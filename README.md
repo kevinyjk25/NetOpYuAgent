@@ -1,197 +1,193 @@
-# IT 运维监控智能体平台
+# IT Ops Multi-Agent Platform
 
-> **IT Ops Multi-Agent Platform** — 基于 A2A 协议的多智能体运维编排系统，集成 HITL 人机协同、四层记忆体系、Runtime Loop 执行引擎与 WebUI 控制台。
-
----
-
-## 目录
-
-1. [项目简介](#1-项目简介)
-2. [核心架构](#2-核心架构)
-3. [模块说明](#3-模块说明)
-4. [快速开始](#4-快速开始)
-5. [WebUI 使用指南](#5-webui-使用指南)
-6. [P0 工具结果缓存演示](#6-p0-工具结果缓存演示)
-7. [P1/P2 特性说明](#7-p1p2-特性说明)
-8. [Mock 工具与技能目录](#8-mock-工具与技能目录)
-9. [测试说明](#9-测试说明)
-10. [环境变量](#10-环境变量)
-11. [项目结构](#11-项目结构)
-12. [开发路线图](#12-开发路线图)
+> **IT 运维多智能体平台** — A2A-protocol multi-agent orchestration system with HITL human-in-the-loop, Hermes learning loop, dual-path execution engine, and a terminal-style WebUI console.
 
 ---
 
-## 1. 项目简介
+## Table of Contents
 
-本平台是一个面向 IT 运维场景的**多智能体协作系统**，核心设计哲学来自两个方向的结合：
-
-- **A2A 协议优先**：所有 Agent 间通信基于 Google A2A Protocol v0.3.0，支持跨语言、跨框架互操作
-- **Loop 极简、脚手架极强**：借鉴 Claude Code 设计哲学，把主执行循环做薄（Runtime Loop），把上下文治理、工具结果缓存、停止机制、技能按需加载做厚
-
-### 核心能力
-
-| 能力 | 描述 |
-|------|------|
-| **双路由执行** | 简单查询走 Runtime Loop（无 LangGraph 开销），复杂/破坏性操作走 HITL 图 + TaskPlanner DAG |
-| **HITL 人工审批** | LangGraph interrupt 机制，多渠道通知（Slack/PagerDuty/SSE/WebSocket），完整审计链 |
-| **四层记忆体系** | L1 实时 → L2 Redis 短期 → L3 ChromaDB 中期 → L4 PostgreSQL 长期，MMR 去重检索 |
-| **上下文预算管理** | 每轮 prompt 按优先级分配 token（确认事实 > 工作集 > 记忆 > 工具结果 > 环境），软上限 3200 tokens |
-| **P0 工具结果缓存** | 大型工具输出（日志、时序数据、流量记录）自动外部化存储，prompt 仅携带引用 ID，支持按需分页读取 |
-| **技能渐进披露** | Level 1（摘要，每轮注入）+ Level 2（详情，按需加载），降低无关 token 消耗 |
-| **分叉委托** | 子 Agent 可继承父 Agent 的确认事实和工作集（forked 模式），避免上下文重复传递 |
-| **停止策略** | 显式停止条件：最大回合数、工具调用上限、token 预算、低进展检测、低置信度升级 |
-| **动态 Agent 注册** | Registry 模块支持运行时注册/注销 Agent，健康检查 + 负载均衡（轮询/随机/最少连接） |
+1. [Overview](#1-overview)
+2. [Architecture](#2-architecture)
+3. [Module Reference](#3-module-reference)
+4. [Quick Start](#4-quick-start)
+5. [Running with a Real LLM (Ollama)](#5-running-with-a-real-llm-ollama)
+6. [WebUI Console Guide](#6-webui-console-guide)
+7. [HITL Human Approval Flow](#7-hitl-human-approval-flow)
+8. [Hermes Learning Loop](#8-hermes-learning-loop)
+9. [P0 Tool Result Cache](#9-p0-tool-result-cache)
+10. [P1 / P2 Features](#10-p1--p2-features)
+11. [Mock Tools & Skill Catalog](#11-mock-tools--skill-catalog)
+12. [Environment Variables](#12-environment-variables)
+13. [Project Structure](#13-project-structure)
+14. [Roadmap](#14-roadmap)
 
 ---
 
-## 2. 核心架构
+## 1. Overview
+
+An IT operations multi-agent platform built around two design principles:
+
+**A2A Protocol First** — All agent communication uses Google's A2A Protocol over HTTP. Agents are discoverable, load-balanced, and health-checked through a built-in registry. Agents written in any language or framework can participate.
+
+**Thin Loop, Thick Scaffold** — Inspired by Claude Code's architecture: the main execution loop (`AgentRuntimeLoop`) is deliberately thin. All the hard work lives in the scaffold around it — context budget management, tool result caching, stop policy, skill loading, FTS5 cross-session recall, and the Hermes post-turn learning pipeline.
+
+### Core Capabilities
+
+| Capability | Description |
+|---|---|
+| **Dual-path routing** | Simple queries → Runtime Loop (no LangGraph overhead). Complex/destructive operations → HITL LangGraph with human approval gate |
+| **HITL approval** | LangGraph `interrupt()` pauses execution, browser shows approval card, graph resumes on decision |
+| **Hermes learning loop** | After every turn: FTS5 memory write, MemoryCurator extracts facts, UserModelEngine tracks expertise, SkillEvolver creates reusable skill recipes |
+| **FTS5 cross-session recall** | SQLite FTS5 stores all past turns; semantically similar context is injected into new queries automatically |
+| **P0 tool result cache** | Large tool outputs (syslogs, Prometheus, NetFlow) are stored externally; prompt carries only a `[STORED:id]` reference |
+| **Skill catalog** | Level 1 summaries injected every turn, Level 2 details loaded on demand — avoids spending tokens on irrelevant skills |
+| **Context budget** | Per-turn token allocation: confirmed facts > working set > memory > tool results > environment. Soft cap 3 200 tokens |
+| **Stop policy** | Six dimensions: max turns, max tool calls, token budget, low progress, low confidence, explicit stop signal |
+| **Agent registry** | Runtime agent registration/deregistration, health checks, round-robin / random / least-loaded balancing |
+| **MCP + OpenAPI** | Pluggable tool backends: MCP server (JSON config) and any OpenAPI 3.0 spec; mock mode for both |
+
+---
+
+## 2. Architecture
 
 ```
-外部调用方（RouterAgent / WebUI / Webhook）
-          │ A2A JSON-RPC / REST / WebSocket
-          ▼
-┌─────────────────────────────────────────────────────────┐
-│                       API 网关层                         │
-│   /api/v1/a2a/*   /hitl/*   /registry/*   /webui/*      │
-└──────────────────────────┬──────────────────────────────┘
-                           │
-          ┌────────────────▼─────────────────┐
-          │         执行路由（v3）            │
-          │                                  │
-          │  classify(query)                 │
-          │    SIMPLE → Runtime Loop        │
-          │    COMPLEX → HITL Graph + DAG   │
-          └──────────────────────────────────┘
-               │                    │
-    ┌──────────▼────────┐  ┌────────▼────────────────┐
-    │  Runtime Loop     │  │  HITL Graph (LangGraph)  │
-    │  context_budget   │  │  TaskPlanner DAG         │
-    │  stop_policy      │  │  A2ADispatcher           │
-    │  skill_catalog    │  │  HitlTaskBridge          │
-    └──────────┬────────┘  └────────────────────────--┘
-               │
-    ┌──────────▼────────────────────────────────────┐
-    │         Memory 模块（四层存储）                │
-    │  L1 实时 → L2 Redis → L3 Chroma → L4 Postgres │
-    └───────────────────────────────────────────────┘
-    
-    
-    Incoming query
-    │
-    ├── Phase 0 ─────────────────────────────────────────────────
-    │   FTS5 search past sessions → LLM summarize → inject to prompt
-    │   UserProfile → format_prompt_section() → inject as hidden context
-    │
-    ├── Phase 1 ─────────────────────────────────────────────────
-    │   classify(query) → SIMPLE or COMPLEX
-    │
-    ├── Phase 2A (SIMPLE) ───────────────────────────────────────
-    │   AgentRuntimeLoop.stream()
-    │     ├── SkillCatalog Level 1 summary injected each turn
-    │     ├── LLM call (Ollama/OpenAI/Anthropic)
-    │     │   └── [TOOL:name] parsed from response
-    │     ├── ToolRouter.dispatch()
-    │     │   ├── MCPClient → NetOps MCP server
-    │     │   ├── OpenAPIClient → NMS REST API
-    │     │   └── Local mock tools
-    │     ├── ToolResultStore → large results cached, [STORED:ref] in prompt
-    │     ├── ContextBudgetManager → assemble within token cap
-    │     └── StopPolicy → check 6 conditions, stop/continue/escalate
-    │
-    ├── Phase 2B (COMPLEX) ──────────────────────────────────────
-    │   LangGraph HITL graph
-    │     ├── intent_classifier (LLM-backed)
-    │     ├── evaluate_triggers → first match interrupts
-    │     ├── interrupt() → serialize to MemorySaver
-    │     ├── 5-channel notification fanout
-    │     ├── operator decision → resume
-    │     └── _verify_action_result → SkillEvolver.after_task()
-    │
-    └── Phase 3 (all paths) ─────────────────────────────────────
-        Concurrent post-turn hooks:
-        ├── FTS5SessionStore.write_turn() → SQLite + trigger → turns_fts
-        ├── MemoryCurator.after_turn() → LLM curate → MemoryRouter ENTITY
-        ├── UserModelEngine.after_turn() → trait inference → profile update
-        └── MemoryRouter.ingest_turn() → L1/L2/L3/L4 fanout
+External caller (RouterAgent / WebUI / webhook / curl)
+           │  A2A JSON-RPC over HTTP-SSE / REST
+           ▼
+┌──────────────────────────────────────────────────────────┐
+│                      API gateway                          │
+│   /api/v1/a2a/*   /hitl/*   /registry/*   /webui/*       │
+└─────────────────────────┬────────────────────────────────┘
+                          │
+         ┌────────────────▼──────────────────┐
+         │          Execution router          │
+         │                                   │
+         │  classify(query)                  │
+         │    SIMPLE  → Runtime Loop         │
+         │    COMPLEX → HITL Graph           │
+         └───────────────────────────────────┘
+              │                    │
+   ┌──────────▼─────────┐  ┌──────▼──────────────────────┐
+   │   Runtime Loop      │  │  HITL Graph (LangGraph)      │
+   │   context_budget    │  │    intent_classifier         │
+   │   stop_policy       │  │    risk_assessor             │
+   │   skill_catalog     │  │    planner                   │
+   │   tool_cache        │  │    hitl_interrupt_node ←─────│─── operator
+   │   FTS5 recall       │  │    executor                  │
+   └──────────┬──────────┘  │    result_formatter          │
+              │             └──────────────────────────────┘
+              ▼
+   ┌──────────────────────────────────────────────────────┐
+   │              Hermes post-turn pipeline                │
+   │   FTS5SessionStore → MemoryCurator → UserModelEngine  │
+   │                    → SkillEvolver                     │
+   └──────────────────────────────────────────────────────┘
+              │
+   ┌──────────▼───────────────────────────────────────────┐
+   │          Integrations layer                           │
+   │   OllamaEngine / OpenAIEngine   MCP client           │
+   │   OpenAPI client                ToolRouter            │
+   └──────────────────────────────────────────────────────┘
 ```
 
----
+### Request flow — SIMPLE path
 
-## 3. 模块说明
+`classify=SIMPLE` → FTS5 recall (past sessions) → `loop.stream()` with real LLM → Turn 1: LLM picks tool → tool executes (large output → `ToolResultStore`) → Turn 2: LLM synthesises answer → stop → Hermes pipeline fires (FTS5 write, curate, user model, skill evolver)
 
-### 3.1 `runtime/` — Agent 运行时
+### Request flow — COMPLEX path
 
-| 文件 | 职责 |
-|------|------|
-| `loop.py` | `AgentRuntimeLoop`：薄主循环，包含 classify/run/stream，集成 P1/P2 特性 |
-| `context_budget.py` | `ContextBudgetManager`：per-turn 上下文预算管理；`ToolResultStore`：P0 大结果外部化 |
-| `stop_policy.py` | `StopPolicy`：六维停止条件评估；`LoopState`：跨回合状态追踪 |
-
-### 3.2 `hitl/` — 人机协同
-
-| 文件 | 职责 |
-|------|------|
-| `a2a_integration.py` | `ITOpsHitlAgentExecutor`：v3 版本，双路由（简单/复杂）+ 后置验证钩子 |
-| `graph.py` | LangGraph 状态图：6 节点（分类→风险评估→规划→中断→执行→格式化） |
-| `triggers.py` | 四类触发器（破坏性操作/告警级别/置信度/歧义意图），优先级链式评估 |
-| `decision.py` | `HitlDecisionRouter`：5 种决策处理（approve/reject/edit/escalate/timeout） |
-| `review.py` | 5 个通知渠道并发扇出；WebSocket 通道（外部 Agent 系统集成） |
-| `audit.py` | 7 种审计事件类型，支持内存/PostgreSQL 后端 |
-
-### 3.3 `memory/` — 四层记忆
-
-| 层级 | 后端 | 检索方式 | TTL |
-|------|------|---------|-----|
-| L1 实时层 | 进程内列表 | 全量返回 | 请求周期 |
-| L2 短期层 | Redis 有序集合 | 时间倒序 | 24 小时 |
-| L3 中期层 | ChromaDB 向量索引 | 余弦相似 + 时间衰减 | 30 天 |
-| L4 长期层 | PostgreSQL 全文 | pg_trgm 相似度 | 永久 |
-
-### 3.4 `task/` — 任务编排
-
-- `intra/planner.py`：`TaskPlanner`（目标→DAG）+ `TaskScheduler`（并发=5，依赖解析）+ `TaskExecutor`
-- `inter/coordinator.py`：`A2ATaskDispatcher`（SSE 委托）+ `MultiRoundCoordinator`（多轮上下文）
-- `inter/hitl_bridge.py`：`HitlTaskBridge`（挂起/恢复钩子）
-
-### 3.5 `registry/` — Agent 注册与发现
-
-- 动态抓取 AgentCard（4 条 well-known 路径）
-- 健康检查（60s 间隔）+ AgentCard 刷新（300s 间隔）
-- 负载均衡：`round_robin`（默认）/ `random` / `least_loaded`
-
-### 3.6 `skills/` — 技能目录（P1）
-
-- `SkillCatalogService`：Level 1 摘要（每轮注入）+ Level 2 详情（按需加载）
-- `DEFAULT_SKILL_DEFINITIONS`：9 个预置技能（含 3 个大结果技能 + 1 个 HITL 技能）
-
-### 3.7 `tools/` — Mock 工具
-
-| 工具 | 输出大小 | 触发缓存 |
-|------|---------|--------|
-| `syslog_search` | ~6,000+ chars | ✅ 是 |
-| `prometheus_query` | ~5,000+ chars | ✅ 是 |
-| `netflow_dump` | ~10,000+ chars | ✅ 是 |
-| `dns_lookup` | < 300 chars | 否，内联返回 |
-| `device_info` | < 500 chars | 否，内联返回 |
-| `alert_summary` | < 300 chars | 否，内联返回 |
-| `service_health` | < 300 chars | 否，内联返回 |
-| `read_stored_result` | 按需分页 | — P0 读取工具 |
-
-### 3.8 `webui/` — 浏览器控制台
-
-- `backend.py`：FastAPI 子应用，挂载于 `/webui`
-- `static/index.html`：终端风格单页面，无外部 JS 框架依赖
+`classify=COMPLEX` → `executor.execute()` → `run_with_hitl()` → LangGraph streams → `hitl_interrupt_node` calls `interrupt()` → `register_interrupt()` → `TaskArtifactUpdateEvent` enqueued → SSE stream closes → browser shows HITL approval card → operator clicks Approve/Reject → `POST /hitl/{id}/approve` → `graph.ainvoke(None, thread_cfg)` resumes → executor node runs → result streams back
 
 ---
 
-## 4. 快速开始
+## 3. Module Reference
 
-### 4.1 环境要求
+### 3.1 `runtime/` — Execution engine (8 files)
 
-- Python 3.9+（推荐 3.12）
-- 可选：Redis、PostgreSQL、ChromaDB（不配置时自动降级为内存 stub）
+| File | Responsibility |
+|---|---|
+| `loop.py` | `AgentRuntimeLoop`: thin main loop — classify, stream, pre/post verify, tool dispatch |
+| `context_budget.py` | `ContextBudgetManager`: per-turn token prioritisation; `ToolResultStore`: P0 large-output externalisation |
+| `stop_policy.py` | `StopPolicy`: six-dimension stop evaluation; `LoopState`: cross-turn state tracking |
+| `skill_catalog.py` | `SkillCatalogService` integration: L1 summary injection + L2 on-demand detail loading |
+| `model_tier.py` | `ModelTierClassifier`: routes queries to fast model vs full model |
+| `delegation.py` | Fork/fresh delegation modes, context inheritance policy |
+| `tool_cache.py` | Composite skill scoring (tool overlap × 0.6 + semantic similarity × 0.4) |
 
-### 4.2 安装依赖
+### 3.2 `hitl/` — Human-in-the-loop (9 files)
+
+| File | Responsibility |
+|---|---|
+| `a2a_integration.py` | `ITOpsHitlAgentExecutor`: dual-path router + post-turn verification hook |
+| `graph.py` | LangGraph `StateGraph(ITOpsGraphState)`: 6 nodes (classify → risk → plan → interrupt → execute → format) |
+| `triggers.py` | Four trigger types: destructive op / alert severity / confidence / ambiguous intent |
+| `decision.py` | `HitlDecisionRouter`: approve / reject / edit / escalate / timeout |
+| `review.py` | Five notification channels: Slack, PagerDuty, SSE, WebSocket, email (concurrent fan-out) |
+| `audit.py` | Seven audit event types; in-memory and PostgreSQL backends |
+| `router.py` | FastAPI routes: `/hitl/pending`, `/hitl/{id}/approve`, `/hitl/{id}/reject`, `/hitl/ws` |
+
+**LangGraph state note:** `StateGraph(ITOpsGraphState)` uses a typed dict so LangGraph merges each node's return dict into accumulated state (`{**old, **new}`). Using a bare `dict` causes each node to receive only the previous node's output, silently dropping earlier keys like `intent_type` before `planner_node` runs.
+
+### 3.3 `memory/` — Storage and learning (12 files)
+
+| Layer | Backend | Retrieval | TTL |
+|---|---|---|---|
+| L1 in-process | Python list | full return | request lifetime |
+| L2 short-term | Redis sorted set | time-descending | 24 h |
+| L3 mid-term | ChromaDB vector index | cosine + time decay | 30 d |
+| L4 long-term | PostgreSQL full-text | pg_trgm similarity | permanent |
+
+**Hermes modules (active in this build):**
+
+| Module | Role |
+|---|---|
+| `fts_store.py` | `FTS5SessionStore`: SQLite FTS5, cross-session turn search, FTS5-safe query sanitiser |
+| `curator.py` | `MemoryCurator`: LLM-driven fact extraction from completed turns; system/user prompt separation prevents injection |
+| `user_model.py` | `UserModelEngine`: tracks tool preferences, domain expertise, technical level, behavioral traits |
+
+### 3.4 `skills/` — Skill system (3 files)
+
+| File | Responsibility |
+|---|---|
+| `catalog.py` | `SkillCatalogService`: L1 summaries + L2 detail loading; composite scoring (tool overlap + semantic similarity) |
+| `evolver.py` | `SkillEvolver`: autonomous skill creation after complex tasks; LLM decides reuse potential; feedback-driven self-improvement |
+
+### 3.5 `integrations/` — LLM and tool backends (5 files)
+
+| File | Responsibility |
+|---|---|
+| `llm_engine.py` | `OllamaEngine`, `OpenAIEngine`, `AnthropicEngine`, `MockEngine`; think-block stripping for reasoning models |
+| `mcp_client.py` | MCP server client; JSON config or env-var driven; mock mode |
+| `openapi_client.py` | OpenAPI 3.0 spec consumer; auto-generates tool definitions; mock mode |
+| `tool_router.py` | `ToolRouter`: dispatches tool calls to MCP / OpenAPI / mock registry |
+
+### 3.6 `task/` — Task orchestration (9 files)
+
+- `intra/planner.py`: `TaskPlanner` (goal → DAG) + `TaskScheduler` (concurrency=5, dependency resolution) + `TaskExecutor`
+- `inter/coordinator.py`: `A2ATaskDispatcher` (SSE delegation) + `MultiRoundCoordinator` (multi-turn context)
+- `inter/hitl_bridge.py`: `HitlTaskBridge` (suspend / resume hooks)
+
+### 3.7 `registry/` — Agent discovery (6 files)
+
+- Dynamic AgentCard fetching (4 well-known paths)
+- Health checks (60 s interval) + card refresh (300 s interval)
+- Load balancing: `round_robin` (default) / `random` / `least_loaded`
+
+### 3.8 `webui/` — Browser console
+
+- `backend.py`: FastAPI sub-app mounted at `/webui`; `/chat/stream` SSE endpoint; `/hitl/*` approval endpoints; `/system/wiring` live wiring status
+- `static/index.html`: terminal-style single-page console, no external JS framework; four tabs: Flow, HITL, Cache, Stats
+
+---
+
+## 4. Quick Start
+
+### Requirements
+
+- Python 3.9+ (3.12 recommended)
+- Optional: Redis, PostgreSQL, ChromaDB (auto-stub when absent)
+
+### Install
 
 ```bash
 cd it-ops-agent
@@ -200,226 +196,323 @@ source .venv/bin/activate        # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 4.3 启动服务
+### Run (mock LLM, no external dependencies)
 
 ```bash
-# 开发模式（无外部依赖，全部降级为内存 stub）
 uvicorn main:app --reload --port 8000
-
-# 或直接运行
-python main.py
 ```
 
-启动后访问：
-- **WebUI 控制台**：http://localhost:8000/webui/
-- **A2A 接口**：http://localhost:8000/api/v1/a2a/
-- **HITL 接口**：http://localhost:8000/hitl/
-- **注册中心**：http://localhost:8000/registry/
-- **API 文档**：http://localhost:8000/docs
-- **健康检查**：http://localhost:8000/health
+Open:
+- **WebUI console**: http://localhost:8000/webui/
+- **A2A endpoint**: http://localhost:8000/api/v1/a2a/
+- **HITL endpoints**: http://localhost:8000/hitl/
+- **Registry**: http://localhost:8000/registry/
+- **API docs**: http://localhost:8000/docs
+- **Health**: http://localhost:8000/health
 
-### 4.4 配置外部依赖（可选）
+### Verify startup wiring
+
+The startup log prints:
+
+```
+━━ System wiring ━━
+  LLM backend : mock
+  FTS5 store  : ./data/state.db
+  Curator     : yes (llm=stub)
+  User model  : yes (llm=stub)
+  SkillEvolver: yes (catalog=real)
+  Executor    : wired
+  HITL router : wired
+```
+
+The Stats tab → **🔌 System Wiring** panel shows a live green/red checklist. `GET /webui/system/wiring` returns the JSON.
+
+---
+
+## 5. Running with a Real LLM (Ollama)
 
 ```bash
-export REDIS_URL=redis://localhost:6379
-export POSTGRES_DSN=postgresql://user:pass@localhost:5432/itops
-export CHROMA_PATH=./chroma_db
-export A2A_BASE_URL=http://localhost:8000/api/v1/a2a
+# Pull and serve your model
+ollama serve
+ollama pull qwen3.5:27b          # or any model
+
+# Set env vars
+export LLM_BACKEND=ollama
+export LLM_MODEL=qwen3.5:27b
+export LLM_BASE_URL=http://localhost:11434
+export HERMES_DATA_DIR=./data
+export MCP_USE_MOCK=true
+export OPENAPI_USE_MOCK=true
+
+uvicorn main:app --port 8000 --reload
 ```
 
----
+Startup log will show `LLM backend: ollama/qwen3.5:27b` and `Curator: yes (llm=real)`.
 
-## 5. WebUI 使用指南
+**Supported backends:**
 
-打开 http://localhost:8000/webui/ 后界面分为三栏：
+| `LLM_BACKEND` | Notes |
+|---|---|
+| `ollama` | Local Ollama server; set `LLM_BASE_URL` and `LLM_MODEL` |
+| `openai` | OpenAI API; set `OPENAI_API_KEY` |
+| `anthropic` | Anthropic API; set `ANTHROPIC_API_KEY` |
+| `mock` | Default; deterministic stub, no LLM calls |
 
-### 左栏 — Skills & Tools
-
-- **Skills 面板**：列出所有注册技能，点击技能名可快速填入查询框
-  - 绿点 = low risk，黄点 = medium，红点 = high/critical
-  - `HITL` 标签 = 执行前需人工审批
-- **Quick Tools 面板**：直接调用 Mock 工具，大结果会自动出现在右栏 Cache 面板
-
-### 中栏 — 对话区
-
-| 控件 | 说明 |
-|------|------|
-| 查询框 | Enter 发送，Shift+Enter 换行，自动高度 |
-| `session` | 留空自动生成会话 ID；填写指定 ID 可延续历史 |
-| `mode` | `stream`=SSE 流式返回；`sync`=等待完整响应 |
-| `delegation` | `fresh`=独立子 Agent；`forked`=继承父 Agent 上下文（P1） |
-| `[STORED:...]` 芯片 | 点击可在右栏加载并分页浏览缓存的大结果（P0 演示） |
-
-### 右栏 — Cache / HITL / Stats
-
-- **Cache 面板**：显示所有已缓存的工具结果，支持逐页翻阅
-- **HITL 面板**：实时显示待审批的中断，可直接 Approve / Reject
-- **Stats 面板**：系统状态快照（技能数、缓存数、Agent 数、内存状态）
+Thinking models (e.g. `qwen3-coder`): the engine automatically strips `<think>…</think>` blocks before parsing tool calls, and passes `think=False` to the Ollama API.
 
 ---
 
-## 6. P0 工具结果缓存演示
+## 6. WebUI Console Guide
 
-### 问题背景
+Three-column layout:
 
-运维场景中，工具调用（syslog 查询/NetFlow 导出/Prometheus 时序）可能返回数万字节数据。若直接注入 prompt，单次调用就会耗尽上下文窗口。
+### Left — Skills & Tools
 
-### 解决方案
+- **Skills panel**: all registered skills; click a skill name to populate the query box. Green dot = low risk, amber = medium, red = high/critical. `HITL` badge = approval required before execution.
+- **Quick Tools panel**: call any mock tool directly; large results appear in the Cache tab automatically.
 
-`ToolResultStore` + `ContextBudgetManager` 实现两步处理：
+### Centre — Chat
 
-1. 工具输出 > 4,000 chars → 存入 `ToolResultStore`，prompt 仅注入：
+| Control | Description |
+|---|---|
+| Query box | Enter to send, Shift+Enter for newline |
+| `session` | Leave blank to auto-generate; enter an ID to continue a previous session |
+| `mode` | `stream` = SSE token-by-token; `sync` = wait for full response |
+| `delegation` | `fresh` = independent sub-agent; `forked` = inherit parent agent's confirmed facts and working set |
+| `[STORED:…]` chip | Click to load and page through a cached large result in the Cache tab |
+
+**Flow tab**: every module event is streamed in real time — classify, FTS5 recall, pre-verify, tool calls, post-verify, Hermes curation, user model update, skill evolver. Click any row to expand details.
+
+### Right — HITL / Cache / Stats
+
+- **HITL tab**: pending interrupts with trigger type, risk level, proposed action, and Approve / Reject buttons. Polls `/hitl/pending` every 3 s; switches to this tab automatically when an interrupt fires.
+- **Cache tab**: all `ToolResultStore` entries; page through large outputs with Prev/Next buttons.
+- **Stats tab**: skill count, cache entries, active agents, Hermes module status, system wiring checklist.
+
+---
+
+## 7. HITL Human Approval Flow
+
+### Trigger queries
+
+```
+restart the payments-service in production
+rollback auth-service to version 3.2.1
+drain k8s-worker-03 for maintenance
+delete the staging database
+force failover payments-db to replica
+```
+
+### What happens
+
+1. `classify()` returns `COMPLEX` — logged as `Complexity: complex — Destructive action detected`
+2. `executor.execute()` calls `run_with_hitl()` — LangGraph graph starts
+3. `intent_classifier_node` → `risk_assessor_node` → `planner_node` → `route_after_plan()`
+4. `DestructiveActionTrigger` fires → routes to `hitl_interrupt_node`
+5. `interrupt(payload)` pauses the graph; checkpointer saves state
+6. `_handle_interrupt_chunk()` calls `register_interrupt()` — payload now in `_payload_store`
+7. `HitlA2AEventProcessor` emits `TaskArtifactUpdateEvent` — SSE delivers `hitl_interrupt` chunk to browser
+8. Browser: `switchTab('hitl')` + `refreshHitl(5)` (5 retries × 500 ms)
+9. HITL card appears: trigger, risk level, proposed action, SLA countdown
+10. Operator clicks **Approve** → `POST /hitl/{id}/approve` → `graph.ainvoke(None, thread_cfg)` → executor node runs
+11. Flow tab logs `⚠ HITL APPROVE` with outcome
+
+### Approval decision types
+
+| Decision | Effect |
+|---|---|
+| `approve` | Graph resumes, executor node runs the proposed action |
+| `reject` | Graph routes to END, task marked rejected |
+| `edit` | Operator patches proposed action params, then graph resumes |
+| `escalate` | Escalates to a senior reviewer; SLA timer resets |
+| `timeout` | Fires automatically when SLA expires |
+
+### Debugging HITL
+
+Key log lines to look for:
+
+```
+hitl.graph:    route_after_plan: intent_type='destructive_op' is_destructive=True action_type='restart_service'
+hitl.graph:    HITL interrupt — interrupt_id=… trigger=destructive_op risk=high
+hitl.graph:    Graph interrupt detection complete: found=True
+hitl.decision: HITL registered: interrupt_id=… status=pending store_size=1
+webui.backend: /hitl/pending: store_size=1 … returning 1 pending interrupts
+```
+
+If `found=False`: confirm `StateGraph(ITOpsGraphState)` is used (not bare `dict`), and that `intent_classifier_node` sees `"restart"` / `"rollback"` / `"delete"` / `"drain"` in the query.
+
+---
+
+## 8. Hermes Learning Loop
+
+After every completed query, a post-turn pipeline runs automatically:
+
+```
+Turn completes
+    │
+    ├─→ FTS5SessionStore.write_turn()
+    │       Writes user query + assistant response to SQLite FTS5
+    │       Importance score based on tool usage and response length
+    │
+    ├─→ MemoryCurator.after_turn()
+    │       LLM extracts structured facts from the turn
+    │       Types: incident_lesson, config_fact, tool_preference,
+    │              entity_relation, procedure_step, env_fact
+    │       High-confidence facts stored in MemoryRouter (L2–L4)
+    │
+    ├─→ UserModelEngine.after_turn()
+    │       Tracks: tool frequency, domain counts (auth / network /
+    │               compute / storage), technical level, behavioral traits
+    │       Injects user profile section into subsequent query prompts
+    │
+    └─→ SkillEvolver.after_task()   (COMPLEX tasks only)
+            LLM asks: should this become a reusable skill?
+            If yes: generates markdown skill recipe (steps, tools, risk)
+            Stored in SkillCatalogService for future queries
+```
+
+**FTS5 cross-session recall** runs at the start of every query:
+
+```
+New query arrives
+    → curator.recall_for_session(query, session_id)
+    → FTS5 searches all past sessions for similar turns
+    → Top matches injected as context before LLM call
+    → Flow tab shows: 🔮 FTS5 Recall — N chars from M sessions
+```
+
+**WebUI events emitted by Hermes:**
+
+| SSE chunk type | Meaning |
+|---|---|
+| `hermes_write` | Turn written to FTS5 |
+| `hermes_curate` | `memories_count` facts extracted by MemoryCurator |
+| `hermes_umodel` | User model updated — `technical_level`, `domain_counts`, `trait_count` |
+| `hermes_skill` | Skill created or updated by SkillEvolver (COMPLEX only) |
+| `recall` | Past context injected — shows `chars` and `sessions_searched` |
+
+**Data directory:** `HERMES_DATA_DIR=./data` (default). Contains `state.db` (FTS5 turns) and any skill recipe files written by SkillEvolver.
+
+---
+
+## 9. P0 Tool Result Cache
+
+### Problem
+
+IT ops tools can return tens of thousands of bytes — 300-line syslogs, 60-minute Prometheus time series, 500-record NetFlow dumps. Injecting these directly into the prompt exhausts the context window on the first tool call.
+
+### Solution
+
+`ToolResultStore` + `ContextBudgetManager` — two-step externalisation:
+
+1. Tool output > 4 000 chars → stored in `ToolResultStore`. Prompt receives only:
    ```
    [STORED:syslog_search:a3f9c12b] Preview: Apr 10 09:12:01 ap-01 hostapd…
    ```
-2. 模型需要详情时调用 `read_stored_result` 工具分页读取：
+
+2. LLM reads details on demand via `read_stored_result`:
    ```
    [TOOL:read_stored_result] {"ref_id": "a3f9c12b", "offset": 0, "length": 2000}
    ```
 
-### WebUI 操作步骤
+### Walkthrough
 
 ```
-步骤 1：在查询框输入 "search syslogs for errors on ap-01"
-         → Runtime Loop 调用 syslog_search（300 行，~6000 chars）
-         → 自动存储，返回 [STORED:syslog_search:abc123]
-         → 右栏 Cache 面板出现新条目
+1. Query: "search syslogs for errors on ap-01"
+   → Runtime Loop calls syslog_search (~6 000 chars)
+   → Stored automatically; [STORED:…] reference injected into prompt
+   → Cache tab shows new entry
 
-步骤 2：点击消息中的 [STORED:syslog_search:abc123] 芯片
-         → 右栏 Cache 面板显示第一页（2000 chars）
-         → 显示：Total: 6XXX chars | Has more: True | Next offset: 2000
+2. Click [STORED:syslog_search:abc123] chip in chat
+   → Cache tab loads first page (2 000 chars)
+   → Shows: Total: 6XXX chars | Has more: True | Next offset: 2000
 
-步骤 3：点击 "Next ▶" 翻页
-         → 加载 offset=2000 的内容
-
-步骤 4：也可直接 API 调用：
-         GET http://localhost:8000/webui/tools/result/abc123?offset=0&length=2000
+3. Click "Next ▶" to page through remaining content
 ```
 
-### API 直接测试
+### API
 
 ```bash
-# 1. 触发大结果工具
+# Trigger a large-result tool
 curl -X POST http://localhost:8000/webui/tools/syslog_search \
   -H "Content-Type: application/json" \
-  -d '{"args": {"host": "ap-*", "keyword": "error", "lines": 300}}'
+  -d '{"args": {"host": "ap-01", "keyword": "error", "lines": 300}}'
 
-# 响应示例：
-# {
-#   "tool": "syslog_search",
-#   "is_stored": true,
-#   "ref_id": "a3f9c12b",
-#   "raw_length": 6241,
-#   "retrieve_url": "/webui/tools/result/a3f9c12b"
-# }
-
-# 2. 读取第一页
-curl "http://localhost:8000/webui/tools/result/a3f9c12b?offset=0&length=2000"
-
-# 3. 读取下一页
-curl "http://localhost:8000/webui/tools/result/a3f9c12b?offset=2000&length=2000"
+# Read a stored result (paginated)
+curl "http://localhost:8000/webui/tools/result/{ref_id}?offset=0&length=2000"
 ```
 
 ---
 
-## 7. P1/P2 特性说明
+## 10. P1 / P2 Features
 
-### P1：技能渐进披露
-
-每轮 prompt 只注入技能摘要（Level 1）：
-```
-[AVAILABLE SKILLS]
-  syslog_search     [   low]  Search syslog entries across network devices
-  prometheus_query  [   low]  Query Prometheus metrics for network devices
-  restart_service   [  high] ⚠ HITL  Trigger a rolling restart of a production service
-  ...
-```
-
-模型发出 `[SKILL_LOAD:syslog_search]` 时，Runtime Loop 按需注入完整参数说明、示例和约束（Level 2），比全量注入节省约 60% tokens。
-
-### P1：分叉委托
+### P1: Pre- and post-verification
 
 ```python
-# Fresh 模式（默认）：子 Agent 从空白开始
-result = await loop.run(query="...", delegation_mode=DelegationMode.FRESH)
-
-# Forked 模式：继承父 Agent 的确认事实和工作集
-result = await loop.run(
-    query="...",
-    delegation_mode=DelegationMode.FORKED,
-    parent_state=parent_loop_state,   # 传入父 Agent 的 LoopState
-)
-# fork_context_policy 控制继承范围：
-#   FACTS_ONLY   → 只继承 confirmed_facts（默认）
-#   WORKING_SET  → confirmed_facts + working_set
-#   FULL         → 全量继承
-```
-
-### P1：前置/后置验证
-
-```python
-# 前置验证（execute 前自动触发）：
+# Pre-verify: runs before execution, blocks destructive ops
 pre = await loop.pre_verify(query, confirmed_facts, env_context)
 if not pre.passed:
-    # → 自动返回 STOP_HITL，不进入执行阶段
+    return STOP_HITL  # escalates to HITL graph
 
-# 后置验证（工具调用后自动触发）：
+# Post-verify: runs after each tool call
 post = await loop.post_verify(tool_name, result, confirmed_facts)
 if not post.passed:
     state.unresolved_points.append(f"Post-verify: {post.reason}")
 ```
 
-**内置规则（可替换为真实策略引擎）：**
-- 破坏性操作 → 直接失败，强制 HITL
-- `change_window: False` + 变更操作 → 失败，不允许执行
-- `allow_destructive: False` + 生产环境 → 失败
+Built-in rules: destructive operations always fail pre-verify; closed change window + change op fails; `allow_destructive=False` + production env fails.
 
-### P1：Confirmed Facts & Working Set
+### P1: Confirmed Facts & Working Set
 
 ```python
-# Confirmed Facts：结构化已确认事实（注入 prompt 最高优先级）
-state.record_new_fact("payments-service 在 prod 环境，当前健康")
-state.record_new_fact("DNS 解析正常，排除 DNS 故障")
+# Confirmed facts — injected at highest priority in every prompt
+state.record_new_fact("payments-service is healthy in prod")
+state.record_new_fact("DNS resolution confirmed OK; not the cause")
 
-# Working Set：当前聚焦对象（DeviceRef 列表）
+# Working set — currently focused devices
 working_set = [
     DeviceRef(id="ap-01", label="AP-01 at Site-A"),
     DeviceRef(id="sw-core-01", label="Core Switch"),
 ]
 ```
 
-### P2：模型分层提示
+### P1: Forked delegation
+
+```python
+# fresh: independent sub-agent, starts from scratch
+# forked: inherits parent's confirmed facts and working set
+delegation = "forked"
+```
+
+### P2: Model tiering
 
 ```python
 decision = loop.classify(query)
-print(decision.model_tier)  # "fast_model" 或 "full_model"
+print(decision.model_tier)   # "fast_model" or "full_model"
 
-# fast_model：check / status / dns / list 等简单查询
-# full_model：复杂分析、P0/P1 事件、破坏性操作
-# → 生产环境可据此选择不同模型（如 haiku vs sonnet）
+# fast_model: check / status / dns / list queries
+# full_model: complex analysis, P0/P1 events, destructive ops
+# In production: map to different Ollama models or haiku vs sonnet
 ```
 
 ---
 
-## 8. Mock 工具与技能目录
+## 11. Mock Tools & Skill Catalog
 
-### 大结果工具（触发 P0 缓存）
+### Large-result tools (trigger P0 cache)
 
 ```bash
-# 查询 syslog（300 行，~6KB）
 POST /webui/tools/syslog_search
-{"args": {"host": "ap-01", "keyword": "error", "lines": 300}}
+{"args": {"host": "ap-01", "keyword": "error", "lines": 300}}    # ~6 KB
 
-# Prometheus 时序查询（8设备×60分钟，~5KB）
 POST /webui/tools/prometheus_query
-{"args": {"metric": "up", "job": "network_devices", "range_minutes": 60}}
+{"args": {"metric": "up", "job": "network_devices", "range_minutes": 60}}  # ~5 KB
 
-# NetFlow 流量记录（500条，~10KB）
 POST /webui/tools/netflow_dump
-{"args": {"site": "site-a", "flows": 500}}
+{"args": {"site": "site-a", "flows": 500}}   # ~10 KB
 ```
 
-### 小结果工具（内联返回）
+### Small-result tools (inline)
 
 ```bash
 POST /webui/tools/dns_lookup      {"args": {"hostname": "payments.internal"}}
@@ -428,200 +521,192 @@ POST /webui/tools/alert_summary   {"args": {"severity": "P1"}}
 POST /webui/tools/service_health  {"args": {"service": "payments-service"}}
 ```
 
-### 缓存读取工具
+### Cache read tool
 
 ```bash
-# 读取已缓存结果（offset 分页）
 POST /webui/tools/read_stored_result
 {"args": {"ref_id": "a3f9c12b", "offset": 0, "length": 2000}}
 ```
 
----
+### Skill catalog (9 pre-built skills)
 
-## 9. 测试说明
-
-### 测试结构
-
-```
-tests/
-├── test_a2a.py          # A2A 模块 (~30 用例)
-├── test_hitl.py         # HITL 模块 (~25 用例)
-├── test_memory_task.py  # Memory + Task 模块 (~45 用例)
-├── test_registry.py     # Registry 模块 (~30 用例)
-├── test_runtime.py      # Runtime Loop 基础 (~50 用例)
-└── test_p0_p1_p2.py     # P0/P1/P2 特性 + WebUI (~60 用例)
-```
-
-### 运行测试
-
-```bash
-# 全部测试
-pytest tests/ -v
-
-# 仅运行 P0/P1/P2 特性测试
-pytest tests/test_p0_p1_p2.py -v
-
-# 仅运行 Runtime Loop 测试
-pytest tests/test_runtime.py -v
-
-# 快速冒烟测试（跳过慢速集成测试）
-pytest tests/ -v -k "not integration"
-
-# 带覆盖率
-pip install pytest-cov
-pytest tests/ --cov=. --cov-report=term-missing
-```
-
-### 关键测试场景
-
-| 场景 | 测试类 | 测试方法 |
-|------|------|--------|
-| P0：大结果存储并分页读取 | `TestP0ToolResultStore` | `test_ref_id_extraction_and_read` |
-| P0：syslog 触发缓存 | `TestP0ToolResultStore` | `test_syslog_tool_produces_large_output` |
-| P0：WebUI API 分页 | `TestWebUIBackend` | `test_p0_retrieve_stored_result_first_page` |
-| P1：技能摘要注入 | `TestP1SkillCatalog` | `test_format_summary_contains_all_skill_ids` |
-| P1：技能详情按需加载 | `TestP1SkillCatalog` | `test_load_detail_returns_string` |
-| P1：分叉继承父事实 | `TestP1ForkedDelegation` | `test_forked_run_inherits_facts` |
-| P1：前置验证阻断破坏性操作 | `TestP1Verification` | `test_pre_verify_fails_destructive_query` |
-| P1：前置验证变更窗口检查 | `TestP1Verification` | `test_pre_verify_fails_closed_change_window` |
-| P2：模型分层提示 | `TestP2ModelTiering` | `test_simple_dns_suggests_fast_model` |
-| 路由：简单查询不走 HITL | `TestRoutingIntegration` | `test_simple_query_uses_runtime_loop` |
-| 路由：复杂查询走 HITL | `TestRoutingIntegration` | `test_complex_query_uses_hitl_graph` |
+| Skill ID | Risk | HITL |
+|---|---|---|
+| `radius_auth_diagnosis` | low | no |
+| `bgp_neighbor_check` | low | no |
+| `dns_resolution_debug` | low | no |
+| `k8s_pod_restart` | high | **yes** |
+| `db_failover` | critical | **yes** |
+| `syslog_bulk_analysis` | low | no |
+| `network_traffic_analysis` | low | no |
+| `prometheus_alert_triage` | medium | no |
+| `change_window_check` | low | no |
 
 ---
 
-## 10. 环境变量
+## 12. Environment Variables
 
-| 变量 | 默认值 | 说明 |
-|------|-------|------|
-| `A2A_BASE_URL` | `http://localhost:8000/api/v1/a2a` | 本 Agent 对外 A2A 基础 URL |
-| `REDIS_URL` | 空（内存降级） | Redis 连接串 |
-| `POSTGRES_DSN` | 空（跳过持久化） | PostgreSQL 连接串 |
-| `CHROMA_PATH` | `./chroma_db` | ChromaDB 本地路径 |
-| `AGENT_URLS` | 空 | 逗号分隔的对端 Agent URL |
-| `REGISTRY_LB` | `round_robin` | 负载均衡策略 |
-| `REGISTRY_HEALTH_INTERVAL` | `60` | 健康检查间隔（秒） |
-| `HITL_CONFIDENCE_THRESHOLD` | `0.75` | 触发 HITL 的置信度阈值 |
-| `HITL_MAX_AUTO_HOST_COUNT` | `5` | 自动执行的最大主机数 |
-| `HITL_SLACK_WEBHOOK_URL` | 空 | Slack Incoming Webhook URL |
-| `HITL_PAGERDUTY_ROUTING_KEY` | 空 | PagerDuty Events API 路由键 |
-| `HOST` | `0.0.0.0` | 服务监听地址（python main.py 模式） |
-| `PORT` | `8000` | 服务监听端口 |
-| `RELOAD` | `false` | 是否开启热重载 |
+| Variable | Default | Description |
+|---|---|---|
+| `LLM_BACKEND` | `mock` | `ollama` \| `openai` \| `anthropic` \| `mock` |
+| `LLM_MODEL` | `mistral` | Model name passed to the backend |
+| `LLM_BASE_URL` | `http://localhost:11434` | Ollama or custom OpenAI-compatible base URL |
+| `HERMES_DATA_DIR` | `./data` | Directory for FTS5 database and skill files |
+| `MCP_USE_MOCK` | `true` | Use mock MCP tools instead of a real server |
+| `MCP_CONFIG_JSON` | — | MCP server config (JSON string or path to JSON file) |
+| `OPENAPI_USE_MOCK` | `true` | Use mock OpenAPI tools instead of a real spec |
+| `OPENAPI_SPEC_URL` | — | URL to OpenAPI 3.0 spec |
+| `OPENAPI_BASE_URL` | — | Base URL for OpenAPI calls |
+| `OPENAPI_AUTH_TYPE` | `bearer` | `bearer` \| `api_key` \| `none` |
+| `OPENAPI_TOKEN_ENV` | `NETOPS_API_TOKEN` | Env var holding the API token |
+| `A2A_BASE_URL` | `http://localhost:8000/api/v1/a2a` | This agent's outbound A2A base URL |
+| `REDIS_URL` | — | Redis connection string (stubs to in-memory if absent) |
+| `POSTGRES_DSN` | — | PostgreSQL DSN (skips persistence if absent) |
+| `CHROMA_PATH` | `./chroma_db` | ChromaDB local path |
+| `AGENT_URLS` | — | Comma-separated peer agent URLs for registry pre-population |
+| `REGISTRY_LB` | `round_robin` | `round_robin` \| `random` \| `least_loaded` |
+| `REGISTRY_HEALTH_INTERVAL` | `60` | Health check interval in seconds |
+| `HITL_CONFIDENCE_THRESHOLD` | `0.75` | Confidence below this triggers HITL ambiguity check |
+| `HITL_MAX_AUTO_HOST_COUNT` | `5` | Actions affecting more hosts than this trigger HITL |
+| `HITL_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL for HITL notifications |
+| `HITL_PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API routing key |
+| `HOST` | `0.0.0.0` | Bind address (python main.py mode) |
+| `PORT` | `8000` | Listen port |
+| `RELOAD` | `false` | Enable hot reload |
 
 ---
 
-## 11. 项目结构
+## 13. Project Structure
 
 ```
 it-ops-agent/
-├── main.py                    # FastAPI 入口，统一装配
-├── requirements.txt           # 全量依赖
+├── main.py                        # FastAPI entry point — step-by-step service assembly
+├── requirements.txt
 ├── pytest.ini
 │
-├── a2a/                       # A2A 协议模块（9 个文件）
-│   ├── schemas.py             # A2A Pydantic 数据模型
-│   ├── agent_card.py          # AgentCard 构建
-│   ├── agent_executor.py      # 执行器基类 + 策略处理器链
-│   ├── event_queue.py         # Sealed 异步事件队列
-│   ├── request_handler.py     # JSON-RPC 方法路由
-│   ├── server.py              # FastAPI 子应用工厂
-│   ├── push_notifications.py  # 推送通知（指数退避）
-│   └── task_store.py          # 任务状态内存存储
+├── a2a/                           # A2A protocol (9 files)
+│   ├── schemas.py                 # Pydantic data models
+│   ├── agent_card.py              # AgentCard builder
+│   ├── agent_executor.py          # Executor base class + processor chain
+│   ├── event_queue.py             # Sealed async event queue
+│   ├── request_handler.py         # JSON-RPC method router
+│   ├── server.py                  # FastAPI sub-app factory
+│   ├── push_notifications.py      # Push notifications (exponential backoff)
+│   └── task_store.py              # In-memory task state store
 │
-├── hitl/                      # HITL 模块（9 个文件）
-│   ├── schemas.py             # HitlPayload/Decision/AuditRecord 等
-│   ├── triggers.py            # 四类触发器 + HitlConfig
-│   ├── graph.py               # LangGraph 状态图（6 节点）
-│   ├── review.py              # 5 渠道通知 + WebSocket 管理器
-│   ├── decision.py            # HitlDecisionRouter（5 种决策）
-│   ├── audit.py               # 审计服务（内存/Postgres 双后端）
-│   ├── router.py              # FastAPI 路由（含 /ws WebSocket）
-│   └── a2a_integration.py     # v3 执行器（双路由 + 后置验证）
+├── hitl/                          # Human-in-the-loop (9 files)
+│   ├── schemas.py                 # HitlPayload, HitlDecision, AuditRecord …
+│   ├── triggers.py                # Four trigger types + HitlConfig
+│   ├── graph.py                   # LangGraph StateGraph(ITOpsGraphState), 6 nodes
+│   ├── review.py                  # Five notification channels + WebSocket manager
+│   ├── decision.py                # HitlDecisionRouter — five decision types
+│   ├── audit.py                   # Audit service (in-memory + PostgreSQL)
+│   ├── router.py                  # FastAPI routes + /ws WebSocket endpoint
+│   └── a2a_integration.py         # ITOpsHitlAgentExecutor — dual-path + post-verify
 │
-├── memory/                    # Memory 模块（7 个文件）
-│   ├── schemas.py             # MemoryRecord/RetrievalQuery 等
-│   ├── router.py              # MemoryRouter 门面（统一读写入口）
-│   ├── consolidation.py       # 整合工作器（摘要 + 实体抽取）
-│   ├── stores/backends.py     # 四层 Store 实现
-│   └── pipelines/             # ingestion.py + retrieval.py
+├── memory/                        # Memory and learning (12 files)
+│   ├── schemas.py                 # MemoryRecord, RetrievalQuery …
+│   ├── router.py                  # MemoryRouter façade
+│   ├── fts_store.py               # FTS5SessionStore — SQLite FTS5 cross-session recall
+│   ├── curator.py                 # MemoryCurator — LLM-driven fact extraction
+│   ├── user_model.py              # UserModelEngine — expertise and trait tracking
+│   ├── consolidation.py           # Consolidation worker (summary + entity extraction)
+│   ├── stores/backends.py         # L1–L4 store implementations
+│   └── pipelines/                 # ingestion.py + retrieval.py
 │
-├── task/                      # Task 模块（8 个文件）
-│   ├── schemas.py             # TaskDefinition/SessionRecord 等
-│   ├── intra/store.py         # TaskStore + RetryManager
-│   ├── intra/planner.py       # TaskPlanner + TaskScheduler + TaskExecutor
-│   ├── inter/session.py       # SessionManager（Redis，TTL=8h）
-│   ├── inter/coordinator.py   # A2ATaskDispatcher + MultiRoundCoordinator
-│   └── inter/hitl_bridge.py   # HitlTaskBridge
+├── skills/                        # Skill system (3 files)
+│   ├── catalog.py                 # SkillCatalogService + 9 default skills
+│   └── evolver.py                 # SkillEvolver — autonomous skill creation + self-improvement
 │
-├── registry/                  # Registry 模块（6 个文件）
-│   ├── schemas.py             # AgentEntry/AgentSkill/ResolutionResult
-│   ├── store.py               # InMemory + Redis 双存储
-│   ├── discovery.py           # AgentDiscovery（AgentCard 抓取）
-│   ├── registry.py            # AgentRegistry（注册/解析/健康检查）
-│   └── router.py              # FastAPI 路由
+├── integrations/                  # LLM and tool backends (5 files)
+│   ├── llm_engine.py              # Ollama / OpenAI / Anthropic / Mock engines
+│   ├── mcp_client.py              # MCP server client
+│   ├── openapi_client.py          # OpenAPI 3.0 consumer
+│   └── tool_router.py             # ToolRouter — dispatches to MCP / OpenAPI / mock
 │
-├── runtime/                   # Runtime 模块（4 个文件，新增）
-│   ├── context_budget.py      # ContextBudgetManager + ToolResultStore（P0）
-│   ├── stop_policy.py         # StopPolicy + LoopState（P0）
-│   └── loop.py                # AgentRuntimeLoop v2（P1/P2 集成）
+├── runtime/                       # Execution engine (8 files)
+│   ├── loop.py                    # AgentRuntimeLoop — thin main loop
+│   ├── context_budget.py          # ContextBudgetManager + ToolResultStore (P0)
+│   ├── stop_policy.py             # StopPolicy + LoopState
+│   ├── skill_catalog.py           # SkillCatalogService integration
+│   ├── model_tier.py              # ModelTierClassifier (P2)
+│   ├── delegation.py              # Fork / fresh delegation
+│   └── tool_cache.py              # Composite skill scoring
 │
-├── skills/                    # 技能目录模块（2 个文件，新增）
-│   └── catalog.py             # SkillCatalogService + DEFAULT_SKILL_DEFINITIONS（P1）
+├── task/                          # Task orchestration (9 files)
+│   ├── schemas.py                 # TaskDefinition, SessionRecord …
+│   ├── intra/planner.py           # TaskPlanner + TaskScheduler + TaskExecutor
+│   ├── intra/store.py             # TaskStore + RetryManager
+│   ├── inter/coordinator.py       # A2ATaskDispatcher + MultiRoundCoordinator
+│   ├── inter/session.py           # SessionManager (Redis, TTL=8 h)
+│   └── inter/hitl_bridge.py       # HitlTaskBridge — suspend / resume hooks
 │
-├── tools/                     # Mock 工具（2 个文件，新增）
-│   └── mock_tools.py          # 8 个 Mock 工具（含 3 个大结果工具）
+├── registry/                      # Agent registry (6 files)
+│   ├── schemas.py                 # AgentEntry, AgentSkill, ResolutionResult
+│   ├── store.py                   # InMemory + Redis dual storage
+│   ├── discovery.py               # AgentDiscovery — AgentCard fetching
+│   ├── registry.py                # AgentRegistry — register / resolve / health check
+│   └── router.py                  # FastAPI routes
 │
-├── webui/                     # WebUI 模块（3 个文件，新增）
-│   ├── backend.py             # FastAPI 子应用（17 个端点）
-│   └── static/index.html      # 终端风格单页面控制台
+├── tools/                         # Mock tools (2 files)
+│   └── mock_tools.py              # 8 mock tools (3 large-result + 4 inline + 1 cache read)
 │
-└── tests/                     # 测试套件（6 个文件）
-    ├── test_a2a.py
-    ├── test_hitl.py
-    ├── test_memory_task.py
-    ├── test_registry.py
-    ├── test_runtime.py
-    └── test_p0_p1_p2.py       # P0/P1/P2 + WebUI（新增，~60 用例）
+├── webui/                         # Browser console
+│   ├── backend.py                 # FastAPI sub-app — chat/stream, HITL, system wiring
+│   └── static/index.html          # Terminal-style single-page console
+│
+└── tests/                         # Test suite
+    ├── test_a2a.py                # A2A module (~30 cases)
+    ├── test_hitl.py               # HITL module (~25 cases)
+    ├── test_memory_task.py        # Memory + Task (~45 cases)
+    ├── test_registry.py           # Registry (~30 cases)
+    ├── test_runtime.py            # Runtime Loop (~50 cases)
+    ├── test_hermes_features.py    # Hermes learning loop (~43 cases)
+    └── test_p0_p1_p2.py           # P0/P1/P2 + WebUI (~60 cases)
 ```
 
 ---
 
-## 12. 开发路线图
+## 14. Roadmap
 
-### 已实现
+### Implemented
 
-- [x] A2A Protocol v0.3.0 完整实现（SSE 流式 + WebSocket HITL）
-- [x] HITL 五层架构（触发 → 图中断 → 通知扇出 → 决策路由 → 审计）
-- [x] 四层 Memory（L1-L4，MMR 检索，整合工作器）
-- [x] Task 模块（DAG 调度 + 跨 Agent 委托 + 多轮会话）
-- [x] Registry 动态服务发现（健康检查 + LB）
-- [x] Runtime Loop v2（薄主循环 + 双路由 + P1/P2 特性）
-- [x] P0：ToolResultStore 大结果外部化 + 分页 API
-- [x] P0：ContextBudgetManager per-turn 预算管理
-- [x] P0：StopPolicy 六维停止条件
-- [x] P1：SkillCatalogService 技能渐进披露
-- [x] P1：分叉委托（fresh / forked + fork_context_policy）
-- [x] P1：Confirmed Facts & Working Set 一等公民
-- [x] P1：前置/后置验证钩子
-- [x] P2：模型分层提示（fast_model / full_model）
-- [x] WebUI 控制台（终端风格，SSE/同步双模式，P0 可视化）
+- [x] A2A Protocol v0.3.0 — full SSE streaming + WebSocket HITL
+- [x] HITL five-layer architecture (trigger → graph interrupt → notification fan-out → decision routing → audit)
+- [x] `StateGraph(ITOpsGraphState)` — typed state prevents silent key clobbering between nodes
+- [x] Four-layer memory (L1–L4, MMR retrieval, consolidation worker)
+- [x] Hermes post-turn pipeline (FTS5 recall, MemoryCurator, UserModelEngine, SkillEvolver)
+- [x] Integrations — Ollama / OpenAI / Anthropic / MCP / OpenAPI tool backends
+- [x] Task module (DAG scheduling + cross-agent delegation + multi-turn sessions)
+- [x] Registry — dynamic service discovery, health checks, load balancing
+- [x] Runtime Loop — thin main loop + dual-path routing + P1/P2 features
+- [x] P0: ToolResultStore large-output externalisation + paginated read API
+- [x] P0: ContextBudgetManager per-turn token prioritisation
+- [x] P0: StopPolicy six-dimension stop evaluation
+- [x] P1: SkillCatalogService — L1/L2 progressive disclosure + composite scoring
+- [x] P1: SkillEvolver — autonomous skill creation and feedback-driven improvement
+- [x] P1: Forked delegation — fresh / forked + context inheritance
+- [x] P1: Confirmed Facts & Working Set as first-class prompt citizens
+- [x] P1: Pre- and post-verification hooks
+- [x] P2: Model tiering — fast_model / full_model routing
+- [x] WebUI console — terminal style, SSE/sync modes, Flow tab, HITL approval, P0 visualisation
 
-### 待实现（生产化必须项）
+### Production requirements (not yet implemented)
 
-- [ ] **JWT/OIDC 鉴权**：`/hitl/decisions/{id}` 必须限制为审批人员角色（最高优先级）
-- [ ] **真实 LLM Chain**：替换 `hitl/graph.py`、`runtime/loop.py` 中的关键词 stub（ChatOpenAI + 结构化输出）
-- [ ] **真实工具接入**：替换 `task/intra/planner.py:_execute_task` stub（kubectl / Prometheus HTTP API / OpsGenie）
-- [ ] **真实 Embedding**：替换 `memory/pipelines/ingestion.py:_EmbedderStub`（OpenAIEmbeddings）
-- [ ] **OpenTelemetry 链路追踪**：所有跨模块调用添加 Span，TraceID 通过 session_id 透传
+- [ ] **JWT / OIDC auth**: `/hitl/{id}/approve` and `/hitl/{id}/reject` must be restricted to approver roles — highest priority
+- [ ] **Real LLM chains in graph nodes**: replace keyword stubs in `intent_classifier_node`, `risk_assessor_node`, `planner_node` with structured LLM calls
+- [ ] **Real tool backends**: replace `_execute_task` stubs in `task/intra/planner.py` (kubectl / Prometheus HTTP API / OpsGenie)
+- [ ] **Real embeddings**: replace `_EmbedderStub` in `memory/pipelines/ingestion.py`
+- [ ] **OpenTelemetry tracing**: add spans to all cross-module calls; propagate TraceID via `session_id`
+- [ ] **PostgreSQL checkpointer**: replace `MemorySaver` in `build_hitl_graph()` for production durability
 
-### 待实现（P2 扩展项）
+### Nice-to-have
 
-- [ ] Prompt cache 友好策略（稳定前缀优先，变化内容后置）
-- [ ] 轻量验证 Agent（独立小模型执行后置健康检查）
-- [ ] Agent 版本管理（AgentCard 含 version 字段，金丝雀发布）
-- [ ] MCP 协议集成（Model Context Protocol，Agent 访问外部工具的标准接口）
+- [ ] Prompt cache-friendly prefix ordering (stable prefix first, variable content last)
+- [ ] Lightweight verifier agent (small model for post-execution health checks)
+- [ ] Agent versioning (AgentCard `version` field, canary releases)
+- [ ] MCP protocol integration for external tool access
 
 ---
 
-*文档版本：v2.0 | 最后更新：2025-01-01 | 内部文件*
+*Version: v3.0 | Updated: 2026-04-15*
