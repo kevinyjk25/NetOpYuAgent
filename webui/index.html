@@ -237,6 +237,24 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 .tab-content::-webkit-scrollbar{width:3px}
 .tab-content::-webkit-scrollbar-thumb{background:var(--border2)}
 
+/* ── Memory tab ─────────────────────────────────────── */
+.mem-card{border:1px solid var(--border);border-radius:5px;margin-bottom:7px;overflow:hidden;transition:border-color .12s}
+.mem-card:hover{border-color:var(--border2)}
+.mem-card-head{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;user-select:none;background:var(--bg)}
+.mem-card-body{padding:7px 10px;font-family:var(--mono);font-size:10px;line-height:1.6;color:var(--text);white-space:pre-wrap;word-break:break-word;border-top:1px solid var(--border);display:none}
+.mem-card-body.open{display:block}
+.mem-track-a{border-left:3px solid var(--accent)}
+.mem-track-b{border-left:3px solid #a78bfa}
+.mem-badge{font-family:var(--mono);font-size:8px;font-weight:700;padding:1px 5px;border-radius:2px;letter-spacing:.5px;flex-shrink:0}
+.mem-badge-a{background:rgba(0,212,170,.15);color:var(--accent)}
+.mem-badge-b{background:rgba(167,139,250,.15);color:#a78bfa}
+.mem-score{font-family:var(--mono);font-size:9px;color:var(--dim);margin-left:auto;flex-shrink:0}
+.mem-source{font-family:var(--mono);font-size:9px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:140px}
+.mem-tag{font-family:var(--mono);font-size:8px;padding:0 4px;border:1px solid var(--border);border-radius:2px;color:var(--dim);flex-shrink:0}
+.mem-filter{font-family:var(--mono);font-size:8px;padding:2px 8px;background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--dim);cursor:pointer;transition:all .1s;letter-spacing:.5px}
+.mem-filter.active{border-color:var(--accent);color:var(--accent);background:rgba(0,212,170,.08)}
+#tab-memory{gap:0;padding:0;flex-direction:column}
+
 /* ── Cache tab ───────────────────────────────────── */
 #tab-cache{gap:8px}
 .cache-index{flex-shrink:0}
@@ -404,15 +422,55 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
     </div>
   </div>
   <div class="divider"></div>
-  <div class="panel-head">⚡ skill evolution</div>
-  <div style="padding:3px 0;overflow-y:auto;max-height:100px">
-    <div class="tool-item" onclick="setQuery('investigate and resolve the RADIUS certificate expiry affecting wireless users at site-a')">
+  <div class="panel-head">🔀 skill ambiguity demos</div>
+  <div style="padding:3px 0;overflow-y:auto;max-height:130px" id="ambiguity-queries">
+    <div class="tool-item" onclick="setQuery('get system logs and metrics')">
       <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">RADIUS cert expiry</div><div class="skill-purpose">complex → auto-skill</div></div>
+      <div><div class="skill-name">logs and metrics</div><div class="skill-purpose">syslog vs prometheus (tie)</div></div>
     </div>
-    <div class="tool-item" onclick="setQuery('diagnose BGP route flapping on router-01 and recommend remediation steps')">
+    <div class="tool-item" onclick="setQuery('get device metrics')">
       <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">BGP route flapping</div><div class="skill-purpose">complex → auto-skill</div></div>
+      <div><div class="skill-name">device metrics</div><div class="skill-purpose">device_info vs prometheus</div></div>
+    </div>
+    <div class="tool-item" onclick="setQuery('check network status')">
+      <div class="risk-dot risk-medium"></div>
+      <div><div class="skill-name">network status</div><div class="skill-purpose">service_health vs netflow</div></div>
+    </div>
+    <div style="padding:4px 10px;font-size:9px;color:var(--dim)">
+      Set HITL_SKILL_AMBIGUITY=true to route these to approval
+    </div>
+  </div>
+  <div class="divider"></div>
+  <div class="panel-head">⚡ skill evolution (complex → auto-skill)</div>
+  <div style="padding:3px 0;overflow-y:auto;max-height:120px" id="skill-evo-triggers">
+    <!-- Populated by renderSkillEvoTriggers() — shows preview button when skill exists -->
+  </div>
+  <div class="divider"></div>
+  <div class="panel-head">📤 upload</div>
+  <div style="padding:4px 6px">
+    <!-- Skill upload -->
+    <div style="margin-bottom:6px">
+      <div style="font-size:10px;color:var(--dim);margin-bottom:3px">skill (.md or .json)</div>
+      <label id="skill-upload-label" style="display:block;border:1px dashed var(--border);border-radius:4px;padding:6px 8px;cursor:pointer;font-size:10px;color:var(--mid);text-align:center;transition:border-color .2s"
+        ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleSkillUpload(event.dataTransfer.files[0])">
+        drag &amp; drop or <span style="color:var(--accent)">browse</span>
+        <input type="file" accept=".md,.json" style="display:none" onchange="handleSkillUpload(this.files[0]);this.value=''">
+      </label>
+      <div id="skill-upload-status" style="font-size:10px;color:var(--dim);margin-top:2px;min-height:14px"></div>
+    </div>
+    <!-- Tool upload -->
+    <div>
+      <div style="font-size:10px;color:var(--dim);margin-bottom:3px">tool (.py)</div>
+      <label id="tool-upload-label" style="display:block;border:1px dashed var(--border);border-radius:4px;padding:6px 8px;cursor:pointer;font-size:10px;color:var(--mid);text-align:center;transition:border-color .2s"
+        ondragover="event.preventDefault();this.style.borderColor='var(--accent)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="event.preventDefault();this.style.borderColor='var(--border)';handleToolUpload(event.dataTransfer.files[0])">
+        drag &amp; drop or <span style="color:var(--accent)">browse</span>
+        <input type="file" accept=".py" style="display:none" onchange="handleToolUpload(this.files[0]);this.value=''">
+      </label>
+      <div id="tool-upload-status" style="font-size:10px;color:var(--dim);margin-top:2px;min-height:14px"></div>
     </div>
   </div>
 </div>
@@ -482,9 +540,10 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 <div class="right-panel">
   <div class="tabs">
     <div class="tab active" onclick="switchTab('cache')" id="tab-btn-cache">Cache</div>
-    <div class="tab" onclick="switchTab('flow')"  id="tab-btn-flow">Flow</div>
-    <div class="tab" onclick="switchTab('hitl')"  id="tab-btn-hitl">HITL</div>
-    <div class="tab" onclick="switchTab('stats')" id="tab-btn-stats">Stats</div>
+    <div class="tab" onclick="switchTab('flow')"   id="tab-btn-flow">Flow</div>
+    <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
+    <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
+    <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
   </div>
 
   <!-- Cache tab -->
@@ -539,6 +598,29 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
     </div>
   </div>
 
+  <!-- Memory tab — Dual-Track Memory viewer -->
+  <div class="tab-content" id="tab-memory">
+    <div id="mem-empty" style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:16px 10px;text-align:center;line-height:1.8">
+      No memory recalled yet.<br>
+      <span style="font-size:10px;opacity:.6">Send a query — Track A (raw chunks) and Track B (curated facts) will appear here.</span>
+    </div>
+    <div id="mem-header" style="display:none;flex-shrink:0;padding:6px 10px 0">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="font-family:var(--mono);font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--dim)">Dual-Track Recall</span>
+        <span id="mem-winner-badge" style="font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:3px;font-weight:600"></span>
+        <span id="mem-counts" style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-left:auto"></span>
+      </div>
+      <div id="mem-query-preview" style="font-family:var(--mono);font-size:9px;color:var(--dim);margin-top:3px;padding:3px 6px;background:var(--bg);border-radius:3px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis"></div>
+      <!-- Track filter buttons -->
+      <div style="display:flex;gap:4px;margin-top:6px">
+        <button onclick="memFilter('all')"  id="mem-f-all"  class="mem-filter active">All</button>
+        <button onclick="memFilter('B')"    id="mem-f-B"    class="mem-filter">💡 Facts (B)</button>
+        <button onclick="memFilter('A')"    id="mem-f-A"    class="mem-filter">📄 Chunks (A)</button>
+      </div>
+    </div>
+    <div id="mem-list" style="flex:1;overflow-y:auto;padding:6px 10px"></div>
+  </div>
+
   <!-- Stats tab -->
   <div class="tab-content" id="tab-stats">
     <div id="stats-content" style="flex:1;overflow-y:auto">
@@ -579,11 +661,126 @@ function getSession() {
 }
 
 function switchTab(name) {
-  ['cache','flow','hitl','stats'].forEach(n => {
+  ['cache','flow','hitl','memory','stats'].forEach(n => {
     document.getElementById('tab-btn-'+n).classList.toggle('active', n===name);
     document.getElementById('tab-'+n).classList.toggle('active', n===name);
   });
 }
+
+// ── Memory tab ────────────────────────────────────────────────────────────
+let _memItems = [];     // current recall results
+let _memFilter = 'all'; // 'all' | 'A' | 'B'
+
+function memFilter(track) {
+  _memFilter = track;
+  ['all','A','B'].forEach(t => {
+    const btn = document.getElementById('mem-f-' + t);
+    if (btn) btn.classList.toggle('active', t === track);
+  });
+  renderMemCards();
+}
+
+function renderMemCards() {
+  const list = document.getElementById('mem-list');
+  if (!list) return;
+  const items = _memFilter === 'all'
+    ? _memItems
+    : _memItems.filter(r => r.track === _memFilter);
+
+  if (!items.length) {
+    list.innerHTML = `<div style="color:var(--dim);font-family:var(--mono);font-size:10px;padding:12px 0;text-align:center">
+      No ${_memFilter === 'all' ? '' : 'Track ' + _memFilter + ' '}results for this query</div>`;
+    return;
+  }
+
+  list.innerHTML = items.map((r, i) => {
+    const isB      = r.track === 'B';
+    const trackCls = isB ? 'mem-track-b' : 'mem-track-a';
+    const badgeCls = isB ? 'mem-badge-b' : 'mem-badge-a';
+    const label    = isB ? '💡 FACT' : '📄 CHUNK';
+    const typeStr  = r.memory_type ? r.memory_type.replace(/_/g,' ') : '';
+    const srcShort = r.source.replace('fts5:','FTS5:').replace('daily/','').replace('facts.jsonl','facts');
+    const dateStr  = r.recency_ts
+      ? new Date(r.recency_ts * 1000).toLocaleDateString('en-US', {month:'short', day:'numeric'})
+      : '';
+    const tags = (r.tags||[]).filter(Boolean).slice(0,4)
+      .map(t => `<span class="mem-tag">${esc(t)}</span>`).join(' ');
+    const pct  = Math.round((r.score || 0) * 100);
+    const bar  = `<div style="width:${Math.min(pct,100)}%;height:2px;background:${isB ? '#a78bfa' : 'var(--accent)'};border-radius:1px;margin-top:3px"></div>`;
+
+    // Preview: first 80 chars of content (stripped of prefix like "[incident_lesson]")
+    const preview = r.content.replace(/^\[[^\]]+\]\s*/, '').slice(0, 90);
+
+    return `<div class="mem-card ${trackCls}" id="mem-card-${i}">
+      <div class="mem-card-head" onclick="toggleMemCard(${i})">
+        <span class="mem-badge ${badgeCls}">${label}</span>
+        ${typeStr ? `<span style="font-family:var(--mono);font-size:9px;color:var(--dim)">${esc(typeStr)}</span>` : ''}
+        <span class="mem-source" title="${esc(r.source)}">${esc(srcShort)}${dateStr ? ' · '+dateStr : ''}</span>
+        <span class="mem-score">${pct}%</span>
+      </div>
+      <div style="padding:3px 8px 5px;background:var(--bg)">
+        <div style="font-family:var(--mono);font-size:9px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${esc(preview)}</div>
+        ${bar}
+        ${tags ? `<div style="display:flex;gap:3px;flex-wrap:wrap;margin-top:3px">${tags}</div>` : ''}
+      </div>
+      <div class="mem-card-body" id="mem-body-${i}">${esc(r.content)}</div>
+    </div>`;
+  }).join('');
+}
+
+function toggleMemCard(i) {
+  const body = document.getElementById('mem-body-'+i);
+  if (body) body.classList.toggle('open');
+}
+
+function updateMemoryTab(chunk) {
+  // chunk: {type:'recall', memory_items:[], track_a, track_b, winner, ...}
+  const items   = chunk.memory_items || [];
+  const trackA  = chunk.track_a || 0;
+  const trackB  = chunk.track_b || 0;
+  const winner  = chunk.winner  || '';
+  const query   = chunk._query  || '';
+
+  _memItems  = items;
+  _memFilter = 'all';
+
+  const empty  = document.getElementById('mem-empty');
+  const header = document.getElementById('mem-header');
+  const badge  = document.getElementById('mem-winner-badge');
+  const counts = document.getElementById('mem-counts');
+  const qprev  = document.getElementById('mem-query-preview');
+
+  if (!items.length) {
+    if (empty)  empty.style.display  = '';
+    if (header) header.style.display = 'none';
+  } else {
+    if (empty)  empty.style.display  = 'none';
+    if (header) header.style.display = '';
+
+    // Winner badge
+    if (badge) {
+      const winnerColor = winner === 'B' ? '#a78bfa' : winner === 'A' ? 'var(--accent)' : 'var(--dim)';
+      badge.textContent = winner === 'B' ? '💡 Facts won'
+                        : winner === 'A' ? '📄 Chunks won'
+                        : '⚖ Tied';
+      badge.style.cssText = `font-family:var(--mono);font-size:9px;padding:2px 7px;border-radius:3px;font-weight:600;background:${winnerColor}22;color:${winnerColor};border:1px solid ${winnerColor}44`;
+    }
+    if (counts) counts.textContent = `${trackA} chunk${trackA!==1?'s':''} · ${trackB} fact${trackB!==1?'s':''}`;
+    if (qprev && query) qprev.textContent = '▶ ' + query;
+
+    // Reset filter buttons
+    ['all','A','B'].forEach(t => {
+      const btn = document.getElementById('mem-f-'+t);
+      if (btn) btn.classList.toggle('active', t === 'all');
+    });
+    renderMemCards();
+
+    // Auto-switch to Memory tab when we have results
+    switchTab('memory');
+  }
+}
+
+
 
 // Messages
 function addMessage(role, content, cls='') {
@@ -775,6 +972,18 @@ async function streamQuery(query, sid, body) {
 }
 
 function dispatchChunk(c, query, sid) {
+  if (c.type==='llm_trace') {
+    const model   = c.model||'llm';
+    const turn    = c.turn||'?';
+    const sys     = c.system_chars||0;
+    const resp    = c.response_chars||0;
+    const hasTool = c.has_tool_call;
+    const detail  = `system: ${sys} chars  →  response: ${resp} chars${hasTool?' [TOOL CALL]':''}`;
+    const sub     = (c.system_preview||'').slice(0,120) + '\n---\n' + (c.response_preview||'').slice(0,120);
+    addStep('llm',`🤖 LLM Turn ${turn} (${model})`,detail,sub);
+    flowEvent('llm',`🤖 LLM·${turn} ${model}`,detail,sub);
+    return;
+  }
   if (c.type==='routing') {
     addStep('hitl','hitl',`Route: ${c.path}`,c.reason||'','');
     flowAdd('hitl',`⚡ ${c.path}`,c.reason||'','',{path:c.path});
@@ -799,20 +1008,33 @@ function dispatchChunk(c, query, sid) {
     return;
   }
   if (c.type==='recall') {
+    const trackA = c.track_a ?? 0, trackB = c.track_b ?? 0;
+    const winner = c.winner ? ` · winner=${c.winner}` : '';
     const detail = c.has_context
-      ? `${c.chars} chars from ${c.sessions_searched} sessions`
-      : `no prior context (${c.sessions_searched} sessions)`;
-    addStep('recall','FTS5 Cross-Session Recall',detail,c.preview||'(no past context)');
-    flowEvent('recall','🔮 FTS5 Recall',detail,c.preview?.slice(0,60)||'');
+      ? `${c.chars} chars · A:${trackA} chunks B:${trackB} facts${winner}`
+      : `no prior context (${c.sessions_searched||0} sessions)`;
+    addStep('recall','🧠 DTM Recall',detail, c.preview||'(no past context)');
+    flowEvent('recall','🧠 DTM Recall',detail, c.preview?.slice(0,60)||'');
+    // Pass current query into the chunk so Memory tab can show it
+    c._query = document.getElementById('query-input')?.value || '';
+    updateMemoryTab(c);
     return;
   }
   if (c.token) { appendToken(c.token); return; }
   if (c.node_step) {
     const step = c.node_step, node = c.node||'';
     if (node==='skill_load'||step.toLowerCase().includes('skill')) {
-      const sk = step.replace(/Loading skill details:\s*/i,'');
-      addStep('skill','Skill Load: '+sk,'L2 detail → context','');
-      flowEvent('skill','📋 Skill Load',sk,'L2 detail injected');
+      const skills = c.selected_skills||[];
+      const cnt    = c.skill_count != null ? c.skill_count : skills.length;
+      const names  = skills.length
+        ? skills.map(s=>`${s.id}(${s.score.toFixed(2)})`).join(', ')
+        : step.replace(/Skills matched:\s*/i,'').replace(/Loading skill details:\s*/i,'');
+      const ambig  = c.ambiguous ? '  ⚠ ambiguous — HITL may trigger' : '';
+      addStep('skill', `Skills matched (${cnt})`, names + ambig, names);
+      flowEvent('skill', `📋 Skills matched (${cnt})`, names, ambig||'injected into context');
+      if (c.ambiguous) {
+        flowEvent('hitl', '⚠ Skill ambiguity', 'top skills too similar', 'routing to HITL');
+      }
     } else if (step.includes('Calling tool:')) {
       const tool = step.replace(/Calling tool:\s*/i,'');
       addStep('tool','Tool Call: '+tool,'→ ToolRouter dispatch',
@@ -884,10 +1106,24 @@ function dispatchChunk(c, query, sid) {
     }
     return;
   }
-  if (c.hitl_interrupt) {
-    addStep('hitl','HITL Interrupt',c.trigger_kind,'');
-    flowEvent('hitl','⚠ HITL Interrupt',c.trigger_kind,`risk: ${c.risk_level}`);
-    switchTab('hitl'); refreshHitl();
+  if (c.stop_hitl) {
+    const tool = c.tool_name||'';
+    addStep('hitl','🔒 Tool HITL Gate',`'${tool}' requires approval`,c.message||'');
+    flowEvent('hitl',`🔒 HITL Gate: ${tool}`,'tool is on watch-list','routing to HITL graph');
+    switchTab('hitl');
+    refreshHitl(5);
+    return;
+  }
+    if (c.hitl_interrupt || c.type==='hitl_interrupt') {
+    const trigger=c.trigger_kind||'';
+    const risk=c.risk_level||'';
+    const iid=c.interrupt_id||'';
+    addStep('hitl','HITL Interrupt',`${trigger} — ${risk}`,
+      `ID: ${iid.slice(0,10)}… | Approval required → HITL tab`);
+    flowAdd('hitl','⚠ HITL Interrupt',`${trigger} / ${risk}`,
+      `interrupt_id: ${iid}`,c);
+    switchTab('hitl');
+    refreshHitl(5);
     return;
   }
   if (c.type==='error') {
@@ -1024,9 +1260,13 @@ function flowEvent(type, label, detail='', sub='') {
 function feIcon(type) {
   const m={classify:'🔍',recall:'🔮',verify:'🔒',turn:'⚙','tool-call':'🔧',
     'tool-result':'✓',cached:'📦',skill:'📋',curate:'🧠',umodel:'👤',
-    fts:'🗄','fts-recall':'🔮',hermes:'🌀',stop:'■',done:'✅',hitl:'⚠',error:'✗'};
+    fts:'🗄','fts-recall':'🔮',hermes:'🌀',stop:'■',done:'✅',hitl:'⚠',error:'✗',
+    llm:'🤖','skill-load':'📋'};
   return m[type]||'·';
 }
+
+// Alias used by HITL decision handlers (accepts optional 5th `data` arg, ignored by flowEvent)
+const flowAdd = (type, label, detail='', sub='', _data={}) => flowEvent(type, label, detail, sub);
 
 function clearFlow() {
   flowEvents=[];
@@ -1035,26 +1275,142 @@ function clearFlow() {
 }
 
 // Left panel
+// Skill evolution trigger items — shows 📄 preview when evolved skill exists in catalog
+const SKILL_EVO_TRIGGERS = [
+  {
+    label:   'RADIUS cert expiry',
+    query:   'investigate and resolve the RADIUS certificate expiry affecting wireless users at site-a',
+    skillId: 'radius_cert_expiry',    // expected skill_id after evolution
+    hint:    'complex → auto-skill',
+  },
+  {
+    label:   'BGP route flapping',
+    query:   'diagnose BGP route flapping on router-01 and recommend remediation steps',
+    skillId: 'bgp_route_flapping',
+    hint:    'complex → auto-skill',
+  },
+];
+
+// known_evolved_ids is populated by loadSkills() so renderSkillEvoTriggers knows what exists
+let known_evolved_ids = new Set();
+
+function renderSkillEvoTriggers() {
+  const el = document.getElementById('skill-evo-triggers');
+  if (!el) return;
+  el.innerHTML = '';
+  for (const t of SKILL_EVO_TRIGGERS) {
+    const exists = known_evolved_ids.has(t.skillId);
+    const item   = document.createElement('div');
+    item.className = 'tool-item';
+    item.style.cssText = exists
+      ? 'background:rgba(0,200,100,.06);border-left:2px solid rgba(0,200,100,.35)'
+      : '';
+    item.onclick = () => setQuery(t.query);
+    item.innerHTML = `
+      <div class="risk-dot risk-medium"></div>
+      <div style="flex:1;min-width:0">
+        <div class="skill-name">→ ${esc(t.label)}${exists ? ' <span style="color:var(--metric-green,#4ade80);font-size:9px">💾</span>' : ''}</div>
+        <div class="skill-purpose">${exists ? 'evolved — click 📄 to view' : esc(t.hint)}</div>
+      </div>
+      ${exists
+        ? `<span title="View evolved skill markdown"
+             style="cursor:pointer;font-size:13px;margin-left:4px;flex-shrink:0;opacity:.8"
+             onclick="event.stopPropagation();viewSkillContent('${t.skillId}')">📄</span>`
+        : ''
+      }`;
+    el.appendChild(item);
+  }
+}
+
 async function loadSkills() {
   try {
     const res=await fetch(`${BASE}/skills`);
     const skills=await res.json();
     const el=document.getElementById('skill-list');
     el.innerHTML='';
-    for (const s of skills) {
+
+    const builtIn  = skills.filter(s=>!s.is_evolved);
+    const evolved  = skills.filter(s=> s.is_evolved);
+
+    // Update global set so renderSkillEvoTriggers knows which skills exist
+    known_evolved_ids = new Set(evolved.map(s=>s.skill_id));
+
+    // ── Built-in skills ──────────────────────────────────────────────
+    for (const s of builtIn) {
       const item=document.createElement('div');
       item.className='skill-item';
-      item.onclick=()=>setQuery(`Use the ${s.skill_id} skill to `);
+      item.style.position='relative';
+      item.title=`Click: fill query\nShift+Click: view skill content`;
+      item.onclick=(e)=>{
+        if (e.shiftKey) { viewSkillContent(s.skill_id); return; }
+        setQuery(`Use the ${s.skill_id} skill to `);
+      };
       item.innerHTML=`
         <div class="risk-dot risk-${s.risk_level}"></div>
-        <div>
+        <div style="flex:1;min-width:0">
           <div class="skill-name">${esc(s.skill_id)}</div>
           <div class="skill-purpose">${esc((s.purpose||'').slice(0,40))}${(s.purpose||'').length>40?'…':''}</div>
         </div>
-        ${s.requires_hitl?'<span class="hitl-tag">HITL</span>':''}`;
+        ${s.requires_hitl?'<span class="hitl-tag">HITL</span>':''}
+        <span title="View skill content" style="cursor:pointer;opacity:.45;font-size:11px;margin-left:4px;flex-shrink:0"
+          onclick="event.stopPropagation();viewSkillContent('${s.skill_id}')">📄</span>`;
       el.appendChild(item);
     }
-  } catch(e) {}
+
+    // ── Evolved skills section inside the skills panel ────────────────
+    if (evolved.length > 0) {
+      const hdr=document.createElement('div');
+      hdr.style.cssText='padding:4px 8px 2px;font-size:9px;color:var(--dim);letter-spacing:.08em;margin-top:4px';
+      hdr.textContent='💾 EVOLVED SKILLS';
+      el.appendChild(hdr);
+      for (const s of evolved) {
+        const item=document.createElement('div');
+        item.className='skill-item';
+        item.style.cssText='position:relative;background:rgba(0,200,100,.04);border-left:2px solid rgba(0,200,100,.3)';
+        item.title=`Evolved skill (saved to disk)\nClick: fill query\nShift+Click: view markdown content`;
+        item.onclick=(e)=>{
+          if (e.shiftKey) { viewSkillContent(s.skill_id); return; }
+          setQuery(`Use the ${s.skill_id} skill to `);
+        };
+        item.innerHTML=`
+          <div class="risk-dot risk-${s.risk_level}"></div>
+          <div style="flex:1;min-width:0">
+            <div class="skill-name">${esc(s.skill_id)} <span style="color:var(--metric-green,#4ade80);font-size:9px">💾</span></div>
+            <div class="skill-purpose">${esc((s.purpose||'').slice(0,38))}${(s.purpose||'').length>38?'…':''}</div>
+          </div>
+          ${s.requires_hitl?'<span class="hitl-tag">HITL</span>':''}
+          <span title="View skill markdown" style="cursor:pointer;opacity:.6;font-size:12px;margin-left:4px;flex-shrink:0"
+            onclick="event.stopPropagation();viewSkillContent('${s.skill_id}')">📄</span>`;
+        el.appendChild(item);
+      }
+    }
+
+    // ── Update the ⚡ evolved-skill-list panel in left sidebar ────────
+    const evolvedPanel=document.getElementById('evolved-skill-list');
+    if (evolvedPanel) {
+      if (evolved.length === 0) {
+        evolvedPanel.innerHTML='<div style="padding:6px 10px;font-size:10px;color:var(--dim)">No evolved skills yet — run a complex query to auto-generate one.</div>';
+      } else {
+        evolvedPanel.innerHTML='';
+        for (const s of evolved) {
+          const item=document.createElement('div');
+          item.className='tool-item';
+          item.title=`Shift+Click: view content`;
+          item.onclick=(e)=>{ viewSkillContent(s.skill_id); };
+          item.innerHTML=`
+            <div class="risk-dot risk-${s.risk_level}"></div>
+            <div style="flex:1;min-width:0">
+              <div class="skill-name">${esc(s.skill_id)}</div>
+              <div class="skill-purpose">💾 evolved · click to view</div>
+            </div>`;
+          evolvedPanel.appendChild(item);
+        }
+      }
+    }
+    // Refresh the skill evolution trigger panel (shows 📄 for existing evolved skills)
+    renderSkillEvoTriggers();
+
+  } catch(e) { console.error('loadSkills:', e); }
 }
 
 async function loadTools() {
@@ -1098,7 +1454,7 @@ async function quickTool(toolName, args) {
   } catch(e) { addMessage('system','Tool error: '+e.message,'error'); }
 }
 
-async function refreshHitl() {
+async function refreshHitl(retries=0) {
   try {
     const res=await fetch(`${BASE}/hitl/pending`);
     const list=await res.json();
@@ -1106,6 +1462,11 @@ async function refreshHitl() {
     const badge=document.getElementById('hitl-badge');
     badge.style.display=list.length?'inline-block':'none';
     if (!list.length){
+      if (retries > 0) {
+        el.innerHTML='<div style="color:var(--dim);font-size:10px;font-family:var(--mono);padding:6px 0">⏳ Waiting for interrupt registration… (' + retries + ')</div>';
+        setTimeout(() => refreshHitl(retries-1), 500);
+        return;
+      }
       el.innerHTML='<div style="color:var(--dim);font-size:10px;font-family:var(--mono);font-style:italic;padding:6px 0">No pending interrupts — send a destructive query to trigger HITL</div>';
       return;
     }
@@ -1141,11 +1502,16 @@ async function refreshHitl() {
 
 async function hitlDec(id,dec) {
   try {
-    await fetch(`${BASE}/hitl/${id}/${dec}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({operator_id:'webui-operator',comment:`${dec} via Console`})});
-    addMessage('system',`HITL ${dec}: ${id.slice(0,8)}…`,'system');
-    flowEvent('hitl',`⚠ HITL ${dec}`,id.slice(0,12));
-    refreshHitl();
-  } catch(e){}
+    const res=await fetch(`${BASE}/hitl/${id}/${dec}`,{method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({operator_id:'webui-operator',comment:`${dec} via Console`})});
+    const data=await res.json().catch(()=>({}));
+    const outcome=data.outcome||data.decision||dec;
+    addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nOutcome: ${outcome}\n`+
+      (data.error?`Error: ${data.error}`:'Execution will resume if approved.'),'system');
+    flowAdd('hitl',`⚠ HITL ${dec.toUpperCase()}`,`${id.slice(0,12)}…`,`outcome: ${outcome}`,data);
+    setTimeout(()=>refreshHitl(0),400);
+  } catch(e){ addMessage('system','HITL decision error: '+e.message,'error'); }
 }
 
 async function refreshStats() {
@@ -1223,6 +1589,118 @@ function clearChat() {
   document.getElementById('cache-viewer').style.display='none';
   updateCacheBadge();
   clearFlow();
+}
+
+// ── CAP 4: Upload handlers ────────────────────────────────────────────────
+
+async function handleSkillUpload(file) {
+  if (!file) return;
+  const statusEl = document.getElementById('skill-upload-status');
+  statusEl.textContent = `Uploading ${file.name}…`;
+  statusEl.style.color = 'var(--mid)';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${BASE}/skills/upload`, {method:'POST', body:fd});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    statusEl.textContent = `✓ registered: ${data.skill_id}`;
+    statusEl.style.color = 'var(--metric-green, #4ade80)';
+    flowEvent('skill', '📤 Skill Uploaded', data.skill_id,
+      `${data.chars} chars${data.persisted?' · persisted to disk':''}`);
+    await loadSkills();            // refresh left panel
+    setTimeout(()=>{ statusEl.textContent=''; }, 4000);
+  } catch(e) {
+    statusEl.textContent = `✗ ${e.message}`;
+    statusEl.style.color = 'var(--metric-warn, #f59e0b)';
+  }
+}
+
+async function handleToolUpload(file) {
+  if (!file) return;
+  const statusEl = document.getElementById('tool-upload-status');
+  statusEl.textContent = `Uploading ${file.name}…`;
+  statusEl.style.color = 'var(--mid)';
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    const res = await fetch(`${BASE}/tools/upload`, {method:'POST', body:fd});
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    statusEl.textContent = `✓ ${data.tool_count} tool(s): ${data.tools.join(', ')}`;
+    statusEl.style.color = 'var(--metric-green, #4ade80)';
+    flowEvent('tool-call', '📤 Tool Uploaded', data.tools.join(', '),
+      `${data.chars} chars · ${data.tool_count} function(s) registered`);
+    await loadTools();             // refresh left panel
+    setTimeout(()=>{ statusEl.textContent=''; }, 4000);
+  } catch(e) {
+    statusEl.textContent = `✗ ${e.message}`;
+    statusEl.style.color = 'var(--metric-warn, #f59e0b)';
+  }
+}
+
+// ── CAP 3/4: Skill content viewer modal ──────────────────────────────────
+
+async function viewSkillContent(skillId) {
+  // Try /skills/{id}/content first, fall back to /skills/{id}
+  let content = '';
+  let onDisk  = false;
+  try {
+    const r1 = await fetch(`${BASE}/skills/${skillId}/content`);
+    if (r1.ok) {
+      const d = await r1.json();
+      content = d.content || '';
+      onDisk  = d.on_disk || false;
+    } else {
+      const r2 = await fetch(`${BASE}/skills/${skillId}`);
+      const d = await r2.json();
+      content = d.detail || JSON.stringify(d, null, 2);
+    }
+  } catch(e) { content = `Error loading skill: ${e.message}`; }
+
+  // Remove existing modal if any
+  document.getElementById('skill-modal')?.remove();
+
+  const overlay = document.createElement('div');
+  overlay.id = 'skill-modal';
+  overlay.style.cssText = [
+    'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.7)',
+    'display:flex;align-items:center;justify-content:center',
+    'font-family:var(--mono)',
+  ].join(';');
+  overlay.onclick = (e) => { if (e.target===overlay) overlay.remove(); };
+
+  overlay.innerHTML = `
+    <div style="background:var(--bg-2,#1a1a2e);border:1px solid var(--border);border-radius:8px;
+                width:min(720px,95vw);max-height:80vh;display:flex;flex-direction:column;
+                box-shadow:0 8px 32px rgba(0,0,0,.6)">
+      <div style="display:flex;align-items:center;justify-content:space-between;
+                  padding:10px 14px;border-bottom:1px solid var(--border)">
+        <span style="font-size:13px;color:var(--fg)">📄 ${esc(skillId)}
+          <span style="font-size:10px;color:var(--dim);margin-left:6px">${onDisk ? '💾 evolved (disk)' : '⚙ built-in'}</span>
+        </span>
+        <div style="display:flex;gap:8px;align-items:center">
+          <button onclick="navigator.clipboard.writeText(document.getElementById('skill-content-pre').textContent)"
+            style="background:none;border:1px solid var(--border);color:var(--mid);
+                   padding:3px 8px;border-radius:3px;cursor:pointer;font-size:10px">copy</button>
+          <button onclick="document.getElementById('skill-modal').remove()"
+            style="background:none;border:none;color:var(--mid);cursor:pointer;font-size:16px;line-height:1">✕</button>
+        </div>
+      </div>
+      <div style="overflow-y:auto;padding:14px;flex:1">
+        <pre id="skill-content-pre" style="margin:0;white-space:pre-wrap;word-break:break-word;
+          font-size:11px;line-height:1.6;color:var(--fg)">${esc(content)}</pre>
+      </div>
+      <div style="padding:8px 14px;border-top:1px solid var(--border);
+                  font-size:10px;color:var(--dim)">
+        shift+click any skill to view · esc to close · ${content.length} chars
+      </div>
+    </div>`;
+
+  document.body.appendChild(overlay);
+  // Close on Escape
+  const onKey = (e) => { if (e.key==='Escape') { overlay.remove(); document.removeEventListener('keydown',onKey); }};
+  document.addEventListener('keydown', onKey);
 }
 
 document.getElementById('query-input').addEventListener('keydown', function(e) {

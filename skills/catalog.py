@@ -187,6 +187,140 @@ class SkillCatalogService:
     def skill_count(self) -> int:
         return len(self._skills)
 
+    def as_markdown(self, skill_id: str) -> Optional[str]:
+        """
+        Return the full markdown content of a skill in IT-ops skill format.
+        Works for both built-in skills (synthesised from catalog detail)
+        and evolved/uploaded skills whose .md source is stored in detail.description.
+        """
+        skill = self._skills.get(skill_id)
+        if skill is None:
+            return None
+        s, d = skill.summary, skill.detail
+
+        # If the description already looks like markdown (starts with #), return it directly
+        if d.description.strip().startswith("#"):
+            return d.description
+
+        # Synthesise clean markdown from the structured detail
+        hitl_str = "yes" if s.requires_hitl else "no"
+        lines = [
+            f"# {s.name}",
+            f"**Purpose:** {s.purpose}",
+            f"**Tags:** [{', '.join(s.tags)}]",
+            f"**Risk:** {s.risk_level}",
+            f"**HITL:** {hitl_str}",
+            "",
+        ]
+        if d.description and d.description != s.purpose:
+            lines += ["## Description", d.description, ""]
+        if d.parameters:
+            lines.append("## Parameters")
+            for pname, pdesc in d.parameters.items():
+                lines.append(f"- `{pname}`: {pdesc}")
+            lines.append("")
+        if d.examples:
+            lines.append("## Examples")
+            for ex in d.examples:
+                lines.append(f"    {ex}")
+            lines.append("")
+        if d.constraints:
+            lines.append("## Constraints")
+            for c in d.constraints:
+                lines.append(f"- {c}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def select_skills_for_query(
+        self,
+        query: str,
+        top_k: int = 5,
+        ambiguity_threshold: float = 0.15,
+    ) -> "SkillSelectionResult":
+        """
+        Score all registered skills against the query and return the top-K.
+
+        Scoring (keyword + tag overlap, no embedding needed):
+          keyword_score = |query_words ∩ skill_words| / |query_words|
+          tag_score     = tags appearing in query / total tags
+          composite     = keyword_score * 0.7 + tag_score * 0.3
+
+        Multiple skills can match — the agent receives all of them in the
+        prompt (Level 1 summary). Level 2 detail is loaded on demand via
+        [SKILL_LOAD:skill_id] if the LLM needs it.
+
+        ambiguous is True when the top-2 scores differ by less than
+        ambiguity_threshold AND both are non-trivial (> 0.05).
+        The caller decides whether to trigger HITL on ambiguity.
+        """
+        import re as _re
+        query_words = set(_re.findall(r'\b\w{3,}\b', query.lower()))
+
+        scored: list[tuple[float, str]] = []
+        for skill_id, skill in self._skills.items():
+            s = skill.summary
+            d = skill.detail
+            skill_text = " ".join([
+                skill_id, s.name, s.purpose, d.description,
+                " ".join(s.tags),
+                " ".join(d.parameters.keys()),
+            ]).lower()
+            skill_words = set(_re.findall(r'\b\w{3,}\b', skill_text))
+
+            kw_score  = len(query_words & skill_words) / max(len(query_words), 1)
+            tag_score = sum(1 for t in s.tags if t.lower() in query.lower()) / max(len(s.tags), 1)
+            score     = round(kw_score * 0.7 + tag_score * 0.3, 4)
+            scored.append((score, skill_id))
+
+        scored.sort(reverse=True)
+        top = scored[:top_k]
+
+        ambiguous = (
+            len(top) >= 2
+            and top[0][0] > 0.05
+            and abs(top[0][0] - top[1][0]) < ambiguity_threshold
+        )
+
+        meaningful = [(sc, sid) for sc, sid in top if sc >= 0.01]
+        if not meaningful:
+            summary  = self.format_summary()
+            selected = [(sid, sc) for sc, sid in top[:top_k]]
+        else:
+            lines = [f"[RELEVANT SKILLS — top {len(meaningful)} matched for this query]"]
+            for score, skill_id in meaningful:
+                sk = self._skills[skill_id]
+                hitl_tag = " ⚠ HITL" if sk.summary.requires_hitl else ""
+                lines.append(
+                    f"  {skill_id:<25} [{sk.summary.risk_level:>8}]{hitl_tag}"
+                    f"  {sk.summary.purpose}"
+                    f"  (score={score:.2f})"
+                )
+            summary  = "\n".join(lines)
+            selected = [(sid, sc) for sc, sid in meaningful]
+
+        return SkillSelectionResult(
+            selected=selected,
+            ambiguous=ambiguous,
+            summary=summary,
+            top_score=top[0][0] if top else 0.0,
+            second_score=top[1][0] if len(top) > 1 else 0.0,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Skill selection result
+# ---------------------------------------------------------------------------
+
+from dataclasses import dataclass as _dc
+
+@_dc
+class SkillSelectionResult:
+    selected:     list   # [(skill_id, score), ...] sorted descending
+    ambiguous:    bool   # top-2 scores within ambiguity_threshold of each other
+    summary:      str    # Level-1 prompt string containing only matched skills
+    top_score:    float
+    second_score: float
+
 
 # ---------------------------------------------------------------------------
 # Default IT-ops skill definitions (registered at startup)
@@ -365,3 +499,8 @@ DEFAULT_SKILL_DEFINITIONS: dict[str, dict[str, Any]] = {
         "constraints":    [],
     },
 }
+
+
+# ---------------------------------------------------------------------------
+# Query-matched skill selection (Q4)
+# ---------------------------------------------------------------------------

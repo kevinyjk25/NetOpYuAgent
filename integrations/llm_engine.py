@@ -92,17 +92,25 @@ TOOL CALLING FORMAT — use EXACTLY this syntax on its own line:
 
 Examples:
 [TOOL:syslog_search] {{"host": "ap-01", "severity": "error", "lines": 50}}
-[TOOL:get_device_status] {{"device_id": "sw-core-01"}}
-[TOOL:get_bgp_summary] {{"router": "router-01"}}
+[TOOL:list_devices] {{}}
+[TOOL:list_devices] {{"type": "switch"}}
+[TOOL:list_interfaces] {{"device_id": "sw-core-01"}}
+[TOOL:device_info] {{"device_id": "sw-core-01"}}
 [TOOL:dns_lookup] {{"hostname": "payments.internal"}}
 
 STRICT RULES — follow exactly:
-1. Call AT MOST ONE tool per response
+1. Call AT MOST ONE tool per response — never list multiple [TOOL:] lines
 2. NEVER repeat a tool call you have already made this session
 3. When tool results appear in the context below, DO NOT call that tool again
 4. When you have enough information to answer, write your analysis WITHOUT any [TOOL:...] line
 5. Keep responses concise — this is a production operations environment
 6. Large results are shown as [STORED:tool:ref_id] — use [TOOL:read_stored_result] {{"ref_id": "..."}} to read pages
+
+INVENTORY QUERIES — when asked "what devices exist" or similar:
+- Use [TOOL:list_devices] {{}} to get ALL devices in one call
+- Use [TOOL:list_devices] {{"type": "switch"}} for wired devices only
+- Use [TOOL:list_devices] {{"type": "wireless_ap"}} for wireless only
+- NEVER call device_info in a loop — get the inventory first, then detail on specific devices
 
 STOP CONDITION: If the context already contains tool results (any text after "Tool outputs:"),
 provide your final analysis NOW. Do not call any tool.
@@ -290,9 +298,76 @@ class OllamaEngine(LLMEngine):
             {"role": "system", "content": system},
             {"role": "user",   "content": query},
         ]
+
+        # ── Conversation logging ─────────────────────────────────────────────
+        # Controlled by LLM_LOG_DETAIL env var (no restart needed — read per call):
+        #   off     → only char/token counts shown (current default)
+        #   compact → first 400 chars of system prompt + full user query + response
+        #   full    → complete system prompt, full user query, full response
+        #
+        # Set before starting:  export LLM_LOG_DETAIL=compact
+        # Or switch live:       export LLM_LOG_DETAIL=full  (takes effect next call)
+        import os as _os
+        _detail = _os.getenv("LLM_LOG_DETAIL", "full").lower()
+        _sep    = "─" * 72
+
+        if _detail in ("compact", "full"):
+            _sys_log = system if _detail == "full" else (system[:400] + (" …" if len(system) > 400 else ""))
+            logger.info(
+                "LLM▶ TURN %d  model=%s  system=%d chars  user=%d chars\n"
+                "%s\n[SYSTEM]\n%s\n%s\n[USER]\n%s\n%s",
+                turns, self.model, len(system), len(query),
+                _sep, _sys_log, _sep, query, _sep,
+            )
+        else:
+            logger.info(
+                "LLM▶ turn=%d model=%s system_chars=%d user_chars=%d",
+                turns, self.model, len(system), len(query),
+            )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "LLM REQUEST (full) turn=%d\n%s\n[SYSTEM]\n%s\n%s\n[USER]\n%s\n%s",
+                turns, _sep, system, _sep, query, _sep,
+            )
+
         raw = await self._chat(messages)
-        # Strip thinking blocks so tool parser and UI see only the answer
-        return self._strip_think(raw)
+        result = self._strip_think(raw)
+
+        if _detail in ("compact", "full"):
+            _resp_log = result if _detail == "full" else (result[:400] + (" …" if len(result) > 400 else ""))
+            _has_tool = "[TOOL:" in result
+            logger.info(
+                "LLM◀ TURN %d  chars=%d  tool_call=%s\n%s\n[RESPONSE]\n%s\n%s",
+                turns, len(result), _has_tool, _sep, _resp_log, _sep,
+            )
+        else:
+            logger.info(
+                "LLM◀ turn=%d response_chars=%d has_tool_call=%s",
+                turns, len(result), "[TOOL:" in result,
+            )
+        if logger.isEnabledFor(logging.DEBUG):
+            logger.debug(
+                "LLM RESPONSE (full) turn=%d\n%s\n%s\n%s",
+                turns, _sep, result, _sep,
+            )
+
+        # CAP 6: attach trace to state so stream() can yield it as an SSE event
+        if state is not None:
+            if not hasattr(state, "_llm_traces"):
+                state._llm_traces = []
+            state._llm_traces.append({
+                "turn":           turns,
+                "model":          self.model,
+                "system_chars":   len(system),
+                "context_chars":  len(context),
+                "user_chars":     len(query),
+                "response_chars": len(result),
+                "has_tool_call":  "[TOOL:" in result,
+                "system_preview": system[:300],
+                "response_preview": result[:300],
+            })
+
+        return result
 
     async def classify_intent(self, query: str) -> IntentResult:
         messages = [
@@ -329,6 +404,13 @@ class OllamaEngine(LLMEngine):
                 )
                 resp.raise_for_status()
                 data = resp.json()
+                # CAP 6: log token usage from Ollama response
+                usage = data.get("prompt_eval_count", 0), data.get("eval_count", 0)
+                if any(usage):
+                    logger.info(
+                        "LLM tokens: prompt=%d completion=%d total=%d model=%s",
+                        usage[0], usage[1], sum(usage), self.model,
+                    )
                 # Even with think=False in the API, strip any residual <think> tags
                 return self._strip_think(data["message"]["content"])
         except Exception as exc:

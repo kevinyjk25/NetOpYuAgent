@@ -68,6 +68,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import pathlib
 import re
 import time
 from dataclasses import dataclass, field
@@ -197,13 +198,20 @@ class SkillEvolver:
         min_complexity:      float = 3.0,
         min_reuse_potential: float = 0.60,
         max_skills:          int   = 200,
+        skills_dir:          Optional[str] = None,  # directory to persist skill .md files
     ) -> None:
         self._catalog      = catalog
-        self._llm_fn       = llm_fn  # None → stub used in _call_llm
+        self._llm_fn       = llm_fn
         self._fts          = fts_store
         self._min_complex  = min_complexity
         self._min_reuse    = min_reuse_potential
         self._max_skills   = max_skills
+        self._skills_dir   = pathlib.Path(skills_dir) if skills_dir else None
+
+        # On startup, load any previously-persisted skill files
+        if self._skills_dir:
+            self._skills_dir.mkdir(parents=True, exist_ok=True)
+            self._load_skills_from_disk()
 
         # Version history: skill_id → list[SkillVersion]
         self._versions: dict[str, list[SkillVersion]] = {}
@@ -483,7 +491,7 @@ class SkillEvolver:
     async def _register_skill(
         self, proposal: SkillCreationProposal, session_id: str
     ) -> None:
-        """Register a newly created skill in SkillCatalogService."""
+        """Register a newly created skill in SkillCatalogService and persist to disk."""
         parsed = self._parse_markdown_to_definition(
             proposal.skill_id, proposal.markdown_content
         )
@@ -491,6 +499,9 @@ class SkillEvolver:
             self._catalog.register_all({proposal.skill_id: parsed})
         except Exception as exc:
             logger.warning("SkillEvolver: catalog registration failed: %s", exc)
+
+        # Persist markdown to disk so skill survives restarts
+        self._save_skill_to_disk(proposal.skill_id, proposal.markdown_content)
 
         # Record initial version
         v = SkillVersion(
@@ -504,15 +515,44 @@ class SkillEvolver:
         )
         self._versions[proposal.skill_id] = [v]
 
+    def _save_skill_to_disk(self, skill_id: str, content: str) -> None:
+        """Write skill markdown to HERMES_DATA_DIR/skills/<skill_id>.md"""
+        if not self._skills_dir:
+            return
+        try:
+            path = self._skills_dir / f"{skill_id}.md"
+            path.write_text(content, encoding="utf-8")
+            logger.info("SkillEvolver: saved skill to %s", path)
+        except Exception as exc:
+            logger.warning("SkillEvolver: disk save failed for %s: %s", skill_id, exc)
+
+    def _load_skills_from_disk(self) -> None:
+        """Load all .md files from skills_dir into the catalog on startup."""
+        if not self._skills_dir or not self._skills_dir.exists():
+            return
+        loaded = 0
+        for path in sorted(self._skills_dir.glob("*.md")):
+            skill_id = path.stem
+            try:
+                content = path.read_text(encoding="utf-8")
+                parsed  = self._parse_markdown_to_definition(skill_id, content)
+                self._catalog.register_all({skill_id: parsed})
+                loaded += 1
+            except Exception as exc:
+                logger.warning("SkillEvolver: failed to load %s: %s", path, exc)
+        if loaded:
+            logger.info("SkillEvolver: loaded %d persisted skill(s) from %s", loaded, self._skills_dir)
+
     async def _update_catalog_from_markdown(
         self, skill_id: str, markdown: str
     ) -> None:
-        """Re-parse updated markdown and update catalog in place."""
+        """Re-parse updated markdown, update catalog in place, and persist to disk."""
         parsed = self._parse_markdown_to_definition(skill_id, markdown)
         try:
             self._catalog.register_all({skill_id: parsed})
         except Exception as exc:
             logger.warning("SkillEvolver: catalog update failed: %s", exc)
+        self._save_skill_to_disk(skill_id, markdown)
 
     # ------------------------------------------------------------------
     # Markdown ↔ definition converters

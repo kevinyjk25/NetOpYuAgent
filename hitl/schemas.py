@@ -30,6 +30,7 @@ class TriggerKind(str, Enum):
     LOW_CONFIDENCE    = "low_confidence"
     DESTRUCTIVE       = "destructive_action"
     AMBIGUOUS_INTENT  = "ambiguous_intent"
+    DESTRUCTIVE_OP    = "destructive_op"
 
 
 class DecisionKind(str, Enum):

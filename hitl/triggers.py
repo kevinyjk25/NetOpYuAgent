@@ -67,6 +67,10 @@ class HitlConfig:
         "flush_cache",
     )
 
+    # ToolCallTrigger — any tool listed here forces HITL before execution
+    # Can be set via env var HITL_TOOL_NAMES (comma-separated)
+    tool_call_hitl_tools: tuple[str, ...] = ()
+
     # AmbiguityTrigger
     max_confidence_gap: float = 0.15       # fire if top-2 differ by < this
 
@@ -283,6 +287,70 @@ class AmbiguityTrigger(HitlTrigger):
         return RiskLevel.MEDIUM
 
 
+class ToolCallTrigger(HitlTrigger):
+    """
+    Fires when the planned action will call a tool that is on the HITL
+    watch-list (``HitlConfig.tool_call_hitl_tools``).
+
+    Configure via env var or HitlConfig:
+        export HITL_TOOL_NAMES="netflow_dump,prometheus_query"
+
+    or in code:
+        config = HitlConfig(tool_call_hitl_tools=("netflow_dump",))
+
+    This lets operators assign specific tools as always requiring human
+    approval, regardless of the action type.  For example, a team might
+    require approval before any live ``kubectl exec`` or ``db_failover`` call.
+    """
+    priority = 0   # evaluated BEFORE DestructiveActionTrigger (highest priority)
+    kind = TriggerKind.DESTRUCTIVE_OP  # reuses destructive_op kind; shown as "tool_call_gate"
+
+    def should_interrupt(self, state: HitlState) -> bool:
+        if not self.config.tool_call_hitl_tools:
+            return False
+        action = state.proposed_action or {}
+        # Check action_type field (set by planner_node)
+        action_type = action.get("action_type", "")
+        # Also check a tool_name field if present
+        tool_name = action.get("tool_name", action_type)
+        hit = tool_name in self.config.tool_call_hitl_tools
+        if hit:
+            logger.info(
+                "ToolCallTrigger: tool %r is on HITL watch-list %s",
+                tool_name, self.config.tool_call_hitl_tools,
+            )
+        return hit
+
+    def _derive_risk(self, state: HitlState) -> RiskLevel:
+        return RiskLevel.HIGH
+
+    def build_payload(
+        self, state: HitlState, thread_id: str, context_id: str, task_id: str
+    ) -> HitlPayload:
+        action = state.proposed_action or {}
+        tool_name = action.get("tool_name", action.get("action_type", "unknown_tool"))
+        return HitlPayload(
+            interrupt_id=str(__import__("uuid").uuid4()),
+            thread_id=thread_id,
+            context_id=context_id,
+            task_id=task_id,
+            trigger_kind=TriggerKind.DESTRUCTIVE_OP,
+            risk_level=RiskLevel.HIGH,
+            user_query=state.query,
+            intent_summary=(
+                f"Tool '{tool_name}' is on the HITL watch-list and requires approval "
+                f"before execution. Query: {state.query[:120]}"
+            ),
+            sla_seconds=self.config.sla_map.get(RiskLevel.HIGH, 600),
+            proposed_action=ProposedAction(
+                action_type=f"tool_call:{tool_name}",
+                target=action.get("target", tool_name),
+                parameters=action.get("parameters", {}),
+                reversible=action.get("reversible", True),
+            ),
+        )
+
+
 # ---------------------------------------------------------------------------
 # Trigger registry
 # ---------------------------------------------------------------------------
@@ -294,10 +362,11 @@ def build_trigger_chain(config: Optional[HitlConfig] = None) -> list[HitlTrigger
     """
     cfg = config or HitlConfig()
     triggers: list[HitlTrigger] = [
-        DestructiveActionTrigger(cfg),
-        SeverityTrigger(cfg),
-        ConfidenceTrigger(cfg),
-        AmbiguityTrigger(cfg),
+        ToolCallTrigger(cfg),          # priority 0 — tool watch-list (new)
+        DestructiveActionTrigger(cfg), # priority 1
+        SeverityTrigger(cfg),          # priority 2
+        ConfidenceTrigger(cfg),        # priority 3
+        AmbiguityTrigger(cfg),         # priority 4
     ]
     return sorted(triggers, key=lambda t: t.priority)
 

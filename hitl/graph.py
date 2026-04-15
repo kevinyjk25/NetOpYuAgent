@@ -49,10 +49,10 @@ Usage
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 import uuid
 from typing import Any, AsyncIterator, Optional
+from typing_extensions import TypedDict
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, StateGraph
@@ -64,74 +64,108 @@ from .schemas import (
     HitlDecision,
     HitlPayload,
     HitlState,
+    ProposedAction,
     RiskLevel,
+    TriggerKind,
 )
-from hitl.triggers import HitlConfig, HitlTrigger, build_trigger_chain, evaluate_triggers
+from .triggers import HitlConfig, HitlTrigger, build_trigger_chain, evaluate_triggers
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# State schema
+# ---------------------------------------------------------------------------
+
+class ITOpsGraphState(TypedDict, total=False):
+    """
+    Shared state for the IT-Ops HITL graph.
+
+    Using TypedDict (not bare dict) is critical: LangGraph merges each node's
+    return dict into the accumulated state ({**old, **new}). With a bare dict
+    each node receives ONLY the previous node's return value — earlier keys
+    like intent_type are silently dropped before planner_node runs.
+    """
+    # Input
+    query:            str
+    thread_id:        str
+    context_id:       str
+    task_id:          str
+    user_metadata:    dict
+
+    # intent_classifier outputs
+    intent_type:       str
+    intent_confidence: float
+    intent_candidates: list
+    intent_summary:    str
+
+    # risk_assessor outputs
+    is_destructive:   bool
+    risk_level:       Any   # RiskLevel enum
+    risk_reasons:     list
+
+    # planner outputs
+    proposed_action:  dict
+    plan_steps:       list
+
+    # hitl_interrupt_node outputs
+    hitl_required:    bool
+    hitl_payload:     dict
+    hitl_decision:    dict
+
+    # executor outputs
+    execution_results: list
+    error:             Any
+
+    # result_formatter outputs
+    emitted_chunks:   list
+
+    # Internal: injected by build_hitl_graph for hitl_interrupt_node
+    _hitl_config:     Any
+
+
+# ---------------------------------------------------------------------------
 # Node implementations
 # ---------------------------------------------------------------------------
-from langchain_ollama import ChatOllama
-from langchain_core.output_parsers import JsonOutputParser
 
-async def intent_classifier_node(state):
-    llm = ChatOllama(model="qwen3.5:27b", temperature=0, format="json")
-    prompt = f"""Classify this IT operations query. Return JSON only:
-{{"intent_type": "destructive_op|alert_analysis|trend_prediction|general_query",
-  "confidence": 0.0-1.0,
-  "intent_summary": "one sentence"}}
+async def intent_classifier_node(state: dict[str, Any]) -> dict[str, Any]:
+    """
+    Classify the user's query into an intent type.
 
-Query: {state["query"]}"""
-    result = await llm.ainvoke(prompt)
-    data = json.loads(result.content)
+    Replace the stub below with your real LangChain / LLM chain call, e.g.:
+        result = await intent_chain.ainvoke({"query": state["query"]})
+    """
+    query: str = state.get("query", "")
+    logger.info("intent_classifier: query=%r", query[:80])
+
+    # ── Stub: simple keyword routing ──────────────────────────────────
+    query_lower = query.lower()
+    if any(k in query_lower for k in ("restart", "rollback", "delete", "drain")):
+        intent_type = "destructive_op"
+        confidence  = 0.95
+        candidates  = [{"intent": "destructive_op", "confidence": 0.95}]
+    elif any(k in query_lower for k in ("alert", "alarm", "p0", "p1", "outage")):
+        intent_type = "alert_analysis"
+        confidence  = 0.88
+        candidates  = [{"intent": "alert_analysis", "confidence": 0.88}]
+    elif any(k in query_lower for k in ("predict", "forecast", "trend")):
+        intent_type = "trend_prediction"
+        confidence  = 0.82
+        candidates  = [{"intent": "trend_prediction", "confidence": 0.82}]
+    else:
+        intent_type = "general_query"
+        confidence  = 0.65
+        candidates  = [
+            {"intent": "general_query", "confidence": 0.65},
+            {"intent": "alert_analysis", "confidence": 0.55},
+        ]
+
     return {
-        "intent_type":       data["intent_type"],
-        "intent_confidence": data["confidence"],
-        "intent_summary":    data["intent_summary"],
-        "intent_candidates": [{"intent": data["intent_type"], "confidence": data["confidence"]}],
+        "intent_type": intent_type,
+        "intent_confidence": confidence,
+        "intent_candidates": candidates,
+        "intent_summary": f"User intent: {intent_type} (confidence={confidence:.2f})",
     }
-
-# async def intent_classifier_node(state: dict[str, Any]) -> dict[str, Any]:
-#     """
-#     Classify the user's query into an intent type.
-#
-#     Replace the stub below with your real LangChain / LLM chain call, e.g.:
-#         result = await intent_chain.ainvoke({"query": state["query"]})
-#     """
-#     query: str = state.get("query", "")
-#     logger.info("intent_classifier: query=%r", query[:80])
-#
-#     # ── Stub: simple keyword routing ──────────────────────────────────
-#     query_lower = query.lower()
-#     if any(k in query_lower for k in ("restart", "rollback", "delete", "drain")):
-#         intent_type = "destructive_op"
-#         confidence  = 0.95
-#         candidates  = [{"intent": "destructive_op", "confidence": 0.95}]
-#     elif any(k in query_lower for k in ("alert", "alarm", "p0", "p1", "outage")):
-#         intent_type = "alert_analysis"
-#         confidence  = 0.88
-#         candidates  = [{"intent": "alert_analysis", "confidence": 0.88}]
-#     elif any(k in query_lower for k in ("predict", "forecast", "trend")):
-#         intent_type = "trend_prediction"
-#         confidence  = 0.82
-#         candidates  = [{"intent": "trend_prediction", "confidence": 0.82}]
-#     else:
-#         intent_type = "general_query"
-#         confidence  = 0.65
-#         candidates  = [
-#             {"intent": "general_query", "confidence": 0.65},
-#             {"intent": "alert_analysis", "confidence": 0.55},
-#         ]
-#
-#     return {
-#         "intent_type": intent_type,
-#         "intent_confidence": confidence,
-#         "intent_candidates": candidates,
-#         "intent_summary": f"User intent: {intent_type} (confidence={confidence:.2f})",
-#     }
 
 
 async def risk_assessor_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -301,17 +335,27 @@ def route_after_plan(
     """
     Evaluate all triggers against the current state.
     If any fires, route to the interrupt node; otherwise go straight to executor.
+
+    NOTE: Do NOT mutate `state` here. LangGraph conditional edge functions are
+    routing-only — their return value is the next node name, and any in-place
+    mutations to `state` are NOT persisted to the checkpoint store. The payload
+    is written by planner_node into the returned state dict instead.
     """
     hitl_state = HitlState.model_validate(state)
     thread_id  = state.get("thread_id", str(uuid.uuid4()))
     context_id = state.get("context_id", thread_id)
     task_id    = state.get("task_id", thread_id)
 
+    logger.info(
+        "route_after_plan: intent_type=%r is_destructive=%r risk_level=%r action_type=%r",
+        state.get("intent_type"),
+        state.get("is_destructive"),
+        getattr(state.get("risk_level"), "value", state.get("risk_level")),
+        (state.get("proposed_action") or {}).get("action_type"),
+    )
+
     payload = evaluate_triggers(hitl_state, triggers, thread_id, context_id, task_id)
     if payload:
-        # Store payload in state so the interrupt node can surface it
-        state["hitl_required"] = True
-        state["hitl_payload"]  = payload.model_dump()
         return "hitl_interrupt_node"
 
     return "executor"
@@ -325,13 +369,12 @@ def route_after_decision(state: dict[str, Any]) -> str:
         return END
 
     decision = HitlDecision.model_validate(decision_raw)
-    match decision.decision:
-        case DecisionKind.APPROVE | DecisionKind.EDIT:
-            return "executor"
-        case DecisionKind.REJECT | DecisionKind.ESCALATE | DecisionKind.TIMEOUT:
-            return END
-        case _:
-            return END
+    if decision.decision in (DecisionKind.APPROVE, DecisionKind.EDIT):
+        return "executor"
+    elif decision.decision in (DecisionKind.REJECT, DecisionKind.ESCALATE, DecisionKind.TIMEOUT):
+        return END
+    else:
+        return END
 
 
 # ---------------------------------------------------------------------------
@@ -350,9 +393,41 @@ async def hitl_interrupt_node(state: dict[str, Any]) -> dict[str, Any]:
       1. The decision router POSTs a HitlDecision to /hitl/decisions/{interrupt_id}
       2. The caller calls graph.invoke(None, config={"configurable": {"thread_id": ...}})
          — optionally after graph.update_state() for operator edits
+
+    IMPORTANT: We build the payload HERE (not in route_after_plan) because node
+    return values ARE persisted to the checkpoint, but conditional edge function
+    mutations are NOT.
     """
-    payload_raw = state.get("hitl_payload", {})
-    payload = HitlPayload.model_validate(payload_raw)
+    thread_id  = state.get("thread_id",  str(uuid.uuid4()))
+    context_id = state.get("context_id", thread_id)
+    task_id    = state.get("task_id",    thread_id)
+
+    # Build triggers and evaluate against current state
+    # (same logic as route_after_plan, but here the result is persisted)
+    config     = state.get("_hitl_config")  # injected by build_hitl_graph if provided
+    triggers   = build_trigger_chain(config if isinstance(config, HitlConfig) else None)
+    hitl_state = HitlState.model_validate(state)
+    payload    = evaluate_triggers(hitl_state, triggers, thread_id, context_id, task_id)
+
+    if payload is None:
+        # Construct a minimal destructive-action payload from state if triggers
+        # didn't fire (can happen if classify=complex but trigger thresholds differ)
+        payload = HitlPayload(
+            interrupt_id    = str(uuid.uuid4()),
+            thread_id       = thread_id,
+            context_id      = context_id,
+            task_id         = task_id,
+            trigger_kind    = TriggerKind.DESTRUCTIVE_OP,
+            risk_level      = RiskLevel.HIGH,
+            user_query      = state.get("query", ""),
+            intent_summary  = state.get("intent_summary", state.get("query", ""))[:200],
+            proposed_action = ProposedAction(
+                action_type = state.get("action_type", "unknown"),
+                target      = state.get("target",      "unknown"),
+                parameters  = state.get("parameters",  {}),
+                reversible  = state.get("reversible",  False),
+            ),
+        )
 
     logger.info(
         "HITL interrupt — interrupt_id=%s trigger=%s risk=%s",
@@ -369,7 +444,11 @@ async def hitl_interrupt_node(state: dict[str, Any]) -> dict[str, Any]:
 
     # After resume, operator_decision contains the HitlDecision payload
     logger.info("HITL resumed — decision=%s", operator_decision.get("decision"))
-    return {"hitl_decision": operator_decision}
+    return {
+        "hitl_decision":  operator_decision,
+        "hitl_required":  True,
+        "hitl_payload":   payload.model_dump(),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -404,7 +483,7 @@ def build_hitl_graph(
     """
     triggers   = build_trigger_chain(config)
     saver      = checkpointer or MemorySaver()
-    builder    = StateGraph(dict)
+    builder    = StateGraph(ITOpsGraphState)
 
     # ── Nodes ────────────────────────────────────────────────────────
     builder.add_node("intent_classifier",  intent_classifier_node)
@@ -501,35 +580,158 @@ async def run_with_hitl(
         "user_metadata": user_metadata or {},
     }
 
-    # ── Run until completion or interrupt ─────────────────────────────
-    result: dict[str, Any] = await g.ainvoke(initial_state, thread_cfg)
+    # ── Run the graph — detect interrupt via astream ──────────────────
+    # LangGraph's interrupt() mechanism varies by version:
+    #   values stream  : __interrupt__ key MAY appear in state snapshot
+    #   updates stream : __interrupt__ appears as a standalone update event (≥0.2.30)
+    #   GraphInterrupt : raised directly from astream in some builds
+    #   aget_state()   : ALWAYS reliable — checkpointer has the state
+    #
+    # We try all four methods in order, log every step for diagnostics.
+    interrupt_payload_raw: Optional[dict[str, Any]] = None
+    final_state: dict[str, Any] = {}
 
-    # ── Check if graph paused at an interrupt ────────────────────────
-    interrupt_payload_raw = result.get("hitl_payload")
-    if interrupt_payload_raw and result.get("hitl_required"):
-        payload = HitlPayload.model_validate(interrupt_payload_raw)
+    try:
+        async for event_type, state_update in g.astream(
+            initial_state, thread_cfg, stream_mode=["values", "updates"]
+        ):
+            if not isinstance(state_update, dict):
+                continue
+
+            logger.debug(
+                "Graph stream event: type=%s keys=%s",
+                event_type,
+                list(state_update.keys()),
+            )
+
+            if event_type == "values":
+                final_state = state_update
+                # Method 1: __interrupt__ key in full-state snapshot
+                interrupts = state_update.get("__interrupt__") or []
+                if interrupts:
+                    iv = interrupts[0]
+                    interrupt_payload_raw = (
+                        iv.value if hasattr(iv, "value")
+                        else iv if isinstance(iv, dict) else {}
+                    )
+                    logger.info("Graph: interrupt via __interrupt__ in values snapshot")
+                    break
+
+            elif event_type == "updates":
+                # Method 2: __interrupt__ in a per-node update event (≥0.2.30)
+                interrupts = state_update.get("__interrupt__") or []
+                if interrupts:
+                    iv = interrupts[0]
+                    interrupt_payload_raw = (
+                        iv.value if hasattr(iv, "value")
+                        else iv if isinstance(iv, dict) else {}
+                    )
+                    logger.info("Graph: interrupt via __interrupt__ in updates event")
+                    break
+                # Merge node outputs into final_state for the hitl_payload fallback
+                for node_name, node_output in state_update.items():
+                    if node_name != "__interrupt__" and isinstance(node_output, dict):
+                        final_state.update(node_output)
+
+    except Exception as stream_exc:
+        # Method 3: some LangGraph builds raise GraphInterrupt from astream itself
+        exc_name = type(stream_exc).__name__
+        logger.info(
+            "Graph stream raised %s — treating as interrupt: %s", exc_name, stream_exc
+        )
+        raw = getattr(stream_exc, "value", None) or (
+            stream_exc.args[0] if stream_exc.args else {}
+        )
+        if isinstance(raw, dict):
+            interrupt_payload_raw = raw
+        elif hasattr(raw, "__dict__"):
+            interrupt_payload_raw = vars(raw)
+
+    # Method 4: hitl_payload in node-persisted state
+    # hitl_interrupt_node now writes this into its return dict (a node return IS persisted)
+    if interrupt_payload_raw is None:
+        raw = final_state.get("hitl_payload")
+        if raw and final_state.get("hitl_required"):
+            logger.info("Graph: interrupt via hitl_payload in final_state")
+            interrupt_payload_raw = raw
+
+    # Method 5: aget_state() — most reliable across all versions.
+    # When interrupt() is called, LangGraph checkpoints the state BEFORE raising.
+    # aget_state() on the same thread_cfg always returns the paused snapshot.
+    if interrupt_payload_raw is None:
+        try:
+            snapshot = await g.aget_state(thread_cfg)
+            logger.debug(
+                "aget_state snapshot: has_tasks=%s values_keys=%s",
+                bool(snapshot and snapshot.tasks),
+                list((snapshot.values if snapshot else {}).keys()),
+            )
+            if snapshot and snapshot.tasks:
+                for task in snapshot.tasks:
+                    task_interrupts = getattr(task, "interrupts", [])
+                    if task_interrupts:
+                        iv = task_interrupts[0]
+                        interrupt_payload_raw = (
+                            iv.value if hasattr(iv, "value")
+                            else iv if isinstance(iv, dict) else {}
+                        )
+                        logger.info("Graph: interrupt via aget_state().tasks[].interrupts")
+                        break
+            if interrupt_payload_raw is None and snapshot:
+                snap_vals = snapshot.values if hasattr(snapshot, "values") else {}
+                raw = snap_vals.get("hitl_payload")
+                if raw and snap_vals.get("hitl_required"):
+                    logger.info("Graph: interrupt via aget_state().values.hitl_payload")
+                    interrupt_payload_raw = raw
+        except Exception as snap_exc:
+            logger.debug("aget_state() fallback failed: %s", snap_exc)
+
+    logger.info(
+        "Graph interrupt detection complete: found=%s",
+        interrupt_payload_raw is not None,
+    )
+
+    # ── Interrupt detected ────────────────────────────────────────────
+    if interrupt_payload_raw:
+        try:
+            payload = HitlPayload.model_validate(interrupt_payload_raw)
+        except Exception:
+            # interrupt_payload_raw might already be a HitlPayload dict
+            # Build a minimal payload from available keys
+            payload = HitlPayload(
+                interrupt_id    = interrupt_payload_raw.get("interrupt_id", str(uuid.uuid4())),
+                thread_id       = thread_id,
+                context_id      = context_id,
+                task_id         = task_id,
+                trigger_kind    = TriggerKind(interrupt_payload_raw.get("trigger_kind", "destructive_op")),
+                risk_level      = RiskLevel(interrupt_payload_raw.get("risk_level", "high")),
+                user_query      = query,
+                intent_summary  = interrupt_payload_raw.get("intent_summary", query[:120]),
+                proposed_action = ProposedAction(
+                    action_type = interrupt_payload_raw.get("action_type", "unknown"),
+                    target      = interrupt_payload_raw.get("target", "unknown"),
+                    parameters  = interrupt_payload_raw.get("parameters", {}),
+                    reversible  = interrupt_payload_raw.get("reversible", True),
+                ),
+            )
 
         yield {
-            "node_step": f"Human review required ({payload.trigger_kind.value})",
+            "node_step": f"Human review required — {payload.trigger_kind.value}",
             "node": "hitl",
         }
         yield {
-            "hitl_interrupt": True,
-            "interrupt_id":   payload.interrupt_id,
-            "trigger_kind":   payload.trigger_kind.value,
-            "risk_level":     payload.risk_level.value,
-            "summary":        payload.intent_summary,
+            "hitl_interrupt":  True,
+            "interrupt_id":    payload.interrupt_id,
+            "trigger_kind":    payload.trigger_kind.value,
+            "risk_level":      payload.risk_level.value,
+            "summary":         payload.intent_summary,
             "proposed_action": payload.proposed_action.model_dump(),
-            "node": "hitl",
+            "thread_id":       thread_id,
+            "node":            "hitl",
         }
-        # Caller is responsible for:
-        #   1. Persisting the interrupt (HitlAuditService)
-        #   2. Notifying operators (HitlReviewService)
-        #   3. Receiving decision (HitlDecisionRouter via FastAPI)
-        #   4. Calling g.update_state() + g.ainvoke(None, thread_cfg) to resume
         return
 
     # ── No interrupt — yield emitted chunks from result_formatter ────
-    for chunk in result.get("emitted_chunks", []):
+    for chunk in final_state.get("emitted_chunks", []):
         yield chunk
         await asyncio.sleep(0)

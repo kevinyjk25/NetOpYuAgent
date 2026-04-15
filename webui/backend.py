@@ -57,7 +57,7 @@ import time
 import uuid
 from typing import Any, AsyncIterator, Optional
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -123,11 +123,21 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         catalog.register_all(DEFAULT_SKILL_DEFINITIONS)
         services["skill_catalog"] = catalog
 
-    # Wire read_stored_result tool with the live store
+    # Inject skill_evolver for upload/persist capability if not already provided by main.py
+    if "skill_evolver" not in services:
+        import os as _os, pathlib as _pl
+        from skills.evolver import SkillEvolver
+        _skills_dir = _os.getenv("HERMES_DATA_DIR", "./data")
+        services["skill_evolver"] = SkillEvolver(
+            catalog=services["skill_catalog"],
+            skills_dir=str(_pl.Path(_skills_dir) / "skills"),
+        )
+
+    # Wire read_stored_result and process_stored_chunks tools with the live store
     tool_registry = dict(TOOL_REGISTRY)
-    tool_registry["read_stored_result"] = make_read_stored_result_tool(
-        services["tool_store"]
-    )
+    _read_fn, _process_fn = make_read_stored_result_tool(services["tool_store"])
+    tool_registry["read_stored_result"]    = _read_fn
+    tool_registry["process_stored_chunks"] = _process_fn
 
     # If main.py already built a ToolRouter, use its full registry
     # (MCP + OpenAPI + local) instead of the mock-only dict above
@@ -137,9 +147,13 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         logger.info("WebUI: using real ToolRouter registry (%d tools)", len(tool_registry))
 
     if "runtime_loop" not in services:
+        import os as _os
+        _hitl_tools = frozenset(
+            t.strip() for t in _os.getenv("HITL_TOOL_NAMES", "").split(",") if t.strip()
+        )
         services["runtime_loop"] = AgentRuntimeLoop(
             memory_router=services.get("memory"),
-            config=RuntimeConfig(),
+            config=RuntimeConfig(hitl_tool_names=_hitl_tools),
             tool_store=services["tool_store"],
             skill_catalog=services["skill_catalog"],
         )
@@ -249,6 +263,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         fts         = services.get("fts_store")
         user_model  = services.get("user_model")
         evolver     = services.get("skill_evolver")
+        dtm         = services.get("dtm")            # DualTrackMemory (v4)
 
         from runtime import DelegationMode
         dm = DelegationMode.FORKED if req.delegation_mode == "forked" else DelegationMode.FRESH
@@ -268,8 +283,31 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 yield f"data: {json.dumps({'type':'pre_verify','passed':pre.passed,'reason':pre.reason[:150]})}\n\n"
                 await asyncio.sleep(0)
 
-                # ── Step 3: FTS5 cross-session recall ─────────────────────
-                if curator and fts:
+                # ── Step 3: Cross-session recall (DTM v4 or FTS5 v3) ─────
+                recall_text = ""
+                if dtm:
+                    try:
+                        recall_result = await dtm.recall(req.query, session_id, max_chars=1200)
+                        recall_text   = recall_result.prompt_context
+                        stats = await fts.get_stats() if fts else {}
+                        # Serialize all DTMResult items for the Memory tab
+                        memory_items = [
+                            {
+                                "track":       r.track,
+                                "score":       round(r.score, 3),
+                                "source":      r.source,
+                                "memory_type": r.memory_type,
+                                "content":     r.content[:500],
+                                "recency_ts":  r.recency_ts,
+                                "tags":        r.tags[:6],
+                            }
+                            for r in recall_result.results
+                        ]
+                        yield f"data: {json.dumps({'type':'recall','chars':len(recall_text),'sessions_searched':stats.get('total_sessions',0),'has_context':bool(recall_text),'track_a':recall_result.track_a_count,'track_b':recall_result.track_b_count,'winner':recall_result.winner,'preview':recall_text[:200],'memory_items':memory_items})}\n\n"
+                        await asyncio.sleep(0)
+                    except Exception as _e:
+                        logger.debug("DTM recall skipped: %s", _e)
+                elif curator and fts:
                     try:
                         recall_text = await curator.recall_for_session(req.query, session_id)
                         stats = await fts.get_stats()
@@ -282,13 +320,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 # Uses the real patched LLM + real ToolRouter registry
                 real_registry = getattr(services.get("tool_router"), "registry", tool_registry)
 
-                # Inject FTS5 recalled context + user profile into env_context
+                # Inject recalled context + user profile into env_context
                 env_ctx = dict(req.env_context or {})
-                if curator and fts:
+                if recall_text:
+                    env_ctx["_fts_context"] = recall_text
+                elif curator and fts:
                     try:
-                        recall_text = await curator.recall_for_session(req.query, session_id)
-                        if recall_text:
-                            env_ctx["_fts_context"] = recall_text
+                        rt = await curator.recall_for_session(req.query, session_id)
+                        if rt:
+                            env_ctx["_fts_context"] = rt
                     except Exception:
                         pass
                 if user_model:
@@ -364,13 +404,17 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                             await asyncio.sleep(0)
 
                     try:
-                        await asyncio.wait_for(exec_task, timeout=0.5)
-                    except (asyncio.TimeoutError, Exception):
-                        pass
+                        # Wait for exec_task to finish (it completes once MessageEvent sent)
+                        await asyncio.wait_for(exec_task, timeout=120.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("Executor task timed out after 120s — likely HITL pending")
+                    except Exception as exc:
+                        logger.debug("Executor task ended: %s", exc)
                     full_text = "".join(tokens)
 
                 else:
                     # SIMPLE path: loop.stream() with real LLM + ToolRouter
+                    _hitl_intercepted = False
                     async for chunk in loop.stream(
                         query=req.query,
                         session_id=session_id,
@@ -386,6 +430,57 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             turns_taken += 1
                         if chunk.get("message"):
                             stop_outcome = chunk["message"][:60]
+
+                        # HITL gate: skill-ambiguity or tool-watchlist triggered from SIMPLE path
+                        # Re-route to executor so HITL graph fires and approval card appears
+                        if chunk.get("stop_hitl") and executor is not None:
+                            yield f"data: {json.dumps(chunk)}\n\n"
+                            await asyncio.sleep(0)
+                            yield f"data: {json.dumps({'type':'routing','path':'hitl_executor','reason':chunk.get('message','HITL gate triggered')[:80]})}\n\n"
+                            await asyncio.sleep(0)
+                            from a2a.event_queue import EventQueue, RequestContext
+                            from a2a.schemas import Message, TextPart
+                            eq  = EventQueue()
+                            ctx = RequestContext(
+                                task_id=task_id,
+                                context_id=context_id,
+                                message=Message(role="user", parts=[TextPart(text=req.query)]),
+                                metadata={
+                                    "session_id":      session_id,
+                                    "env_context":     env_ctx,
+                                    "confirmed_facts": list(req.confirmed_facts or []),
+                                    "working_set":     list(req.working_set or []),
+                                },
+                            )
+                            exec_task = asyncio.create_task(executor.execute(ctx, eq))
+                            async for event in eq.consume():
+                                kind = event.kind
+                                if kind == "taskStatusUpdate":
+                                    state_val = event.status.state.value if event.status else "unknown"
+                                    yield f"data: {json.dumps({'type':'task_status','state':state_val,'task_id':task_id})}\n\n"
+                                    await asyncio.sleep(0)
+                                elif kind == "message":
+                                    for part in (event.message.parts if event.message else []):
+                                        if hasattr(part, "text") and part.text:
+                                            tokens.append(part.text)
+                                            for word in part.text.split():
+                                                yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+                                            await asyncio.sleep(0)
+                                elif kind == "taskArtifactUpdate":
+                                    if event.artifact:
+                                        for part in event.artifact.parts:
+                                            if hasattr(part, "data") and isinstance(part.data, dict):
+                                                data = part.data
+                                                if (data.get("tag") or data.get("kind")) == "hitl_interrupt":
+                                                    yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,**data})}\n\n"
+                                                    await asyncio.sleep(0)
+                            try:
+                                await asyncio.wait_for(exec_task, timeout=120.0)
+                            except (asyncio.TimeoutError, Exception):
+                                pass
+                            _hitl_intercepted = True
+                            break
+
                         yield f"data: {json.dumps(chunk)}\n\n"
                         await asyncio.sleep(0)
                     full_text = "".join(tokens)
@@ -397,22 +492,43 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 import re as _re
                 tc = [{"tool": m} for m in _re.findall(r"\[TOOL:(\w+)\]", full_text)]
 
-                if fts:
+                if dtm:
+                    # v4 path: DTM.after_turn() handles Track A (FTS5 + daily .md
+                    # compaction) and Track B (curator → facts.jsonl) in one call.
                     try:
-                        await fts.write_turn(session_id, req.query, full_text, tool_calls=tc, importance=0.7)
-                        yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12]})}\n\n"
+                        memories = await dtm.after_turn(
+                            session_id     = session_id,
+                            user_text      = req.query,
+                            assistant_text = full_text,
+                            tool_calls     = tc,
+                            importance     = 0.7,
+                        )
+                        yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12],'track':'A+B'})}\n\n"
                         await asyncio.sleep(0)
+                        if memories:
+                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':[getattr(m.memory_type,'value',str(m.memory_type)) for m in memories[:5]]})}\n\n"
+                            await asyncio.sleep(0)
                     except Exception as _e:
-                        logger.debug("FTS5 write skipped: %s", _e)
+                        logger.debug("DTM after_turn skipped: %s", _e)
+                else:
+                    # v3 fallback: individual hooks when DTM not wired
+                    if fts:
+                        try:
+                            await fts.write_turn(session_id, req.query, full_text, tool_calls=tc, importance=0.7)
+                            yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12]})}\n\n"
+                            await asyncio.sleep(0)
+                        except Exception as _e:
+                            logger.debug("FTS5 write skipped: %s", _e)
 
-                if curator:
-                    try:
-                        memories = await curator.after_turn(session_id, req.query, full_text, tc)
-                        yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':[m.memory_type.value for m in memories[:5]]})}\n\n"
-                        await asyncio.sleep(0)
-                    except Exception as _e:
-                        logger.debug("Curation skipped: %s", _e)
+                    if curator:
+                        try:
+                            memories = await curator.after_turn(session_id, req.query, full_text, tc)
+                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':[m.memory_type.value for m in memories[:5]]})}\n\n"
+                            await asyncio.sleep(0)
+                        except Exception as _e:
+                            logger.debug("Curation skipped: %s", _e)
 
+                # User model always runs (not inside DTM scope)
                 if user_model:
                     try:
                         profile = await user_model.after_turn(session_id, req.query, full_text, tc)
@@ -546,15 +662,26 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     @app.get("/skills")
     async def list_skills() -> JSONResponse:
-        catalog = services["skill_catalog"]
+        catalog    = services["skill_catalog"]
+        skill_evol = services.get("skill_evolver")
+        import pathlib as _pl
+
+        # Which skills live on disk (evolved / uploaded — not just built-in)
+        evolved_ids: set = set()
+        if skill_evol and getattr(skill_evol, "_skills_dir", None):
+            skills_dir = _pl.Path(skill_evol._skills_dir)
+            if skills_dir.exists():
+                evolved_ids = {p.stem for p in skills_dir.glob("*.md")}
+
         return JSONResponse(content=[
             {
-                "skill_id":     s.skill_id,
-                "name":         s.name,
-                "purpose":      s.purpose,
-                "risk_level":   s.risk_level,
+                "skill_id":      s.skill_id,
+                "name":          s.name,
+                "purpose":       s.purpose,
+                "risk_level":    s.risk_level,
                 "requires_hitl": s.requires_hitl,
-                "tags":         s.tags,
+                "tags":          s.tags,
+                "is_evolved":    s.skill_id in evolved_ids,
             }
             for s in catalog.list_skills()
         ])
@@ -574,6 +701,221 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             "risk_level":    summary.risk_level if summary else "unknown",
         })
 
+    @app.post("/skills/upload")
+    async def upload_skill(file: UploadFile = File(...)) -> JSONResponse:
+        """
+        Upload a skill markdown file (.md) or JSON definition (.json).
+        The skill is registered in the catalog and persisted to HERMES_DATA_DIR/skills/.
+
+        Markdown format (preferred):
+            # Skill Name
+            **Purpose:** one-line description
+            **Tags:** [tag1, tag2]
+            **Risk:** low | medium | high | critical
+            **HITL:** yes | no
+
+            ## Steps
+            1. Step one
+            2. Step two
+
+        JSON format:
+            {"skill_id": "my_skill", "name": "...", "purpose": "...", "risk_level": "low",
+             "requires_hitl": false, "tags": [], "description": "..."}
+        """
+        catalog    = services.get("skill_catalog")
+        skill_evol = services.get("skill_evolver")
+        if not catalog:
+            raise HTTPException(status_code=503, detail="Skill catalog not available")
+
+        content_bytes = await file.read()
+        try:
+            content = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="File must be UTF-8 encoded text")
+
+        filename  = file.filename or "uploaded_skill"
+        skill_id  = filename.removesuffix(".md").removesuffix(".json")
+        # Sanitise: only alphanumeric + underscore
+        import re as _re
+        skill_id  = _re.sub(r"[^a-zA-Z0-9_]", "_", skill_id).strip("_") or "uploaded_skill"
+
+        if filename.endswith(".json"):
+            import json as _json
+            try:
+                defn = _json.loads(content)
+            except Exception as exc:
+                raise HTTPException(status_code=400, detail=f"Invalid JSON: {exc}")
+            skill_id = defn.get("skill_id", skill_id)
+            try:
+                catalog.register_all({skill_id: defn})
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
+        else:
+            # Markdown — use SkillEvolver parser if available, else minimal parse
+            if skill_evol and hasattr(skill_evol, "_parse_markdown_to_definition"):
+                defn = skill_evol._parse_markdown_to_definition(skill_id, content)
+                catalog.register_all({skill_id: defn})
+            else:
+                # Minimal fallback: register with raw content as description
+                catalog.register_all({skill_id: {
+                    "name":          skill_id.replace("_", " ").title(),
+                    "purpose":       content.split("\n")[0].lstrip("# ").strip()[:200],
+                    "description":   content,
+                    "risk_level":    "low",
+                    "requires_hitl": False,
+                    "tags":          [],
+                    "parameters":    {},
+                    "returns":       "string",
+                    "examples":      [],
+                    "constraints":   [],
+                    "estimated_size": "small",
+                    "returns_large":  False,
+                }})
+
+        # Persist to disk via SkillEvolver if available
+        if skill_evol and hasattr(skill_evol, "_save_skill_to_disk"):
+            skill_evol._save_skill_to_disk(skill_id, content)
+
+        logger.info("Skill uploaded and registered: %s", skill_id)
+        return JSONResponse(content={
+            "status":   "registered",
+            "skill_id": skill_id,
+            "chars":    len(content),
+            "persisted": bool(skill_evol and getattr(skill_evol, "_skills_dir", None)),
+        })
+
+    @app.get("/skills/{skill_id}/content")
+    async def get_skill_raw_content(skill_id: str) -> JSONResponse:
+        """
+        Return the human-readable markdown content of a skill.
+        Priority:
+          1. Disk file (HERMES_DATA_DIR/skills/<id>.md) — evolved/uploaded skills
+          2. catalog.as_markdown()                       — built-in skills synthesised as markdown
+          3. 404 if not registered at all
+        """
+        skill_evol = services.get("skill_evolver")
+        raw_content = None
+        source = "unknown"
+
+        # 1. Try disk file first (evolved / uploaded skills)
+        if skill_evol and getattr(skill_evol, "_skills_dir", None):
+            import pathlib as _pl
+            path = _pl.Path(skill_evol._skills_dir) / f"{skill_id}.md"
+            if path.exists():
+                raw_content = path.read_text(encoding="utf-8")
+                source = "disk"
+
+        # 2. Fall back to catalog.as_markdown() — works for built-in skills too
+        if raw_content is None:
+            catalog = services.get("skill_catalog")
+            if catalog and hasattr(catalog, "as_markdown"):
+                raw_content = catalog.as_markdown(skill_id)
+                if raw_content:
+                    source = "catalog"
+
+        if raw_content is None:
+            raise HTTPException(status_code=404, detail=f"Skill {skill_id!r} not found")
+
+        return JSONResponse(content={
+            "skill_id": skill_id,
+            "content":  raw_content,
+            "source":   source,
+        })
+
+    @app.get("/tools")
+    async def list_tools() -> JSONResponse:
+        """List all registered tools with descriptions."""
+        from tools import TOOL_DESCRIPTIONS
+        tool_reg = services.get("tool_registry") or {}
+        # Merge static descriptions with live registry keys
+        all_tools = {}
+        for name, desc in TOOL_DESCRIPTIONS.items():
+            all_tools[name] = desc
+        for name in tool_reg:
+            if name not in all_tools:
+                all_tools[name] = {"description": f"Tool: {name}", "parameters": {}}
+        return JSONResponse(content=all_tools)
+
+    @app.post("/tools/upload")
+    async def upload_tool(file: UploadFile = File(...)) -> JSONResponse:
+        """
+        Upload a Python tool file (.py).  The file must define one or more
+        async functions and a TOOL_REGISTRY dict mapping names → functions,
+        OR export individual functions whose names are the tool IDs.
+
+        The uploaded tools are added to the live tool registry immediately —
+        no restart required.
+
+        Safety: uploaded code runs in the same process. Only use in trusted
+        environments. Production deployments should use MCP or OpenAPI instead.
+
+        Example tool file:
+            async def my_custom_tool(args: dict) -> str:
+                return f\"Result: {args.get('input', '')}"
+
+            TOOL_REGISTRY = {"my_custom_tool": my_custom_tool}
+        """
+        filename = file.filename or "uploaded_tool.py"
+        if not filename.endswith(".py"):
+            raise HTTPException(status_code=400, detail="Only .py files are supported")
+
+        content_bytes = await file.read()
+        try:
+            source = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
+
+        # Compile first to catch syntax errors before exec
+        try:
+            code = compile(source, filename, "exec")
+        except SyntaxError as exc:
+            raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
+
+        # Execute in an isolated namespace
+        ns: dict = {}
+        try:
+            exec(code, ns)  # noqa: S102
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Execution error: {exc}")
+
+        # Extract tools — prefer explicit TOOL_REGISTRY, else all async callables
+        new_tools: dict = {}
+        if "TOOL_REGISTRY" in ns and isinstance(ns["TOOL_REGISTRY"], dict):
+            new_tools = {k: v for k, v in ns["TOOL_REGISTRY"].items() if callable(v)}
+        else:
+            import asyncio as _asyncio, inspect as _inspect
+            new_tools = {
+                name: fn
+                for name, fn in ns.items()
+                if not name.startswith("_") and callable(fn) and _inspect.iscoroutinefunction(fn)
+            }
+
+        if not new_tools:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No tools found. Define a TOOL_REGISTRY dict or "
+                    "at least one top-level async function."
+                ),
+            )
+
+        # Register into the live tool registry used by the runtime loop
+        loop = services.get("runtime_loop")
+        if loop and hasattr(loop, "_tool_registry"):
+            loop._tool_registry.update(new_tools)
+        # Also patch the module-level tool_registry dict used by this webui
+        # (the local variable captured in the closure)
+        tool_registry.update(new_tools)
+
+        registered = list(new_tools.keys())
+        logger.info("Tool(s) uploaded and registered: %s", registered)
+        return JSONResponse(content={
+            "status":     "registered",
+            "tools":      registered,
+            "chars":      len(source),
+            "tool_count": len(registered),
+        })
+
     # ==================================================================
     # HITL endpoints
     # ==================================================================
@@ -582,14 +924,43 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     async def list_pending_hitl() -> JSONResponse:
         hitl_router = services.get("hitl_router")
         if not hitl_router:
+            logger.warning("/hitl/pending: hitl_router not in services")
             return JSONResponse(content=[])
         from hitl.schemas import InterruptState
-        pending = [
-            p.model_dump()
-            for p in hitl_router._payload_store.values()
-            if p.status == InterruptState.PENDING
-        ]
-        return JSONResponse(content=pending)
+        store_size = len(hitl_router._payload_store)
+        logger.info(
+            "/hitl/pending: store_size=%d ids=%s",
+            store_size,
+            [
+                f"{k[:8]}…={getattr(v.status,'value',v.status)}"
+                for k, v in hitl_router._payload_store.items()
+            ],
+        )
+        result = []
+        for p in hitl_router._payload_store.values():
+            # Compare robustly: status may be enum or raw string
+            status_val = p.status.value if hasattr(p.status, "value") else str(p.status)
+            if status_val in ("pending", InterruptState.PENDING.value):
+                try:
+                    dumped = p.model_dump()
+                except Exception:
+                    # Fallback for non-pydantic objects
+                    dumped = {
+                        "interrupt_id":   getattr(p, "interrupt_id", ""),
+                        "trigger_kind":   getattr(p.trigger_kind, "value", str(getattr(p, "trigger_kind", ""))),
+                        "risk_level":     getattr(p.risk_level,   "value", str(getattr(p, "risk_level",   ""))),
+                        "user_query":     getattr(p, "user_query",     ""),
+                        "intent_summary": getattr(p, "intent_summary", ""),
+                        "sla_seconds":    getattr(p, "sla_seconds",    600),
+                        "proposed_action": (
+                            p.proposed_action.model_dump()
+                            if hasattr(p, "proposed_action") and p.proposed_action and hasattr(p.proposed_action, "model_dump")
+                            else getattr(p, "proposed_action", {}) or {}
+                        ),
+                    }
+                result.append(dumped)
+        logger.info("/hitl/pending: returning %d pending interrupts", len(result))
+        return JSONResponse(content=result)
 
     @app.post("/hitl/{interrupt_id}/approve")
     async def approve_hitl(interrupt_id: str, req: HitlDecisionRequest) -> JSONResponse:
@@ -672,6 +1043,32 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             },
         })
 
+    @app.get("/hitl/debug")
+    async def hitl_debug() -> JSONResponse:
+        """
+        Raw dump of _payload_store — use this to diagnose HITL tab issues.
+        Call GET /webui/hitl/debug after triggering a HITL interrupt.
+        """
+        hitl_router = services.get("hitl_router")
+        if not hitl_router:
+            return JSONResponse(content={"error": "hitl_router not in services"})
+        store = hitl_router._payload_store
+        items = []
+        for iid, p in store.items():
+            status_val = p.status.value if hasattr(p.status, "value") else str(p.status)
+            items.append({
+                "interrupt_id": iid,
+                "status":       status_val,
+                "trigger_kind": getattr(p.trigger_kind, "value", str(getattr(p, "trigger_kind", ""))),
+                "risk_level":   getattr(p.risk_level, "value", str(getattr(p, "risk_level", ""))),
+                "user_query":   getattr(p, "user_query", "")[:80],
+            })
+        return JSONResponse(content={
+            "store_size":   len(store),
+            "interrupts":   items,
+            "router_id":    id(hitl_router),
+        })
+
     @app.get("/system/wiring")
     async def system_wiring() -> JSONResponse:
         """
@@ -693,7 +1090,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 "memory_curator": services.get("memory_curator") is not None,
                 "user_model":     services.get("user_model") is not None,
                 "skill_evolver":  services.get("skill_evolver") is not None,
+                "dtm":            services.get("dtm") is not None,
                 "db_path":        services.get("_hermes_data", "not initialised"),
+                "dtm_stats":      services.get("dtm").stats() if services.get("dtm") else {},
             },
             "executor": {
                 "wired":       services.get("executor") is not None,
@@ -708,6 +1107,74 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 "HERMES_DATA_DIR": services.get("_hermes_data", "./data/state.db"),
             },
         })
+
+    @app.get("/system/log-level")
+    async def get_log_level() -> JSONResponse:
+        """Return current effective log level for each key logger."""
+        import logging as _logging
+        loggers = [
+            "integrations.llm_engine",
+            "runtime.loop",
+            "hitl.graph",
+            "hitl.a2a_integration",
+            "memory.fts_store",
+            "webui.backend",
+        ]
+        return JSONResponse(content={
+            name: _logging.getLevelName(_logging.getLogger(name).getEffectiveLevel())
+            for name in loggers
+        })
+
+    @app.post("/system/log-level")
+    async def set_log_level(req: Request) -> JSONResponse:
+        """
+        Toggle log verbosity at runtime — no restart required.
+
+        Body: {"mode": "normal" | "llm" | "verbose"}
+          normal  — INFO for everything (default)
+          llm     — DEBUG for LLM messages, tool args, and tool results; INFO elsewhere
+          verbose — DEBUG everywhere
+
+        Or set a specific logger:
+          {"logger": "integrations.llm_engine", "level": "DEBUG"}
+
+        Examples:
+          curl -X POST http://localhost:8000/webui/system/log-level \\
+               -H 'Content-Type: application/json' -d '{"mode": "llm"}'
+
+          curl -X POST http://localhost:8000/webui/system/log-level \\
+               -H 'Content-Type: application/json' \\
+               -d '{"logger": "runtime.loop", "level": "DEBUG"}'
+        """
+        import logging as _logging
+        body = await req.json()
+        mode        = body.get("mode", "")
+        logger_name = body.get("logger", "")
+        level_name  = body.get("level", "DEBUG").upper()
+
+        if logger_name:
+            # Set a specific logger
+            lg    = _logging.getLogger(logger_name)
+            level = getattr(_logging, level_name, _logging.INFO)
+            lg.setLevel(level)
+            return JSONResponse(content={
+                "set": logger_name,
+                "level": _logging.getLevelName(lg.getEffectiveLevel()),
+            })
+
+        # Mode-based — use logging_config if available
+        try:
+            import logging_config as _lc
+            _lc.configure(mode=mode or "normal")
+        except ImportError:
+            # Fallback if logging_config.py isn't in path
+            root_level = _logging.DEBUG if mode == "verbose" else _logging.INFO
+            _logging.getLogger().setLevel(root_level)
+            if mode == "llm":
+                for name in ("integrations.llm_engine", "runtime.loop"):
+                    _logging.getLogger(name).setLevel(_logging.DEBUG)
+
+        return JSONResponse(content={"mode": mode or "normal", "status": "ok"})
 
     @app.get("/hermes/stats")
     async def hermes_stats() -> JSONResponse:

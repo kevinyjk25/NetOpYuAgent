@@ -1,24 +1,28 @@
 """
-hitl/a2a_integration.py  [v3 — Runtime Loop integrated]
----------------------------------------------------------
-Changes from v2
+hitl/a2a_integration.py  [v4 — Dual-Track Memory integrated]
+-------------------------------------------------------------
+Changes from v3
 ---------------
-  1. ITOpsHitlAgentExecutor now accepts a RuntimeLoop (or creates one).
-  2. execute() routes through classify() first:
-       SIMPLE  -> AgentRuntimeLoop.stream()  (no LangGraph, no TaskPlanner)
-       COMPLEX -> run_with_hitl()            (original HITL graph + DAG path)
-  3. ContextBudgetManager governs all memory/tool injection.
-  4. StopOutcome.STOP_HITL from Runtime Loop re-routes to HITL graph.
-  5. Post-action verification hook added (_verify_action_result).
-  6. All v2 features preserved (memory read/write, hitl_bridge, audit).
-  7. Backward compatible: all new parameters are Optional.
+  1. DualTrackMemory (DTM) integrated as the primary recall/write path.
+       - recall:    dtm.recall() replaces curator.recall_for_session()
+       - write:     dtm.after_turn() replaces separate fts + curator calls
+       - fallback:  if dtm is None, all v3 Hermes hooks run as before
+         (full backward compatibility — no breakage if DTM not wired)
+  2. Constructor accepts optional `dtm` parameter (DualTrackMemory instance).
+  3. _hermes_post_turn() delegates to DTM when available, else runs
+     the original three-task concurrent pattern (fts + curator + user_model).
+  4. _recall() is a single entry point for both SIMPLE and COMPLEX paths.
+  5. All v3 features preserved: HITL graph, runtime loop dual routing,
+     post-action verification, skill evolver, task bridge, memory helpers.
+
+Backward compatible: all new parameters are Optional.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import uuid
-from typing import Any, AsyncIterator, Optional
+from typing import Any, Optional
 
 from a2a.agent_executor import AgentExecutor, A2AEventProcessor, DEFAULT_PROCESSORS
 from a2a.event_queue import EventQueue, RequestContext
@@ -44,6 +48,10 @@ from runtime import (
 
 logger = logging.getLogger(__name__)
 
+
+# ---------------------------------------------------------------------------
+# A2A event processor for HITL interrupt chunks
+# ---------------------------------------------------------------------------
 
 class HitlA2AEventProcessor(A2AEventProcessor):
     async def process(self, chunk, event_queue, task_id, context_id):
@@ -84,16 +92,30 @@ def build_hitl_processors() -> list[A2AEventProcessor]:
     ]
 
 
+# ---------------------------------------------------------------------------
+# Main executor
+# ---------------------------------------------------------------------------
+
 class ITOpsHitlAgentExecutor(AgentExecutor):
     """
     v4: Routes SIMPLE queries to AgentRuntimeLoop (thin fast path)
         and COMPLEX/destructive queries to HITL graph + TaskPlanner.
 
-    Hermes learning loop integrated (§03 §04 §05):
-      - FTS5SessionStore: cross-session full-text search + write every turn
-      - MemoryCurator:    post-turn LLM curation + periodic nudge
-      - UserModelEngine:  behavioral profile injection per session
-      - SkillEvolver:     auto-create skills after complex tasks + self-improve
+    Memory strategy (priority order):
+      1. DualTrackMemory (dtm) — if wired, handles ALL recall and write.
+         Runs Track A (FTS5 chunks + daily .md files) and Track B
+         (curated facts) in parallel, arbitrates with MMR + temporal decay.
+      2. Fallback Hermes v3 — if dtm is None, runs the original three
+         concurrent hooks: fts_store.write_turn, curator.after_turn,
+         user_model.after_turn. All v3 code paths are fully preserved.
+
+    Hermes learning loop modules (all Optional):
+      fts_store:      FTS5SessionStore  — raw turn storage (Track A)
+      memory_curator: MemoryCurator     — LLM fact extraction (Track B)
+      user_model:     UserModelEngine   — behavioral profile
+      skill_evolver:  SkillEvolver      — autonomous skill creation
+      skill_catalog:  SkillCatalogService
+      dtm:            DualTrackMemory   — converged dual-track memory (v4)
     """
 
     def __init__(
@@ -106,12 +128,14 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         task_system:    Optional[Any]             = None,
         runtime_config: Optional[RuntimeConfig]   = None,
         tool_registry:  Optional[dict[str, Any]]  = None,
-        # ── Hermes learning loop (all Optional — graceful degradation) ──
+        # ── Hermes v3 modules (fallback when dtm is None) ─────────────
         fts_store:      Optional[Any]             = None,
         memory_curator: Optional[Any]             = None,
         user_model:     Optional[Any]             = None,
         skill_evolver:  Optional[Any]             = None,
         skill_catalog:  Optional[Any]             = None,
+        # ── v4: Dual-Track Memory ──────────────────────────────────────
+        dtm:            Optional[Any]             = None,
     ) -> None:
         self._hitl_router    = hitl_router
         self._review_service = review_service
@@ -124,12 +148,15 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         self._processors     = build_hitl_processors()
         self._cancelled:     dict[str, bool] = {}
 
-        # ── Hermes learning loop modules ──────────────────────────────
-        self._fts_store      = fts_store       # FTS5SessionStore
-        self._curator        = memory_curator  # MemoryCurator
-        self._user_model     = user_model      # UserModelEngine
-        self._skill_evolver  = skill_evolver   # SkillEvolver
-        self._skill_catalog  = skill_catalog   # SkillCatalogService
+        # ── Hermes v3 modules ─────────────────────────────────────────
+        self._fts_store      = fts_store
+        self._curator        = memory_curator
+        self._user_model     = user_model
+        self._skill_evolver  = skill_evolver
+        self._skill_catalog  = skill_catalog
+
+        # ── v4: DTM — primary recall/write path ───────────────────────
+        self._dtm            = dtm
 
         self._runtime = AgentRuntimeLoop(
             memory_router=memory_router,
@@ -137,6 +164,15 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         )
         cfg = runtime_config or RuntimeConfig()
         self._budget = ContextBudgetManager(cfg.budget)
+
+        if dtm:
+            logger.info("ITOpsHitlAgentExecutor: DualTrackMemory wired (v4 recall path)")
+        else:
+            logger.info("ITOpsHitlAgentExecutor: Hermes v3 recall path (no DTM)")
+
+    # ------------------------------------------------------------------
+    # Top-level execute — routes SIMPLE vs COMPLEX
+    # ------------------------------------------------------------------
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
         task_id    = context.task_id
@@ -191,7 +227,7 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         ))
 
     # ------------------------------------------------------------------
-    # Path A: Runtime Loop
+    # Path A: Runtime Loop (SIMPLE queries)
     # ------------------------------------------------------------------
 
     async def _execute_simple(
@@ -206,27 +242,19 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
             if isinstance(d, dict) and "id" in d
         ]
 
-        # ── Hermes §04: FTS5 cross-session recall ─────────────────────
-        past_context   = ""
-        user_profile   = ""
-        if self._curator:
-            try:
-                past_context = await self._curator.recall_for_session(query, session_id)
-            except Exception as exc:
-                logger.debug("FTS5 recall skipped: %s", exc)
-        if self._user_model:
+        # ── Recall ────────────────────────────────────────────────────
+        past_context = await self._recall(query, session_id)
+        user_profile = ""
+        if self._user_model and not self._dtm:
+            # When DTM is wired it folds user profile into prompt_context.
+            # When DTM is absent, inject user profile separately (v3 path).
             try:
                 user_profile = self._user_model.get_prompt_section(session_id)
             except Exception as exc:
                 logger.debug("User profile injection skipped: %s", exc)
 
-        # Merge past context + user profile into env_context for the runtime loop
         if past_context or user_profile:
-            extra = []
-            if past_context:
-                extra.append(past_context)
-            if user_profile:
-                extra.append(user_profile)
+            extra = [x for x in [past_context, user_profile] if x]
             env_ctx = {**env_ctx, "_hermes_context": "\n\n".join(extra)}
 
         response_chunks: list[str] = []
@@ -263,25 +291,18 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         ))
         await self._write_back_memory(session_id, query, assistant_text)
 
-        # ── Hermes §03: Post-turn curation + user model update ────────
         tool_calls = self._extract_tool_calls_from_chunks(response_chunks)
         await self._hermes_post_turn(session_id, query, assistant_text, tool_calls)
 
     # ------------------------------------------------------------------
-    # Path B: Full HITL graph
+    # Path B: Full HITL graph (COMPLEX / destructive queries)
     # ------------------------------------------------------------------
 
     async def _execute_complex(
         self, query, session_id, context, event_queue, task_id, context_id
     ) -> None:
-        # ── Hermes §04: FTS5 recall for complex queries too ───────────
-        past_context = ""
-        if self._curator:
-            try:
-                past_context = await self._curator.recall_for_session(query, session_id)
-            except Exception as exc:
-                logger.debug("FTS5 recall (complex) skipped: %s", exc)
-
+        # ── Recall ────────────────────────────────────────────────────
+        past_context   = await self._recall(query, session_id)
         memory_context = await self._build_memory_context(context, session_id)
         if past_context:
             memory_context = past_context + "\n\n" + memory_context
@@ -303,13 +324,40 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         ):
             if self._cancelled.get(task_id):
                 break
+
+            # HITL interrupt: register BEFORE letting processors emit
+            # TaskArtifactUpdateEvent — avoids race where browser polls
+            # /hitl/pending before register_interrupt() has run.
+            if chunk.get("hitl_interrupt"):
+                # Step 1: register → payload is now in _payload_store
+                await self._handle_interrupt_chunk(chunk, context, session_id)
+                # Step 2: processors emit TaskArtifactUpdateEvent
+                for processor in self._processors:
+                    await processor.process(chunk, event_queue, task_id, context_id)
+                interrupt_id = chunk.get("interrupt_id", "?")
+                trigger      = chunk.get("trigger_kind", "destructive_op")
+                risk         = chunk.get("risk_level", "high")
+                # Step 3: close queue so SSE stream ends cleanly
+                await event_queue.enqueue_event(MessageEvent(
+                    task_id=task_id, context_id=context_id,
+                    message=Message(
+                        role="assistant",
+                        parts=[TextPart(text=(
+                            f"⚠ HITL interrupt — human approval required.\n"
+                            f"Trigger: {trigger}  Risk: {risk}\n"
+                            f"Interrupt ID: {interrupt_id}\n\n"
+                            "Approval card is now in the HITL tab. "
+                            "Click Approve or Reject to continue execution."
+                        ))],
+                    ),
+                ))
+                return
+
+            # Non-HITL chunks: normal processor pipeline
             for processor in self._processors:
                 await processor.process(chunk, event_queue, task_id, context_id)
             if "token" in chunk:
                 response_chunks.append(chunk["token"])
-            if chunk.get("hitl_interrupt"):
-                await self._handle_interrupt_chunk(chunk, context, session_id)
-                return
 
         await self._verify_action_result(context, session_id, response_chunks)
         await event_queue.enqueue_event(TaskStatusUpdateEvent(
@@ -323,12 +371,122 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         assistant_text = "".join(response_chunks) or "Task completed."
         await self._write_back_memory(session_id, query, assistant_text)
 
-        # ── Hermes §03: Post-turn curation after complex task ─────────
         tool_calls = self._extract_tool_calls_from_chunks(response_chunks)
         await self._hermes_post_turn(session_id, query, assistant_text, tool_calls)
 
     # ------------------------------------------------------------------
-    # Post-action verification + Hermes §05 skill evolution
+    # Recall — DTM v4 or Hermes v3 fallback
+    # ------------------------------------------------------------------
+
+    async def _recall(self, query: str, session_id: str) -> str:
+        """
+        Single recall entry point for both SIMPLE and COMPLEX paths.
+
+        v4 (DTM wired):
+            Runs Track A (FTS5 raw turns + daily .md chunks) and
+            Track B (curated facts from facts.jsonl) in parallel.
+            Arbitrates scores: temporal decay × relevance for Track A,
+            confidence × type-boost × track_b_weight for Track B.
+            MMR-deduplicates (λ=0.7) and returns combined prompt string.
+
+        v3 fallback (DTM absent):
+            curator.recall_for_session() — FTS5 BM25 search only.
+        """
+        if self._dtm:
+            try:
+                result = await self._dtm.recall(query, session_id, max_chars=1200)
+                logger.debug(
+                    "DTM recall: A=%d B=%d winner=%s chars=%d",
+                    result.track_a_count, result.track_b_count,
+                    result.winner, len(result.prompt_context),
+                )
+                return result.prompt_context
+            except Exception as exc:
+                logger.warning("DTM recall failed, falling back to v3: %s", exc)
+
+        # v3 fallback
+        if self._curator:
+            try:
+                return await self._curator.recall_for_session(query, session_id)
+            except Exception as exc:
+                logger.debug("FTS5 recall skipped: %s", exc)
+        return ""
+
+    # ------------------------------------------------------------------
+    # Post-turn Hermes hooks — DTM v4 or v3 fallback
+    # ------------------------------------------------------------------
+
+    async def _hermes_post_turn(
+        self,
+        session_id:     str,
+        user_text:      str,
+        assistant_text: str,
+        tool_calls:     list[dict],
+    ) -> None:
+        """
+        Called after every turn (both SIMPLE and COMPLEX paths).
+
+        v4 (DTM wired):
+            dtm.after_turn() runs Track A write (FTS5 + daily .md buffer)
+            and Track B write (curator.after_turn → facts.jsonl) internally.
+            user_model.after_turn() runs separately (outside DTM scope).
+
+        v3 fallback (DTM absent):
+            Three concurrent tasks: fts_store.write_turn + curator.after_turn
+            + user_model.after_turn (original Hermes v3 behaviour).
+        """
+        if self._dtm:
+            tasks = [
+                self._safe(
+                    self._dtm.after_turn(
+                        session_id     = session_id,
+                        user_text      = user_text,
+                        assistant_text = assistant_text,
+                        tool_calls     = tool_calls,
+                        importance     = 0.6,
+                    ),
+                    "dtm.after_turn",
+                )
+            ]
+            if self._user_model:
+                tasks.append(self._safe(
+                    self._user_model.after_turn(
+                        session_id, user_text, assistant_text, tool_calls
+                    ),
+                    "user_model.after_turn",
+                ))
+            await asyncio.gather(*tasks)
+            return
+
+        # v3 fallback
+        tasks = []
+        if self._fts_store:
+            tasks.append(self._safe(
+                self._fts_store.write_turn(
+                    session_id, user_text, assistant_text,
+                    tool_calls=tool_calls, importance=0.6,
+                ),
+                "fts_store.write_turn",
+            ))
+        if self._curator:
+            tasks.append(self._safe(
+                self._curator.after_turn(
+                    session_id, user_text, assistant_text, tool_calls
+                ),
+                "curator.after_turn",
+            ))
+        if self._user_model:
+            tasks.append(self._safe(
+                self._user_model.after_turn(
+                    session_id, user_text, assistant_text, tool_calls
+                ),
+                "user_model.after_turn",
+            ))
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    # ------------------------------------------------------------------
+    # Post-action verification + §05 skill evolution
     # ------------------------------------------------------------------
 
     async def _verify_action_result(
@@ -342,101 +500,23 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
             "Post-action verification: action_type=%s session=%s",
             action_type, session_id,
         )
-        # ── Hermes §05: Auto-create skill after complex task ──────────
         if self._skill_evolver:
             assistant_text = "".join(response_chunks)
             try:
                 await self._skill_evolver.after_task(
-                    task_description=query,
-                    solution_summary=assistant_text[:400],
-                    tools_used=self._extract_tool_names_from_text(assistant_text),
-                    solution_steps=[],
-                    key_observations=[],
-                    complexity=7.0,
-                    session_id=session_id,
+                    task_description = query,
+                    solution_summary = assistant_text[:400],
+                    tools_used       = self._extract_tool_names_from_text(assistant_text),
+                    solution_steps   = [],
+                    key_observations = [],
+                    complexity       = 7.0,
+                    session_id       = session_id,
                 )
             except Exception as exc:
                 logger.debug("SkillEvolver.after_task skipped: %s", exc)
 
     # ------------------------------------------------------------------
-    # Hermes shared post-turn hook
-    # ------------------------------------------------------------------
-
-    async def _hermes_post_turn(
-        self,
-        session_id:     str,
-        user_text:      str,
-        assistant_text: str,
-        tool_calls:     list[dict],
-    ) -> None:
-        """
-        Called after every turn (simple and complex paths).
-        Runs all Hermes learning loop updates concurrently.
-        """
-        tasks = []
-
-        # FTS5 write
-        if self._fts_store:
-            tasks.append(self._safe(
-                self._fts_store.write_turn(
-                    session_id, user_text, assistant_text,
-                    tool_calls=tool_calls, importance=0.6,
-                ),
-                "fts_store.write_turn",
-            ))
-
-        # Memory curator (curation + nudge)
-        if self._curator:
-            tasks.append(self._safe(
-                self._curator.after_turn(session_id, user_text, assistant_text, tool_calls),
-                "curator.after_turn",
-            ))
-
-        # User model update
-        if self._user_model:
-            tasks.append(self._safe(
-                self._user_model.after_turn(session_id, user_text, assistant_text, tool_calls),
-                "user_model.after_turn",
-            ))
-
-        if tasks:
-            await asyncio.gather(*tasks)
-
-    @staticmethod
-    async def _safe(coro, name: str) -> None:
-        """Run a coroutine, log but don't propagate exceptions."""
-        try:
-            await coro
-        except Exception as exc:
-            logger.warning("Hermes hook %s failed: %s", name, exc)
-
-    @staticmethod
-    def _extract_tool_calls_from_chunks(chunks: list[str]) -> list[dict]:
-        """Extract [TOOL:name] calls from assembled response text."""
-        import re
-        text = "".join(chunks)
-        calls = []
-        for m in re.finditer(r"\[TOOL:(\w+)\]\s*(\{[^}]*\})?", text):
-            tool_name = m.group(1)
-            try:
-                import json
-                args = json.loads(m.group(2) or "{}")
-            except Exception:
-                args = {}
-            calls.append({"tool": tool_name, "args": args})
-        return calls
-
-    @staticmethod
-    def _extract_tool_names_from_text(text: str) -> list[str]:
-        """Extract unique tool names from response text."""
-        import re
-        return list(dict.fromkeys(re.findall(r"\[TOOL:(\w+)\]", text)))
-        # STUB: replace with real health check
-        # e.g. if action_type == "restart_service":
-        #          health = await check_service_health(context.metadata["target"])
-
-    # ------------------------------------------------------------------
-    # HITL interrupt (unchanged from v2)
+    # HITL interrupt registration
     # ------------------------------------------------------------------
 
     async def _handle_interrupt_chunk(
@@ -445,20 +525,20 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         interrupt_id = chunk.get("interrupt_id", str(uuid.uuid4()))
         action_raw   = chunk.get("proposed_action", {})
         payload = HitlPayload(
-            interrupt_id=interrupt_id,
-            thread_id=context.context_id,
-            context_id=context.context_id,
-            task_id=context.task_id,
-            trigger_kind=TriggerKind(chunk.get("trigger_kind", "low_confidence")),
-            risk_level=RiskLevel(chunk.get("risk_level", "medium")),
-            user_query=context.get_user_input(),
-            intent_summary=chunk.get("summary", ""),
-            confidence_score=context.metadata.get("confidence_score", 0.0),
-            proposed_action=ProposedAction(
-                action_type=action_raw.get("action_type", "unknown"),
-                target=action_raw.get("target", "unknown"),
-                parameters=action_raw.get("parameters", {}),
-                reversible=action_raw.get("reversible", True),
+            interrupt_id     = interrupt_id,
+            thread_id        = context.context_id,
+            context_id       = context.context_id,
+            task_id          = context.task_id,
+            trigger_kind     = TriggerKind(chunk.get("trigger_kind", "low_confidence")),
+            risk_level       = RiskLevel(chunk.get("risk_level", "medium")),
+            user_query       = context.get_user_input(),
+            intent_summary   = chunk.get("summary", ""),
+            confidence_score = context.metadata.get("confidence_score", 0.0),
+            proposed_action  = ProposedAction(
+                action_type = action_raw.get("action_type", "unknown"),
+                target      = action_raw.get("target", "unknown"),
+                parameters  = action_raw.get("parameters", {}),
+                reversible  = action_raw.get("reversible", True),
             ),
         )
         await self._hitl_router.register_interrupt(payload)
@@ -470,12 +550,12 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                 )
                 from task.schemas import TaskDefinition, TaskScope, TaskState as TState
                 task_ref = TaskDefinition(
-                    task_id=context.task_id,
-                    session_id=session_id,
-                    context_id=context.context_id,
-                    scope=TaskScope.INTRA,
-                    description=context.get_user_input(),
-                    state=TState.WAITING_HITL,
+                    task_id     = context.task_id,
+                    session_id  = session_id,
+                    context_id  = context.context_id,
+                    scope       = TaskScope.INTRA,
+                    description = context.get_user_input(),
+                    state       = TState.WAITING_HITL,
                 )
                 await self._task_system.hitl_bridge.suspend_for_review(
                     task_ref, payload, session
@@ -484,7 +564,7 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                 logger.warning("HitlTaskBridge suspend failed: %s", exc)
 
     # ------------------------------------------------------------------
-    # Memory helpers (unchanged from v2)
+    # Memory helpers (L1–L4 MemoryRouter — unchanged from v3)
     # ------------------------------------------------------------------
 
     async def _build_memory_context(self, context: RequestContext, session_id: str) -> str:
@@ -493,9 +573,9 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         try:
             from memory.schemas import RetrievalQuery
             query = RetrievalQuery(
-                query_text=context.get_user_input(),
-                session_id=session_id,
-                max_tokens=1_500,
+                query_text = context.get_user_input(),
+                session_id = session_id,
+                max_tokens = 1_500,
             )
             results = await self._memory.retrieve(query)
             return self._memory.format_context(results)
@@ -512,6 +592,39 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
             await self._memory.ingest_turn(session_id, user_text, assistant_text)
         except Exception as exc:
             logger.warning("Memory write-back failed: %s", exc)
+
+    # ------------------------------------------------------------------
+    # Utility helpers
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _safe(coro, name: str) -> None:
+        """Run a coroutine — log but never propagate exceptions."""
+        try:
+            await coro
+        except Exception as exc:
+            logger.warning("Hermes hook %s failed: %s", name, exc)
+
+    @staticmethod
+    def _extract_tool_calls_from_chunks(chunks: list[str]) -> list[dict]:
+        """Extract [TOOL:name] calls from assembled response text."""
+        import re, json
+        text  = "".join(chunks)
+        calls = []
+        for m in re.finditer(r"\[TOOL:(\w+)\]\s*(\{[^}]*\})?", text):
+            tool_name = m.group(1)
+            try:
+                args = json.loads(m.group(2) or "{}")
+            except Exception:
+                args = {}
+            calls.append({"tool": tool_name, "args": args})
+        return calls
+
+    @staticmethod
+    def _extract_tool_names_from_text(text: str) -> list[str]:
+        """Extract unique tool names from response text."""
+        import re
+        return list(dict.fromkeys(re.findall(r"\[TOOL:(\w+)\]", text)))
 
     @staticmethod
     def _extract_session_id(context: RequestContext) -> str:

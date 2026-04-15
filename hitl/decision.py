@@ -28,7 +28,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from hitl.audit import HitlAuditService
+from .audit import HitlAuditService
 from .schemas import (
     AuditEventKind,
     DecisionKind,
@@ -106,6 +106,14 @@ class HitlDecisionRouter:
     async def register_interrupt(self, payload: HitlPayload) -> None:
         """Called when a new HITL interrupt fires. Stores the payload."""
         self._payload_store[payload.interrupt_id] = payload
+        logger.info(
+            "HITL registered: interrupt_id=%s trigger=%s risk=%s status=%s store_size=%d",
+            payload.interrupt_id,
+            getattr(payload.trigger_kind, "value", payload.trigger_kind),
+            getattr(payload.risk_level, "value", payload.risk_level),
+            getattr(payload.status, "value", payload.status),
+            len(self._payload_store),
+        )
         await self._audit.write(HitlAuditRecord(
             interrupt_id=payload.interrupt_id,
             thread_id=payload.thread_id,
@@ -160,33 +168,32 @@ class HitlDecisionRouter:
 
         thread_cfg = {"configurable": {"thread_id": decision.thread_id}}
 
-        match decision.decision:
-            case DecisionKind.APPROVE:
-                return await self._resume(decision, payload, thread_cfg)
+        if decision.decision == DecisionKind.APPROVE:
+            return await self._resume(decision, payload, thread_cfg)
 
-            case DecisionKind.EDIT:
-                return await self._resume_with_edit(decision, payload, thread_cfg)
+        elif decision.decision == DecisionKind.EDIT:
+            return await self._resume_with_edit(decision, payload, thread_cfg)
 
-            case DecisionKind.REJECT:
-                return await self._abort(
-                    decision, payload, thread_cfg, reason="operator_rejected"
-                )
+        elif decision.decision == DecisionKind.REJECT:
+            return await self._abort(
+                decision, payload, thread_cfg, reason="operator_rejected"
+            )
 
-            case DecisionKind.ESCALATE:
-                return await self._escalate(decision, payload, thread_cfg)
+        elif decision.decision == DecisionKind.ESCALATE:
+            return await self._escalate(decision, payload, thread_cfg)
 
-            case DecisionKind.TIMEOUT:
-                return await self._abort(
-                    decision, payload, thread_cfg, reason="sla_timeout"
-                )
+        elif decision.decision == DecisionKind.TIMEOUT:
+            return await self._abort(
+                decision, payload, thread_cfg, reason="sla_timeout"
+            )
 
-            case _:
-                return DecisionResult(
-                    interrupt_id=decision.interrupt_id,
-                    decision=decision.decision,
-                    resumed=False,
-                    error=f"Unknown decision kind: {decision.decision}",
-                )
+        else:
+            return DecisionResult(
+                interrupt_id=decision.interrupt_id,
+                decision=decision.decision,
+                resumed=False,
+                error=f"Unknown decision kind: {decision.decision}",
+            )
 
     # ------------------------------------------------------------------
     # Private handlers

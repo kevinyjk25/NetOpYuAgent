@@ -132,6 +132,10 @@ class RuntimeConfig:
     # Tool result inline limit
     tool_result_inline_limit:  int  = 4_000
 
+    # CAP 5: tools that force HITL before execution even on SIMPLE path
+    # Populated from HITL_TOOL_NAMES env var in main.py
+    hitl_tool_names: frozenset = field(default_factory=frozenset)
+
 
 # ---------------------------------------------------------------------------
 # Loop result
@@ -395,8 +399,9 @@ class AgentRuntimeLoop:
                         context_str += "\n\n" + detail
                         logger.debug("SkillCatalog: loaded detail for %s", skill_id)
 
-            # Execute tool calls
-            tool_calls = self._parse_tool_calls(llm_response)
+            # Execute tool calls — one per turn only
+            _single = self._parse_tool_call(llm_response)
+            tool_calls = [_single] if _single else []
             new_tool_calls = [(n, a) for n, a in tool_calls if n not in called_tools]
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
@@ -478,9 +483,21 @@ class AgentRuntimeLoop:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
 
-            skill_section = ""
+            skill_section  = ""
+            skill_count    = 0
+            selected_skills: list = []
+            skill_ambiguous = False
             if self._skill_catalog:
-                skill_section = self._skill_catalog.format_summary()
+                try:
+                    sel = self._skill_catalog.select_skills_for_query(query, top_k=5)
+                    skill_section   = sel.summary
+                    selected_skills = sel.selected          # [(skill_id, score), ...]
+                    skill_ambiguous = sel.ambiguous
+                    skill_count     = len(selected_skills)
+                except AttributeError:
+                    # Fallback if select_skills_for_query not available
+                    skill_section = self._skill_catalog.format_summary()
+                    skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
 
             context_str = self._budget.assemble(
                 memory_results=memory_results,
@@ -491,6 +508,32 @@ class AgentRuntimeLoop:
             )
             if skill_section:
                 context_str = skill_section + "\n\n" + context_str
+                # Q1: emit named matched skills so Flow tab shows exactly which skills loaded
+                skill_names = ", ".join(f"{sid}({sc:.2f})" for sid, sc in selected_skills) \
+                              or f"{skill_count} skills"
+                yield {
+                    "node_step": f"Skills matched: {skill_names}",
+                    "node":      "skill_load",
+                    "skill_count": skill_count,
+                    "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
+                    "ambiguous": skill_ambiguous,
+                }
+                # Q4 ambiguity: if top skills are too similar, escalate to HITL
+                # Only when explicitly enabled via HITL_SKILL_AMBIGUITY=true env var
+                import os as _os
+                if skill_ambiguous and _os.getenv("HITL_SKILL_AMBIGUITY", "false").lower() == "true":
+                    top2 = [sid for sid, _ in selected_skills[:2]]
+                    yield {
+                        "message": (
+                            f"stop_hitl: ambiguous skill match — top skills {top2} have "
+                            "nearly identical scores. Routing to HITL for clarification."
+                        ),
+                        "node": "hitl_gate",
+                        "stop_hitl": True,
+                        "reason": "skill_ambiguity",
+                        "top_skills": top2,
+                    }
+                    return
 
             yield {"node_step": f"Turn {state.turns}: analysing", "node": "runtime_loop"}
 
@@ -498,9 +541,40 @@ class AgentRuntimeLoop:
             state.tokens_consumed += self._budget._estimate_tokens(context_str + llm_response)
             state.record_response(llm_response)
 
-            for word in llm_response.split():
-                yield {"token": word + " "}
-                await asyncio.sleep(0)
+            # CAP 6: emit LLM trace so Flow tab shows messages and token usage
+            _trace = {}
+            if hasattr(state, "_llm_traces") and state._llm_traces:
+                _trace = state._llm_traces[-1]
+            yield {
+                "type":             "llm_trace",
+                "turn":             state.turns,
+                "model":            _trace.get("model", "mock"),
+                "system_chars":     _trace.get("system_chars", len(context_str)),
+                "context_chars":    _trace.get("context_chars", len(context_str)),
+                "response_chars":   _trace.get("response_chars", len(llm_response)),
+                "has_tool_call":    "[TOOL:" in llm_response,
+                "system_preview":   _trace.get("system_preview", context_str[:200]),
+                "response_preview": _trace.get("response_preview", llm_response[:200]),
+            }
+
+            # ── Stream tokens to user — strip [TOOL:...] lines ──────────
+            # The raw LLM response may contain [TOOL:name] {...} directives.
+            # These are execution instructions, not prose — never show them
+            # to the user.  Strip any line that starts with [TOOL: before
+            # yielding tokens.
+            import re as _re
+            _visible_lines = [
+                ln for ln in llm_response.splitlines()
+                if not _re.match(r'\s*\[TOOL:\w+\]', ln)
+            ]
+            _visible = "\n".join(_visible_lines).strip()
+            if _visible:
+                for word in _visible.split():
+                    yield {"token": word + " "}
+                    await asyncio.sleep(0)
+            # If the entire response was tool calls (no prose), yield nothing —
+            # the tool result will be injected in the next turn's context and
+            # the LLM will produce a proper prose answer then.
 
             import re
             for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
@@ -509,15 +583,52 @@ class AgentRuntimeLoop:
                     if detail:
                         yield {"node_step": f"Loading skill details: {skill_id}", "node": "skill_load"}
 
-            tool_calls = self._parse_tool_calls(llm_response)
+            # ── Single tool call enforcement ──────────────────────────
+            # _parse_tool_call() returns only the FIRST [TOOL:] found.
+            # Multiple calls in one response are a model error — execute
+            # only the first so we feed back real data before the next call.
+            _single = self._parse_tool_call(llm_response)
+            tool_calls = [_single] if _single else []
             new_tool_calls = [(n, a) for n, a in tool_calls if n not in called_tools]
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(tool_name)
+
+                # CAP 5: gate tool against HITL watch-list BEFORE execution
+                # Two sources: RuntimeConfig.hitl_tool_names (from HITL_TOOL_NAMES env)
+                # and SkillCatalogService.requires_hitl (per-skill flag)
+                _needs_hitl = tool_name in self._cfg.hitl_tool_names
+                if not _needs_hitl and self._skill_catalog:
+                    try:
+                        _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
+                    except Exception:
+                        pass
+                if _needs_hitl:
+                    yield {
+                        "message": (
+                            f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
+                            "and requires human approval before execution. "
+                            "Routing to HITL graph."
+                        ),
+                        "node": "hitl_gate",
+                        "stop_hitl": True,
+                        "tool_name": tool_name,
+                    }
+                    return
+
                 yield {"node_step": f"Calling tool: {tool_name}", "node": "runtime_loop"}
+                logger.info("TOOL▶ %s args=%s", tool_name, tool_args)
+                if logger.isEnabledFor(logging.DEBUG):
+                    import json as _json
+                    logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
+                                 _json.dumps(tool_args, indent=2, default=str), "─"*72)
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
                 tool_outputs[tool_name] = stored   # accumulated for next turn context
+                logger.info("TOOL◀ %s result_chars=%d stored=%s",
+                            tool_name, len(raw), stored.startswith("[STORED:"))
+                if logger.isEnabledFor(logging.DEBUG):
+                    logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:2000], "─"*72)
                 yield {
                     "node_result": {"tool": tool_name, "result": stored[:300]},
                     "node": "runtime_tool_result",
@@ -767,6 +878,23 @@ class AgentRuntimeLoop:
             calls.append((tool_name, args))
 
         return calls
+
+    def _parse_tool_call(self, response: str) -> tuple[str, dict] | None:
+        """
+        Parse exactly ONE tool call from an LLM response — the first one found.
+
+        This is the safe entry point used by the stream() loop.  Multiple
+        [TOOL:] directives in one response violate the system prompt ("AT MOST
+        ONE tool per response") and are almost always caused by the model
+        hallucinating a sequence of calls it cannot actually execute in one
+        turn.  We honour only the first and discard the rest so the loop can
+        execute it, get the result, and give the model a chance to decide
+        what to call next with real data.
+
+        Returns (tool_name, args) or None if no tool call found.
+        """
+        calls = self._parse_tool_calls(response)
+        return calls[0] if calls else None
 
     async def _execute_tool(
         self, tool_name: str, args: dict[str, Any], registry: dict[str, Any]
