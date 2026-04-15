@@ -185,21 +185,34 @@ External caller (RouterAgent / WebUI / webhook / curl)
 ### Requirements
 
 - Python 3.9+ (3.12 recommended)
+- [Ollama](https://ollama.ai) with `qwen3.5:27b` pulled (default LLM — see section 5)
 - Optional: Redis, PostgreSQL, ChromaDB (auto-stub when absent)
 
 ### Install
 
 ```bash
-cd it-ops-agent
+cd NetOpYuAgent
 python -m venv .venv
 source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements.txt  # includes pyyaml for config.yaml loading
 ```
 
-### Run (mock LLM, no external dependencies)
+### Run (default: Ollama + qwen3.5:27b)
 
 ```bash
+ollama serve
+ollama pull qwen3.5:27b
 uvicorn main:app --reload --port 8000
+```
+
+### Run (mock LLM — no Ollama needed)
+
+```bash
+# Override just the backend in config.yaml:
+#   llm:
+#     backend: "mock"
+# Or via env var:
+LLM_BACKEND=mock uvicorn main:app --reload --port 8000
 ```
 
 Open:
@@ -210,53 +223,72 @@ Open:
 - **API docs**: http://localhost:8000/docs
 - **Health**: http://localhost:8000/health
 
-### Verify startup wiring
+### Verify startup
 
-The startup log prints:
+The startup log prints a configuration summary:
 
 ```
-━━ System wiring ━━
-  LLM backend : mock
-  FTS5 store  : ./data/state.db
-  Curator     : yes (llm=stub)
-  User model  : yes (llm=stub)
-  SkillEvolver: yes (catalog=real)
-  Executor    : wired
-  HITL router : wired
+━━ Configuration ━━
+  LLM           : ollama/qwen3.5:27b  (base_url=http://localhost:11434)
+  Tools         : MCP=mock  OpenAPI=mock
+  HITL tools    : —
+  Memory dir    : ./data
+  DTM compaction: every 20 turns  nudge every 10 turns
+  Log mode      : normal  LLM detail: off
+  Server        : 0.0.0.0:8000  reload=True
 ```
 
-The Stats tab → **🔌 System Wiring** panel shows a live green/red checklist. `GET /webui/system/wiring` returns the JSON.
+The Stats tab → **🔌 System Wiring** panel shows a live green/red checklist. `GET /webui/system/wiring` returns JSON including DTM stats.
 
 ---
 
 ## 5. Running with a Real LLM (Ollama)
 
+**Recommended:** set config in `config.yaml` (already defaults to Ollama + qwen3.5:27b):
+
+```yaml
+# config.yaml — already the default, no change needed
+llm:
+  backend:  "ollama"
+  model:    "qwen3.5:27b"
+  base_url: "http://localhost:11434"
+```
+
+Then simply:
+
 ```bash
-# Pull and serve your model
 ollama serve
-ollama pull qwen3.5:27b          # or any model
-
-# Set env vars
-export LLM_BACKEND=ollama
-export LLM_MODEL=qwen3.5:27b
-export LLM_BASE_URL=http://localhost:11434
-export HERMES_DATA_DIR=./data
-export MCP_USE_MOCK=true
-export OPENAPI_USE_MOCK=true
-
+ollama pull qwen3.5:27b
+pip install -r requirements.txt   # includes pyyaml
 uvicorn main:app --port 8000 --reload
 ```
 
-Startup log will show `LLM backend: ollama/qwen3.5:27b` and `Curator: yes (llm=real)`.
+**Alternative — env var override** (no config.yaml edit needed):
+
+```bash
+ollama serve
+ollama pull qwen3.5:14b   # lighter model
+
+LLM_MODEL=qwen3.5:14b uvicorn main:app --port 8000 --reload
+```
+
+Startup log confirms:
+```
+━━ Configuration ━━
+  LLM           : ollama/qwen3.5:27b  (base_url=http://localhost:11434)
+  Tools         : MCP=mock  OpenAPI=mock
+  Memory dir    : ./data
+  ...
+```
 
 **Supported backends:**
 
 | `LLM_BACKEND` | Notes |
 |---|---|
-| `ollama` | Local Ollama server; set `LLM_BASE_URL` and `LLM_MODEL` |
-| `openai` | OpenAI API; set `OPENAI_API_KEY` |
-| `anthropic` | Anthropic API; set `ANTHROPIC_API_KEY` |
-| `mock` | Default; deterministic stub, no LLM calls |
+| `ollama` | Local Ollama server; default — set `llm.base_url` and `llm.model` in config.yaml |
+| `openai` | OpenAI API; set `OPENAI_API_KEY` env var |
+| `anthropic` | Anthropic API; set `ANTHROPIC_API_KEY` env var |
+| `mock` | Deterministic stub, no LLM calls — for testing without Ollama |
 
 Thinking models (e.g. `qwen3-coder`): the engine automatically strips `<think>…</think>` blocks before parsing tool calls, and passes `think=False` to the Ollama API.
 
@@ -499,6 +531,24 @@ print(decision.model_tier)   # "fast_model" or "full_model"
 
 ## 11. Mock Tools & Skill Catalog
 
+### Inventory tools (use these for "what devices exist?" queries)
+
+```bash
+POST /webui/tools/list_devices
+{"args": {}}                                      # all 13 devices (APs, switches, routers, servers)
+{"args": {"type": "switch"}}                       # wired switches only
+{"args": {"type": "wireless_ap"}}                  # wireless APs only
+{"args": {"type": "router"}}                       # routers only
+{"args": {"type": "switch", "site": "site-a"}}    # site-filtered
+
+POST /webui/tools/list_interfaces
+{"args": {"device_id": "sw-core-01"}}             # port table for a switch
+{"args": {"device_id": "ap-01"}}                  # radio interfaces for an AP
+{"args": {"device_id": "router-01"}}              # WAN/LAN interfaces for a router
+```
+
+The 13 mock devices span: 4 wireless APs, 5 switches (2 core + 3 access), 2 edge routers, 2 RADIUS servers — all at site-a or site-b.
+
 ### Large-result tools (trigger P0 cache)
 
 ```bash
@@ -516,16 +566,24 @@ POST /webui/tools/netflow_dump
 
 ```bash
 POST /webui/tools/dns_lookup      {"args": {"hostname": "payments.internal"}}
-POST /webui/tools/device_info     {"args": {"device_id": "ap-01"}}
+POST /webui/tools/device_info     {"args": {"device_id": "sw-core-01"}}
 POST /webui/tools/alert_summary   {"args": {"severity": "P1"}}
 POST /webui/tools/service_health  {"args": {"service": "payments-service"}}
 ```
 
-### Cache read tool
+### Cache tools
 
 ```bash
+# Read a page of a stored large result
 POST /webui/tools/read_stored_result
 {"args": {"ref_id": "a3f9c12b", "offset": 0, "length": 2000}}
+
+# Process all chunks of a stored result with an operation
+POST /webui/tools/process_stored_chunks
+{"args": {"ref_id": "a3f9c12b", "operation": "filter", "match": "ERROR"}}
+{"args": {"ref_id": "a3f9c12b", "operation": "extract", "pattern": "(\\d+\\.\\d+\\.\\d+\\.\\d+)"}}
+{"args": {"ref_id": "a3f9c12b", "operation": "count",   "match": "timeout"}}
+{"args": {"ref_id": "a3f9c12b", "operation": "summarise"}}
 ```
 
 ### Skill catalog (9 pre-built skills)
@@ -544,35 +602,115 @@ POST /webui/tools/read_stored_result
 
 ---
 
-## 12. Environment Variables
+## 12. Configuration
 
-| Variable | Default | Description |
-|---|---|---|
-| `LLM_BACKEND` | `mock` | `ollama` \| `openai` \| `anthropic` \| `mock` |
-| `LLM_MODEL` | `mistral` | Model name passed to the backend |
-| `LLM_BASE_URL` | `http://localhost:11434` | Ollama or custom OpenAI-compatible base URL |
-| `HERMES_DATA_DIR` | `./data` | Directory for FTS5 database and skill files |
-| `MCP_USE_MOCK` | `true` | Use mock MCP tools instead of a real server |
-| `MCP_CONFIG_JSON` | — | MCP server config (JSON string or path to JSON file) |
-| `OPENAPI_USE_MOCK` | `true` | Use mock OpenAPI tools instead of a real spec |
-| `OPENAPI_SPEC_URL` | — | URL to OpenAPI 3.0 spec |
-| `OPENAPI_BASE_URL` | — | Base URL for OpenAPI calls |
-| `OPENAPI_AUTH_TYPE` | `bearer` | `bearer` \| `api_key` \| `none` |
-| `OPENAPI_TOKEN_ENV` | `NETOPS_API_TOKEN` | Env var holding the API token |
-| `A2A_BASE_URL` | `http://localhost:8000/api/v1/a2a` | This agent's outbound A2A base URL |
-| `REDIS_URL` | — | Redis connection string (stubs to in-memory if absent) |
-| `POSTGRES_DSN` | — | PostgreSQL DSN (skips persistence if absent) |
-| `CHROMA_PATH` | `./chroma_db` | ChromaDB local path |
-| `AGENT_URLS` | — | Comma-separated peer agent URLs for registry pre-population |
-| `REGISTRY_LB` | `round_robin` | `round_robin` \| `random` \| `least_loaded` |
-| `REGISTRY_HEALTH_INTERVAL` | `60` | Health check interval in seconds |
-| `HITL_CONFIDENCE_THRESHOLD` | `0.75` | Confidence below this triggers HITL ambiguity check |
-| `HITL_MAX_AUTO_HOST_COUNT` | `5` | Actions affecting more hosts than this trigger HITL |
-| `HITL_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL for HITL notifications |
-| `HITL_PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API routing key |
-| `HOST` | `0.0.0.0` | Bind address (python main.py mode) |
-| `PORT` | `8000` | Listen port |
-| `RELOAD` | `false` | Enable hot reload |
+All settings live in **`config.yaml`** (project root). Edit that file to change defaults — no code changes needed.
+
+Environment variables always override the YAML value (12-factor compatible).
+
+### Quick-start config
+
+```yaml
+# config.yaml — change these for your deployment
+llm:
+  backend: "ollama"        # ollama | openai | anthropic | mock
+  model:   "qwen3.5:27b"  # any Ollama-compatible model
+  base_url: "http://localhost:11434"
+
+logging:
+  mode: "normal"           # normal | llm | verbose
+```
+
+### Full environment variable reference
+
+#### LLM
+
+| Variable | YAML key | Default | Description |
+|---|---|---|---|
+| `LLM_BACKEND` | `llm.backend` | `ollama` | `ollama` \| `openai` \| `anthropic` \| `mock` |
+| `LLM_MODEL` | `llm.model` | `qwen3.5:27b` | Model name passed to the backend |
+| `LLM_BASE_URL` | `llm.base_url` | `http://localhost:11434` | Ollama or OpenAI-compatible base URL |
+| `LLM_TEMPERATURE` | `llm.temperature` | `0.1` | Sampling temperature |
+| `LLM_MAX_TOKENS` | `llm.max_tokens` | `2048` | Max tokens per LLM call |
+| `LLM_LOG_DETAIL` | `llm.log_detail` | `off` | `off` \| `compact` \| `full` — show LLM conversation in server log |
+
+#### Logging
+
+| Variable | YAML key | Default | Description |
+|---|---|---|---|
+| `LOG_MODE` | `logging.mode` | `normal` | `normal` — INFO only \| `llm` — DEBUG for LLM/tool interactions \| `verbose` — all DEBUG |
+
+#### Tools
+
+| Variable | YAML key | Default | Description |
+|---|---|---|---|
+| `MCP_USE_MOCK` | `tools.mcp.use_mock` | `true` | Use built-in NetOps mock instead of real MCP server |
+| `MCP_CONFIG_JSON` | `tools.mcp.config_json` | — | MCP server config (JSON string or path to JSON file) |
+| `OPENAPI_USE_MOCK` | `tools.openapi.use_mock` | `true` | Use built-in NetOps mock instead of real OpenAPI spec |
+| `OPENAPI_SPEC_URL` | `tools.openapi.spec_url` | — | URL to OpenAPI 3.0 spec |
+| `OPENAPI_BASE_URL` | `tools.openapi.base_url` | — | Base URL for OpenAPI calls |
+| `OPENAPI_AUTH_TYPE` | `tools.openapi.auth_type` | `bearer` | `bearer` \| `api_key` \| `none` |
+| `OPENAPI_TOKEN_ENV` | `tools.openapi.token_env` | `NETOPS_API_TOKEN` | Env var holding the API token |
+| `HITL_TOOL_NAMES` | `tools.hitl_tool_names` | — | Comma-separated tools that always require HITL approval before execution |
+
+#### HITL
+
+| Variable | YAML key | Default | Description |
+|---|---|---|---|
+| `HITL_CONFIDENCE_THRESHOLD` | `hitl.confidence_threshold` | `0.75` | Confidence below this triggers HITL ambiguity check |
+| `HITL_MAX_AUTO_HOST_COUNT` | `hitl.max_auto_host_count` | `5` | Actions affecting more hosts than this trigger HITL |
+| `HITL_SKILL_AMBIGUITY` | `hitl.skill_ambiguity` | `false` | `true` to route ambiguous skill matches to HITL approval |
+| `HITL_SLACK_WEBHOOK_URL` | `hitl.slack_webhook_url` | — | Slack incoming webhook URL for HITL notifications |
+| `HITL_PAGERDUTY_ROUTING_KEY` | `hitl.pagerduty_routing_key` | — | PagerDuty Events API routing key |
+
+#### Memory / Dual-Track Memory (DTM)
+
+| Variable | YAML key | Default | Description |
+|---|---|---|---|
+| `HERMES_DATA_DIR` | `memory.data_dir` | `./data` | Root directory for FTS5 database, daily .md files, facts.jsonl, skills |
+| `REDIS_URL` | `memory.redis_url` | — | Redis connection string (stubs to in-memory if absent) |
+| `POSTGRES_DSN` | `memory.postgres_dsn` | — | PostgreSQL DSN (skips persistence if absent) |
+| `CHROMA_PATH` | `memory.chroma_path` | `./chroma_db` | ChromaDB local path |
+| `DTM_COMPACTION_TURNS` | `memory.dtm.compaction_turns` | `20` | Turns before flushing today's buffer to `daily/YYYY-MM-DD.md` |
+| `DTM_NUDGE_TURNS` | `memory.dtm.nudge_turns` | `10` | Turns between deep Hermes LLM review sweeps |
+| `DTM_TRACK_B_WEIGHT` | `memory.dtm.track_b_weight` | `1.5` | Score multiplier for curated facts vs raw chunks (>1 prefers facts) |
+| `DTM_HALF_LIFE_DAYS` | `memory.dtm.temporal_half_life_days` | `7.0` | Track A temporal decay — score halves every N days |
+
+#### Registry
+
+| Variable | YAML key | Default | Description |
+|---|---|---|---|
+| `AGENT_URLS` | `registry.agent_urls` | — | Comma-separated peer agent A2A URLs for pre-population |
+| `REGISTRY_LB` | `registry.lb_strategy` | `round_robin` | `round_robin` \| `random` \| `least_loaded` |
+| `REGISTRY_HEALTH_INTERVAL` | `registry.health_check_interval` | `60` | Health check interval in seconds |
+
+#### Server & A2A
+
+| Variable | YAML key | Default | Description |
+|---|---|---|---|
+| `HOST` | `server.host` | `0.0.0.0` | Bind address |
+| `PORT` | `server.port` | `8000` | Listen port |
+| `RELOAD` | `server.reload` | `false` | Enable hot reload |
+| `A2A_BASE_URL` | `server.a2a_base_url` | `http://localhost:8000/api/v1/a2a` | This agent's outbound A2A base URL |
+
+### Override examples
+
+```bash
+# Run with a smaller model for testing
+LLM_MODEL=qwen3.5:14b uvicorn main:app --port 8000
+
+# Enable full LLM conversation logging
+LLM_LOG_DETAIL=compact LOG_MODE=llm uvicorn main:app --port 8000
+
+# Enable HITL for specific tools + skill ambiguity
+HITL_TOOL_NAMES=netflow_dump,db_failover HITL_SKILL_AMBIGUITY=true uvicorn main:app
+
+# Faster DTM compaction for development (see daily files appear sooner)
+DTM_COMPACTION_TURNS=3 uvicorn main:app --port 8000
+
+# Use real Ollama (same as config.yaml defaults)
+LLM_BACKEND=ollama LLM_MODEL=qwen3.5:27b uvicorn main:app --port 8000
+```
 
 ---
 
@@ -580,7 +718,10 @@ POST /webui/tools/read_stored_result
 
 ```
 it-ops-agent/
-├── main.py                        # FastAPI entry point — step-by-step service assembly
+├── main.py                        # FastAPI entry point — config-driven service assembly (v5)
+├── config.yaml                    # Single source of truth for all settings
+├── config.py                      # YAML loader + env var overlay + AppConfig dataclass
+├── logging_config.py              # Logging presets: normal | llm | verbose
 ├── requirements.txt
 ├── pytest.ini
 │
@@ -649,7 +790,7 @@ it-ops-agent/
 │   └── router.py                  # FastAPI routes
 │
 ├── tools/                         # Mock tools (2 files)
-│   └── mock_tools.py              # 8 mock tools (3 large-result + 4 inline + 1 cache read)
+│   └── mock_tools.py              # 11 mock tools: list_devices, list_interfaces, syslog_search, prometheus_query, netflow_dump, dns_lookup, device_info, alert_summary, service_health, read_stored_result, process_stored_chunks
 │
 ├── webui/                         # Browser console
 │   ├── backend.py                 # FastAPI sub-app — chat/stream, HITL, system wiring
