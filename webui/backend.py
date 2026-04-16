@@ -871,12 +871,17 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         except SyntaxError as exc:
             raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
 
-        # Execute in an isolated namespace
-        ns: dict = {}
+        # Execute in an isolated namespace with standard library pre-imported
+        # (exec'd functions need __builtins__ and common stdlib available)
+        import asyncio as _asyncio_mod, inspect as _inspect_mod
+        ns: dict = {"__builtins__": __builtins__}
         try:
             exec(code, ns)  # noqa: S102
         except Exception as exc:
-            raise HTTPException(status_code=400, detail=f"Execution error: {exc}")
+            raise HTTPException(
+                status_code=400,
+                detail=f"Execution error in {filename}: {type(exc).__name__}: {exc}",
+            )
 
         # Extract tools — prefer explicit TOOL_REGISTRY, else all async callables
         new_tools: dict = {}
@@ -899,12 +904,19 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 ),
             )
 
-        # Register into the live tool registry used by the runtime loop
+        # Register into ALL live registries so uploaded tools are immediately callable:
+        #   1. runtime_loop._tool_registry  — used by AgentRuntimeLoop.stream()
+        #   2. tool_router.registry         — used by chat/stream real_registry
+        #   3. tool_registry (local dict)   — fallback used when tool_router absent
         loop = services.get("runtime_loop")
         if loop and hasattr(loop, "_tool_registry"):
             loop._tool_registry.update(new_tools)
-        # Also patch the module-level tool_registry dict used by this webui
-        # (the local variable captured in the closure)
+
+        tool_router_svc = services.get("tool_router")
+        if tool_router_svc and hasattr(tool_router_svc, "registry"):
+            tool_router_svc.registry.update(new_tools)
+
+        # Also update local fallback dict
         tool_registry.update(new_tools)
 
         registered = list(new_tools.keys())

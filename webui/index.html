@@ -1602,20 +1602,44 @@ async function handleSkillUpload(file) {
     const fd = new FormData();
     fd.append('file', file);
     const res = await fetch(`${BASE}/skills/upload`, {method:'POST', body:fd});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || res.statusText);
+    let data;
+    try { data = await res.json(); } catch(_) { data = {}; }
+    if (!res.ok) {
+      // FastAPI 422 returns detail as array [{loc,msg,type}]; flatten to readable string
+      const detail = data.detail;
+      const msg = Array.isArray(detail)
+        ? detail.map(e => e.msg || JSON.stringify(e)).join('; ')
+        : (typeof detail === 'string' ? detail : (res.statusText || `HTTP ${res.status}`));
+      throw new Error(msg);
+    }
     statusEl.textContent = `✓ registered: ${data.skill_id}`;
     statusEl.style.color = 'var(--metric-green, #4ade80)';
     flowEvent('skill', '📤 Skill Uploaded', data.skill_id,
       `${data.chars} chars${data.persisted?' · persisted to disk':''}`);
-    await loadSkills();            // refresh left panel
-    setTimeout(()=>{ statusEl.textContent=''; }, 4000);
+    await loadSkills();   // refresh left panel
+
+    // Scroll to and briefly highlight the newly registered skill
+    setTimeout(() => {
+      const allItems = document.querySelectorAll('#skill-list .skill-item');
+      for (const item of allItems) {
+        const nameEl = item.querySelector('.skill-name');
+        if (nameEl && nameEl.textContent.includes(data.skill_id)) {
+          item.scrollIntoView({behavior:'smooth', block:'nearest'});
+          item.style.transition = 'background .2s';
+          item.style.background = 'rgba(0,212,170,.18)';
+          setTimeout(() => { item.style.background = ''; }, 1200);
+          break;
+        }
+      }
+    }, 120);
+
+    setTimeout(()=>{ statusEl.textContent=''; }, 5000);
   } catch(e) {
     statusEl.textContent = `✗ ${e.message}`;
     statusEl.style.color = 'var(--metric-warn, #f59e0b)';
+    console.error('Skill upload error:', e);
   }
 }
-
 async function handleToolUpload(file) {
   if (!file) return;
   const statusEl = document.getElementById('tool-upload-status');
@@ -1625,17 +1649,40 @@ async function handleToolUpload(file) {
     const fd = new FormData();
     fd.append('file', file);
     const res = await fetch(`${BASE}/tools/upload`, {method:'POST', body:fd});
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || res.statusText);
+    let data;
+    try { data = await res.json(); } catch(_) { data = {}; }
+    if (!res.ok) {
+      // FastAPI 422 returns detail as array [{loc,msg,type}]; flatten to readable string
+      const detail = data.detail;
+      const msg = Array.isArray(detail)
+        ? detail.map(e => e.msg || JSON.stringify(e)).join('; ')
+        : (typeof detail === 'string' ? detail : (res.statusText || `HTTP ${res.status}`));
+      throw new Error(msg);
+    }
     statusEl.textContent = `✓ ${data.tool_count} tool(s): ${data.tools.join(', ')}`;
     statusEl.style.color = 'var(--metric-green, #4ade80)';
     flowEvent('tool-call', '📤 Tool Uploaded', data.tools.join(', '),
       `${data.chars} chars · ${data.tool_count} function(s) registered`);
-    await loadTools();             // refresh left panel
-    setTimeout(()=>{ statusEl.textContent=''; }, 4000);
+    await loadTools();   // refresh left panel
+
+    // Briefly highlight newly registered tools in the quick-tools panel
+    setTimeout(() => {
+      const allItems = document.querySelectorAll('#tool-list .tool-item');
+      for (const item of allItems) {
+        const nameEl = item.querySelector('.skill-name');
+        if (nameEl && data.tools.some(t => nameEl.textContent.includes(t))) {
+          item.style.transition = 'background .2s';
+          item.style.background = 'rgba(0,212,170,.18)';
+          setTimeout(() => { item.style.background = ''; }, 1200);
+        }
+      }
+    }, 120);
+
+    setTimeout(()=>{ statusEl.textContent=''; }, 5000);
   } catch(e) {
     statusEl.textContent = `✗ ${e.message}`;
     statusEl.style.color = 'var(--metric-warn, #f59e0b)';
+    console.error('Tool upload error:', e);
   }
 }
 
