@@ -375,57 +375,154 @@ If `found=False`: confirm `StateGraph(ITOpsGraphState)` is used (not bare `dict`
 
 ---
 
-## 8. Hermes Learning Loop
+## 8. Hermes Learning Loop & Dual-Track Memory (DTM)
 
-After every completed query, a post-turn pipeline runs automatically:
+### Overview
+
+Every completed query passes through two parallel memory systems — a design converging OpenClaw's static file-chunk model with Hermes's dynamic LLM-curation model.
 
 ```
 Turn completes
     │
-    ├─→ FTS5SessionStore.write_turn()
-    │       Writes user query + assistant response to SQLite FTS5
-    │       Importance score based on tool usage and response length
+    ├── Track A write (Static — OpenClaw-style)
+    │     ├── FTS5SessionStore.write_turn()   → state.db (raw turns, BM25 indexed)
+    │     └── today_turns buffer              → daily/YYYY-MM-DD.md every 20 turns
     │
-    ├─→ MemoryCurator.after_turn()
-    │       LLM extracts structured facts from the turn
-    │       Types: incident_lesson, config_fact, tool_preference,
-    │              entity_relation, procedure_step, env_fact
-    │       High-confidence facts stored in MemoryRouter (L2–L4)
+    ├── Track B write (Dynamic — Hermes-style)
+    │     └── MemoryCurator.after_turn()      → facts/facts.jsonl (structured facts)
+    │           LLM extracts: incident_lesson | tool_pattern | operational_fact
+    │                         environment_fact | user_preference
     │
-    ├─→ UserModelEngine.after_turn()
-    │       Tracks: tool frequency, domain counts (auth / network /
-    │               compute / storage), technical level, behavioral traits
-    │       Injects user profile section into subsequent query prompts
+    ├── UserModelEngine.after_turn()
+    │     Tracks: tool frequency, domain expertise, technical level, traits
+    │     Injects user profile into subsequent prompts
     │
-    └─→ SkillEvolver.after_task()   (COMPLEX tasks only)
-            LLM asks: should this become a reusable skill?
-            If yes: generates markdown skill recipe (steps, tools, risk)
-            Stored in SkillCatalogService for future queries
+    └── SkillEvolver.after_task()  (COMPLEX tasks only)
+          LLM: should this become a reusable skill?
+          If yes → markdown recipe saved to data/skills/<id>.md
+                 → registered in SkillCatalogService for future queries
 ```
 
-**FTS5 cross-session recall** runs at the start of every query:
+### Dual-Track retrieval (before every turn)
 
 ```
-New query arrives
-    → curator.recall_for_session(query, session_id)
-    → FTS5 searches all past sessions for similar turns
-    → Top matches injected as context before LLM call
-    → Flow tab shows: 🔮 FTS5 Recall — N chars from M sessions
+Query arrives
+    │
+    ├── Track A ──────────────────────────────────────────────────────────
+    │     • FTS5 BM25 search over state.db (raw conversation turns)
+    │     • Keyword search over daily/YYYY-MM-DD.md (1600-char chunks)
+    │     • Temporal decay: score × e^(−λt), half-life = 7 days
+    │
+    ├── Track B ──────────────────────────────────────────────────────────
+    │     • Keyword + type-boost search over facts/facts.jsonl
+    │     • Type boosts: incident_lesson ×1.3, tool_pattern ×1.2
+    │     • confidence × track_b_weight (default 1.5×) multiplier
+    │
+    └── Arbitration ────────────────────────────────────────────────────────
+          MMR dedup (λ=0.7, Jaccard similarity) — no repeated facts
+          Track B facts first (abstracted signal)
+          Track A chunks follow (verbatim evidence)
+          → single ranked list → injected as prompt context
 ```
 
-**WebUI events emitted by Hermes:**
+**Why two tracks?**
 
-| SSE chunk type | Meaning |
+| Scenario | Track A alone | Track B alone | Both |
+|---|---|---|---|
+| "Why did auth fail?" | 50 raw log turns, noisy | "RADIUS cert expires quarterly — pre-renew week 3" | Fact leads, chunk validates |
+| First session | Nothing | Nothing | Nothing (correct) |
+| After 5 sessions | Relevant raw turns | Extracted lessons + patterns | Best of both |
+
+### File layout on disk
+
+```
+data/                          ← HERMES_DATA_DIR (default: ./data)
+├── state.db                   # Track A: SQLite FTS5 raw turns (always written)
+├── state.db-shm / .db-wal    # SQLite WAL journal
+├── daily/
+│   └── 2026-04-16.md         # Track A: human-readable compacted sessions
+│                              #   written every DTM_COMPACTION_TURNS turns (default 20)
+│                              #   grep-able, git-versionable, inspectable in any editor
+├── facts/
+│   └── facts.jsonl           # Track B: curated facts, one JSON line per extraction
+│                              #   accumulates across all sessions permanently
+└── skills/
+    └── <skill_id>.md         # Evolved skill markdown recipes (SkillEvolver)
+```
+
+### Memory tab in the WebUI
+
+The **Memory** tab (right panel) auto-opens whenever recall finds results.
+
+| Card style | Track | Meaning |
+|---|---|---|
+| 🟢 Green left border · `📄 CHUNK` badge | A | Raw chunk from FTS5 or daily .md file |
+| 🟣 Purple left border · `💡 FACT` badge | B | Curated fact from facts.jsonl |
+
+Each card shows: score bar (width = relevance), source file, age, tags. Click any card to expand the full content that was injected into the LLM prompt.
+
+Filter buttons at top: **All** · **💡 Facts (B)** · **📄 Chunks (A)**
+
+Winner badge: `💡 Facts won` · `📄 Chunks won` · `⚖ Tied` — which track dominated for this query.
+
+**Flow tab recall event:**
+
+```
+🧠 DTM Recall — 480 chars · A:2 chunks B:1 facts · winner=B
+```
+
+### SSE events
+
+| Type | Key fields | Meaning |
+|---|---|---|
+| `recall` | `track_a`, `track_b`, `winner`, `memory_items[]`, `preview` | DTM recall result — drives Memory tab |
+| `hermes_write` | `session_id`, `track` | Turn written to Track A (FTS5 + daily buffer) |
+| `hermes_curate` | `memories_count`, `types[]` | Track B facts extracted → facts.jsonl |
+| `hermes_umodel` | `technical_level`, `domain_counts`, `trait_count` | User model updated |
+| `hermes_skill` | `created`, `skill_id` | Skill created by SkillEvolver (COMPLEX only) |
+
+### Compaction and nudge schedule
+
+| Trigger | Action |
 |---|---|
-| `hermes_write` | Turn written to FTS5 |
-| `hermes_curate` | `memories_count` facts extracted by MemoryCurator |
-| `hermes_umodel` | User model updated — `technical_level`, `domain_counts`, `trait_count` |
-| `hermes_skill` | Skill created or updated by SkillEvolver (COMPLEX only) |
-| `recall` | Past context injected — shows `chars` and `sessions_searched` |
+| Every `DTM_COMPACTION_TURNS` turns (default 20) | today_turns buffer flushed to `daily/YYYY-MM-DD.md` |
+| Every `DTM_NUDGE_TURNS` turns (default 10) | Deep LLM review of recent turns → additional facts extracted |
+| Context window ~80% full | `pre_compaction_flush()` — immediate daily .md write + deep nudge |
 
-**Data directory:** `HERMES_DATA_DIR=./data` (default). Contains `state.db` (FTS5 turns) and any skill recipe files written by SkillEvolver.
+Lower `compaction_turns` in config.yaml to see daily files appear faster in development:
+
+```yaml
+memory:
+  dtm:
+    compaction_turns: 3    # dev mode — flush after every 3 turns
+    nudge_turns: 5
+```
+
+### Verifying memory is working
+
+After a few queries:
+
+```bash
+# Track B: curated facts (one JSON line per extraction)
+cat data/facts/facts.jsonl | python3 -m json.tool | head -30
+
+# Track A: daily compacted sessions (human-readable)
+ls -la data/daily/
+cat data/daily/$(date +%Y-%m-%d).md
+
+# Track A: raw FTS5 turns
+sqlite3 data/state.db \
+  "SELECT session_id, substr(user_text,1,80) FROM session_turns LIMIT 5;"
+
+# Confirm DTM is wired (check system/wiring endpoint)
+curl http://localhost:8000/webui/system/wiring | python3 -m json.tool | grep -A8 '"hermes"'
+# Expected: "dtm": true, "dtm_stats": {"daily_files": 1, "facts_count": 12, ...}
+```
+
+If `daily/` and `facts/` are empty after queries, the most common cause is `dtm` not appearing in services. Check the startup log for the `━━ Configuration ━━` block and ensure `HERMES_DATA_DIR` points to a writable directory.
 
 ---
+
 
 ## 9. P0 Tool Result Cache
 
