@@ -139,6 +139,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     tool_registry["read_stored_result"]    = _read_fn
     tool_registry["process_stored_chunks"] = _process_fn
 
+    # Track runtime-uploaded skills/tools so they appear correctly in the left panel
+    _uploaded_skill_ids: set[str] = set()
+    _uploaded_tool_names: set[str] = set()
+
     # If main.py already built a ToolRouter, use its full registry
     # (MCP + OpenAPI + local) instead of the mock-only dict above
     tool_router = services.get("tool_router")
@@ -571,9 +575,107 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # Tools endpoints
     # ==================================================================
 
-    @app.get("/tools")
-    async def list_tools() -> JSONResponse:
-        return JSONResponse(content=TOOL_DESCRIPTIONS)
+
+    @app.post("/tools/upload")
+    async def upload_tool(request: Request) -> JSONResponse:
+        """
+        Upload a Python tool file (.py).  The file must define one or more
+        async functions and a TOOL_REGISTRY dict mapping names → functions,
+        OR export individual functions whose names are the tool IDs.
+        Uses Request directly (not File()) to work correctly in mounted sub-apps.
+        """
+        try:
+            form = await request.form()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to parse form data: {exc}")
+
+        upload = form.get("file")
+        if upload is None:
+            raise HTTPException(status_code=400, detail="No file field in form data — field name must be 'file'")
+
+        filename = getattr(upload, "filename", None) or "uploaded_tool.py"
+        if not filename.endswith(".py"):
+            raise HTTPException(status_code=400, detail="Only .py files are supported")
+
+        try:
+            content_bytes = await upload.read()
+            source = content_bytes.decode("utf-8")
+        except UnicodeDecodeError:
+            raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
+
+        # Compile first to catch syntax errors before exec
+        try:
+            code = compile(source, filename, "exec")
+        except SyntaxError as exc:
+            raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
+
+        # Execute in an isolated namespace with standard library pre-imported
+        # (exec'd functions need __builtins__ and common stdlib available)
+        import asyncio as _asyncio_mod, inspect as _inspect_mod
+        ns: dict = {"__builtins__": __builtins__}
+        try:
+            exec(code, ns)  # noqa: S102
+        except Exception as exc:
+            logger.exception("upload_tool: exec failed for %s", filename)
+            raise HTTPException(
+                status_code=400,
+                detail=f"Execution error in {filename}: {type(exc).__name__}: {exc}",
+            )
+
+        # Extract tools — prefer explicit TOOL_REGISTRY, else all async callables
+        new_tools: dict = {}
+        if "TOOL_REGISTRY" in ns and isinstance(ns["TOOL_REGISTRY"], dict):
+            new_tools = {k: v for k, v in ns["TOOL_REGISTRY"].items() if callable(v)}
+        else:
+            import asyncio as _asyncio, inspect as _inspect
+            new_tools = {
+                name: fn
+                for name, fn in ns.items()
+                if not name.startswith("_") and callable(fn) and _inspect.iscoroutinefunction(fn)
+            }
+
+        if not new_tools:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No tools found. Define a TOOL_REGISTRY dict or "
+                    "at least one top-level async function."
+                ),
+            )
+
+        # Register into ALL live registries so uploaded tools are immediately callable:
+        #   1. tool_router._callables (via register_local) — the real source of truth.
+        #      tool_router.registry is a @property that rebuilds from _callables every
+        #      call — so we must write to _callables, not to the property return value.
+        #   2. runtime_loop._tool_registry — direct dict used by AgentRuntimeLoop.stream()
+        #   3. tool_registry (local fallback) — used when tool_router is absent
+        tool_router_svc = services.get("tool_router")
+        if tool_router_svc:
+            # register_local skips already-registered names; force-register uploaded tools
+            # by writing directly to _callables so re-uploads update existing entries
+            for name, fn in new_tools.items():
+                if hasattr(tool_router_svc, "_register"):
+                    tool_router_svc._register(name=name, fn=fn, source="upload")
+                elif hasattr(tool_router_svc, "_callables"):
+                    tool_router_svc._callables[name] = fn
+
+        loop = services.get("runtime_loop")
+        if loop and hasattr(loop, "_tool_registry"):
+            loop._tool_registry.update(new_tools)
+
+        # Also update local fallback dict
+        tool_registry.update(new_tools)
+
+        registered = list(new_tools.keys())
+        logger.info("Tool(s) uploaded and registered: %s (%d tools)", registered, len(registered))
+        return JSONResponse(content={
+            "status":     "registered",
+            "tools":      registered,
+            "chars":      len(source),
+            "tool_count": len(registered),
+        })
 
     @app.post("/tools/{tool_name}")
     async def call_tool(tool_name: str, req: ToolCallRequest) -> JSONResponse:
@@ -702,38 +804,35 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         })
 
     @app.post("/skills/upload")
-    async def upload_skill(file: UploadFile = File(...)) -> JSONResponse:
+    async def upload_skill(request: Request) -> JSONResponse:
         """
         Upload a skill markdown file (.md) or JSON definition (.json).
         The skill is registered in the catalog and persisted to HERMES_DATA_DIR/skills/.
-
-        Markdown format (preferred):
-            # Skill Name
-            **Purpose:** one-line description
-            **Tags:** [tag1, tag2]
-            **Risk:** low | medium | high | critical
-            **HITL:** yes | no
-
-            ## Steps
-            1. Step one
-            2. Step two
-
-        JSON format:
-            {"skill_id": "my_skill", "name": "...", "purpose": "...", "risk_level": "low",
-             "requires_hitl": false, "tags": [], "description": "..."}
+        Uses Request directly (not File()) to work correctly in mounted sub-apps.
         """
         catalog    = services.get("skill_catalog")
         skill_evol = services.get("skill_evolver")
         if not catalog:
             raise HTTPException(status_code=503, detail="Skill catalog not available")
 
-        content_bytes = await file.read()
         try:
+            form = await request.form()
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to parse form data: {exc}")
+
+        upload = form.get("file")
+        if upload is None:
+            raise HTTPException(status_code=400, detail="No file field in form data — field name must be 'file'")
+
+        try:
+            content_bytes = await upload.read()
             content = content_bytes.decode("utf-8")
         except UnicodeDecodeError:
             raise HTTPException(status_code=400, detail="File must be UTF-8 encoded text")
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
 
-        filename  = file.filename or "uploaded_skill"
+        filename  = getattr(upload, "filename", None) or "uploaded_skill"
         skill_id  = filename.removesuffix(".md").removesuffix(".json")
         # Sanitise: only alphanumeric + underscore
         import re as _re
@@ -776,7 +875,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         if skill_evol and hasattr(skill_evol, "_save_skill_to_disk"):
             skill_evol._save_skill_to_disk(skill_id, content)
 
-        logger.info("Skill uploaded and registered: %s", skill_id)
+        logger.info("Skill uploaded and registered: %s (persisted=%s)", skill_id,
+                     bool(skill_evol and getattr(skill_evol, "_skills_dir", None)))
         return JSONResponse(content={
             "status":   "registered",
             "skill_id": skill_id,
@@ -836,97 +936,6 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 all_tools[name] = {"description": f"Tool: {name}", "parameters": {}}
         return JSONResponse(content=all_tools)
 
-    @app.post("/tools/upload")
-    async def upload_tool(file: UploadFile = File(...)) -> JSONResponse:
-        """
-        Upload a Python tool file (.py).  The file must define one or more
-        async functions and a TOOL_REGISTRY dict mapping names → functions,
-        OR export individual functions whose names are the tool IDs.
-
-        The uploaded tools are added to the live tool registry immediately —
-        no restart required.
-
-        Safety: uploaded code runs in the same process. Only use in trusted
-        environments. Production deployments should use MCP or OpenAPI instead.
-
-        Example tool file:
-            async def my_custom_tool(args: dict) -> str:
-                return f\"Result: {args.get('input', '')}"
-
-            TOOL_REGISTRY = {"my_custom_tool": my_custom_tool}
-        """
-        filename = file.filename or "uploaded_tool.py"
-        if not filename.endswith(".py"):
-            raise HTTPException(status_code=400, detail="Only .py files are supported")
-
-        content_bytes = await file.read()
-        try:
-            source = content_bytes.decode("utf-8")
-        except UnicodeDecodeError:
-            raise HTTPException(status_code=400, detail="File must be UTF-8 encoded")
-
-        # Compile first to catch syntax errors before exec
-        try:
-            code = compile(source, filename, "exec")
-        except SyntaxError as exc:
-            raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
-
-        # Execute in an isolated namespace with standard library pre-imported
-        # (exec'd functions need __builtins__ and common stdlib available)
-        import asyncio as _asyncio_mod, inspect as _inspect_mod
-        ns: dict = {"__builtins__": __builtins__}
-        try:
-            exec(code, ns)  # noqa: S102
-        except Exception as exc:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Execution error in {filename}: {type(exc).__name__}: {exc}",
-            )
-
-        # Extract tools — prefer explicit TOOL_REGISTRY, else all async callables
-        new_tools: dict = {}
-        if "TOOL_REGISTRY" in ns and isinstance(ns["TOOL_REGISTRY"], dict):
-            new_tools = {k: v for k, v in ns["TOOL_REGISTRY"].items() if callable(v)}
-        else:
-            import asyncio as _asyncio, inspect as _inspect
-            new_tools = {
-                name: fn
-                for name, fn in ns.items()
-                if not name.startswith("_") and callable(fn) and _inspect.iscoroutinefunction(fn)
-            }
-
-        if not new_tools:
-            raise HTTPException(
-                status_code=400,
-                detail=(
-                    "No tools found. Define a TOOL_REGISTRY dict or "
-                    "at least one top-level async function."
-                ),
-            )
-
-        # Register into ALL live registries so uploaded tools are immediately callable:
-        #   1. runtime_loop._tool_registry  — used by AgentRuntimeLoop.stream()
-        #   2. tool_router.registry         — used by chat/stream real_registry
-        #   3. tool_registry (local dict)   — fallback used when tool_router absent
-        loop = services.get("runtime_loop")
-        if loop and hasattr(loop, "_tool_registry"):
-            loop._tool_registry.update(new_tools)
-
-        tool_router_svc = services.get("tool_router")
-        if tool_router_svc and hasattr(tool_router_svc, "registry"):
-            tool_router_svc.registry.update(new_tools)
-
-        # Also update local fallback dict
-        tool_registry.update(new_tools)
-
-        registered = list(new_tools.keys())
-        logger.info("Tool(s) uploaded and registered: %s", registered)
-        return JSONResponse(content={
-            "status":     "registered",
-            "tools":      registered,
-            "chars":      len(source),
-            "tool_count": len(registered),
-        })
 
     # ==================================================================
     # HITL endpoints

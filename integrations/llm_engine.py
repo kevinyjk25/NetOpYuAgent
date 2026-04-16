@@ -95,6 +95,11 @@ Examples:
 [TOOL:list_devices] {{}}
 [TOOL:list_devices] {{"type": "switch"}}
 [TOOL:list_interfaces] {{"device_id": "sw-core-01"}}
+[TOOL:get_device_config] {{"device_id": "sw-core-01"}}
+[TOOL:get_device_config] {{"device_id": "ap-01", "section": "radius"}}
+[TOOL:edit_device_config] {{"device_id": "sw-core-01", "section": "ntp", "changes": {{"servers": ["10.0.1.1", "10.0.1.2"]}}, "reason": "add NTP redundancy"}}
+[TOOL:validate_device_config] {{"device_id": "sw-core-01"}}
+[TOOL:diff_device_config] {{"device_id": "sw-core-01"}}
 [TOOL:device_info] {{"device_id": "sw-core-01"}}
 [TOOL:dns_lookup] {{"hostname": "payments.internal"}}
 
@@ -106,14 +111,27 @@ STRICT RULES — follow exactly:
 5. Keep responses concise — this is a production operations environment
 6. Large results are shown as [STORED:tool:ref_id] — use [TOOL:read_stored_result] {{"ref_id": "..."}} to read pages
 
-INVENTORY QUERIES — when asked "what devices exist" or similar:
+TOOLS vs SKILLS — critical distinction:
+- TOOLS (use [TOOL:name]): executable functions that query/modify real systems
+- SKILLS (shown as "Available skills"): procedural guides telling you WHICH tools to call in sequence
+- NEVER call [TOOL:skill_name] — skills are NOT callable tools
+- When a skill is relevant, READ its steps (via [SKILL_LOAD:skill_id]) then call the TOOLS it describes
+
+INVENTORY QUERIES — when asked what devices exist:
 - Use [TOOL:list_devices] {{}} to get ALL devices in one call
-- Use [TOOL:list_devices] {{"type": "switch"}} for wired devices only
-- Use [TOOL:list_devices] {{"type": "wireless_ap"}} for wireless only
-- NEVER call device_info in a loop — get the inventory first, then detail on specific devices
+- Use [TOOL:list_devices] {{"type": "switch"}} for wired switches only
+- Use [TOOL:list_devices] {{"type": "wireless_ap"}} for wireless APs only
+
+CONFIGURATION QUERIES — when asked about device config:
+- Use [TOOL:get_device_config] {{"device_id": "<id>"}} for full config
+- Use [TOOL:get_device_config] {{"device_id": "<id>", "section": "radius"}} for one section
+- Use [TOOL:validate_device_config] to check for errors
+- Use [TOOL:edit_device_config] to apply fixes
 
 STOP CONDITION: If the context already contains tool results (any text after "Tool outputs:"),
 provide your final analysis NOW. Do not call any tool.
+
+{extra_tools_section}
 
 {skill_summary}
 
@@ -185,26 +203,49 @@ Return format:
         raise NotImplementedError
 
     def _build_system_prompt(
-        self, context: str, skill_catalog: Any = None, confirmed_facts: list[str] | None = None
+        self, context: str, skill_catalog: Any = None,
+        confirmed_facts: list[str] | None = None,
+        tool_registry: dict | None = None,
     ) -> str:
+        # ── Uploaded / extra tools section ───────────────────────────
+        # Base tools are listed in TOOL_CALL_SYSTEM examples.
+        # Any tools registered AFTER startup (via upload) are injected here
+        # so the LLM knows they exist and can call them.
+        _BASE_TOOLS = {
+            "syslog_search", "prometheus_query", "netflow_dump", "dns_lookup",
+            "device_info", "alert_summary", "service_health", "restart_service",
+            "read_stored_result", "process_stored_chunks", "list_devices", "list_interfaces",
+        }
+        extra_tools_section = ""
+        if tool_registry:
+            extra = {n: fn for n, fn in tool_registry.items() if n not in _BASE_TOOLS}
+            if extra:
+                lines = ["UPLOADED TOOLS — also available, use the same [TOOL:name] format:"]
+                for name in sorted(extra.keys()):
+                    lines.append("  [TOOL:" + name + '] {"<arg>": "<value>"}')
+                extra_tools_section = "\\n".join(lines)
+
+        # ── Skill summary ─────────────────────────────────────────────
         skill_summary = ""
         if skill_catalog:
             try:
-                skill_summary = "Available skills:\n" + skill_catalog.format_summary()
+                skill_summary = "Available skills:\\n" + skill_catalog.format_summary()
             except Exception:
                 pass
 
+        # ── Confirmed facts ───────────────────────────────────────────
         facts_section = ""
         if confirmed_facts:
-            facts_section = "Confirmed facts from this session:\n" + \
-                            "\n".join(f"  • {f}" for f in confirmed_facts[-10:])
+            facts_section = ("Confirmed facts from this session:\\n" +
+                             "\\n".join(f"  • {f}" for f in confirmed_facts[-10:]))
 
         system = self.TOOL_CALL_SYSTEM.format(
             skill_summary=skill_summary,
             confirmed_facts_section=facts_section,
+            extra_tools_section=extra_tools_section,
         )
         if context:
-            system += f"\n\nContext:\n{context}"
+            system += f"\\n\\nContext:\\n{context}"
         return system
 
     @staticmethod
@@ -290,13 +331,15 @@ class OllamaEngine(LLMEngine):
                 "DO NOT emit any [TOOL:...] line. Provide your final analysis now."
             )
 
-        system = self._build_system_prompt(context, skill_catalog, confirmed_facts)
+        # Pass the live tool_registry so uploaded tools appear in the system prompt
+        _tool_reg = getattr(state, "_tool_registry", None) if state else None
+        system = self._build_system_prompt(context, skill_catalog, confirmed_facts, _tool_reg)
         if stop_note:
             system += stop_note
 
         messages = [
             {"role": "system", "content": system},
-            {"role": "user",   "content": query},
+            {"role": "user", "content": query},
         ]
 
         # ── Conversation logging ─────────────────────────────────────────────
