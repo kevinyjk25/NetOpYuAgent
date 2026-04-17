@@ -385,6 +385,9 @@ class AgentRuntimeLoop:
             if skill_section:
                 context_str = skill_section + "\n\n" + context_str
 
+            # Attach live tool registry to state so _call_llm / llm_engine can
+            # inject it into the system prompt (shows uploaded tools to the LLM)
+            state._tool_registry = tool_reg  # type: ignore[attr-defined]
             llm_response = await self._call_llm(query, context_str, state)
             state.tokens_consumed += self._budget._estimate_tokens(context_str + llm_response)
             state.record_response(llm_response)
@@ -406,7 +409,25 @@ class AgentRuntimeLoop:
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(tool_name)
-                raw = await self._execute_tool(tool_name, tool_args, tool_reg)
+
+                # Skill-as-tool guard (same as stream path)
+                _is_skill_name = False
+                if self._skill_catalog:
+                    try:
+                        _is_skill_name = any(
+                            s.skill_id == tool_name
+                            for s in self._skill_catalog.list_skills()
+                        )
+                    except Exception:
+                        pass
+                if _is_skill_name:
+                    raw = (
+                        f"[ERROR] '{tool_name}' is a SKILL not a tool. "
+                        f"Use [SKILL_LOAD:{tool_name}] then call the individual tools it describes."
+                    )
+                    logger.warning("run: LLM called skill '%s' as tool — injecting error", tool_name)
+                else:
+                    raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
                 tool_outputs[tool_name] = stored   # accumulated for next turn
                 last_tool_result = raw
@@ -537,6 +558,9 @@ class AgentRuntimeLoop:
 
             yield {"node_step": f"Turn {state.turns}: analysing", "node": "runtime_loop"}
 
+            # Attach live tool registry to state so _call_llm / llm_engine can
+            # inject it into the system prompt (shows uploaded tools to the LLM)
+            state._tool_registry = tool_reg  # type: ignore[attr-defined]
             llm_response = await self._call_llm(query, context_str, state)
             state.tokens_consumed += self._budget._estimate_tokens(context_str + llm_response)
             state.record_response(llm_response)
@@ -594,13 +618,43 @@ class AgentRuntimeLoop:
                 state.record_tool_call(tool_name)
                 called_tools.add(tool_name)
 
+                # ── Skill-as-tool guard ───────────────────────────────
+                # If the LLM called a SKILL name as if it were a tool,
+                # inject an error result so the LLM corrects itself on
+                # the next turn rather than hitting the HITL gate or
+                # getting a "not registered" error with no explanation.
+                _is_skill_name = False
+                if self._skill_catalog:
+                    try:
+                        _is_skill_name = any(
+                            s.skill_id == tool_name
+                            for s in self._skill_catalog.list_skills()
+                        )
+                    except Exception:
+                        pass
+                if _is_skill_name:
+                    _skill_err = (
+                        f"[ERROR] '{tool_name}' is a SKILL, not a tool. "
+                        f"Skills are procedural guides — you cannot call them with [TOOL:]. "
+                        f"Load the skill steps with [SKILL_LOAD:{tool_name}], "
+                        f"then call the individual TOOLS the skill describes "
+                        f"(e.g. get_device_config, validate_device_config, etc.)."
+                    )
+                    logger.warning("stream: LLM called skill '%s' as tool — injecting error", tool_name)
+                    tool_outputs[tool_name] = _skill_err
+                    yield {"node_step": f"Skill-as-tool error: {tool_name}", "node": "runtime_loop"}
+                    continue   # skip HITL check and _execute_tool for this name
+
                 # CAP 5: gate tool against HITL watch-list BEFORE execution
-                # Two sources: RuntimeConfig.hitl_tool_names (from HITL_TOOL_NAMES env)
-                # and SkillCatalogService.requires_hitl (per-skill flag)
+                # Only fires for REAL tools, not skill names (guarded above).
                 _needs_hitl = tool_name in self._cfg.hitl_tool_names
                 if not _needs_hitl and self._skill_catalog:
                     try:
-                        _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
+                        # Only check HITL for a name if it is actually a registered tool
+                        # (i.e. present in the tool registry), not a stray skill name
+                        _is_real_tool = tool_name in tool_reg
+                        if _is_real_tool:
+                            _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
                     except Exception:
                         pass
                 if _needs_hitl:

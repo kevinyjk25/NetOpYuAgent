@@ -150,6 +150,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         tool_registry = tool_router.registry
         logger.info("WebUI: using real ToolRouter registry (%d tools)", len(tool_registry))
 
+    # Store tool_registry reference in services so upload_tool and /tools endpoint
+    # share the exact same dict — uploaded tools appear in /tools immediately
+    services["tool_registry"] = tool_registry
+
     if "runtime_loop" not in services:
         import os as _os
         _hitl_tools = frozenset(
@@ -645,27 +649,27 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 ),
             )
 
-        # Register into ALL live registries so uploaded tools are immediately callable:
-        #   1. tool_router._callables (via register_local) — the real source of truth.
-        #      tool_router.registry is a @property that rebuilds from _callables every
-        #      call — so we must write to _callables, not to the property return value.
-        #   2. runtime_loop._tool_registry — direct dict used by AgentRuntimeLoop.stream()
-        #   3. tool_registry (local fallback) — used when tool_router is absent
-        tool_router_svc = services.get("tool_router")
-        if tool_router_svc:
-            # register_local skips already-registered names; force-register uploaded tools
-            # by writing directly to _callables so re-uploads update existing entries
-            for name, fn in new_tools.items():
-                if hasattr(tool_router_svc, "_register"):
-                    tool_router_svc._register(name=name, fn=fn, source="upload")
-                elif hasattr(tool_router_svc, "_callables"):
-                    tool_router_svc._callables[name] = fn
-
+        # Register into ALL live registries so uploaded tools are immediately callable
+        # and visible in the Quick Tools panel (/tools endpoint reads services["tool_registry"])
         loop = services.get("runtime_loop")
         if loop and hasattr(loop, "_tool_registry"):
             loop._tool_registry.update(new_tools)
 
-        # Also update local fallback dict
+        tool_router_svc = services.get("tool_router")
+        if tool_router_svc:
+            # .registry is a @property that rebuilds each call — must write to _callables
+            if hasattr(tool_router_svc, "_callables"):
+                for name, fn in new_tools.items():
+                    tool_router_svc._callables[name] = fn
+                    # Initialise meta entry so the circuit-breaker wrapper works
+                    if hasattr(tool_router_svc, "_meta") and name not in tool_router_svc._meta:
+                        from integrations.tool_router import ToolMeta  # noqa
+                        tool_router_svc._meta[name] = ToolMeta(name, source)
+
+        # Update the shared tool_registry in services (read by /tools and chat/stream)
+        svc_reg = services.get("tool_registry")
+        if svc_reg is not None:
+            svc_reg.update(new_tools)
         tool_registry.update(new_tools)
 
         registered = list(new_tools.keys())
@@ -924,16 +928,30 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     @app.get("/tools")
     async def list_tools() -> JSONResponse:
-        """List all registered tools with descriptions."""
+        """List all registered tools with descriptions — includes uploaded tools."""
         from tools import TOOL_DESCRIPTIONS
-        tool_reg = services.get("tool_registry") or {}
-        # Merge static descriptions with live registry keys
+        # Use the live registry (same dict that upload_tool writes into)
+        live_reg = services.get("tool_registry") or {}
         all_tools = {}
+        # Start with static descriptions (mark as not uploaded)
         for name, desc in TOOL_DESCRIPTIONS.items():
-            all_tools[name] = desc
-        for name in tool_reg:
+            entry = dict(desc)
+            entry["uploaded"] = False
+            all_tools[name] = entry
+        # Add any tools in the live registry that have no static description
+        # These are uploaded tools — mark them clearly
+        for name in live_reg:
             if name not in all_tools:
-                all_tools[name] = {"description": f"Tool: {name}", "parameters": {}}
+                all_tools[name] = {
+                    "description": f"Uploaded tool: {name}",
+                    "parameters":  {},
+                    "returns_large": False,
+                    "example":     {},
+                    "uploaded":    True,
+                }
+        logger.debug("/tools: returning %d tools (%d uploaded)",
+                     len(all_tools),
+                     sum(1 for t in all_tools.values() if t.get("uploaded")))
         return JSONResponse(content=all_tools)
 
 

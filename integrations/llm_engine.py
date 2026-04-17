@@ -128,8 +128,9 @@ CONFIGURATION QUERIES — when asked about device config:
 - Use [TOOL:validate_device_config] to check for errors
 - Use [TOOL:edit_device_config] to apply fixes
 
-STOP CONDITION: If the context already contains tool results (any text after "Tool outputs:"),
-provide your final analysis NOW. Do not call any tool.
+STOP CONDITION: If the context section shows tool results — either a "Tool outputs:" header
+or any "[TOOL: tool_name]" block — provide your final analysis NOW. Do NOT call any more tools.
+The results are already there; summarise and answer the user directly.
 
 {extra_tools_section}
 
@@ -212,9 +213,13 @@ Return format:
         # Any tools registered AFTER startup (via upload) are injected here
         # so the LLM knows they exist and can call them.
         _BASE_TOOLS = {
+            # Built-in mock tools (always present)
             "syslog_search", "prometheus_query", "netflow_dump", "dns_lookup",
             "device_info", "alert_summary", "service_health", "restart_service",
             "read_stored_result", "process_stored_chunks", "list_devices", "list_interfaces",
+            # Config tools (examples in system prompt — don't re-list in UPLOADED section)
+            "get_device_config", "edit_device_config",
+            "validate_device_config", "diff_device_config",
         }
         extra_tools_section = ""
         if tool_registry:
@@ -223,21 +228,21 @@ Return format:
                 lines = ["UPLOADED TOOLS — also available, use the same [TOOL:name] format:"]
                 for name in sorted(extra.keys()):
                     lines.append("  [TOOL:" + name + '] {"<arg>": "<value>"}')
-                extra_tools_section = "\\n".join(lines)
+                extra_tools_section = "\n".join(lines)
 
         # ── Skill summary ─────────────────────────────────────────────
         skill_summary = ""
         if skill_catalog:
             try:
-                skill_summary = "Available skills:\\n" + skill_catalog.format_summary()
+                skill_summary = "Available skills:\n" + skill_catalog.format_summary()
             except Exception:
                 pass
 
         # ── Confirmed facts ───────────────────────────────────────────
         facts_section = ""
         if confirmed_facts:
-            facts_section = ("Confirmed facts from this session:\\n" +
-                             "\\n".join(f"  • {f}" for f in confirmed_facts[-10:]))
+            facts_section = "Confirmed facts from this session:\n" + \
+                            "\n".join(f"  • {f}" for f in confirmed_facts[-10:])
 
         system = self.TOOL_CALL_SYSTEM.format(
             skill_summary=skill_summary,
@@ -245,7 +250,7 @@ Return format:
             extra_tools_section=extra_tools_section,
         )
         if context:
-            system += f"\\n\\nContext:\\n{context}"
+            system += f"\n\nContext:\n{context}"
         return system
 
     @staticmethod
@@ -323,6 +328,7 @@ class OllamaEngine(LLMEngine):
         stop_note = ""
         if turns > 1 and context and (
             "Tool outputs:" in context or
+            "[TOOL: " in context or          # _format_tool_outputs produces this
             "[STORED:" in context or
             "Result for tool" in context
         ):
@@ -339,7 +345,7 @@ class OllamaEngine(LLMEngine):
 
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": query},
+            {"role": "user",   "content": query},
         ]
 
         # ── Conversation logging ─────────────────────────────────────────────

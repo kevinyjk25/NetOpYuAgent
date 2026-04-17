@@ -52,8 +52,8 @@ header{
   flex-shrink:0;
 }
 .skill-list,.tool-list{overflow-y:auto;padding:4px 0}
-.skill-list{flex:1;min-height:80px}
-.tool-list{flex:0 0 auto;max-height:100px}
+.skill-list{flex:1;min-height:0}
+.tool-list{flex:0 0 auto;max-height:160px}
 .skill-item,.tool-item{
   padding:5px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;
   transition:background .12s;
@@ -1421,19 +1421,22 @@ async function loadTools() {
     el.innerHTML='';
     const large=['syslog_search','prometheus_query','netflow_dump'];
     for (const [name,info] of Object.entries(tools).filter(([n])=>n!=='read_stored_result')) {
-      const isL=large.includes(name);
-      const item=document.createElement('div');
+      const isL   = large.includes(name);
+      const isUp  = info.uploaded === true;
+      const item  = document.createElement('div');
       item.className='tool-item';
       item.onclick=()=>quickTool(name,info.example||{});
+      let subtitle = isL ? '📦 large → cached' : '✓ inline';
+      if (isUp) subtitle = '📤 uploaded · ' + subtitle;
       item.innerHTML=`
         <div class="risk-dot ${isL?'risk-medium':'risk-low'}"></div>
         <div>
-          <div class="skill-name">${esc(name)}</div>
-          <div class="skill-purpose">${isL?'📦 large → cached':'✓ inline'}</div>
+          <div class="skill-name">${esc(name)}${isUp?' <span style="color:var(--accent);font-size:9px">📤</span>':''}</div>
+          <div class="skill-purpose">${esc(subtitle)}</div>
         </div>`;
       el.appendChild(item);
     }
-  } catch(e) {}
+  } catch(e) { console.error('loadTools:', e); }
 }
 
 async function quickTool(toolName, args) {
