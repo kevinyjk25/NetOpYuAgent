@@ -128,8 +128,9 @@ CONFIGURATION QUERIES — when asked about device config:
 - Use [TOOL:validate_device_config] to check for errors
 - Use [TOOL:edit_device_config] to apply fixes
 
-STOP CONDITION: If the context already contains tool results (any text after "Tool outputs:"),
-provide your final analysis NOW. Do not call any tool.
+STOP CONDITION: If the context section shows tool results — either a "Tool outputs:" header
+or any "[TOOL: tool_name]" block — provide your final analysis NOW. Do NOT call any more tools.
+The results are already there; summarise and answer the user directly.
 
 {extra_tools_section}
 
@@ -212,9 +213,13 @@ Return format:
         # Any tools registered AFTER startup (via upload) are injected here
         # so the LLM knows they exist and can call them.
         _BASE_TOOLS = {
+            # Built-in mock tools (always present)
             "syslog_search", "prometheus_query", "netflow_dump", "dns_lookup",
             "device_info", "alert_summary", "service_health", "restart_service",
             "read_stored_result", "process_stored_chunks", "list_devices", "list_interfaces",
+            # Config tools (examples in system prompt — don't re-list in UPLOADED section)
+            "get_device_config", "edit_device_config",
+            "validate_device_config", "diff_device_config",
         }
         extra_tools_section = ""
         if tool_registry:
@@ -223,21 +228,21 @@ Return format:
                 lines = ["UPLOADED TOOLS — also available, use the same [TOOL:name] format:"]
                 for name in sorted(extra.keys()):
                     lines.append("  [TOOL:" + name + '] {"<arg>": "<value>"}')
-                extra_tools_section = "\\n".join(lines)
+                extra_tools_section = "\n".join(lines)
 
         # ── Skill summary ─────────────────────────────────────────────
         skill_summary = ""
         if skill_catalog:
             try:
-                skill_summary = "Available skills:\\n" + skill_catalog.format_summary()
+                skill_summary = "Available skills:\n" + skill_catalog.format_summary()
             except Exception:
                 pass
 
         # ── Confirmed facts ───────────────────────────────────────────
         facts_section = ""
         if confirmed_facts:
-            facts_section = ("Confirmed facts from this session:\\n" +
-                             "\\n".join(f"  • {f}" for f in confirmed_facts[-10:]))
+            facts_section = "Confirmed facts from this session:\n" + \
+                            "\n".join(f"  • {f}" for f in confirmed_facts[-10:])
 
         system = self.TOOL_CALL_SYSTEM.format(
             skill_summary=skill_summary,
@@ -245,7 +250,7 @@ Return format:
             extra_tools_section=extra_tools_section,
         )
         if context:
-            system += f"\\n\\nContext:\\n{context}"
+            system += f"\n\nContext:\n{context}"
         return system
 
     @staticmethod
@@ -318,14 +323,13 @@ class OllamaEngine(LLMEngine):
         confirmed_facts = getattr(state, "confirmed_facts", None) if state else None
         turns           = getattr(state, "turns", 1) if state else 1
 
-        # On Turn 2+: if tool results are already in context, add an explicit
-        # stop instruction so the model doesn't repeat the same tool call
+        # On Turn 2+: if THIS TURN's tool_outputs are non-empty, add a stop
+        # instruction so the model synthesizes rather than calling another tool.
+        # We use state._current_tool_outputs_count (set by loop.py) to distinguish
+        # real current-turn results from memory context (which may also contain [TOOL:] text).
         stop_note = ""
-        if turns > 1 and context and (
-            "Tool outputs:" in context or
-            "[STORED:" in context or
-            "Result for tool" in context
-        ):
+        _cur_tool_count = getattr(state, "_current_tool_outputs_count", 0) if state else 0
+        if turns > 1 and _cur_tool_count > 0:
             stop_note = (
                 "\n\nCRITICAL: Tool results are already shown in the context above. "
                 "DO NOT emit any [TOOL:...] line. Provide your final analysis now."
@@ -339,7 +343,7 @@ class OllamaEngine(LLMEngine):
 
         messages = [
             {"role": "system", "content": system},
-            {"role": "user", "content": query},
+            {"role": "user",   "content": query},
         ]
 
         # ── Conversation logging ─────────────────────────────────────────────
@@ -440,29 +444,48 @@ class OllamaEngine(LLMEngine):
         if self._is_thinking_model:
             payload["think"] = self._think  # False = suppress think blocks in API response
 
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{self._base_url}/api/chat", json=payload
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                # CAP 6: log token usage from Ollama response
-                usage = data.get("prompt_eval_count", 0), data.get("eval_count", 0)
-                if any(usage):
-                    logger.info(
-                        "LLM tokens: prompt=%d completion=%d total=%d model=%s",
-                        usage[0], usage[1], sum(usage), self.model,
+        # Use separate connect / read timeouts.
+        # connect: fail fast if Ollama not running.
+        # read: generous — large contexts on qwen3.5:27b can take 3-5 min.
+        _timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=5.0)
+
+        for _attempt in range(2):   # one retry on ReadTimeout
+            try:
+                async with httpx.AsyncClient(timeout=_timeout) as client:
+                    resp = await client.post(
+                        f"{self._base_url}/api/chat", json=payload
                     )
-                # Even with think=False in the API, strip any residual <think> tags
-                return self._strip_think(data["message"]["content"])
-        except Exception as exc:
-            logger.error("OllamaEngine error: %s", exc)
-            raise RuntimeError(
-                f"Ollama call failed: {exc}. "
-                f"Is Ollama running at {self._base_url}? "
-                f"Run: ollama serve && ollama pull {self.model}"
-            )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    # CAP 6: log token usage from Ollama response
+                    usage = data.get("prompt_eval_count", 0), data.get("eval_count", 0)
+                    if any(usage):
+                        logger.info(
+                            "LLM tokens: prompt=%d completion=%d total=%d model=%s",
+                            usage[0], usage[1], sum(usage), self.model,
+                        )
+                    # Even with think=False in the API, strip any residual <think> tags
+                    return self._strip_think(data["message"]["content"])
+            except httpx.ReadTimeout:
+                if _attempt == 0:
+                    logger.warning(
+                        "OllamaEngine: ReadTimeout on attempt 1 — retrying (context=%d chars)...",
+                        len(str(payload.get("messages", "")))
+                    )
+                    await asyncio.sleep(2)
+                    continue
+                logger.error("OllamaEngine: ReadTimeout after retry — context may be too large")
+                raise RuntimeError(
+                    f"Ollama timed out after 300s (context too large or model overloaded). "
+                    f"Try: reduce context, use a faster model, or increase Ollama resources."
+                )
+            except Exception as exc:
+                logger.error("OllamaEngine error: %s", exc)
+                raise RuntimeError(
+                    f"Ollama call failed: {exc}. "
+                    f"Is Ollama running at {self._base_url}? "
+                    f"Run: ollama serve && ollama pull {self.model}"
+                )
 
     async def stream_call(self, query: str, context: str,
                           state: Any = None, skill_catalog: Any = None):
@@ -480,7 +503,7 @@ class OllamaEngine(LLMEngine):
             "stream":   True,
             "options":  {"temperature": self.temperature, "num_predict": self.max_tokens},
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=5.0)) as client:
             async with client.stream("POST", f"{self._base_url}/api/chat", json=payload) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():

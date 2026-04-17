@@ -283,11 +283,18 @@ class ContextBudgetManager:
             content = getattr(r, "record", r)
             text = getattr(content, "content", str(content))
             lines.append(f"[{tier}] {text}")
-        return "[MEMORY CONTEXT]\n" + "\n\n".join(lines)
+        header = (
+            "[MEMORY CONTEXT]\n"
+            "# NOTE: this is RECALLED HISTORY from prior sessions, not current tool results.\n"
+            "# You may still call tools to get fresh data for this request."
+        )
+        return header + "\n\n" + "\n\n".join(lines)
 
     @staticmethod
     def _format_tool_outputs(outputs: dict[str, str]) -> str:
-        parts = []
+        # Header "Tool outputs:" is checked by the stop_note trigger in llm_engine.py
+        # to know whether to inject the STOP CONDITION instruction.
+        parts = ["Tool outputs:"]
         for tool_name, output in outputs.items():
             parts.append(f"[TOOL: {tool_name}]\n{output}")
         return "\n\n".join(parts)
