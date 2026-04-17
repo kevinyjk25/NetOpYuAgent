@@ -364,11 +364,33 @@ class AgentRuntimeLoop:
         chunks: list[str] = []
         last_tool_result  = ""
         tool_outputs: dict[str, str] = {}   # persists across turns — tool results feed next LLM call
-        called_tools: set[str] = set()       # dedup: don't call same tool twice
+        # Seed called_tools from any prior tool calls visible in memory context.
+        # This prevents the LLM from re-calling ap-01 when memory already has
+        # its config from a previous stream() invocation.
+        import re as _re2
+        _prior_calls: set[str] = set()
+        # We'll also seed after the first memory retrieval inside the loop.
+        # For now, seed from confirmed_facts which may contain tool call records.
+        for _fact in (confirmed_facts or []):
+            for _m in _re2.finditer(r"\[TOOL:\s*(\w+)\]", _fact):
+                _prior_calls.add(_m.group(1))
+        called_tools: set[str] = _prior_calls   # dedup: don't call same tool twice
 
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
+
+            # Seed called_tools from prior tool calls visible in memory (first turn only)
+            # so we don't re-fetch device configs that were already retrieved in a prior
+            # stream() call and are now visible in the FTS5 memory context.
+            if state.turns == 1 and memory_results:
+                import re as _re3
+                for _mr in memory_results:
+                    _mr_text = getattr(_mr, "content", "") or str(_mr)
+                    for _mt in _re3.finditer(r"\[TOOL:\s*(\w+)\]", _mr_text):
+                        called_tools.add(_mt.group(1))
+                if called_tools:
+                    logger.debug("stream: seeded called_tools from memory: %s", called_tools)
 
             # P2: skill catalog summary always prepended (cache-stable prefix)
             skill_section = ""
@@ -679,6 +701,8 @@ class AgentRuntimeLoop:
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
                 tool_outputs[tool_name] = stored   # accumulated for next turn context
+                # Update count so llm_engine knows how many current-turn results exist
+                state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):

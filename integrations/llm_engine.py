@@ -323,15 +323,13 @@ class OllamaEngine(LLMEngine):
         confirmed_facts = getattr(state, "confirmed_facts", None) if state else None
         turns           = getattr(state, "turns", 1) if state else 1
 
-        # On Turn 2+: if tool results are already in context, add an explicit
-        # stop instruction so the model doesn't repeat the same tool call
+        # On Turn 2+: if THIS TURN's tool_outputs are non-empty, add a stop
+        # instruction so the model synthesizes rather than calling another tool.
+        # We use state._current_tool_outputs_count (set by loop.py) to distinguish
+        # real current-turn results from memory context (which may also contain [TOOL:] text).
         stop_note = ""
-        if turns > 1 and context and (
-            "Tool outputs:" in context or
-            "[TOOL: " in context or          # _format_tool_outputs produces this
-            "[STORED:" in context or
-            "Result for tool" in context
-        ):
+        _cur_tool_count = getattr(state, "_current_tool_outputs_count", 0) if state else 0
+        if turns > 1 and _cur_tool_count > 0:
             stop_note = (
                 "\n\nCRITICAL: Tool results are already shown in the context above. "
                 "DO NOT emit any [TOOL:...] line. Provide your final analysis now."
