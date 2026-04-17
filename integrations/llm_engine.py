@@ -446,29 +446,48 @@ class OllamaEngine(LLMEngine):
         if self._is_thinking_model:
             payload["think"] = self._think  # False = suppress think blocks in API response
 
-        try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
-                resp = await client.post(
-                    f"{self._base_url}/api/chat", json=payload
-                )
-                resp.raise_for_status()
-                data = resp.json()
-                # CAP 6: log token usage from Ollama response
-                usage = data.get("prompt_eval_count", 0), data.get("eval_count", 0)
-                if any(usage):
-                    logger.info(
-                        "LLM tokens: prompt=%d completion=%d total=%d model=%s",
-                        usage[0], usage[1], sum(usage), self.model,
+        # Use separate connect / read timeouts.
+        # connect: fail fast if Ollama not running.
+        # read: generous — large contexts on qwen3.5:27b can take 3-5 min.
+        _timeout = httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=5.0)
+
+        for _attempt in range(2):   # one retry on ReadTimeout
+            try:
+                async with httpx.AsyncClient(timeout=_timeout) as client:
+                    resp = await client.post(
+                        f"{self._base_url}/api/chat", json=payload
                     )
-                # Even with think=False in the API, strip any residual <think> tags
-                return self._strip_think(data["message"]["content"])
-        except Exception as exc:
-            logger.error("OllamaEngine error: %s", exc)
-            raise RuntimeError(
-                f"Ollama call failed: {exc}. "
-                f"Is Ollama running at {self._base_url}? "
-                f"Run: ollama serve && ollama pull {self.model}"
-            )
+                    resp.raise_for_status()
+                    data = resp.json()
+                    # CAP 6: log token usage from Ollama response
+                    usage = data.get("prompt_eval_count", 0), data.get("eval_count", 0)
+                    if any(usage):
+                        logger.info(
+                            "LLM tokens: prompt=%d completion=%d total=%d model=%s",
+                            usage[0], usage[1], sum(usage), self.model,
+                        )
+                    # Even with think=False in the API, strip any residual <think> tags
+                    return self._strip_think(data["message"]["content"])
+            except httpx.ReadTimeout:
+                if _attempt == 0:
+                    logger.warning(
+                        "OllamaEngine: ReadTimeout on attempt 1 — retrying (context=%d chars)...",
+                        len(str(payload.get("messages", "")))
+                    )
+                    await asyncio.sleep(2)
+                    continue
+                logger.error("OllamaEngine: ReadTimeout after retry — context may be too large")
+                raise RuntimeError(
+                    f"Ollama timed out after 300s (context too large or model overloaded). "
+                    f"Try: reduce context, use a faster model, or increase Ollama resources."
+                )
+            except Exception as exc:
+                logger.error("OllamaEngine error: %s", exc)
+                raise RuntimeError(
+                    f"Ollama call failed: {exc}. "
+                    f"Is Ollama running at {self._base_url}? "
+                    f"Run: ollama serve && ollama pull {self.model}"
+                )
 
     async def stream_call(self, query: str, context: str,
                           state: Any = None, skill_catalog: Any = None):
@@ -486,7 +505,7 @@ class OllamaEngine(LLMEngine):
             "stream":   True,
             "options":  {"temperature": self.temperature, "num_predict": self.max_tokens},
         }
-        async with httpx.AsyncClient(timeout=120.0) as client:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=300.0, write=30.0, pool=5.0)) as client:
             async with client.stream("POST", f"{self._base_url}/api/chat", json=payload) as resp:
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
