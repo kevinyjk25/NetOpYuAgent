@@ -259,11 +259,42 @@ async def executor_node(state: dict[str, Any]) -> dict[str, Any]:
     In pragmatic mode: dispatches to real tools via _tool_registry injected in state.
     In mock mode: returns stub completions for each step.
     Tool registry is injected by patch_hitl_graph(engine, tool_registry=...) in main.py.
+
+    When a specific tool was force-routed here via force_hitl_tool (e.g. edit_device_config),
+    the approved tool is dispatched directly with the original args rather than matching
+    plan_steps text.
     """
     action        = state.get("proposed_action", {})
     steps         = state.get("plan_steps", [])
     tool_registry = state.get("_tool_registry") or {}
     results       = []
+
+    # ── Fast path: force_hitl_tool was approved — dispatch directly ──────────
+    user_meta  = state.get("user_metadata") or {}
+    force_tool = user_meta.get("force_hitl_tool", "")
+    force_args = user_meta.get("force_hitl_args") or {}
+    if force_tool and tool_registry and force_tool in tool_registry:
+        logger.info("executor_node: approved force_hitl_tool=%r args=%s", force_tool, force_args)
+        try:
+            raw = await tool_registry[force_tool](force_args)
+            return {
+                "execution_results": [{
+                    "step":   f"Execute approved tool: {force_tool}",
+                    "status": "ok",
+                    "output": str(raw)[:2000],
+                }],
+                "error": None,
+            }
+        except Exception as exc:
+            logger.warning("executor_node: force_hitl_tool %r failed: %s", force_tool, exc)
+            return {
+                "execution_results": [{
+                    "step":   f"Execute approved tool: {force_tool}",
+                    "status": "error",
+                    "output": str(exc),
+                }],
+                "error": str(exc),
+            }
 
     for step in steps:
         logger.info("executor: step=%r", step)
@@ -372,6 +403,13 @@ def route_after_plan(
         (state.get("proposed_action") or {}).get("action_type"),
     )
 
+    # If the loop already determined a specific tool requires HITL approval,
+    # bypass the LLM-based trigger evaluation and go straight to the interrupt node.
+    force_tool = (state.get("user_metadata") or {}).get("force_hitl_tool", "")
+    if force_tool:
+        logger.info("route_after_plan: force_hitl_tool=%r → forcing interrupt", force_tool)
+        return "hitl_interrupt_node"
+
     payload = evaluate_triggers(hitl_state, triggers, thread_id, context_id, task_id)
     if payload:
         return "hitl_interrupt_node"
@@ -425,7 +463,30 @@ async def hitl_interrupt_node(state: dict[str, Any]) -> dict[str, Any]:
     config     = state.get("_hitl_config")  # injected by build_hitl_graph if provided
     triggers   = build_trigger_chain(config if isinstance(config, HitlConfig) else None)
     hitl_state = HitlState.model_validate(state)
-    payload    = evaluate_triggers(hitl_state, triggers, thread_id, context_id, task_id)
+    # If a specific tool was flagged by the loop (force_hitl_tool), build
+    # the payload for that tool directly — no need to re-run LLM evaluators.
+    force_tool = (state.get("user_metadata") or {}).get("force_hitl_tool", "")
+    if force_tool:
+        payload = HitlPayload(
+            interrupt_id     = str(uuid.uuid4()),
+            thread_id        = thread_id,
+            context_id       = context_id,
+            task_id          = task_id,
+            trigger_kind     = TriggerKind.DESTRUCTIVE_OP,
+            risk_level       = RiskLevel.HIGH,
+            user_query       = state.get("query", ""),
+            intent_summary   = f"Tool '{force_tool}' requires human approval before execution.",
+            proposed_action  = ProposedAction(
+                action_type  = f"tool_call:{force_tool}",
+                target       = force_tool,
+                parameters   = {},
+                risk_summary = f"Tool '{force_tool}' is on the HITL watch-list.",
+                reversible   = False,
+            ),
+            sla_seconds      = 600,
+        )
+    else:
+        payload = evaluate_triggers(hitl_state, triggers, thread_id, context_id, task_id)
 
     if payload is None:
         # Construct a minimal destructive-action payload from state if triggers

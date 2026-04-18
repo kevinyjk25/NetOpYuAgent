@@ -191,4 +191,4 @@ registry:
 
 # ── Logging ───────────────────────────────────────────────────
 logging:
-  mode: "llm_only"   # normal | llm | verbose / llm_only
+  mode: "normal"   # normal | llm | verbose

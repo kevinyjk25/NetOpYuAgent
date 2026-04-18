@@ -449,6 +449,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             from a2a.event_queue import EventQueue, RequestContext
                             from a2a.schemas import Message, TextPart
                             eq  = EventQueue()
+                            # Pass the tool name and args that triggered HITL so
+                            # the graph can force the interrupt and replay after approval.
+                            _hitl_tool = chunk.get("tool_name", "")
+                            _hitl_args = chunk.get("tool_args", {})
                             ctx = RequestContext(
                                 task_id=task_id,
                                 context_id=context_id,
@@ -458,6 +462,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                     "env_context":     env_ctx,
                                     "confirmed_facts": list(req.confirmed_facts or []),
                                     "working_set":     list(req.working_set or []),
+                                    "force_hitl_tool": _hitl_tool,   # bypass LLM trigger eval
+                                    "force_hitl_args": _hitl_args,   # replay args after approval
+                                    "action_type":     f"tool_call:{_hitl_tool}",
                                 },
                             )
                             exec_task = asyncio.create_task(executor.execute(ctx, eq))
@@ -557,7 +564,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     except Exception as _e:
                         logger.debug("Skill evolver skipped: %s", _e)
 
-                yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome})}\n\n"
+                # Include confirmed_facts so frontend can carry them to next query
+                _done_facts = getattr(loop, '_last_confirmed_facts', []) or []
+                yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
                 yield "data: [DONE]\n\n"
 
             except Exception as exc:

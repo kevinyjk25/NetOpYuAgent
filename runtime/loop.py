@@ -422,7 +422,12 @@ class AgentRuntimeLoop:
 
             # P1: detect SKILL_LOAD directives and expand detail on demand
             import re
+            _skill_loads_this_turn_r: set[str] = set()
             for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+                if skill_id in _skill_loads_this_turn_r:
+                    continue
+                _skill_loads_this_turn_r.add(skill_id)
+                called_tools.add(f"SKILL_LOAD:{skill_id}")
                 if self._skill_catalog:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
@@ -631,7 +636,13 @@ class AgentRuntimeLoop:
             # the LLM will produce a proper prose answer then.
 
             import re
+            _skill_loads_this_turn: set[str] = set()
             for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+                if skill_id in _skill_loads_this_turn:
+                    continue   # deduplicate within a single response
+                _skill_loads_this_turn.add(skill_id)
+                # Mark as "called" so dedup blocks repeated SKILL_LOAD across turns
+                called_tools.add(f"SKILL_LOAD:{skill_id}")
                 if self._skill_catalog:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
@@ -690,15 +701,18 @@ class AgentRuntimeLoop:
                     except Exception:
                         pass
                 if _needs_hitl:
+                    import json as _json
                     yield {
                         "message": (
                             f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
                             "and requires human approval before execution. "
                             "Routing to HITL graph."
                         ),
-                        "node": "hitl_gate",
+                        "node":      "hitl_gate",
                         "stop_hitl": True,
                         "tool_name": tool_name,
+                        "tool_args": tool_args,          # carry args for post-approval replay
+                        "tool_args_json": _json.dumps(tool_args, default=str),
                     }
                     return
 
@@ -736,14 +750,12 @@ class AgentRuntimeLoop:
             decision = self._policy.evaluate(state)
             if decision.should_stop:
                 yield {"message": self._format_final([], decision), "node": "runtime_loop"}
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
             if self._is_complete(llm_response, new_tool_calls):
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
 
     async def _retrieve_memory(self, query: str, session_id: str) -> list[Any]:
         if self._memory is None:
@@ -1004,13 +1016,22 @@ class AgentRuntimeLoop:
         return f"[Tool {tool_name!r} not registered — args={args}]"
 
     @staticmethod
-    def _is_complete(response: str, tool_calls: list) -> bool:
-        # If the LLM emitted a SKILL_LOAD directive, it needs another turn
-        # to read the loaded detail and then call the actual tools.
-        # Do NOT terminate on SKILL_LOAD turns even though tool_calls is empty.
+    @staticmethod
+    def _skill_loads_in(response: str) -> set:
         import re as _re
-        if _re.search(r"\[SKILL_LOAD:\w+\]", response):
-            return False
+        return set(_re.findall(r"\[SKILL_LOAD:(\w+)\]", response))
+
+    def _is_complete(self, response: str, tool_calls: list) -> bool:
+        # If the LLM emitted a SKILL_LOAD directive, it needs one more turn
+        # to read the loaded detail and then call the actual tools.
+        # BUT: if the response ONLY contains SKILL_LOAD with no other content
+        # and no tool calls, limit to one extension (dedup in called_tools handles the rest).
+        import re as _re
+        skill_loads = _re.findall(r"\[SKILL_LOAD:\w+\]", response)
+        if skill_loads:
+            # Only extend if there's actual content beyond the SKILL_LOAD directives
+            stripped = _re.sub(r"\[SKILL_LOAD:\w+\]", "", response).strip()
+            return len(stripped) == 0 and len(tool_calls) == 0  # pure SKILL_LOAD with nothing else → complete
         return len(tool_calls) == 0
 
     @staticmethod

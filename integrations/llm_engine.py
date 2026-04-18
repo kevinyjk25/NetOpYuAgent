@@ -354,6 +354,13 @@ class OllamaEngine(LLMEngine):
                     checked_lines.append(f"  - {k} ✓ done")
             stop_note = "\n\nALREADY COMPLETED THIS SESSION:\n" + "\n".join(checked_lines)
             stop_note += "\nDo NOT repeat any of the above calls. Move to the next unchecked device."
+            # When many results exist, strongly prompt for synthesis to avoid empty responses
+            if len(_tool_output_keys) >= 2:
+                stop_note += (
+                    "\n\nYou have gathered sufficient tool results. "
+                    "Write a complete analysis and recommendations NOW. "
+                    "Your response MUST include prose text summarising the findings."
+                )
 
         if turns > 1 and _cur_tool_count >= _max_tool_calls:
             stop_note += (

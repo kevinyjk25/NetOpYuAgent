@@ -714,6 +714,121 @@ async def validate_device_config(args: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+
+# ---------------------------------------------------------------------------
+# Tool: edit_device_config  (mock)
+# ---------------------------------------------------------------------------
+
+async def edit_device_config(args: dict[str, Any]) -> str:
+    """
+    Mock: simulate pushing config lines to a device.
+    Accepts multiple call formats the LLM may use:
+
+    Format A — explicit IOS commands:
+      config_lines: ["radius-server host 10.0.1.100 auth-port 1812 timeout 3"]
+
+    Format B — remove/add dicts (legacy):
+      section: "radius", changes: {"remove": ["...old..."], "add": ["...new..."]}
+
+    Format C — key-value changes (what LLMs naturally produce):
+      section: "radius", changes: {"timeout": 3, "host": "10.0.1.100"}
+      → converted to IOS commands based on section type
+    """
+    device_id    = args.get("device_id", "")
+    config_lines = args.get("config_lines") or []
+    section      = args.get("section", "")
+    changes      = args.get("changes", {})
+    reason       = args.get("reason", "operator change")
+
+    await asyncio.sleep(0.05)
+
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found. Use list_devices to see valid IDs.]"
+
+    # ── Normalise all call formats into config_lines ──────────────────────
+    if not config_lines and changes:
+        if "remove" in changes or "add" in changes:
+            # Format B: explicit remove/add lists
+            for line in changes.get("remove", []):
+                config_lines.append(f"no {line}")
+            config_lines.extend(changes.get("add", []))
+        else:
+            # Format C: key-value changes — generate IOS commands per section
+            sect = section.lower()
+            if sect in ("ntp", "time"):
+                servers = changes.get("servers", [])
+                for s in servers:
+                    config_lines.append(f"ntp server {s}")
+                if "timezone" in changes:
+                    config_lines.append(f"clock timezone {changes['timezone']}")
+            elif sect == "radius" or sect == "aaa":
+                host    = changes.get("host", "")
+                port    = changes.get("auth_port", changes.get("port", 1812))
+                timeout = changes.get("timeout", "")
+                key     = changes.get("key", changes.get("secret", ""))
+                if host:
+                    cmd = f"radius-server host {host} auth-port {port}"
+                    if timeout:
+                        cmd += f" timeout {timeout}"
+                    if key:
+                        cmd += f" key {key}"
+                    config_lines.append(cmd)
+                elif timeout:
+                    # timeout-only change — patch existing server entry
+                    config_lines.append(f"radius-server timeout {timeout}")
+            elif sect in ("syslog", "logging"):
+                server = changes.get("server", changes.get("host", ""))
+                if server:
+                    config_lines.append(f"logging host {server}")
+                level = changes.get("level", changes.get("severity", ""))
+                if level:
+                    config_lines.append(f"logging trap {level}")
+            elif sect in ("bgp",):
+                as_num = changes.get("as", changes.get("local_as", ""))
+                if as_num:
+                    config_lines.append(f"router bgp {as_num}")
+                for key, val in changes.items():
+                    if key not in ("as", "local_as"):
+                        config_lines.append(f"  bgp {key} {val}")
+            else:
+                # Generic: emit "key value" lines for each change
+                for key, val in changes.items():
+                    if isinstance(val, list):
+                        for v in val:
+                            config_lines.append(f"{key} {v}")
+                    else:
+                        config_lines.append(f"{key} {val}")
+
+    # Last-resort: if still empty but args has scalar values, treat them as inline config
+    if not config_lines and changes:
+        for key, val in changes.items():
+            if isinstance(val, (str, int, float)) and key not in ("section", "reason"):
+                config_lines.append(f"{key} {val}")
+
+    if not config_lines:
+        # Build a helpful error with what was received
+        received = f"section={section!r}, changes={changes!r}" if (section or changes) else f"args={args!r}"
+        return (f"[Error: no configuration lines could be derived for {device_id}. "
+                f"Received: {received}. "
+                f"Provide config_lines (list of IOS commands), or section + changes with recognized keys.]")
+
+    # Simulate config push
+    lines_applied = "\n".join(f"  {l}" for l in config_lines)
+    return (
+        f"# Config push result — {device_id} ({dev['model']}) — site {dev['site']}\n"
+        f"# {'─'*60}\n"
+        f"# Reason: {reason}\n"
+        f"# Section: {section or 'global'}\n"
+        f"# Lines applied ({len(config_lines)}):\n"
+        f"{lines_applied}\n"
+        f"# {'─'*60}\n"
+        f"# Result: Configuration applied successfully (mock)\n"
+        f"# Device acknowledged: OK\n"
+        f"# Write memory: Done\n"
+        f"# Note: run validate_device_config to verify the change took effect"
+    )
+
 TOOL_REGISTRY: dict[str, callable] = {
     "syslog_search":          syslog_search,
     "prometheus_query":       prometheus_query,
@@ -726,6 +841,7 @@ TOOL_REGISTRY: dict[str, callable] = {
     "list_interfaces":        list_interfaces,
     "get_device_config":      get_device_config,
     "validate_device_config": validate_device_config,
+    "edit_device_config":     edit_device_config,
     # read_stored_result and process_stored_chunks are injected at runtime (need ToolResultStore ref)
 }
 
@@ -875,5 +991,19 @@ TOOL_DESCRIPTIONS = {
         },
         "returns_large": False,
         "example": {"device_id": "ap-01"},
+    },
+    "edit_device_config": {
+        "description": (
+            "Push configuration lines to a device (HITL approval required before execution). "
+            "Mock mode simulates the config push and returns a result summary. "
+            "Provide config_lines as a list of IOS-style commands."
+        ),
+        "parameters": {
+            "device_id":    "device ID (e.g. 'ap-01', 'sw-core-01')",
+            "config_lines": "list of IOS-style config commands to push",
+            "reason":       "change reason for audit log",
+        },
+        "returns_large": False,
+        "example": {"device_id": "ap-01", "config_lines": ["radius-server host 10.0.1.100 timeout 3"], "reason": "fix RADIUS timeout"},
     },
 }

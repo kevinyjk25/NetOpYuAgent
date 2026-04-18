@@ -1130,7 +1130,7 @@ async function switchSession(sid) {
 
   // Clear current chat and load history
   document.getElementById('messages').innerHTML = '';
-  storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0;
+  storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0; _sessionFacts = [];
   renderResultsTurns();
   clearFlow();
 
@@ -1172,7 +1172,7 @@ async function createNewSession() {
     document.getElementById('session-input').value = sessionId;
     document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
     document.getElementById('messages').innerHTML = '';
-    storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0;
+    storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0; _sessionFacts = [];
     renderResultsTurns(); clearFlow();
     // Add to local list and re-render immediately
     _sessions.unshift({
@@ -1244,6 +1244,7 @@ let sessionId = '';
 let storeItems = {};
 let activeRefId = null;
 let flowEvents  = [];
+let _sessionFacts = [];   // confirmed_facts from last response, sent back next query
 let reqStart    = 0;
 let streamState = null;
 
@@ -1524,7 +1525,7 @@ async function sendQuery() {
   addMessage('user', query);
   reqStart = Date.now();
   flowEvent('classify','🔍 Classify',`"${query.slice(0,55)}${query.length>55?'…':''}"`,`session: ${sid}`);
-  const body = JSON.stringify({query,session_id:sid,confirmed_facts:[],working_set:[],env_context:{},delegation_mode:dlg});
+  const body = JSON.stringify({query,session_id:sid,confirmed_facts:_sessionFacts,working_set:[],env_context:{},delegation_mode:dlg});
   try {
     if (mode==='stream') await streamQuery(query, sid, body);
     else                  await syncQuery(body);
@@ -1689,10 +1690,21 @@ function dispatchChunk(c, query, sid) {
     updateModelBadge(c.message);
     return;
   }
+  if (c.type==='confirmed_facts') {
+    // loop.py yielded confirmed_facts before stopping — carry forward to next query
+    if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
+      _sessionFacts = c.confirmed_facts;
+    }
+    return;
+  }
   if (c.type==='done') {
     addStep('done',`Complete — ${c.turns||'?'} turns in ${elap()}`,'','');
     flowEvent('done','✅ Done',`${c.turns||'?'} turns`,`session: ${sid}`);
     scanForRefs(streamState?.tokens?.join('')||'');
+    // Also capture confirmed_facts from done event if present
+    if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
+      _sessionFacts = c.confirmed_facts;
+    }
     return;
   }
   if (c.type==='hermes_write') {
@@ -2102,10 +2114,35 @@ async function hitlDec(id,dec) {
       body:JSON.stringify({operator_id:'webui-operator',comment:`${dec} via Console`})});
     const data=await res.json().catch(()=>({}));
     const outcome=data.outcome||data.decision||dec;
-    addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nOutcome: ${outcome}\n`+
-      (data.error?`Error: ${data.error}`:'Execution will resume if approved.'),'system');
+
+    if (data.error) {
+      // Decision failed (already resolved, not found, etc.)
+      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
+Outcome: ${outcome}
+Error: ${data.error}`,'system');
+    } else if (data.tool_result && dec==='approve') {
+      // Tool executed successfully after approval — show the result
+      const toolName = data.tool_name || 'tool';
+      addMessage('agent',
+        `✓ HITL approved — ${toolName} executed:
+
+${data.tool_result}`,
+        'agent');
+      // Also inject into Results tab as an inline result
+      addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
+      switchTab('cache');
+    } else if (dec==='approve') {
+      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
+Outcome: ${outcome}
+Tool is executing — check Results tab for output.`,'system');
+    } else {
+      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
+Outcome: ${outcome}`,'system');
+    }
     flowAdd('hitl',`⚠ HITL ${dec.toUpperCase()}`,`${id.slice(0,12)}…`,`outcome: ${outcome}`,data);
     setTimeout(()=>refreshHitl(0),400);
+    // Refresh session list to pick up the new turn written by Hermes
+    setTimeout(loadSessions, 1200);
   } catch(e){ addMessage('system','HITL decision error: '+e.message,'error'); }
 }
 
@@ -2180,7 +2217,7 @@ function setQuery(q) {
 function clearChat() {
   document.getElementById('messages').innerHTML='';
   sessionId=''; storeItems={}; activeRefId=null; flowEvents=[];
-  _turnResults={}; _currentTurn=0; _liveSessionId=''; _viewingHistory=false;
+  _turnResults={}; _currentTurn=0; _liveSessionId=''; _viewingHistory=false; _sessionFacts=[];
   document.getElementById('history-banner').classList.remove('visible');
   document.getElementById('send-btn').disabled = false;
   document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
