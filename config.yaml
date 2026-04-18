@@ -43,7 +43,7 @@ embeddings:
   backend:  "ollama"           # ollama | openai | none(stub)
   model:    "nomic-embed-text"
   base_url: "http://localhost:11434"
-  dim:      1536
+  dim:      768
 
 
 # ── Tool Backends (mock mode) ─────────────────────────────────
@@ -170,11 +170,11 @@ skills:
 # ── Runtime ──────────────────────────────────────────────────
 runtime:
   simple_confidence_floor:  0.70
-  simple_max_tool_calls:    4
+  simple_max_tool_calls:    8    # raised: enough for small fleet checks
   tool_result_inline_limit: 4000
   stop:
-    max_turns:             10
-    max_tool_calls:        20
+    max_turns:             20   # raised: multi-device checks need up to 14+ turns
+    max_tool_calls:        30   # raised: 7-device validation = 7+ tool calls
     token_budget:          50000
     max_no_progress_turns: 3
   pre_verification:  true
@@ -191,4 +191,4 @@ registry:
 
 # ── Logging ───────────────────────────────────────────────────
 logging:
-  mode: "normal"   # normal | llm | verbose
+  mode: "llm_only"   # normal | llm | verbose / llm_only

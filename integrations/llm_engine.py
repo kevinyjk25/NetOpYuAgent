@@ -112,10 +112,10 @@ STRICT RULES — follow exactly:
 6. Large results are shown as [STORED:tool:ref_id] — use [TOOL:read_stored_result] {{"ref_id": "..."}} to read pages
 
 TOOLS vs SKILLS — critical distinction:
-- TOOLS (use [TOOL:name]): executable functions that query/modify real systems
-- SKILLS (shown as "Available skills"): procedural guides telling you WHICH tools to call in sequence
-- NEVER call [TOOL:skill_name] — skills are NOT callable tools
-- When a skill is relevant, READ its steps (via [SKILL_LOAD:skill_id]) then call the TOOLS it describes
+- TOOLS (callable with [TOOL:name]): executable functions. Call them directly.
+- SKILLS listed in "Available skills" without a matching TOOL: procedural guides only — use [SKILL_LOAD:skill_id] to read steps, then call the tools it describes.
+- If a name appears in BOTH the tool list AND the skills list (e.g. get_device_config, validate_device_config, list_devices), it IS a real callable tool — use [TOOL:name] directly. SKILL_LOAD is NOT needed.
+- Only use [SKILL_LOAD:skill_id] for skills that have no corresponding [TOOL:] (e.g. restart_service, network_baseline_check).
 
 INVENTORY QUERIES — when asked what devices exist:
 - Use [TOOL:list_devices] {{}} to get ALL devices in one call
@@ -128,9 +128,10 @@ CONFIGURATION QUERIES — when asked about device config:
 - Use [TOOL:validate_device_config] to check for errors
 - Use [TOOL:edit_device_config] to apply fixes
 
-STOP CONDITION: If the context section shows tool results — either a "Tool outputs:" header
-or any "[TOOL: tool_name]" block — provide your final analysis NOW. Do NOT call any more tools.
-The results are already there; summarise and answer the user directly.
+STOP CONDITION: Once you have gathered enough information to fully answer the user's question, write your final analysis WITHOUT any [TOOL:] line.
+- For single-device queries: one tool call is usually enough — summarise after that result.
+- For multi-device queries (e.g. "check all site-a devices"): call the tool once per device, then summarise ALL results together. Do NOT stop after the first device.
+- NEVER call the same tool with the same arguments twice.
 
 {extra_tools_section}
 
@@ -326,13 +327,39 @@ class OllamaEngine(LLMEngine):
         # On Turn 2+: if THIS TURN's tool_outputs are non-empty, add a stop
         # instruction so the model synthesizes rather than calling another tool.
         # We use state._current_tool_outputs_count (set by loop.py) to distinguish
-        # real current-turn results from memory context (which may also contain [TOOL:] text).
+        # On turn 2+: if we already have multiple device results, nudge the LLM
+        # to synthesise rather than keep calling more tools. But allow sequential
+        # multi-device calls (e.g. validate each of 7 devices one at a time).
+        # Build "already checked" section from accumulated tool_outputs keys
+        # This tells the LLM exactly which device/args combos it has already run.
+        _tool_output_keys = getattr(state, "_tool_output_keys", []) if state else []
+        _cur_tool_count   = getattr(state, "_current_tool_outputs_count", 0) if state else 0
+        _max_tool_calls   = getattr(self, "_max_tool_calls", 20)
+
         stop_note = ""
-        _cur_tool_count = getattr(state, "_current_tool_outputs_count", 0) if state else 0
-        if turns > 1 and _cur_tool_count > 0:
-            stop_note = (
-                "\n\nCRITICAL: Tool results are already shown in the context above. "
-                "DO NOT emit any [TOOL:...] line. Provide your final analysis now."
+        if _tool_output_keys:
+            # Show LLM what has already been run this session
+            checked_lines = []
+            import json as _json
+            for k in _tool_output_keys:
+                if "|" in k:
+                    tname, args_str = k.split("|", 1)
+                    try:
+                        args = _json.loads(args_str)
+                        dev  = args.get("device_id", args_str)
+                        checked_lines.append(f"  - {tname}({dev}) ✓ done")
+                    except Exception:
+                        checked_lines.append(f"  - {k} ✓ done")
+                else:
+                    checked_lines.append(f"  - {k} ✓ done")
+            stop_note = "\n\nALREADY COMPLETED THIS SESSION:\n" + "\n".join(checked_lines)
+            stop_note += "\nDo NOT repeat any of the above calls. Move to the next unchecked device."
+
+        if turns > 1 and _cur_tool_count >= _max_tool_calls:
+            stop_note += (
+                "\n\nNOTE: You have gathered enough results. "
+                "Please now provide your complete analysis and recommendations. "
+                "Do NOT emit any further [TOOL:...] lines."
             )
 
         # Pass the live tool_registry so uploaded tools appear in the system prompt

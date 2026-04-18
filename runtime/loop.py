@@ -158,6 +158,21 @@ class LoopResult:
 # AgentRuntimeLoop
 # ---------------------------------------------------------------------------
 
+
+def _call_key(tool_name: str, tool_args: dict) -> str:
+    """
+    Deduplicate tool calls by name+args fingerprint, not just name.
+    This allows calling validate_device_config(ap-01) and validate_device_config(ap-02)
+    in the same session without the second being blocked as a duplicate.
+    Only blocks genuinely identical calls (same tool, same arguments).
+    """
+    import json as _json
+    try:
+        args_sig = _json.dumps(tool_args, sort_keys=True)
+    except Exception:
+        args_sig = str(tool_args)
+    return f"{tool_name}|{args_sig}"
+
 class AgentRuntimeLoop:
     """
     Thin default execution path.
@@ -367,30 +382,20 @@ class AgentRuntimeLoop:
         # Seed called_tools from any prior tool calls visible in memory context.
         # This prevents the LLM from re-calling ap-01 when memory already has
         # its config from a previous stream() invocation.
-        import re as _re2
-        _prior_calls: set[str] = set()
-        # We'll also seed after the first memory retrieval inside the loop.
-        # For now, seed from confirmed_facts which may contain tool call records.
-        for _fact in (confirmed_facts or []):
-            for _m in _re2.finditer(r"\[TOOL:\s*(\w+)\]", _fact):
-                _prior_calls.add(_m.group(1))
-        called_tools: set[str] = _prior_calls   # dedup: don't call same tool twice
+        # called_tools uses _call_key(name, args) fingerprints — not bare names.
+        # This allows validate_device_config(ap-01) and validate_device_config(ap-02)
+        # to both execute within one session.
+        called_tools: set[str] = set()
 
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
 
-            # Seed called_tools from prior tool calls visible in memory (first turn only)
-            # so we don't re-fetch device configs that were already retrieved in a prior
-            # stream() call and are now visible in the FTS5 memory context.
-            if state.turns == 1 and memory_results:
-                import re as _re3
-                for _mr in memory_results:
-                    _mr_text = getattr(_mr, "content", "") or str(_mr)
-                    for _mt in _re3.finditer(r"\[TOOL:\s*(\w+)\]", _mr_text):
-                        called_tools.add(_mt.group(1))
-                if called_tools:
-                    logger.debug("stream: seeded called_tools from memory: %s", called_tools)
+            # NOTE: We intentionally do NOT seed called_tools from memory context.
+            # Memory may mention [TOOL: validate_device_config] from a prior call on
+            # device X, but we still need to call it for devices Y and Z.
+            # Deduplication is now by _call_key (name+args), so the same tool with
+            # different device_id args is allowed. Same call with same args is blocked.
 
             # P2: skill catalog summary always prepended (cache-stable prefix)
             skill_section = ""
@@ -427,10 +432,10 @@ class AgentRuntimeLoop:
             # Execute tool calls — one per turn only
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
-            new_tool_calls = [(n, a) for n, a in tool_calls if n not in called_tools]
+            new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
-                called_tools.add(tool_name)
+                called_tools.add(_call_key(tool_name, tool_args))
 
                 # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
                 # When a name exists in both catalogs (e.g. list_devices is both a skill
@@ -454,7 +459,7 @@ class AgentRuntimeLoop:
                 else:
                     raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[tool_name] = stored   # accumulated for next turn
+                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 last_tool_result = raw
 
                 # P1: post-verification after each tool call
@@ -630,6 +635,7 @@ class AgentRuntimeLoop:
                 if self._skill_catalog:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
+                        context_str += "\n\n" + detail   # inject for next turn
                         yield {"node_step": f"Loading skill details: {skill_id}", "node": "skill_load"}
 
             # ── Single tool call enforcement ──────────────────────────
@@ -638,10 +644,10 @@ class AgentRuntimeLoop:
             # only the first so we feed back real data before the next call.
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
-            new_tool_calls = [(n, a) for n, a in tool_calls if n not in called_tools]
+            new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
-                called_tools.add(tool_name)
+                called_tools.add(_call_key(tool_name, tool_args))
 
                 # ── Skill-as-tool guard ───────────────────────────────
                 # If the LLM called a SKILL name as if it were a tool,
@@ -667,7 +673,7 @@ class AgentRuntimeLoop:
                         f"then call the individual tools it describes."
                     )
                     logger.warning("stream: LLM called skill-only '%s' as tool — injecting error", tool_name)
-                    tool_outputs[tool_name] = _skill_err
+                    tool_outputs[_call_key(tool_name, tool_args)] = _skill_err
                     yield {"node_step": f"Skill-only error: {tool_name}", "node": "runtime_loop"}
                     continue   # skip HITL check and _execute_tool for this name
 
@@ -704,9 +710,10 @@ class AgentRuntimeLoop:
                                  _json.dumps(tool_args, indent=2, default=str), "─"*72)
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[tool_name] = stored   # accumulated for next turn context
+                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 # Update count so llm_engine knows how many current-turn results exist
                 state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
+                state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):
@@ -993,6 +1000,12 @@ class AgentRuntimeLoop:
 
     @staticmethod
     def _is_complete(response: str, tool_calls: list) -> bool:
+        # If the LLM emitted a SKILL_LOAD directive, it needs another turn
+        # to read the loaded detail and then call the actual tools.
+        # Do NOT terminate on SKILL_LOAD turns even though tool_calls is empty.
+        import re as _re
+        if _re.search(r"\[SKILL_LOAD:\w+\]", response):
+            return False
         return len(tool_calls) == 0
 
     @staticmethod

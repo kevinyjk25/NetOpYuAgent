@@ -715,15 +715,17 @@ async def validate_device_config(args: dict[str, Any]) -> str:
 
 
 TOOL_REGISTRY: dict[str, callable] = {
-    "syslog_search":     syslog_search,
-    "prometheus_query":  prometheus_query,
-    "netflow_dump":      netflow_dump,
-    "dns_lookup":        dns_lookup,
-    "device_info":       device_info,
-    "alert_summary":     alert_summary,
-    "service_health":    service_health,
-    "list_devices":      list_devices,
-    "list_interfaces":   list_interfaces,
+    "syslog_search":          syslog_search,
+    "prometheus_query":       prometheus_query,
+    "netflow_dump":           netflow_dump,
+    "dns_lookup":             dns_lookup,
+    "device_info":            device_info,
+    "alert_summary":          alert_summary,
+    "service_health":         service_health,
+    "list_devices":           list_devices,
+    "list_interfaces":        list_interfaces,
+    "get_device_config":      get_device_config,
+    "validate_device_config": validate_device_config,
     # read_stored_result and process_stored_chunks are injected at runtime (need ToolResultStore ref)
 }
 
@@ -849,5 +851,29 @@ TOOL_DESCRIPTIONS = {
         },
         "returns_large": False,
         "example": {"ref_id": "a3f9c12b", "offset": 0, "length": 2000},
+    },
+    "get_device_config": {
+        "description": (
+            "Retrieve running configuration from a device. "
+            "Mock mode returns realistic seeded config with intentional issues on some APs "
+            "(missing NTP, RADIUS timeout, missing ACL). Use section= to narrow output."
+        ),
+        "parameters": {
+            "device_id": "device ID (e.g. 'ap-01', 'sw-core-01')",
+            "section":   "config section keyword — e.g. 'radius', 'ntp' (optional)",
+        },
+        "returns_large": True,
+        "example": {"device_id": "ap-01", "section": "radius"},
+    },
+    "validate_device_config": {
+        "description": (
+            "Run NTP, RADIUS, ACL, CPU and memory validation checks on a device. "
+            "Mock mode returns a deterministic PASS/WARN/FAIL report seeded by device ID."
+        ),
+        "parameters": {
+            "device_id": "device ID (e.g. 'ap-01', 'sw-core-01')",
+        },
+        "returns_large": False,
+        "example": {"device_id": "ap-01"},
     },
 }

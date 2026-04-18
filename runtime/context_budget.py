@@ -292,11 +292,18 @@ class ContextBudgetManager:
 
     @staticmethod
     def _format_tool_outputs(outputs: dict[str, str]) -> str:
-        # Header "Tool outputs:" is checked by the stop_note trigger in llm_engine.py
-        # to know whether to inject the STOP CONDITION instruction.
+        """
+        Format accumulated tool results for the LLM context.
+
+        Keys are _call_key fingerprints (e.g. "validate_device_config|{"device_id": "ap-01"}").
+        We strip the args fingerprint for display, keeping just the tool name label.
+        All results from the current session accumulate here — never overwritten.
+        """
         parts = ["Tool outputs:"]
-        for tool_name, output in outputs.items():
-            parts.append(f"[TOOL: {tool_name}]\n{output}")
+        for key, output in outputs.items():
+            # Key format: "tool_name|{args_json}" or plain "tool_name"
+            label = key.split("|")[0] if "|" in key else key
+            parts.append(f"[TOOL: {label}]\n{output}")
         return "\n\n".join(parts)
 
     @staticmethod
