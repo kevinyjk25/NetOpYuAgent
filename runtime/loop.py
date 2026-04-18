@@ -719,7 +719,12 @@ class AgentRuntimeLoop:
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:2000], "─"*72)
                 yield {
-                    "node_result": {"tool": tool_name, "result": stored[:300]},
+                    "node_result": {
+                        "tool":   tool_name,
+                        "result": stored,      # full stored label (for large) or full raw text (for inline)
+                        "raw":    raw,         # always full raw text — used by frontend Results tab
+                        "args":   tool_args,   # pass args so frontend can label the card accurately
+                    },
                     "node": "runtime_tool_result",
                 }
 

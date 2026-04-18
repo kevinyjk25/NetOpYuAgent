@@ -430,6 +430,91 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   transition:border-color .15s, color .15s;
 }
 .session-new-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ── Results tab (replaces Cache) ────────────────────────────────── */
+.results-turn {
+  border:1px solid var(--border); border-radius:6px;
+  margin-bottom:8px; overflow:hidden; flex-shrink:0;
+}
+.results-turn-head {
+  display:flex; align-items:center; gap:8px;
+  padding:5px 10px; background:rgba(255,255,255,.03);
+  cursor:pointer; user-select:none; font-size:11px;
+}
+.results-turn-head:hover { background:rgba(255,255,255,.06); }
+.results-turn-num  { font-family:var(--mono); font-weight:700; color:var(--accent); font-size:10px; }
+.results-turn-meta { color:var(--dim); font-size:9px; margin-left:auto; }
+.results-turn-arrow{ font-size:9px; color:var(--dim); transition:transform .2s; }
+.results-turn-head.open .results-turn-arrow { transform:rotate(90deg); }
+.results-turn-body { display:none; padding:6px 8px; gap:5px; flex-direction:column; }
+.results-turn-body.open { display:flex; }
+.result-card {
+  border:1px solid var(--border); border-radius:4px; overflow:hidden;
+}
+.result-card-head {
+  display:flex; align-items:center; gap:6px;
+  padding:4px 8px; background:rgba(255,255,255,.02);
+  font-size:10px; cursor:pointer; user-select:none;
+}
+.result-card-head:hover { background:rgba(255,255,255,.05); }
+.result-card-head::before {
+  content:'▶'; font-size:7px; color:var(--dim);
+  transition:transform .15s; flex-shrink:0;
+}
+.result-card-head.open::before { transform:rotate(90deg); }
+.result-card-tool { font-family:var(--mono); color:var(--text); font-weight:600; }
+.result-card-args { color:var(--dim); font-family:var(--mono); font-size:9px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.result-card-badge {
+  font-size:8px; padding:1px 5px; border-radius:3px; flex-shrink:0;
+  font-family:var(--mono); border:1px solid;
+}
+.result-card-badge.inline  { color:var(--success); border-color:var(--success); }
+.result-card-badge.stored  { color:var(--warn);    border-color:var(--warn); }
+.result-card-body { display:none; }
+.result-card-body.open {
+  display:block; border-top:1px solid var(--border);
+}
+.result-card-pre {
+  padding:6px 8px; margin:0;
+  font-family:var(--mono); font-size:10px; color:var(--mid);
+  white-space:pre; overflow-x:auto; overflow-y:auto;
+  max-height:320px; tab-size:4;
+  /* horizontal scroll for wide ASCII tables */
+}
+.result-card-pager {
+  display:flex; align-items:center; gap:4px;
+  padding:4px 8px; border-top:1px solid var(--border);
+  background:rgba(255,255,255,.02);
+}
+.result-card-pager-info {
+  font-family:var(--mono); font-size:9px; color:var(--dim);
+  flex:1; text-align:center;
+}
+.result-card-pager button {
+  padding:2px 8px; font-size:9px;
+}
+.result-card-stored-btn {
+  display:block; margin:4px 8px 6px;
+  padding:4px 8px; font-size:10px; font-family:var(--mono);
+  background:transparent; border:1px solid var(--warn);
+  color:var(--warn); border-radius:4px; cursor:pointer;
+  transition:background .15s;
+}
+.result-card-stored-btn:hover { background:rgba(255,200,0,.08); }
+/* ── History banner ──────────────────────────────────────────────── */
+.history-banner {
+  display:none; align-items:center; gap:8px;
+  padding:6px 12px; background:rgba(0,212,170,.12);
+  border-bottom:1px solid var(--accent); font-size:11px; color:var(--accent);
+  flex-shrink:0;
+}
+.history-banner.visible { display:flex; }
+.history-resume-btn {
+  margin-left:auto; padding:3px 10px; font-size:10px;
+  background:var(--accent); color:#000; border:none;
+  border-radius:4px; cursor:pointer; font-weight:600;
+}
 </style>
 </head>
 <body>
@@ -579,6 +664,11 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 
 <!-- Main chat -->
 <main>
+  <!-- History mode banner — shown when viewing a past session -->
+  <div class="history-banner" id="history-banner">
+    <span>👁 Viewing history: <strong id="history-banner-name"></strong></span>
+    <button class="history-resume-btn" onclick="resumeLiveSession()">▶ Resume live session</button>
+  </div>
   <div id="messages">
     <div class="msg-wrap">
       <div class="avatar avatar-sys">SYS</div>
@@ -642,22 +732,26 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 <!-- Right panel -->
 <div class="right-panel">
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('cache')" id="tab-btn-cache">Cache</div>
+    <div class="tab active" onclick="switchTab('cache')" id="tab-btn-cache">Results</div>
     <div class="tab" onclick="switchTab('flow')"   id="tab-btn-flow">Flow</div>
     <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
     <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
     <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
   </div>
 
-  <!-- Cache tab -->
+  <!-- Results tab — all tool calls grouped by turn -->
   <div class="tab-content active" id="tab-cache">
-    <div class="cache-index" id="cache-index">
-      <div style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:4px 0 6px;font-style:italic">No cached results yet</div>
+    <!-- Turn-grouped result cards -->
+    <div id="results-turns" style="padding:6px;overflow-y:auto;flex:1;display:flex;flex-direction:column">
+      <div id="results-empty" style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:8px 4px;font-style:italic">No tool results yet — send a query</div>
     </div>
+    <!-- Large-result pager (kept for stored results) -->
     <div class="cache-viewer" id="cache-viewer" style="display:none">
       <div class="cache-viewer-header">
         <span class="cv-title" id="cv-title">—</span>
         <span class="cv-meta" id="cv-meta"></span>
+        <span onclick="document.getElementById('cache-viewer').style.display='none'"
+              style="margin-left:auto;cursor:pointer;color:var(--dim);font-size:12px">✕</span>
       </div>
       <div class="cv-progress"><div class="cv-progress-fill" id="cv-progress-fill" style="width:0%"></div></div>
       <div class="cache-content" id="cache-content"></div>
@@ -747,6 +841,207 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 <script>
 
 
+
+// ── Session history navigation ────────────────────────────────────────────
+
+let _liveSessionId = '';   // the session we can actually SEND to
+let _viewingHistory = false;
+
+function _setLiveSession(sid) {
+  _liveSessionId = sid;
+  _viewingHistory = false;
+  document.getElementById('history-banner').classList.remove('visible');
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+}
+
+function resumeLiveSession() {
+  if (!_liveSessionId) return;
+  sessionId = _liveSessionId;
+  document.getElementById('session-input').value = sessionId;
+  document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
+  _setLiveSession(sessionId);
+  // Reload live session chat
+  document.getElementById('messages').innerHTML = '';
+  _turnResults = {};
+  renderResultsTurns();
+  fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/history?limit=100`)
+    .then(r=>r.json()).then(msgs => {
+      for (const m of msgs) {
+        if (m.role==='user') addMessage('user', m.content||'');
+        else if (m.role==='assistant') addMessage('agent', m.content||'');
+      }
+    }).catch(()=>{});
+  renderSessionList();
+}
+
+// ── Turn-grouped results store ─────────────────────────────────────────────
+
+// _turnResults: { [turnKey]: { turnNum, tools: [{name, args, result, stored, refId}] } }
+// turnKey = `${sessionId}#${turnNum}`
+let _turnResults = {};
+let _currentTurn = 0;   // incremented each time a new streaming request starts
+
+function _getTurnKey() { return `${sessionId}#${_currentTurn}`; }
+
+function startNewResultTurn() {
+  _currentTurn++;
+  const key = _getTurnKey();
+  if (!_turnResults[key]) {
+    _turnResults[key] = { turnNum: _currentTurn, tools: [] };
+  }
+}
+
+function addToolResult(toolName, argsStr, resultText, isStored, refId) {
+  const key = _getTurnKey();
+  if (!_turnResults[key]) _turnResults[key] = { turnNum: _currentTurn, tools: [] };
+  // Store FULL result text — truncation happens only at display time (via pagination)
+  _turnResults[key].tools.push({
+    name:    toolName,
+    args:    argsStr || '',
+    result:  resultText || '',   // full text, never sliced here
+    stored:  isStored,
+    refId:   refId || null,
+  });
+  renderResultsTurns();
+  updateCacheBadge();
+  switchTab('cache');
+}
+
+function renderResultsTurns() {
+  const container = document.getElementById('results-turns');
+  const empty     = document.getElementById('results-empty');
+  const turns     = Object.values(_turnResults).sort((a,b)=>a.turnNum-b.turnNum);
+  if (!turns.length || !turns.some(t=>t.tools.length)) {
+    empty.style.display = '';
+    // Remove any existing turn cards
+    for (const el of container.querySelectorAll('.results-turn')) el.remove();
+    return;
+  }
+  empty.style.display = 'none';
+  // Re-render all turns (cheap for small count)
+  for (const el of container.querySelectorAll('.results-turn')) el.remove();
+  for (const turn of turns) {
+    if (!turn.tools.length) continue;
+    const wrap = document.createElement('div');
+    wrap.className = 'results-turn';
+    const isLatest = turn.turnNum === _currentTurn;
+    const headOpen = isLatest ? ' open' : '';
+    const bodyOpen = isLatest ? ' open' : '';
+    wrap.innerHTML = `
+      <div class="results-turn-head${headOpen}" onclick="toggleResultTurn(this)">
+        <span class="results-turn-num">Turn ${turn.turnNum}</span>
+        <span style="font-size:10px;color:var(--mid)">${turn.tools.length} tool call${turn.tools.length>1?'s':''}</span>
+        <span class="results-turn-meta">${turn.tools.map(t=>t.name.replace('_',' ')).join(' · ')}</span>
+        <span class="results-turn-arrow">▶</span>
+      </div>
+      <div class="results-turn-body${bodyOpen}">
+        ${turn.tools.map((t,i) => _renderResultCard(t, turn.turnNum, i)).join('')}
+      </div>`;
+    container.appendChild(wrap);
+  }
+}
+
+// Inline result pager state: { [pageId]: {text, page, pageSize, pages} }
+const _rcPages = {};
+const RC_PAGE  = 3000;   // chars per page for inline results
+
+function _renderResultCard(t, turnNum, idx) {
+  const cardId   = `rc-${turnNum}-${idx}`;
+  const bodyId   = `rb-${turnNum}-${idx}`;
+  const preId    = `rp-${turnNum}-${idx}`;
+  const pgId     = `pg-${turnNum}-${idx}`;
+  const badgeCls = t.stored ? 'stored' : 'inline';
+  const badgeTxt = t.stored ? 'STORED' : 'INLINE';
+
+  // Prettify args for header
+  let argsLabel = '';
+  try {
+    const a = JSON.parse(t.args);
+    argsLabel = Object.entries(a).map(([k,v])=>`${k}=${v}`).join(' · ');
+  } catch { argsLabel = (t.args||'').slice(0, 80); }
+
+  let bodyContent = '';
+
+  if (t.stored && t.refId) {
+    // Large stored result — open in the large viewer
+    const sizeM = t.result.match(/chars:([\d,]+)/);
+    const sz    = sizeM ? sizeM[1]+' chars' : 'large';
+    bodyContent = `<div class="result-card-body open" id="${bodyId}">
+      <button class="result-card-stored-btn" onclick="openCache('${t.refId}','${esc(t.name)}')">
+        📦 Open full result in viewer — ${esc(sz)}
+      </button>
+    </div>`;
+  } else {
+    // Inline result — paginate locally, full text preserved
+    const fullText = t.result || '';
+    const pages    = Math.max(1, Math.ceil(fullText.length / RC_PAGE));
+    _rcPages[preId] = { text: fullText, page: 0, pageSize: RC_PAGE, pages };
+    const slice     = fullText.slice(0, RC_PAGE);
+    const pagerHtml = pages > 1
+      ? `<div class="result-card-pager" id="${pgId}">
+          <button class="btn btn-secondary btn-sm" onclick="rcPageNav('${preId}','${pgId}',-1)" id="${preId}-prev" disabled>◀</button>
+          <span class="result-card-pager-info" id="${preId}-info">1 / ${pages} · ${fullText.length.toLocaleString()} chars</span>
+          <button class="btn btn-secondary btn-sm" onclick="rcPageNav('${preId}','${pgId}',1)" id="${preId}-next" ${pages<=1?'disabled':''}>▶</button>
+        </div>`
+      : `<div class="result-card-pager"><span class="result-card-pager-info">${fullText.length.toLocaleString()} chars</span></div>`;
+    bodyContent = `<div class="result-card-body open" id="${bodyId}">
+      <pre class="result-card-pre" id="${preId}">${esc(slice)}</pre>
+      ${pagerHtml}
+    </div>`;
+  }
+
+  return `<div class="result-card" id="${cardId}">
+    <div class="result-card-head open" onclick="toggleResultCard('${cardId}','${bodyId}')">
+      <span class="result-card-tool">${esc(t.name)}</span>
+      <span class="result-card-args" title="${esc(argsLabel)}">${esc(argsLabel)}</span>
+      <span class="result-card-badge ${badgeCls}">${badgeTxt}</span>
+    </div>
+    ${bodyContent}
+  </div>`;
+}
+
+function rcPageNav(preId, pgId, dir) {
+  const state = _rcPages[preId];
+  if (!state) return;
+  state.page = Math.max(0, Math.min(state.pages - 1, state.page + dir));
+  const start = state.page * state.pageSize;
+  const slice = state.text.slice(start, start + state.pageSize);
+  const pre   = document.getElementById(preId);
+  if (pre) { pre.textContent = slice; pre.scrollTop = 0; }
+  const info  = document.getElementById(preId + '-info');
+  if (info) info.textContent = `${state.page+1} / ${state.pages} · ${state.text.length.toLocaleString()} chars`;
+  const prev = document.getElementById(preId + '-prev');
+  const next = document.getElementById(preId + '-next');
+  if (prev) prev.disabled = (state.page === 0);
+  if (next) next.disabled = (state.page >= state.pages - 1);
+}
+
+function toggleResultTurn(head) {
+  const body = head.nextElementSibling;
+  head.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+function toggleResultCard(cardId, bodyId) {
+  const body = document.getElementById(bodyId);
+  if (!body) return;
+  // Toggle open class so CSS handles display
+  body.classList.toggle('open');
+  // Sync arrow on the card head
+  const card = document.getElementById(cardId);
+  if (card) {
+    const head = card.querySelector('.result-card-head');
+    if (head) head.classList.toggle('open');
+  }
+}
+
+function updateCacheBadge() {
+  const n = Object.values(_turnResults).reduce((s,t)=>s+t.tools.length,0);
+  const badge = document.getElementById('cache-badge');
+  if (badge) badge.textContent = n ? `results: ${n}` : '';
+}
+
 // ── Accordion toggle ──────────────────────────────────────────────────────
 function toggleAcc(headEl) {
   const body = headEl.nextElementSibling;
@@ -803,16 +1098,40 @@ function _relativeTime(ts) {
 }
 
 async function switchSession(sid) {
-  // Update session ID
+  // If switching away from live session, remember live session id
+  if (!_viewingHistory && sessionId && sessionId !== sid) {
+    _liveSessionId = sessionId;
+  }
+  // Mark as viewing history if different from live
+  const wasLive = !_viewingHistory;
   sessionId = sid;
+  _viewingHistory = (sid !== _liveSessionId);
+
   document.getElementById('session-input').value = sid;
   document.getElementById('session-badge').textContent = 'session: '+sid.slice(0,12)+'…';
-  renderSessionList();   // re-render to highlight active
+
+  // Show/hide history banner
+  const banner = document.getElementById('history-banner');
+  if (_viewingHistory && _liveSessionId && sid !== _liveSessionId) {
+    const s = _sessions.find(s=>s.session_id===sid);
+    document.getElementById('history-banner-name').textContent =
+      (s?.topic_summary || sid.slice(0,16)+'…');
+    banner.classList.add('visible');
+    document.getElementById('send-btn').disabled = true;
+    document.getElementById('query-input').placeholder = 'Viewing history — click "Resume live session" to continue';
+  } else {
+    banner.classList.remove('visible');
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+    if (!_liveSessionId) _liveSessionId = sid;
+  }
+
+  renderSessionList();
 
   // Clear current chat and load history
   document.getElementById('messages').innerHTML = '';
-  storeItems = {}; activeRefId = null; flowEvents = [];
-  renderCacheIndex();
+  storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0;
+  renderResultsTurns();
   clearFlow();
 
   // Fetch and render history from FTS5
@@ -845,11 +1164,16 @@ async function createNewSession() {
     });
     const data = await res.json();
     sessionId  = data.session_id;
+    _liveSessionId = sessionId;
+    _viewingHistory = false;
+    document.getElementById('history-banner').classList.remove('visible');
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
     document.getElementById('session-input').value = sessionId;
     document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
     document.getElementById('messages').innerHTML = '';
-    storeItems = {}; activeRefId = null; flowEvents = [];
-    renderCacheIndex(); clearFlow();
+    storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0;
+    renderResultsTurns(); clearFlow();
     // Add to local list and re-render immediately
     _sessions.unshift({
       session_id:    data.session_id,
@@ -898,6 +1222,8 @@ async function restoreLastSession() {
   if (_sessions.length > 0 && !sessionId) {
     const last = _sessions[0];
     sessionId = last.session_id;
+    _liveSessionId = sessionId;
+    _viewingHistory = false;
     document.getElementById('session-input').value = sessionId;
     document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
     renderSessionList();
@@ -1192,6 +1518,9 @@ async function sendQuery() {
   const mode = document.getElementById('mode-select').value;
   const dlg  = document.getElementById('delegation-select').value;
   document.getElementById('session-badge').textContent = 'session: '+sid;
+  // Track live session and start a new result turn
+  if (!_liveSessionId) _liveSessionId = sid;
+  startNewResultTurn();
   addMessage('user', query);
   reqStart = Date.now();
   flowEvent('classify','🔍 Classify',`"${query.slice(0,55)}${query.length>55?'…':''}"`,`session: ${sid}`);
@@ -1324,19 +1653,33 @@ function dispatchChunk(c, query, sid) {
     return;
   }
   if (c.node_result) {
-    const {tool, result} = c.node_result;
-    const preview = String(result||'');
-    const refM = preview.match(/\[STORED:([^:]+):([^\]]+)\]/);
+    const {tool, result, raw, args: toolArgs} = c.node_result;
+    // raw = full result text (always present)
+    // result = stored label (if large) or raw text (if inline)
+    const displayText = String(raw || result || '');
+    const storedLabel = String(result || '');
+    const refM = storedLabel.match(/\[STORED:([^:]+):([^\]]+)\]/);
+
+    // Build args label from args dict passed by loop.py
+    let argsStr = '';
+    if (toolArgs && typeof toolArgs === 'object') {
+      argsStr = Object.entries(toolArgs).map(([k,v])=>`${k}=${v}`).join(' · ');
+    } else if (typeof toolArgs === 'string') {
+      argsStr = toolArgs;
+    }
+
     if (refM) {
       const refId = refM[2];
-      registerStore(refId, tool, preview);
-      addStep('cached','Cached: '+tool,`${refId.slice(0,10)}… → Cache tab`,preview,{refId,tool});
-      flowEvent('cached','📦 Cached Result',`${tool} → [STORED:${refId.slice(0,8)}…]`,`${preview.length} chars`);
-      switchTab('cache');
-      openCache(refId, tool);
+      registerStore(refId, tool, storedLabel);
+      // For large results, show the label + open viewer — raw is too big to inline
+      addToolResult(tool, argsStr, storedLabel, true, refId);
+      addStep('cached','Cached: '+tool,`${refId.slice(0,10)}… → Results tab`,storedLabel,{refId,tool});
+      flowEvent('cached','📦 Cached Result',`${tool} → [STORED:${refId.slice(0,8)}…]`,`${displayText.length} chars`);
     } else {
-      addStep('inline','Inline: '+tool,'',preview,{inline:preview.slice(0,120)});
-      flowEvent('tool-result','✓ Inline Result',tool,preview.slice(0,60));
+      // Inline result — use full raw text for display with pagination
+      addToolResult(tool, argsStr, displayText, false, null);
+      addStep('inline','Inline: '+tool,'',displayText,{inline:displayText.slice(0,120)});
+      flowEvent('tool-result','✓ Inline Result',tool,displayText.slice(0,60));
     }
     return;
   }
@@ -1416,32 +1759,8 @@ function registerStore(refId, tool, label='') {
 }
 
 function renderCacheIndex() {
-  const el = document.getElementById('cache-index');
-  const items = Object.entries(storeItems);
-  if (!items.length) {
-    el.innerHTML = '<div style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:8px 10px;font-style:italic">No cached results yet</div>';
-    return;
-  }
-  const ICONS = {syslog_search:'📋',prometheus_query:'📊',netflow_dump:'🌊',default:'📦'};
-  el.innerHTML = '';
-  for (const [refId, item] of items) {
-    const div = document.createElement('div');
-    div.className = 'cache-index-item'+(refId===activeRefId?' selected':'');
-    div.id = 'ci-'+refId;
-    div.onclick = () => openCache(refId, item.tool);
-    const icon = ICONS[item.tool]||ICONS.default;
-    div.innerHTML = `
-      <span style="font-size:14px">${icon}</span>
-      <div style="flex:1;min-width:0">
-        <div class="ci-tool">${esc(item.tool)}</div>
-        <div class="ci-ref">${esc(refId.slice(0,16))}…</div>
-      </div>
-      <div style="text-align:right">
-        <div class="ci-size">${item.total?item.total.toLocaleString()+' B':'—'}</div>
-        ${item.total?'<div class="ci-stored">STORED</div>':''}
-      </div>`;
-    el.appendChild(div);
-  }
+  // Kept for backward compat — delegates to the new results renderer
+  renderResultsTurns();
 }
 
 async function openCache(refId, tool) {
@@ -1861,7 +2180,11 @@ function setQuery(q) {
 function clearChat() {
   document.getElementById('messages').innerHTML='';
   sessionId=''; storeItems={}; activeRefId=null; flowEvents=[];
-  renderCacheIndex();
+  _turnResults={}; _currentTurn=0; _liveSessionId=''; _viewingHistory=false;
+  document.getElementById('history-banner').classList.remove('visible');
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+  renderResultsTurns();
   document.getElementById('cache-viewer').style.display='none';
   updateCacheBadge();
   clearFlow();
