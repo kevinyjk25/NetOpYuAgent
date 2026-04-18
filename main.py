@@ -1,23 +1,19 @@
 """
-main.py  [v5 — config.yaml driven]
-------------------------------------
-All runtime configuration is now read from config.yaml (project root).
-Environment variables still override any YAML value — same 12-factor
-compatibility, but no scattered os.getenv() throughout the code.
+main.py  [v6 — mode-aware: mock | pragmatic]
+--------------------------------------------
+Both modes: real LLM (Ollama/OpenAI/Anthropic), real embeddings, real Redis.
+Mode only controls tools/MCP:
 
-Quick-start:
-    uvicorn main:app --port 8000 --reload
+  mock       — Built-in simulated network tools (from_netops_mock + mock_tools.py).
+               Zero device credentials needed. Good for dev/demo/CI.
 
-Change a setting without editing code:
-    # In config.yaml:
-    llm:
-      model: "qwen3.5:14b"
+  pragmatic  — Real device access via Netmiko/NAPALM/Nornir.
+               Add devices to pragmatic.device_inventory in config.yaml.
+               Optional: additional real MCP servers in pragmatic.mcp_servers.
 
-    # Or via env var (always wins over YAML):
-    LLM_MODEL=qwen3.5:14b uvicorn main:app
-
-See config.yaml for all available settings and their defaults.
-Default LLM: Ollama / qwen3.5:27b
+Switch:
+    MODE=pragmatic uvicorn main:app --port 8001 --reload
+    # or in config.yaml:  mode: "pragmatic"
 """
 from __future__ import annotations
 
@@ -27,7 +23,6 @@ import pathlib
 from contextlib import asynccontextmanager
 from typing import Any
 
-# ── Config must be first — logging_config reads cfg.logging.mode ──────────
 from config import cfg
 import logging_config as _lc
 _lc.configure(mode=cfg.logging.mode)
@@ -37,24 +32,53 @@ from fastapi import FastAPI
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Build all services
-# ---------------------------------------------------------------------------
+def _print_banner() -> None:
+    if cfg.is_pragmatic:
+        n_dev = len(cfg.pragmatic.device_inventory)
+        logger.info(
+            "\n╔══════════════════════════════════════════════════════╗\n"
+            "║  🔧  PRAGMATIC MODE                                  ║\n"
+            f"║  Real devices: {n_dev:<36} ║\n"
+            "║  Real LLM · Real embeddings · Real Redis (if set)    ║\n"
+            "╚══════════════════════════════════════════════════════╝"
+        )
+    else:
+        logger.info(
+            "\n╔══════════════════════════════════════════════════════╗\n"
+            "║  🎭  MOCK MODE                                       ║\n"
+            "║  Simulated tools · Real LLM · Real embeddings        ║\n"
+            "║  Set MODE=pragmatic to connect real devices           ║\n"
+            "╚══════════════════════════════════════════════════════╝"
+        )
+
+
+class _NullMemoryRouter:
+    async def ingest_entity(self, *a, **kw): pass
+    async def retrieve(self, *a, **kw): return []
+
+class _NullSkillCatalog:
+    def register_all(self, d): pass
+    def load_detail(self, s): return None
+    def get_summary(self, s): return None
+    def format_summary(self): return ""
+
 
 async def build_services() -> dict[str, Any]:
     services: dict[str, Any] = {}
+    _print_banner()
 
-    # ── 1. Memory module ─────────────────────────────────────────────────
+    # ── 1. Memory ────────────────────────────────────────────────────────────
     from memory import create_memory_router
     memory_router = await create_memory_router(
-        redis_url    = cfg.memory.redis_url,
-        postgres_dsn = cfg.memory.postgres_dsn,
-        chroma_path  = cfg.memory.chroma_path,
+        redis_url     = cfg.memory.redis_url,
+        postgres_dsn  = cfg.memory.postgres_dsn,
+        chroma_path   = cfg.memory.chroma_path,
+        embedding_dim = cfg.embeddings.dim,
     )
     services["memory"] = memory_router
     logger.info("Memory module ready")
 
-    # ── 2. HITL module ───────────────────────────────────────────────────
+    # ── 2. HITL ──────────────────────────────────────────────────────────────
     from hitl import (
         HitlAuditService, HitlDecisionRouter, HitlReviewService,
         HitlTimeoutWatchdog, ReviewChannelConfig, build_hitl_graph,
@@ -89,10 +113,9 @@ async def build_services() -> dict[str, Any]:
     ))
     logger.info("HITL module ready")
 
-    # ── 3. Agent Registry ─────────────────────────────────────────────────
+    # ── 3. Registry ──────────────────────────────────────────────────────────
     from registry import create_registry, RegistryConfig as RegCfg
     from a2a.agent_card import get_agent_card
-
     registry_config = RegCfg(
         lb_strategy                   = cfg.registry.lb_strategy,
         health_check_interval_seconds = cfg.registry.health_check_interval,
@@ -106,12 +129,9 @@ async def build_services() -> dict[str, Any]:
     )
     await registry.start()
     services["registry"] = registry
-    logger.info(
-        "Agent Registry ready — %d peer agent(s) pre-registered",
-        len(cfg.registry.agent_urls),
-    )
+    logger.info("Agent Registry ready — %d peer(s)", len(cfg.registry.agent_urls))
 
-    # ── 4. Task module ───────────────────────────────────────────────────
+    # ── 4. Task module ───────────────────────────────────────────────────────
     from task import create_task_system
     task_system = await create_task_system(
         hitl_router = hitl_router,
@@ -119,9 +139,9 @@ async def build_services() -> dict[str, Any]:
         registry    = registry,
     )
     services["task_system"] = task_system
-    logger.info("Task module ready (registry-aware planner)")
+    logger.info("Task module ready")
 
-    # ── 5. A2A executor ──────────────────────────────────────────────────
+    # ── 5. A2A executor ──────────────────────────────────────────────────────
     from hitl import ITOpsHitlAgentExecutor
     executor = ITOpsHitlAgentExecutor(
         hitl_router    = hitl_router,
@@ -134,7 +154,7 @@ async def build_services() -> dict[str, Any]:
     services["executor"] = executor
     logger.info("A2A executor ready")
 
-    # ── 6. Integrations (MCP + OpenAPI + LLM + ToolRouter) ───────────────
+    # ── 6. Integrations ──────────────────────────────────────────────────────
     try:
         from integrations import (
             MCPClient, OpenAPIClient, LLMEngine, ToolRouter,
@@ -143,10 +163,10 @@ async def build_services() -> dict[str, Any]:
         from tools import TOOL_REGISTRY, make_read_stored_result_tool
         from runtime import ToolResultStore
 
-        tool_store = services.get("tool_store") or ToolResultStore()
+        tool_store = ToolResultStore()
         services["tool_store"] = tool_store
 
-        # 6a. LLM engine
+        # 6a. LLM engine — always real (both modes)
         llm_engine = LLMEngine.from_config({
             "backend":     cfg.llm.backend,
             "model":       cfg.llm.model,
@@ -154,91 +174,74 @@ async def build_services() -> dict[str, Any]:
             "temperature": cfg.llm.temperature,
             "max_tokens":  cfg.llm.max_tokens,
         })
-        patch_hitl_graph(llm_engine)
-        services["llm_engine"] = llm_engine
-        logger.info(
-            "LLM engine ready: backend=%s model=%s",
-            cfg.llm.backend, cfg.llm.model,
-        )
+        services["llm_engine"] = llm_engine  # patch_hitl_graph called after tool registry is built
+        logger.info("LLM engine: %s/%s", cfg.llm.backend, cfg.llm.model)
 
-        # 6b. MCP client
-        if cfg.tools.mcp.config_json:
-            import json as _json
-            try:
-                mcp_config_data = _json.loads(cfg.tools.mcp.config_json)
-            except Exception:
-                mcp_config_data = _json.loads(
-                    pathlib.Path(cfg.tools.mcp.config_json).read_text()
-                )
-            mcp_client = MCPClient.from_config(mcp_config_data)
-        elif cfg.tools.mcp.use_mock:
-            mcp_client = MCPClient.from_netops_mock()
-            logger.info("MCP: using built-in NetOps mock")
-        else:
-            mcp_client = MCPClient()
-        await mcp_client.connect_all()
-        services["mcp_client"] = mcp_client
+        # 6b. Real embeddings — always (both modes)
+        try:
+            from integrations.embedder import build_embedder
+            embedder = build_embedder(cfg.embeddings)
+            services["embedder"] = embedder
+            logger.info("Embedder: %s/%s dim=%d",
+                        cfg.embeddings.backend, cfg.embeddings.model, cfg.embeddings.dim)
+        except Exception as exc:
+            logger.warning("Embedder init failed (%s) — using hash stub", exc)
 
-        # 6c. OpenAPI client
-        if cfg.tools.openapi.spec_url and cfg.tools.openapi.base_url:
-            api_client = OpenAPIClient.from_url(
-                name     = "netops_api",
-                spec_url = cfg.tools.openapi.spec_url,
-                base_url = cfg.tools.openapi.base_url,
-                auth     = {
-                    "type":      cfg.tools.openapi.auth_type,
-                    "token_env": cfg.tools.openapi.token_env,
-                },
-            )
-            await api_client.load()
-            logger.info(
-                "OpenAPI client loaded %d operations",
-                len(api_client.list_operations()),
-            )
-        elif cfg.tools.openapi.use_mock:
-            api_client = OpenAPIClient.netops_mock()
-            await api_client.load()
-            logger.info("OpenAPI: using built-in NetOps mock")
-        else:
-            api_client = None
-        services["api_client"] = api_client
-
-        # 6d. ToolRouter
-        tool_registry_local = dict(TOOL_REGISTRY)
+        # 6c. Build tool registry based on mode
+        tool_registry_local = dict(TOOL_REGISTRY)   # always include mock_tools as base
         read_stored_fn, process_chunks_fn = make_read_stored_result_tool(tool_store)
         tool_registry_local["read_stored_result"]    = read_stored_fn
         tool_registry_local["process_stored_chunks"] = process_chunks_fn
 
+        if cfg.is_pragmatic:
+            tool_registry_local = await _build_pragmatic_tools(tool_registry_local)
+        
+        # 6d. MCP client
+        mcp_client = await _build_mcp_client(MCPClient)
+        await mcp_client.connect_all()
+        services["mcp_client"] = mcp_client
+
+        # 6e. OpenAPI client (mock in both modes unless explicitly configured)
+        api_client = await _build_openapi_client(OpenAPIClient)
+        services["api_client"] = api_client
+
+        # 6f. Pragmatic extra MCP servers
+        extra_mcp_clients = []
+        if cfg.is_pragmatic and cfg.pragmatic.mcp_servers:
+            extra_mcp_clients = await _load_pragmatic_mcp_servers(MCPClient)
+
+        # 6g. ToolRouter
         router = ToolRouter(tool_store=tool_store)
         router.register_mcp(mcp_client)
+        for ec in extra_mcp_clients:
+            router.register_mcp(ec)
         if api_client:
             router.register_openapi(api_client)
         router.register_local(tool_registry_local)
         services["tool_router"] = router
         counts = router.tool_count()
-        logger.info(
-            "ToolRouter ready: mcp=%d openapi=%d local=%d",
-            counts.get("mcp", 0),
-            counts.get("openapi", 0),
-            counts.get("local", 0),
-        )
+        logger.info("ToolRouter: mcp=%d openapi=%d local=%d",
+                    counts.get("mcp", 0), counts.get("openapi", 0), counts.get("local", 0))
 
-        # 6e. Patch runtime loop with real LLM + tools
         real_registry = router.registry
-        if "runtime_loop" in services:
-            services["runtime_loop"]._tool_registry = real_registry
-            patch_runtime_loop(services["runtime_loop"], llm_engine)
-            logger.info("Runtime loop: patched with real LLM + ToolRouter")
         executor._tool_registry = real_registry
+        patch_hitl_graph(llm_engine, tool_registry=real_registry)
+        patch_runtime_loop(executor, llm_engine)
+        logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
 
     except Exception as exc:
-        logger.warning(
-            "Integrations layer failed to initialise (%s). "
-            "Running with mock tools and stub LLM.",
-            exc,
-        )
+        logger.warning("Integrations layer failed (%s). Running degraded.", exc)
 
-    # ── 7. Hermes + Dual-Track Memory ────────────────────────────────────
+    # ── 7. Embedder injection into memory pipelines ───────────────────────────
+    embedder = services.get("embedder")
+    if embedder:
+        try:
+            from memory.pipelines.ingestion import IngestionPipeline
+            _inject_embedder(memory_router, embedder, IngestionPipeline)
+        except Exception as exc:
+            logger.warning("Embedder injection failed: %s", exc)
+
+    # ── 8. Hermes + DTM ──────────────────────────────────────────────────────
     try:
         from memory.fts_store  import FTS5SessionStore
         from memory.curator    import MemoryCurator
@@ -252,7 +255,6 @@ async def build_services() -> dict[str, Any]:
         fts_store = FTS5SessionStore(db_path=str(_data_dir / "state.db"))
         await fts_store.initialize()
 
-        # Build shared LLM callable for Hermes modules
         llm_engine = services.get("llm_engine")
         llm_fn = None
         if llm_engine:
@@ -267,7 +269,6 @@ async def build_services() -> dict[str, Any]:
                 return await _e.call(user, context=system)
             llm_fn = _llm_fn
 
-        # FTS5 summarizer (uses same LLM)
         if llm_fn:
             async def _fts_summarizer(results, query, _fn=llm_fn):
                 import datetime as _dt
@@ -291,18 +292,13 @@ async def build_services() -> dict[str, Any]:
             memory_router = memory_router2 or _NullMemoryRouter(),
             llm_fn        = llm_fn,
         )
-        user_model = UserModelEngine(
-            fts_store = fts_store,
-            llm_fn    = llm_fn,
-        )
+        user_model = UserModelEngine(fts_store=fts_store, llm_fn=llm_fn)
         skill_evolver = SkillEvolver(
             catalog    = skill_catalog or _NullSkillCatalog(),
             llm_fn     = llm_fn,
             fts_store  = fts_store,
             skills_dir = str(_data_dir / "skills"),
         )
-
-        # Dual-Track Memory — reads all tuning from cfg
         dtm = DualTrackMemory(
             fts_store               = fts_store,
             curator                 = memory_curator,
@@ -314,7 +310,6 @@ async def build_services() -> dict[str, Any]:
             track_b_weight          = cfg.memory.dtm.track_b_weight,
             temporal_half_life_days = cfg.memory.dtm.temporal_half_life_days,
         )
-
         services.update({
             "fts_store":      fts_store,
             "memory_curator": memory_curator,
@@ -326,8 +321,6 @@ async def build_services() -> dict[str, Any]:
             "_hermes_data":   str(_data_dir / "state.db"),
             "_mcp_mock":      cfg.tools.mcp.use_mock,
         })
-
-        # Inject into executor
         executor = services.get("executor")
         if executor:
             executor._fts_store     = fts_store
@@ -340,29 +333,109 @@ async def build_services() -> dict[str, Any]:
         logger.info(cfg.dump_summary())
 
     except Exception as exc:
-        logger.warning("Hermes learning loop failed to initialise: %s", exc)
+        logger.warning("Hermes DTM failed to initialise: %s", exc)
 
     return services
 
 
-# ---------------------------------------------------------------------------
-# Null-object stubs
-# ---------------------------------------------------------------------------
+# ─────────────────────────────────────────────────────────────────────────────
+# Mode-specific helpers
+# ─────────────────────────────────────────────────────────────────────────────
 
-class _NullMemoryRouter:
-    async def ingest_entity(self, *a, **kw): pass
-    async def retrieve(self, *a, **kw): return []
+async def _build_pragmatic_tools(base_registry: dict) -> dict:
+    """Load real Netmiko/NAPALM tools and register devices from config."""
+    from tools.pragmatic_tools import PRAGMATIC_TOOL_REGISTRY, register_devices
+    if not cfg.pragmatic.device_inventory:
+        logger.warning(
+            "Pragmatic mode: no devices in pragmatic.device_inventory — "
+            "real device tools registered but will return 'no devices' until config populated."
+        )
+    else:
+        register_devices(cfg.pragmatic.device_inventory)
+    # Pragmatic tools override mock tools with same name
+    merged = dict(base_registry)
+    merged.update(PRAGMATIC_TOOL_REGISTRY)
+    logger.info("Pragmatic tools loaded: %s", list(PRAGMATIC_TOOL_REGISTRY.keys()))
+    return merged
 
 
-class _NullSkillCatalog:
-    def register_all(self, d): pass
-    def load_detail(self, s): return None
-    def get_summary(self, s): return None
+async def _build_mcp_client(MCPClient):
+    import json as _json
+    if cfg.tools.mcp.config_json:
+        try:
+            try:
+                mcp_data = _json.loads(cfg.tools.mcp.config_json)
+            except Exception:
+                mcp_data = _json.loads(pathlib.Path(cfg.tools.mcp.config_json).read_text())
+            client = MCPClient.from_config(mcp_data)
+            logger.info("MCP: using config_json")
+            return client
+        except Exception as exc:
+            logger.warning("MCP config_json failed (%s), using mock", exc)
+    if cfg.tools.mcp.use_mock:
+        logger.info("MCP: using built-in NetOps mock")
+        return MCPClient.from_netops_mock()
+    return MCPClient()
 
 
-# ---------------------------------------------------------------------------
-# Application lifespan
-# ---------------------------------------------------------------------------
+async def _build_openapi_client(OpenAPIClient):
+    if cfg.tools.openapi.spec_url and cfg.tools.openapi.base_url:
+        try:
+            client = OpenAPIClient.from_url(
+                name     = "netops_api",
+                spec_url = cfg.tools.openapi.spec_url,
+                base_url = cfg.tools.openapi.base_url,
+                auth     = {"type": cfg.tools.openapi.auth_type,
+                            "token_env": cfg.tools.openapi.token_env},
+            )
+            await client.load()
+            logger.info("OpenAPI: %d operations", len(client.list_operations()))
+            return client
+        except Exception as exc:
+            logger.warning("OpenAPI spec failed (%s), using mock", exc)
+    if cfg.tools.openapi.use_mock:
+        client = OpenAPIClient.netops_mock()
+        await client.load()
+        logger.info("OpenAPI: using mock")
+        return client
+    return None
+
+
+async def _load_pragmatic_mcp_servers(MCPClient) -> list:
+    clients = []
+    for srv in cfg.pragmatic.mcp_servers:
+        try:
+            srv_dict = {srv.name: {
+                "transport": srv.transport,
+                "url":       srv.url,
+                "command":   srv.command,
+                "auth":      srv.auth,
+            }}
+            client = MCPClient.from_config(srv_dict)
+            await client.connect_all()
+            clients.append(client)
+            logger.info("Pragmatic MCP: %s (%s)", srv.name, srv.transport)
+        except Exception as exc:
+            logger.warning("Pragmatic MCP %s failed: %s", srv.name, exc)
+    return clients
+
+
+def _inject_embedder(memory_router, embedder, IngestionPipeline) -> None:
+    injected = 0
+    for attr in ("_ingestion", "_pipeline", "pipeline", "ingestion"):
+        obj = getattr(memory_router, attr, None)
+        if isinstance(obj, IngestionPipeline):
+            obj.set_embedder(embedder)
+            injected += 1
+    if injected == 0:
+        logger.debug("_inject_embedder: no IngestionPipeline found in memory_router")
+    else:
+        logger.info("Embedder injected into %d IngestionPipeline(s)", injected)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FastAPI lifespan
+# ─────────────────────────────────────────────────────────────────────────────
 
 _services: dict[str, Any] = {}
 
@@ -370,10 +443,9 @@ _services: dict[str, Any] = {}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global _services
-    logger.info("Starting IT Ops Agent v5 (config.yaml driven)")
+    logger.info("Starting IT Ops Agent v6 (mode=%s)", cfg.mode.upper())
     _services = await build_services()
 
-    # Mount sub-apps (must happen before yield so routes are live)
     from a2a import create_a2a_app, InMemoryTaskStore
     a2a_app = create_a2a_app(
         base_url   = cfg.server.a2a_base_url,
@@ -395,22 +467,18 @@ async def lifespan(app: FastAPI):
     reg_api = create_registry_router(_services["registry"])
     app.include_router(reg_api, prefix="/registry")
 
-    logger.info("Modules mounted: /api/v1/a2a · /hitl · /registry")
-
     from webui.backend import create_webui_app
     webui = create_webui_app(_services)
     app.mount("/webui", webui)
-    logger.info("WebUI mounted at /webui")
+    logger.info("All modules mounted")
 
     from memory.consolidation import LifecycleManager
     lifecycle      = LifecycleManager(_services["memory"])
     watchdog_task  = asyncio.create_task(_services["hitl_watchdog"].run())
     lifecycle_task = asyncio.create_task(lifecycle.run())
-    logger.info("Background tasks started")
 
     yield
 
-    # Graceful shutdown
     _services["hitl_watchdog"].stop()
     await _services["registry"].stop()
     lifecycle.stop()
@@ -420,17 +488,22 @@ async def lifespan(app: FastAPI):
             await t
         except asyncio.CancelledError:
             pass
-    logger.info("IT Ops Agent v5 shut down cleanly")
+    # Flush any pending DTM daily buffer so no turns are lost on shutdown
+    dtm = _services.get("dtm")
+    if dtm and hasattr(dtm, "_compact_today") and getattr(dtm, "_today_turns", []):
+        try:
+            await dtm._compact_today()
+            logger.info("DTM: flushed %d turn(s) to daily file on shutdown",
+                        len(getattr(dtm, "_today_turns", [])))
+        except Exception as exc:
+            logger.warning("DTM shutdown flush failed: %s", exc)
+    logger.info("IT Ops Agent shut down cleanly")
 
-
-# ---------------------------------------------------------------------------
-# FastAPI app
-# ---------------------------------------------------------------------------
 
 app = FastAPI(
     title       = "IT Ops Monitoring Agent",
-    version     = "5.0.0",
-    description = "IT Ops AI Agent — A2A · HITL · Memory · Task · Agent Registry",
+    version     = "6.0.0",
+    description = "IT Ops AI Agent — A2A · HITL · Memory · Task · Registry",
     lifespan    = lifespan,
 )
 
@@ -444,35 +517,36 @@ async def serve_webui():
 
 @app.get("/health")
 async def health():
-    reg    = _services.get("registry")
-    agents = await reg.list_agents() if reg else []
+    reg     = _services.get("registry")
+    agents  = await reg.list_agents() if reg else []
     from registry.schemas import AgentHealthState
     healthy = sum(1 for a in agents if a.health == AgentHealthState.HEALTHY)
-
-    task_sys = _services.get("task_system")
+    task_sys     = _services.get("task_system")
     pending_tasks = len(await task_sys.store.list_pending()) if task_sys else 0
-
-    hitl_rtr = _services.get("hitl_router")
+    hitl_rtr     = _services.get("hitl_router")
     pending_hitl = sum(
         1 for p in hitl_rtr._payload_store.values()
         if p.status.value == "pending"
     ) if hitl_rtr else 0
-
     return {
-        "status":  "ok",
-        "version": "5.0.0",
-        "registry": {
-            "total_agents":   len(agents),
-            "healthy_agents": healthy,
-        },
-        "pending_tasks":           pending_tasks,
-        "pending_hitl_interrupts": pending_hitl,
+        "status":  "ok", "version": "6.0.0", "mode": cfg.mode,
+        "registry": {"total": len(agents), "healthy": healthy},
+        "pending_tasks": pending_tasks,
+        "pending_hitl":  pending_hitl,
     }
 
 
-# ---------------------------------------------------------------------------
-# Entry point — `python main.py` or `uvicorn main:app`
-# ---------------------------------------------------------------------------
+@app.get("/mode")
+async def get_mode():
+    n_dev = len(cfg.pragmatic.device_inventory)
+    return {
+        "mode":            cfg.mode,
+        "llm":             f"{cfg.llm.backend}/{cfg.llm.model}",
+        "embeddings":      f"{cfg.embeddings.backend}/{cfg.embeddings.model} dim={cfg.embeddings.dim}",
+        "devices_in_cfg":  n_dev,
+        "pragmatic_mcps":  len(cfg.pragmatic.mcp_servers),
+    }
+
 
 if __name__ == "__main__":
     import uvicorn

@@ -636,14 +636,24 @@ class SkillEvolver:
         return defn
 
     async def _call_llm(self, system: str, user: str) -> str:
-        """Call LLM with system+user separation. Falls back to stub."""
+        """
+        Call LLM with system+user separation.
+        Always returns a string that starts with [ or { (valid JSON),
+        or the stub output — never raw prose that breaks JSON parsers downstream.
+        """
         import re as _re
         if self._llm_fn is None:
             return await self._stub_llm(system + "\n\n" + user)
         try:
             raw = await self._llm_fn(system, user)
             raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL | _re.IGNORECASE).strip()
-            if not raw or raw.startswith("You are"):
+            # Strip markdown fences that some models wrap JSON in
+            raw = _re.sub(r"^```json?\s*", "", raw)
+            raw = _re.sub(r"\s*```$", "", raw).strip()
+            first = raw.lstrip()[:1]
+            if not raw or first not in ("[", "{", "#"):
+                # Non-JSON non-markdown — fall back to stub for this call
+                logger.debug("SkillEvolver: non-JSON response (%r...) — using stub", raw[:60])
                 return await self._stub_llm(system + "\n\n" + user)
             return raw
         except Exception as exc:

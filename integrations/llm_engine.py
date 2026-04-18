@@ -736,19 +736,48 @@ def patch_runtime_loop(loop: Any, engine: LLMEngine) -> None:
     )
 
 
-def patch_hitl_graph(engine: LLMEngine) -> None:
-    """
-    Monkey-patch hitl/graph.py's intent_classifier_node to use a real LLM engine.
+_RISK_SYSTEM = """You are an IT security risk evaluator for network operations.
+Analyse the query and classify risk. Return ONLY valid JSON, no other text.
 
-    Call this BEFORE building the HITL graph:
-        patch_hitl_graph(engine)
-        graph = build_hitl_graph(hitl_config)
+Return format:
+{"is_destructive": true|false, "risk_level": "low"|"medium"|"high"|"critical", "risk_reasons": ["reason1"]}
+
+Risk levels:
+  critical — irreversible data loss, production outage, security breach
+  high     — service disruption, destructive config change, many hosts affected
+  medium   — single-host change, recoverable, non-critical service
+  low      — read-only diagnostic, no state change
+"""
+
+_PLANNER_SYSTEM = """You are an IT network operations planner.
+Given the query and its classified intent, produce a concrete action plan.
+Return ONLY valid JSON, no other text, no markdown fences.
+
+Return format:
+{"action_type": "string", "target": "string", "parameters": {}, "estimated_impact": "string", "reversible": true|false, "plan_steps": ["step1", "step2"]}
+
+Keep plan_steps to 3-6 steps. Be specific. action_type should be a snake_case verb.
+"""
+
+
+def patch_hitl_graph(engine: LLMEngine, tool_registry: dict | None = None) -> None:
     """
+    Monkey-patch hitl/graph.py nodes to use the real LLM engine.
+    Patches: intent_classifier_node, risk_assessor_node, planner_node.
+    Optionally injects tool_registry into executor_node.
+
+    Call BEFORE build_hitl_graph().
+    """
+    import re as _re
+    import json as _json
     import hitl.graph as _graph
+    from hitl.schemas import RiskLevel
 
-    async def real_intent_classifier(state: dict) -> dict:
+    # ── intent classifier ─────────────────────────────────────────────
+    async def _intent(state: dict) -> dict:
         query  = state.get("query", "")
         result = await engine.classify_intent(query)
+        logger.info("intent_classifier(LLM): %s conf=%.2f", result.intent_type, result.confidence)
         return {
             "intent_type":       result.intent_type,
             "intent_confidence": result.confidence,
@@ -756,8 +785,88 @@ def patch_hitl_graph(engine: LLMEngine) -> None:
             "intent_summary":    result.intent_summary,
         }
 
-    _graph.intent_classifier_node = real_intent_classifier
+    # ── risk assessor ─────────────────────────────────────────────────
+    async def _risk(state: dict) -> dict:
+        query       = state.get("query", "")
+        intent_type = state.get("intent_type", "general_query")
+        intent_sum  = state.get("intent_summary", "")
+        prompt = (f"Query: {query}\nIntent: {intent_type} — {intent_sum}\n"
+                  "Assess the risk of executing this network operation.")
+        try:
+            if hasattr(engine, "_chat"):
+                raw = await engine._chat([
+                    {"role": "system", "content": _RISK_SYSTEM},
+                    {"role": "user",   "content": prompt},
+                ])
+            else:
+                raw = await engine.call(prompt, "", None)
+            text = engine._strip_think(raw) if hasattr(engine, "_strip_think") else raw
+            text = _re.sub(r"^```json?\s*", "", text.strip())
+            text = _re.sub(r"\s*```$", "", text)
+            data = _json.loads(text)
+            rl   = getattr(RiskLevel, data.get("risk_level", "medium").upper(), RiskLevel.MEDIUM)
+            logger.info("risk_assessor(LLM): risk=%s is_destructive=%s", rl, data.get("is_destructive"))
+            return {"is_destructive": bool(data.get("is_destructive", False)),
+                    "risk_level": rl, "risk_reasons": data.get("risk_reasons", [])}
+        except Exception as exc:
+            logger.warning("risk_assessor(LLM) parse failed (%s) — heuristic fallback", exc)
+            is_destr = intent_type == "destructive_op"
+            return {"is_destructive": is_destr,
+                    "risk_level": RiskLevel.HIGH if is_destr else RiskLevel.LOW,
+                    "risk_reasons": ["LLM parse failed; heuristic used"]}
+
+    # ── planner ───────────────────────────────────────────────────────
+    async def _planner(state: dict) -> dict:
+        query       = state.get("query", "")
+        intent_type = state.get("intent_type", "general_query")
+        intent_sum  = state.get("intent_summary", "")
+        risk_level  = getattr(state.get("risk_level"), "value", "medium")
+        risk_rsns   = "; ".join(state.get("risk_reasons", []))
+        prompt = (f"Query: {query}\nIntent: {intent_type} — {intent_sum}\n"
+                  f"Risk: {risk_level} ({risk_rsns})\n"
+                  "Produce a concrete network operations action plan.")
+        try:
+            if hasattr(engine, "_chat"):
+                raw = await engine._chat([
+                    {"role": "system", "content": _PLANNER_SYSTEM},
+                    {"role": "user",   "content": prompt},
+                ])
+            else:
+                raw = await engine.call(prompt, "", None)
+            text = engine._strip_think(raw) if hasattr(engine, "_strip_think") else raw
+            text = _re.sub(r"^```json?\s*", "", text.strip())
+            text = _re.sub(r"\s*```$", "", text)
+            data = _json.loads(text)
+            action = {
+                "action_type":      data.get("action_type", "llm_answer"),
+                "target":           data.get("target", "network"),
+                "parameters":       data.get("parameters", {}),
+                "estimated_impact": data.get("estimated_impact", ""),
+                "reversible":       data.get("reversible", True),
+            }
+            plan_steps = data.get("plan_steps", ["Analyse", "Execute", "Verify"])
+            logger.info("planner(LLM): action_type=%s steps=%d", action["action_type"], len(plan_steps))
+            return {"proposed_action": action, "plan_steps": plan_steps}
+        except Exception as exc:
+            logger.warning("planner(LLM) parse failed (%s) — fallback plan", exc)
+            return {"proposed_action": {"action_type": "llm_answer", "target": "network",
+                                        "parameters": {}, "reversible": True},
+                    "plan_steps": ["Analyse query", "Execute best action", "Verify result"]}
+
+    # ── executor (with optional real tool dispatch) ────────────────────
+    if tool_registry is not None:
+        _orig_executor = _graph.executor_node
+        async def _executor_with_tools(state: dict) -> dict:
+            state_copy = dict(state)
+            state_copy["_tool_registry"] = tool_registry
+            return await _orig_executor(state_copy)
+        _graph.executor_node = _executor_with_tools
+
+    _graph.intent_classifier_node = _intent
+    _graph.risk_assessor_node     = _risk
+    _graph.planner_node           = _planner
+
     logger.info(
-        "patch_hitl_graph: intent_classifier_node patched → %s(%s)",
-        engine.__class__.__name__, engine.model,
+        "patch_hitl_graph: intent+risk+planner patched → %s(%s)",
+        engine.__class__.__name__, getattr(engine, "model", "?"),
     )

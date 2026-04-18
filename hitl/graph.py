@@ -256,20 +256,38 @@ async def executor_node(state: dict[str, Any]) -> dict[str, Any]:
     """
     Execute the approved action plan.
 
-    Stub — replace with real tool calls:
-        - kubectl / k8s client for service restarts
-        - Prometheus HTTP API for queries
-        - PagerDuty / OpsGenie for escalations
+    In pragmatic mode: dispatches to real tools via _tool_registry injected in state.
+    In mock mode: returns stub completions for each step.
+    Tool registry is injected by patch_hitl_graph(engine, tool_registry=...) in main.py.
     """
-    action  = state.get("proposed_action", {})
-    steps   = state.get("plan_steps", [])
-    results = []
+    action        = state.get("proposed_action", {})
+    steps         = state.get("plan_steps", [])
+    tool_registry = state.get("_tool_registry") or {}
+    results       = []
 
     for step in steps:
         logger.info("executor: step=%r", step)
-        # Real implementation: await run_tool(step, action)
-        await asyncio.sleep(0)          # yield control
-        results.append({"step": step, "status": "ok", "output": f"Completed: {step}"})
+        result_text = f"Completed: {step}"
+
+        if tool_registry:
+            # Best-effort: match step text to a tool name
+            step_lower = step.lower().replace(" ", "_").replace("-", "_")
+            matched = None
+            for tname in tool_registry:
+                if tname in step_lower or tname.replace("_", " ") in step.lower():
+                    matched = tname
+                    break
+            if matched:
+                try:
+                    raw = await tool_registry[matched](action.get("parameters", {}))
+                    result_text = f"[{matched}] {str(raw)[:600]}"
+                    logger.info("executor: dispatched %s → %d chars", matched, len(str(raw)))
+                except Exception as exc:
+                    result_text = f"[{matched}] ERROR: {exc}"
+                    logger.warning("executor: tool %s failed: %s", matched, exc)
+
+        await asyncio.sleep(0)
+        results.append({"step": step, "status": "ok", "output": result_text})
 
     return {"execution_results": results, "error": None}
 

@@ -294,6 +294,22 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         tool_calls = self._extract_tool_calls_from_chunks(response_chunks)
         await self._hermes_post_turn(session_id, query, assistant_text, tool_calls)
 
+        # Fire skill evolver for SIMPLE path too — if the turn used at least one
+        # tool call it may be worth capturing as a reusable skill recipe.
+        if self._skill_evolver and tool_calls:
+            try:
+                await self._skill_evolver.after_task(
+                    task_description = query,
+                    solution_summary = assistant_text[:400],
+                    tools_used       = [tc.get("tool", "") for tc in tool_calls if tc.get("tool")],
+                    solution_steps   = [],
+                    key_observations = [],
+                    complexity       = 5.0,   # simple path: lower complexity → higher bar for skill creation
+                    session_id       = session_id,
+                )
+            except Exception as exc:
+                logger.debug("SkillEvolver.after_task (simple path) skipped: %s", exc)
+
     # ------------------------------------------------------------------
     # Path B: Full HITL graph (COMPLEX / destructive queries)
     # ------------------------------------------------------------------
@@ -492,28 +508,29 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
     async def _verify_action_result(
         self, context: RequestContext, session_id: str, response_chunks: list[str]
     ) -> None:
-        action_type = context.metadata.get("action_type", "")
-        query       = context.get_user_input()
-        if not action_type:
-            return
+        query          = context.get_user_input()
+        action_type    = context.metadata.get("action_type", "complex_task")
+        assistant_text = "".join(response_chunks)
+        tools_used     = self._extract_tool_names_from_text(assistant_text)
+
         logger.info(
-            "Post-action verification: action_type=%s session=%s",
-            action_type, session_id,
+            "Post-action verification: action_type=%s tools=%s session=%s",
+            action_type, tools_used, session_id,
         )
-        if self._skill_evolver:
-            assistant_text = "".join(response_chunks)
+        # Always fire skill evolver for COMPLEX path if any tools were used
+        if self._skill_evolver and (tools_used or assistant_text):
             try:
                 await self._skill_evolver.after_task(
                     task_description = query,
                     solution_summary = assistant_text[:400],
-                    tools_used       = self._extract_tool_names_from_text(assistant_text),
+                    tools_used       = tools_used,
                     solution_steps   = [],
                     key_observations = [],
-                    complexity       = 7.0,
+                    complexity       = 7.5,   # complex path: higher complexity → lower bar for skill creation
                     session_id       = session_id,
                 )
             except Exception as exc:
-                logger.debug("SkillEvolver.after_task skipped: %s", exc)
+                logger.debug("SkillEvolver.after_task (complex path) skipped: %s", exc)
 
     # ------------------------------------------------------------------
     # HITL interrupt registration

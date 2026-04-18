@@ -613,6 +613,107 @@ async def list_interfaces(args: dict[str, Any]) -> str:
 
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Tool: get_device_config  (mock)
+# ---------------------------------------------------------------------------
+
+async def get_device_config(args: dict[str, Any]) -> str:
+    """Mock: return realistic AP/switch running config with seeded issues."""
+    device_id = args.get("device_id", "ap-01")
+    section   = args.get("section")
+    await asyncio.sleep(0.05)
+
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found. Use list_devices to see valid IDs.]"
+
+    import hashlib as _hs
+    seed = int(_hs.md5(device_id.encode()).hexdigest()[:4], 16)
+    ntp_missing    = (seed % 4 == 0)
+    radius_timeout = 3 + (seed % 4)
+    vlan_acl_ok    = (seed % 3 != 1)
+    ip = dev["ip"]
+
+    if dev["type"] == "wireless_ap":
+        if section == "radius":
+            return (f"# RADIUS config for {device_id}\n"
+                    f"radius-server host 10.0.1.100 auth-port 1812\n"
+                    f" timeout {radius_timeout}"
+                    + ("   ! WARNING: recommend <=3s\n" if radius_timeout > 3 else "\n"))
+        if section == "ntp":
+            return (f"# NTP config for {device_id}\n"
+                    + ("! NTP NOT CONFIGURED\n" if ntp_missing else "ntp server 10.0.1.5\nntp server 10.0.1.6\n"))
+        return (
+            f"! Configuration for {device_id} ({dev['model']}) — site {dev['site']}\n"
+            f"hostname {device_id}\n!\n"
+            f"interface GigabitEthernet0\n ip address {ip} 255.255.255.0\n no shutdown\n!\n"
+            f"dot11 ssid corp-wifi\n vlan 20\n authentication key-management wpa version 2\n!\n"
+            + ("! NTP NOT CONFIGURED — clock drift risk!\n" if ntp_missing else f"ntp server 10.0.1.5\nntp server 10.0.1.6\n")
+            + f"!\nradius-server host 10.0.1.100 auth-port 1812\n timeout {radius_timeout}"
+            + ("   ! WARNING: recommend <=3s\n" if radius_timeout > 3 else "\n")
+            + ("!\n! ACL NOT APPLIED to mgmt VLAN — security gap!\n" if not vlan_acl_ok else "!\nip access-list extended MGMT\n permit tcp 10.0.0.0 0.255.255.255 any\n deny ip any any log\n")
+            + "!\nend"
+        )
+    if dev["type"] == "switch":
+        return (
+            f"! Configuration for {device_id} ({dev['model']})\n"
+            f"hostname {device_id}\n!\nspanning-tree mode rapid-pvst\n!\n"
+            f"interface Vlan10\n ip address {ip} 255.255.255.0\n!\n"
+            f"ntp server 10.0.1.5\nntp server 10.0.1.6\n!\n"
+            f"radius-server host 10.0.1.100 timeout 3\n!\nend"
+        )
+    return f"! Configuration for {device_id}\nhostname {device_id}\n!\nend"
+
+
+# ---------------------------------------------------------------------------
+# Tool: validate_device_config  (mock)
+# ---------------------------------------------------------------------------
+
+async def validate_device_config(args: dict[str, Any]) -> str:
+    """Mock: deterministic PASS/WARN/FAIL report seeded by device ID."""
+    device_id = args.get("device_id", "ap-01")
+    await asyncio.sleep(0.03)
+
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found.]"
+
+    import hashlib as _hs
+    seed = int(_hs.md5(device_id.encode()).hexdigest()[:4], 16)
+    issues, warnings, passed = [], [], []
+
+    if dev["type"] == "wireless_ap":
+        ntp_missing    = (seed % 4 == 0)
+        radius_timeout = 3 + (seed % 4)
+        vlan_acl_ok    = (seed % 3 != 1)
+        if ntp_missing:
+            issues.append("FAIL  [NTP]    NTP server not configured — clock drift risk")
+        else:
+            passed.append("PASS  [NTP]    NTP configured (2 servers)")
+        if radius_timeout > 3:
+            warnings.append(f"WARN  [RADIUS] timeout={radius_timeout}s > recommended 3s (auth delays under load)")
+        else:
+            passed.append(f"PASS  [RADIUS] timeout={radius_timeout}s OK")
+        passed.append("PASS  [RADIUS] server 10.0.1.100 reachable")
+        if not vlan_acl_ok:
+            warnings.append("WARN  [ACL]    Management VLAN ACL not applied — unrestricted management access")
+        else:
+            passed.append("PASS  [ACL]    Management VLAN ACL applied")
+        passed.extend(["PASS  [SSID]   WPA2 on all SSIDs", "PASS  [SSID]   Guest SSID isolated"])
+    elif dev["type"] == "switch":
+        passed.extend(["PASS  [STP]    Rapid-PVST configured", "PASS  [VLAN]   VLANs 10/20/100 present",
+                       "PASS  [NTP]    NTP configured", "PASS  [RADIUS] timeout=3s OK"])
+    else:
+        passed.extend(["PASS  [ROUTING] Default route present", "PASS  [NTP]     NTP configured"])
+
+    lines = [f"VALIDATION REPORT — {device_id} ({dev['model']}) — site {dev['site']}", "=" * 65]
+    lines += issues + warnings + passed
+    lines += ["=" * 65,
+              f"Summary: {len(issues)} issue(s), {len(warnings)} warning(s), {len(passed)} check(s) passed"]
+    return "\n".join(lines)
+
+
 TOOL_REGISTRY: dict[str, callable] = {
     "syslog_search":     syslog_search,
     "prometheus_query":  prometheus_query,

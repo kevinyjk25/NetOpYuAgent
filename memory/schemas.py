@@ -127,7 +127,8 @@ class MemoryConfig(BaseModel):
 
     # Token budget
     max_context_tokens: int = 3_000
-    embedding_model:    str = "text-embedding-3-small"
+    embedding_model:    str = "nomic-embed-text"   # was text-embedding-3-small (1536-dim)
+    embedding_dim:      int = 768                   # must match active embedder
 
     # Consolidation
     consolidation_min_turns: int = 5

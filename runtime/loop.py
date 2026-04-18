@@ -432,22 +432,25 @@ class AgentRuntimeLoop:
                 state.record_tool_call(tool_name)
                 called_tools.add(tool_name)
 
-                # Skill-as-tool guard (same as stream path)
-                _is_skill_name = False
-                if self._skill_catalog:
+                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
+                # When a name exists in both catalogs (e.g. list_devices is both a skill
+                # description AND a callable tool), the tool takes priority.
+                _is_skill_only = False
+                if self._skill_catalog and tool_name not in tool_reg:
                     try:
-                        _is_skill_name = any(
+                        _is_skill_only = any(
                             s.skill_id == tool_name
                             for s in self._skill_catalog.list_skills()
                         )
                     except Exception:
                         pass
-                if _is_skill_name:
+                if _is_skill_only:
                     raw = (
-                        f"[ERROR] '{tool_name}' is a SKILL not a tool. "
-                        f"Use [SKILL_LOAD:{tool_name}] then call the individual tools it describes."
+                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
+                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
+                        f"then call the individual tools it describes."
                     )
-                    logger.warning("run: LLM called skill '%s' as tool — injecting error", tool_name)
+                    logger.warning("run: LLM called skill-only '%s' as tool — injecting error", tool_name)
                 else:
                     raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
@@ -645,26 +648,27 @@ class AgentRuntimeLoop:
                 # inject an error result so the LLM corrects itself on
                 # the next turn rather than hitting the HITL gate or
                 # getting a "not registered" error with no explanation.
-                _is_skill_name = False
-                if self._skill_catalog:
+                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
+                # Tools and skills can share the same name (e.g. list_devices is both a
+                # skill description and a real callable tool). The tool always wins.
+                _is_skill_only = False
+                if self._skill_catalog and tool_name not in tool_reg:
                     try:
-                        _is_skill_name = any(
+                        _is_skill_only = any(
                             s.skill_id == tool_name
                             for s in self._skill_catalog.list_skills()
                         )
                     except Exception:
                         pass
-                if _is_skill_name:
+                if _is_skill_only:
                     _skill_err = (
-                        f"[ERROR] '{tool_name}' is a SKILL, not a tool. "
-                        f"Skills are procedural guides — you cannot call them with [TOOL:]. "
-                        f"Load the skill steps with [SKILL_LOAD:{tool_name}], "
-                        f"then call the individual TOOLS the skill describes "
-                        f"(e.g. get_device_config, validate_device_config, etc.)."
+                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
+                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
+                        f"then call the individual tools it describes."
                     )
-                    logger.warning("stream: LLM called skill '%s' as tool — injecting error", tool_name)
+                    logger.warning("stream: LLM called skill-only '%s' as tool — injecting error", tool_name)
                     tool_outputs[tool_name] = _skill_err
-                    yield {"node_step": f"Skill-as-tool error: {tool_name}", "node": "runtime_loop"}
+                    yield {"node_step": f"Skill-only error: {tool_name}", "node": "runtime_loop"}
                     continue   # skip HITL check and _execute_tool for this name
 
                 # CAP 5: gate tool against HITL watch-list BEFORE execution
