@@ -43,7 +43,7 @@ header{
 /* ── Left panel ──────────────────────────────────── */
 .left-panel{
   grid-area:left;background:var(--surface);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;overflow:hidden;
+  display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;
 }
 .panel-head{
   padding:9px 12px;font-family:var(--mono);font-size:9px;font-weight:600;
@@ -51,9 +51,9 @@ header{
   border-bottom:1px solid var(--border);background:rgba(0,212,170,.03);
   flex-shrink:0;
 }
-.skill-list,.tool-list{overflow-y:auto;padding:4px 0}
-.skill-list{flex:1;min-height:80px}
-.tool-list{flex:0 0 auto;max-height:100px}
+.skill-list,.tool-list{overflow-y:auto;padding:4px 0;max-height:200px}
+.skill-list{max-height:200px}
+.tool-list{max-height:120px}
 .skill-item,.tool-item{
   padding:5px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;
   transition:background .12s;
@@ -378,6 +378,58 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ── Accordion left panel ─────────────────────────────────────────── */
+.acc-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 10px; font-size:10px; font-weight:600; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--dim);
+  cursor:pointer; user-select:none; flex-shrink:0;
+  transition:color .15s;
+}
+.acc-head:hover { color:var(--text); }
+.acc-head .acc-arrow {
+  font-size:9px; transition:transform .2s; flex-shrink:0; margin-left:4px;
+}
+.acc-head.open .acc-arrow { transform:rotate(90deg); }
+.acc-head .acc-badge {
+  font-size:9px; color:var(--dim); margin-left:auto; margin-right:4px;
+  font-weight:400; letter-spacing:0; text-transform:none;
+}
+.acc-body {
+  overflow:hidden; max-height:0; transition:max-height .2s ease;
+  flex-shrink:0;
+}
+.acc-body.open {
+  max-height:180px;          /* cap every section so all headers stay visible */
+  overflow-y:auto;           /* scroll within the section if content is taller */
+}
+/* Session items */
+.session-panel { display:flex; flex-direction:column; gap:0; }
+.session-item {
+  display:flex; align-items:center; gap:6px;
+  padding:5px 8px; cursor:pointer; border-radius:4px;
+  font-size:11px; color:var(--mid); transition:background .15s;
+  user-select:none;
+}
+.session-item:hover { background:var(--hover); }
+.session-item.active { background:var(--accent); color:#fff; }
+.session-item .s-topic { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session-item .s-count { font-size:9px; opacity:.7; flex-shrink:0; }
+.session-item .s-del {
+  font-size:10px; opacity:0; flex-shrink:0;
+  padding:0 3px; border-radius:3px; color:var(--dim); transition:opacity .15s;
+}
+.session-item:hover .s-del { opacity:.7; }
+.session-item:hover .s-del:hover { opacity:1; color:var(--red,#e44); }
+.session-new-btn {
+  margin:4px 6px 6px; padding:5px 8px;
+  font-size:10px; background:transparent;
+  border:1px dashed var(--border); border-radius:4px;
+  color:var(--dim); cursor:pointer; width:calc(100% - 12px);
+  transition:border-color .15s, color .15s;
+}
+.session-new-btn:hover { border-color:var(--accent); color:var(--accent); }
 </style>
 </head>
 <body>
@@ -396,57 +448,106 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 
 <!-- Left panel -->
 <div class="left-panel">
-  <div class="panel-head">skills</div>
-  <div class="skill-list" id="skill-list">
-    <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
+
+  <!-- Sessions (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-sessions">
+    <span>sessions</span>
+    <span class="acc-badge" id="session-count-badge"></span>
+    <span class="acc-arrow">▶</span>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">quick tools</div>
-  <div class="tool-list" id="tool-list">
-    <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
+  <div class="acc-body" id="acc-body-sessions">
+    <div class="session-panel" id="session-list-panel">
+      <div style="padding:8px 10px;color:var(--dim);font-size:11px;">Loading…</div>
+    </div>
+    <button class="session-new-btn" onclick="createNewSession()">+ new session</button>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">⚠ hitl triggers</div>
-  <div style="padding:3px 0;overflow-y:auto;max-height:120px" id="hitl-queries">
-    <div class="tool-item" onclick="setQuery('restart the payments-service in production')">
-      <div class="risk-dot risk-high"></div>
-      <div><div class="skill-name">restart payments-service</div><div class="skill-purpose">→ HITL: destructive op</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('rollback auth-service to version 3.2.1')">
-      <div class="risk-dot risk-high"></div>
-      <div><div class="skill-name">rollback auth-service</div><div class="skill-purpose">→ HITL: rollback deploy</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('drain k8s-worker-03 for maintenance')">
-      <div class="risk-dot risk-high"></div>
-      <div><div class="skill-name">drain k8s-worker-03</div><div class="skill-purpose">→ HITL: drain node</div></div>
-    </div>
+
+  <!-- Skills (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-skills">
+    <span>skills</span>
+    <span class="acc-arrow">▶</span>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">🔀 skill ambiguity demos</div>
-  <div style="padding:3px 0;overflow-y:auto;max-height:130px" id="ambiguity-queries">
-    <div class="tool-item" onclick="setQuery('get system logs and metrics')">
-      <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">logs and metrics</div><div class="skill-purpose">syslog vs prometheus (tie)</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('get device metrics')">
-      <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">device metrics</div><div class="skill-purpose">device_info vs prometheus</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('check network status')">
-      <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">network status</div><div class="skill-purpose">service_health vs netflow</div></div>
-    </div>
-    <div style="padding:4px 10px;font-size:9px;color:var(--dim)">
-      Set HITL_SKILL_AMBIGUITY=true to route these to approval
+  <div class="acc-body" id="acc-body-skills">
+    <div class="skill-list" id="skill-list">
+      <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
     </div>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">⚡ skill evolution (complex → auto-skill)</div>
-  <div style="padding:3px 0;overflow-y:auto;max-height:120px" id="skill-evo-triggers">
-    <!-- Populated by renderSkillEvoTriggers() — shows preview button when skill exists -->
+
+  <!-- Quick tools (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-tools">
+    <span>quick tools</span>
+    <span class="acc-arrow">▶</span>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">📤 upload</div>
+  <div class="acc-body" id="acc-body-tools">
+    <div class="tool-list" id="tool-list">
+      <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
+    </div>
+  </div>
+
+  <!-- HITL triggers (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-hitl">
+    <span>⚠ hitl triggers</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-hitl">
+    <div style="padding:3px 0" id="hitl-queries">
+      <div class="tool-item" onclick="setQuery('restart the payments-service in production')">
+        <div class="risk-dot risk-high"></div>
+        <div><div class="skill-name">restart payments-service</div><div class="skill-purpose">→ HITL: destructive op</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('rollback auth-service to version 3.2.1')">
+        <div class="risk-dot risk-high"></div>
+        <div><div class="skill-name">rollback auth-service</div><div class="skill-purpose">→ HITL: rollback deploy</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('drain k8s-worker-03 for maintenance')">
+        <div class="risk-dot risk-high"></div>
+        <div><div class="skill-name">drain k8s-worker-03</div><div class="skill-purpose">→ HITL: drain node</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill ambiguity demos (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-ambiguity">
+    <span>🔀 skill ambiguity</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-ambiguity">
+    <div style="padding:3px 0" id="ambiguity-queries">
+      <div class="tool-item" onclick="setQuery('get system logs and metrics')">
+        <div class="risk-dot risk-medium"></div>
+        <div><div class="skill-name">logs and metrics</div><div class="skill-purpose">syslog vs prometheus (tie)</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('get device metrics')">
+        <div class="risk-dot risk-medium"></div>
+        <div><div class="skill-name">device metrics</div><div class="skill-purpose">device_info vs prometheus</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('check network status')">
+        <div class="risk-dot risk-medium"></div>
+        <div><div class="skill-name">network status</div><div class="skill-purpose">service_health vs netflow</div></div>
+      </div>
+      <div style="padding:4px 10px;font-size:9px;color:var(--dim)">
+        Set HITL_SKILL_AMBIGUITY=true to route these to approval
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill evolution (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-skillevo">
+    <span>⚡ skill evolution</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-skillevo">
+    <div style="padding:3px 0" id="skill-evo-triggers">
+      <!-- Populated by renderSkillEvoTriggers() -->
+    </div>
+  </div>
+
+  <!-- Upload (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-upload">
+    <span>📤 upload</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-upload">
   <div style="padding:4px 6px">
     <!-- Skill upload -->
     <div style="margin-bottom:6px">
@@ -473,7 +574,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
       <div id="tool-upload-status" style="font-size:10px;color:var(--dim);margin-top:2px;min-height:14px"></div>
     </div>
   </div>
-</div>
+  </div><!-- /acc-body-upload -->
+</div><!-- /left-panel -->
 
 <!-- Main chat -->
 <main>
@@ -521,7 +623,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
     </div>
     <div class="input-opts">
       <span class="opt-label">session</span>
-      <input type="text" class="opt-input" id="session-input" placeholder="auto" style="width:90px">
+      <input type="text" class="opt-input" id="session-input" placeholder="auto" style="width:90px"
+             oninput="onSessionInputChange(this.value)">
       <span class="opt-label">mode</span>
       <select class="opt-select" id="mode-select">
         <option value="stream">stream</option>
@@ -642,6 +745,174 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 </div>
 
 <script>
+
+
+// ── Accordion toggle ──────────────────────────────────────────────────────
+function toggleAcc(headEl) {
+  const body = headEl.nextElementSibling;
+  if (!body || !body.classList.contains('acc-body')) return;
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  headEl.classList.toggle('open', !isOpen);
+}
+
+// ── Session management ────────────────────────────────────────────────────
+
+let _sessions = [];   // [{session_id, topic_summary, turn_count, last_active}]
+
+async function loadSessions() {
+  try {
+    const res = await fetch(`${BASE}/sessions?limit=50`);
+    _sessions = await res.json();
+    renderSessionList();
+    document.getElementById('session-count-badge').textContent =
+      _sessions.length ? `${_sessions.length} session(s)` : '';
+  } catch(e) {
+    console.warn('loadSessions failed', e);
+  }
+}
+
+function renderSessionList() {
+  const panel = document.getElementById('session-list-panel');
+  if (!panel) return;
+  if (!_sessions.length) {
+    panel.innerHTML = '<div style="padding:8px 10px;color:var(--dim);font-size:11px;">No sessions yet</div>';
+    return;
+  }
+  const curSid = getSession();
+  panel.innerHTML = _sessions.map(s => {
+    const isActive = s.session_id === curSid;
+    const topic    = esc(s.topic_summary || s.session_id.slice(0,16));
+    const ago      = _relativeTime(s.last_active);
+    return `<div class="session-item${isActive ? ' active' : ''}"
+                 onclick="switchSession('${s.session_id}')"
+                 title="${esc(s.session_id)}">
+      <div class="s-topic">${topic}</div>
+      <div class="s-count">${s.turn_count}t · ${ago}</div>
+      <div class="s-del" onclick="event.stopPropagation();deleteSession('${s.session_id}')" title="Delete session">✕</div>
+    </div>`;
+  }).join('');
+}
+
+function _relativeTime(ts) {
+  const secs = Math.floor(Date.now()/1000 - ts);
+  if (secs < 60)    return 'now';
+  if (secs < 3600)  return `${Math.floor(secs/60)}m`;
+  if (secs < 86400) return `${Math.floor(secs/3600)}h`;
+  return `${Math.floor(secs/86400)}d`;
+}
+
+async function switchSession(sid) {
+  // Update session ID
+  sessionId = sid;
+  document.getElementById('session-input').value = sid;
+  document.getElementById('session-badge').textContent = 'session: '+sid.slice(0,12)+'…';
+  renderSessionList();   // re-render to highlight active
+
+  // Clear current chat and load history
+  document.getElementById('messages').innerHTML = '';
+  storeItems = {}; activeRefId = null; flowEvents = [];
+  renderCacheIndex();
+  clearFlow();
+
+  // Fetch and render history from FTS5
+  try {
+    const res  = await fetch(`${BASE}/sessions/${encodeURIComponent(sid)}/history?limit=100`);
+    const msgs = await res.json();
+    if (msgs.length === 0) {
+      addMessage('system', `Session "${sid.slice(0,12)}…" — no messages yet.`, 'info');
+    } else {
+      for (const m of msgs) {
+        if (m.role === 'user')
+          addMessage('user', m.content || '');
+        else if (m.role === 'assistant')
+          addMessage('agent', m.content || '');
+      }
+    }
+  } catch(e) {
+    addMessage('system', 'Could not load session history: '+e.message, 'error');
+  }
+}
+
+async function createNewSession() {
+  const name = prompt('Session name (optional):', '');
+  if (name === null) return;   // cancelled
+  try {
+    const res  = await fetch(`${BASE}/sessions`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name.trim()}),
+    });
+    const data = await res.json();
+    sessionId  = data.session_id;
+    document.getElementById('session-input').value = sessionId;
+    document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
+    document.getElementById('messages').innerHTML = '';
+    storeItems = {}; activeRefId = null; flowEvents = [];
+    renderCacheIndex(); clearFlow();
+    // Add to local list and re-render immediately
+    _sessions.unshift({
+      session_id:    data.session_id,
+      topic_summary: data.topic_summary,
+      turn_count:    0,
+      last_active:   Date.now()/1000,
+    });
+    renderSessionList();
+    document.getElementById('session-count-badge').textContent = `${_sessions.length} session(s)`;
+  } catch(e) {
+    alert('Could not create session: '+e.message);
+  }
+}
+
+async function deleteSession(sid) {
+  if (!confirm(`Delete session "${sid.slice(0,16)}…" and all its history?`)) return;
+  try {
+    await fetch(`${BASE}/sessions/${encodeURIComponent(sid)}`, {method: 'DELETE'});
+    _sessions = _sessions.filter(s => s.session_id !== sid);
+    renderSessionList();
+    document.getElementById('session-count-badge').textContent =
+      _sessions.length ? `${_sessions.length} session(s)` : '';
+    // If we deleted the active session, create a fresh one
+    if (sessionId === sid) {
+      sessionId = '';
+      document.getElementById('session-input').value = '';
+      document.getElementById('session-badge').textContent = 'session: —';
+      document.getElementById('messages').innerHTML = '';
+    }
+  } catch(e) {
+    alert('Could not delete session: '+e.message);
+  }
+}
+
+function onSessionInputChange(val) {
+  // Sync the manual session-input text to active sessionId
+  if (val.trim()) {
+    sessionId = val.trim();
+    renderSessionList();
+  }
+}
+
+async function restoreLastSession() {
+  // On page load: if sessions exist, switch to most recent automatically
+  await loadSessions();
+  if (_sessions.length > 0 && !sessionId) {
+    const last = _sessions[0];
+    sessionId = last.session_id;
+    document.getElementById('session-input').value = sessionId;
+    document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
+    renderSessionList();
+    // Load its history
+    try {
+      const res  = await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/history?limit=100`);
+      const msgs = await res.json();
+      for (const m of msgs) {
+        if (m.role === 'user')      addMessage('user',  m.content || '');
+        else if (m.role === 'assistant') addMessage('agent', m.content || '');
+      }
+    } catch(e) { /* ignore — fresh start is fine */ }
+  }
+}
+
 const BASE = '/webui';
 let sessionId = '';
 let storeItems = {};
@@ -932,6 +1203,8 @@ async function sendQuery() {
     btn.disabled = false;
     flowEvent('done','✅ Complete',`${elap()} total`,`session: ${sid}`);
     refreshStats();
+    // Refresh session list so turn count and last_active update live
+    setTimeout(loadSessions, 800);
   }
 }
 
@@ -1759,7 +2032,7 @@ document.getElementById('query-input').addEventListener('keydown', function(e) {
   this.style.height=Math.min(this.scrollHeight,110)+'px';
 });
 
-loadSkills(); loadTools(); refreshStats();
+restoreLastSession(); loadSkills(); loadTools(); refreshStats();
 setInterval(refreshHitl, 3000);
 setInterval(refreshStats, 20000);
 </script>

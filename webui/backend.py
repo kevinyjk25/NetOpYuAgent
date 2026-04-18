@@ -573,6 +573,19 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     @app.get("/chat/history")
     async def chat_history(session_id: str = "default") -> JSONResponse:
+        """Returns message history — prefers FTS5 (persistent) over in-memory cache."""
+        fts = services.get("fts_store")
+        if fts:
+            try:
+                turns = await fts.get_session_turns(session_id, limit=100)
+                turns = list(reversed(turns))
+                messages = []
+                for t in turns:
+                    messages.append({"role": "user",      "content": t.user_text,      "ts": t.ts})
+                    messages.append({"role": "assistant",  "content": t.assistant_text, "ts": t.ts})
+                return JSONResponse(content=messages)
+            except Exception:
+                pass
         return JSONResponse(content=_message_history.get(session_id, []))
 
     # ==================================================================
@@ -1018,6 +1031,97 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return await _submit_hitl_decision(
             interrupt_id, "edit", req, services
         )
+
+    # ==================================================================
+    # Session management endpoints  (persistent via FTS5 store)
+    # ==================================================================
+
+    @app.get("/sessions")
+    async def list_sessions_endpoint(limit: int = 50) -> JSONResponse:
+        """
+        List all conversation sessions ordered by most recent activity.
+        Reads from FTS5 state.db — survives server restarts.
+        """
+        fts = services.get("fts_store")
+        if not fts:
+            return JSONResponse(content=[])
+        try:
+            sessions = await fts.list_sessions(limit=limit)
+            return JSONResponse(content=[
+                {
+                    "session_id":    s.session_id,
+                    "created_at":    s.created_at,
+                    "last_active":   s.last_active,
+                    "topic_summary": s.topic_summary or s.session_id[:20],
+                    "turn_count":    s.turn_count,
+                }
+                for s in sessions
+            ])
+        except Exception as exc:
+            logger.warning("/sessions failed: %s", exc)
+            return JSONResponse(content=[])
+
+    @app.get("/sessions/{session_id}/history")
+    async def get_session_history(session_id: str, limit: int = 100) -> JSONResponse:
+        """
+        Retrieve full turn history for a session from FTS5 state.db.
+        Returns turns as {role, content, ts} pairs for the frontend chat panel.
+        """
+        fts = services.get("fts_store")
+        if not fts:
+            # Fall back to in-memory history
+            return JSONResponse(content=_message_history.get(session_id, []))
+        try:
+            turns = await fts.get_session_turns(session_id, limit=limit)
+            # FTS5 returns newest-first; reverse for chronological display
+            turns = list(reversed(turns))
+            messages = []
+            for t in turns:
+                messages.append({"role": "user",      "content": t.user_text,      "ts": t.ts})
+                messages.append({"role": "assistant",  "content": t.assistant_text, "ts": t.ts})
+            return JSONResponse(content=messages)
+        except Exception as exc:
+            logger.warning("/sessions/%s/history failed: %s", session_id, exc)
+            return JSONResponse(content=_message_history.get(session_id, []))
+
+    @app.post("/sessions")
+    async def create_session(request: Request) -> JSONResponse:
+        """
+        Create (or re-open) a named session. Returns the session_id.
+        Body: {"name": "optional display name"} — name becomes the topic_summary.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        name       = body.get("name", "").strip()
+        session_id = "sess-" + uuid.uuid4().hex[:12]
+        fts = services.get("fts_store")
+        if fts and name:
+            try:
+                await fts.update_session_topic(session_id, name)
+            except Exception:
+                pass
+        return JSONResponse(content={
+            "session_id":    session_id,
+            "topic_summary": name or session_id,
+            "created_at":    time.time(),
+        })
+
+    @app.delete("/sessions/{session_id}")
+    async def delete_session(session_id: str) -> JSONResponse:
+        """
+        Delete a session and all its turns from FTS5 state.db.
+        Also removes from in-memory history cache.
+        """
+        fts = services.get("fts_store")
+        if fts:
+            try:
+                await fts.delete_session(session_id)
+            except Exception as exc:
+                logger.warning("delete_session FTS5 failed: %s", exc)
+        _message_history.pop(session_id, None)
+        return JSONResponse(content={"deleted": session_id})
 
     # ==================================================================
     # Memory / Session endpoints
