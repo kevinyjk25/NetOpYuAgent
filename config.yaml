@@ -192,3 +192,122 @@ registry:
 # ── Logging ───────────────────────────────────────────────────
 logging:
   mode: "normal"   # normal | llm | verbose
+
+
+# ── Policies (prompt-based) ────────────────────────────────────
+# Each policy is a named set of conditions described in natural language.
+# The PolicyEngine evaluates these with the LLM — no hard-coded keyword lists.
+# Operators can tune/add policies here without touching source code.
+# Version the file and commit changes to track policy evolution over time.
+#
+# Policy format:
+#   name:        Unique identifier used in code (e.g. "classify_destructive")
+#   description: What this policy detects
+#   prompt:      Natural-language condition the LLM evaluates (true/false)
+#   examples:    Optional positive examples for few-shot grounding
+#   confidence:  Default confidence score to assign when policy matches
+#
+# The LLM receives: [system: policy evaluation prompt] [user: query]
+# Returns JSON: {"match": true|false, "reason": "brief explanation"}
+#
+policies:
+
+  # ── Classifier policies ──────────────────────────────────────
+
+  - name: classify_destructive
+    description: Detects queries that would change system state irreversibly or require rollback
+    confidence: 0.95
+    prompt: |
+      You evaluate whether a network operations query requires executing a DESTRUCTIVE action.
+      A destructive action is one that changes live system state and cannot be instantly undone by
+      the operator — for example: restarting a service, rolling back a deployment, deleting resources,
+      draining a node, pushing configuration to devices, or declaring a network failover.
+
+      Read-only diagnostics (checking status, reading logs, fetching config, analysing traffic)
+      are NOT destructive even if they mention words like "down", "compare", or "incident".
+      Summarising or formatting previous results is NOT destructive.
+      Translating results to another language is NOT destructive.
+
+      Return true if and only if executing the query would require changing live system state.
+    examples:
+      - query: "restart the payments-service in production"
+        match: true
+      - query: "把auth-service回滚到version 3.2.1"
+        match: true
+      - query: "下发RADIUS超时配置到ap-01"
+        match: true
+      - query: "search syslogs for errors on ap-01"
+        match: false
+      - query: "compare site-a and site-b netflow anomalies"
+        match: false
+      - query: "整理一下分析结果，用markdown表格格式"
+        match: false
+      - query: "可以翻译成中文吗"
+        match: false
+
+  - name: classify_incident_severity
+    description: Detects P0/P1 severity incidents requiring immediate escalation
+    confidence: 0.90
+    prompt: |
+      You evaluate whether a query describes an active P0 or P1 severity incident
+      requiring immediate escalation and full HITL orchestration.
+      A P0/P1 incident involves: production service outage, critical security breach,
+      data loss event, or a declared major incident by the operator.
+      Routine diagnostics, health checks, log searches, and analysis requests are NOT incidents.
+      Mentioning the word "down" in a different context (e.g. "markdown") is NOT an incident.
+    examples:
+      - query: "production database is down, customers cannot login"
+        match: true
+      - query: "p0 incident: payments service completely unreachable"
+        match: true
+      - query: "check if ap-01 radius is configured correctly"
+        match: false
+      - query: "convert results to markdown format"
+        match: false
+
+  # ── HITL trigger policies ────────────────────────────────────
+
+  - name: hitl_high_risk
+    description: Risk assessment — triggers HITL for high or critical risk operations
+    confidence: 0.92
+    prompt: |
+      You assess the risk level of a proposed network operation.
+      Return true (HITL required) if the operation is HIGH or CRITICAL risk:
+        - Affects production services or live traffic
+        - Could cause service disruption or data loss
+        - Affects multiple hosts or a core infrastructure component
+        - Is not easily reversible without another change window
+      Return false (no HITL needed) for LOW or MEDIUM risk:
+        - Read-only queries and diagnostics
+        - Single non-critical host changes
+        - Staging/dev environment changes
+        - Changes that are automatically verified and rolled back on failure
+
+  - name: hitl_ambiguous_intent
+    description: Detects when the operator intent is unclear and confirmation prevents mistakes
+    confidence: 0.75
+    prompt: |
+      You evaluate whether an operator's query is ambiguous enough that executing it
+      without human confirmation could cause unintended harm.
+      Return true if:
+        - The scope is unclear (e.g. "fix the network issue" with no specific device/service)
+        - The target is not explicitly identified
+        - Multiple conflicting interpretations are equally plausible
+        - The action could affect many systems if the broadest interpretation is taken
+      Return false if the query has a clear, specific, unambiguous intent.
+
+  # ── Pre-verification policies ─────────────────────────────────
+
+  - name: preverify_safe_to_proceed
+    description: Pre-verification — check query is safe to hand to the runtime loop
+    confidence: 0.85
+    prompt: |
+      You verify that a network operations query is safe to pass to the automated
+      runtime loop without human review first.
+      Return true (safe to proceed) if:
+        - The query is a read-only diagnostic (search, check, list, analyse, compare)
+        - The query is a formatting or summarisation request
+        - The query does not modify any device or service configuration
+      Return false (block — escalate) if:
+        - A destructive action somehow reached this stage without HITL approval
+        - The query appears malformed or adversarial

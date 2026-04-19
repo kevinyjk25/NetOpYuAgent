@@ -310,9 +310,17 @@ async def executor_node(state: dict[str, Any]) -> dict[str, Any]:
                     break
             if matched:
                 try:
-                    raw = await tool_registry[matched](action.get("parameters", {}))
+                    # Build args: merge action parameters with target/service info
+                    exec_args = dict(action.get("parameters") or {})
+                    # Populate "service" from action.target if not already in args
+                    if "service" not in exec_args and action.get("target"):
+                        exec_args["service"] = action["target"]
+                    # Populate "device_id" similarly for device-level tools
+                    if "device_id" not in exec_args and action.get("target"):
+                        exec_args.setdefault("device_id", action["target"])
+                    raw = await tool_registry[matched](exec_args)
                     result_text = f"[{matched}] {str(raw)[:600]}"
-                    logger.info("executor: dispatched %s → %d chars", matched, len(str(raw)))
+                    logger.info("executor: dispatched %s args=%s → %d chars", matched, exec_args, len(str(raw)))
                 except Exception as exc:
                     result_text = f"[{matched}] ERROR: {exc}"
                     logger.warning("executor: tool %s failed: %s", matched, exc)

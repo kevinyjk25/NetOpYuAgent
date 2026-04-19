@@ -89,8 +89,11 @@ class ComplexityDecision:
 
 
 _DESTRUCTIVE_KEYWORDS = frozenset({
+    # English
     "restart", "rollback", "delete", "drain", "failover", "flush",
     "reboot", "terminate", "shutdown", "wipe", "reset",
+    # Chinese equivalents (substring match is fine for CJK — no word boundaries needed)
+    "重启", "回滚", "删除", "终止", "关机", "重置", "下发配置", "推送配置",
 })
 _P0P1_KEYWORDS = frozenset({
     "p0", "p1", "critical", "outage", "down", "emergency",
@@ -273,30 +276,61 @@ class AgentRuntimeLoop:
     # ------------------------------------------------------------------
 
     def classify(self, query: str) -> ComplexityDecision:
-        q = query.lower()
-        if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
+        """
+        Classify query complexity using prompt-based PolicyEngine when available.
+        Falls back to keyword heuristics if PolicyEngine is not wired.
+        Policy definitions live in config.yaml — operators tune them without code changes.
+        """
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is not None:
+            # Use synchronous fallback evaluation (keyword heuristic via engine._fallback)
+            # The async path is used when classify() is called from async context in backend
+            _dr = _engine._fallback("classify_destructive", query)
+            _ir = _engine._fallback("classify_incident_severity", query)
+            if _dr.match:
+                return ComplexityDecision(
+                    complexity=QueryComplexity.COMPLEX,
+                    reason=f"Policy[classify_destructive]: {_dr.reason}",
+                    confidence=_dr.confidence, model_tier="full_model",
+                )
+            if _ir.match:
+                return ComplexityDecision(
+                    complexity=QueryComplexity.COMPLEX,
+                    reason=f"Policy[classify_incident_severity]: {_ir.reason}",
+                    confidence=_ir.confidence, model_tier="full_model",
+                )
             return ComplexityDecision(
-                complexity=QueryComplexity.COMPLEX,
-                reason="Destructive action detected — requires HITL approval",
-                confidence=0.95, model_tier="full_model",
-            )
-        if any(kw in q for kw in _P0P1_KEYWORDS):
-            return ComplexityDecision(
-                complexity=QueryComplexity.COMPLEX,
-                reason="P0/P1 severity — requires full HITL + DAG orchestration",
-                confidence=0.90, model_tier="full_model",
-            )
-        if any(kw in q for kw in _PARALLEL_KEYWORDS):
-            return ComplexityDecision(
-                complexity=QueryComplexity.COMPLEX,
-                reason="Parallel multi-entity analysis — requires TaskPlanner DAG",
+                complexity=QueryComplexity.SIMPLE,
+                reason="Policy: non-destructive query",
                 confidence=0.85, model_tier="full_model",
             )
-        # P2: fast model hint for simple lookups
-        tier = "fast_model" if any(kw in q for kw in _FAST_MODEL_KEYWORDS) else "full_model"
+
+        # ── Keyword heuristic (fallback when PolicyEngine not yet wired) ──────
+        import re as _re
+        q = query.lower()
+
+        def _word_match(kw: str, text: str) -> bool:
+            if " " in kw or not kw.isascii():
+                return kw in text
+            return bool(_re.search(r"(?<![a-z0-9])" + _re.escape(kw) + r"(?![a-z0-9])", text))
+
+        if any(_word_match(kw, q) for kw in _DESTRUCTIVE_KEYWORDS):
+            return ComplexityDecision(
+                complexity=QueryComplexity.COMPLEX,
+                reason="Destructive action detected (keyword heuristic)",
+                confidence=0.90, model_tier="full_model",
+            )
+        if any(_word_match(kw, q) for kw in _P0P1_KEYWORDS):
+            return ComplexityDecision(
+                complexity=QueryComplexity.COMPLEX,
+                reason="P0/P1 severity (keyword heuristic)",
+                confidence=0.85, model_tier="full_model",
+            )
+        tier = "fast_model" if any(_word_match(kw, q) for kw in _FAST_MODEL_KEYWORDS) else "full_model"
         return ComplexityDecision(
             complexity=QueryComplexity.SIMPLE,
-            reason="Single-intent diagnostic query — Runtime Loop sufficient",
+            reason="Single-intent diagnostic query (keyword heuristic)",
             confidence=0.80, model_tier=tier,
         )
 

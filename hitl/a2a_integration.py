@@ -204,7 +204,27 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                 "Complexity: %s — %s (task_id=%s)",
                 decision.complexity.value, decision.reason, task_id,
             )
-            if decision.complexity == QueryComplexity.SIMPLE:
+
+            # COMPLEX routing is appropriate for:
+            #   - Destructive actions (restart, rollback, delete...)
+            #   - True P0/P1 incidents
+            #   - Parallel multi-entity DAG tasks
+            # It is NOT appropriate for:
+            #   - Summary/format requests ("make a table", "translate to Chinese")
+            #   - Analysis requests that only need the LLM to synthesize prior results
+            # For the latter, _execute_simple handles it correctly via loop.stream().
+            # Re-check: if COMPLEX but reason is "P0/P1" or "Parallel" (not destructive),
+            # and there is no force_hitl_tool, use _execute_simple as a safe fallback
+            # because the HITL graph executor_node has no tool to run and returns empty.
+            _use_simple = (
+                decision.complexity == QueryComplexity.SIMPLE
+                or (
+                    decision.complexity == QueryComplexity.COMPLEX
+                    and not context.metadata.get("force_hitl_tool")
+                    and "Destructive" not in decision.reason
+                )
+            )
+            if _use_simple:
                 await self._execute_simple(
                     query, session_id, context, event_queue, task_id, context_id
                 )

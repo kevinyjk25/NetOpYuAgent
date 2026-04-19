@@ -227,6 +227,44 @@ async def build_services() -> dict[str, Any]:
         executor._tool_registry = real_registry
         patch_hitl_graph(llm_engine, tool_registry=real_registry)
         patch_runtime_loop(executor, llm_engine)
+
+        # ── Wire prompt-based PolicyEngine ────────────────────────────────────
+        # Loads policies from config.yaml and registers the global singleton.
+        # classify(), pre_verify(), and HITL triggers use this automatically.
+        try:
+            from runtime.policy_engine import (
+                PolicyEngine, load_policies_from_config, set_policy_engine
+            )
+            _cfg_policies = cfg.raw.get("policies", []) if hasattr(cfg, "raw") else []
+            # Also try loading from the parsed config dict directly
+            if not _cfg_policies:
+                import yaml as _yaml
+                with open("config.yaml") as _f:
+                    _raw_cfg = _yaml.safe_load(_f)
+                _cfg_policies = _raw_cfg.get("policies", [])
+
+            _policy_defs = load_policies_from_config(_cfg_policies)
+
+            async def _policy_llm_call(system: str, user: str) -> str:
+                """Thin wrapper: call the real LLM engine for policy evaluation."""
+                return await llm_engine.call(
+                    query=user,
+                    context=system,
+                    state=None,
+                )
+
+            _policy_engine = PolicyEngine(
+                policies    = _policy_defs,
+                llm_call    = _policy_llm_call,
+                cache_ttl_s = 120,
+            )
+            set_policy_engine(_policy_engine)
+            logger.info(
+                "PolicyEngine: wired with %d policies from config.yaml",
+                len(_policy_defs),
+            )
+        except Exception as _pe_exc:
+            logger.warning("PolicyEngine: startup failed (%s) — keyword heuristics active", _pe_exc)
         logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
 
     except Exception as exc:
