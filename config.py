@@ -1,67 +1,14 @@
 """
-config.py
----------
-Single source of truth for all runtime configuration.
+config.py  [v2 — mode-aware: mock | pragmatic]
+-----------------------------------------------
+Both modes use real LLM, real embeddings, real Redis.
+Mode controls only whether tools/MCP are simulated or real.
 
-Priority (highest wins):
-  1. Environment variable (e.g. LLM_MODEL=qwen3.5:14b)
-  2. config.yaml value
-  3. Hardcoded default (in this file)
-
-Usage
------
-    from config import cfg
-
-    cfg.llm.backend          # "ollama"
-    cfg.llm.model            # "qwen3.5:27b"
-    cfg.hitl.confidence_threshold  # 0.75
-    cfg.memory.data_dir      # "./data"
-
-Environment variable overrides
--------------------------------
-Every YAML key has a corresponding env var shown below.
-Env vars always take priority — no code change needed for
-per-deployment tuning.
-
-    YAML key                        → Env var
-    ────────────────────────────────────────────────────────
-    server.host                     HOST
-    server.port                     PORT
-    server.reload                   RELOAD
-    server.a2a_base_url             A2A_BASE_URL
-    llm.backend                     LLM_BACKEND
-    llm.model                       LLM_MODEL
-    llm.base_url                    LLM_BASE_URL
-    llm.temperature                 LLM_TEMPERATURE
-    llm.max_tokens                  LLM_MAX_TOKENS
-    llm.log_detail                  LLM_LOG_DETAIL
-    tools.mcp.use_mock              MCP_USE_MOCK
-    tools.mcp.config_json           MCP_CONFIG_JSON
-    tools.openapi.use_mock          OPENAPI_USE_MOCK
-    tools.openapi.spec_url          OPENAPI_SPEC_URL
-    tools.openapi.base_url          OPENAPI_BASE_URL
-    tools.openapi.auth_type         OPENAPI_AUTH_TYPE
-    tools.openapi.token_env         OPENAPI_TOKEN_ENV
-    tools.hitl_tool_names           HITL_TOOL_NAMES
-    hitl.confidence_threshold       HITL_CONFIDENCE_THRESHOLD
-    hitl.max_auto_host_count        HITL_MAX_AUTO_HOST_COUNT
-    hitl.skill_ambiguity            HITL_SKILL_AMBIGUITY
-    hitl.slack_webhook_url          HITL_SLACK_WEBHOOK_URL
-    hitl.pagerduty_routing_key      HITL_PAGERDUTY_ROUTING_KEY
-    memory.data_dir                 HERMES_DATA_DIR
-    memory.redis_url                REDIS_URL
-    memory.postgres_dsn             POSTGRES_DSN
-    memory.chroma_path              CHROMA_PATH
-    memory.dtm.compaction_turns     DTM_COMPACTION_TURNS
-    memory.dtm.nudge_turns          DTM_NUDGE_TURNS
-    memory.dtm.track_b_weight       DTM_TRACK_B_WEIGHT
-    memory.dtm.temporal_half_life_days  DTM_HALF_LIFE_DAYS
-    registry.agent_urls             AGENT_URLS
-    registry.lb_strategy            REGISTRY_LB
-    registry.health_check_interval  REGISTRY_HEALTH_INTERVAL
-    logging.mode                    LOG_MODE
+New sections vs v1:
+  - mode: "mock" | "pragmatic"
+  - embeddings: backend/model/dim (used by both modes)
+  - pragmatic: device_inventory, mcp_servers, napalm_getters
 """
-
 from __future__ import annotations
 
 import logging
@@ -72,40 +19,21 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# ── YAML loader (graceful: works without PyYAML installed) ───────────────────
 
 def _load_yaml(path: str) -> dict:
-    """Load config.yaml; return empty dict if file missing or PyYAML absent."""
     p = pathlib.Path(path)
     if not p.exists():
         return {}
     try:
-        import yaml          # PyYAML
+        import yaml
         with p.open(encoding="utf-8") as f:
-            data = yaml.safe_load(f) or {}
-        logger.debug("config: loaded %s", path)
-        return data
+            return yaml.safe_load(f) or {}
     except ImportError:
-        logger.warning(
-            "config: PyYAML not installed — using env vars only.\n"
-            "  Install with: pip install pyyaml"
-        )
+        logger.warning("config: PyYAML not installed — using env vars only.")
         return {}
     except Exception as exc:
-        logger.warning("config: failed to load %s: %s — using env vars only", path, exc)
+        logger.warning("config: failed to load %s: %s", path, exc)
         return {}
-
-
-def _get(data: dict, *keys, default=None):
-    """Navigate nested dict safely."""
-    cur = data
-    for k in keys:
-        if not isinstance(cur, dict):
-            return default
-        cur = cur.get(k, default)
-        if cur is None:
-            return default
-    return cur
 
 
 def _env_bool(name: str, yaml_val) -> bool:
@@ -114,13 +42,11 @@ def _env_bool(name: str, yaml_val) -> bool:
         return v.lower() in ("true", "1", "yes")
     return bool(yaml_val)
 
-
 def _env_str(name: str, yaml_val, default: str = "") -> str:
     v = os.getenv(name)
     if v is not None:
         return v
     return str(yaml_val) if yaml_val is not None else default
-
 
 def _env_int(name: str, yaml_val, default: int = 0) -> int:
     v = os.getenv(name)
@@ -131,7 +57,6 @@ def _env_int(name: str, yaml_val, default: int = 0) -> int:
             pass
     return int(yaml_val) if yaml_val is not None else default
 
-
 def _env_float(name: str, yaml_val, default: float = 0.0) -> float:
     v = os.getenv(name)
     if v is not None:
@@ -141,171 +66,177 @@ def _env_float(name: str, yaml_val, default: float = 0.0) -> float:
             pass
     return float(yaml_val) if yaml_val is not None else default
 
+def _resolve_env(value: str) -> str:
+    """Substitute ${ENV_VAR} in a string from environment."""
+    import re
+    def _sub(m):
+        return os.getenv(m.group(1), m.group(0))
+    return re.sub(r'\$\{(\w+)\}', _sub, value)
 
-# ── Config dataclasses ───────────────────────────────────────────────────────
+
+# ── Config dataclasses ────────────────────────────────────────────────────────
 
 @dataclass
 class ServerConfig:
-    host:        str
-    port:        int
-    reload:      bool
-    a2a_base_url: str
-
+    host: str; port: int; reload: bool; a2a_base_url: str
 
 @dataclass
 class LLMConfig:
-    backend:     str    # ollama | openai | anthropic | mock
-    model:       str
-    base_url:    str
-    temperature: float
-    max_tokens:  int
-    log_detail:  str    # off | compact | full
-
+    backend: str; model: str; base_url: str
+    temperature: float; max_tokens: int; log_detail: str
 
 @dataclass
 class MCPConfig:
-    use_mock:    bool
-    config_json: str
-
+    use_mock: bool; config_json: str
 
 @dataclass
 class OpenAPIConfig:
-    use_mock:  bool
-    spec_url:  str
-    base_url:  str
-    auth_type: str
-    token_env: str
-
+    use_mock: bool; spec_url: str; base_url: str
+    auth_type: str; token_env: str
 
 @dataclass
 class ToolsConfig:
-    mcp:             MCPConfig
-    openapi:         OpenAPIConfig
-    hitl_tool_names: list[str]   # tools that always require HITL
-
+    mcp: MCPConfig; openapi: OpenAPIConfig; hitl_tool_names: list[str]
 
 @dataclass
 class HITLSLAConfig:
-    critical: int
-    high:     int
-    medium:   int
-    low:      int
-
+    critical: int; high: int; medium: int; low: int
 
 @dataclass
 class HITLConfig:
-    confidence_threshold:    float
-    max_auto_host_count:     int
-    skill_ambiguity:         bool
-    slack_webhook_url:       Optional[str]
-    pagerduty_routing_key:   Optional[str]
-    sla:                     HITLSLAConfig
-    destructive_action_types: list[str]
-
+    confidence_threshold: float; max_auto_host_count: int
+    skill_ambiguity: bool; slack_webhook_url: Optional[str]
+    pagerduty_routing_key: Optional[str]
+    sla: HITLSLAConfig; destructive_action_types: list[str]
 
 @dataclass
 class DTMConfig:
-    compaction_turns:        int
-    nudge_turns:             int
-    track_b_weight:          float
-    temporal_half_life_days: float
-
+    compaction_turns: int; nudge_turns: int
+    track_b_weight: float; temporal_half_life_days: float
 
 @dataclass
 class MemoryConfig:
-    data_dir:    str
-    redis_url:   Optional[str]
-    postgres_dsn: Optional[str]
-    chroma_path: str
-    dtm:         DTMConfig
-
+    data_dir: str; redis_url: Optional[str]; postgres_dsn: Optional[str]
+    chroma_path: str; dtm: DTMConfig
+    embedding_model: str = "nomic-embed-text"
+    embedding_dim:   int = 768
 
 @dataclass
 class SkillsConfig:
-    top_k:               int
-    ambiguity_threshold: float
-
+    top_k: int; ambiguity_threshold: float
 
 @dataclass
 class StopConfig:
-    max_turns:             int
-    max_tool_calls:        int
-    token_budget:          int
-    max_no_progress_turns: int
-
+    max_turns: int; max_tool_calls: int
+    token_budget: int; max_no_progress_turns: int
 
 @dataclass
 class RuntimeConfig:
-    simple_confidence_floor:  float
-    simple_max_tool_calls:    int
-    tool_result_inline_limit: int
-    stop:                     StopConfig
-    pre_verification:         bool
-    post_verification:        bool
-    model_tiering:            bool
-
+    simple_confidence_floor: float; simple_max_tool_calls: int
+    tool_result_inline_limit: int; stop: StopConfig
+    pre_verification: bool; post_verification: bool; model_tiering: bool
 
 @dataclass
 class RegistryConfig:
-    agent_urls:            list[str]
-    lb_strategy:           str
-    health_check_interval: int
-
+    agent_urls: list[str]; lb_strategy: str; health_check_interval: int
 
 @dataclass
 class LoggingConfig:
-    mode: str    # normal | llm | verbose
+    mode: str
 
+# ── NEW: Embeddings ───────────────────────────────────────────────────────────
+
+@dataclass
+class EmbeddingsConfig:
+    backend:  str    # ollama | openai | none
+    model:    str
+    base_url: str
+    dim:      int
+
+# ── NEW: Pragmatic device entry ───────────────────────────────────────────────
+
+@dataclass
+class PragmaticDevice:
+    id:          str
+    device_type: str          # netmiko device_type string
+    host:        str
+    username:    str
+    password:    str
+    secret:      str  = ""
+    port:        int  = 22
+    timeout:     int  = 30
+    label:       str  = ""
+    tags:        list[str] = field(default_factory=list)
+
+@dataclass
+class PragmaticMCPServer:
+    name:      str
+    transport: str
+    url:       str = ""
+    command:   list[str] = field(default_factory=list)
+    auth:      dict = field(default_factory=dict)
+
+@dataclass
+class PragmaticConfig:
+    device_inventory: list[PragmaticDevice]
+    mcp_servers:      list[PragmaticMCPServer]
+    napalm_getters:   list[str]
+
+# ── Top-level AppConfig ───────────────────────────────────────────────────────
 
 @dataclass
 class AppConfig:
-    server:   ServerConfig
-    llm:      LLMConfig
-    tools:    ToolsConfig
-    hitl:     HITLConfig
-    memory:   MemoryConfig
-    skills:   SkillsConfig
-    runtime:  RuntimeConfig
-    registry: RegistryConfig
-    logging:  LoggingConfig
+    mode:       str   # "mock" | "pragmatic"
+    server:     ServerConfig
+    llm:        LLMConfig
+    tools:      ToolsConfig
+    hitl:       HITLConfig
+    memory:     MemoryConfig
+    skills:     SkillsConfig
+    runtime:    RuntimeConfig
+    registry:   RegistryConfig
+    logging:    LoggingConfig
+    embeddings: EmbeddingsConfig
+    pragmatic:  PragmaticConfig
+
+    @property
+    def is_mock(self) -> bool:
+        return self.mode == "mock"
+
+    @property
+    def is_pragmatic(self) -> bool:
+        return self.mode == "pragmatic"
 
     def dump_summary(self) -> str:
-        """Human-readable startup summary (logged by main.py)."""
-        htnames = ", ".join(self.tools.hitl_tool_names) or "—"
+        mode_tag = "🔧 PRAGMATIC" if self.is_pragmatic else "🎭 MOCK"
+        n_dev = len(self.pragmatic.device_inventory)
+        n_mcp = len(self.pragmatic.mcp_servers)
         return (
             f"━━ Configuration ━━\n"
-            f"  LLM           : {self.llm.backend}/{self.llm.model}  "
-            f"(base_url={self.llm.base_url})\n"
-            f"  Tools         : MCP={'real' if not self.tools.mcp.use_mock else 'mock'}"
-            f"  OpenAPI={'real' if not self.tools.openapi.use_mock else 'mock'}\n"
-            f"  HITL tools    : {htnames}\n"
-            f"  Memory dir    : {self.memory.data_dir}\n"
-            f"  DTM compaction: every {self.memory.dtm.compaction_turns} turns  "
-            f"nudge every {self.memory.dtm.nudge_turns} turns\n"
-            f"  Log mode      : {self.logging.mode}  "
-            f"LLM detail: {self.llm.log_detail}\n"
-            f"  Server        : {self.server.host}:{self.server.port}  "
-            f"reload={self.server.reload}"
+            f"  Mode     : {mode_tag}\n"
+            f"  LLM      : {self.llm.backend}/{self.llm.model}\n"
+            f"  Embed    : {self.embeddings.backend}/{self.embeddings.model} dim={self.embeddings.dim}\n"
+            f"  Tools    : {'mock MCP + mock_tools' if self.is_mock else f'{n_dev} real device(s), {n_mcp} MCP server(s)'}\n"
+            f"  Memory   : {self.memory.data_dir}  Redis={'yes' if self.memory.redis_url else 'stub'}\n"
+            f"  Server   : {self.server.host}:{self.server.port}"
         )
 
 
-# ── Builder ──────────────────────────────────────────────────────────────────
+# ── Builder ───────────────────────────────────────────────────────────────────
 
 def load(config_path: str = "config.yaml") -> AppConfig:
-    """
-    Load config.yaml, then overlay environment variables.
-    Returns a fully-populated AppConfig.
-    """
-    y = _load_yaml(config_path)
-    s   = y.get("server",   {})
-    l   = y.get("llm",      {})
-    t   = y.get("tools",    {})
-    h   = y.get("hitl",     {})
-    m   = y.get("memory",   {})
-    sk  = y.get("skills",   {})
-    r   = y.get("runtime",  {})
-    rg  = y.get("registry", {})
-    lg  = y.get("logging",  {})
+    y   = _load_yaml(config_path)
+    s   = y.get("server",     {})
+    l   = y.get("llm",        {})
+    t   = y.get("tools",      {})
+    h   = y.get("hitl",       {})
+    m   = y.get("memory",     {})
+    sk  = y.get("skills",     {})
+    r   = y.get("runtime",    {})
+    rg  = y.get("registry",   {})
+    lg  = y.get("logging",    {})
+    emb = y.get("embeddings", {})
+    pg  = y.get("pragmatic",  {})
 
     tm  = t.get("mcp",     {})
     to  = t.get("openapi", {})
@@ -313,40 +244,82 @@ def load(config_path: str = "config.yaml") -> AppConfig:
     rs  = r.get("stop",    {})
     hs  = h.get("sla",     {})
 
-    # Parse hitl_tool_names from YAML list or env string
-    yaml_hitl_tools = t.get("hitl_tool_names", "") or ""
-    env_hitl_tools  = os.getenv("HITL_TOOL_NAMES", "")
-    if env_hitl_tools:
-        hitl_tool_names = [x.strip() for x in env_hitl_tools.split(",") if x.strip()]
-    elif isinstance(yaml_hitl_tools, list):
-        hitl_tool_names = [str(x) for x in yaml_hitl_tools]
-    else:
-        hitl_tool_names = [x.strip() for x in str(yaml_hitl_tools).split(",") if x.strip()]
+    mode = _env_str("MODE", y.get("mode", "mock")).lower()
+    if mode not in ("mock", "pragmatic"):
+        logger.warning("Unknown mode=%r, defaulting to mock", mode)
+        mode = "mock"
 
-    # Parse agent_urls from YAML list or env string
-    yaml_agents = rg.get("agent_urls", "") or ""
-    env_agents  = os.getenv("AGENT_URLS", "")
-    if env_agents:
-        agent_urls = [u.strip() for u in env_agents.split(",") if u.strip()]
-    elif isinstance(yaml_agents, list):
-        agent_urls = [str(u) for u in yaml_agents]
+    # hitl_tool_names
+    yaml_ht = t.get("hitl_tool_names", "") or ""
+    env_ht  = os.getenv("HITL_TOOL_NAMES", "")
+    if env_ht:
+        hitl_tool_names = [x.strip() for x in env_ht.split(",") if x.strip()]
+    elif isinstance(yaml_ht, list):
+        hitl_tool_names = [str(x) for x in yaml_ht]
     else:
-        agent_urls = [u.strip() for u in str(yaml_agents).split(",") if u.strip()]
+        hitl_tool_names = [x.strip() for x in str(yaml_ht).split(",") if x.strip()]
 
-    # Destructive action types
+    # agent_urls
+    yaml_ag = rg.get("agent_urls", "") or ""
+    env_ag  = os.getenv("AGENT_URLS", "")
+    if env_ag:
+        agent_urls = [u.strip() for u in env_ag.split(",") if u.strip()]
+    elif isinstance(yaml_ag, list):
+        agent_urls = [str(u) for u in yaml_ag]
+    else:
+        agent_urls = [u.strip() for u in str(yaml_ag).split(",") if u.strip()]
+
+    # destructive_action_types
     yaml_dat = h.get("destructive_action_types", [
         "restart_service", "rollback_deploy", "delete_resource",
         "drain_node", "force_failover", "flush_cache",
     ])
     destructive_action_types = list(yaml_dat) if isinstance(yaml_dat, list) else []
 
+    # pragmatic devices
+    pg_devs_raw = pg.get("device_inventory", []) or []
+    pg_devices = []
+    for d in pg_devs_raw:
+        if not isinstance(d, dict):
+            continue
+        pg_devices.append(PragmaticDevice(
+            id          = d.get("id", ""),
+            device_type = d.get("device_type", "cisco_ios"),
+            host        = _resolve_env(d.get("host", "")),
+            username    = _resolve_env(d.get("username", "")),
+            password    = _resolve_env(d.get("password", "")),
+            secret      = _resolve_env(d.get("secret", "")),
+            port        = int(d.get("port", 22)),
+            timeout     = int(d.get("timeout", 30)),
+            label       = d.get("label", d.get("id", "")),
+            tags        = d.get("tags", []),
+        ))
+
+    # pragmatic MCP servers
+    pg_mcp_raw = pg.get("mcp_servers", []) or []
+    pg_mcps = [
+        PragmaticMCPServer(
+            name      = srv.get("name", f"mcp_{i}"),
+            transport = srv.get("transport", "http"),
+            url       = srv.get("url", ""),
+            command   = srv.get("command", []),
+            auth      = srv.get("auth", {}),
+        )
+        for i, srv in enumerate(pg_mcp_raw) if isinstance(srv, dict)
+    ]
+
+    napalm_getters = pg.get("napalm_getters", [
+        "get_facts", "get_interfaces", "get_interfaces_ip",
+        "get_bgp_neighbors", "get_ntp_servers", "get_environment",
+    ])
+
     return AppConfig(
+        mode=mode,
         server=ServerConfig(
             host         = _env_str("HOST",        s.get("host",        "0.0.0.0")),
-            port         = _env_int("PORT",         s.get("port",        8000)),
+            port         = _env_int("PORT",         s.get("port",        8001)),
             reload       = _env_bool("RELOAD",      s.get("reload",      False)),
-            a2a_base_url = _env_str("A2A_BASE_URL", s.get("a2a_base_url",
-                                    "http://localhost:8000/api/v1/a2a")),
+            a2a_base_url = _env_str("A2A_BASE_URL", s.get("a2a_base_url", "http://localhost:8001/api/v1/a2a")),
         ),
         llm=LLMConfig(
             backend     = _env_str  ("LLM_BACKEND",    l.get("backend",     "ollama")),
@@ -385,10 +358,10 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             destructive_action_types=destructive_action_types,
         ),
         memory=MemoryConfig(
-            data_dir    = _env_str("HERMES_DATA_DIR", m.get("data_dir",    "./data")),
-            redis_url   = _env_str("REDIS_URL",       m.get("redis_url",   "")) or None,
-            postgres_dsn= _env_str("POSTGRES_DSN",    m.get("postgres_dsn","")) or None,
-            chroma_path = _env_str("CHROMA_PATH",     m.get("chroma_path", "./chroma_db")),
+            data_dir     = _env_str("HERMES_DATA_DIR", m.get("data_dir",    "./data")),
+            redis_url    = _env_str("REDIS_URL",       m.get("redis_url",   "")) or None,
+            postgres_dsn = _env_str("POSTGRES_DSN",    m.get("postgres_dsn","")) or None,
+            chroma_path  = _env_str("CHROMA_PATH",     m.get("chroma_path", "./chroma_db")),
             dtm=DTMConfig(
                 compaction_turns        = _env_int  ("DTM_COMPACTION_TURNS", md.get("compaction_turns",        20)),
                 nudge_turns             = _env_int  ("DTM_NUDGE_TURNS",      md.get("nudge_turns",             10)),
@@ -422,12 +395,19 @@ def load(config_path: str = "config.yaml") -> AppConfig:
         logging=LoggingConfig(
             mode = _env_str("LOG_MODE", lg.get("mode", "normal")),
         ),
+        embeddings=EmbeddingsConfig(
+            backend  = _env_str("EMBED_BACKEND", emb.get("backend",  "ollama")),
+            model    = _env_str("EMBED_MODEL",   emb.get("model",    "nomic-embed-text")),
+            base_url = _env_str("EMBED_BASE_URL",emb.get("base_url", "http://localhost:11434")),
+            dim      = _env_int("EMBED_DIM",     emb.get("dim",      768)),
+        ),
+        pragmatic=PragmaticConfig(
+            device_inventory = pg_devices,
+            mcp_servers      = pg_mcps,
+            napalm_getters   = napalm_getters,
+        ),
     )
 
 
-# ── Module-level singleton ────────────────────────────────────────────────────
-
-# Loaded once at import time from config.yaml next to this file.
-# Other modules import it as:  from config import cfg
 _CONFIG_PATH = pathlib.Path(__file__).parent / "config.yaml"
 cfg: AppConfig = load(str(_CONFIG_PATH))

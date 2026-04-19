@@ -8,6 +8,7 @@ levelled output.  Three preset modes:
 
     normal   — INFO for everything (what you see now)
     llm      — DEBUG for LLM/tool interactions; INFO for everything else
+    llm_only — ONLY LLM requests/responses and tool calls; all other output suppressed
     verbose  — DEBUG for everything
 
 Usage
@@ -17,7 +18,8 @@ Usage
     logging_config.configure(mode="llm")
 
     # Or via env var (no code change needed):
-    LOG_MODE=llm uvicorn main:app --port 8000
+    LOG_MODE=llm      uvicorn main:app --port 8001   # LLM debug + normal app logs
+    LOG_MODE=llm_only uvicorn main:app --port 8001   # ONLY LLM/tool lines, nothing else
 
     # Or enable just one logger at runtime:
     logging_config.set_llm_debug(True)
@@ -88,6 +90,12 @@ _LLM_LOGGERS = [
     "runtime.loop",
 ]
 
+# "llm_only" mode: these loggers are shown; everything else is silenced
+_LLM_ONLY_LOGGERS = [
+    "integrations.llm_engine",   # LLM requests, responses, token counts
+    "runtime.loop",              # TOOL▶ / TOOL◀ calls and results
+]
+
 # Loggers kept at WARNING even in verbose mode (too noisy)
 _QUIET_LOGGERS = [
     "httpcore",
@@ -106,7 +114,10 @@ def configure(mode: str = "") -> None:
     """
     Configure logging for the whole application.
 
-    mode: "normal" | "llm" | "verbose" | "" (reads LOG_MODE env var, defaults to normal)
+    mode: "normal" | "llm" | "llm_only" | "verbose" | "" (reads LOG_MODE env var)
+          llm_only — silences all loggers except integrations.llm_engine and runtime.loop,
+                     then sets those to DEBUG. Shows only LLM requests/responses and tool calls.
+                     Usage: LOG_MODE=llm_only uvicorn main:app --port 8001
     """
     if not mode:
         mode = os.getenv("LOG_MODE", "normal").lower()
@@ -123,6 +134,12 @@ def configure(mode: str = "") -> None:
 
     if mode == "verbose":
         root.setLevel(logging.DEBUG)
+    elif mode == "llm_only":
+        # Show ONLY LLM and tool call lines — silence all other loggers.
+        # Useful for debugging LLM behaviour without FastAPI / memory noise.
+        root.setLevel(logging.WARNING)
+        for name in _LLM_ONLY_LOGGERS:
+            logging.getLogger(name).setLevel(logging.DEBUG)
     else:
         root.setLevel(logging.INFO)
 
@@ -131,7 +148,7 @@ def configure(mode: str = "") -> None:
         logging.getLogger(name).setLevel(logging.WARNING)
 
     if mode == "llm":
-        # Only the LLM/tool loggers get DEBUG; everything else stays at INFO
+        # LLM/tool loggers get DEBUG; everything else stays at INFO
         for name in _LLM_LOGGERS:
             logging.getLogger(name).setLevel(logging.DEBUG)
 

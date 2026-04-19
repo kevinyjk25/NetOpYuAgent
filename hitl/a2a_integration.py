@@ -189,6 +189,16 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         ))
 
         try:
+            # ── Fast path: force_hitl_tool set by stop_hitl in loop.py ──────────
+            # When the runtime loop detects a requires_hitl tool, it emits stop_hitl
+            # and the backend re-routes here with force_hitl_tool in context.metadata.
+            # Skip complexity classification entirely — go straight to the interrupt.
+            if context.metadata.get("force_hitl_tool"):
+                await self._execute_complex(
+                    query, session_id, context, event_queue, task_id, context_id
+                )
+                return
+
             decision = self._runtime.classify(query)
             logger.info(
                 "Complexity: %s — %s (task_id=%s)",
@@ -294,6 +304,22 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         tool_calls = self._extract_tool_calls_from_chunks(response_chunks)
         await self._hermes_post_turn(session_id, query, assistant_text, tool_calls)
 
+        # Fire skill evolver for SIMPLE path too — if the turn used at least one
+        # tool call it may be worth capturing as a reusable skill recipe.
+        if self._skill_evolver and tool_calls:
+            try:
+                await self._skill_evolver.after_task(
+                    task_description = query,
+                    solution_summary = assistant_text[:400],
+                    tools_used       = [tc.get("tool", "") for tc in tool_calls if tc.get("tool")],
+                    solution_steps   = [],
+                    key_observations = [],
+                    complexity       = 5.0,   # simple path: lower complexity → higher bar for skill creation
+                    session_id       = session_id,
+                )
+            except Exception as exc:
+                logger.debug("SkillEvolver.after_task (simple path) skipped: %s", exc)
+
     # ------------------------------------------------------------------
     # Path B: Full HITL graph (COMPLEX / destructive queries)
     # ------------------------------------------------------------------
@@ -308,6 +334,97 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
             memory_context = past_context + "\n\n" + memory_context
 
         response_chunks: list[str] = []
+
+        # ── Fast path: force_hitl_tool bypasses the LangGraph graph ──
+        # When stop_hitl fires in loop.py for a requires_hitl tool, the backend
+        # sets force_hitl_tool in context.metadata. We build the HitlPayload
+        # directly here — no LangGraph interrupt() needed, works on all versions.
+        force_tool = context.metadata.get("force_hitl_tool", "")
+        force_args = context.metadata.get("force_hitl_args") or {}
+        if force_tool:
+            import uuid as _uuid
+            from hitl.schemas import (
+                HitlPayload, ProposedAction, TriggerKind, RiskLevel, InterruptState,
+            )
+            interrupt_id = str(_uuid.uuid4())
+            payload = HitlPayload(
+                interrupt_id    = interrupt_id,
+                thread_id       = context_id,
+                context_id      = context_id,
+                task_id         = task_id,
+                trigger_kind    = TriggerKind.DESTRUCTIVE_OP,
+                risk_level      = RiskLevel.HIGH,
+                confidence_score= 0.95,
+                user_query      = query,
+                intent_summary  = (
+                    f"Tool '{force_tool}' requires human approval before execution.\n"
+                    f"Args: {force_args}"
+                ),
+                proposed_action = ProposedAction(
+                    action_type  = f"tool_call:{force_tool}",
+                    target       = force_tool,
+                    parameters   = force_args,
+                    risk_summary = f"'{force_tool}' is on the HITL watch-list — approval required.",
+                    reversible   = False,
+                ),
+                sla_seconds     = 600,
+            )
+            # Emit the interrupt chunk — _handle_interrupt_chunk calls
+            # register_interrupt which stores it in _payload_store automatically
+            interrupt_chunk = {
+                "hitl_interrupt": True,
+                "interrupt_id":   interrupt_id,
+                "trigger_kind":   payload.trigger_kind.value,
+                "risk_level":     payload.risk_level.value,
+                "summary":        payload.intent_summary,
+                "proposed_action": payload.proposed_action.model_dump(),
+                "thread_id":      context_id,
+                "node":           "hitl",
+                "tag":            "hitl_interrupt",
+                "kind":           "hitl_interrupt",
+            }
+            await self._handle_interrupt_chunk(interrupt_chunk, context, session_id)
+            for processor in self._processors:
+                await processor.process(interrupt_chunk, event_queue, task_id, context_id)
+
+            # Register a direct callback so the decision router can execute the tool
+            # after the operator clicks Approve — without needing LangGraph resume.
+            _tool_reg = getattr(self, "_tool_registry", {}) or {}
+            async def _approved_tool_callback(
+                _tool=force_tool, _args=force_args, _reg=_tool_reg,
+                _sid=session_id, _q=query,
+            ):
+                if _tool not in _reg:
+                    return {"error": f"Tool {_tool!r} not in registry after approval"}
+                try:
+                    raw = await _reg[_tool](_args)
+                    await self._hermes_post_turn(
+                        _sid, _q,
+                        f"[TOOL:{_tool}] approved and executed. Result: {str(raw)[:300]}", []
+                    )
+                    return {"tool": _tool, "args": _args, "result": str(raw)}
+                except Exception as exc:
+                    return {"tool": _tool, "error": str(exc)}
+
+            self._hitl_router._direct_callbacks[interrupt_id] = _approved_tool_callback
+
+            await event_queue.enqueue_event(MessageEvent(
+                task_id=task_id, context_id=context_id,
+                message=Message(
+                    role="assistant",
+                    parts=[TextPart(text=(
+                        f"⚠ HITL interrupt — human approval required.\n"
+                        f"Tool: {force_tool}\n"
+                        f"Args: {force_args}\n"
+                        f"Interrupt ID: {interrupt_id}\n\n"
+                        "Approval card is now in the HITL tab. "
+                        "Click Approve or Reject to continue."
+                    ))],
+                ),
+            ))
+            await self._hermes_post_turn(session_id, query,
+                                         f"HITL interrupt raised for {force_tool}", [])
+            return
 
         async for chunk in run_with_hitl(
             query=query,
@@ -492,28 +609,29 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
     async def _verify_action_result(
         self, context: RequestContext, session_id: str, response_chunks: list[str]
     ) -> None:
-        action_type = context.metadata.get("action_type", "")
-        query       = context.get_user_input()
-        if not action_type:
-            return
+        query          = context.get_user_input()
+        action_type    = context.metadata.get("action_type", "complex_task")
+        assistant_text = "".join(response_chunks)
+        tools_used     = self._extract_tool_names_from_text(assistant_text)
+
         logger.info(
-            "Post-action verification: action_type=%s session=%s",
-            action_type, session_id,
+            "Post-action verification: action_type=%s tools=%s session=%s",
+            action_type, tools_used, session_id,
         )
-        if self._skill_evolver:
-            assistant_text = "".join(response_chunks)
+        # Always fire skill evolver for COMPLEX path if any tools were used
+        if self._skill_evolver and (tools_used or assistant_text):
             try:
                 await self._skill_evolver.after_task(
                     task_description = query,
                     solution_summary = assistant_text[:400],
-                    tools_used       = self._extract_tool_names_from_text(assistant_text),
+                    tools_used       = tools_used,
                     solution_steps   = [],
                     key_observations = [],
-                    complexity       = 7.0,
+                    complexity       = 7.5,   # complex path: higher complexity → lower bar for skill creation
                     session_id       = session_id,
                 )
             except Exception as exc:
-                logger.debug("SkillEvolver.after_task skipped: %s", exc)
+                logger.debug("SkillEvolver.after_task (complex path) skipped: %s", exc)
 
     # ------------------------------------------------------------------
     # HITL interrupt registration

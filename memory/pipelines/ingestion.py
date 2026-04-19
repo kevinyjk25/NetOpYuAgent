@@ -36,7 +36,17 @@ class IngestionPipeline:
 
     def __init__(self, config: MemoryConfig) -> None:
         self._cfg = config
-        self._embedder = _EmbedderStub(config.embedding_model)
+        _dim = getattr(config, "embedding_dim", 768)
+        self._embedder = _EmbedderStub(dim=_dim)
+
+    def set_embedder(self, embedder) -> None:
+        """Swap in a real embedder (called by main.py after startup)."""
+        self._embedder = embedder
+        logger.info(
+            "IngestionPipeline: embedder set to %s (dim=%s)",
+            embedder.__class__.__name__,
+            getattr(embedder, "DIM", getattr(embedder, "dim", "?")),
+        )
 
     async def process(
         self,
@@ -112,24 +122,13 @@ class IngestionPipeline:
 # ---------------------------------------------------------------------------
 
 class _EmbedderStub:
-    """
-    Deterministic pseudo-embedder for dev/test.
-    Replace with:
-
-        from langchain_openai import OpenAIEmbeddings
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
-        vector = await embeddings.aembed_query(text)
-    """
-    DIM = 1536
-
-    def __init__(self, model_name: str) -> None:
-        self.model_name = model_name
+    """Deterministic hash pseudo-embedder. dim from MemoryConfig.embedding_dim (default 768)."""
+    def __init__(self, dim: int = 768) -> None:
+        self.DIM = dim
 
     async def embed(self, text: str) -> list[float]:
         digest = hashlib.sha256(text.encode()).digest()
         base   = [b / 255.0 for b in digest]
-        # Tile to DIM
-        vec = (base * (self.DIM // len(base) + 1))[: self.DIM]
-        # Normalise
-        norm = sum(v * v for v in vec) ** 0.5 or 1.0
+        vec    = (base * (self.DIM // len(base) + 1))[: self.DIM]
+        norm   = sum(v * v for v in vec) ** 0.5 or 1.0
         return [v / norm for v in vec]

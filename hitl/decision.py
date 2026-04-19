@@ -62,12 +62,21 @@ class DecisionResult:
         self.error        = error
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        d = {
             "interrupt_id": self.interrupt_id,
             "decision":     self.decision.value,
             "resumed":      self.resumed,
             "error":        self.error,
         }
+        # Include tool execution result when callback ran successfully
+        if self.graph_result:
+            if "result" in self.graph_result:
+                d["tool_result"] = self.graph_result["result"]
+            if "tool" in self.graph_result:
+                d["tool_name"] = self.graph_result["tool"]
+            if "error" in self.graph_result and not d["error"]:
+                d["error"] = self.graph_result["error"]
+        return d
 
 
 # ---------------------------------------------------------------------------
@@ -97,14 +106,19 @@ class HitlDecisionRouter:
     ) -> None:
         self._graph         = graph
         self._audit         = audit
-        self._payload_store: dict[str, HitlPayload] = payload_store or {}
+        self._payload_store:    dict[str, HitlPayload] = payload_store or {}
+        self._direct_callbacks: dict[str, Any]         = {}   # interrupt_id → async callable
 
     # ------------------------------------------------------------------
     # Public API called by FastAPI route
     # ------------------------------------------------------------------
 
     async def register_interrupt(self, payload: HitlPayload) -> None:
-        """Called when a new HITL interrupt fires. Stores the payload."""
+        """Called when a new HITL interrupt fires. Stores the payload. Idempotent."""
+        if payload.interrupt_id in self._payload_store:
+            logger.debug("register_interrupt: %s already registered, skipping",
+                        payload.interrupt_id[:12])
+            return
         self._payload_store[payload.interrupt_id] = payload
         logger.info(
             "HITL registered: interrupt_id=%s trigger=%s risk=%s status=%s store_size=%d",
@@ -205,10 +219,27 @@ class HitlDecisionRouter:
         payload: HitlPayload,
         thread_cfg: dict,
     ) -> DecisionResult:
-        """Resume the graph after APPROVE."""
+        """Resume the graph after APPROVE — or run direct callback for non-graph interrupts."""
         try:
-            # Inject the operator's decision into the graph state so the
-            # hitl_interrupt_node can receive it and route to 'executor'
+            # Direct callback path (force_hitl_tool interrupts that bypassed LangGraph)
+            callback = self._direct_callbacks.pop(decision.interrupt_id, None)
+            if callback:
+                logger.info("_resume: running direct callback for interrupt %s", decision.interrupt_id[:12])
+                graph_result = await callback()
+                await self._audit.write(HitlAuditRecord(
+                    interrupt_id=decision.interrupt_id,
+                    thread_id=payload.thread_id,
+                    event_kind=AuditEventKind.GRAPH_RESUMED,
+                    actor=decision.operator_id,
+                    payload={"decision": decision.decision.value, "path": "direct_callback"},
+                ))
+                return DecisionResult(
+                    interrupt_id=decision.interrupt_id,
+                    decision=decision.decision,
+                    resumed=True,
+                    graph_result=graph_result or {},
+                )
+            # LangGraph resume path
             self._graph.update_state(
                 thread_cfg,
                 {"hitl_decision": decision.model_dump()},

@@ -112,10 +112,10 @@ STRICT RULES — follow exactly:
 6. Large results are shown as [STORED:tool:ref_id] — use [TOOL:read_stored_result] {{"ref_id": "..."}} to read pages
 
 TOOLS vs SKILLS — critical distinction:
-- TOOLS (use [TOOL:name]): executable functions that query/modify real systems
-- SKILLS (shown as "Available skills"): procedural guides telling you WHICH tools to call in sequence
-- NEVER call [TOOL:skill_name] — skills are NOT callable tools
-- When a skill is relevant, READ its steps (via [SKILL_LOAD:skill_id]) then call the TOOLS it describes
+- TOOLS (callable with [TOOL:name]): executable functions. Call them directly.
+- SKILLS listed in "Available skills" without a matching TOOL: procedural guides only — use [SKILL_LOAD:skill_id] to read steps, then call the tools it describes.
+- If a name appears in BOTH the tool list AND the skills list (e.g. get_device_config, validate_device_config, list_devices), it IS a real callable tool — use [TOOL:name] directly. SKILL_LOAD is NOT needed.
+- Only use [SKILL_LOAD:skill_id] for skills that have no corresponding [TOOL:] (e.g. restart_service, network_baseline_check).
 
 INVENTORY QUERIES — when asked what devices exist:
 - Use [TOOL:list_devices] {{}} to get ALL devices in one call
@@ -126,11 +126,17 @@ CONFIGURATION QUERIES — when asked about device config:
 - Use [TOOL:get_device_config] {{"device_id": "<id>"}} for full config
 - Use [TOOL:get_device_config] {{"device_id": "<id>", "section": "radius"}} for one section
 - Use [TOOL:validate_device_config] to check for errors
-- Use [TOOL:edit_device_config] to apply fixes
+- Use [TOOL:edit_device_config] to apply fixes — HITL approval required
+- Use [TOOL:diff_device_config] {{"device_id": "<id>"}} to see uncommitted config changes
 
-STOP CONDITION: If the context section shows tool results — either a "Tool outputs:" header
-or any "[TOOL: tool_name]" block — provide your final analysis NOW. Do NOT call any more tools.
-The results are already there; summarise and answer the user directly.
+SERVICE OPERATIONS — for service restarts and rollbacks (HITL required, approval card appears):
+- Use [TOOL:restart_service] {{"service": "<name>", "environment": "prod"}} for rolling restart
+- Use [TOOL:rollback_service] {{"service": "<name>", "version": "<v>", "environment": "prod"}} for rollback
+
+STOP CONDITION: Once you have gathered enough information to fully answer the user's question, write your final analysis WITHOUT any [TOOL:] line.
+- For single-device queries: one tool call is usually enough — summarise after that result.
+- For multi-device queries (e.g. "check all site-a devices"): call the tool once per device, then summarise ALL results together. Do NOT stop after the first device.
+- NEVER call the same tool with the same arguments twice.
 
 {extra_tools_section}
 
@@ -326,13 +332,54 @@ class OllamaEngine(LLMEngine):
         # On Turn 2+: if THIS TURN's tool_outputs are non-empty, add a stop
         # instruction so the model synthesizes rather than calling another tool.
         # We use state._current_tool_outputs_count (set by loop.py) to distinguish
-        # real current-turn results from memory context (which may also contain [TOOL:] text).
+        # On turn 2+: if we already have multiple device results, nudge the LLM
+        # to synthesise rather than keep calling more tools. But allow sequential
+        # multi-device calls (e.g. validate each of 7 devices one at a time).
+        # Build "already checked" section from accumulated tool_outputs keys
+        # This tells the LLM exactly which device/args combos it has already run.
+        _tool_output_keys = getattr(state, "_tool_output_keys", []) if state else []
+        _cur_tool_count   = getattr(state, "_current_tool_outputs_count", 0) if state else 0
+        _max_tool_calls   = getattr(self, "_max_tool_calls", 20)
+
         stop_note = ""
-        _cur_tool_count = getattr(state, "_current_tool_outputs_count", 0) if state else 0
-        if turns > 1 and _cur_tool_count > 0:
-            stop_note = (
-                "\n\nCRITICAL: Tool results are already shown in the context above. "
-                "DO NOT emit any [TOOL:...] line. Provide your final analysis now."
+        if _tool_output_keys:
+            # Show LLM what has already been run this session
+            checked_lines = []
+            import json as _json
+            for k in _tool_output_keys:
+                if "|" in k:
+                    tname, args_str = k.split("|", 1)
+                    try:
+                        args = _json.loads(args_str)
+                        if tname == "read_stored_result":
+                            # Normalise ref_id for display and show offset
+                            rid = args.get("ref_id", "?").strip("[]")
+                            if ":" in rid:
+                                rid = rid.rsplit(":", 1)[-1].strip()
+                            off = args.get("offset", 0)
+                            checked_lines.append(f"  - {tname}(ref_id={rid}, offset={off}) ✓ done — use offset={off + 2000} for next page")
+                        else:
+                            dev = args.get("device_id") or args.get("site") or args_str[:40]
+                            checked_lines.append(f"  - {tname}({dev}) ✓ done")
+                    except Exception:
+                        checked_lines.append(f"  - {k} ✓ done")
+                else:
+                    checked_lines.append(f"  - {k} ✓ done")
+            stop_note = "\n\nALREADY COMPLETED THIS SESSION:\n" + "\n".join(checked_lines)
+            stop_note += "\nDo NOT repeat any of the above calls. Move to the next unchecked device."
+            # When many results exist, strongly prompt for synthesis to avoid empty responses
+            if len(_tool_output_keys) >= 2:
+                stop_note += (
+                    "\n\nYou have gathered sufficient tool results. "
+                    "Write a complete analysis and recommendations NOW. "
+                    "Your response MUST include prose text summarising the findings."
+                )
+
+        if turns > 1 and _cur_tool_count >= _max_tool_calls:
+            stop_note += (
+                "\n\nNOTE: You have gathered enough results. "
+                "Please now provide your complete analysis and recommendations. "
+                "Do NOT emit any further [TOOL:...] lines."
             )
 
         # Pass the live tool_registry so uploaded tools appear in the system prompt
@@ -736,19 +783,48 @@ def patch_runtime_loop(loop: Any, engine: LLMEngine) -> None:
     )
 
 
-def patch_hitl_graph(engine: LLMEngine) -> None:
-    """
-    Monkey-patch hitl/graph.py's intent_classifier_node to use a real LLM engine.
+_RISK_SYSTEM = """You are an IT security risk evaluator for network operations.
+Analyse the query and classify risk. Return ONLY valid JSON, no other text.
 
-    Call this BEFORE building the HITL graph:
-        patch_hitl_graph(engine)
-        graph = build_hitl_graph(hitl_config)
+Return format:
+{"is_destructive": true|false, "risk_level": "low"|"medium"|"high"|"critical", "risk_reasons": ["reason1"]}
+
+Risk levels:
+  critical — irreversible data loss, production outage, security breach
+  high     — service disruption, destructive config change, many hosts affected
+  medium   — single-host change, recoverable, non-critical service
+  low      — read-only diagnostic, no state change
+"""
+
+_PLANNER_SYSTEM = """You are an IT network operations planner.
+Given the query and its classified intent, produce a concrete action plan.
+Return ONLY valid JSON, no other text, no markdown fences.
+
+Return format:
+{"action_type": "string", "target": "string", "parameters": {}, "estimated_impact": "string", "reversible": true|false, "plan_steps": ["step1", "step2"]}
+
+Keep plan_steps to 3-6 steps. Be specific. action_type should be a snake_case verb.
+"""
+
+
+def patch_hitl_graph(engine: LLMEngine, tool_registry: dict | None = None) -> None:
     """
+    Monkey-patch hitl/graph.py nodes to use the real LLM engine.
+    Patches: intent_classifier_node, risk_assessor_node, planner_node.
+    Optionally injects tool_registry into executor_node.
+
+    Call BEFORE build_hitl_graph().
+    """
+    import re as _re
+    import json as _json
     import hitl.graph as _graph
+    from hitl.schemas import RiskLevel
 
-    async def real_intent_classifier(state: dict) -> dict:
+    # ── intent classifier ─────────────────────────────────────────────
+    async def _intent(state: dict) -> dict:
         query  = state.get("query", "")
         result = await engine.classify_intent(query)
+        logger.info("intent_classifier(LLM): %s conf=%.2f", result.intent_type, result.confidence)
         return {
             "intent_type":       result.intent_type,
             "intent_confidence": result.confidence,
@@ -756,8 +832,88 @@ def patch_hitl_graph(engine: LLMEngine) -> None:
             "intent_summary":    result.intent_summary,
         }
 
-    _graph.intent_classifier_node = real_intent_classifier
+    # ── risk assessor ─────────────────────────────────────────────────
+    async def _risk(state: dict) -> dict:
+        query       = state.get("query", "")
+        intent_type = state.get("intent_type", "general_query")
+        intent_sum  = state.get("intent_summary", "")
+        prompt = (f"Query: {query}\nIntent: {intent_type} — {intent_sum}\n"
+                  "Assess the risk of executing this network operation.")
+        try:
+            if hasattr(engine, "_chat"):
+                raw = await engine._chat([
+                    {"role": "system", "content": _RISK_SYSTEM},
+                    {"role": "user",   "content": prompt},
+                ])
+            else:
+                raw = await engine.call(prompt, "", None)
+            text = engine._strip_think(raw) if hasattr(engine, "_strip_think") else raw
+            text = _re.sub(r"^```json?\s*", "", text.strip())
+            text = _re.sub(r"\s*```$", "", text)
+            data = _json.loads(text)
+            rl   = getattr(RiskLevel, data.get("risk_level", "medium").upper(), RiskLevel.MEDIUM)
+            logger.info("risk_assessor(LLM): risk=%s is_destructive=%s", rl, data.get("is_destructive"))
+            return {"is_destructive": bool(data.get("is_destructive", False)),
+                    "risk_level": rl, "risk_reasons": data.get("risk_reasons", [])}
+        except Exception as exc:
+            logger.warning("risk_assessor(LLM) parse failed (%s) — heuristic fallback", exc)
+            is_destr = intent_type == "destructive_op"
+            return {"is_destructive": is_destr,
+                    "risk_level": RiskLevel.HIGH if is_destr else RiskLevel.LOW,
+                    "risk_reasons": ["LLM parse failed; heuristic used"]}
+
+    # ── planner ───────────────────────────────────────────────────────
+    async def _planner(state: dict) -> dict:
+        query       = state.get("query", "")
+        intent_type = state.get("intent_type", "general_query")
+        intent_sum  = state.get("intent_summary", "")
+        risk_level  = getattr(state.get("risk_level"), "value", "medium")
+        risk_rsns   = "; ".join(state.get("risk_reasons", []))
+        prompt = (f"Query: {query}\nIntent: {intent_type} — {intent_sum}\n"
+                  f"Risk: {risk_level} ({risk_rsns})\n"
+                  "Produce a concrete network operations action plan.")
+        try:
+            if hasattr(engine, "_chat"):
+                raw = await engine._chat([
+                    {"role": "system", "content": _PLANNER_SYSTEM},
+                    {"role": "user",   "content": prompt},
+                ])
+            else:
+                raw = await engine.call(prompt, "", None)
+            text = engine._strip_think(raw) if hasattr(engine, "_strip_think") else raw
+            text = _re.sub(r"^```json?\s*", "", text.strip())
+            text = _re.sub(r"\s*```$", "", text)
+            data = _json.loads(text)
+            action = {
+                "action_type":      data.get("action_type", "llm_answer"),
+                "target":           data.get("target", "network"),
+                "parameters":       data.get("parameters", {}),
+                "estimated_impact": data.get("estimated_impact", ""),
+                "reversible":       data.get("reversible", True),
+            }
+            plan_steps = data.get("plan_steps", ["Analyse", "Execute", "Verify"])
+            logger.info("planner(LLM): action_type=%s steps=%d", action["action_type"], len(plan_steps))
+            return {"proposed_action": action, "plan_steps": plan_steps}
+        except Exception as exc:
+            logger.warning("planner(LLM) parse failed (%s) — fallback plan", exc)
+            return {"proposed_action": {"action_type": "llm_answer", "target": "network",
+                                        "parameters": {}, "reversible": True},
+                    "plan_steps": ["Analyse query", "Execute best action", "Verify result"]}
+
+    # ── executor (with optional real tool dispatch) ────────────────────
+    if tool_registry is not None:
+        _orig_executor = _graph.executor_node
+        async def _executor_with_tools(state: dict) -> dict:
+            state_copy = dict(state)
+            state_copy["_tool_registry"] = tool_registry
+            return await _orig_executor(state_copy)
+        _graph.executor_node = _executor_with_tools
+
+    _graph.intent_classifier_node = _intent
+    _graph.risk_assessor_node     = _risk
+    _graph.planner_node           = _planner
+
     logger.info(
-        "patch_hitl_graph: intent_classifier_node patched → %s(%s)",
-        engine.__class__.__name__, engine.model,
+        "patch_hitl_graph: intent+risk+planner patched → %s(%s)",
+        engine.__class__.__name__, getattr(engine, "model", "?"),
     )

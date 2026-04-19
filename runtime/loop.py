@@ -158,6 +158,21 @@ class LoopResult:
 # AgentRuntimeLoop
 # ---------------------------------------------------------------------------
 
+
+def _call_key(tool_name: str, tool_args: dict) -> str:
+    """
+    Deduplicate tool calls by name+args fingerprint, not just name.
+    This allows calling validate_device_config(ap-01) and validate_device_config(ap-02)
+    in the same session without the second being blocked as a duplicate.
+    Only blocks genuinely identical calls (same tool, same arguments).
+    """
+    import json as _json
+    try:
+        args_sig = _json.dumps(tool_args, sort_keys=True)
+    except Exception:
+        args_sig = str(tool_args)
+    return f"{tool_name}|{args_sig}"
+
 class AgentRuntimeLoop:
     """
     Thin default execution path.
@@ -367,30 +382,20 @@ class AgentRuntimeLoop:
         # Seed called_tools from any prior tool calls visible in memory context.
         # This prevents the LLM from re-calling ap-01 when memory already has
         # its config from a previous stream() invocation.
-        import re as _re2
-        _prior_calls: set[str] = set()
-        # We'll also seed after the first memory retrieval inside the loop.
-        # For now, seed from confirmed_facts which may contain tool call records.
-        for _fact in (confirmed_facts or []):
-            for _m in _re2.finditer(r"\[TOOL:\s*(\w+)\]", _fact):
-                _prior_calls.add(_m.group(1))
-        called_tools: set[str] = _prior_calls   # dedup: don't call same tool twice
+        # called_tools uses _call_key(name, args) fingerprints — not bare names.
+        # This allows validate_device_config(ap-01) and validate_device_config(ap-02)
+        # to both execute within one session.
+        called_tools: set[str] = set()
 
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
 
-            # Seed called_tools from prior tool calls visible in memory (first turn only)
-            # so we don't re-fetch device configs that were already retrieved in a prior
-            # stream() call and are now visible in the FTS5 memory context.
-            if state.turns == 1 and memory_results:
-                import re as _re3
-                for _mr in memory_results:
-                    _mr_text = getattr(_mr, "content", "") or str(_mr)
-                    for _mt in _re3.finditer(r"\[TOOL:\s*(\w+)\]", _mr_text):
-                        called_tools.add(_mt.group(1))
-                if called_tools:
-                    logger.debug("stream: seeded called_tools from memory: %s", called_tools)
+            # NOTE: We intentionally do NOT seed called_tools from memory context.
+            # Memory may mention [TOOL: validate_device_config] from a prior call on
+            # device X, but we still need to call it for devices Y and Z.
+            # Deduplication is now by _call_key (name+args), so the same tool with
+            # different device_id args is allowed. Same call with same args is blocked.
 
             # P2: skill catalog summary always prepended (cache-stable prefix)
             skill_section = ""
@@ -417,7 +422,12 @@ class AgentRuntimeLoop:
 
             # P1: detect SKILL_LOAD directives and expand detail on demand
             import re
+            _skill_loads_this_turn_r: set[str] = set()
             for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+                if skill_id in _skill_loads_this_turn_r:
+                    continue
+                _skill_loads_this_turn_r.add(skill_id)
+                called_tools.add(f"SKILL_LOAD:{skill_id}")
                 if self._skill_catalog:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
@@ -427,31 +437,34 @@ class AgentRuntimeLoop:
             # Execute tool calls — one per turn only
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
-            new_tool_calls = [(n, a) for n, a in tool_calls if n not in called_tools]
+            new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
-                called_tools.add(tool_name)
+                called_tools.add(_call_key(tool_name, tool_args))
 
-                # Skill-as-tool guard (same as stream path)
-                _is_skill_name = False
-                if self._skill_catalog:
+                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
+                # When a name exists in both catalogs (e.g. list_devices is both a skill
+                # description AND a callable tool), the tool takes priority.
+                _is_skill_only = False
+                if self._skill_catalog and tool_name not in tool_reg:
                     try:
-                        _is_skill_name = any(
+                        _is_skill_only = any(
                             s.skill_id == tool_name
                             for s in self._skill_catalog.list_skills()
                         )
                     except Exception:
                         pass
-                if _is_skill_name:
+                if _is_skill_only:
                     raw = (
-                        f"[ERROR] '{tool_name}' is a SKILL not a tool. "
-                        f"Use [SKILL_LOAD:{tool_name}] then call the individual tools it describes."
+                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
+                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
+                        f"then call the individual tools it describes."
                     )
-                    logger.warning("run: LLM called skill '%s' as tool — injecting error", tool_name)
+                    logger.warning("run: LLM called skill-only '%s' as tool — injecting error", tool_name)
                 else:
                     raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[tool_name] = stored   # accumulated for next turn
+                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 last_tool_result = raw
 
                 # P1: post-verification after each tool call
@@ -623,10 +636,17 @@ class AgentRuntimeLoop:
             # the LLM will produce a proper prose answer then.
 
             import re
+            _skill_loads_this_turn: set[str] = set()
             for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+                if skill_id in _skill_loads_this_turn:
+                    continue   # deduplicate within a single response
+                _skill_loads_this_turn.add(skill_id)
+                # Mark as "called" so dedup blocks repeated SKILL_LOAD across turns
+                called_tools.add(f"SKILL_LOAD:{skill_id}")
                 if self._skill_catalog:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
+                        context_str += "\n\n" + detail   # inject for next turn
                         yield {"node_step": f"Loading skill details: {skill_id}", "node": "skill_load"}
 
             # ── Single tool call enforcement ──────────────────────────
@@ -635,36 +655,68 @@ class AgentRuntimeLoop:
             # only the first so we feed back real data before the next call.
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
-            new_tool_calls = [(n, a) for n, a in tool_calls if n not in called_tools]
+            new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
-                called_tools.add(tool_name)
+                called_tools.add(_call_key(tool_name, tool_args))
 
                 # ── Skill-as-tool guard ───────────────────────────────
                 # If the LLM called a SKILL name as if it were a tool,
                 # inject an error result so the LLM corrects itself on
                 # the next turn rather than hitting the HITL gate or
                 # getting a "not registered" error with no explanation.
-                _is_skill_name = False
-                if self._skill_catalog:
+                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
+                # Tools and skills can share the same name (e.g. list_devices is both a
+                # skill description and a real callable tool). The tool always wins.
+                _is_skill_only = False
+                if self._skill_catalog and tool_name not in tool_reg:
                     try:
-                        _is_skill_name = any(
+                        _is_skill_only = any(
                             s.skill_id == tool_name
                             for s in self._skill_catalog.list_skills()
                         )
                     except Exception:
                         pass
-                if _is_skill_name:
+                if _is_skill_only:
+                    # ── Special case: HITL-required skill called as [TOOL:] ──
+                    # Rather than injecting a "not a tool" error (which causes
+                    # the LLM to loop through SKILL_LOAD indefinitely), detect
+                    # the requires_hitl flag and route straight to stop_hitl.
+                    # This lets restart_service, rollback_service etc. trigger
+                    # the HITL interrupt card exactly like edit_device_config.
+                    _skill_requires_hitl = False
+                    if self._skill_catalog:
+                        try:
+                            _skill_requires_hitl = self._skill_catalog.requires_hitl(tool_name)
+                        except Exception:
+                            pass
+                    if _skill_requires_hitl:
+                        import json as _json
+                        logger.info(
+                            "stream: HITL-required skill '%s' called as tool — routing to HITL",
+                            tool_name,
+                        )
+                        yield {
+                            "message": (
+                                f"stop_hitl: skill '{tool_name}' requires human approval "
+                                "before execution. Routing to HITL graph."
+                            ),
+                            "node":          "hitl_gate",
+                            "stop_hitl":     True,
+                            "tool_name":     tool_name,
+                            "tool_args":     tool_args,
+                            "tool_args_json": _json.dumps(tool_args, default=str),
+                        }
+                        return
+                    # Non-HITL skill-only: inject guidance error so LLM learns to SKILL_LOAD
                     _skill_err = (
-                        f"[ERROR] '{tool_name}' is a SKILL, not a tool. "
-                        f"Skills are procedural guides — you cannot call them with [TOOL:]. "
-                        f"Load the skill steps with [SKILL_LOAD:{tool_name}], "
-                        f"then call the individual TOOLS the skill describes "
-                        f"(e.g. get_device_config, validate_device_config, etc.)."
+                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
+                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
+                        f"then call the individual tools it describes."
                     )
-                    logger.warning("stream: LLM called skill '%s' as tool — injecting error", tool_name)
-                    tool_outputs[tool_name] = _skill_err
-                    yield {"node_step": f"Skill-as-tool error: {tool_name}", "node": "runtime_loop"}
+                    logger.warning("stream: LLM called skill-only '%s' as tool — injecting error", tool_name)
+                    tool_outputs[_call_key(tool_name, tool_args)] = _skill_err
+                    yield {"node_step": f"Skill-only error: {tool_name}", "node": "runtime_loop"}
                     continue   # skip HITL check and _execute_tool for this name
 
                 # CAP 5: gate tool against HITL watch-list BEFORE execution
@@ -680,15 +732,18 @@ class AgentRuntimeLoop:
                     except Exception:
                         pass
                 if _needs_hitl:
+                    import json as _json
                     yield {
                         "message": (
                             f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
                             "and requires human approval before execution. "
                             "Routing to HITL graph."
                         ),
-                        "node": "hitl_gate",
+                        "node":      "hitl_gate",
                         "stop_hitl": True,
                         "tool_name": tool_name,
+                        "tool_args": tool_args,          # carry args for post-approval replay
+                        "tool_args_json": _json.dumps(tool_args, default=str),
                     }
                     return
 
@@ -700,15 +755,21 @@ class AgentRuntimeLoop:
                                  _json.dumps(tool_args, indent=2, default=str), "─"*72)
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
                 stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[tool_name] = stored   # accumulated for next turn context
+                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 # Update count so llm_engine knows how many current-turn results exist
                 state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
+                state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):
                     logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:2000], "─"*72)
                 yield {
-                    "node_result": {"tool": tool_name, "result": stored[:300]},
+                    "node_result": {
+                        "tool":   tool_name,
+                        "result": stored,      # full stored label (for large) or full raw text (for inline)
+                        "raw":    raw,         # always full raw text — used by frontend Results tab
+                        "args":   tool_args,   # pass args so frontend can label the card accurately
+                    },
                     "node": "runtime_tool_result",
                 }
 
@@ -720,14 +781,12 @@ class AgentRuntimeLoop:
             decision = self._policy.evaluate(state)
             if decision.should_stop:
                 yield {"message": self._format_final([], decision), "node": "runtime_loop"}
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
             if self._is_complete(llm_response, new_tool_calls):
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
-
-    # ------------------------------------------------------------------
-    # Internals
-    # ------------------------------------------------------------------
 
     async def _retrieve_memory(self, query: str, session_id: str) -> list[Any]:
         if self._memory is None:
@@ -988,7 +1047,22 @@ class AgentRuntimeLoop:
         return f"[Tool {tool_name!r} not registered — args={args}]"
 
     @staticmethod
+    def _skill_loads_in(response: str) -> set:
+        import re as _re
+        return set(_re.findall(r"\[SKILL_LOAD:(\w+)\]", response))
+
+    @staticmethod
     def _is_complete(response: str, tool_calls: list) -> bool:
+        # If the LLM emitted a SKILL_LOAD directive, it needs one more turn
+        # to read the loaded detail and then call the actual tools.
+        # BUT: if the response ONLY contains SKILL_LOAD with no other content
+        # and no tool calls, limit to one extension (dedup in called_tools handles the rest).
+        import re as _re
+        skill_loads = _re.findall(r"\[SKILL_LOAD:\w+\]", response)
+        if skill_loads:
+            # Only extend if there's actual content beyond the SKILL_LOAD directives
+            stripped = _re.sub(r"\[SKILL_LOAD:\w+\]", "", response).strip()
+            return len(stripped) == 0 and len(tool_calls) == 0  # pure SKILL_LOAD with nothing else → complete
         return len(tool_calls) == 0
 
     @staticmethod

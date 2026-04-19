@@ -1,24 +1,20 @@
 # ============================================================
 # IT Ops Agent — Configuration
 # ============================================================
-# All parameters in one place. Environment variables always
-# override these values when set (12-factor compatible).
+# mode: mock | pragmatic
 #
-# Usage:
-#   uvicorn main:app --port 8000          # uses this file
-#   LLM_MODEL=qwen3.5:14b uvicorn ...    # env var wins
+#   mock       — Simulated tools (built-in mock MCP + mock_tools.py).
+#                Real LLM, real embeddings, real Redis memory.
+#                Zero device credentials needed. Good for dev/demo.
 #
-# Sections:
-#   server   — bind address, port, reload
-#   llm      — backend, model, endpoint, logging
-#   tools    — MCP, OpenAPI, mock modes
-#   hitl     — triggers, thresholds, notifications
-#   memory   — Hermes/DTM data paths and tuning
-#   skills   — catalog matching thresholds
-#   runtime  — stop policy, context budget, model tiering
-#   registry — agent discovery, load balancing
-#   logging  — verbosity, format
+#   pragmatic  — Real network device access via Netmiko/NAPALM/Nornir.
+#                Real MCP servers from pragmatic_tools section.
+#                Real LLM, real embeddings, real Redis memory (same as mock).
+#
+# Switch:  MODE=pragmatic uvicorn main:app --port 8001
 # ============================================================
+
+mode: "mock"         # mock | pragmatic   (env: MODE)
 
 
 # ── Server ───────────────────────────────────────────────────
@@ -26,71 +22,122 @@ server:
   host:   "127.0.0.1"
   port:   8001
   reload: false
-  a2a_base_url: "http://localhost:8000/api/v1/a2a"
+  a2a_base_url: "http://localhost:8001/api/v1/a2a"
 
 
 # ── LLM Backend ──────────────────────────────────────────────
-# backend: ollama | openai | anthropic | mock
-# mock     = deterministic stub, no network calls (good for CI)
-# ollama   = local Ollama server (default)
+# Used by BOTH modes — always real.
 llm:
   backend:     "ollama"
   model:       "qwen3.5:27b"
   base_url:    "http://localhost:11434"
   temperature: 0.1
   max_tokens:  4096
-
-  # LLM conversation logging
-  # off     = token counts only (production)
-  # compact = first 400 chars of system + full user + response
-  # full    = complete messages, no truncation
-  log_detail: "off"
+  log_detail:  "off"   # off | compact | full
 
 
-# ── Tool Backends ─────────────────────────────────────────────
+# ── Embeddings ───────────────────────────────────────────────
+# Used by BOTH modes — always real.
+# Pull first: ollama pull nomic-embed-text
+embeddings:
+  backend:  "ollama"           # ollama | openai | none(stub)
+  model:    "nomic-embed-text"
+  base_url: "http://localhost:11434"
+  dim:      768
+
+
+# ── Tool Backends (mock mode) ─────────────────────────────────
 tools:
-  # MCP server — set use_mock: false and provide config to use real tools
   mcp:
-    use_mock:   true
-    config_json: ""        # JSON string or path to mcp_config.json
-
-  # OpenAPI — set use_mock: false and provide spec_url to use real API
+    use_mock:    true
+    config_json: ""
   openapi:
-    use_mock:   true
-    spec_url:   ""
-    base_url:   ""
-    auth_type:  "bearer"   # bearer | api_key | none
-    token_env:  "NETOPS_API_TOKEN"
-
-  # Tools that always require HITL approval before execution
-  # Comma-separated tool names, e.g. "netflow_dump,db_failover"
+    use_mock:    true
+    spec_url:    ""
+    base_url:    ""
+    auth_type:   "bearer"
+    token_env:   "NETOPS_API_TOKEN"
   hitl_tool_names: ""
 
 
-# ── HITL — Human-in-the-Loop ─────────────────────────────────
+# ── Pragmatic mode — real network device access ───────────────
+# Only used when mode: pragmatic.
+#
+# device_inventory: list of real devices Netmiko/NAPALM can connect to.
+# Each device follows Netmiko's ConnectHandler parameter schema.
+#
+# mcp_servers: your own MCP server endpoints.
+# These are loaded IN ADDITION to the pragmatic device tools.
+#
+pragmatic:
+  # Real network devices — Netmiko ConnectHandler params
+  # Leave empty list [] to skip real device connections.
+  device_inventory:
+    []
+    # Example:
+    # - id: "sw-core-01"
+    #   device_type: "cisco_ios"    # netmiko device_type
+    #   host: "192.168.1.1"
+    #   username: "admin"
+    #   password: "${SW_CORE_01_PASS}"   # env var substitution supported
+    #   secret: "${SW_CORE_01_SECRET}"
+    #   port: 22
+    #   timeout: 30
+    #   label: "Core Switch Site-A"
+    #   tags: ["core", "site-a"]
+    #
+    # - id: "ap-01"
+    #   device_type: "cisco_ios"
+    #   host: "192.168.1.11"
+    #   username: "admin"
+    #   password: "${AP_01_PASS}"
+    #   label: "AP Site-A Floor-1"
+    #   tags: ["wireless", "site-a"]
+    #
+    # - id: "router-01"
+    #   device_type: "cisco_xr"
+    #   host: "192.168.1.254"
+    #   username: "admin"
+    #   password: "${ROUTER_01_PASS}"
+    #   label: "Edge Router Site-A"
+    #   tags: ["router", "edge"]
+
+  # Additional real MCP servers (loaded alongside device tools)
+  mcp_servers:
+    []
+    # Example:
+    # - name: "netbox"
+    #   transport: "http"
+    #   url: "http://netbox.internal:8080"
+    #   auth:
+    #     type: "bearer"
+    #     token_env: "NETBOX_MCP_TOKEN"
+    # - name: "prometheus"
+    #   transport: "stdio"
+    #   command: ["python", "-m", "prometheus_mcp_server"]
+
+  # NAPALM getter list for get_device_facts (pragmatic mode)
+  napalm_getters:
+    - "get_facts"
+    - "get_interfaces"
+    - "get_interfaces_ip"
+    - "get_bgp_neighbors"
+    - "get_ntp_servers"
+    - "get_environment"
+
+
+# ── HITL ─────────────────────────────────────────────────────
 hitl:
-  # Confidence below this triggers AmbiguityTrigger
-  confidence_threshold: 0.75
-
-  # Actions affecting more hosts than this trigger HITL
-  max_auto_host_count: 5
-
-  # Trigger HITL when top-2 skill scores are within threshold
-  # Set to true to block on ambiguity; false = warn only
-  skill_ambiguity: false
-
-  # Notification channels (leave blank to disable)
-  slack_webhook_url:      ""
-  pagerduty_routing_key:  ""
-
-  # SLA timeouts (seconds) per risk level
+  confidence_threshold:  0.75
+  max_auto_host_count:   5
+  skill_ambiguity:       false
+  slack_webhook_url:     ""
+  pagerduty_routing_key: ""
   sla:
-    critical: 300    #  5 min
-    high:     600    # 10 min
-    medium:   900    # 15 min
-    low:      1800   # 30 min
-
-  # Destructive action types that always require HITL
+    critical: 300
+    high:     600
+    medium:   900
+    low:      1800
   destructive_action_types:
     - restart_service
     - rollback_deploy
@@ -100,87 +147,48 @@ hitl:
     - flush_cache
 
 
-# ── Memory — Hermes + Dual-Track Memory ──────────────────────
+# ── Memory ───────────────────────────────────────────────────
+# Both modes use real Redis and real embeddings.
 memory:
-  # Root directory for all persistent memory files:
-  #   state.db          — FTS5 raw turns (Track A)
-  #   daily/YYYY-MM-DD.md — compacted sessions (Track A)
-  #   facts/facts.jsonl — curated facts (Track B)
-  #   skills/           — evolved skill markdown files
-  data_dir: "./data"
-
-  # Optional external backends (leave blank to use SQLite fallbacks)
-  redis_url:    ""
+  data_dir:    "./data"
+  redis_url:   ""          # e.g. "redis://localhost:6379" — leave blank for in-memory stub
   postgres_dsn: ""
-  chroma_path:  "./chroma_db"
-
-  # Dual-Track Memory tuning
+  chroma_path: "./chroma_db"
   dtm:
-    # Turns before flushing today's buffer to daily/.md
-    compaction_turns: 20
-
-    # Turns between deep Hermes nudge/review sweeps
-    nudge_turns: 10
-
-    # Score multiplier for Track B (curated facts) vs Track A (raw chunks)
-    # 1.0 = equal weight, 1.5 = facts preferred (default), 2.0 = strongly prefer facts
-    track_b_weight: 1.5
-
-    # Track A temporal decay — score halves every N days
-    # Lower = recent context matters more (IT ops: 7d is good)
-    temporal_half_life_days: 7.0
+    compaction_turns:         5    # flush daily .md after 5 turns (raise to 20+ in prod)
+    nudge_turns:              5    # deep Hermes review every 5 turns
+    track_b_weight:           1.5
+    temporal_half_life_days:  7.0
 
 
 # ── Skills ───────────────────────────────────────────────────
 skills:
-  # Number of top-K matched skills injected into the prompt
-  top_k: 5
-
-  # Skills with score gap smaller than this are considered ambiguous
+  top_k:               5
   ambiguity_threshold: 0.15
 
 
-# ── Runtime Loop ─────────────────────────────────────────────
+# ── Runtime ──────────────────────────────────────────────────
 runtime:
-  # Confidence below this keeps query on SIMPLE path
-  simple_confidence_floor: 0.70
-
-  # Max tool calls before routing SIMPLE → COMPLEX
-  simple_max_tool_calls: 4
-
-  # Tool results larger than this (chars) are stored externally
-  # and injected as [STORED:ref_id] references
+  simple_confidence_floor:  0.70
+  simple_max_tool_calls:    8    # raised: enough for small fleet checks
   tool_result_inline_limit: 4000
-
-  # Stop policy
   stop:
-    max_turns:            10
-    max_tool_calls:       20
-    token_budget:         50000
+    max_turns:             20   # raised: multi-device checks need up to 14+ turns
+    max_tool_calls:        30   # raised: 7-device validation = 7+ tool calls
+    token_budget:          50000
     max_no_progress_turns: 3
-
-  # Enable P1/P2 features
   pre_verification:  true
   post_verification: true
-  model_tiering:     false   # set true when routing to different models by tier
+  model_tiering:     false
 
 
 # ── Agent Registry ────────────────────────────────────────────
 registry:
-  # Comma-separated peer agent A2A base URLs to pre-register
-  # e.g. "http://agent-b:8001/api/v1/a2a,http://predictor:8002/api/v1/a2a"
-  agent_urls: ""
-
-  # Load-balance strategy: round_robin | random | least_loaded
-  lb_strategy: "round_robin"
-
-  # Health check interval in seconds
+  agent_urls:            ""
+  lb_strategy:           "round_robin"
   health_check_interval: 60
 
 
 # ── Logging ───────────────────────────────────────────────────
 logging:
-  # normal  = INFO for everything
-  # llm     = DEBUG for LLM/tool interactions, INFO for everything else
-  # verbose = DEBUG for everything (very noisy)
-  mode: "normal"
+  mode: "normal"   # normal | llm | verbose

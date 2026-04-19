@@ -359,36 +359,40 @@ class MemoryCurator:
     async def _call_llm(self, system: str, user: str) -> str:
         """
         Call the LLM with explicit system (instruction) + user (data) separation.
-        Falls back to built-in stub when no llm_fn is configured.
-        Strips <think> reasoning blocks from thinking models (qwen3.5, deepseek-r1).
+        Always returns valid JSON (array or object) for safe parsing.
+        Strips <think> reasoning blocks from thinking models.
         """
         import re as _re
         if self._llm_fn is None:
             return await self._stub_llm(user)
         try:
             raw = await self._llm_fn(system, user)
-            # Strip thinking blocks
             raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL | _re.IGNORECASE).strip()
-            # Sanity: model echoed the system prompt or gave empty response
-            if not raw or raw.startswith("You are") or raw.startswith("I need to"):
-                logger.debug("MemoryCurator: bad llm response, using stub")
-                return await self._stub_llm(user)
+            # Reject non-JSON — model echoed prompt, returned prose, or errored
+            first_char = raw.lstrip()[:1]
+            if not raw or first_char not in ("[", "{"):
+                logger.debug("MemoryCurator: non-JSON response (%r...) — returning []", raw[:60])
+                return "[]"
             return raw
         except Exception as exc:
-            logger.warning("MemoryCurator: llm_fn failed (%s) — using stub", exc)
-            return await self._stub_llm(user)
+            logger.warning("MemoryCurator: llm_fn failed (%s) — returning []", exc)
+            return "[]"
 
     @staticmethod
     async def _stub_llm(text: str) -> str:
         """
-        Deterministic stub — receives the user/data portion of the text.
+        Deterministic stub — always returns a valid JSON array string.
+        Guards against being called with raw LLM output instead of a curation prompt.
         """
         await asyncio.sleep(0)
+        import re as _re
+        # Only extract memories from structured curation prompt format
+        if not ("User:" in text or "Assistant:" in text or "Tool calls" in text):
+            return "[]"
         memories = []
 
         # Detect device mentions
-        import re as _re
-        devices = _re.findall(r"\b(ap-\d+|sw-\w+|router-\d+)\b", text, _re.IGNORECASE)
+        devices = _re.findall(r"\b(ap-\d+|sw-[\w-]+|router-\d+)\b", text, _re.IGNORECASE)
         if devices:
             dev = devices[0]
             memories.append({

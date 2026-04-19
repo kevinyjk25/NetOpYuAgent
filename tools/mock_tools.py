@@ -306,6 +306,11 @@ def make_read_stored_result_tool(tool_store):
         if not ref_id:
             return "[Error: ref_id is required]"
 
+        # Normalise ref_id: LLM often copies the full "[STORED:tool:uuid]" label
+        ref_id = ref_id.strip("[]")
+        if ":" in ref_id:
+            ref_id = ref_id.rsplit(":", 1)[-1].strip()
+
         chunk = tool_store.read(ref_id, offset=offset, length=length)
         if chunk is None:
             return f"[Error: no stored result found for ref_id={ref_id!r}]"
@@ -613,16 +618,302 @@ async def list_interfaces(args: dict[str, Any]) -> str:
 
 # ---------------------------------------------------------------------------
 
+
+# ---------------------------------------------------------------------------
+# Tool: get_device_config  (mock)
+# ---------------------------------------------------------------------------
+
+async def get_device_config(args: dict[str, Any]) -> str:
+    """Mock: return realistic AP/switch running config with seeded issues."""
+    device_id = args.get("device_id", "ap-01")
+    section   = args.get("section")
+    await asyncio.sleep(0.05)
+
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found. Use list_devices to see valid IDs.]"
+
+    import hashlib as _hs
+    seed = int(_hs.md5(device_id.encode()).hexdigest()[:4], 16)
+    ntp_missing    = (seed % 4 == 0)
+    radius_timeout = 3 + (seed % 4)
+    vlan_acl_ok    = (seed % 3 != 1)
+    ip = dev["ip"]
+
+    if dev["type"] == "wireless_ap":
+        if section == "radius":
+            return (f"# RADIUS config for {device_id}\n"
+                    f"radius-server host 10.0.1.100 auth-port 1812\n"
+                    f" timeout {radius_timeout}"
+                    + ("   ! WARNING: recommend <=3s\n" if radius_timeout > 3 else "\n"))
+        if section == "ntp":
+            return (f"# NTP config for {device_id}\n"
+                    + ("! NTP NOT CONFIGURED\n" if ntp_missing else "ntp server 10.0.1.5\nntp server 10.0.1.6\n"))
+        return (
+            f"! Configuration for {device_id} ({dev['model']}) — site {dev['site']}\n"
+            f"hostname {device_id}\n!\n"
+            f"interface GigabitEthernet0\n ip address {ip} 255.255.255.0\n no shutdown\n!\n"
+            f"dot11 ssid corp-wifi\n vlan 20\n authentication key-management wpa version 2\n!\n"
+            + ("! NTP NOT CONFIGURED — clock drift risk!\n" if ntp_missing else f"ntp server 10.0.1.5\nntp server 10.0.1.6\n")
+            + f"!\nradius-server host 10.0.1.100 auth-port 1812\n timeout {radius_timeout}"
+            + ("   ! WARNING: recommend <=3s\n" if radius_timeout > 3 else "\n")
+            + ("!\n! ACL NOT APPLIED to mgmt VLAN — security gap!\n" if not vlan_acl_ok else "!\nip access-list extended MGMT\n permit tcp 10.0.0.0 0.255.255.255 any\n deny ip any any log\n")
+            + "!\nend"
+        )
+    if dev["type"] == "switch":
+        return (
+            f"! Configuration for {device_id} ({dev['model']})\n"
+            f"hostname {device_id}\n!\nspanning-tree mode rapid-pvst\n!\n"
+            f"interface Vlan10\n ip address {ip} 255.255.255.0\n!\n"
+            f"ntp server 10.0.1.5\nntp server 10.0.1.6\n!\n"
+            f"radius-server host 10.0.1.100 timeout 3\n!\nend"
+        )
+    return f"! Configuration for {device_id}\nhostname {device_id}\n!\nend"
+
+
+# ---------------------------------------------------------------------------
+# Tool: validate_device_config  (mock)
+# ---------------------------------------------------------------------------
+
+async def validate_device_config(args: dict[str, Any]) -> str:
+    """Mock: deterministic PASS/WARN/FAIL report seeded by device ID."""
+    device_id = args.get("device_id", "ap-01")
+    await asyncio.sleep(0.03)
+
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found.]"
+
+    import hashlib as _hs
+    seed = int(_hs.md5(device_id.encode()).hexdigest()[:4], 16)
+    issues, warnings, passed = [], [], []
+
+    if dev["type"] == "wireless_ap":
+        ntp_missing    = (seed % 4 == 0)
+        radius_timeout = 3 + (seed % 4)
+        vlan_acl_ok    = (seed % 3 != 1)
+        if ntp_missing:
+            issues.append("FAIL  [NTP]    NTP server not configured — clock drift risk")
+        else:
+            passed.append("PASS  [NTP]    NTP configured (2 servers)")
+        if radius_timeout > 3:
+            warnings.append(f"WARN  [RADIUS] timeout={radius_timeout}s > recommended 3s (auth delays under load)")
+        else:
+            passed.append(f"PASS  [RADIUS] timeout={radius_timeout}s OK")
+        passed.append("PASS  [RADIUS] server 10.0.1.100 reachable")
+        if not vlan_acl_ok:
+            warnings.append("WARN  [ACL]    Management VLAN ACL not applied — unrestricted management access")
+        else:
+            passed.append("PASS  [ACL]    Management VLAN ACL applied")
+        passed.extend(["PASS  [SSID]   WPA2 on all SSIDs", "PASS  [SSID]   Guest SSID isolated"])
+    elif dev["type"] == "switch":
+        passed.extend(["PASS  [STP]    Rapid-PVST configured", "PASS  [VLAN]   VLANs 10/20/100 present",
+                       "PASS  [NTP]    NTP configured", "PASS  [RADIUS] timeout=3s OK"])
+    else:
+        passed.extend(["PASS  [ROUTING] Default route present", "PASS  [NTP]     NTP configured"])
+
+    lines = [f"VALIDATION REPORT — {device_id} ({dev['model']}) — site {dev['site']}", "=" * 65]
+    lines += issues + warnings + passed
+    lines += ["=" * 65,
+              f"Summary: {len(issues)} issue(s), {len(warnings)} warning(s), {len(passed)} check(s) passed"]
+    return "\n".join(lines)
+
+
+
+# ---------------------------------------------------------------------------
+# Tool: edit_device_config  (mock)
+# ---------------------------------------------------------------------------
+
+async def edit_device_config(args: dict[str, Any]) -> str:
+    """
+    Mock: simulate pushing config lines to a device.
+    Accepts multiple call formats the LLM may use:
+
+    Format A — explicit IOS commands:
+      config_lines: ["radius-server host 10.0.1.100 auth-port 1812 timeout 3"]
+
+    Format B — remove/add dicts (legacy):
+      section: "radius", changes: {"remove": ["...old..."], "add": ["...new..."]}
+
+    Format C — key-value changes (what LLMs naturally produce):
+      section: "radius", changes: {"timeout": 3, "host": "10.0.1.100"}
+      → converted to IOS commands based on section type
+    """
+    device_id    = args.get("device_id", "")
+    config_lines = args.get("config_lines") or []
+    section      = args.get("section", "")
+    changes      = args.get("changes", {})
+    reason       = args.get("reason", "operator change")
+
+    await asyncio.sleep(0.05)
+
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found. Use list_devices to see valid IDs.]"
+
+    # ── Normalise all call formats into config_lines ──────────────────────
+    if not config_lines and changes:
+        if "remove" in changes or "add" in changes:
+            # Format B: explicit remove/add lists
+            for line in changes.get("remove", []):
+                config_lines.append(f"no {line}")
+            config_lines.extend(changes.get("add", []))
+        else:
+            # Format C: key-value changes — generate IOS commands per section
+            sect = section.lower()
+            if sect in ("ntp", "time"):
+                servers = changes.get("servers", [])
+                for s in servers:
+                    config_lines.append(f"ntp server {s}")
+                if "timezone" in changes:
+                    config_lines.append(f"clock timezone {changes['timezone']}")
+            elif sect == "radius" or sect == "aaa":
+                host    = changes.get("host", "")
+                port    = changes.get("auth_port", changes.get("port", 1812))
+                timeout = changes.get("timeout", "")
+                key     = changes.get("key", changes.get("secret", ""))
+                if host:
+                    cmd = f"radius-server host {host} auth-port {port}"
+                    if timeout:
+                        cmd += f" timeout {timeout}"
+                    if key:
+                        cmd += f" key {key}"
+                    config_lines.append(cmd)
+                elif timeout:
+                    # timeout-only change — patch existing server entry
+                    config_lines.append(f"radius-server timeout {timeout}")
+            elif sect in ("syslog", "logging"):
+                server = changes.get("server", changes.get("host", ""))
+                if server:
+                    config_lines.append(f"logging host {server}")
+                level = changes.get("level", changes.get("severity", ""))
+                if level:
+                    config_lines.append(f"logging trap {level}")
+            elif sect in ("bgp",):
+                as_num = changes.get("as", changes.get("local_as", ""))
+                if as_num:
+                    config_lines.append(f"router bgp {as_num}")
+                for key, val in changes.items():
+                    if key not in ("as", "local_as"):
+                        config_lines.append(f"  bgp {key} {val}")
+            else:
+                # Generic: emit "key value" lines for each change
+                for key, val in changes.items():
+                    if isinstance(val, list):
+                        for v in val:
+                            config_lines.append(f"{key} {v}")
+                    else:
+                        config_lines.append(f"{key} {val}")
+
+    # Last-resort: if still empty but args has scalar values, treat them as inline config
+    if not config_lines and changes:
+        for key, val in changes.items():
+            if isinstance(val, (str, int, float)) and key not in ("section", "reason"):
+                config_lines.append(f"{key} {val}")
+
+    if not config_lines:
+        # Build a helpful error with what was received
+        received = f"section={section!r}, changes={changes!r}" if (section or changes) else f"args={args!r}"
+        return (f"[Error: no configuration lines could be derived for {device_id}. "
+                f"Received: {received}. "
+                f"Provide config_lines (list of IOS commands), or section + changes with recognized keys.]")
+
+    # Simulate config push
+    lines_applied = "\n".join(f"  {l}" for l in config_lines)
+    return (
+        f"# Config push result — {device_id} ({dev['model']}) — site {dev['site']}\n"
+        f"# {'─'*60}\n"
+        f"# Reason: {reason}\n"
+        f"# Section: {section or 'global'}\n"
+        f"# Lines applied ({len(config_lines)}):\n"
+        f"{lines_applied}\n"
+        f"# {'─'*60}\n"
+        f"# Result: Configuration applied successfully (mock)\n"
+        f"# Device acknowledged: OK\n"
+        f"# Write memory: Done\n"
+        f"# Note: run validate_device_config to verify the change took effect"
+    )
+
+
+# ---------------------------------------------------------------------------
+# HITL skill-only tools — mock implementations
+# These are registered in TOOL_REGISTRY so stop_hitl can replay them after
+# operator approval. In production, replace with real Kubernetes/API calls.
+# ---------------------------------------------------------------------------
+
+async def restart_service(args: dict[str, Any]) -> str:
+    """Mock: simulate a rolling service restart (HITL-required)."""
+    service     = args.get("service", args.get("service_name", "unknown-service"))
+    environment = args.get("environment", args.get("env", "prod"))
+    rolling     = args.get("rolling", True)
+    reason      = args.get("reason", "operator-initiated restart")
+    await asyncio.sleep(0.1)
+    strategy = "rolling" if rolling else "full"
+    return (
+        f"# Service restart — {service} ({environment}) — {strategy}\n"
+        f"# {'─'*60}\n"
+        f"# Reason: {reason}\n"
+        f"  Pods desired: 3  |  updated: 3  |  ready: 3  |  available: 3\n"
+        f"# Status: Rollout complete — all pods healthy\n"
+        f"# Health check: PASS (200 OK on /healthz)\n"
+        f"# Note: Monitor logs for 5 minutes post-restart"
+    )
+
+
+async def rollback_service(args: dict[str, Any]) -> str:
+    """Mock: simulate a service rollback to a previous version (HITL-required)."""
+    service     = args.get("service", args.get("service_name", "unknown-service"))
+    version     = args.get("version", args.get("target_version", "previous"))
+    environment = args.get("environment", args.get("env", "prod"))
+    reason      = args.get("reason", "operator-initiated rollback")
+    await asyncio.sleep(0.1)
+    return (
+        f"# Service rollback — {service} → {version} ({environment})\n"
+        f"# {'─'*60}\n"
+        f"# Reason: {reason}\n"
+        f"  Pods rolled back: 3  |  ready: 3  |  available: 3\n"
+        f"# Status: Rollback complete — running {version}\n"
+        f"# Health check: PASS (200 OK on /healthz)\n"
+        f"# Note: Monitor 10 minutes post-rollback; verify functionality manually"
+    )
+
+
+async def diff_device_config(args: dict[str, Any]) -> str:
+    """Mock: show what changed in a device config since last known-good state."""
+    device_id = args.get("device_id", "")
+    section   = args.get("section", "")
+    
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found.]"
+    
+    await asyncio.sleep(0.05)
+    sect_label = f" [{section}]" if section else ""
+    return (
+        f"# Config diff — {device_id} ({dev['model']}){sect_label}\n"
+        f"# Compared: running-config vs startup-config\n"
+        f"# {'─'*60}\n"
+        f"  No uncommitted changes detected.\n"
+        f"  running-config matches startup-config.\n"
+        f"# Last write: within last maintenance window"
+    )
+
 TOOL_REGISTRY: dict[str, callable] = {
-    "syslog_search":     syslog_search,
-    "prometheus_query":  prometheus_query,
-    "netflow_dump":      netflow_dump,
-    "dns_lookup":        dns_lookup,
-    "device_info":       device_info,
-    "alert_summary":     alert_summary,
-    "service_health":    service_health,
-    "list_devices":      list_devices,
-    "list_interfaces":   list_interfaces,
+    "syslog_search":          syslog_search,
+    "prometheus_query":       prometheus_query,
+    "netflow_dump":           netflow_dump,
+    "dns_lookup":             dns_lookup,
+    "device_info":            device_info,
+    "alert_summary":          alert_summary,
+    "service_health":         service_health,
+    "list_devices":           list_devices,
+    "list_interfaces":        list_interfaces,
+    "get_device_config":      get_device_config,
+    "validate_device_config": validate_device_config,
+    "edit_device_config":     edit_device_config,
+    "restart_service":        restart_service,
+    "rollback_service":       rollback_service,
+    "diff_device_config":     diff_device_config,
     # read_stored_result and process_stored_chunks are injected at runtime (need ToolResultStore ref)
 }
 
@@ -748,5 +1039,43 @@ TOOL_DESCRIPTIONS = {
         },
         "returns_large": False,
         "example": {"ref_id": "a3f9c12b", "offset": 0, "length": 2000},
+    },
+    "get_device_config": {
+        "description": (
+            "Retrieve running configuration from a device. "
+            "Mock mode returns realistic seeded config with intentional issues on some APs "
+            "(missing NTP, RADIUS timeout, missing ACL). Use section= to narrow output."
+        ),
+        "parameters": {
+            "device_id": "device ID (e.g. 'ap-01', 'sw-core-01')",
+            "section":   "config section keyword — e.g. 'radius', 'ntp' (optional)",
+        },
+        "returns_large": True,
+        "example": {"device_id": "ap-01", "section": "radius"},
+    },
+    "validate_device_config": {
+        "description": (
+            "Run NTP, RADIUS, ACL, CPU and memory validation checks on a device. "
+            "Mock mode returns a deterministic PASS/WARN/FAIL report seeded by device ID."
+        ),
+        "parameters": {
+            "device_id": "device ID (e.g. 'ap-01', 'sw-core-01')",
+        },
+        "returns_large": False,
+        "example": {"device_id": "ap-01"},
+    },
+    "edit_device_config": {
+        "description": (
+            "Push configuration lines to a device (HITL approval required before execution). "
+            "Mock mode simulates the config push and returns a result summary. "
+            "Provide config_lines as a list of IOS-style commands."
+        ),
+        "parameters": {
+            "device_id":    "device ID (e.g. 'ap-01', 'sw-core-01')",
+            "config_lines": "list of IOS-style config commands to push",
+            "reason":       "change reason for audit log",
+        },
+        "returns_large": False,
+        "example": {"device_id": "ap-01", "config_lines": ["radius-server host 10.0.1.100 timeout 3"], "reason": "fix RADIUS timeout"},
     },
 }

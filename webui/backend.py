@@ -449,6 +449,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             from a2a.event_queue import EventQueue, RequestContext
                             from a2a.schemas import Message, TextPart
                             eq  = EventQueue()
+                            # Pass the tool name and args that triggered HITL so
+                            # the graph can force the interrupt and replay after approval.
+                            _hitl_tool = chunk.get("tool_name", "")
+                            _hitl_args = chunk.get("tool_args", {})
                             ctx = RequestContext(
                                 task_id=task_id,
                                 context_id=context_id,
@@ -458,6 +462,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                     "env_context":     env_ctx,
                                     "confirmed_facts": list(req.confirmed_facts or []),
                                     "working_set":     list(req.working_set or []),
+                                    "force_hitl_tool": _hitl_tool,   # bypass LLM trigger eval
+                                    "force_hitl_args": _hitl_args,   # replay args after approval
+                                    "action_type":     f"tool_call:{_hitl_tool}",
                                 },
                             )
                             exec_task = asyncio.create_task(executor.execute(ctx, eq))
@@ -557,7 +564,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     except Exception as _e:
                         logger.debug("Skill evolver skipped: %s", _e)
 
-                yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome})}\n\n"
+                # Include confirmed_facts so frontend can carry them to next query
+                _done_facts = getattr(loop, '_last_confirmed_facts', []) or []
+                yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
                 yield "data: [DONE]\n\n"
 
             except Exception as exc:
@@ -573,6 +582,19 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     @app.get("/chat/history")
     async def chat_history(session_id: str = "default") -> JSONResponse:
+        """Returns message history — prefers FTS5 (persistent) over in-memory cache."""
+        fts = services.get("fts_store")
+        if fts:
+            try:
+                turns = await fts.get_session_turns(session_id, limit=100)
+                turns = list(reversed(turns))
+                messages = []
+                for t in turns:
+                    messages.append({"role": "user",      "content": t.user_text,      "ts": t.ts})
+                    messages.append({"role": "assistant",  "content": t.assistant_text, "ts": t.ts})
+                return JSONResponse(content=messages)
+            except Exception:
+                pass
         return JSONResponse(content=_message_history.get(session_id, []))
 
     # ==================================================================
@@ -748,7 +770,11 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 detail=f"No stored result found for ref_id={ref_id!r}. "
                        "Results may have been cleared or the ref_id is invalid."
             )
-        total      = len(store._store.get(ref_id, ""))
+        # Normalise ref_id in case it includes tool_name prefix
+        _norm_ref = ref_id.strip("[]")
+        if ":" in _norm_ref:
+            _norm_ref = _norm_ref.rsplit(":", 1)[-1].strip()
+        total      = len(store._store.get(_norm_ref, ""))
         next_off   = offset + len(chunk)
         has_more   = next_off < total
 
@@ -1018,6 +1044,97 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return await _submit_hitl_decision(
             interrupt_id, "edit", req, services
         )
+
+    # ==================================================================
+    # Session management endpoints  (persistent via FTS5 store)
+    # ==================================================================
+
+    @app.get("/sessions")
+    async def list_sessions_endpoint(limit: int = 50) -> JSONResponse:
+        """
+        List all conversation sessions ordered by most recent activity.
+        Reads from FTS5 state.db — survives server restarts.
+        """
+        fts = services.get("fts_store")
+        if not fts:
+            return JSONResponse(content=[])
+        try:
+            sessions = await fts.list_sessions(limit=limit)
+            return JSONResponse(content=[
+                {
+                    "session_id":    s.session_id,
+                    "created_at":    s.created_at,
+                    "last_active":   s.last_active,
+                    "topic_summary": s.topic_summary or s.session_id[:20],
+                    "turn_count":    s.turn_count,
+                }
+                for s in sessions
+            ])
+        except Exception as exc:
+            logger.warning("/sessions failed: %s", exc)
+            return JSONResponse(content=[])
+
+    @app.get("/sessions/{session_id}/history")
+    async def get_session_history(session_id: str, limit: int = 100) -> JSONResponse:
+        """
+        Retrieve full turn history for a session from FTS5 state.db.
+        Returns turns as {role, content, ts} pairs for the frontend chat panel.
+        """
+        fts = services.get("fts_store")
+        if not fts:
+            # Fall back to in-memory history
+            return JSONResponse(content=_message_history.get(session_id, []))
+        try:
+            turns = await fts.get_session_turns(session_id, limit=limit)
+            # FTS5 returns newest-first; reverse for chronological display
+            turns = list(reversed(turns))
+            messages = []
+            for t in turns:
+                messages.append({"role": "user",      "content": t.user_text,      "ts": t.ts})
+                messages.append({"role": "assistant",  "content": t.assistant_text, "ts": t.ts})
+            return JSONResponse(content=messages)
+        except Exception as exc:
+            logger.warning("/sessions/%s/history failed: %s", session_id, exc)
+            return JSONResponse(content=_message_history.get(session_id, []))
+
+    @app.post("/sessions")
+    async def create_session(request: Request) -> JSONResponse:
+        """
+        Create (or re-open) a named session. Returns the session_id.
+        Body: {"name": "optional display name"} — name becomes the topic_summary.
+        """
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        name       = body.get("name", "").strip()
+        session_id = "sess-" + uuid.uuid4().hex[:12]
+        fts = services.get("fts_store")
+        if fts and name:
+            try:
+                await fts.update_session_topic(session_id, name)
+            except Exception:
+                pass
+        return JSONResponse(content={
+            "session_id":    session_id,
+            "topic_summary": name or session_id,
+            "created_at":    time.time(),
+        })
+
+    @app.delete("/sessions/{session_id}")
+    async def delete_session(session_id: str) -> JSONResponse:
+        """
+        Delete a session and all its turns from FTS5 state.db.
+        Also removes from in-memory history cache.
+        """
+        fts = services.get("fts_store")
+        if fts:
+            try:
+                await fts.delete_session(session_id)
+            except Exception as exc:
+                logger.warning("delete_session FTS5 failed: %s", exc)
+        _message_history.pop(session_id, None)
+        return JSONResponse(content={"deleted": session_id})
 
     # ==================================================================
     # Memory / Session endpoints

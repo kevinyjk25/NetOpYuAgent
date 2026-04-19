@@ -43,7 +43,7 @@ header{
 /* ── Left panel ──────────────────────────────────── */
 .left-panel{
   grid-area:left;background:var(--surface);border-right:1px solid var(--border);
-  display:flex;flex-direction:column;overflow:hidden;
+  display:flex;flex-direction:column;overflow-y:auto;overflow-x:hidden;
 }
 .panel-head{
   padding:9px 12px;font-family:var(--mono);font-size:9px;font-weight:600;
@@ -51,9 +51,9 @@ header{
   border-bottom:1px solid var(--border);background:rgba(0,212,170,.03);
   flex-shrink:0;
 }
-.skill-list,.tool-list{overflow-y:auto;padding:4px 0}
-.skill-list{flex:1;min-height:80px}
-.tool-list{flex:0 0 auto;max-height:100px}
+.skill-list,.tool-list{overflow-y:auto;padding:4px 0;max-height:200px}
+.skill-list{max-height:200px}
+.tool-list{max-height:120px}
 .skill-item,.tool-item{
   padding:5px 12px;cursor:pointer;display:flex;align-items:center;gap:8px;
   transition:background .12s;
@@ -378,6 +378,143 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* ── Accordion left panel ─────────────────────────────────────────── */
+.acc-head {
+  display:flex; align-items:center; justify-content:space-between;
+  padding:6px 10px; font-size:10px; font-weight:600; letter-spacing:.06em;
+  text-transform:uppercase; color:var(--dim);
+  cursor:pointer; user-select:none; flex-shrink:0;
+  transition:color .15s;
+}
+.acc-head:hover { color:var(--text); }
+.acc-head .acc-arrow {
+  font-size:9px; transition:transform .2s; flex-shrink:0; margin-left:4px;
+}
+.acc-head.open .acc-arrow { transform:rotate(90deg); }
+.acc-head .acc-badge {
+  font-size:9px; color:var(--dim); margin-left:auto; margin-right:4px;
+  font-weight:400; letter-spacing:0; text-transform:none;
+}
+.acc-body {
+  overflow:hidden; max-height:0; transition:max-height .2s ease;
+  flex-shrink:0;
+}
+.acc-body.open {
+  max-height:180px;          /* cap every section so all headers stay visible */
+  overflow-y:auto;           /* scroll within the section if content is taller */
+}
+/* Session items */
+.session-panel { display:flex; flex-direction:column; gap:0; }
+.session-item {
+  display:flex; align-items:center; gap:6px;
+  padding:5px 8px; cursor:pointer; border-radius:4px;
+  font-size:11px; color:var(--mid); transition:background .15s;
+  user-select:none;
+}
+.session-item:hover { background:var(--hover); }
+.session-item.active { background:var(--accent); color:#fff; }
+.session-item .s-topic { flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.session-item .s-count { font-size:9px; opacity:.7; flex-shrink:0; }
+.session-item .s-del {
+  font-size:10px; opacity:0; flex-shrink:0;
+  padding:0 3px; border-radius:3px; color:var(--dim); transition:opacity .15s;
+}
+.session-item:hover .s-del { opacity:.7; }
+.session-item:hover .s-del:hover { opacity:1; color:var(--red,#e44); }
+.session-new-btn {
+  margin:4px 6px 6px; padding:5px 8px;
+  font-size:10px; background:transparent;
+  border:1px dashed var(--border); border-radius:4px;
+  color:var(--dim); cursor:pointer; width:calc(100% - 12px);
+  transition:border-color .15s, color .15s;
+}
+.session-new-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ── Results tab (replaces Cache) ────────────────────────────────── */
+.results-turn {
+  border:1px solid var(--border); border-radius:6px;
+  margin-bottom:8px; overflow:hidden; flex-shrink:0;
+}
+.results-turn-head {
+  display:flex; align-items:center; gap:8px;
+  padding:5px 10px; background:rgba(255,255,255,.03);
+  cursor:pointer; user-select:none; font-size:11px;
+}
+.results-turn-head:hover { background:rgba(255,255,255,.06); }
+.results-turn-num  { font-family:var(--mono); font-weight:700; color:var(--accent); font-size:10px; }
+.results-turn-meta { color:var(--dim); font-size:9px; margin-left:auto; }
+.results-turn-arrow{ font-size:9px; color:var(--dim); transition:transform .2s; }
+.results-turn-head.open .results-turn-arrow { transform:rotate(90deg); }
+.results-turn-body { display:none; padding:6px 8px; gap:5px; flex-direction:column; }
+.results-turn-body.open { display:flex; }
+.result-card {
+  border:1px solid var(--border); border-radius:4px; overflow:hidden;
+}
+.result-card-head {
+  display:flex; align-items:center; gap:6px;
+  padding:4px 8px; background:rgba(255,255,255,.02);
+  font-size:10px; cursor:pointer; user-select:none;
+}
+.result-card-head:hover { background:rgba(255,255,255,.05); }
+.result-card-head::before {
+  content:'▶'; font-size:7px; color:var(--dim);
+  transition:transform .15s; flex-shrink:0;
+}
+.result-card-head.open::before { transform:rotate(90deg); }
+.result-card-tool { font-family:var(--mono); color:var(--text); font-weight:600; }
+.result-card-args { color:var(--dim); font-family:var(--mono); font-size:9px;
+  overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1; }
+.result-card-badge {
+  font-size:8px; padding:1px 5px; border-radius:3px; flex-shrink:0;
+  font-family:var(--mono); border:1px solid;
+}
+.result-card-badge.inline  { color:var(--success); border-color:var(--success); }
+.result-card-badge.stored  { color:var(--warn);    border-color:var(--warn); }
+.result-card-body { display:none; }
+.result-card-body.open {
+  display:block; border-top:1px solid var(--border);
+}
+.result-card-pre {
+  padding:6px 8px; margin:0;
+  font-family:var(--mono); font-size:10px; color:var(--mid);
+  white-space:pre; overflow-x:auto; overflow-y:auto;
+  max-height:320px; tab-size:4;
+  /* horizontal scroll for wide ASCII tables */
+}
+.result-card-pager {
+  display:flex; align-items:center; gap:4px;
+  padding:4px 8px; border-top:1px solid var(--border);
+  background:rgba(255,255,255,.02);
+}
+.result-card-pager-info {
+  font-family:var(--mono); font-size:9px; color:var(--dim);
+  flex:1; text-align:center;
+}
+.result-card-pager button {
+  padding:2px 8px; font-size:9px;
+}
+.result-card-stored-btn {
+  display:block; margin:4px 8px 6px;
+  padding:4px 8px; font-size:10px; font-family:var(--mono);
+  background:transparent; border:1px solid var(--warn);
+  color:var(--warn); border-radius:4px; cursor:pointer;
+  transition:background .15s;
+}
+.result-card-stored-btn:hover { background:rgba(255,200,0,.08); }
+/* ── History banner ──────────────────────────────────────────────── */
+.history-banner {
+  display:none; align-items:center; gap:8px;
+  padding:6px 12px; background:rgba(0,212,170,.12);
+  border-bottom:1px solid var(--accent); font-size:11px; color:var(--accent);
+  flex-shrink:0;
+}
+.history-banner.visible { display:flex; }
+.history-resume-btn {
+  margin-left:auto; padding:3px 10px; font-size:10px;
+  background:var(--accent); color:#000; border:none;
+  border-radius:4px; cursor:pointer; font-weight:600;
+}
 </style>
 </head>
 <body>
@@ -396,57 +533,106 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 
 <!-- Left panel -->
 <div class="left-panel">
-  <div class="panel-head">skills</div>
-  <div class="skill-list" id="skill-list">
-    <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
+
+  <!-- Sessions (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-sessions">
+    <span>sessions</span>
+    <span class="acc-badge" id="session-count-badge"></span>
+    <span class="acc-arrow">▶</span>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">quick tools</div>
-  <div class="tool-list" id="tool-list">
-    <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
+  <div class="acc-body" id="acc-body-sessions">
+    <div class="session-panel" id="session-list-panel">
+      <div style="padding:8px 10px;color:var(--dim);font-size:11px;">Loading…</div>
+    </div>
+    <button class="session-new-btn" onclick="createNewSession()">+ new session</button>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">⚠ hitl triggers</div>
-  <div style="padding:3px 0;overflow-y:auto;max-height:120px" id="hitl-queries">
-    <div class="tool-item" onclick="setQuery('restart the payments-service in production')">
-      <div class="risk-dot risk-high"></div>
-      <div><div class="skill-name">restart payments-service</div><div class="skill-purpose">→ HITL: destructive op</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('rollback auth-service to version 3.2.1')">
-      <div class="risk-dot risk-high"></div>
-      <div><div class="skill-name">rollback auth-service</div><div class="skill-purpose">→ HITL: rollback deploy</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('drain k8s-worker-03 for maintenance')">
-      <div class="risk-dot risk-high"></div>
-      <div><div class="skill-name">drain k8s-worker-03</div><div class="skill-purpose">→ HITL: drain node</div></div>
-    </div>
+
+  <!-- Skills (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-skills">
+    <span>skills</span>
+    <span class="acc-arrow">▶</span>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">🔀 skill ambiguity demos</div>
-  <div style="padding:3px 0;overflow-y:auto;max-height:130px" id="ambiguity-queries">
-    <div class="tool-item" onclick="setQuery('get system logs and metrics')">
-      <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">logs and metrics</div><div class="skill-purpose">syslog vs prometheus (tie)</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('get device metrics')">
-      <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">device metrics</div><div class="skill-purpose">device_info vs prometheus</div></div>
-    </div>
-    <div class="tool-item" onclick="setQuery('check network status')">
-      <div class="risk-dot risk-medium"></div>
-      <div><div class="skill-name">network status</div><div class="skill-purpose">service_health vs netflow</div></div>
-    </div>
-    <div style="padding:4px 10px;font-size:9px;color:var(--dim)">
-      Set HITL_SKILL_AMBIGUITY=true to route these to approval
+  <div class="acc-body" id="acc-body-skills">
+    <div class="skill-list" id="skill-list">
+      <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
     </div>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">⚡ skill evolution (complex → auto-skill)</div>
-  <div style="padding:3px 0;overflow-y:auto;max-height:120px" id="skill-evo-triggers">
-    <!-- Populated by renderSkillEvoTriggers() — shows preview button when skill exists -->
+
+  <!-- Quick tools (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-tools">
+    <span>quick tools</span>
+    <span class="acc-arrow">▶</span>
   </div>
-  <div class="divider"></div>
-  <div class="panel-head">📤 upload</div>
+  <div class="acc-body" id="acc-body-tools">
+    <div class="tool-list" id="tool-list">
+      <div style="padding:10px;color:var(--dim);font-size:11px;">Loading…</div>
+    </div>
+  </div>
+
+  <!-- HITL triggers (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-hitl">
+    <span>⚠ hitl triggers</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-hitl">
+    <div style="padding:3px 0" id="hitl-queries">
+      <div class="tool-item" onclick="setQuery('restart the payments-service in production')">
+        <div class="risk-dot risk-high"></div>
+        <div><div class="skill-name">restart payments-service</div><div class="skill-purpose">→ HITL: destructive op</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('rollback auth-service to version 3.2.1')">
+        <div class="risk-dot risk-high"></div>
+        <div><div class="skill-name">rollback auth-service</div><div class="skill-purpose">→ HITL: rollback deploy</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('drain k8s-worker-03 for maintenance')">
+        <div class="risk-dot risk-high"></div>
+        <div><div class="skill-name">drain k8s-worker-03</div><div class="skill-purpose">→ HITL: drain node</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill ambiguity demos (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-ambiguity">
+    <span>🔀 skill ambiguity</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-ambiguity">
+    <div style="padding:3px 0" id="ambiguity-queries">
+      <div class="tool-item" onclick="setQuery('get system logs and metrics')">
+        <div class="risk-dot risk-medium"></div>
+        <div><div class="skill-name">logs and metrics</div><div class="skill-purpose">syslog vs prometheus (tie)</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('get device metrics')">
+        <div class="risk-dot risk-medium"></div>
+        <div><div class="skill-name">device metrics</div><div class="skill-purpose">device_info vs prometheus</div></div>
+      </div>
+      <div class="tool-item" onclick="setQuery('check network status')">
+        <div class="risk-dot risk-medium"></div>
+        <div><div class="skill-name">network status</div><div class="skill-purpose">service_health vs netflow</div></div>
+      </div>
+      <div style="padding:4px 10px;font-size:9px;color:var(--dim)">
+        Set HITL_SKILL_AMBIGUITY=true to route these to approval
+      </div>
+    </div>
+  </div>
+
+  <!-- Skill evolution (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-skillevo">
+    <span>⚡ skill evolution</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-skillevo">
+    <div style="padding:3px 0" id="skill-evo-triggers">
+      <!-- Populated by renderSkillEvoTriggers() -->
+    </div>
+  </div>
+
+  <!-- Upload (collapsed by default) -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-upload">
+    <span>📤 upload</span>
+    <span class="acc-arrow">▶</span>
+  </div>
+  <div class="acc-body" id="acc-body-upload">
   <div style="padding:4px 6px">
     <!-- Skill upload -->
     <div style="margin-bottom:6px">
@@ -473,10 +659,20 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
       <div id="tool-upload-status" style="font-size:10px;color:var(--dim);margin-top:2px;min-height:14px"></div>
     </div>
   </div>
-</div>
+  </div><!-- /acc-body-upload -->
+</div><!-- /left-panel -->
 
 <!-- Main chat -->
 <main>
+  <!-- History mode banner — shown when viewing a past session -->
+  <div class="history-banner" id="history-banner">
+    <span>👁 Viewing history: <strong id="history-banner-name"></strong></span>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="history-resume-btn" style="background:transparent;color:var(--accent);border:1px solid var(--accent)"
+              onclick="resumeLiveSession()">▶ Back to live</button>
+      <button class="history-resume-btn" onclick="continueThisSession()">↩ Continue this session</button>
+    </div>
+  </div>
   <div id="messages">
     <div class="msg-wrap">
       <div class="avatar avatar-sys">SYS</div>
@@ -521,7 +717,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
     </div>
     <div class="input-opts">
       <span class="opt-label">session</span>
-      <input type="text" class="opt-input" id="session-input" placeholder="auto" style="width:90px">
+      <input type="text" class="opt-input" id="session-input" placeholder="auto" style="width:90px"
+             oninput="onSessionInputChange(this.value)">
       <span class="opt-label">mode</span>
       <select class="opt-select" id="mode-select">
         <option value="stream">stream</option>
@@ -539,22 +736,26 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 <!-- Right panel -->
 <div class="right-panel">
   <div class="tabs">
-    <div class="tab active" onclick="switchTab('cache')" id="tab-btn-cache">Cache</div>
+    <div class="tab active" onclick="switchTab('cache')" id="tab-btn-cache">Results</div>
     <div class="tab" onclick="switchTab('flow')"   id="tab-btn-flow">Flow</div>
     <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
     <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
     <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
   </div>
 
-  <!-- Cache tab -->
+  <!-- Results tab — all tool calls grouped by turn -->
   <div class="tab-content active" id="tab-cache">
-    <div class="cache-index" id="cache-index">
-      <div style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:4px 0 6px;font-style:italic">No cached results yet</div>
+    <!-- Turn-grouped result cards -->
+    <div id="results-turns" style="padding:6px;overflow-y:auto;flex:1;display:flex;flex-direction:column">
+      <div id="results-empty" style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:8px 4px;font-style:italic">No tool results yet — send a query</div>
     </div>
+    <!-- Large-result pager (kept for stored results) -->
     <div class="cache-viewer" id="cache-viewer" style="display:none">
       <div class="cache-viewer-header">
         <span class="cv-title" id="cv-title">—</span>
         <span class="cv-meta" id="cv-meta"></span>
+        <span onclick="document.getElementById('cache-viewer').style.display='none'"
+              style="margin-left:auto;cursor:pointer;color:var(--dim);font-size:12px">✕</span>
       </div>
       <div class="cv-progress"><div class="cv-progress-fill" id="cv-progress-fill" style="width:0%"></div></div>
       <div class="cache-content" id="cache-content"></div>
@@ -642,11 +843,433 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 </div>
 
 <script>
+
+
+
+// ── Session history navigation ────────────────────────────────────────────
+
+let _liveSessionId = '';   // the session we can actually SEND to
+let _viewingHistory = false;
+
+function _setLiveSession(sid) {
+  _liveSessionId = sid;
+  _viewingHistory = false;
+  document.getElementById('history-banner').classList.remove('visible');
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+}
+
+function resumeLiveSession() {
+  if (!_liveSessionId) return;
+  sessionId = _liveSessionId;
+  document.getElementById('session-input').value = sessionId;
+  document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
+  _setLiveSession(sessionId);
+  // Reload live session chat
+  document.getElementById('messages').innerHTML = '';
+  _turnResults = {};
+  renderResultsTurns();
+  fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/history?limit=100`)
+    .then(r=>r.json()).then(msgs => {
+      for (const m of msgs) {
+        if (m.role==='user') addMessage('user', m.content||'');
+        else if (m.role==='assistant') addMessage('agent', m.content||'');
+      }
+    }).catch(()=>{});
+  renderSessionList();
+}
+
+function continueThisSession() {
+  // Make the currently-viewed history session the new live session.
+  // The chat is already loaded — just unlock Send and update live pointer.
+  const histSid = sessionId;   // already set to the history session
+  _liveSessionId = histSid;
+  _viewingHistory = false;
+  document.getElementById('history-banner').classList.remove('visible');
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+  document.getElementById('session-input').value = histSid;
+  document.getElementById('session-badge').textContent = 'session: '+histSid.slice(0,12)+'…';
+  // Reset per-session state so new tool calls start fresh in the Results tab
+  _sessionFacts = [];
+  _currentTurn = 0;
+  _turnResults = {};
+  renderResultsTurns();
+  renderSessionList();
+  // Focus the input so user can start typing immediately
+  document.getElementById('query-input').focus();
+}
+
+// ── Turn-grouped results store ─────────────────────────────────────────────
+
+// _turnResults: { [turnKey]: { turnNum, tools: [{name, args, result, stored, refId}] } }
+// turnKey = `${sessionId}#${turnNum}`
+let _turnResults = {};
+let _currentTurn = 0;   // incremented each time a new streaming request starts
+
+function _getTurnKey() { return `${sessionId}#${_currentTurn}`; }
+
+function startNewResultTurn() {
+  _currentTurn++;
+  const key = _getTurnKey();
+  if (!_turnResults[key]) {
+    _turnResults[key] = { turnNum: _currentTurn, tools: [] };
+  }
+}
+
+function addToolResult(toolName, argsStr, resultText, isStored, refId) {
+  const key = _getTurnKey();
+  if (!_turnResults[key]) _turnResults[key] = { turnNum: _currentTurn, tools: [] };
+  // Store FULL result text — truncation happens only at display time (via pagination)
+  _turnResults[key].tools.push({
+    name:    toolName,
+    args:    argsStr || '',
+    result:  resultText || '',   // full text, never sliced here
+    stored:  isStored,
+    refId:   refId || null,
+  });
+  renderResultsTurns();
+  updateCacheBadge();
+  switchTab('cache');
+}
+
+function renderResultsTurns() {
+  const container = document.getElementById('results-turns');
+  const empty     = document.getElementById('results-empty');
+  const turns     = Object.values(_turnResults).sort((a,b)=>a.turnNum-b.turnNum);
+  if (!turns.length || !turns.some(t=>t.tools.length)) {
+    empty.style.display = '';
+    // Remove any existing turn cards
+    for (const el of container.querySelectorAll('.results-turn')) el.remove();
+    return;
+  }
+  empty.style.display = 'none';
+  // Re-render all turns (cheap for small count)
+  for (const el of container.querySelectorAll('.results-turn')) el.remove();
+  for (const turn of turns) {
+    if (!turn.tools.length) continue;
+    const wrap = document.createElement('div');
+    wrap.className = 'results-turn';
+    const isLatest = turn.turnNum === _currentTurn;
+    const headOpen = isLatest ? ' open' : '';
+    const bodyOpen = isLatest ? ' open' : '';
+    wrap.innerHTML = `
+      <div class="results-turn-head${headOpen}" onclick="toggleResultTurn(this)">
+        <span class="results-turn-num">Turn ${turn.turnNum}</span>
+        <span style="font-size:10px;color:var(--mid)">${turn.tools.length} tool call${turn.tools.length>1?'s':''}</span>
+        <span class="results-turn-meta">${turn.tools.map(t=>t.name.replace('_',' ')).join(' · ')}</span>
+        <span class="results-turn-arrow">▶</span>
+      </div>
+      <div class="results-turn-body${bodyOpen}">
+        ${turn.tools.map((t,i) => _renderResultCard(t, turn.turnNum, i)).join('')}
+      </div>`;
+    container.appendChild(wrap);
+  }
+}
+
+// Inline result pager state: { [pageId]: {text, page, pageSize, pages} }
+const _rcPages = {};
+const RC_PAGE  = 3000;   // chars per page for inline results
+
+function _renderResultCard(t, turnNum, idx) {
+  const cardId   = `rc-${turnNum}-${idx}`;
+  const bodyId   = `rb-${turnNum}-${idx}`;
+  const preId    = `rp-${turnNum}-${idx}`;
+  const pgId     = `pg-${turnNum}-${idx}`;
+  const badgeCls = t.stored ? 'stored' : 'inline';
+  const badgeTxt = t.stored ? 'STORED' : 'INLINE';
+
+  // Prettify args for header
+  let argsLabel = '';
+  try {
+    const a = JSON.parse(t.args);
+    argsLabel = Object.entries(a).map(([k,v])=>`${k}=${v}`).join(' · ');
+  } catch { argsLabel = (t.args||'').slice(0, 80); }
+
+  let bodyContent = '';
+
+  if (t.stored && t.refId) {
+    // Large stored result — open in the large viewer
+    const sizeM = t.result.match(/chars:([\d,]+)/);
+    const sz    = sizeM ? sizeM[1]+' chars' : 'large';
+    bodyContent = `<div class="result-card-body open" id="${bodyId}">
+      <button class="result-card-stored-btn" onclick="openCache('${t.refId}','${esc(t.name)}')">
+        📦 Open full result in viewer — ${esc(sz)}
+      </button>
+    </div>`;
+  } else {
+    // Inline result — paginate locally, full text preserved
+    const fullText = t.result || '';
+    const pages    = Math.max(1, Math.ceil(fullText.length / RC_PAGE));
+    _rcPages[preId] = { text: fullText, page: 0, pageSize: RC_PAGE, pages };
+    const slice     = fullText.slice(0, RC_PAGE);
+    const pagerHtml = pages > 1
+      ? `<div class="result-card-pager" id="${pgId}">
+          <button class="btn btn-secondary btn-sm" onclick="rcPageNav('${preId}','${pgId}',-1)" id="${preId}-prev" disabled>◀</button>
+          <span class="result-card-pager-info" id="${preId}-info">1 / ${pages} · ${fullText.length.toLocaleString()} chars</span>
+          <button class="btn btn-secondary btn-sm" onclick="rcPageNav('${preId}','${pgId}',1)" id="${preId}-next" ${pages<=1?'disabled':''}>▶</button>
+        </div>`
+      : `<div class="result-card-pager"><span class="result-card-pager-info">${fullText.length.toLocaleString()} chars</span></div>`;
+    bodyContent = `<div class="result-card-body open" id="${bodyId}">
+      <pre class="result-card-pre" id="${preId}">${esc(slice)}</pre>
+      ${pagerHtml}
+    </div>`;
+  }
+
+  return `<div class="result-card" id="${cardId}">
+    <div class="result-card-head open" onclick="toggleResultCard('${cardId}','${bodyId}')">
+      <span class="result-card-tool">${esc(t.name)}</span>
+      <span class="result-card-args" title="${esc(argsLabel)}">${esc(argsLabel)}</span>
+      <span class="result-card-badge ${badgeCls}">${badgeTxt}</span>
+    </div>
+    ${bodyContent}
+  </div>`;
+}
+
+function rcPageNav(preId, pgId, dir) {
+  const state = _rcPages[preId];
+  if (!state) return;
+  state.page = Math.max(0, Math.min(state.pages - 1, state.page + dir));
+  const start = state.page * state.pageSize;
+  const slice = state.text.slice(start, start + state.pageSize);
+  const pre   = document.getElementById(preId);
+  if (pre) { pre.textContent = slice; pre.scrollTop = 0; }
+  const info  = document.getElementById(preId + '-info');
+  if (info) info.textContent = `${state.page+1} / ${state.pages} · ${state.text.length.toLocaleString()} chars`;
+  const prev = document.getElementById(preId + '-prev');
+  const next = document.getElementById(preId + '-next');
+  if (prev) prev.disabled = (state.page === 0);
+  if (next) next.disabled = (state.page >= state.pages - 1);
+}
+
+function toggleResultTurn(head) {
+  const body = head.nextElementSibling;
+  head.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+function toggleResultCard(cardId, bodyId) {
+  const body = document.getElementById(bodyId);
+  if (!body) return;
+  // Toggle open class so CSS handles display
+  body.classList.toggle('open');
+  // Sync arrow on the card head
+  const card = document.getElementById(cardId);
+  if (card) {
+    const head = card.querySelector('.result-card-head');
+    if (head) head.classList.toggle('open');
+  }
+}
+
+function updateCacheBadge() {
+  const n = Object.values(_turnResults).reduce((s,t)=>s+t.tools.length,0);
+  const badge = document.getElementById('cache-badge');
+  if (badge) badge.textContent = n ? `results: ${n}` : '';
+}
+
+// ── Accordion toggle ──────────────────────────────────────────────────────
+function toggleAcc(headEl) {
+  const body = headEl.nextElementSibling;
+  if (!body || !body.classList.contains('acc-body')) return;
+  const isOpen = body.classList.contains('open');
+  body.classList.toggle('open', !isOpen);
+  headEl.classList.toggle('open', !isOpen);
+}
+
+// ── Session management ────────────────────────────────────────────────────
+
+let _sessions = [];   // [{session_id, topic_summary, turn_count, last_active}]
+
+async function loadSessions() {
+  try {
+    const res = await fetch(`${BASE}/sessions?limit=50`);
+    _sessions = await res.json();
+    renderSessionList();
+    document.getElementById('session-count-badge').textContent =
+      _sessions.length ? `${_sessions.length} session(s)` : '';
+  } catch(e) {
+    console.warn('loadSessions failed', e);
+  }
+}
+
+function renderSessionList() {
+  const panel = document.getElementById('session-list-panel');
+  if (!panel) return;
+  if (!_sessions.length) {
+    panel.innerHTML = '<div style="padding:8px 10px;color:var(--dim);font-size:11px;">No sessions yet</div>';
+    return;
+  }
+  const curSid = getSession();
+  panel.innerHTML = _sessions.map(s => {
+    const isActive = s.session_id === curSid;
+    const topic    = esc(s.topic_summary || s.session_id.slice(0,16));
+    const ago      = _relativeTime(s.last_active);
+    return `<div class="session-item${isActive ? ' active' : ''}"
+                 onclick="switchSession('${s.session_id}')"
+                 title="${esc(s.session_id)}">
+      <div class="s-topic">${topic}</div>
+      <div class="s-count">${s.turn_count}t · ${ago}</div>
+      <div class="s-del" onclick="event.stopPropagation();deleteSession('${s.session_id}')" title="Delete session">✕</div>
+    </div>`;
+  }).join('');
+}
+
+function _relativeTime(ts) {
+  const secs = Math.floor(Date.now()/1000 - ts);
+  if (secs < 60)    return 'now';
+  if (secs < 3600)  return `${Math.floor(secs/60)}m`;
+  if (secs < 86400) return `${Math.floor(secs/3600)}h`;
+  return `${Math.floor(secs/86400)}d`;
+}
+
+async function switchSession(sid) {
+  // If switching away from live session, remember live session id
+  if (!_viewingHistory && sessionId && sessionId !== sid) {
+    _liveSessionId = sessionId;
+  }
+  // Mark as viewing history if different from live
+  const wasLive = !_viewingHistory;
+  sessionId = sid;
+  _viewingHistory = (sid !== _liveSessionId);
+
+  document.getElementById('session-input').value = sid;
+  document.getElementById('session-badge').textContent = 'session: '+sid.slice(0,12)+'…';
+
+  // Show/hide history banner
+  const banner = document.getElementById('history-banner');
+  if (_viewingHistory && _liveSessionId && sid !== _liveSessionId) {
+    const s = _sessions.find(s=>s.session_id===sid);
+    document.getElementById('history-banner-name').textContent =
+      (s?.topic_summary || sid.slice(0,16)+'…');
+    banner.classList.add('visible');
+    document.getElementById('send-btn').disabled = true;
+    document.getElementById('query-input').placeholder = 'Viewing history — click "Resume live session" to continue';
+  } else {
+    banner.classList.remove('visible');
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+    if (!_liveSessionId) _liveSessionId = sid;
+  }
+
+  renderSessionList();
+
+  // Clear current chat and load history
+  document.getElementById('messages').innerHTML = '';
+  storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0; _sessionFacts = [];
+  renderResultsTurns();
+  clearFlow();
+
+  // Fetch and render history from FTS5
+  try {
+    const res  = await fetch(`${BASE}/sessions/${encodeURIComponent(sid)}/history?limit=100`);
+    const msgs = await res.json();
+    if (msgs.length === 0) {
+      addMessage('system', `Session "${sid.slice(0,12)}…" — no messages yet.`, 'info');
+    } else {
+      for (const m of msgs) {
+        if (m.role === 'user')
+          addMessage('user', m.content || '');
+        else if (m.role === 'assistant')
+          addMessage('agent', m.content || '');
+      }
+    }
+  } catch(e) {
+    addMessage('system', 'Could not load session history: '+e.message, 'error');
+  }
+}
+
+async function createNewSession() {
+  const name = prompt('Session name (optional):', '');
+  if (name === null) return;   // cancelled
+  try {
+    const res  = await fetch(`${BASE}/sessions`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: name.trim()}),
+    });
+    const data = await res.json();
+    sessionId  = data.session_id;
+    _liveSessionId = sessionId;
+    _viewingHistory = false;
+    document.getElementById('history-banner').classList.remove('visible');
+    document.getElementById('send-btn').disabled = false;
+    document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+    document.getElementById('session-input').value = sessionId;
+    document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
+    document.getElementById('messages').innerHTML = '';
+    storeItems = {}; activeRefId = null; flowEvents = []; _turnResults = {}; _currentTurn = 0; _sessionFacts = [];
+    renderResultsTurns(); clearFlow();
+    // Add to local list and re-render immediately
+    _sessions.unshift({
+      session_id:    data.session_id,
+      topic_summary: data.topic_summary,
+      turn_count:    0,
+      last_active:   Date.now()/1000,
+    });
+    renderSessionList();
+    document.getElementById('session-count-badge').textContent = `${_sessions.length} session(s)`;
+  } catch(e) {
+    alert('Could not create session: '+e.message);
+  }
+}
+
+async function deleteSession(sid) {
+  if (!confirm(`Delete session "${sid.slice(0,16)}…" and all its history?`)) return;
+  try {
+    await fetch(`${BASE}/sessions/${encodeURIComponent(sid)}`, {method: 'DELETE'});
+    _sessions = _sessions.filter(s => s.session_id !== sid);
+    renderSessionList();
+    document.getElementById('session-count-badge').textContent =
+      _sessions.length ? `${_sessions.length} session(s)` : '';
+    // If we deleted the active session, create a fresh one
+    if (sessionId === sid) {
+      sessionId = '';
+      document.getElementById('session-input').value = '';
+      document.getElementById('session-badge').textContent = 'session: —';
+      document.getElementById('messages').innerHTML = '';
+    }
+  } catch(e) {
+    alert('Could not delete session: '+e.message);
+  }
+}
+
+function onSessionInputChange(val) {
+  // Sync the manual session-input text to active sessionId
+  if (val.trim()) {
+    sessionId = val.trim();
+    renderSessionList();
+  }
+}
+
+async function restoreLastSession() {
+  // On page load: if sessions exist, switch to most recent automatically
+  await loadSessions();
+  if (_sessions.length > 0 && !sessionId) {
+    const last = _sessions[0];
+    sessionId = last.session_id;
+    _liveSessionId = sessionId;
+    _viewingHistory = false;
+    document.getElementById('session-input').value = sessionId;
+    document.getElementById('session-badge').textContent = 'session: '+sessionId.slice(0,12)+'…';
+    renderSessionList();
+    // Load its history
+    try {
+      const res  = await fetch(`${BASE}/sessions/${encodeURIComponent(sessionId)}/history?limit=100`);
+      const msgs = await res.json();
+      for (const m of msgs) {
+        if (m.role === 'user')      addMessage('user',  m.content || '');
+        else if (m.role === 'assistant') addMessage('agent', m.content || '');
+      }
+    } catch(e) { /* ignore — fresh start is fine */ }
+  }
+}
+
 const BASE = '/webui';
 let sessionId = '';
 let storeItems = {};
 let activeRefId = null;
 let flowEvents  = [];
+let _sessionFacts = [];   // confirmed_facts from last response, sent back next query
 let reqStart    = 0;
 let streamState = null;
 
@@ -921,10 +1544,13 @@ async function sendQuery() {
   const mode = document.getElementById('mode-select').value;
   const dlg  = document.getElementById('delegation-select').value;
   document.getElementById('session-badge').textContent = 'session: '+sid;
+  // Track live session and start a new result turn
+  if (!_liveSessionId) _liveSessionId = sid;
+  startNewResultTurn();
   addMessage('user', query);
   reqStart = Date.now();
   flowEvent('classify','🔍 Classify',`"${query.slice(0,55)}${query.length>55?'…':''}"`,`session: ${sid}`);
-  const body = JSON.stringify({query,session_id:sid,confirmed_facts:[],working_set:[],env_context:{},delegation_mode:dlg});
+  const body = JSON.stringify({query,session_id:sid,confirmed_facts:_sessionFacts,working_set:[],env_context:{},delegation_mode:dlg});
   try {
     if (mode==='stream') await streamQuery(query, sid, body);
     else                  await syncQuery(body);
@@ -932,6 +1558,8 @@ async function sendQuery() {
     btn.disabled = false;
     flowEvent('done','✅ Complete',`${elap()} total`,`session: ${sid}`);
     refreshStats();
+    // Refresh session list so turn count and last_active update live
+    setTimeout(loadSessions, 800);
   }
 }
 
@@ -1051,19 +1679,33 @@ function dispatchChunk(c, query, sid) {
     return;
   }
   if (c.node_result) {
-    const {tool, result} = c.node_result;
-    const preview = String(result||'');
-    const refM = preview.match(/\[STORED:([^:]+):([^\]]+)\]/);
+    const {tool, result, raw, args: toolArgs} = c.node_result;
+    // raw = full result text (always present)
+    // result = stored label (if large) or raw text (if inline)
+    const displayText = String(raw || result || '');
+    const storedLabel = String(result || '');
+    const refM = storedLabel.match(/\[STORED:([^:]+):([^\]]+)\]/);
+
+    // Build args label from args dict passed by loop.py
+    let argsStr = '';
+    if (toolArgs && typeof toolArgs === 'object') {
+      argsStr = Object.entries(toolArgs).map(([k,v])=>`${k}=${v}`).join(' · ');
+    } else if (typeof toolArgs === 'string') {
+      argsStr = toolArgs;
+    }
+
     if (refM) {
       const refId = refM[2];
-      registerStore(refId, tool, preview);
-      addStep('cached','Cached: '+tool,`${refId.slice(0,10)}… → Cache tab`,preview,{refId,tool});
-      flowEvent('cached','📦 Cached Result',`${tool} → [STORED:${refId.slice(0,8)}…]`,`${preview.length} chars`);
-      switchTab('cache');
-      openCache(refId, tool);
+      registerStore(refId, tool, storedLabel);
+      // For large results, show the label + open viewer — raw is too big to inline
+      addToolResult(tool, argsStr, storedLabel, true, refId);
+      addStep('cached','Cached: '+tool,`${refId.slice(0,10)}… → Results tab`,storedLabel,{refId,tool});
+      flowEvent('cached','📦 Cached Result',`${tool} → [STORED:${refId.slice(0,8)}…]`,`${displayText.length} chars`);
     } else {
-      addStep('inline','Inline: '+tool,'',preview,{inline:preview.slice(0,120)});
-      flowEvent('tool-result','✓ Inline Result',tool,preview.slice(0,60));
+      // Inline result — use full raw text for display with pagination
+      addToolResult(tool, argsStr, displayText, false, null);
+      addStep('inline','Inline: '+tool,'',displayText,{inline:displayText.slice(0,120)});
+      flowEvent('tool-result','✓ Inline Result',tool,displayText.slice(0,60));
     }
     return;
   }
@@ -1073,10 +1715,21 @@ function dispatchChunk(c, query, sid) {
     updateModelBadge(c.message);
     return;
   }
+  if (c.type==='confirmed_facts') {
+    // loop.py yielded confirmed_facts before stopping — carry forward to next query
+    if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
+      _sessionFacts = c.confirmed_facts;
+    }
+    return;
+  }
   if (c.type==='done') {
     addStep('done',`Complete — ${c.turns||'?'} turns in ${elap()}`,'','');
     flowEvent('done','✅ Done',`${c.turns||'?'} turns`,`session: ${sid}`);
     scanForRefs(streamState?.tokens?.join('')||'');
+    // Also capture confirmed_facts from done event if present
+    if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
+      _sessionFacts = c.confirmed_facts;
+    }
     return;
   }
   if (c.type==='hermes_write') {
@@ -1143,32 +1796,8 @@ function registerStore(refId, tool, label='') {
 }
 
 function renderCacheIndex() {
-  const el = document.getElementById('cache-index');
-  const items = Object.entries(storeItems);
-  if (!items.length) {
-    el.innerHTML = '<div style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:8px 10px;font-style:italic">No cached results yet</div>';
-    return;
-  }
-  const ICONS = {syslog_search:'📋',prometheus_query:'📊',netflow_dump:'🌊',default:'📦'};
-  el.innerHTML = '';
-  for (const [refId, item] of items) {
-    const div = document.createElement('div');
-    div.className = 'cache-index-item'+(refId===activeRefId?' selected':'');
-    div.id = 'ci-'+refId;
-    div.onclick = () => openCache(refId, item.tool);
-    const icon = ICONS[item.tool]||ICONS.default;
-    div.innerHTML = `
-      <span style="font-size:14px">${icon}</span>
-      <div style="flex:1;min-width:0">
-        <div class="ci-tool">${esc(item.tool)}</div>
-        <div class="ci-ref">${esc(refId.slice(0,16))}…</div>
-      </div>
-      <div style="text-align:right">
-        <div class="ci-size">${item.total?item.total.toLocaleString()+' B':'—'}</div>
-        ${item.total?'<div class="ci-stored">STORED</div>':''}
-      </div>`;
-    el.appendChild(div);
-  }
+  // Kept for backward compat — delegates to the new results renderer
+  renderResultsTurns();
 }
 
 async function openCache(refId, tool) {
@@ -1510,10 +2139,35 @@ async function hitlDec(id,dec) {
       body:JSON.stringify({operator_id:'webui-operator',comment:`${dec} via Console`})});
     const data=await res.json().catch(()=>({}));
     const outcome=data.outcome||data.decision||dec;
-    addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nOutcome: ${outcome}\n`+
-      (data.error?`Error: ${data.error}`:'Execution will resume if approved.'),'system');
+
+    if (data.error) {
+      // Decision failed (already resolved, not found, etc.)
+      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
+Outcome: ${outcome}
+Error: ${data.error}`,'system');
+    } else if (data.tool_result && dec==='approve') {
+      // Tool executed successfully after approval — show the result
+      const toolName = data.tool_name || 'tool';
+      addMessage('agent',
+        `✓ HITL approved — ${toolName} executed:
+
+${data.tool_result}`,
+        'agent');
+      // Also inject into Results tab as an inline result
+      addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
+      switchTab('cache');
+    } else if (dec==='approve') {
+      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
+Outcome: ${outcome}
+Tool is executing — check Results tab for output.`,'system');
+    } else {
+      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
+Outcome: ${outcome}`,'system');
+    }
     flowAdd('hitl',`⚠ HITL ${dec.toUpperCase()}`,`${id.slice(0,12)}…`,`outcome: ${outcome}`,data);
     setTimeout(()=>refreshHitl(0),400);
+    // Refresh session list to pick up the new turn written by Hermes
+    setTimeout(loadSessions, 1200);
   } catch(e){ addMessage('system','HITL decision error: '+e.message,'error'); }
 }
 
@@ -1588,7 +2242,11 @@ function setQuery(q) {
 function clearChat() {
   document.getElementById('messages').innerHTML='';
   sessionId=''; storeItems={}; activeRefId=null; flowEvents=[];
-  renderCacheIndex();
+  _turnResults={}; _currentTurn=0; _liveSessionId=''; _viewingHistory=false; _sessionFacts=[];
+  document.getElementById('history-banner').classList.remove('visible');
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+  renderResultsTurns();
   document.getElementById('cache-viewer').style.display='none';
   updateCacheBadge();
   clearFlow();
@@ -1759,7 +2417,7 @@ document.getElementById('query-input').addEventListener('keydown', function(e) {
   this.style.height=Math.min(this.scrollHeight,110)+'px';
 });
 
-loadSkills(); loadTools(); refreshStats();
+restoreLastSession(); loadSkills(); loadTools(); refreshStats();
 setInterval(refreshHitl, 3000);
 setInterval(refreshStats, 20000);
 </script>
