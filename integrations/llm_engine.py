@@ -139,7 +139,7 @@ STOP CONDITION: Once you have gathered enough information to fully answer the us
 - NEVER call the same tool with the same arguments twice.
 
 LARGE DATA STRATEGY — when reading a stored result page by page:
-- After EACH page, write 2-3 sentences of key findings based on user request in your response BEFORE calling the next page.
+- After EACH page, write 2-3 sentences of key findings in your response BEFORE calling the next page.
 - Example: "Page 1 findings: 3 flows to port 3389 (RDP) from internal IPs — potential lateral movement."
 - These findings are saved to memory and recalled when you write the final analysis.
 - When all pages are read (Has more: False), write your complete analysis using all recalled findings.
@@ -251,11 +251,34 @@ Return format:
             except Exception:
                 pass
 
-        # ── Confirmed facts ───────────────────────────────────────────
+        # ── Confirmed facts (+ tool ledger + prior analysis) ───────────────────────
         facts_section = ""
         if confirmed_facts:
-            facts_section = "Confirmed facts from this session:\n" + \
-                            "\n".join(f"  • {f}" for f in confirmed_facts[-10:])
+            tool_exec_lines, prev_analysis_lines, semantic_facts = [], [], []
+            for _f in confirmed_facts:
+                if _f.startswith("TOOL_EXEC: "):
+                    tool_exec_lines.append(_f[len("TOOL_EXEC: "):])
+                elif _f.startswith("PREV_ANALYSIS: "):
+                    prev_analysis_lines.append(_f[len("PREV_ANALYSIS: "):])
+                else:
+                    semantic_facts.append(_f)
+            _parts = []
+            if tool_exec_lines:
+                _parts.append(
+                    "DATA ALREADY FETCHED (do NOT re-fetch — reuse existing ref_ids):\n"
+                    + "\n".join(f"  ✓ {l}" for l in tool_exec_lines[-12:])
+                )
+            if prev_analysis_lines:
+                _parts.append(
+                    "PREVIOUS ANALYSIS RESULTS (context for follow-up questions):\n"
+                    + "\n".join(f"  → {l[:300]}" for l in prev_analysis_lines[-3:])
+                )
+            if semantic_facts:
+                _parts.append(
+                    "Confirmed facts from this session:\n"
+                    + "\n".join(f"  • {f}" for f in semantic_facts[-8:])
+                )
+            facts_section = "\n\n".join(_parts)
 
         system = self.TOOL_CALL_SYSTEM.format(
             skill_summary=skill_summary,

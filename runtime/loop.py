@@ -173,6 +173,75 @@ def _call_key(tool_name: str, tool_args: dict) -> str:
         args_sig = str(tool_args)
     return f"{tool_name}|{args_sig}"
 
+
+def _build_tool_ledger(
+    tool_outputs: dict,
+    tool_reg: dict,
+    raw_outputs: dict,
+) -> list[str]:
+    """
+    Build confirmed_facts ledger entries from the current session's tool_outputs.
+    Written at the end of each stream() so the next HTTP request can:
+      - Seed called_tools to prevent re-fetching the same data
+      - Surface existing ref_ids to the LLM so it can read without re-downloading
+
+    Format:
+      TOOL_EXEC: netflow_dump|{"site":"all"} → ref=abc123 total_size=43191 [read_stored_result ref_id=abc123]
+      TOOL_EXEC: validate_device_config|{"device_id":"ap-01"} → inline size=230
+    """
+    import json as _j, re as _re
+
+    # First pass: collect total_sizes from read_stored_result results
+    # so we can annotate the [STORED:] parent entries accurately
+    ref_total: dict[str, str] = {}
+    for key, val in raw_outputs.items():
+        tool = key.split("|")[0] if "|" in key else key
+        if tool == "read_stored_result":
+            total_m = _re.search(r"Total size:\s*([\d,]+)", val)
+            if total_m:
+                # Also extract which ref_id this read is for
+                try:
+                    args = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
+                    ref = args.get("ref_id", "").strip("[]")
+                    ref = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
+                    if ref:
+                        ref_total[ref] = total_m.group(1).replace(",", "")
+                except Exception:
+                    pass
+
+    ledger: list[str] = []
+    seen: set[str] = set()
+
+    for key, stored in tool_outputs.items():
+        if key in seen:
+            continue
+        seen.add(key)
+        tool_name = key.split("|")[0] if "|" in key else key
+
+        # Skip paged-summary placeholders written by compress_paged_outputs
+        if "_summary" in key:
+            continue
+
+        raw = raw_outputs.get(key, stored)
+
+        # Check if the result was stored (large)
+        ref_m = _re.search(r"\[STORED:\w+:(\w+)\]", stored)
+        if ref_m:
+            ref_id   = ref_m.group(1)
+            # Prefer the total_size extracted from read_stored_result results
+            total    = ref_total.get(ref_id, str(len(raw)))
+            ledger.append(
+                f"TOOL_EXEC: {key} → ref={ref_id} total_size={total} "
+                f"[use read_stored_result with ref_id={ref_id}]"
+            )
+        else:
+            # Inline result — just record size
+            size = len(raw)
+            ledger.append(f"TOOL_EXEC: {key} → inline size={size}")
+
+    return ledger
+
+
 class AgentRuntimeLoop:
     """
     Thin default execution path.
@@ -383,9 +452,29 @@ class AgentRuntimeLoop:
         # This prevents the LLM from re-calling ap-01 when memory already has
         # its config from a previous stream() invocation.
         # called_tools uses _call_key(name, args) fingerprints — not bare names.
-        # This allows validate_device_config(ap-01) and validate_device_config(ap-02)
-        # to both execute within one session.
+        # Also seeded from TOOL_EXEC ledger in confirmed_facts (from prior HTTP requests)
+        # so tools that ran in previous rounds are not re-executed.
         called_tools: set[str] = set()
+        _known_stores: dict[str, str] = {}  # ref_id → tool_name (for context injection)
+        import json as _j2, re as _re2
+        for _fact in (confirmed_facts or []):
+            if _fact.startswith("TOOL_EXEC: "):
+                # Parse: "TOOL_EXEC: tool_name|{args} → ref=abc size=N"
+                _body = _fact[len("TOOL_EXEC: "):]
+                _arrow = _body.find(" → ")
+                if _arrow > 0:
+                    _call_part = _body[:_arrow].strip()
+                    _info_part = _body[_arrow+3:].strip()
+                    # Seed called_tools with the _call_key fingerprint
+                    called_tools.add(_call_part)
+                    # Extract ref_id if present
+                    _ref_m = _re2.search(r"ref=(\w+)", _info_part)
+                    if _ref_m:
+                        _tool_n = _call_part.split("|")[0]
+                        _known_stores[_ref_m.group(1)] = _tool_n
+        if called_tools:
+            logger.info("stream: seeded %d prior tool calls from ledger; %d known stores",
+                        len(called_tools), len(_known_stores))
 
         while True:
             state.turns += 1
@@ -788,10 +877,29 @@ class AgentRuntimeLoop:
             decision = self._policy.evaluate(state)
             if decision.should_stop:
                 yield {"message": self._format_final([], decision), "node": "runtime_loop"}
+                # Write tool execution ledger into confirmed_facts for next-round reuse
+                _ledger = _build_tool_ledger(tool_outputs, tool_reg,
+                                              getattr(state, "_tool_outputs_raw", {}))
+                state.confirmed_facts.extend(_ledger)
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
             if self._is_complete(llm_response, new_tool_calls):
+                _ledger = _build_tool_ledger(tool_outputs, tool_reg,
+                                              getattr(state, "_tool_outputs_raw", {}))
+                state.confirmed_facts.extend(_ledger)
+                # Capture final synthesis response (not intermediate page-reading turns)
+                # Only append when response is substantial prose with no further tool calls
+                _resp_clean = llm_response.strip()
+                _is_synthesis = (
+                    len(_resp_clean) > 150              # substantial response
+                    and "[TOOL:" not in _resp_clean     # no pending tool call
+                    and "[SKILL_LOAD:" not in _resp_clean
+                    and state.turns > 1                  # not a trivial first turn
+                )
+                if _is_synthesis:
+                    summary_line = _resp_clean[:500].replace("\n", " ")
+                    state.confirmed_facts.append(f"PREV_ANALYSIS: {summary_line}")
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
