@@ -305,15 +305,42 @@ class ContextBudgetManager:
         """
         Format accumulated tool results for the LLM context.
 
-        Keys are _call_key fingerprints (e.g. "validate_device_config|{"device_id": "ap-01"}").
-        We strip the args fingerprint for display, keeping just the tool name label.
-        All results from the current session accumulate here — never overwritten.
+        Per-entry compression rules to prevent context overload:
+        - [STORED:] entries: show only the preview line (full data is in the store)
+        - read_stored_result entries: show in full (this IS the paged data)
+        - Other entries: show first 600 chars — enough to act on, not enough to overload
+        - Most recent entry: shown in full up to 1200 chars
+
+        This prevents the LLM from receiving multi-KB raw data from previous turns
+        while still getting the current turn's full result.
         """
+        _STORED_LABEL_LIMIT = 1   # [STORED:] label is one line, show as-is
+        _PAGED_RESULT_LIMIT = 1200  # read_stored_result: show up to 1200 chars
+        _NORMAL_LIMIT       = 600   # other tools: 600 chars is enough context
+        _LATEST_BONUS       = 600   # extra chars for the most recent result
+
         parts = ["Tool outputs:"]
-        for key, output in outputs.items():
-            # Key format: "tool_name|{args_json}" or plain "tool_name"
+        items = list(outputs.items())
+        for i, (key, output) in enumerate(items):
             label = key.split("|")[0] if "|" in key else key
-            parts.append(f"[TOOL: {label}]\n{output}")
+            is_latest = (i == len(items) - 1)
+
+            if "[STORED:" in output:
+                # Only show the reference label + preview — full data is in the store
+                # Extract just the [STORED:...] line and the preview
+                lines = output.splitlines()
+                stored_lines = [l for l in lines if l.startswith("[STORED:") or l.startswith("Preview:")]
+                display = "\n".join(stored_lines[:3]) if stored_lines else output[:200]
+            elif label == "read_stored_result":
+                # Paged data — show in full but capped (LLM needs this to answer)
+                cap = _PAGED_RESULT_LIMIT + (_LATEST_BONUS if is_latest else 0)
+                display = output[:cap] + (f"\n… [{len(output)-cap} more chars — call read_stored_result with next offset]" if len(output) > cap else "")
+            else:
+                # Normal result — show enough to act on
+                cap = _NORMAL_LIMIT + (_LATEST_BONUS if is_latest else 0)
+                display = output[:cap] + (f"\n… [truncated — {len(output)} total chars]" if len(output) > cap else "")
+
+            parts.append(f"[TOOL: {label}]\n{display}")
         return "\n\n".join(parts)
 
     @staticmethod
@@ -336,3 +363,52 @@ class ContextBudgetManager:
         if len(text) <= max_chars:
             return text
         return text[:max_chars - 20] + "\n... [truncated]"
+
+def compress_paged_outputs(outputs: dict) -> dict:
+    """
+    Keep only the most recent read_stored_result page per ref_id in tool_outputs.
+    Older pages are replaced by a compact summary note.
+
+    This prevents context overflow when paging through large stored results across
+    many turns. The LLM's own response text (written while reading each page) is
+    saved to FTS5 by Hermes, so findings from prior pages survive via memory recall.
+    """
+    import json as _j, re as _re
+
+    paged: dict = {}   # ref_id → [(offset, key, val)]
+    result: dict = {}
+
+    for key, val in outputs.items():
+        tool = key.split("|")[0] if "|" in key else key
+        if tool == "read_stored_result" and "_summary" not in key:
+            try:
+                args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
+                ref    = args.get("ref_id", "").strip("[]")
+                ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
+                offset = int(args.get("offset", 0))
+                paged.setdefault(ref, []).append((offset, key, val))
+            except Exception:
+                result[key] = val
+        else:
+            result[key] = val
+
+    for ref_id, pages in paged.items():
+        pages = sorted(pages, key=lambda x: x[0])
+        if len(pages) == 1:
+            result[pages[0][1]] = pages[0][2]
+        else:
+            last_val = pages[-1][2]
+            has_more = "Has more: True" in last_val
+            total_m  = _re.search(r"Total size:\s*([\d,]+)", last_val)
+            total_sz = total_m.group(1) if total_m else "?"
+            covered  = pages[-2][0] + 2000
+            note = (
+                f"[PAGED-SUMMARY ref_id={ref_id} pages_read={len(pages)} "
+                f"bytes_covered=0-{covered} total={total_sz} has_more={has_more}]\n"
+                f"Prior page findings written to response — see memory context for analysis so far."
+            )
+            summary_key = _j.dumps({"read_stored_result": ref_id, "_summary": True})
+            result[summary_key] = note
+            result[pages[-1][1]] = pages[-1][2]
+
+    return result

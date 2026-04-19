@@ -402,9 +402,12 @@ class AgentRuntimeLoop:
             if self._skill_catalog:
                 skill_section = self._skill_catalog.format_summary()
 
+            # Compress paged results before assembly to prevent context overflow
+            from runtime.context_budget import compress_paged_outputs as _compress
+            _to_assemble = _compress(tool_outputs)
             context_str = self._budget.assemble(
                 memory_results=memory_results,
-                tool_outputs=tool_outputs,       # pass accumulated results to LLM
+                tool_outputs=_to_assemble,       # pass compressed accumulated results to LLM
                 confirmed_facts=state.confirmed_facts,
                 working_set=working_set,
                 env_context=env_ctx,
@@ -759,6 +762,10 @@ class AgentRuntimeLoop:
                 # Update count so llm_engine knows how many current-turn results exist
                 state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
                 state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
+                # Keep raw results for has_more / paging detection in llm_engine
+                if not hasattr(state, "_tool_outputs_raw"):
+                    state._tool_outputs_raw = {}  # type: ignore[attr-defined]
+                state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):

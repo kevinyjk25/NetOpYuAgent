@@ -138,6 +138,13 @@ STOP CONDITION: Once you have gathered enough information to fully answer the us
 - For multi-device queries (e.g. "check all site-a devices"): call the tool once per device, then summarise ALL results together. Do NOT stop after the first device.
 - NEVER call the same tool with the same arguments twice.
 
+LARGE DATA STRATEGY — when reading a stored result page by page:
+- After EACH page, write 2-3 sentences of key findings based on user request in your response BEFORE calling the next page.
+- Example: "Page 1 findings: 3 flows to port 3389 (RDP) from internal IPs — potential lateral movement."
+- These findings are saved to memory and recalled when you write the final analysis.
+- When all pages are read (Has more: False), write your complete analysis using all recalled findings.
+- Do NOT try to hold all data in memory — write findings incrementally.
+
 {extra_tools_section}
 
 {skill_summary}
@@ -352,12 +359,25 @@ class OllamaEngine(LLMEngine):
                     try:
                         args = _json.loads(args_str)
                         if tname == "read_stored_result":
-                            # Normalise ref_id for display and show offset
+                            # Normalise ref_id for display and show paging status
                             rid = args.get("ref_id", "?").strip("[]")
                             if ":" in rid:
                                 rid = rid.rsplit(":", 1)[-1].strip()
                             off = args.get("offset", 0)
-                            checked_lines.append(f"  - {tname}(ref_id={rid}, offset={off}) ✓ done — use offset={off + 2000} for next page")
+                            # Check if this read had more data available
+                            raw_val = (getattr(state, "_tool_outputs_raw", {}) or {}).get(k, "")
+                            has_more = "Has more: True" in raw_val
+                            if has_more:
+                                next_off = off + 2000
+                                next_call = '{' + f'"ref_id": "{rid}", "offset": {next_off}' + '}'
+                                checked_lines.append(
+                                    f"  - {tname}(ref_id={rid}, offset={off}) done "
+                                    f"— MORE DATA: [TOOL:read_stored_result] {next_call} (write key findings in your response first)"
+                                )
+                            else:
+                                checked_lines.append(
+                                    f"  - {tname}(ref_id={rid}, offset={off}) done — all pages read"
+                                )
                         else:
                             dev = args.get("device_id") or args.get("site") or args_str[:40]
                             checked_lines.append(f"  - {tname}({dev}) ✓ done")
@@ -367,12 +387,27 @@ class OllamaEngine(LLMEngine):
                     checked_lines.append(f"  - {k} ✓ done")
             stop_note = "\n\nALREADY COMPLETED THIS SESSION:\n" + "\n".join(checked_lines)
             stop_note += "\nDo NOT repeat any of the above calls. Move to the next unchecked device."
-            # When many results exist, strongly prompt for synthesis to avoid empty responses
-            if len(_tool_output_keys) >= 2:
+            # Synthesis prompt: fire only when data gathering is truly complete.
+            # Do NOT fire if:
+            # - A read_stored_result call has "Has more: True" (more pages to read)
+            # - The only results are [STORED:] labels (LLM hasn't read the data yet)
+            _has_more_pages = any(
+                "Has more: True" in v
+                for v in (state._tool_outputs_raw.values() if hasattr(state, "_tool_outputs_raw") else [])
+            )
+            _all_stored = all(
+                "[STORED:" in v
+                for v in (state._tool_outputs_raw.values() if hasattr(state, "_tool_outputs_raw") else ["x"])
+            )
+            _n_real_results = sum(
+                1 for k in _tool_output_keys
+                if k.split("|")[0] not in ("netflow_dump", "syslog_search", "prometheus_query")
+                   or "|" not in k
+            )
+            if len(_tool_output_keys) >= 3 and not _has_more_pages and not _all_stored:
                 stop_note += (
                     "\n\nYou have gathered sufficient tool results. "
-                    "Write a complete analysis and recommendations NOW. "
-                    "Your response MUST include prose text summarising the findings."
+                    "Provide your complete analysis and recommendations now."
                 )
 
         if turns > 1 and _cur_tool_count >= _max_tool_calls:
