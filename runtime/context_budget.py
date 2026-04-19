@@ -61,52 +61,97 @@ logger = logging.getLogger(__name__)
 # ToolResultStore
 # ---------------------------------------------------------------------------
 
+
+class _SqliteStoreProxy:
+    """Dict-like proxy over the SQLite results table for backward-compat access."""
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+
+    def __len__(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM results").fetchone()
+        return row[0] if row else 0
+
+    def get(self, ref_id: str, default: str = "") -> str:
+        ref_id = ref_id.strip("[]")
+        if ":" in ref_id:
+            ref_id = ref_id.rsplit(":", 1)[-1].strip()
+        row = self._conn.execute(
+            "SELECT content FROM results WHERE ref_id=?", (ref_id,)
+        ).fetchone()
+        return row[0] if row else default
+
+
 class ToolResultStore:
     """
     Stores large tool outputs externally so the prompt only carries a reference.
 
-    In production swap _store for Redis or object storage.
+    Backed by SQLite (default) for persistence across restarts.
+    Pass db_path=":memory:" for in-memory (tests only).
+    Pass db_path=None to auto-locate at data/tool_results.db.
     """
 
     MAX_INLINE_CHARS = 4_000   # ~1 000 tokens: store externally above this
+    TTL_SECONDS      = 86_400  # prune entries older than 24 h
 
-    def __init__(self) -> None:
-        self._store: dict[str, str] = {}   # ref_id → full text
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        import sqlite3, pathlib, time as _time, os
+        if db_path is None:
+            _data_dir = pathlib.Path("data")
+            _data_dir.mkdir(exist_ok=True)
+            db_path = str(_data_dir / "tool_results.db")
+        self._db_path = db_path
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS results "
+            "(ref_id TEXT PRIMARY KEY, content TEXT, created_at REAL)"
+        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_created ON results(created_at)")
+        self._conn.commit()
+        # Prune stale entries from prior runs
+        self._prune()
+        # Compatibility shim: expose dict-like _store interface for code that
+        # reads self._store.get() directly (HTTP endpoint total_chars calc)
+        self._store = _SqliteStoreProxy(self._conn)
+
+    def _prune(self) -> None:
+        import time as _time
+        cutoff = _time.time() - self.TTL_SECONDS
+        self._conn.execute("DELETE FROM results WHERE created_at < ?", (cutoff,))
+        self._conn.commit()
 
     def store(self, tool_name: str, raw_output: str) -> str:
         """
         Store *raw_output* if it exceeds the inline threshold.
-
-        Returns a short reference string for prompt injection:
-            '[STORED:tool_name:ref_id — use read_result(ref_id) to access]'
-        Or the original text if small enough.
+        Persisted to SQLite — survives restarts.
+        Returns '[STORED:tool_name:ref_id] Preview: <first 80 chars>'
+        or the original text if small enough to inline.
         """
+        import time as _time
         if len(raw_output) <= self.MAX_INLINE_CHARS:
             return raw_output
-
-        ref_id = str(uuid.uuid4())[:8]
-        self._store[ref_id] = raw_output
-        preview = raw_output[:300].replace("\n", " ").strip()
-        label = f"[STORED:{tool_name}:{ref_id}] Preview: {preview}..."
-        logger.debug(
-            "ToolResultStore: stored %d chars for tool=%s ref=%s",
-            len(raw_output), tool_name, ref_id,
+        import uuid
+        ref_id = uuid.uuid4().hex[:8]
+        self._conn.execute(
+            "INSERT OR REPLACE INTO results(ref_id, content, created_at) VALUES(?,?,?)",
+            (ref_id, raw_output, _time.time()),
         )
-        return label
+        self._conn.commit()
+        preview = raw_output[:80].replace("\n", " ")
+        return f"[STORED:{tool_name}:{ref_id}] Preview: {preview}"
+
 
     def read(self, ref_id: str, offset: int = 0, length: int = 2_000) -> Optional[str]:
-        """Retrieve a slice of a stored result (for a 'read_result' tool call).
-
-        Accepts both plain ref_id (e.g. "6ac5ade7") and the full label form
-        the LLM copies from context (e.g. "netflow_dump:6ac5ade7" or
-        "[STORED:netflow_dump:6ac5ade7]"). Strips any prefix to get just the UUID.
-        """
-        # Strip surrounding brackets if LLM included them
+        """Retrieve a slice of a stored result. Accepts full label or plain ref_id."""
+        # Normalise: strip brackets and tool_name: prefix
         ref_id = ref_id.strip("[]")
-        # If the LLM sent "tool_name:uuid", keep only the uuid part (after last ":")
         if ":" in ref_id:
             ref_id = ref_id.rsplit(":", 1)[-1].strip()
-        full = self._store.get(ref_id)
+        row = self._conn.execute(
+            "SELECT content FROM results WHERE ref_id=?", (ref_id,)
+        ).fetchone()
+        full = row[0] if row else None
+        if full is None:
+            full = None
         if full is None:
             return None
         return full[offset : offset + length]

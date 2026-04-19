@@ -139,6 +139,81 @@ class InMemoryAuditBackend:
 # PostgreSQL backend  (production)
 # ---------------------------------------------------------------------------
 
+
+class SqliteAuditBackend:
+    """
+    SQLite-backed audit log for production use without PostgreSQL.
+    Stores immutable HITL decision records locally.
+    Schema is compatible with a future migration to PostgreSQL.
+    """
+
+    def __init__(self, db_path: str = "data/hitl_audit.db") -> None:
+        import sqlite3, pathlib
+        pathlib.Path(db_path).parent.mkdir(exist_ok=True)
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._lock = asyncio.Lock()
+        self._conn.execute("""
+            CREATE TABLE IF NOT EXISTS hitl_audit_log (
+                record_id    TEXT PRIMARY KEY,
+                interrupt_id TEXT NOT NULL,
+                thread_id    TEXT,
+                event_kind   TEXT NOT NULL,
+                trigger_kind TEXT,
+                risk_level   TEXT,
+                decision     TEXT,
+                query        TEXT,
+                operator     TEXT,
+                reason       TEXT,
+                duration_s   REAL,
+                created_at   TEXT NOT NULL
+            )
+        """)
+        self._conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_interrupt ON hitl_audit_log(interrupt_id)"
+        )
+        self._conn.commit()
+
+    async def append(self, record: "HitlAuditRecord") -> None:
+        async with self._lock:
+            self._conn.execute(
+                """INSERT OR IGNORE INTO hitl_audit_log
+                   (record_id, interrupt_id, thread_id, event_kind, trigger_kind,
+                    risk_level, decision, query, operator, reason, duration_s, created_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    record.record_id,
+                    record.interrupt_id,
+                    getattr(record, "thread_id", ""),
+                    str(record.event_kind.value if hasattr(record.event_kind, "value") else record.event_kind),
+                    str(record.trigger_kind.value if hasattr(record, "trigger_kind") and record.trigger_kind else ""),
+                    str(record.risk_level.value   if hasattr(record, "risk_level")   and record.risk_level   else ""),
+                    str(record.decision.value     if hasattr(record, "decision")     and record.decision     else ""),
+                    getattr(record, "query",    "")[:1000],
+                    getattr(record, "operator", "system"),
+                    getattr(record, "reason",   "")[:500],
+                    getattr(record, "duration_s", None),
+                    datetime.now(timezone.utc).isoformat(),
+                ),
+            )
+            self._conn.commit()
+
+    async def find_by_interrupt(self, interrupt_id: str) -> list:
+        async with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM hitl_audit_log WHERE interrupt_id=? ORDER BY created_at",
+                (interrupt_id,),
+            ).fetchall()
+            return rows
+
+    async def recent(self, limit: int = 100) -> list:
+        async with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM hitl_audit_log ORDER BY created_at DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+            return rows
+
+
 class PostgresAuditBackend:
     """
     Async PostgreSQL backend using asyncpg.
@@ -236,6 +311,11 @@ class HitlAuditService:
     @classmethod
     def in_memory(cls) -> "HitlAuditService":
         return cls(InMemoryAuditBackend())
+
+    @classmethod
+    def sqlite(cls, db_path: str = "data/hitl_audit.db") -> "HitlAuditService":
+        """SQLite-backed audit log — production default when PostgreSQL not configured."""
+        return cls(SqliteAuditBackend(db_path))
 
     @classmethod
     async def postgres(cls, dsn: str) -> "HitlAuditService":

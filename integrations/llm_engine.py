@@ -264,10 +264,17 @@ Return format:
                     semantic_facts.append(_f)
             _parts = []
             if tool_exec_lines:
-                _parts.append(
-                    "DATA ALREADY FETCHED (do NOT re-fetch — reuse existing ref_ids):\n"
-                    + "\n".join(f"  ✓ {l}" for l in tool_exec_lines[-12:])
-                )
+                # Filter: show stored-data entries (with ref=) and skip per-page reads
+                _filtered = [
+                    l for l in tool_exec_lines[-20:]
+                    if not (l.startswith("read_stored_result|") and "pages_read" not in l
+                            and "inline" not in l)
+                ]
+                if _filtered:
+                    _parts.append(
+                        "DATA ALREADY FETCHED (do NOT re-fetch — reuse existing ref_ids):\n"
+                        + "\n".join(f"  ✓ {l}" for l in _filtered[-12:])
+                    )
             if prev_analysis_lines:
                 _parts.append(
                     "PREVIOUS ANALYSIS RESULTS (context for follow-up questions):\n"

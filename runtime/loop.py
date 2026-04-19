@@ -184,63 +184,84 @@ def _build_tool_ledger(
 ) -> list[str]:
     """
     Build confirmed_facts ledger entries from the current session's tool_outputs.
-    Written at the end of each stream() so the next HTTP request can:
-      - Seed called_tools to prevent re-fetching the same data
-      - Surface existing ref_ids to the LLM so it can read without re-downloading
+    Written at end of stream() so next HTTP request can seed called_tools and
+    surface existing ref_ids without re-fetching.
 
-    Format:
-      TOOL_EXEC: netflow_dump|{"site":"all"} → ref=abc123 total_size=43191 [read_stored_result ref_id=abc123]
-      TOOL_EXEC: validate_device_config|{"device_id":"ap-01"} → inline size=230
+    Collapsing rules:
+    - Multiple read_stored_result pages for the same ref_id → single summary entry
+    - [STORED:] labels annotated with total_size from their read results
+    - Inline results recorded with size
     """
     import json as _j, re as _re
 
-    # First pass: collect total_sizes from read_stored_result results
-    # so we can annotate the [STORED:] parent entries accurately
-    ref_total: dict[str, str] = {}
+    # Pass 1: collect total_size and page count per ref_id from read_stored_result results
+    ref_info: dict = {}   # ref_id → {total_size, pages, last_offset}
     for key, val in raw_outputs.items():
         tool = key.split("|")[0] if "|" in key else key
-        if tool == "read_stored_result":
+        if tool != "read_stored_result" or "_summary" in key:
+            continue
+        try:
+            args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
+            ref    = args.get("ref_id", "").strip("[]")
+            ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
+            offset = int(args.get("offset", 0))
+            if not ref:
+                continue
             total_m = _re.search(r"Total size:\s*([\d,]+)", val)
-            if total_m:
-                # Also extract which ref_id this read is for
-                try:
-                    args = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
-                    ref = args.get("ref_id", "").strip("[]")
-                    ref = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
-                    if ref:
-                        ref_total[ref] = total_m.group(1).replace(",", "")
-                except Exception:
-                    pass
+            total   = int(total_m.group(1).replace(",", "")) if total_m else 0
+            if ref not in ref_info:
+                ref_info[ref] = {"total_size": total, "last_offset": offset, "pages": 0}
+            else:
+                if offset > ref_info[ref]["last_offset"]:
+                    ref_info[ref]["last_offset"] = offset
+                    ref_info[ref]["total_size"]   = total
+            ref_info[ref]["pages"] += 1
+        except Exception:
+            pass
 
     ledger: list[str] = []
-    seen: set[str] = set()
+    seen:   set[str]  = set()
+    seen_read_refs:  set[str] = set()   # track which refs already have a read entry
 
     for key, stored in tool_outputs.items():
-        if key in seen:
+        if key in seen or "_summary" in key:
             continue
         seen.add(key)
         tool_name = key.split("|")[0] if "|" in key else key
 
-        # Skip paged-summary placeholders written by compress_paged_outputs
-        if "_summary" in key:
+        # Collapse all read_stored_result pages for same ref_id into ONE entry
+        if tool_name == "read_stored_result":
+            try:
+                args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
+                ref    = args.get("ref_id", "").strip("[]")
+                ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
+            except Exception:
+                ref = ""
+            if ref and ref in seen_read_refs:
+                continue   # already emitted a summary for this ref_id
+            if ref:
+                seen_read_refs.add(ref)
+                info    = ref_info.get(ref, {})
+                pages   = info.get("pages", 1)
+                total   = info.get("total_size", 0)
+                covered = info.get("last_offset", 0) + 2000
+                ledger.append(
+                    f"TOOL_EXEC: read_stored_result|ref={ref} pages_read={pages} "
+                    f"bytes_covered=0-{min(covered, total)} total={total}"
+                )
             continue
 
-        raw = raw_outputs.get(key, stored)
-
-        # Check if the result was stored (large)
+        raw  = raw_outputs.get(key, stored)
         ref_m = _re.search(r"\[STORED:\w+:(\w+)\]", stored)
         if ref_m:
-            ref_id   = ref_m.group(1)
-            # Prefer the total_size extracted from read_stored_result results
-            total    = ref_total.get(ref_id, str(len(raw)))
+            ref_id = ref_m.group(1)
+            total  = ref_info.get(ref_id, {}).get("total_size", len(raw))
             ledger.append(
                 f"TOOL_EXEC: {key} → ref={ref_id} total_size={total} "
-                f"[use read_stored_result with ref_id={ref_id}]"
+                f"[reuse: read_stored_result ref_id={ref_id}]"
             )
         else:
-            # Inline result — just record size
-            size = len(raw)
-            ledger.append(f"TOOL_EXEC: {key} → inline size={size}")
+            ledger.append(f"TOOL_EXEC: {key} → inline size={len(raw)}")
 
     return ledger
 
@@ -338,6 +359,47 @@ class AgentRuntimeLoop:
     # Pre-verification (P1)
     # ------------------------------------------------------------------
 
+    async def classify_async(self, query: str) -> "ComplexityDecision":
+        """
+        Async classify — uses PolicyEngine LLM evaluation when wired.
+        Called from backend.py (async context). Falls back to synchronous
+        keyword heuristic if engine is unavailable or LLM fails.
+        """
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is not None:
+            try:
+                results = await _engine.evaluate_any(
+                    ["classify_destructive", "classify_incident_severity"], query
+                )
+                destructive = results.get("classify_destructive")
+                incident    = results.get("classify_incident_severity")
+                if destructive and destructive.match:
+                    return ComplexityDecision(
+                        complexity=QueryComplexity.COMPLEX,
+                        reason=f"Policy[classify_destructive]: {destructive.reason}",
+                        confidence=destructive.confidence, model_tier="full_model",
+                    )
+                if incident and incident.match:
+                    return ComplexityDecision(
+                        complexity=QueryComplexity.COMPLEX,
+                        reason=f"Policy[classify_incident_severity]: {incident.reason}",
+                        confidence=incident.confidence, model_tier="full_model",
+                    )
+                return ComplexityDecision(
+                    complexity=QueryComplexity.SIMPLE,
+                    reason="Policy: non-destructive diagnostic query",
+                    confidence=0.85, model_tier="full_model",
+                )
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "classify_async: PolicyEngine failed (%s) — keyword fallback", _e
+                )
+        # Fallback to synchronous keyword heuristic
+        return self.classify(query)
+
+
     async def pre_verify(
         self,
         query: str,
@@ -345,37 +407,31 @@ class AgentRuntimeLoop:
         env_context: dict[str, Any],
     ) -> VerificationResult:
         """
-        Pre-action verification: check the request is safe to proceed with.
-        Replace with real checks (policy engine, ACL) in production.
+        Pre-action verification using PolicyEngine when available.
+        Falls back to keyword check if engine is not wired.
         """
-        q = query.lower()
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is not None:
+            try:
+                result = await _engine.evaluate("preverify_safe_to_proceed", query)
+                if not result.match:
+                    return VerificationResult.fail(
+                        f"Policy[preverify_safe_to_proceed]: {result.reason}"
+                    )
+                return VerificationResult.ok("Pre-verification passed")
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger(__name__).warning("pre_verify PolicyEngine error: %s", _e)
 
-        # Check: destructive action in non-SIMPLE path should never reach here
+        # Keyword fallback
+        q = query.lower()
         if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
             return VerificationResult.fail(
                 "Destructive action reached pre_verify — escalate to HITL"
             )
-
-        # Check: change window (from env_context)
-        if env_context.get("change_window") is False:
-            if any(kw in q for kw in {"restart", "rollback", "delete", "flush"}):
-                return VerificationResult.fail(
-                    "Change window is closed — operation not permitted"
-                )
-
-        # Check: production restriction
-        if env_context.get("allow_destructive") is False:
-            if "production" in q or "prod" in q:
-                if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
-                    return VerificationResult.fail(
-                        "Destructive operations on production are restricted"
-                    )
-
         return VerificationResult.ok("Pre-verification passed")
 
-    # ------------------------------------------------------------------
-    # Post-verification (P1)
-    # ------------------------------------------------------------------
 
     async def post_verify(
         self,

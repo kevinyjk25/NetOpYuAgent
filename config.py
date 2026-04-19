@@ -198,8 +198,7 @@ class AppConfig:
     logging:    LoggingConfig
     embeddings: EmbeddingsConfig
     pragmatic:  PragmaticConfig
-
-    @property
+    policies:   list = field(default_factory=list)  # prompt-based policies from config.yaml
     def is_mock(self) -> bool:
         return self.mode == "mock"
 
@@ -406,8 +405,113 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             mcp_servers      = pg_mcps,
             napalm_getters   = napalm_getters,
         ),
+        policies=y.get("policies", []),
     )
 
 
 _CONFIG_PATH = pathlib.Path(__file__).parent / "config.yaml"
 cfg: AppConfig = load(str(_CONFIG_PATH))
+
+# Validate at import time so startup fails fast with a clear error message
+# rather than silently degrading at the first LLM call.
+def _validate_on_load() -> None:
+    import logging as _log
+    _log = _log.getLogger("config")
+    _errs: list[str] = []
+
+    if not getattr(cfg.llm, "model", ""):
+        _errs.append("llm.model is required")
+    if not getattr(cfg.llm, "base_url", ""):
+        _errs.append("llm.base_url is required (e.g. http://localhost:11434)")
+    if getattr(cfg.llm, "backend", "") not in ("ollama", "openai", "anthropic", ""):
+        _log.warning("config: llm.backend=%r unrecognised", cfg.llm.backend)
+
+    _policies = getattr(cfg, "policies", None) or []
+    _found    = {p.get("name", "") for p in _policies if isinstance(p, dict)}
+    _required = {"classify_destructive", "classify_incident_severity",
+                 "hitl_high_risk", "preverify_safe_to_proceed"}
+    for _p in _required - _found:
+        _log.warning("config: recommended policy %r missing from config.yaml", _p)
+
+    if cfg.mode == "pragmatic":
+        _devs = getattr(getattr(cfg, "pragmatic", None), "device_inventory", [])
+        if not _devs:
+            _log.warning("config: pragmatic mode with empty device_inventory")
+
+    if _errs:
+        raise RuntimeError(
+            "Config validation failed — fix config.yaml before starting:\n"
+            + "\n".join(f"  ✗ {e}" for e in _errs)
+        )
+
+_validate_on_load()
+
+
+def validate_config(cfg: "AppConfig") -> list[str]:
+    """
+    Validate required config fields at startup.
+    Returns a list of error strings — empty means valid.
+    Raises RuntimeError if any blockers are found.
+    """
+    errors = []
+    warnings = []
+
+    # LLM
+    if not getattr(cfg, "llm", None):
+        errors.append("llm: section missing")
+    else:
+        if not getattr(cfg.llm, "model", ""):
+            errors.append("llm.model: required — set to your Ollama model name")
+        if not getattr(cfg.llm, "base_url", ""):
+            errors.append("llm.base_url: required (e.g. http://localhost:11434)")
+        backend = getattr(cfg.llm, "backend", "")
+        if backend not in ("ollama", "openai", "anthropic", ""):
+            warnings.append(f"llm.backend={backend!r} unrecognised — expected ollama|openai|anthropic")
+
+    # Embeddings
+    if not getattr(cfg, "embeddings", None):
+        warnings.append("embeddings: section missing — semantic search disabled")
+    else:
+        dim = getattr(cfg.embeddings, "dim", 0)
+        if dim not in (384, 768, 1536, 3072):
+            warnings.append(f"embeddings.dim={dim} unusual — verify it matches your model")
+
+    # Runtime
+    if not getattr(cfg, "runtime", None):
+        warnings.append("runtime: section missing — using defaults")
+    else:
+        max_turns = getattr(cfg.runtime.stop, "max_turns", 0) if getattr(cfg.runtime, "stop", None) else 0
+        if max_turns < 3:
+            warnings.append(f"runtime.stop.max_turns={max_turns} very low — agent may stop early")
+
+    # Policies
+    policies = getattr(cfg, "policies", None) or []
+    required_policies = {
+        "classify_destructive", "classify_incident_severity",
+        "hitl_high_risk", "preverify_safe_to_proceed",
+    }
+    found_policies = {p.get("name", "") for p in policies if isinstance(p, dict)}
+    missing = required_policies - found_policies
+    if missing:
+        warnings.append(f"policies: missing recommended entries: {sorted(missing)}")
+
+    # Mode check
+    mode = getattr(cfg, "mode", "mock")
+    if mode == "pragmatic":
+        devices = getattr(getattr(cfg, "pragmatic", None), "device_inventory", [])
+        if not devices:
+            warnings.append("pragmatic mode: device_inventory is empty — no real devices configured")
+
+    import logging as _log
+    _logger = _log.getLogger("config")
+    for w in warnings:
+        _logger.warning("Config warning: %s", w)
+    for e in errors:
+        _logger.error("Config error: %s", e)
+
+    if errors:
+        raise RuntimeError(
+            "Config validation failed — fix errors before starting:\n"
+            + "\n".join(f"  ✗ {e}" for e in errors)
+        )
+    return warnings

@@ -107,7 +107,8 @@ class HitlDecisionRouter:
         self._graph         = graph
         self._audit         = audit
         self._payload_store:    dict[str, HitlPayload] = payload_store or {}
-        self._direct_callbacks: dict[str, Any]         = {}   # interrupt_id → async callable
+        # interrupt_id → (callback, registered_at) — pruned after 30 min
+        self._direct_callbacks: dict = {}  # {interrupt_id: (callback, monotonic_ts)}
 
     # ------------------------------------------------------------------
     # Public API called by FastAPI route
@@ -222,7 +223,8 @@ class HitlDecisionRouter:
         """Resume the graph after APPROVE — or run direct callback for non-graph interrupts."""
         try:
             # Direct callback path (force_hitl_tool interrupts that bypassed LangGraph)
-            callback = self._direct_callbacks.pop(decision.interrupt_id, None)
+            _cb_entry = self._direct_callbacks.pop(decision.interrupt_id, None)
+            callback = _cb_entry[0] if _cb_entry else None
             if callback:
                 logger.info("_resume: running direct callback for interrupt %s", decision.interrupt_id[:12])
                 graph_result = await callback()

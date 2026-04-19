@@ -60,7 +60,7 @@ from typing import Any, AsyncIterator, Optional
 from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +72,26 @@ _STATIC_DIR = pathlib.Path(__file__).parent / "static"
 # ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
-    query:           str
-    session_id:      Optional[str] = None
-    confirmed_facts: list[str]    = []
-    working_set:     list[dict]   = []
-    env_context:     dict          = {}
-    delegation_mode: str           = "fresh"   # fresh | forked
+    query:           str            = Field(..., min_length=1, max_length=8_000,
+                                           description="User query — max 8 000 chars")
+    session_id:      Optional[str]  = Field(None, pattern=r"^[a-zA-Z0-9_-]{8,128}$",
+                                           description="Session ID — alphanumeric + _ -")
+    confirmed_facts: list[str]      = Field(default_factory=list, max_length=60,
+                                           description="Carry-forward facts — max 60 items")
+    working_set:     list[dict]     = Field(default_factory=list, max_length=20)
+    env_context:     dict           = Field(default_factory=dict)
+    delegation_mode: str            = Field("fresh", pattern=r"^(fresh|forked)$")
+
+    @field_validator("confirmed_facts")
+    @classmethod
+    def cap_fact_length(cls, v: list[str]) -> list[str]:
+        """Prevent individual facts from inflating the LLM context."""
+        return [f[:500] for f in v]
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, v: str) -> str:
+        return v.strip()
 
 
 class ToolCallRequest(BaseModel):
@@ -282,7 +296,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             decision  = None
             try:
                 # ── Step 1: Classify ──────────────────────────────────────
-                decision = loop.classify(req.query)
+                decision = await loop.classify_async(req.query)
                 yield f"data: {json.dumps({'type':'classify','complexity':decision.complexity.value,'tier':decision.model_tier,'reason':decision.reason[:100]})}\n\n"
                 await asyncio.sleep(0)
 

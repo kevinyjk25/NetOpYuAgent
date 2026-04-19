@@ -426,7 +426,15 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                 except Exception as exc:
                     return {"tool": _tool, "error": str(exc)}
 
-            self._hitl_router._direct_callbacks[interrupt_id] = _approved_tool_callback
+            import time as _time_cb
+            # Prune stale callbacks (>30 min) before registering
+            _cb_ttl = 1800
+            _cb_now = _time_cb.monotonic()
+            self._hitl_router._direct_callbacks = {
+                k: v for k, v in self._hitl_router._direct_callbacks.items()
+                if _cb_now - (v[1] if isinstance(v, tuple) else 0) < _cb_ttl
+            }
+            self._hitl_router._direct_callbacks[interrupt_id] = (_approved_tool_callback, _cb_now)
 
             await event_queue.enqueue_event(MessageEvent(
                 task_id=task_id, context_id=context_id,

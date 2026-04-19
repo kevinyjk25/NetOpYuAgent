@@ -101,7 +101,7 @@ async def build_services() -> dict[str, Any]:
         pagerduty_routing_key = cfg.hitl.pagerduty_routing_key,
         enable_sse            = True,
     )
-    hitl_audit     = HitlAuditService.in_memory()
+    hitl_audit     = HitlAuditService.sqlite("data/hitl_audit.db")
     review_service = HitlReviewService.from_config(review_config)
     hitl_graph     = build_hitl_graph(hitl_config)
     hitl_router    = HitlDecisionRouter(graph=hitl_graph, audit=hitl_audit)
@@ -235,22 +235,17 @@ async def build_services() -> dict[str, Any]:
             from runtime.policy_engine import (
                 PolicyEngine, load_policies_from_config, set_policy_engine
             )
-            _cfg_policies = cfg.raw.get("policies", []) if hasattr(cfg, "raw") else []
-            # Also try loading from the parsed config dict directly
-            if not _cfg_policies:
-                import yaml as _yaml
-                with open("config.yaml") as _f:
-                    _raw_cfg = _yaml.safe_load(_f)
-                _cfg_policies = _raw_cfg.get("policies", [])
-
-            _policy_defs = load_policies_from_config(_cfg_policies)
+            # cfg.policies is populated from config.yaml at import time
+            _policy_defs = load_policies_from_config(cfg.policies)
 
             async def _policy_llm_call(system: str, user: str) -> str:
-                """Thin wrapper: call the real LLM engine for policy evaluation."""
+                """Thin wrapper: call the real LLM for policy evaluation (JSON output)."""
+                # Use a minimal context so the policy call is fast and cheap
                 return await llm_engine.call(
                     query=user,
                     context=system,
                     state=None,
+                    skill_catalog=None,
                 )
 
             _policy_engine = PolicyEngine(

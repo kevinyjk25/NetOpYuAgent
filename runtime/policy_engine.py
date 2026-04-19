@@ -3,17 +3,15 @@ runtime/policy_engine.py
 ─────────────────────────
 Prompt-based policy evaluation engine.
 
-Replaces hard-coded keyword lists in classify(), pre_verify(), and HITL triggers
-with natural-language policies defined in config.yaml under the ``policies:`` key.
+Policy definitions live in config.yaml under ``policies:`` — operators tune them
+without touching source code. Each policy is evaluated with a focused LLM call.
 
-Each policy is evaluated by sending a focused LLM prompt:
-  [system: policy description + examples]
-  [user: the query being evaluated]
-
-The LLM returns JSON: {"match": true|false, "reason": "brief explanation"}
-
-Operators tune policies in config.yaml — no code changes needed.
-Results are cached per-turn to avoid duplicate LLM calls for the same query.
+Design
+------
+- evaluate()      : async, uses real LLM, cached 120 s per (policy, query)
+- evaluate_sync() : synchronous wrapper via asyncio; falls back to keyword
+                    heuristics when called from non-async context or on error
+- _fallback()     : keyword-heuristic safety net — used ONLY when LLM unavailable
 """
 from __future__ import annotations
 
@@ -28,18 +26,13 @@ from typing import Any, Callable, Awaitable, Optional
 logger = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Data model
-# ─────────────────────────────────────────────────────────────────────────────
-
 @dataclass
 class PolicyDefinition:
-    """Loaded from config.yaml policies[] entries."""
     name:        str
     description: str
     prompt:      str
     confidence:  float = 0.85
-    examples:    list  = field(default_factory=list)   # [{query, match}, ...]
+    examples:    list  = field(default_factory=list)
 
 
 @dataclass
@@ -50,25 +43,15 @@ class PolicyResult:
     policy:        str
     latency_ms:    float = 0.0
     from_cache:    bool  = False
-    from_fallback: bool  = False   # True when LLM unavailable, used keyword heuristic
+    from_fallback: bool  = False
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Engine
-# ─────────────────────────────────────────────────────────────────────────────
 
 class PolicyEngine:
     """
     Evaluate named policies against user queries using LLM.
-
-    Parameters
-    ----------
-    policies    : list of PolicyDefinition loaded from config
-    llm_call    : async fn(system: str, user: str) -> str
-    cache_ttl_s : how long to cache results per query (default 60s)
+    Falls back to keyword heuristics when LLM is unavailable.
     """
 
-    # Keyword fallbacks — only used when LLM is unavailable
     _FALLBACK_DESTRUCTIVE = frozenset({
         "restart", "rollback", "delete", "drain", "failover", "flush",
         "reboot", "terminate", "shutdown", "wipe", "reset",
@@ -83,20 +66,17 @@ class PolicyEngine:
         self,
         policies:    list[PolicyDefinition],
         llm_call:    Callable[[str, str], Awaitable[str]],
-        cache_ttl_s: int = 60,
+        cache_ttl_s: int = 120,
     ) -> None:
         self._policies   = {p.name: p for p in policies}
         self._llm_call   = llm_call
         self._cache:     dict[str, tuple[PolicyResult, float]] = {}
         self._cache_ttl  = cache_ttl_s
 
-    # ── Public API ────────────────────────────────────────────────────────────
+    # ── Async API (primary path) ──────────────────────────────────────────────
 
     async def evaluate(self, policy_name: str, query: str) -> PolicyResult:
-        """
-        Evaluate ``policy_name`` against ``query``.
-        Returns a PolicyResult. Falls back to keyword heuristics if LLM fails.
-        """
+        """Evaluate one policy against query using real LLM. Cached per TTL."""
         cache_key = f"{policy_name}|{query}"
         cached = self._cache.get(cache_key)
         if cached:
@@ -110,24 +90,22 @@ class PolicyEngine:
 
         policy = self._policies.get(policy_name)
         if policy is None:
-            logger.warning("PolicyEngine: unknown policy %r — using fallback", policy_name)
+            logger.warning("PolicyEngine: unknown policy %r — fallback", policy_name)
             return self._fallback(policy_name, query)
 
         t0 = time.monotonic()
         try:
             result = await self._evaluate_with_llm(policy, query)
         except Exception as exc:
-            logger.warning("PolicyEngine: LLM eval failed (%s) — using fallback", exc)
+            logger.warning("PolicyEngine: LLM eval failed (%s) — fallback", exc)
             result = self._fallback(policy_name, query)
 
         result.latency_ms = round((time.monotonic() - t0) * 1000, 1)
         self._cache[cache_key] = (result, time.monotonic())
-
         logger.info(
-            "PolicyEngine: policy=%r match=%s conf=%.2f reason=%s latency=%.0fms%s",
-            policy_name, result.match, result.confidence,
-            result.reason[:60], result.latency_ms,
-            " [fallback]" if result.from_fallback else "",
+            "PolicyEngine: policy=%r match=%s conf=%.2f latency=%.0fms reason=%s%s",
+            policy_name, result.match, result.confidence, result.latency_ms,
+            result.reason[:60], " [fallback]" if result.from_fallback else "",
         )
         return result
 
@@ -142,7 +120,47 @@ class PolicyEngine:
             for name, r in zip(policy_names, results)
         }
 
-    # ── LLM evaluation ────────────────────────────────────────────────────────
+    # ── Sync wrapper (for classify() called from FastAPI sync context) ────────
+
+    def evaluate_sync(self, policy_name: str, query: str) -> PolicyResult:
+        """
+        Synchronous wrapper around evaluate().
+        Uses the running event loop if available; falls back to keyword heuristic
+        when blocking is not possible (i.e. inside an active async task).
+        """
+        cache_key = f"{policy_name}|{query}"
+        cached = self._cache.get(cache_key)
+        if cached:
+            result, ts = cached
+            if time.monotonic() - ts < self._cache_ttl:
+                return PolicyResult(
+                    match=result.match, reason=result.reason,
+                    confidence=result.confidence, policy=policy_name,
+                    from_cache=True,
+                )
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Inside async context — cannot block. Return cached fallback.
+                # The async path (evaluate_any) should be used instead.
+                return self._fallback(policy_name, query)
+            return loop.run_until_complete(self.evaluate(policy_name, query))
+        except Exception:
+            return self._fallback(policy_name, query)
+
+    def evaluate_any_sync(
+        self, policy_names: list[str], query: str
+    ) -> dict[str, PolicyResult]:
+        """Synchronous multi-policy evaluation."""
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                return {n: self._fallback(n, query) for n in policy_names}
+            return loop.run_until_complete(self.evaluate_any(policy_names, query))
+        except Exception:
+            return {n: self._fallback(n, query) for n in policy_names}
+
+    # ── LLM path ─────────────────────────────────────────────────────────────
 
     async def _evaluate_with_llm(
         self, policy: PolicyDefinition, query: str
@@ -155,11 +173,11 @@ class PolicyEngine:
             parts.append("\nExamples:")
             for ex in policy.examples:
                 m = "true" if ex.get("match") else "false"
-                parts.append(f'  Query: "{ex["query"]}" → match: {m}')
-
+                parts.append(f'  Query: "{ex["query"]}" -> match: {m}')
         parts.append(
-            '\n\nEvaluate the user query below. Return ONLY valid JSON:\n'
-            '{"match": true or false, "reason": "one sentence explanation"}'
+            '\n\nEvaluate the user query below.'
+            '\nReturn ONLY valid JSON, nothing else:'
+            '\n{"match": true or false, "reason": "one sentence"}'
         )
         system = "\n".join(parts)
         raw    = await self._llm_call(system, query)
@@ -179,14 +197,12 @@ class PolicyEngine:
                 policy     = policy.name,
             )
         except Exception:
-            lower = raw.lower()
-            matched = "true" in lower[:20]
+            matched = "true" in raw.lower()[:20]
             return PolicyResult(matched, raw[:100], policy.confidence, policy.name)
 
-    # ── Keyword fallback ──────────────────────────────────────────────────────
+    # ── Keyword fallback (safety net only) ───────────────────────────────────
 
     def _fallback(self, policy_name: str, query: str) -> PolicyResult:
-        """Keyword heuristic when LLM is unavailable — safety net only."""
         q = query.lower()
 
         def _wm(kw: str) -> bool:
@@ -200,8 +216,7 @@ class PolicyEngine:
             match = any(_wm(kw) for kw in self._FALLBACK_DESTRUCTIVE)
             return PolicyResult(
                 match=match,
-                reason=("keyword fallback: destructive keyword detected"
-                        if match else "keyword fallback: no destructive keyword"),
+                reason=("keyword: destructive" if match else "keyword: safe"),
                 confidence=0.75 if match else 0.80,
                 policy=policy_name, from_fallback=True,
             )
@@ -209,8 +224,15 @@ class PolicyEngine:
             match = any(kw in q for kw in self._FALLBACK_INCIDENT)
             return PolicyResult(
                 match=match,
-                reason="keyword fallback: incident keyword" if match else "no incident",
+                reason="keyword: incident" if match else "keyword: no incident",
                 confidence=0.70, policy=policy_name, from_fallback=True,
+            )
+        if policy_name == "preverify_safe_to_proceed":
+            match = not any(_wm(kw) for kw in self._FALLBACK_DESTRUCTIVE)
+            return PolicyResult(
+                match=match,
+                reason="keyword: safe to proceed" if match else "keyword: destructive blocked",
+                confidence=0.75, policy=policy_name, from_fallback=True,
             )
         return PolicyResult(
             match=False, reason="unknown policy — safe default",
@@ -218,12 +240,9 @@ class PolicyEngine:
         )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Factory helpers
-# ─────────────────────────────────────────────────────────────────────────────
+# ── Factory ───────────────────────────────────────────────────────────────────
 
 def load_policies_from_config(cfg_policies: list[dict]) -> list[PolicyDefinition]:
-    """Parse config.yaml policies[] list into PolicyDefinition objects."""
     out = []
     for p in (cfg_policies or []):
         try:
@@ -235,7 +254,7 @@ def load_policies_from_config(cfg_policies: list[dict]) -> list[PolicyDefinition
                 examples    = p.get("examples", []),
             ))
         except (KeyError, TypeError) as e:
-            logger.warning("PolicyEngine: skipping malformed policy entry: %s", e)
+            logger.warning("PolicyEngine: skipping malformed policy: %s", e)
     return out
 
 
@@ -243,11 +262,9 @@ _GLOBAL_ENGINE: Optional[PolicyEngine] = None
 
 
 def get_policy_engine() -> Optional[PolicyEngine]:
-    """Return the globally registered PolicyEngine, or None if not yet set."""
     return _GLOBAL_ENGINE
 
 
 def set_policy_engine(engine: PolicyEngine) -> None:
-    """Register the PolicyEngine singleton — called during app startup."""
     global _GLOBAL_ENGINE
     _GLOBAL_ENGINE = engine
