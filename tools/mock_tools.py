@@ -306,6 +306,11 @@ def make_read_stored_result_tool(tool_store):
         if not ref_id:
             return "[Error: ref_id is required]"
 
+        # Normalise ref_id: LLM often copies the full "[STORED:tool:uuid]" label
+        ref_id = ref_id.strip("[]")
+        if ":" in ref_id:
+            ref_id = ref_id.rsplit(":", 1)[-1].strip()
+
         chunk = tool_store.read(ref_id, offset=offset, length=length)
         if chunk is None:
             return f"[Error: no stored result found for ref_id={ref_id!r}]"
@@ -829,6 +834,70 @@ async def edit_device_config(args: dict[str, Any]) -> str:
         f"# Note: run validate_device_config to verify the change took effect"
     )
 
+
+# ---------------------------------------------------------------------------
+# HITL skill-only tools — mock implementations
+# These are registered in TOOL_REGISTRY so stop_hitl can replay them after
+# operator approval. In production, replace with real Kubernetes/API calls.
+# ---------------------------------------------------------------------------
+
+async def restart_service(args: dict[str, Any]) -> str:
+    """Mock: simulate a rolling service restart (HITL-required)."""
+    service     = args.get("service", args.get("service_name", "unknown-service"))
+    environment = args.get("environment", args.get("env", "prod"))
+    rolling     = args.get("rolling", True)
+    reason      = args.get("reason", "operator-initiated restart")
+    await asyncio.sleep(0.1)
+    strategy = "rolling" if rolling else "full"
+    return (
+        f"# Service restart — {service} ({environment}) — {strategy}\n"
+        f"# {'─'*60}\n"
+        f"# Reason: {reason}\n"
+        f"  Pods desired: 3  |  updated: 3  |  ready: 3  |  available: 3\n"
+        f"# Status: Rollout complete — all pods healthy\n"
+        f"# Health check: PASS (200 OK on /healthz)\n"
+        f"# Note: Monitor logs for 5 minutes post-restart"
+    )
+
+
+async def rollback_service(args: dict[str, Any]) -> str:
+    """Mock: simulate a service rollback to a previous version (HITL-required)."""
+    service     = args.get("service", args.get("service_name", "unknown-service"))
+    version     = args.get("version", args.get("target_version", "previous"))
+    environment = args.get("environment", args.get("env", "prod"))
+    reason      = args.get("reason", "operator-initiated rollback")
+    await asyncio.sleep(0.1)
+    return (
+        f"# Service rollback — {service} → {version} ({environment})\n"
+        f"# {'─'*60}\n"
+        f"# Reason: {reason}\n"
+        f"  Pods rolled back: 3  |  ready: 3  |  available: 3\n"
+        f"# Status: Rollback complete — running {version}\n"
+        f"# Health check: PASS (200 OK on /healthz)\n"
+        f"# Note: Monitor 10 minutes post-rollback; verify functionality manually"
+    )
+
+
+async def diff_device_config(args: dict[str, Any]) -> str:
+    """Mock: show what changed in a device config since last known-good state."""
+    device_id = args.get("device_id", "")
+    section   = args.get("section", "")
+    
+    dev = next((d for d in _DEVICE_INVENTORY if d["id"] == device_id), None)
+    if not dev:
+        return f"[Error: device {device_id!r} not found.]"
+    
+    await asyncio.sleep(0.05)
+    sect_label = f" [{section}]" if section else ""
+    return (
+        f"# Config diff — {device_id} ({dev['model']}){sect_label}\n"
+        f"# Compared: running-config vs startup-config\n"
+        f"# {'─'*60}\n"
+        f"  No uncommitted changes detected.\n"
+        f"  running-config matches startup-config.\n"
+        f"# Last write: within last maintenance window"
+    )
+
 TOOL_REGISTRY: dict[str, callable] = {
     "syslog_search":          syslog_search,
     "prometheus_query":       prometheus_query,
@@ -842,6 +911,9 @@ TOOL_REGISTRY: dict[str, callable] = {
     "get_device_config":      get_device_config,
     "validate_device_config": validate_device_config,
     "edit_device_config":     edit_device_config,
+    "restart_service":        restart_service,
+    "rollback_service":       rollback_service,
+    "diff_device_config":     diff_device_config,
     # read_stored_result and process_stored_chunks are injected at runtime (need ToolResultStore ref)
 }
 

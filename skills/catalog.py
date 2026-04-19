@@ -476,6 +476,33 @@ DEFAULT_SKILL_DEFINITIONS: dict[str, dict[str, Any]] = {
             "Post-action health check is mandatory",
         ],
     },
+    "rollback_service": {
+        "name":           "Rollback Service",
+        "purpose":        "Roll back a production service to a previous version",
+        "risk_level":     "high",
+        "requires_hitl":  True,
+        "tags":           ["ops", "destructive", "rollback"],
+        "description":    (
+            "Rolls back the specified service to a previous known-good version. "
+            "Always requires HITL approval. Post-action health verification is automatic."
+        ),
+        "parameters":     {
+            "service":     "Service name (e.g. auth-service, payments-service)",
+            "version":     "Target version to roll back to (e.g. v3.2.1, 3.2.1)",
+            "environment": "Target environment: prod | staging | dev",
+            "reason":      "Reason for rollback (for audit log)",
+        },
+        "returns":        "Rollback status with pod counts and health check results",
+        "estimated_size": "small",
+        "returns_large":  False,
+        "examples":       [{"args": {"service": "auth-service", "version": "3.2.1", "environment": "prod"},
+                            "note": "Rollback auth-service to 3.2.1 — HITL required"}],
+        "constraints":    [
+            "Requires HITL approval before execution",
+            "Target version must exist in the image registry",
+            "Post-action health check is mandatory",
+        ],
+    },
     "read_stored_result": {
         "name":           "Read Stored Result",
         "purpose":        "Page through a large tool result by reference ID",

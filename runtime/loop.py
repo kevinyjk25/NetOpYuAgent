@@ -678,6 +678,37 @@ class AgentRuntimeLoop:
                     except Exception:
                         pass
                 if _is_skill_only:
+                    # ── Special case: HITL-required skill called as [TOOL:] ──
+                    # Rather than injecting a "not a tool" error (which causes
+                    # the LLM to loop through SKILL_LOAD indefinitely), detect
+                    # the requires_hitl flag and route straight to stop_hitl.
+                    # This lets restart_service, rollback_service etc. trigger
+                    # the HITL interrupt card exactly like edit_device_config.
+                    _skill_requires_hitl = False
+                    if self._skill_catalog:
+                        try:
+                            _skill_requires_hitl = self._skill_catalog.requires_hitl(tool_name)
+                        except Exception:
+                            pass
+                    if _skill_requires_hitl:
+                        import json as _json
+                        logger.info(
+                            "stream: HITL-required skill '%s' called as tool — routing to HITL",
+                            tool_name,
+                        )
+                        yield {
+                            "message": (
+                                f"stop_hitl: skill '{tool_name}' requires human approval "
+                                "before execution. Routing to HITL graph."
+                            ),
+                            "node":          "hitl_gate",
+                            "stop_hitl":     True,
+                            "tool_name":     tool_name,
+                            "tool_args":     tool_args,
+                            "tool_args_json": _json.dumps(tool_args, default=str),
+                        }
+                        return
+                    # Non-HITL skill-only: inject guidance error so LLM learns to SKILL_LOAD
                     _skill_err = (
                         f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
                         f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
@@ -1016,12 +1047,12 @@ class AgentRuntimeLoop:
         return f"[Tool {tool_name!r} not registered — args={args}]"
 
     @staticmethod
-    @staticmethod
     def _skill_loads_in(response: str) -> set:
         import re as _re
         return set(_re.findall(r"\[SKILL_LOAD:(\w+)\]", response))
 
-    def _is_complete(self, response: str, tool_calls: list) -> bool:
+    @staticmethod
+    def _is_complete(response: str, tool_calls: list) -> bool:
         # If the LLM emitted a SKILL_LOAD directive, it needs one more turn
         # to read the loaded detail and then call the actual tools.
         # BUT: if the response ONLY contains SKILL_LOAD with no other content

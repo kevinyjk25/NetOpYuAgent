@@ -95,7 +95,17 @@ class ToolResultStore:
         return label
 
     def read(self, ref_id: str, offset: int = 0, length: int = 2_000) -> Optional[str]:
-        """Retrieve a slice of a stored result (for a 'read_result' tool call)."""
+        """Retrieve a slice of a stored result (for a 'read_result' tool call).
+
+        Accepts both plain ref_id (e.g. "6ac5ade7") and the full label form
+        the LLM copies from context (e.g. "netflow_dump:6ac5ade7" or
+        "[STORED:netflow_dump:6ac5ade7]"). Strips any prefix to get just the UUID.
+        """
+        # Strip surrounding brackets if LLM included them
+        ref_id = ref_id.strip("[]")
+        # If the LLM sent "tool_name:uuid", keep only the uuid part (after last ":")
+        if ":" in ref_id:
+            ref_id = ref_id.rsplit(":", 1)[-1].strip()
         full = self._store.get(ref_id)
         if full is None:
             return None

@@ -126,7 +126,12 @@ CONFIGURATION QUERIES — when asked about device config:
 - Use [TOOL:get_device_config] {{"device_id": "<id>"}} for full config
 - Use [TOOL:get_device_config] {{"device_id": "<id>", "section": "radius"}} for one section
 - Use [TOOL:validate_device_config] to check for errors
-- Use [TOOL:edit_device_config] to apply fixes
+- Use [TOOL:edit_device_config] to apply fixes — HITL approval required
+- Use [TOOL:diff_device_config] {{"device_id": "<id>"}} to see uncommitted config changes
+
+SERVICE OPERATIONS — for service restarts and rollbacks (HITL required, approval card appears):
+- Use [TOOL:restart_service] {{"service": "<name>", "environment": "prod"}} for rolling restart
+- Use [TOOL:rollback_service] {{"service": "<name>", "version": "<v>", "environment": "prod"}} for rollback
 
 STOP CONDITION: Once you have gathered enough information to fully answer the user's question, write your final analysis WITHOUT any [TOOL:] line.
 - For single-device queries: one tool call is usually enough — summarise after that result.
@@ -346,8 +351,16 @@ class OllamaEngine(LLMEngine):
                     tname, args_str = k.split("|", 1)
                     try:
                         args = _json.loads(args_str)
-                        dev  = args.get("device_id", args_str)
-                        checked_lines.append(f"  - {tname}({dev}) ✓ done")
+                        if tname == "read_stored_result":
+                            # Normalise ref_id for display and show offset
+                            rid = args.get("ref_id", "?").strip("[]")
+                            if ":" in rid:
+                                rid = rid.rsplit(":", 1)[-1].strip()
+                            off = args.get("offset", 0)
+                            checked_lines.append(f"  - {tname}(ref_id={rid}, offset={off}) ✓ done — use offset={off + 2000} for next page")
+                        else:
+                            dev = args.get("device_id") or args.get("site") or args_str[:40]
+                            checked_lines.append(f"  - {tname}({dev}) ✓ done")
                     except Exception:
                         checked_lines.append(f"  - {k} ✓ done")
                 else:

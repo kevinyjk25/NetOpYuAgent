@@ -770,7 +770,11 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 detail=f"No stored result found for ref_id={ref_id!r}. "
                        "Results may have been cleared or the ref_id is invalid."
             )
-        total      = len(store._store.get(ref_id, ""))
+        # Normalise ref_id in case it includes tool_name prefix
+        _norm_ref = ref_id.strip("[]")
+        if ":" in _norm_ref:
+            _norm_ref = _norm_ref.rsplit(":", 1)[-1].strip()
+        total      = len(store._store.get(_norm_ref, ""))
         next_off   = offset + len(chunk)
         has_more   = next_off < total
 

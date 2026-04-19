@@ -667,7 +667,11 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   <!-- History mode banner — shown when viewing a past session -->
   <div class="history-banner" id="history-banner">
     <span>👁 Viewing history: <strong id="history-banner-name"></strong></span>
-    <button class="history-resume-btn" onclick="resumeLiveSession()">▶ Resume live session</button>
+    <div style="margin-left:auto;display:flex;gap:6px">
+      <button class="history-resume-btn" style="background:transparent;color:var(--accent);border:1px solid var(--accent)"
+              onclick="resumeLiveSession()">▶ Back to live</button>
+      <button class="history-resume-btn" onclick="continueThisSession()">↩ Continue this session</button>
+    </div>
   </div>
   <div id="messages">
     <div class="msg-wrap">
@@ -873,6 +877,27 @@ function resumeLiveSession() {
       }
     }).catch(()=>{});
   renderSessionList();
+}
+
+function continueThisSession() {
+  // Make the currently-viewed history session the new live session.
+  // The chat is already loaded — just unlock Send and update live pointer.
+  const histSid = sessionId;   // already set to the history session
+  _liveSessionId = histSid;
+  _viewingHistory = false;
+  document.getElementById('history-banner').classList.remove('visible');
+  document.getElementById('send-btn').disabled = false;
+  document.getElementById('query-input').placeholder = 'Query the agent… (Enter to send, Shift+Enter newline)';
+  document.getElementById('session-input').value = histSid;
+  document.getElementById('session-badge').textContent = 'session: '+histSid.slice(0,12)+'…';
+  // Reset per-session state so new tool calls start fresh in the Results tab
+  _sessionFacts = [];
+  _currentTurn = 0;
+  _turnResults = {};
+  renderResultsTurns();
+  renderSessionList();
+  // Focus the input so user can start typing immediately
+  document.getElementById('query-input').focus();
 }
 
 // ── Turn-grouped results store ─────────────────────────────────────────────
