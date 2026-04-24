@@ -188,13 +188,21 @@ async def build_services() -> dict[str, Any]:
             logger.warning("Embedder init failed (%s) — using hash stub", exc)
 
         # 6c. Build tool registry based on mode
-        tool_registry_local = dict(TOOL_REGISTRY)   # always include mock_tools as base
+        # In mock mode: use mock_tools as the full registry
+        # In pragmatic mode: use ONLY real tools (no mock fallback — avoid confusing
+        #   LLM with fake tools that would silently return synthetic data in production)
         read_stored_fn, process_chunks_fn = make_read_stored_result_tool(tool_store)
-        tool_registry_local["read_stored_result"]    = read_stored_fn
-        tool_registry_local["process_stored_chunks"] = process_chunks_fn
-
         if cfg.is_pragmatic:
+            # Start from empty — only real tools exposed
+            tool_registry_local = {}
+            tool_registry_local["read_stored_result"]    = read_stored_fn
+            tool_registry_local["process_stored_chunks"] = process_chunks_fn
             tool_registry_local = await _build_pragmatic_tools(tool_registry_local)
+        else:
+            # Mock mode: full mock registry
+            tool_registry_local = dict(TOOL_REGISTRY)
+            tool_registry_local["read_stored_result"]    = read_stored_fn
+            tool_registry_local["process_stored_chunks"] = process_chunks_fn
         
         # 6d. MCP client
         mcp_client = await _build_mcp_client(MCPClient)
@@ -260,6 +268,24 @@ async def build_services() -> dict[str, Any]:
             )
         except Exception as _pe_exc:
             logger.warning("PolicyEngine: startup failed (%s) — keyword heuristics active", _pe_exc)
+
+        # ── Skill catalog — built here so it can be filtered against tool_registry_local ──
+        # This must happen after tool_registry_local is finalised (mock vs pragmatic).
+        # backend.py's inject block guards with "if skill_catalog not in services"
+        # so building it here takes priority.
+        try:
+            from skills import SkillCatalogService, DEFAULT_SKILL_DEFINITIONS
+            _skill_catalog = SkillCatalogService()
+            _skill_catalog.register_all(DEFAULT_SKILL_DEFINITIONS)
+            _removed = _skill_catalog.filter_to_registry(tool_registry_local)
+            services["skill_catalog"] = _skill_catalog
+            logger.info(
+                "SkillCatalog: %d skills registered, %d filtered out (tools not in registry)",
+                len(_skill_catalog._skills), _removed,
+            )
+        except Exception as _sc_exc:
+            logger.warning("SkillCatalog: build failed (%s) — catalog unavailable", _sc_exc)
+
         logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
 
     except Exception as exc:

@@ -975,17 +975,37 @@ class AgentRuntimeLoop:
                 return
 
             if self._is_complete(llm_response, new_tool_calls):
+                # Guard: never exit with empty or trivial response when we have context
+                # The LLM sometimes returns empty text when it sees PREV_ANALYSIS and halts.
+                _resp_stripped = llm_response.strip()
+                _has_context = bool(tool_outputs) or bool(state.confirmed_facts)
+                if not _resp_stripped and _has_context and state.turns < 3:
+                    # Force one more turn with an explicit synthesis instruction
+                    logger.warning(
+                        "stream: empty response with available context at turn %d — nudging",
+                        state.turns,
+                    )
+                    # Inject a nudge into confirmed_facts as a one-time instruction
+                    state.confirmed_facts.append(
+                        "_NUDGE: Your previous response was empty. "
+                        "Write a complete answer to the user's question using the available context."
+                    )
+                    state.turns += 1
+                    continue  # retry the LLM call
+                # Remove any lingering nudge entries
+                state.confirmed_facts = [
+                    f for f in state.confirmed_facts if not f.startswith("_NUDGE:")
+                ]
                 _ledger = _build_tool_ledger(tool_outputs, tool_reg,
                                               getattr(state, "_tool_outputs_raw", {}))
                 state.confirmed_facts.extend(_ledger)
                 # Capture final synthesis response (not intermediate page-reading turns)
-                # Only append when response is substantial prose with no further tool calls
                 _resp_clean = llm_response.strip()
                 _is_synthesis = (
-                    len(_resp_clean) > 150              # substantial response
-                    and "[TOOL:" not in _resp_clean     # no pending tool call
+                    len(_resp_clean) > 150
+                    and "[TOOL:" not in _resp_clean
                     and "[SKILL_LOAD:" not in _resp_clean
-                    and state.turns > 1                  # not a trivial first turn
+                    and state.turns > 1
                 )
                 if _is_synthesis:
                     summary_line = _resp_clean[:500].replace("\n", " ")

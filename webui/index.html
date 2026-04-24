@@ -2146,20 +2146,24 @@ async function hitlDec(id,dec) {
 Outcome: ${outcome}
 Error: ${data.error}`,'system');
     } else if (data.tool_result && dec==='approve') {
-      // Tool executed successfully after approval — show the result
+      // Tool executed successfully — show result + synthesis if available
       const toolName = data.tool_name || 'tool';
+      const synthNote = data.synthesis ? `
+
+${data.synthesis}` : '';
       addMessage('agent',
-        `✓ HITL approved — ${toolName} executed:
+        `✓ HITL approved — ${toolName} executed:${synthNote}
 
 ${data.tool_result}`,
         'agent');
-      // Also inject into Results tab as an inline result
       addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
       switchTab('cache');
     } else if (dec==='approve') {
-      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
-Outcome: ${outcome}
-Tool is executing — check Results tab for output.`,'system');
+      // No tool_result yet — show synthesis or fallback message
+      const synthNote = data.synthesis
+          ? `\nSummary: ${data.synthesis}`
+          : `\nTool is executing — check Results tab for output.`;
+      addMessage('agent',`HITL APPROVE: ${id.slice(0,10)}…\nOutcome: ${outcome}${synthNote}`,'system');
     } else {
       addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
 Outcome: ${outcome}`,'system');

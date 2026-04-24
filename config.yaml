@@ -14,7 +14,7 @@
 # Switch:  MODE=pragmatic uvicorn main:app --port 8001
 # ============================================================
 
-mode: "mock"         # mock | pragmatic   (env: MODE)
+mode: "pragmatic"         # mock | pragmatic   (env: MODE)
 
 
 # ── Server ───────────────────────────────────────────────────

@@ -122,6 +122,45 @@ class SkillCatalogService:
             )
             self.register(Skill(summary=summary, detail=detail))
 
+    def filter_to_registry(self, tool_registry: dict, *, strict: bool = False) -> int:
+        """
+        Remove skills whose skill_id is not present in tool_registry.
+
+        A skill named 'syslog_search' is only useful if tool_registry contains
+        a callable named 'syslog_search'. Without it the LLM loads the skill,
+        reads steps that call [TOOL:syslog_search], and gets a silent error.
+
+        Args:
+            tool_registry: dict of available tool names → callables
+            strict: if True, also remove skills whose description mentions
+                    [TOOL:xxx] where xxx is not in the registry
+
+        Returns: number of skills removed
+        """
+        import re as _re
+        to_remove = []
+        for skill_id, skill in list(self._skills.items()):
+            # Primary check: skill_id matches a tool name
+            if skill_id not in tool_registry:
+                to_remove.append(skill_id)
+                continue
+            if strict:
+                # Secondary check: any [TOOL:xxx] in skill detail not in registry
+                tool_refs = _re.findall(r"\[TOOL:(\w+)\]", skill.detail.description or "")
+                for ref in tool_refs:
+                    if ref not in tool_registry:
+                        to_remove.append(skill_id)
+                        break
+        for skill_id in to_remove:
+            del self._skills[skill_id]
+            logger.info("SkillCatalog: removed skill %r (tool not in registry)", skill_id)
+        if to_remove:
+            logger.info(
+                "SkillCatalog: filtered %d skill(s) — %d remain",
+                len(to_remove), len(self._skills),
+            )
+        return len(to_remove)
+
     def format_summary(self) -> str:
         """
         Build the Level 1 prompt section.

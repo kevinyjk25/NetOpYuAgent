@@ -135,6 +135,14 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     if "skill_catalog" not in services:
         catalog = SkillCatalogService()
         catalog.register_all(DEFAULT_SKILL_DEFINITIONS)
+        # Filter skills to only those whose tool exists in the active registry.
+        # Prefers the ToolRouter registry (set by main.py); falls back to the
+        # imported TOOL_REGISTRY (mock tools — used when running standalone without main.py).
+        _active_registry = (
+            getattr(services.get("tool_router"), "registry", None)
+            or TOOL_REGISTRY
+        )
+        catalog.filter_to_registry(_active_registry)
         services["skill_catalog"] = catalog
 
     # Inject skill_evolver for upload/persist capability if not already provided by main.py
@@ -2340,8 +2348,35 @@ async def _submit_hitl_decision(
         comment=req.comment,
         parameter_patch=req.parameter_patch,
     )
-    result = await hitl_router.handle_decision(decision)
-    return JSONResponse(content=result.to_dict())
+    result     = await hitl_router.handle_decision(decision)
+    result_dict = result.to_dict()
+
+    # Post-HITL synthesis: run one LLM turn to summarise the tool execution result
+    # so the chat shows a meaningful response after the operator approves.
+    _loop = services.get("runtime_loop")
+    _tool_result = result_dict.get("tool_result", "")
+    _tool_name   = result_dict.get("tool_name", "the approved tool")
+    if _loop and _tool_result and result_dict.get("decision") == "approve":
+        try:
+            _synthesis_query = (
+                f"The HITL-approved tool '{_tool_name}' has just been executed. "
+                f"Summarise the result for the operator in 2-3 sentences."
+            )
+            _synthesis_facts = [f"TOOL_RESULT: {str(_tool_result)[:800]}"]
+            _full_text = ""
+            async for _chunk in _loop.stream(
+                query           = _synthesis_query,
+                session_id      = f"hitl__{interrupt_id[:8]}",
+                confirmed_facts = _synthesis_facts,
+            ):
+                if _chunk.get("type") == "token":
+                    _full_text += _chunk.get("token", "")
+            if _full_text.strip():
+                result_dict["synthesis"] = _full_text.strip()
+        except Exception as _e:
+            logger.debug("Post-HITL synthesis failed: %s", _e)
+
+    return JSONResponse(content=result_dict)
 
 
 def _push_history(session_id: str, msg: dict, store: dict) -> None:
