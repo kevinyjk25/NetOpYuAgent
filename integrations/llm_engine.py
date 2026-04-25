@@ -90,19 +90,6 @@ class LLMEngine:
 TOOL CALLING FORMAT — use EXACTLY this syntax on its own line:
 [TOOL:tool_name] {{"arg1": "value1", "arg2": "value2"}}
 
-Examples:
-[TOOL:syslog_search] {{"host": "ap-01", "severity": "error", "lines": 50}}
-[TOOL:list_devices] {{}}
-[TOOL:list_devices] {{"type": "switch"}}
-[TOOL:list_interfaces] {{"device_id": "sw-core-01"}}
-[TOOL:get_device_config] {{"device_id": "sw-core-01"}}
-[TOOL:get_device_config] {{"device_id": "ap-01", "section": "radius"}}
-[TOOL:edit_device_config] {{"device_id": "sw-core-01", "section": "ntp", "changes": {{"servers": ["10.0.1.1", "10.0.1.2"]}}, "reason": "add NTP redundancy"}}
-[TOOL:validate_device_config] {{"device_id": "sw-core-01"}}
-[TOOL:diff_device_config] {{"device_id": "sw-core-01"}}
-[TOOL:device_info] {{"device_id": "sw-core-01"}}
-[TOOL:dns_lookup] {{"hostname": "payments.internal"}}
-
 STRICT RULES — follow exactly:
 1. Call AT MOST ONE tool per response — never list multiple [TOOL:] lines
 2. NEVER repeat a tool call you have already made this session
@@ -115,7 +102,7 @@ TOOLS vs SKILLS — critical distinction:
 - TOOLS (callable with [TOOL:name]): executable functions. Call them directly.
 - SKILLS listed in "Available skills" without a matching TOOL: procedural guides only — use [SKILL_LOAD:skill_id] to read steps, then call the tools it describes.
 - If a name appears in BOTH the tool list AND the skills list (e.g. get_device_config, validate_device_config, list_devices), it IS a real callable tool — use [TOOL:name] directly. SKILL_LOAD is NOT needed.
-- Only use [SKILL_LOAD:skill_id] for skills that have no corresponding [TOOL:] (e.g. restart_service, network_baseline_check).
+- Only use [SKILL_LOAD:skill_id] for skills that have no corresponding [TOOL:] entry in the AVAILABLE TOOLS list above.
 
 INVENTORY QUERIES — when asked what devices exist:
 - Use [TOOL:list_devices] {{}} to get ALL devices in one call
@@ -127,11 +114,18 @@ CONFIGURATION QUERIES — when asked about device config:
 - Use [TOOL:get_device_config] {{"device_id": "<id>", "section": "radius"}} for one section
 - Use [TOOL:validate_device_config] to check for errors
 - Use [TOOL:edit_device_config] to apply fixes — HITL approval required
-- Use [TOOL:diff_device_config] {{"device_id": "<id>"}} to see uncommitted config changes
+- Use the diff tool (if available in AVAILABLE TOOLS) to see uncommitted config changes
 
 SERVICE OPERATIONS — for service restarts and rollbacks (HITL required, approval card appears):
-- Use [TOOL:restart_service] {{"service": "<name>", "environment": "prod"}} for rolling restart
-- Use [TOOL:rollback_service] {{"service": "<name>", "version": "<v>", "environment": "prod"}} for rollback
+- Use the appropriate HITL-flagged tool from the AVAILABLE TOOLS list above.
+- These always trigger an approval card before execution.
+
+TOOL RESULT HANDLING — when a tool returns an error or empty result:
+- If a tool returns "[Error]" or "not found" or "No devices found": report this fact clearly to the user. Do NOT invent or hallucinate data. Say what the tool returned.
+- If list_devices returns an empty list: tell the user "No devices are currently registered in the system."
+- If get_syslog or a device query returns "Device not found": tell the user the device is not reachable or not in inventory.
+- NEVER synthesise or fabricate log entries, device data, or metrics that were not returned by a tool.
+- An empty or error result IS a valid answer — report it honestly, then suggest what the user could do next.
 
 STOP CONDITION: Once you have gathered enough information to fully answer the user's question, write your final analysis WITHOUT any [TOOL:] line.
 - For single-device queries: one tool call is usually enough — summarise after that result.
@@ -225,23 +219,37 @@ Return format:
         # Base tools are listed in TOOL_CALL_SYSTEM examples.
         # Any tools registered AFTER startup (via upload) are injected here
         # so the LLM knows they exist and can call them.
-        _BASE_TOOLS = {
-            # Built-in mock tools (always present)
-            "syslog_search", "prometheus_query", "netflow_dump", "dns_lookup",
-            "device_info", "alert_summary", "service_health", "restart_service",
-            "read_stored_result", "process_stored_chunks", "list_devices", "list_interfaces",
-            # Config tools (examples in system prompt — don't re-list in UPLOADED section)
-            "get_device_config", "edit_device_config",
-            "validate_device_config", "diff_device_config",
-        }
+        # Build AVAILABLE TOOLS section dynamically from ToolLoader metadata.
+        # No tool name is hardcoded here — the section is assembled from
+        # tools/{mock,pragmatic,builtin}/registry.py for the active mode.
         extra_tools_section = ""
-        if tool_registry:
-            extra = {n: fn for n, fn in tool_registry.items() if n not in _BASE_TOOLS}
-            if extra:
-                lines = ["UPLOADED TOOLS — also available, use the same [TOOL:name] format:"]
-                for name in sorted(extra.keys()):
-                    lines.append("  [TOOL:" + name + '] {"<arg>": "<value>"}')
-                extra_tools_section = "\n".join(lines)
+        _tool_loader = (
+            # Prefer the loader stored by build_services (has correct mode)
+            None  # will be populated below
+        )
+        try:
+            # Try to get the loader from the services context if available
+            # Fall back to building from tool_registry keys (registered/uploaded tools)
+            from tools.loader import ToolLoader as _TL
+            import config as _cfg
+            _tl = _TL(mode=_cfg.cfg.mode)
+            extra_tools_section = _tl.tool_section_for_prompt()
+            # Append any registered/uploaded tools not in the mode registry
+            if tool_registry:
+                _mode_names = set(_tl.build_metadata().keys())
+                _extra = {n for n in tool_registry if n not in _mode_names}
+                if _extra:
+                    _extra_lines = ["\nUPLOADED/REGISTERED TOOLS — also available:"]
+                    for _n in sorted(_extra):
+                        _extra_lines.append(f"  [TOOL:{_n}] {{"<arg>": "<value>"}}")
+                    extra_tools_section += "\n".join(_extra_lines)
+        except Exception as _te:
+            # Fallback: list tools from registry with no descriptions
+            if tool_registry:
+                _lines = ["AVAILABLE TOOLS (use [TOOL:name] format):"]
+                for _n in sorted(tool_registry):
+                    _lines.append(f"  [TOOL:{_n}]")
+                extra_tools_section = "\n".join(_lines)
 
         # ── Skill summary ─────────────────────────────────────────────
         skill_summary = ""
@@ -429,10 +437,20 @@ class OllamaEngine(LLMEngine):
                 "[STORED:" in v
                 for v in (state._tool_outputs_raw.values() if hasattr(state, "_tool_outputs_raw") else ["x"])
             )
+            # Identify large-data tools by their registry tags (traffic/metrics)
+            # so no tool names are hardcoded here
+            try:
+                import config as _cfg2
+                from tools.loader import ToolLoader as _TL2
+                _large_data_tools = {
+                    n for n, info in _TL2(mode=_cfg2.cfg.mode).build_metadata().items()
+                    if any(t in info.get("tags", []) for t in ("traffic", "metrics"))
+                }
+            except Exception:
+                _large_data_tools = set()
             _n_real_results = sum(
                 1 for k in _tool_output_keys
-                if k.split("|")[0] not in ("netflow_dump", "syslog_search", "prometheus_query")
-                   or "|" not in k
+                if k.split("|")[0] not in _large_data_tools or "|" not in k
             )
             if len(_tool_output_keys) >= 3 and not _has_more_pages and not _all_stored:
                 stop_note += (

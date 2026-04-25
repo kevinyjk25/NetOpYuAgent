@@ -133,16 +133,13 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         services["tool_store"] = ToolResultStore()
 
     if "skill_catalog" not in services:
+        # Use ToolLoader so only mode-appropriate skills are registered.
+        # No filter_to_registry needed here — ToolLoader already returns the right set.
+        import config as _cfg
+        from tools.loader import ToolLoader as _TL
+        _tl = _TL(mode=_cfg.cfg.mode)
         catalog = SkillCatalogService()
-        catalog.register_all(DEFAULT_SKILL_DEFINITIONS)
-        # Filter skills to only those whose tool exists in the active registry.
-        # Prefers the ToolRouter registry (set by main.py); falls back to the
-        # imported TOOL_REGISTRY (mock tools — used when running standalone without main.py).
-        _active_registry = (
-            getattr(services.get("tool_router"), "registry", None)
-            or TOOL_REGISTRY
-        )
-        catalog.filter_to_registry(_active_registry)
+        catalog.register_all(_tl.skill_definitions())
         services["skill_catalog"] = catalog
 
     # Inject skill_evolver for upload/persist capability if not already provided by main.py
@@ -156,7 +153,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         )
 
     # Wire read_stored_result and process_stored_chunks tools with the live store
-    tool_registry = dict(TOOL_REGISTRY)
+    # Build mode-appropriate tool registry (no mock tools in pragmatic mode)
+    import config as _cfg_be
+    from tools.loader import ToolLoader as _TL_be
+    tool_registry = _TL_be(mode=_cfg_be.cfg.mode).build_callables()
     _read_fn, _process_fn = make_read_stored_result_tool(services["tool_store"])
     tool_registry["read_stored_result"]    = _read_fn
     tool_registry["process_stored_chunks"] = _process_fn
@@ -976,18 +976,18 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     @app.get("/tools")
     async def list_tools() -> JSONResponse:
-        """List all registered tools with descriptions — includes uploaded tools."""
-        from tools import TOOL_DESCRIPTIONS
-        # Use the live registry (same dict that upload_tool writes into)
-        live_reg = services.get("tool_registry") or {}
+        """List tools valid for the current running mode (no mock tools in pragmatic)."""
+        from tools.loader import ToolLoader
+        import config as _cfg
+        # ToolLoader returns only tools for the current mode (mock vs pragmatic)
+        _loader = ToolLoader(mode=_cfg.cfg.mode)
         all_tools = {}
-        # Start with static descriptions (mark as not uploaded)
-        for name, desc in TOOL_DESCRIPTIONS.items():
-            entry = dict(desc)
+        for name, meta in _loader.build_metadata().items():
+            entry = dict(meta)
             entry["uploaded"] = False
             all_tools[name] = entry
-        # Add any tools in the live registry that have no static description
-        # These are uploaded tools — mark them clearly
+        # Also surface any live-registered/uploaded tools not in the static metadata
+        live_reg = services.get("tool_registry") or {}
         for name in live_reg:
             if name not in all_tools:
                 all_tools[name] = {

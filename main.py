@@ -187,22 +187,18 @@ async def build_services() -> dict[str, Any]:
         except Exception as exc:
             logger.warning("Embedder init failed (%s) — using hash stub", exc)
 
-        # 6c. Build tool registry based on mode
-        # In mock mode: use mock_tools as the full registry
-        # In pragmatic mode: use ONLY real tools (no mock fallback — avoid confusing
-        #   LLM with fake tools that would silently return synthetic data in production)
+        # 6c. Build tool registry via ToolLoader — single source of truth by mode.
+        # ToolLoader assembles: builtin tools + mode-specific tools (mock XOR pragmatic).
+        # No tool name is hardcoded here or in llm_engine — metadata comes from registries.
+        from tools.loader import ToolLoader as _ToolLoader
+        _loader = _ToolLoader(mode=cfg.mode)
         read_stored_fn, process_chunks_fn = make_read_stored_result_tool(tool_store)
-        if cfg.is_pragmatic:
-            # Start from empty — only real tools exposed
-            tool_registry_local = {}
-            tool_registry_local["read_stored_result"]    = read_stored_fn
-            tool_registry_local["process_stored_chunks"] = process_chunks_fn
-            tool_registry_local = await _build_pragmatic_tools(tool_registry_local)
-        else:
-            # Mock mode: full mock registry
-            tool_registry_local = dict(TOOL_REGISTRY)
-            tool_registry_local["read_stored_result"]    = read_stored_fn
-            tool_registry_local["process_stored_chunks"] = process_chunks_fn
+        tool_registry_local = _loader.build_callables()
+        tool_registry_local["read_stored_result"]    = read_stored_fn
+        tool_registry_local["process_stored_chunks"] = process_chunks_fn
+        # Store loader on services so llm_engine can build the dynamic tool section
+        services["tool_loader"] = _loader
+        logger.info("ToolLoader[%s]: %d tools assembled", cfg.mode, len(tool_registry_local))
         
         # 6d. MCP client
         mcp_client = await _build_mcp_client(MCPClient)
@@ -269,19 +265,18 @@ async def build_services() -> dict[str, Any]:
         except Exception as _pe_exc:
             logger.warning("PolicyEngine: startup failed (%s) — keyword heuristics active", _pe_exc)
 
-        # ── Skill catalog — built here so it can be filtered against tool_registry_local ──
-        # This must happen after tool_registry_local is finalised (mock vs pragmatic).
-        # backend.py's inject block guards with "if skill_catalog not in services"
-        # so building it here takes priority.
+        # ── Skill catalog — built from ToolLoader.skill_definitions() ──────────────
+        # Skills are mode-specific: only the correct set is loaded.
+        # No cross-mode contamination; no filter_to_registry needed here because
+        # the loader only returns skills valid for the current mode.
         try:
-            from skills import SkillCatalogService, DEFAULT_SKILL_DEFINITIONS
+            from skills import SkillCatalogService
+            _skill_defs = _loader.skill_definitions()
             _skill_catalog = SkillCatalogService()
-            _skill_catalog.register_all(DEFAULT_SKILL_DEFINITIONS)
-            _removed = _skill_catalog.filter_to_registry(tool_registry_local)
+            _skill_catalog.register_all(_skill_defs)
             services["skill_catalog"] = _skill_catalog
             logger.info(
-                "SkillCatalog: %d skills registered, %d filtered out (tools not in registry)",
-                len(_skill_catalog._skills), _removed,
+                "SkillCatalog[%s]: %d skills registered", cfg.mode, len(_skill_catalog._skills)
             )
         except Exception as _sc_exc:
             logger.warning("SkillCatalog: build failed (%s) — catalog unavailable", _sc_exc)

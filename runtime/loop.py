@@ -945,6 +945,12 @@ class AgentRuntimeLoop:
                 if not hasattr(state, "_tool_outputs_raw"):
                     state._tool_outputs_raw = {}  # type: ignore[attr-defined]
                 state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
+                # Log when tool returns error/empty — high hallucination risk
+                _raw_lower = raw.lower() if isinstance(raw, str) else ""
+                if raw.startswith("[Error]") or "not found" in _raw_lower or                    raw.strip() in ("", "[]", "{}") or "no devices" in _raw_lower:
+                    logger.warning(
+                        "tool %r returned error/empty: %s", tool_name, raw[:120]
+                    )
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):
@@ -975,21 +981,40 @@ class AgentRuntimeLoop:
                 return
 
             if self._is_complete(llm_response, new_tool_calls):
-                # Guard: never exit with empty or trivial response when we have context
-                # The LLM sometimes returns empty text when it sees PREV_ANALYSIS and halts.
+                # Guard: never exit with empty or trivial response when we have context.
+                # Also fires when LLM returns a very short response after tool errors/empty
+                # results — it should tell the user something meaningful, not go silent.
                 _resp_stripped = llm_response.strip()
-                _has_context = bool(tool_outputs) or bool(state.confirmed_facts)
-                if not _resp_stripped and _has_context and state.turns < 3:
+                _has_context   = bool(tool_outputs) or bool(state.confirmed_facts)
+                _tool_had_result = bool(tool_outputs)
+                _resp_too_short  = len(_resp_stripped) < 30 and _tool_had_result
+                if (not _resp_stripped or _resp_too_short) and _has_context and state.turns < 3:
                     # Force one more turn with an explicit synthesis instruction
                     logger.warning(
                         "stream: empty response with available context at turn %d — nudging",
                         state.turns,
                     )
                     # Inject a nudge into confirmed_facts as a one-time instruction
-                    state.confirmed_facts.append(
-                        "_NUDGE: Your previous response was empty. "
-                        "Write a complete answer to the user's question using the available context."
+                    # Detect if tools returned errors or empty results
+                    _tool_vals = list(tool_outputs.values())
+                    _has_errors = any(
+                        "[Error]" in str(v) or "not found" in str(v).lower()
+                        or "No devices" in str(v)
+                        for v in _tool_vals
                     )
+                    if _has_errors:
+                        _nudge_text = (
+                            "_NUDGE: Your previous response was empty or too short. "
+                            "The tools returned errors or empty results. "
+                            "Report this clearly to the user: explain what the tool found (or didn't find), "
+                            "and suggest what they could do next. Do NOT fabricate data."
+                        )
+                    else:
+                        _nudge_text = (
+                            "_NUDGE: Your previous response was empty or too short. "
+                            "Write a complete answer using the available context and tool results."
+                        )
+                    state.confirmed_facts.append(_nudge_text)
                     state.turns += 1
                     continue  # retry the LLM call
                 # Remove any lingering nudge entries
