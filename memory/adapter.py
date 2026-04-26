@@ -26,7 +26,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Optional
 
 from agent_memory import MemoryManager
@@ -57,10 +57,19 @@ def get_current_operator() -> str:
 @dataclass
 class RecallResult:
     """Mimics the previous DTM RecallResult shape — used by backend.py and
-    hitl/a2a_integration.py to inject memory into LLM context."""
+    hitl/a2a_integration.py to inject memory into LLM context.
+
+    Track A = long-term raw chunks (FTS5 + TF-IDF retrieval)
+    Track B = mid-term distilled facts (curated knowledge)
+    """
     prompt_context: str
     fact_count:     int
     chunk_count:    int
+    # Memory tab fields:
+    results:        list = field(default_factory=list)  # serialized items
+    track_a_count:  int  = 0     # = chunk_count, kept for FE clarity
+    track_b_count:  int  = 0     # = fact_count, kept for FE clarity
+    winner:         str  = ""    # "A" | "B" | "tie" | ""
 
 
 class MemoryAdapter:
@@ -120,25 +129,71 @@ class MemoryAdapter:
                 include_chunks       = True,
                 include_skills       = True,
             )
-            # Counts via search() — cheap, indexes already warm
-            results = self._mgr.search(
+            # search() returns {"long_term": RetrievalResult, "mid_term": RetrievalResult}
+            search_out = self._mgr.search(
                 user_id    = user_id,
                 query      = query,
                 session_id = session_id,
                 top_k      = 5,
             )
-            fact_count  = len(results.get("mid_term",  results.get("facts",  [])).items
-                              if hasattr(results.get("mid_term",  None), "items") else [])
-            chunk_count = len(results.get("long_term", results.get("chunks", [])).items
-                              if hasattr(results.get("long_term", None), "items") else [])
-            return RecallResult(prompt_context=ctx_str,
-                                fact_count=fact_count, chunk_count=chunk_count)
+            chunks_rr = search_out.get("long_term")
+            facts_rr  = search_out.get("mid_term")
+            chunk_items = chunks_rr.items if chunks_rr and hasattr(chunks_rr, "items") else []
+            fact_items  = facts_rr.items  if facts_rr  and hasattr(facts_rr,  "items") else []
+
+            # Serialize for the Memory tab. Each item is either a MemoryChunk
+            # (long_term/Track A) or MemoryFact (mid_term/Track B).
+            serialized = []
+            for it in chunk_items:
+                serialized.append({
+                    "track":       "A",
+                    "score":       round(getattr(it, "score", 0.0), 3),
+                    "source":      getattr(it, "source", "conversation"),
+                    "memory_type": "chunk",
+                    "content":     (getattr(it, "text", "") or "")[:500],
+                    "recency_ts":  getattr(it, "created_at", 0),
+                    "tags":        list(getattr(it, "metadata", {}).get("tags", []))[:6],
+                })
+            for it in fact_items:
+                serialized.append({
+                    "track":       "B",
+                    "score":       round(getattr(it, "score", getattr(it, "confidence", 1.0)), 3),
+                    "source":      "facts",
+                    "memory_type": getattr(it, "fact_type", "general"),
+                    "content":     (getattr(it, "fact", "") or "")[:500],
+                    "recency_ts":  getattr(it, "created_at", 0),
+                    "tags":        [],
+                })
+
+            chunk_count = len(chunk_items)
+            fact_count  = len(fact_items)
+            if chunk_count > fact_count:
+                winner = "A"
+            elif fact_count > chunk_count:
+                winner = "B"
+            elif chunk_count > 0:
+                winner = "tie"
+            else:
+                winner = ""
+
+            return RecallResult(
+                prompt_context = ctx_str,
+                fact_count     = fact_count,
+                chunk_count    = chunk_count,
+                results        = serialized,
+                track_a_count  = chunk_count,
+                track_b_count  = fact_count,
+                winner         = winner,
+            )
 
         try:
             return await asyncio.to_thread(_do)
         except Exception as exc:
             logger.warning("MemoryAdapter.recall failed: %s", exc)
-            return RecallResult(prompt_context="", fact_count=0, chunk_count=0)
+            return RecallResult(
+                prompt_context="", fact_count=0, chunk_count=0,
+                results=[], track_a_count=0, track_b_count=0, winner="",
+            )
 
     # ── Write (after every completed turn) ────────────────────────────────
 
@@ -268,6 +323,24 @@ class MemoryAdapter:
             return await self.stats()
         except Exception:
             return {}
+
+    def set_llm_fn(self, llm_fn: Callable[[str], str]) -> None:
+        """
+        Wire an LLM into the FactExtractor (and ReflectionEngine) AFTER the
+        adapter is constructed. This enables LLM-driven fact distillation —
+        without it, extraction falls back to English-only regex patterns and
+        returns no facts for non-English conversations.
+
+        Called by main.py once the LLM engine is built.
+        """
+        try:
+            if hasattr(self._mgr, "extractor"):
+                self._mgr.extractor._llm_fn = llm_fn
+            if hasattr(self._mgr, "_reflector"):
+                self._mgr._reflector._llm_fn = llm_fn
+            logger.info("MemoryAdapter: LLM-driven fact extraction enabled")
+        except Exception as exc:
+            logger.warning("MemoryAdapter.set_llm_fn failed: %s", exc)
 
     async def list_sessions(self, limit: int = 50) -> list[dict]:
         """List sessions with metadata for the current operator."""

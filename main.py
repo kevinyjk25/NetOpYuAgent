@@ -186,6 +186,33 @@ async def build_services() -> dict[str, Any]:
         services["llm_engine"] = llm_engine  # patch_hitl_graph called after tool registry is built
         logger.info("LLM engine: %s/%s", cfg.llm.backend, cfg.llm.model)
 
+        # Wire the LLM into the memory module so fact extraction works for
+        # any language (default rule-based extractor is English-only regex).
+        try:
+            import asyncio as _asyncio
+            def _sync_llm_for_memory(prompt: str) -> str:
+                """
+                Sync wrapper for the FactExtractor. Uses the engine's lightweight
+                _chat primitive (single-message, no full system prompt) so the
+                extractor sees only its own EXTRACT_PROMPT.
+                """
+                messages = [{"role": "user", "content": prompt}]
+                async def _go():
+                    if hasattr(llm_engine, "_chat"):
+                        return await llm_engine._chat(messages)
+                    return await llm_engine.call(prompt, "", state=None)
+                try:
+                    return _asyncio.run(_go())
+                except RuntimeError:
+                    new_loop = _asyncio.new_event_loop()
+                    try:
+                        return new_loop.run_until_complete(_go())
+                    finally:
+                        new_loop.close()
+            memory_router.set_llm_fn(_sync_llm_for_memory)
+        except Exception as _exc:
+            logger.warning("memory llm_fn wiring failed: %s — facts will use rule-based extraction", _exc)
+
         # 6b. Real embeddings — always (both modes)
         try:
             from integrations.embedder import build_embedder

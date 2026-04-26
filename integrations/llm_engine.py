@@ -139,6 +139,38 @@ LARGE DATA STRATEGY — when reading a stored result page by page:
 - When all pages are read (Has more: False), write your complete analysis using all recalled findings.
 - Do NOT try to hold all data in memory — write findings incrementally.
 
+VISUAL OUTPUT — use diagrams when they make answers clearer:
+- For network topology / 组网 questions, draw an ASCII tree or box-and-line diagram showing how devices connect (core → access → AP, with router at the edge).
+- For relationships, hierarchies, sequences, or flows, an ASCII diagram is often clearer than a bullet list.
+- For richer renderable diagrams, you may emit a fenced ```mermaid block (graph TD, sequenceDiagram, flowchart, etc.) — the UI renders it.
+- Keep diagrams concise. Use real device IDs and IPs from tool results, never invent them.
+- Pair the diagram with a short prose summary so the user gets both views.
+
+ASCII topology example:
+```
+                    [router-01]  ← edge, NAT/firewall
+                         │
+              ┌──────────┴──────────┐
+         [sw-core-01]           [sw-core-02]   ← VRRP/HSRP pair
+              │                      │
+     ┌────────┼────────┐       ┌─────┴──────┐
+[sw-acc-01][sw-acc-02][sw-acc-03]           …
+     │           │           │
+   ap-01,02   ap-03,04      …                ← Wi-Fi APs
+```
+
+Mermaid example:
+```mermaid
+graph TD
+  R[router-01] --> C1[sw-core-01]
+  R --> C2[sw-core-02]
+  C1 --> A1[sw-acc-01]
+  C1 --> A2[sw-acc-02]
+  C2 --> A3[sw-acc-03]
+  A1 --> AP1[ap-01]
+  A1 --> AP2[ap-02]
+```
+
 {extra_tools_section}
 
 {skill_summary}

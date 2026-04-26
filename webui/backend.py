@@ -384,23 +384,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         recall_result = await memory.recall(req.query, session_id, max_chars=1200)
                         recall_text   = recall_result.prompt_context
                         stats = {"chunk_count": recall_result.chunk_count, "fact_count": recall_result.fact_count}
-                        # Serialize all DTMResult items for the Memory tab
-                        memory_items = [
-                            {
-                                "track":       r.track,
-                                "score":       round(r.score, 3),
-                                "source":      r.source,
-                                "memory_type": r.memory_type,
-                                "content":     r.content[:500],
-                                "recency_ts":  r.recency_ts,
-                                "tags":        r.tags[:6],
-                            }
-                            for r in recall_result.results
-                        ]
+                        # MemoryAdapter.recall returns already-serialized dicts in .results
+                        memory_items = recall_result.results
                         yield f"data: {json.dumps({'type':'recall','chars':len(recall_text),'sessions_searched':stats.get('total_sessions',0),'has_context':bool(recall_text),'track_a':recall_result.track_a_count,'track_b':recall_result.track_b_count,'winner':recall_result.winner,'preview':recall_text[:200],'memory_items':memory_items})}\n\n"
                         await asyncio.sleep(0)
                     except Exception as _e:
-                        logger.debug("DTM recall skipped: %s", _e)
+                        logger.warning("Memory recall failed (no recall event sent to FE): %s", _e, exc_info=True)
                 elif curator and fts:
                     try:
                         recall_text = await curator.recall_for_session(req.query, session_id)
