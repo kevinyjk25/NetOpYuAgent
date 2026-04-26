@@ -1040,6 +1040,9 @@ class AgentRuntimeLoop:
                 if _is_synthesis:
                     summary_line = _resp_clean[:500].replace("\n", " ")
                     state.confirmed_facts.append(f"PREV_ANALYSIS: {summary_line}")
+                # NOTE: turn persistence (after_turn) is handled by the backend's
+                # post-turn hook in webui/backend.py:600 via dtm.after_turn(). Do NOT
+                # write here — it would create duplicate long_term_chunks entries.
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 

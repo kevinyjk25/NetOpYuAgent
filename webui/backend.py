@@ -379,8 +379,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 recall_text = ""
                 if memory:
                     try:
-                        from memory import set_current_operator
-                        set_current_operator(req.operator_id or "anonymous")
+                        # operator_id was set by `set_current_operator((await _identity())…)`
+                        # at the top of this endpoint — recall sees the same user_id as writes.
                         recall_result = await memory.recall(req.query, session_id, max_chars=1200)
                         recall_text   = recall_result.prompt_context
                         stats = {"chunk_count": recall_result.chunk_count, "fact_count": recall_result.fact_count}
@@ -607,7 +607,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12],'track':'A+B'})}\n\n"
                         await asyncio.sleep(0)
                         if memories:
-                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':[getattr(m.memory_type,'value',str(m.memory_type)) for m in memories[:5]]})}\n\n"
+                            # MemoryFact uses .fact_type (not .memory_type)
+                            _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
+                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
                             await asyncio.sleep(0)
                     except Exception as _e:
                         logger.debug("DTM after_turn skipped: %s", _e)
@@ -1161,23 +1163,17 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     ) -> JSONResponse:
         """
         List all conversation sessions ordered by most recent activity.
-        Reads from FTS5 state.db — survives server restarts.
+        Reads from MemoryAdapter → agent_memory.long_term_chunks (SQLite).
+        Survives server restarts.
         """
-        fts = services.get("fts_store")
-        if not fts:
+        memory = services.get("memory")
+        if not memory or not hasattr(memory, "list_sessions"):
             return JSONResponse(content=[])
         try:
-            sessions = await fts.list_sessions(limit=limit)
-            return JSONResponse(content=[
-                {
-                    "session_id":    s.session_id,
-                    "created_at":    s.created_at,
-                    "last_active":   s.last_active,
-                    "topic_summary": s.topic_summary or s.session_id[:20],
-                    "turn_count":    s.turn_count,
-                }
-                for s in sessions
-            ])
+            # Bind operator before reading — memory is per-user-isolated
+            set_current_operator((await _identity()).operator_id)
+            sessions = await memory.list_sessions(limit=limit)
+            return JSONResponse(content=sessions)
         except Exception as exc:
             logger.warning("/sessions failed: %s", exc)
             return JSONResponse(content=[])
@@ -1185,21 +1181,31 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     @app.get("/sessions/{session_id}/history")
     async def get_session_history(session_id: str, limit: int = 100) -> JSONResponse:
         """
-        Retrieve full turn history for a session from FTS5 state.db.
-        Returns turns as {role, content, ts} pairs for the frontend chat panel.
+        Retrieve full turn history for a session from MemoryAdapter long-term store.
+        Returns chunks as {role, content, ts} pairs for the frontend chat panel.
         """
-        fts = services.get("fts_store")
-        if not fts:
-            # Fall back to in-memory history
+        memory = services.get("memory")
+        if not memory or not hasattr(memory, "get_session_history"):
             return JSONResponse(content=_message_history.get(session_id, []))
         try:
-            turns = await fts.get_session_turns(session_id, limit=limit)
-            # FTS5 returns newest-first; reverse for chronological display
-            turns = list(reversed(turns))
+            # Bind operator before reading — memory is per-user-isolated
+            set_current_operator((await _identity()).operator_id)
+            chunks = await memory.get_session_history(session_id)
             messages = []
-            for t in turns:
-                messages.append({"role": "user",      "content": t.user_text,      "ts": t.ts})
-                messages.append({"role": "assistant",  "content": t.assistant_text, "ts": t.ts})
+            for c in chunks[-limit:]:
+                text = c.get("text", "")
+                ts   = c.get("created_at", 0)
+                # Split "User: ...\nAssistant: ..." back into two messages
+                if "User:" in text and "Assistant:" in text:
+                    parts    = text.split("Assistant:", 1)
+                    user_msg = parts[0].replace("User:", "", 1).strip()
+                    asst_msg = parts[1].strip() if len(parts) > 1 else ""
+                    if user_msg:
+                        messages.append({"role": "user",      "content": user_msg, "ts": ts})
+                    if asst_msg:
+                        messages.append({"role": "assistant", "content": asst_msg, "ts": ts})
+                else:
+                    messages.append({"role": "assistant", "content": text, "ts": ts})
             return JSONResponse(content=messages)
         except Exception as exc:
             logger.warning("/sessions/%s/history failed: %s", session_id, exc)
@@ -1257,8 +1263,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         if not memory:
             return JSONResponse(content=[])
         try:
-            # MemoryAdapter exposes recall_for_session(query, session_id) → str.
-            # For listing, return a summary based on the session's memory.
+            set_current_operator((await _identity()).operator_id)
             recalled = await memory.recall_for_session("", session_id)
             return JSONResponse(content=[{"session_id": session_id, "recalled": recalled[:2000]}])
         except Exception as exc:

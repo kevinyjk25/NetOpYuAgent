@@ -349,6 +349,49 @@ class LongTermStore:
         )
         return [r["session_id"] for r in rows]
 
+    def list_sessions_with_meta(self, user_id: str, limit: int = 50) -> list[dict]:
+        """
+        List sessions with metadata for the UI: session_id, last_active, turn_count, preview.
+        Ordered by last activity, most recent first.
+        """
+        rows = self._pool.execute_read(
+            "SELECT session_id, "
+            "       MAX(created_at) AS last_active, "
+            "       MIN(created_at) AS created_at, "
+            "       COUNT(*)        AS chunk_count "
+            "FROM long_term_chunks WHERE user_id=? "
+            "GROUP BY session_id ORDER BY last_active DESC LIMIT ?",
+            (user_id, limit),
+        )
+        out = []
+        for r in rows:
+            # Get a preview from the most recent chunk
+            preview_rows = self._pool.execute_read(
+                "SELECT text FROM long_term_chunks "
+                "WHERE user_id=? AND session_id=? "
+                "ORDER BY created_at DESC LIMIT 1",
+                (user_id, r["session_id"]),
+            )
+            preview = preview_rows[0]["text"][:80] if preview_rows else ""
+            out.append({
+                "session_id":    r["session_id"],
+                "created_at":    r["created_at"],
+                "last_active":   r["last_active"],
+                "turn_count":    r["chunk_count"],
+                "topic_summary": preview,
+            })
+        return out
+
+    def get_chunks_by_session(self, user_id: str, session_id: str) -> list[dict]:
+        """Return all chunks for a session in chronological order, for UI replay."""
+        rows = self._pool.execute_read(
+            "SELECT chunk_id, text, source, importance, created_at "
+            "FROM long_term_chunks WHERE user_id=? AND session_id=? "
+            "ORDER BY created_at ASC",
+            (user_id, session_id),
+        )
+        return [dict(r) for r in rows]
+
     def count(self, user_id: str) -> int:
         rows = self._pool.execute_read(
             "SELECT COUNT(*) as n FROM long_term_chunks WHERE user_id=?", (user_id,)

@@ -269,6 +269,20 @@ class MemoryAdapter:
         except Exception:
             return {}
 
+    async def list_sessions(self, limit: int = 50) -> list[dict]:
+        """List sessions with metadata for the current operator."""
+        user_id = get_current_operator()
+        def _do() -> list[dict]:
+            return self._mgr.long_term.list_sessions_with_meta(user_id, limit=limit)
+        return await asyncio.to_thread(_do)
+
+    async def get_session_history(self, session_id: str) -> list[dict]:
+        """Return chronological chunks of a session for UI replay."""
+        user_id = get_current_operator()
+        def _do() -> list[dict]:
+            return self._mgr.long_term.get_chunks_by_session(user_id, session_id)
+        return await asyncio.to_thread(_do)
+
     # Old curator's _turn_counter / _shallow_n / _deep_n are no longer meaningful;
     # consolidation is handled internally by agent_memory.ConsolidationWorker.
     # Provide stub attributes so any leftover stats/health endpoints don't crash.
