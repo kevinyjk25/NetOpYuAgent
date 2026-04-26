@@ -26,7 +26,7 @@ from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolR
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
 
 if TYPE_CHECKING:
-    from memory.router import MemoryRouter
+    from memory.adapter import MemoryAdapter as MemoryRouter
     from skills.catalog import SkillCatalogService
 
 logger = logging.getLogger(__name__)
@@ -737,9 +737,14 @@ class AgentRuntimeLoop:
                     skill_section = self._skill_catalog.format_summary()
                     skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
 
+            # Compress paged results before assembly to prevent context overflow.
+            # Without this, accumulated read_stored_result pages send the full
+            # paged content back to the LLM every turn — Ollama times out.
+            from runtime.context_budget import compress_paged_outputs as _compress
+            _to_assemble = _compress(tool_outputs)
             context_str = self._budget.assemble(
                 memory_results=memory_results,
-                tool_outputs=tool_outputs,       # accumulated tool results feed LLM
+                tool_outputs=_to_assemble,       # compressed accumulated results
                 confirmed_facts=state.confirmed_facts,
                 working_set=working_set,
                 env_context=env_ctx,
@@ -1042,13 +1047,9 @@ class AgentRuntimeLoop:
         if self._memory is None:
             return []
         try:
-            from memory.schemas import RetrievalQuery
-            rq = RetrievalQuery(
-                query_text=query,
-                session_id=session_id,
-                max_tokens=self._cfg.budget.memory_tokens,
-            )
-            return await self._memory.retrieve(rq)
+            # MemoryAdapter.recall_for_session returns a single string of recalled context
+            recalled = await self._memory.recall_for_session(query, session_id)
+            return [recalled] if recalled else []
         except Exception as exc:
             logger.warning("RuntimeLoop: memory retrieval failed: %s", exc)
             return []

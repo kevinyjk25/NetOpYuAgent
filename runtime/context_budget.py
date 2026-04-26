@@ -332,8 +332,19 @@ class ContextBudgetManager:
 
     @staticmethod
     def _format_memory(results: list[Any]) -> str:
+        """
+        Format memory recall results. Accepts:
+        - Plain strings (from MemoryAdapter.recall_for_session)
+        - Records with .tier and .record attributes (legacy format)
+        """
         lines = []
         for r in results:
+            if isinstance(r, str):
+                # MemoryAdapter returns a single recalled-context string per call
+                if r.strip():
+                    lines.append(r.strip())
+                continue
+            # Legacy record format with .tier
             tier = getattr(r.tier, "value", str(r.tier)).upper()
             content = getattr(r, "record", r)
             text = getattr(content, "content", str(content))

@@ -14,7 +14,7 @@
 # Switch:  MODE=pragmatic uvicorn main:app --port 8001
 # ============================================================
 
-mode: "pragmatic"         # mock | pragmatic   (env: MODE)
+mode: "mock"         # mock | pragmatic   (env: MODE)
 
 
 # ── Server ───────────────────────────────────────────────────
@@ -192,6 +192,19 @@ registry:
 # ── Logging ───────────────────────────────────────────────────
 logging:
   mode: "normal"   # normal | llm | verbose
+
+
+# ── Authentication ──────────────────────────────────────────────
+# When enabled=false, ALL auth dependencies are bypassed. No Authorization
+# header is required, no JWT verification, no API key check, no role check.
+# Every request runs as the dev_operator identity.
+#
+# This is intended for local development and demos. NEVER ship enabled=false
+# to a deployed environment — there is no role enforcement and no audit trail.
+auth:
+  enabled:        false        # true = enforce auth; false = skip ALL auth
+  dev_operator:   "dev-user"   # operator_id used when auth is disabled
+  jwt_secret_env: "NETOPYU_JWT_SECRET"   # env var holding the JWT secret
 
 
 # ── Policies (prompt-based) ────────────────────────────────────

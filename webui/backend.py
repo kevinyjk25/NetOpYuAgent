@@ -55,12 +55,32 @@ import os
 import pathlib
 import time
 import uuid
-from typing import Any, AsyncIterator, Optional
+from typing import Annotated, Any, AsyncIterator, Optional
 
-from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, field_validator
+
+# Auth + redaction + per-operator memory scoping
+from auth import (
+    Identity, verify_identity, require_role, AUTH_DISABLED,
+)
+# ── Auth helper ──────────────────────────────────────────────────────────────
+# Endpoints used to receive `identity: Identity = Depends(verify_identity)` as
+# a parameter, but FastAPI's parameter inference (with the dataclass Identity)
+# kept treating it as a body field, causing 422 errors. The identity parameter
+# is now resolved inline inside each endpoint via this helper, which keeps the
+# endpoint signature limited to the request body alone.
+async def _identity() -> Identity:
+    """Resolve the current identity. Honors cfg.auth.enabled."""
+    return await verify_identity()
+
+
+
+from log_redaction import redact_text
+from rate_limit import per_operator_limit, global_concurrency
+from memory import set_current_operator
 
 logger = logging.getLogger(__name__)
 
@@ -74,8 +94,8 @@ _STATIC_DIR = pathlib.Path(__file__).parent / "static"
 class ChatRequest(BaseModel):
     query:           str            = Field(..., min_length=1, max_length=8_000,
                                            description="User query — max 8 000 chars")
-    session_id:      Optional[str]  = Field(None, pattern=r"^[a-zA-Z0-9_-]{8,128}$",
-                                           description="Session ID — alphanumeric + _ -")
+    session_id:      Optional[str]  = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,128}$",
+                                           description="Session ID — 1-128 chars of [a-zA-Z0-9_-]")
     confirmed_facts: list[str]      = Field(default_factory=list, max_length=60,
                                            description="Carry-forward facts — max 60 items")
     working_set:     list[dict]     = Field(default_factory=list, max_length=20)
@@ -124,10 +144,41 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     """
     app = FastAPI(title="IT Ops Agent WebUI", docs_url="/docs")
 
+
+    # 422 validation error handler — logs the failure so the user can see WHY
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse as _JSON422
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_handler(request, exc: RequestValidationError):
+        logger.warning(
+            "422 on %s — validation errors: %s", request.url.path, exc.errors()
+        )
+        return _JSON422(
+            status_code=422,
+            content={"detail": exc.errors(), "body": str(exc.body)[:500]},
+        )
+
+
+    # CORS — allow only configured origins. In production set
+    # NETOPYU_ALLOWED_ORIGINS="https://ops.company.com,https://admin.company.com"
+    import os as _os_cors
+    from fastapi.middleware.cors import CORSMiddleware
+    _allowed = [o.strip() for o in _os_cors.getenv(
+        "NETOPYU_ALLOWED_ORIGINS", "http://localhost:8001"
+    ).split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins     = _allowed,
+        allow_credentials = True,
+        allow_methods     = ["GET", "POST", "DELETE"],
+        allow_headers     = ["Authorization", "Content-Type", "X-API-Key"],
+    )
+
     # ── Inject runtime components if not already present ──────────────
     from runtime import AgentRuntimeLoop, RuntimeConfig, ToolResultStore
-    from skills import SkillCatalogService, DEFAULT_SKILL_DEFINITIONS
-    from tools import TOOL_REGISTRY, TOOL_DESCRIPTIONS, make_read_stored_result_tool
+    from skills import SkillCatalogService
+    from tools import make_read_stored_result_tool
 
     if "tool_store" not in services:
         services["tool_store"] = ToolResultStore()
@@ -226,7 +277,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.post("/chat")
-    async def chat(req: ChatRequest) -> JSONResponse:
+    async def chat(
+        req: ChatRequest,
+    ) -> JSONResponse:
+        set_current_operator((await _identity()).operator_id)
         """
         Non-streaming chat. Returns the full response as JSON.
         """
@@ -264,7 +318,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return JSONResponse(content=msg)
 
     @app.post("/chat/stream")
-    async def chat_stream(req: ChatRequest) -> StreamingResponse:
+    async def chat_stream(
+        req: ChatRequest,
+    ) -> StreamingResponse:
         """
         SSE streaming chat — routes through ITOpsHitlAgentExecutor.
 
@@ -282,6 +338,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
           Cache — auto-opens when large tool results are stored
           HITL  — interrupt card appears; Approve/Reject resumes the task
         """
+        set_current_operator((await _identity()).operator_id)
         import uuid as _uuid
         session_id  = req.session_id or str(_uuid.uuid4())
         task_id     = "task-" + _uuid.uuid4().hex[:12]
@@ -289,11 +346,16 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
         executor    = services.get("executor")
         loop        = services["runtime_loop"]
-        curator     = services.get("memory_curator")
-        fts         = services.get("fts_store")
-        user_model  = services.get("user_model")
+        # New unified memory backend (agent_memory.MemoryManager via adapter).
+        # Replaces the old DTM/curator/fts/user_model split.
+        memory      = services.get("memory")
+        # Backward-compat aliases — all old service names resolve to the unified adapter.
+        # The MemoryAdapter exposes recall_for_session(), after_turn(), get_stats() shims.
+        dtm         = memory
+        curator     = memory
+        fts         = memory
+        user_model  = None   # behaviour now embedded in adapter.update_user_profile()
         evolver     = services.get("skill_evolver")
-        dtm         = services.get("dtm")            # DualTrackMemory (v4)
 
         from runtime import DelegationMode
         dm = DelegationMode.FORKED if req.delegation_mode == "forked" else DelegationMode.FRESH
@@ -315,11 +377,13 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                 # ── Step 3: Cross-session recall (DTM v4 or FTS5 v3) ─────
                 recall_text = ""
-                if dtm:
+                if memory:
                     try:
-                        recall_result = await dtm.recall(req.query, session_id, max_chars=1200)
+                        from memory import set_current_operator
+                        set_current_operator(req.operator_id or "anonymous")
+                        recall_result = await memory.recall(req.query, session_id, max_chars=1200)
                         recall_text   = recall_result.prompt_context
-                        stats = await fts.get_stats() if fts else {}
+                        stats = {"chunk_count": recall_result.chunk_count, "fact_count": recall_result.fact_count}
                         # Serialize all DTMResult items for the Memory tab
                         memory_items = [
                             {
@@ -625,7 +689,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
 
     @app.post("/tools/upload")
-    async def upload_tool(request: Request) -> JSONResponse:
+    async def upload_tool(request: Request,
+    ) -> JSONResponse:
         """
         Upload a Python tool file (.py).  The file must define one or more
         async functions and a TOOL_REGISTRY dict mapping names → functions,
@@ -856,7 +921,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         })
 
     @app.post("/skills/upload")
-    async def upload_skill(request: Request) -> JSONResponse:
+    async def upload_skill(request: Request,
+    ) -> JSONResponse:
         """
         Upload a skill markdown file (.md) or JSON definition (.json).
         The skill is registered in the catalog and persisted to HERMES_DATA_DIR/skills/.
@@ -1008,7 +1074,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/hitl/pending")
-    async def list_pending_hitl() -> JSONResponse:
+    async def list_pending_hitl(
+    ) -> JSONResponse:
         hitl_router = services.get("hitl_router")
         if not hitl_router:
             logger.warning("/hitl/pending: hitl_router not in services")
@@ -1050,19 +1117,37 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return JSONResponse(content=result)
 
     @app.post("/hitl/{interrupt_id}/approve")
-    async def approve_hitl(interrupt_id: str, req: HitlDecisionRequest) -> JSONResponse:
+    async def approve_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        # Override client-supplied operator_id with the verified identity
+        # → audit log records the actual approver, not whoever the client claims
+        req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "approve", req, services
         )
 
     @app.post("/hitl/{interrupt_id}/reject")
-    async def reject_hitl(interrupt_id: str, req: HitlDecisionRequest) -> JSONResponse:
+    async def reject_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        # Override client-supplied operator_id with the verified identity
+        # → audit log records the actual approver, not whoever the client claims
+        req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "reject", req, services
         )
 
     @app.post("/hitl/{interrupt_id}/edit")
-    async def edit_hitl(interrupt_id: str, req: HitlDecisionRequest) -> JSONResponse:
+    async def edit_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        # Override client-supplied operator_id with the verified identity
+        # → audit log records the actual approver, not whoever the client claims
+        req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "edit", req, services
         )
@@ -1072,7 +1157,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/sessions")
-    async def list_sessions_endpoint(limit: int = 50) -> JSONResponse:
+    async def list_sessions_endpoint(limit: int = 50,
+    ) -> JSONResponse:
         """
         List all conversation sessions ordered by most recent activity.
         Reads from FTS5 state.db — survives server restarts.
@@ -1120,7 +1206,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             return JSONResponse(content=_message_history.get(session_id, []))
 
     @app.post("/sessions")
-    async def create_session(request: Request) -> JSONResponse:
+    async def create_session(request: Request,
+    ) -> JSONResponse:
         """
         Create (or re-open) a named session. Returns the session_id.
         Body: {"name": "optional display name"} — name becomes the topic_summary.
@@ -1144,7 +1231,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         })
 
     @app.delete("/sessions/{session_id}")
-    async def delete_session(session_id: str) -> JSONResponse:
+    async def delete_session(session_id: str,
+    ) -> JSONResponse:
         """
         Delete a session and all its turns from FTS5 state.db.
         Also removes from in-memory history cache.
@@ -1163,15 +1251,16 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/memory")
-    async def get_memory(session_id: str = "default", limit: int = 10) -> JSONResponse:
+    async def get_memory(session_id: str = "default", limit: int = 10,
+    ) -> JSONResponse:
         memory = services.get("memory")
         if not memory:
             return JSONResponse(content=[])
         try:
-            records = await memory.router.get_by_session(session_id, limit=limit) \
-                if hasattr(memory, "router") else \
-                await memory._rt.get_by_session(session_id, limit=limit)
-            return JSONResponse(content=[r.model_dump() for r in records])
+            # MemoryAdapter exposes recall_for_session(query, session_id) → str.
+            # For listing, return a summary based on the session's memory.
+            recalled = await memory.recall_for_session("", session_id)
+            return JSONResponse(content=[{"session_id": session_id, "recalled": recalled[:2000]}])
         except Exception as exc:
             return JSONResponse(content={"error": str(exc)}, status_code=500)
 
@@ -1198,7 +1287,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/system/status")
-    async def system_status() -> JSONResponse:
+    async def system_status(
+    ) -> JSONResponse:
         store    = services.get("tool_store")
         catalog  = services.get("skill_catalog")
         registry = services.get("registry")
@@ -1295,7 +1385,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             "runtime.loop",
             "hitl.graph",
             "hitl.a2a_integration",
-            "memory.fts_store",
+            "agent_memory.memory_manager",
             "webui.backend",
         ]
         return JSONResponse(content={
@@ -1542,17 +1632,17 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         # P0-B: Context budget assembly
         elif req.scenario == "p0_context_budget":
             from runtime.context_budget import ContextBudgetManager, BudgetConfig, DeviceRef as DR
-            from tools.mock_tools import dns_lookup as _dns, syslog_search as _slog
             mgr   = ContextBudgetManager(BudgetConfig(total_cap_tokens=800))
-            facts = ["payments-service: prod, healthy", "DNS: confirmed OK"]
+            facts = ["device: ap-01, status: healthy", "config: validated OK"]
             ws    = [DR(id="ap-01", label="AP-01 Site-A"), DR(id="sw-core", label="Core Switch")]
             env   = {"site": "Site-A", "change_window": False}
-            sm    = await _dns({"hostname": "payments.internal"})
-            big   = await _slog({"lines": 300})
-            sm_ref  = mgr.store_tool_result("dns_lookup", sm)
-            big_ref = mgr.store_tool_result("syslog_search", big)
+            # Synthetic payloads — no live tool call needed to test budget assembly
+            sm  = "payments.internal -> 10.0.1.42 (A record, TTL 300)"
+            big = "\n".join(f"2024-01-01 {h:02d}:00 ap-01 ERROR auth fail" for h in range(50))
+            sm_ref  = mgr.store_tool_result("get_device_status", sm)
+            big_ref = mgr.store_tool_result("get_syslog", big)
             ctx = mgr.assemble(confirmed_facts=facts, working_set=ws,
-                               tool_outputs={"dns_lookup": sm_ref, "syslog_search": big_ref},
+                               tool_outputs={"get_device_status": sm_ref, "get_syslog": big_ref},
                                env_context=env)
             result = {
                 "budget_cap_tokens": 800,

@@ -126,6 +126,12 @@ class SkillsConfig:
     top_k: int; ambiguity_threshold: float
 
 @dataclass
+class AuthConfig:
+    enabled:        bool = False         # true = enforce auth; false = skip ALL auth
+    dev_operator:   str  = "dev-user"    # operator_id used when auth is disabled
+    jwt_secret_env: str  = "NETOPYU_JWT_SECRET"
+
+@dataclass
 class StopConfig:
     max_turns: int; max_tool_calls: int
     token_budget: int; max_no_progress_turns: int
@@ -198,6 +204,7 @@ class AppConfig:
     logging:    LoggingConfig
     embeddings: EmbeddingsConfig
     pragmatic:  PragmaticConfig
+    auth:       AuthConfig = field(default_factory=AuthConfig)
     policies:   list = field(default_factory=list)  # prompt-based policies from config.yaml
     def is_mock(self) -> bool:
         return self.mode == "mock"
@@ -234,6 +241,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
     r   = y.get("runtime",    {})
     rg  = y.get("registry",   {})
     lg  = y.get("logging",    {})
+    au  = y.get("auth",       {})
     emb = y.get("embeddings", {})
     pg  = y.get("pragmatic",  {})
 
@@ -404,6 +412,11 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             device_inventory = pg_devices,
             mcp_servers      = pg_mcps,
             napalm_getters   = napalm_getters,
+        ),
+        auth=AuthConfig(
+            enabled        = bool(au.get("enabled", False)),
+            dev_operator   = str(au.get("dev_operator", "dev-user")),
+            jwt_secret_env = str(au.get("jwt_secret_env", "NETOPYU_JWT_SECRET")),
         ),
         policies=y.get("policies", []),
     )
