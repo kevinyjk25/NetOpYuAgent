@@ -815,8 +815,11 @@ class AgentRuntimeLoop:
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
-                for word in _visible.split():
-                    yield {"token": word + " "}
+                # Stream in 80-char chunks preserving newlines + whitespace.
+                # Frontend renders markdown after the stream completes, so block
+                # structure (\n\n, table rows, ```fences, ## headers) must survive.
+                for _i in range(0, len(_visible), 80):
+                    yield {"token": _visible[_i:_i+80]}
                     await asyncio.sleep(0)
             # If the entire response was tool calls (no prose), yield nothing —
             # the tool result will be injected in the next turn's context and

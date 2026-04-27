@@ -462,8 +462,13 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             for part in (event.message.parts if event.message else []):
                                 if hasattr(part, "text") and part.text:
                                     tokens.append(part.text)
-                                    for word in part.text.split():
-                                        yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+                                    # Stream the text in 80-char chunks, PRESERVING newlines and
+                                    # all whitespace exactly. The frontend renders markdown after
+                                    # the stream completes, so block structure (\n\n, table rows,
+                                    # ```fences, ## headers) must survive transmission.
+                                    _txt = part.text
+                                    for _i in range(0, len(_txt), 80):
+                                        yield f"data: {json.dumps({'token': _txt[_i:_i+80]})}\n\n"
                                     await asyncio.sleep(0)
 
                         elif kind == "taskArtifactUpdate":
@@ -553,8 +558,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                     for part in (event.message.parts if event.message else []):
                                         if hasattr(part, "text") and part.text:
                                             tokens.append(part.text)
-                                            for word in part.text.split():
-                                                yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+                                            _txt = part.text
+                                            for _i in range(0, len(_txt), 80):
+                                                yield f"data: {json.dumps({'token': _txt[_i:_i+80]})}\n\n"
                                             await asyncio.sleep(0)
                                 elif kind == "taskArtifactUpdate":
                                     if event.artifact:
