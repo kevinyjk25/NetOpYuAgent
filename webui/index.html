@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>IT Ops Agent — Console</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
+<!-- Markdown + mermaid rendering for agent responses -->
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.11/dist/purify.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10.9.0/dist/mermaid.min.js"></script>
 <style>
 :root{
   --bg:#0a0e14;--surface:#0d1117;--border:#1e2a38;--border2:#243040;
@@ -96,7 +100,49 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 .bubble{
   background:var(--surface);border:1px solid var(--border);border-radius:6px;
   padding:9px 13px;font-size:13px;line-height:1.6;
-  white-space:pre-wrap;word-break:break-word;
+  word-break:break-word;
+}
+/* Plain user/system bubbles keep pre-wrap (no markdown rendering on those) */
+.bubble.user, .bubble.system, .bubble.error{ white-space:pre-wrap; }
+/* Agent markdown content */
+.bubble.agent{ white-space:normal; }
+.bubble.agent p{ margin:0 0 8px 0; }
+.bubble.agent p:last-child{ margin-bottom:0; }
+.bubble.agent h1, .bubble.agent h2, .bubble.agent h3, .bubble.agent h4{
+  margin:14px 0 6px 0; font-weight:600; color:var(--text);
+  padding-bottom:3px; border-bottom:1px solid var(--border);
+}
+.bubble.agent h1{ font-size:16px; }
+.bubble.agent h2{ font-size:15px; }
+.bubble.agent h3{ font-size:14px; }
+.bubble.agent h4{ font-size:13px; border-bottom:none; }
+.bubble.agent ul, .bubble.agent ol{ margin:4px 0 8px 0; padding-left:22px; }
+.bubble.agent li{ margin:2px 0; }
+.bubble.agent strong{ color:var(--text); font-weight:600; }
+.bubble.agent em{ color:var(--mid); }
+.bubble.agent code{
+  background:rgba(0,212,170,.08); color:var(--accent);
+  padding:1px 5px; border-radius:3px; font-family:var(--mono); font-size:12px;
+}
+.bubble.agent pre{
+  background:#080c11; border:1px solid var(--border);
+  border-radius:5px; padding:10px 12px; margin:8px 0;
+  overflow-x:auto; font-family:var(--mono); font-size:12px; line-height:1.5;
+}
+.bubble.agent pre code{ background:none; color:var(--text); padding:0; }
+.bubble.agent table{ border-collapse:collapse; margin:8px 0; font-size:12px; }
+.bubble.agent th, .bubble.agent td{
+  border:1px solid var(--border); padding:5px 9px;
+}
+.bubble.agent th{ background:rgba(0,212,170,.05); font-weight:600; }
+.bubble.agent blockquote{
+  border-left:3px solid var(--accent); margin:8px 0;
+  padding:2px 0 2px 11px; color:var(--mid);
+}
+.bubble.agent a{ color:var(--blue); }
+.bubble.agent .mermaid{
+  background:#080c11; border:1px solid var(--border); border-radius:5px;
+  padding:10px; margin:8px 0; text-align:center;
 }
 .bubble.user{background:rgba(0,153,255,.07);border-color:rgba(0,153,255,.22)}
 .bubble.system{background:rgba(0,212,170,.05);border-color:rgba(0,212,170,.2);color:var(--accent);font-family:var(--mono);font-size:11px}
@@ -1406,16 +1452,179 @@ function updateMemoryTab(chunk) {
 
 
 // Messages
+// ── Inline Markdown renderer (no external deps) ──────────────────────────
+// Handles: headers, bold, italic, inline code, fenced code blocks (including
+// ```mermaid), bullet/numbered lists, tables, blockquotes, paragraphs, links.
+// This always works — no network, no CDN. If marked.js loaded from CDN, we
+// still prefer it (richer GFM support); otherwise fall back to this renderer.
+function _mdInline(s) {
+  // s is HTML-escaped already
+  // Inline code first (so other inline rules don't recurse into it)
+  s = s.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+  // Bold then italic
+  s = s.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>');
+  // Markdown links [text](url)
+  s = s.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g,
+    (_, t, u) => `<a href="${u}" target="_blank" rel="noopener">${t}</a>`);
+  return s;
+}
+function _mdRender(text) {
+  if (!text) return '';
+  // 1. Pull out fenced code blocks first (so their contents aren't parsed)
+  const blocks = [];
+  text = text.replace(/```([a-zA-Z0-9_-]*)\n?([\s\S]*?)```/g, (_, lang, body) => {
+    const idx = blocks.length;
+    blocks.push({ lang: lang || '', body: body.replace(/\n+$/, '') });
+    return `\u0000FENCE${idx}\u0000`;
+  });
+  // 2. Escape everything else
+  let s = esc(text);
+  // 3. Block-level: headers, blockquotes, hr, lists, tables, paragraphs
+  const lines = s.split('\n');
+  const out = [];
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    // Header
+    let h = /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (h) {
+      const lvl = h[1].length;
+      out.push(`<h${lvl}>${_mdInline(h[2])}</h${lvl}>`);
+      i++; continue;
+    }
+    // HR
+    if (/^\s*(\*{3,}|-{3,}|_{3,})\s*$/.test(line)) {
+      out.push('<hr>'); i++; continue;
+    }
+    // Table: header line, then separator, then rows
+    if (/^\s*\|.*\|\s*$/.test(line) && i + 1 < lines.length
+        && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(lines[i+1])) {
+      const header = line.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      i += 2; // skip header + separator
+      const rows = [];
+      while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+        rows.push(lines[i].trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim()));
+        i++;
+      }
+      let html = '<table><thead><tr>' + header.map(c => `<th>${_mdInline(c)}</th>`).join('') + '</tr></thead><tbody>';
+      for (const r of rows) {
+        html += '<tr>' + r.map(c => `<td>${_mdInline(c)}</td>`).join('') + '</tr>';
+      }
+      html += '</tbody></table>';
+      out.push(html); continue;
+    }
+    // Blockquote
+    if (/^\s*&gt;\s?/.test(line)) {
+      const buf = [];
+      while (i < lines.length && /^\s*&gt;\s?/.test(lines[i])) {
+        buf.push(lines[i].replace(/^\s*&gt;\s?/, ''));
+        i++;
+      }
+      out.push(`<blockquote>${_mdInline(buf.join('<br>'))}</blockquote>`);
+      continue;
+    }
+    // Unordered list
+    if (/^\s*[-*+]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*[-*+]\s+/, ''));
+        i++;
+      }
+      out.push('<ul>' + items.map(x => `<li>${_mdInline(x)}</li>`).join('') + '</ul>');
+      continue;
+    }
+    // Ordered list
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) {
+        items.push(lines[i].replace(/^\s*\d+\.\s+/, ''));
+        i++;
+      }
+      out.push('<ol>' + items.map(x => `<li>${_mdInline(x)}</li>`).join('') + '</ol>');
+      continue;
+    }
+    // Blank line
+    if (/^\s*$/.test(line)) { i++; continue; }
+    // Paragraph (collect consecutive non-empty lines)
+    const buf = [line];
+    i++;
+    while (i < lines.length && !/^\s*$/.test(lines[i])
+           && !/^(#{1,6})\s/.test(lines[i])
+           && !/^\s*[-*+]\s/.test(lines[i])
+           && !/^\s*\d+\.\s/.test(lines[i])
+           && !/^\s*\|/.test(lines[i])
+           && !/^\s*&gt;/.test(lines[i])) {
+      buf.push(lines[i]); i++;
+    }
+    out.push(`<p>${_mdInline(buf.join('<br>'))}</p>`);
+  }
+  let html = out.join('\n');
+  // 4. Restore fenced blocks
+  html = html.replace(/\u0000FENCE(\d+)\u0000/g, (_, idx) => {
+    const b = blocks[+idx];
+    if (b.lang.toLowerCase() === 'mermaid') {
+      // Don't escape — mermaid syntax accepts <br/> inside node labels
+      return `<div class="mermaid">${b.body}</div>`;
+    }
+    const cls = b.lang ? ` class="language-${esc(b.lang)}"` : '';
+    return `<pre><code${cls}>${esc(b.body)}</code></pre>`;
+  });
+  return html;
+}
+
+function _renderMarkdown(text) {
+  // Prefer marked+DOMPurify if loaded from CDN (richer GFM support).
+  // Fall back to inline _mdRender — works offline / when CDN is blocked.
+  if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+    try {
+      marked.setOptions({ breaks: true, gfm: true });
+      let html = marked.parse(text || '');
+      html = html.replace(
+        /<pre><code class="language-mermaid">([\s\S]*?)<\/code><\/pre>/g,
+        (_, m) => `<div class="mermaid">${m.trim()}</div>`,
+      );
+      return DOMPurify.sanitize(html, { ADD_TAGS: ['mermaid'], ADD_ATTR: ['class'] });
+    } catch(_e) { /* fall through */ }
+  }
+  return _mdRender(text);
+}
+
+function _renderMermaidIn(rootEl) {
+  if (typeof mermaid === 'undefined' || !rootEl) return;
+  const blocks = rootEl.querySelectorAll('.mermaid');
+  if (!blocks.length) return;
+  try {
+    mermaid.initialize({ startOnLoad:false, theme:'dark', securityLevel:'loose' });
+    blocks.forEach((el, i) => {
+      const src = el.textContent;
+      const id  = 'mer-' + Date.now() + '-' + i;
+      mermaid.render(id, src).then(({svg}) => { el.innerHTML = svg; })
+                              .catch(_e => { /* keep raw text */ });
+    });
+  } catch(_e) {}
+}
+
 function addMessage(role, content, cls='') {
   const msgs = document.getElementById('messages');
   const avMap = {user:'YOU',agent:'AGT',system:'SYS'};
   const clMap = {user:'avatar-user',agent:'avatar-agent',system:'avatar-sys'};
   const wrap  = document.createElement('div');
   wrap.className = 'msg-wrap'+(role==='user'?' user':'');
-  let rendered = esc(content).replace(
-    /\[STORED:([^:]+):([^\]]+)\][^\n]*/g,
-    (_,tool,ref) => `<span class="step-result-chip" onclick="openCache('${ref}','${tool}')">📦 [STORED:${esc(tool)}:${esc(ref.slice(0,8))}…]</span>`
-  );
+  // Agent messages are rendered as markdown; user/system are plain (escaped) text.
+  let rendered;
+  if (role === 'agent') {
+    rendered = _renderMarkdown(content);
+    rendered = rendered.replace(
+      /\[STORED:([^:]+):([^\]]+)\][^\n<]*/g,
+      (_,tool,ref) => `<span class="step-result-chip" onclick="openCache('${ref}','${tool}')">📦 [STORED:${esc(tool)}:${esc(ref.slice(0,8))}…]</span>`
+    );
+  } else {
+    rendered = esc(content).replace(
+      /\[STORED:([^:]+):([^\]]+)\][^\n]*/g,
+      (_,tool,ref) => `<span class="step-result-chip" onclick="openCache('${ref}','${tool}')">📦 [STORED:${esc(tool)}:${esc(ref.slice(0,8))}…]</span>`
+    );
+  }
   wrap.innerHTML = `
     <div class="avatar ${clMap[role]||'avatar-sys'}">${avMap[role]||'?'}</div>
     <div class="msg-body">
@@ -1423,6 +1632,7 @@ function addMessage(role, content, cls='') {
       <div class="bubble ${cls||role}">${rendered}</div>
     </div>`;
   msgs.appendChild(wrap);
+  if (role === 'agent') _renderMermaidIn(wrap);
   msgs.scrollTop = msgs.scrollHeight;
 }
 
@@ -1523,6 +1733,18 @@ function appendToken(token) {
 function finalizeStream() {
   if (!streamState) return;
   const {sid} = streamState;
+  // Re-render the streamed text as markdown now that the message is complete.
+  const bub = document.getElementById(sid+'-bubble');
+  if (bub) {
+    const finalText = streamState.tokens.join('');
+    let html = _renderMarkdown(finalText);
+    html = html.replace(
+      /\[STORED:([^:]+):([^\]]+)\][^\n<]*/g,
+      (_,tool,ref) => `<span class="step-result-chip" onclick="openCache('${ref}','${tool}')">📦 [STORED:${esc(tool)}:${esc(ref.slice(0,8))}…]</span>`
+    );
+    bub.innerHTML = html;
+    _renderMermaidIn(bub);
+  }
   const hdr = document.querySelector(`#${sid}-stream .action-header`);
   if (hdr) {
     hdr.classList.remove('open');
@@ -2146,20 +2368,24 @@ async function hitlDec(id,dec) {
 Outcome: ${outcome}
 Error: ${data.error}`,'system');
     } else if (data.tool_result && dec==='approve') {
-      // Tool executed successfully after approval — show the result
+      // Tool executed successfully — show result + synthesis if available
       const toolName = data.tool_name || 'tool';
+      const synthNote = data.synthesis ? `
+
+${data.synthesis}` : '';
       addMessage('agent',
-        `✓ HITL approved — ${toolName} executed:
+        `✓ HITL approved — ${toolName} executed:${synthNote}
 
 ${data.tool_result}`,
         'agent');
-      // Also inject into Results tab as an inline result
       addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
       switchTab('cache');
     } else if (dec==='approve') {
-      addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
-Outcome: ${outcome}
-Tool is executing — check Results tab for output.`,'system');
+      // No tool_result yet — show synthesis or fallback message
+      const synthNote = data.synthesis
+          ? `\nSummary: ${data.synthesis}`
+          : `\nTool is executing — check Results tab for output.`;
+      addMessage('agent',`HITL APPROVE: ${id.slice(0,10)}…\nOutcome: ${outcome}${synthNote}`,'system');
     } else {
       addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
 Outcome: ${outcome}`,'system');

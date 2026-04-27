@@ -30,6 +30,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+from log_redaction import redact_text
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Device registry (populated at startup by build_pragmatic_tool_registry)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -342,7 +344,7 @@ async def get_device_config(args: dict[str, Any]) -> str:
             header += f"  section={section}"
         return f"{header}\n! Retrieved: live\n!\n{output}"
     except Exception as exc:
-        return f"[Error] Could not retrieve config from {device_id}: {exc}"
+        return redact_text(f"[Error] Could not retrieve config from {device_id}: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -351,8 +353,17 @@ async def get_device_config(args: dict[str, Any]) -> str:
 
 async def edit_device_config(args: dict[str, Any]) -> str:
     """
-    Push configuration lines to a real device.
+    Push configuration lines to a real device with snapshot + verify + rollback.
     REQUIRES HITL approval (tagged as hitl_required in skill catalog).
+
+    Workflow:
+      1. Take a snapshot of running-config before any change.
+      2. Push config_lines.
+      3. Verify reachability with `show clock` (10s timeout).
+      4. If verify fails → automatic rollback from snapshot.
+
+    Snapshots are saved under data/config_snapshots/ for forensic review and
+    manual rollback if automatic rollback also fails.
 
     args:
       device_id: str
@@ -368,20 +379,83 @@ async def edit_device_config(args: dict[str, Any]) -> str:
     if not config_lines:
         return "[Error] config_lines list is required and must not be empty."
 
+    import pathlib, uuid, datetime
+    snapshot_dir = pathlib.Path("data/config_snapshots")
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_id  = f"{device_id}_{datetime.datetime.utcnow().strftime('%Y%m%dT%H%M%SZ')}_{uuid.uuid4().hex[:6]}"
+    snapshot_path = snapshot_dir / f"{snapshot_id}.txt"
+
     logger.warning(
-        "PRAGMATIC: edit_device_config on %s — %d lines — reason=%r",
-        device_id, len(config_lines), reason,
+        "PRAGMATIC: edit_device_config on %s — %d lines — reason=%r — snapshot=%s",
+        device_id, len(config_lines), reason, snapshot_id,
     )
+
+    # ── Step 1: Snapshot ──────────────────────────────────────────────
     try:
-        output = await _run_in_executor(_netmiko_send_config, device_id, config_lines)
+        pre_config = await _run_in_executor(_netmiko_send, device_id, "show running-config")
+        snapshot_path.write_text(pre_config)
+        logger.info("Snapshot saved: %s (%d bytes)", snapshot_path, len(pre_config))
+    except Exception as exc:
+        return redact_text(
+            f"[Error] Pre-change snapshot failed on {device_id} — change ABORTED to avoid "
+            f"unrecoverable state. Reason: {exc}"
+        )
+
+    # ── Step 2: Push change ───────────────────────────────────────────
+    try:
+        push_output = await _run_in_executor(_netmiko_send_config, device_id, config_lines)
+    except Exception as exc:
+        return redact_text(
+            f"[Error] Config push to {device_id} failed: {exc}\n"
+            f"Snapshot preserved at: {snapshot_path}\n"
+            f"Device state unchanged (push raised before any line was committed)."
+        )
+
+    # ── Step 3: Verify reachability ───────────────────────────────────
+    try:
+        verify_output = await asyncio.wait_for(
+            _run_in_executor(_netmiko_send, device_id, "show clock"),
+            timeout=10.0,
+        )
+        verify_ok = bool(verify_output and "%" not in verify_output[:50])
+    except (asyncio.TimeoutError, Exception) as exc:
+        verify_ok = False
+        verify_output = f"verification failed: {exc}"
+
+    if verify_ok:
         return (
-            f"Config applied to {device_id}:\n"
+            f"Config applied to {device_id} (snapshot: {snapshot_id}):\n"
             f"Lines: {json.dumps(config_lines, indent=2)}\n"
             f"Reason: {reason}\n"
-            f"Output:\n{output}"
+            f"Verify: PASS\n"
+            f"Output:\n{push_output}"
         )
-    except Exception as exc:
-        return f"[Error] Config push to {device_id} failed: {exc}"
+
+    # ── Step 4: Automatic rollback ────────────────────────────────────
+    logger.error(
+        "Post-change verify FAILED on %s — rolling back from snapshot %s",
+        device_id, snapshot_id,
+    )
+    try:
+        # Push the original config as a single multi-line command set
+        rollback_lines = pre_config.split("\n")
+        await _run_in_executor(_netmiko_send_config, device_id, rollback_lines)
+        return (
+            f"[ROLLED BACK] Config push to {device_id} succeeded but post-change "
+            f"verification failed.\n"
+            f"Reverted from snapshot: {snapshot_id}\n"
+            f"Original verify error: {verify_output[:200]}\n"
+            f"Manual investigation recommended — check device console."
+        )
+    except Exception as rb_exc:
+        return redact_text(
+            f"[CRITICAL] Config push to {device_id} succeeded BUT both verify "
+            f"AND rollback failed.\n"
+            f"Snapshot at: {snapshot_path}\n"
+            f"Verify error: {verify_output[:200]}\n"
+            f"Rollback error: {rb_exc}\n"
+            f"MANUAL INTERVENTION REQUIRED — device may be unreachable."
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -553,7 +627,7 @@ async def get_syslog(args: dict[str, Any]) -> str:
         output = await _run_in_executor(_netmiko_send, device_id, cmd)
         return f"# Syslog {device_id} severity={severity} lines={lines_n}\n{output}"
     except Exception as exc:
-        return f"[Error] Syslog retrieval from {device_id} failed: {exc}"
+        return redact_text(f"[Error] Syslog retrieval from {device_id} failed: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -590,7 +664,7 @@ async def query_interface_metrics(args: dict[str, Any]) -> str:
         output = await _run_in_executor(_netmiko_send, device_id, cmd)
         return f"# Interface metrics {device_id} iface={interface or 'all'}\n{output}"
     except Exception as exc:
-        return f"[Error] Interface query on {device_id} failed: {exc}"
+        return redact_text(f"[Error] Interface query on {device_id} failed: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -619,7 +693,7 @@ async def get_bgp_summary(args: dict[str, Any]) -> str:
         output = await _run_in_executor(_netmiko_send, device_id, cmd)
         return f"# BGP Summary {device_id}\n{output}"
     except Exception as exc:
-        return f"[Error] BGP query on {device_id} failed: {exc}"
+        return redact_text(f"[Error] BGP query on {device_id} failed: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -643,9 +717,9 @@ async def get_device_facts(args: dict[str, Any]) -> str:
             out = await _run_in_executor(_netmiko_send, device_id, "show version")
             return f"# Device facts (show version fallback)\n{out}"
         except Exception as exc:
-            return f"[Error] {exc}"
+            return redact_text(f"[Error] {exc}")
     except Exception as exc:
-        return f"[Error] NAPALM get_facts on {device_id} failed: {exc}"
+        return redact_text(f"[Error] NAPALM get_facts on {device_id} failed: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -663,24 +737,26 @@ async def run_command(args: dict[str, Any]) -> str:
     if device_id not in _DEVICES:
         return f"[Error] Device {device_id!r} not found."
 
-    # Block config-mode commands
-    _BLOCKED = re.compile(
-        r"^(conf(igure)?[\s\t]*(t(erminal)?)?|no\s|write\s|copy\s|reload|delete\s|"
-        r"clear\s|debug\s|undebug\s)",
+    # Allow-list: only read-only, side-effect-free commands.
+    # Allow-lists fail closed — any new vendor command is rejected by default.
+    # For configuration changes, the LLM must use edit_device_config (HITL-gated).
+    _ALLOWED = re.compile(
+        r"^(show |display |get |ping |traceroute |dir |more |cat |"
+        r"systemctl status |service .* status )",
         re.IGNORECASE,
     )
-    if _BLOCKED.match(command):
+    if not _ALLOWED.match(command):
         return (
-            f"[BLOCKED] Command {command!r} is not allowed via run_command "
-            "(config-mode and destructive commands are restricted). "
-            "Use edit_device_config for configuration changes."
+            f"[BLOCKED] Command {command!r} is not in the read-only allow-list. "
+            "Allowed prefixes: show, display, get, ping, traceroute, dir, more, cat. "
+            "For configuration changes use edit_device_config (HITL-gated)."
         )
 
     try:
         output = await _run_in_executor(_netmiko_send, device_id, command)
         return f"# {device_id}: {command}\n{output}"
     except Exception as exc:
-        return f"[Error] Command {command!r} on {device_id} failed: {exc}"
+        return redact_text(f"[Error] Command {command!r} on {device_id} failed: {exc}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -166,15 +166,10 @@ class MemoryAwareMixin:
         if self._memory is None:
             return ""
         try:
-            from memory.schemas import RetrievalQuery
             session_id = context.metadata.get("session_id", context.context_id)
-            query = RetrievalQuery(
-                query_text=context.get_user_input(),
-                session_id=session_id,
-                max_tokens=1_500,
+            return await self._memory.recall_for_session(
+                context.get_user_input(), session_id,
             )
-            results = await self._memory.retrieve(query)
-            return self._memory.format_context(results)
         except Exception as exc:
             logger.warning("Memory retrieval failed: %s", exc)
             return ""

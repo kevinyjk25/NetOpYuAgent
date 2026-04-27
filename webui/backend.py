@@ -55,12 +55,32 @@ import os
 import pathlib
 import time
 import uuid
-from typing import Any, AsyncIterator, Optional
+from typing import Annotated, Any, AsyncIterator, Optional
 
-from fastapi import APIRouter, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
+
+# Auth + redaction + per-operator memory scoping
+from auth import (
+    Identity, verify_identity, require_role, AUTH_DISABLED,
+)
+# ── Auth helper ──────────────────────────────────────────────────────────────
+# Endpoints used to receive `identity: Identity = Depends(verify_identity)` as
+# a parameter, but FastAPI's parameter inference (with the dataclass Identity)
+# kept treating it as a body field, causing 422 errors. The identity parameter
+# is now resolved inline inside each endpoint via this helper, which keeps the
+# endpoint signature limited to the request body alone.
+async def _identity() -> Identity:
+    """Resolve the current identity. Honors cfg.auth.enabled."""
+    return await verify_identity()
+
+
+
+from log_redaction import redact_text
+from rate_limit import per_operator_limit, global_concurrency
+from memory import set_current_operator
 
 logger = logging.getLogger(__name__)
 
@@ -72,12 +92,26 @@ _STATIC_DIR = pathlib.Path(__file__).parent / "static"
 # ---------------------------------------------------------------------------
 
 class ChatRequest(BaseModel):
-    query:           str
-    session_id:      Optional[str] = None
-    confirmed_facts: list[str]    = []
-    working_set:     list[dict]   = []
-    env_context:     dict          = {}
-    delegation_mode: str           = "fresh"   # fresh | forked
+    query:           str            = Field(..., min_length=1, max_length=8_000,
+                                           description="User query — max 8 000 chars")
+    session_id:      Optional[str]  = Field(None, pattern=r"^[a-zA-Z0-9_-]{1,128}$",
+                                           description="Session ID — 1-128 chars of [a-zA-Z0-9_-]")
+    confirmed_facts: list[str]      = Field(default_factory=list, max_length=60,
+                                           description="Carry-forward facts — max 60 items")
+    working_set:     list[dict]     = Field(default_factory=list, max_length=20)
+    env_context:     dict           = Field(default_factory=dict)
+    delegation_mode: str            = Field("fresh", pattern=r"^(fresh|forked)$")
+
+    @field_validator("confirmed_facts")
+    @classmethod
+    def cap_fact_length(cls, v: list[str]) -> list[str]:
+        """Prevent individual facts from inflating the LLM context."""
+        return [f[:500] for f in v]
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, v: str) -> str:
+        return v.strip()
 
 
 class ToolCallRequest(BaseModel):
@@ -110,17 +144,53 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     """
     app = FastAPI(title="IT Ops Agent WebUI", docs_url="/docs")
 
+
+    # 422 validation error handler — logs the failure so the user can see WHY
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse as _JSON422
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_handler(request, exc: RequestValidationError):
+        logger.warning(
+            "422 on %s — validation errors: %s", request.url.path, exc.errors()
+        )
+        return _JSON422(
+            status_code=422,
+            content={"detail": exc.errors(), "body": str(exc.body)[:500]},
+        )
+
+
+    # CORS — allow only configured origins. In production set
+    # NETOPYU_ALLOWED_ORIGINS="https://ops.company.com,https://admin.company.com"
+    import os as _os_cors
+    from fastapi.middleware.cors import CORSMiddleware
+    _allowed = [o.strip() for o in _os_cors.getenv(
+        "NETOPYU_ALLOWED_ORIGINS", "http://localhost:8001"
+    ).split(",") if o.strip()]
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins     = _allowed,
+        allow_credentials = True,
+        allow_methods     = ["GET", "POST", "DELETE"],
+        allow_headers     = ["Authorization", "Content-Type", "X-API-Key"],
+    )
+
     # ── Inject runtime components if not already present ──────────────
     from runtime import AgentRuntimeLoop, RuntimeConfig, ToolResultStore
-    from skills import SkillCatalogService, DEFAULT_SKILL_DEFINITIONS
-    from tools import TOOL_REGISTRY, TOOL_DESCRIPTIONS, make_read_stored_result_tool
+    from skills import SkillCatalogService
+    from tools import make_read_stored_result_tool
 
     if "tool_store" not in services:
         services["tool_store"] = ToolResultStore()
 
     if "skill_catalog" not in services:
+        # Use ToolLoader so only mode-appropriate skills are registered.
+        # No filter_to_registry needed here — ToolLoader already returns the right set.
+        import config as _cfg
+        from tools.loader import ToolLoader as _TL
+        _tl = _TL(mode=_cfg.cfg.mode)
         catalog = SkillCatalogService()
-        catalog.register_all(DEFAULT_SKILL_DEFINITIONS)
+        catalog.register_all(_tl.skill_definitions())
         services["skill_catalog"] = catalog
 
     # Inject skill_evolver for upload/persist capability if not already provided by main.py
@@ -134,7 +204,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         )
 
     # Wire read_stored_result and process_stored_chunks tools with the live store
-    tool_registry = dict(TOOL_REGISTRY)
+    # Build mode-appropriate tool registry (no mock tools in pragmatic mode)
+    import config as _cfg_be
+    from tools.loader import ToolLoader as _TL_be
+    tool_registry = _TL_be(mode=_cfg_be.cfg.mode).build_callables()
     _read_fn, _process_fn = make_read_stored_result_tool(services["tool_store"])
     tool_registry["read_stored_result"]    = _read_fn
     tool_registry["process_stored_chunks"] = _process_fn
@@ -204,7 +277,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.post("/chat")
-    async def chat(req: ChatRequest) -> JSONResponse:
+    async def chat(
+        req: ChatRequest,
+    ) -> JSONResponse:
+        set_current_operator((await _identity()).operator_id)
         """
         Non-streaming chat. Returns the full response as JSON.
         """
@@ -242,7 +318,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return JSONResponse(content=msg)
 
     @app.post("/chat/stream")
-    async def chat_stream(req: ChatRequest) -> StreamingResponse:
+    async def chat_stream(
+        req: ChatRequest,
+    ) -> StreamingResponse:
         """
         SSE streaming chat — routes through ITOpsHitlAgentExecutor.
 
@@ -260,6 +338,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
           Cache — auto-opens when large tool results are stored
           HITL  — interrupt card appears; Approve/Reject resumes the task
         """
+        set_current_operator((await _identity()).operator_id)
         import uuid as _uuid
         session_id  = req.session_id or str(_uuid.uuid4())
         task_id     = "task-" + _uuid.uuid4().hex[:12]
@@ -267,11 +346,16 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
         executor    = services.get("executor")
         loop        = services["runtime_loop"]
-        curator     = services.get("memory_curator")
-        fts         = services.get("fts_store")
-        user_model  = services.get("user_model")
+        # New unified memory backend (agent_memory.MemoryManager via adapter).
+        # Replaces the old DTM/curator/fts/user_model split.
+        memory      = services.get("memory")
+        # Backward-compat aliases — all old service names resolve to the unified adapter.
+        # The MemoryAdapter exposes recall_for_session(), after_turn(), get_stats() shims.
+        dtm         = memory
+        curator     = memory
+        fts         = memory
+        user_model  = None   # behaviour now embedded in adapter.update_user_profile()
         evolver     = services.get("skill_evolver")
-        dtm         = services.get("dtm")            # DualTrackMemory (v4)
 
         from runtime import DelegationMode
         dm = DelegationMode.FORKED if req.delegation_mode == "forked" else DelegationMode.FRESH
@@ -282,7 +366,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             decision  = None
             try:
                 # ── Step 1: Classify ──────────────────────────────────────
-                decision = loop.classify(req.query)
+                decision = await loop.classify_async(req.query)
                 yield f"data: {json.dumps({'type':'classify','complexity':decision.complexity.value,'tier':decision.model_tier,'reason':decision.reason[:100]})}\n\n"
                 await asyncio.sleep(0)
 
@@ -293,28 +377,19 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                 # ── Step 3: Cross-session recall (DTM v4 or FTS5 v3) ─────
                 recall_text = ""
-                if dtm:
+                if memory:
                     try:
-                        recall_result = await dtm.recall(req.query, session_id, max_chars=1200)
+                        # operator_id was set by `set_current_operator((await _identity())…)`
+                        # at the top of this endpoint — recall sees the same user_id as writes.
+                        recall_result = await memory.recall(req.query, session_id, max_chars=1200)
                         recall_text   = recall_result.prompt_context
-                        stats = await fts.get_stats() if fts else {}
-                        # Serialize all DTMResult items for the Memory tab
-                        memory_items = [
-                            {
-                                "track":       r.track,
-                                "score":       round(r.score, 3),
-                                "source":      r.source,
-                                "memory_type": r.memory_type,
-                                "content":     r.content[:500],
-                                "recency_ts":  r.recency_ts,
-                                "tags":        r.tags[:6],
-                            }
-                            for r in recall_result.results
-                        ]
+                        stats = {"chunk_count": recall_result.chunk_count, "fact_count": recall_result.fact_count}
+                        # MemoryAdapter.recall returns already-serialized dicts in .results
+                        memory_items = recall_result.results
                         yield f"data: {json.dumps({'type':'recall','chars':len(recall_text),'sessions_searched':stats.get('total_sessions',0),'has_context':bool(recall_text),'track_a':recall_result.track_a_count,'track_b':recall_result.track_b_count,'winner':recall_result.winner,'preview':recall_text[:200],'memory_items':memory_items})}\n\n"
                         await asyncio.sleep(0)
                     except Exception as _e:
-                        logger.debug("DTM recall skipped: %s", _e)
+                        logger.warning("Memory recall failed (no recall event sent to FE): %s", _e, exc_info=True)
                 elif curator and fts:
                     try:
                         recall_text = await curator.recall_for_session(req.query, session_id)
@@ -387,8 +462,13 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             for part in (event.message.parts if event.message else []):
                                 if hasattr(part, "text") and part.text:
                                     tokens.append(part.text)
-                                    for word in part.text.split():
-                                        yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+                                    # Stream the text in 80-char chunks, PRESERVING newlines and
+                                    # all whitespace exactly. The frontend renders markdown after
+                                    # the stream completes, so block structure (\n\n, table rows,
+                                    # ```fences, ## headers) must survive transmission.
+                                    _txt = part.text
+                                    for _i in range(0, len(_txt), 80):
+                                        yield f"data: {json.dumps({'token': _txt[_i:_i+80]})}\n\n"
                                     await asyncio.sleep(0)
 
                         elif kind == "taskArtifactUpdate":
@@ -478,8 +558,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                     for part in (event.message.parts if event.message else []):
                                         if hasattr(part, "text") and part.text:
                                             tokens.append(part.text)
-                                            for word in part.text.split():
-                                                yield f"data: {json.dumps({'token': word + ' '})}\n\n"
+                                            _txt = part.text
+                                            for _i in range(0, len(_txt), 80):
+                                                yield f"data: {json.dumps({'token': _txt[_i:_i+80]})}\n\n"
                                             await asyncio.sleep(0)
                                 elif kind == "taskArtifactUpdate":
                                     if event.artifact:
@@ -521,7 +602,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12],'track':'A+B'})}\n\n"
                         await asyncio.sleep(0)
                         if memories:
-                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':[getattr(m.memory_type,'value',str(m.memory_type)) for m in memories[:5]]})}\n\n"
+                            # MemoryFact uses .fact_type (not .memory_type)
+                            _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
+                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
                             await asyncio.sleep(0)
                     except Exception as _e:
                         logger.debug("DTM after_turn skipped: %s", _e)
@@ -603,7 +686,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
 
     @app.post("/tools/upload")
-    async def upload_tool(request: Request) -> JSONResponse:
+    async def upload_tool(request: Request,
+    ) -> JSONResponse:
         """
         Upload a Python tool file (.py).  The file must define one or more
         async functions and a TOOL_REGISTRY dict mapping names → functions,
@@ -834,7 +918,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         })
 
     @app.post("/skills/upload")
-    async def upload_skill(request: Request) -> JSONResponse:
+    async def upload_skill(request: Request,
+    ) -> JSONResponse:
         """
         Upload a skill markdown file (.md) or JSON definition (.json).
         The skill is registered in the catalog and persisted to HERMES_DATA_DIR/skills/.
@@ -954,18 +1039,18 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     @app.get("/tools")
     async def list_tools() -> JSONResponse:
-        """List all registered tools with descriptions — includes uploaded tools."""
-        from tools import TOOL_DESCRIPTIONS
-        # Use the live registry (same dict that upload_tool writes into)
-        live_reg = services.get("tool_registry") or {}
+        """List tools valid for the current running mode (no mock tools in pragmatic)."""
+        from tools.loader import ToolLoader
+        import config as _cfg
+        # ToolLoader returns only tools for the current mode (mock vs pragmatic)
+        _loader = ToolLoader(mode=_cfg.cfg.mode)
         all_tools = {}
-        # Start with static descriptions (mark as not uploaded)
-        for name, desc in TOOL_DESCRIPTIONS.items():
-            entry = dict(desc)
+        for name, meta in _loader.build_metadata().items():
+            entry = dict(meta)
             entry["uploaded"] = False
             all_tools[name] = entry
-        # Add any tools in the live registry that have no static description
-        # These are uploaded tools — mark them clearly
+        # Also surface any live-registered/uploaded tools not in the static metadata
+        live_reg = services.get("tool_registry") or {}
         for name in live_reg:
             if name not in all_tools:
                 all_tools[name] = {
@@ -986,7 +1071,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/hitl/pending")
-    async def list_pending_hitl() -> JSONResponse:
+    async def list_pending_hitl(
+    ) -> JSONResponse:
         hitl_router = services.get("hitl_router")
         if not hitl_router:
             logger.warning("/hitl/pending: hitl_router not in services")
@@ -1028,19 +1114,37 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return JSONResponse(content=result)
 
     @app.post("/hitl/{interrupt_id}/approve")
-    async def approve_hitl(interrupt_id: str, req: HitlDecisionRequest) -> JSONResponse:
+    async def approve_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        # Override client-supplied operator_id with the verified identity
+        # → audit log records the actual approver, not whoever the client claims
+        req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "approve", req, services
         )
 
     @app.post("/hitl/{interrupt_id}/reject")
-    async def reject_hitl(interrupt_id: str, req: HitlDecisionRequest) -> JSONResponse:
+    async def reject_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        # Override client-supplied operator_id with the verified identity
+        # → audit log records the actual approver, not whoever the client claims
+        req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "reject", req, services
         )
 
     @app.post("/hitl/{interrupt_id}/edit")
-    async def edit_hitl(interrupt_id: str, req: HitlDecisionRequest) -> JSONResponse:
+    async def edit_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        # Override client-supplied operator_id with the verified identity
+        # → audit log records the actual approver, not whoever the client claims
+        req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "edit", req, services
         )
@@ -1050,26 +1154,21 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/sessions")
-    async def list_sessions_endpoint(limit: int = 50) -> JSONResponse:
+    async def list_sessions_endpoint(limit: int = 50,
+    ) -> JSONResponse:
         """
         List all conversation sessions ordered by most recent activity.
-        Reads from FTS5 state.db — survives server restarts.
+        Reads from MemoryAdapter → agent_memory.long_term_chunks (SQLite).
+        Survives server restarts.
         """
-        fts = services.get("fts_store")
-        if not fts:
+        memory = services.get("memory")
+        if not memory or not hasattr(memory, "list_sessions"):
             return JSONResponse(content=[])
         try:
-            sessions = await fts.list_sessions(limit=limit)
-            return JSONResponse(content=[
-                {
-                    "session_id":    s.session_id,
-                    "created_at":    s.created_at,
-                    "last_active":   s.last_active,
-                    "topic_summary": s.topic_summary or s.session_id[:20],
-                    "turn_count":    s.turn_count,
-                }
-                for s in sessions
-            ])
+            # Bind operator before reading — memory is per-user-isolated
+            set_current_operator((await _identity()).operator_id)
+            sessions = await memory.list_sessions(limit=limit)
+            return JSONResponse(content=sessions)
         except Exception as exc:
             logger.warning("/sessions failed: %s", exc)
             return JSONResponse(content=[])
@@ -1077,28 +1176,39 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     @app.get("/sessions/{session_id}/history")
     async def get_session_history(session_id: str, limit: int = 100) -> JSONResponse:
         """
-        Retrieve full turn history for a session from FTS5 state.db.
-        Returns turns as {role, content, ts} pairs for the frontend chat panel.
+        Retrieve full turn history for a session from MemoryAdapter long-term store.
+        Returns chunks as {role, content, ts} pairs for the frontend chat panel.
         """
-        fts = services.get("fts_store")
-        if not fts:
-            # Fall back to in-memory history
+        memory = services.get("memory")
+        if not memory or not hasattr(memory, "get_session_history"):
             return JSONResponse(content=_message_history.get(session_id, []))
         try:
-            turns = await fts.get_session_turns(session_id, limit=limit)
-            # FTS5 returns newest-first; reverse for chronological display
-            turns = list(reversed(turns))
+            # Bind operator before reading — memory is per-user-isolated
+            set_current_operator((await _identity()).operator_id)
+            chunks = await memory.get_session_history(session_id)
             messages = []
-            for t in turns:
-                messages.append({"role": "user",      "content": t.user_text,      "ts": t.ts})
-                messages.append({"role": "assistant",  "content": t.assistant_text, "ts": t.ts})
+            for c in chunks[-limit:]:
+                text = c.get("text", "")
+                ts   = c.get("created_at", 0)
+                # Split "User: ...\nAssistant: ..." back into two messages
+                if "User:" in text and "Assistant:" in text:
+                    parts    = text.split("Assistant:", 1)
+                    user_msg = parts[0].replace("User:", "", 1).strip()
+                    asst_msg = parts[1].strip() if len(parts) > 1 else ""
+                    if user_msg:
+                        messages.append({"role": "user",      "content": user_msg, "ts": ts})
+                    if asst_msg:
+                        messages.append({"role": "assistant", "content": asst_msg, "ts": ts})
+                else:
+                    messages.append({"role": "assistant", "content": text, "ts": ts})
             return JSONResponse(content=messages)
         except Exception as exc:
             logger.warning("/sessions/%s/history failed: %s", session_id, exc)
             return JSONResponse(content=_message_history.get(session_id, []))
 
     @app.post("/sessions")
-    async def create_session(request: Request) -> JSONResponse:
+    async def create_session(request: Request,
+    ) -> JSONResponse:
         """
         Create (or re-open) a named session. Returns the session_id.
         Body: {"name": "optional display name"} — name becomes the topic_summary.
@@ -1122,7 +1232,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         })
 
     @app.delete("/sessions/{session_id}")
-    async def delete_session(session_id: str) -> JSONResponse:
+    async def delete_session(session_id: str,
+    ) -> JSONResponse:
         """
         Delete a session and all its turns from FTS5 state.db.
         Also removes from in-memory history cache.
@@ -1141,15 +1252,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/memory")
-    async def get_memory(session_id: str = "default", limit: int = 10) -> JSONResponse:
+    async def get_memory(session_id: str = "default", limit: int = 10,
+    ) -> JSONResponse:
         memory = services.get("memory")
         if not memory:
             return JSONResponse(content=[])
         try:
-            records = await memory.router.get_by_session(session_id, limit=limit) \
-                if hasattr(memory, "router") else \
-                await memory._rt.get_by_session(session_id, limit=limit)
-            return JSONResponse(content=[r.model_dump() for r in records])
+            set_current_operator((await _identity()).operator_id)
+            recalled = await memory.recall_for_session("", session_id)
+            return JSONResponse(content=[{"session_id": session_id, "recalled": recalled[:2000]}])
         except Exception as exc:
             return JSONResponse(content={"error": str(exc)}, status_code=500)
 
@@ -1176,7 +1287,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
 
     @app.get("/system/status")
-    async def system_status() -> JSONResponse:
+    async def system_status(
+    ) -> JSONResponse:
         store    = services.get("tool_store")
         catalog  = services.get("skill_catalog")
         registry = services.get("registry")
@@ -1273,7 +1385,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             "runtime.loop",
             "hitl.graph",
             "hitl.a2a_integration",
-            "memory.fts_store",
+            "agent_memory.memory_manager",
             "webui.backend",
         ]
         return JSONResponse(content={
@@ -1520,17 +1632,17 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         # P0-B: Context budget assembly
         elif req.scenario == "p0_context_budget":
             from runtime.context_budget import ContextBudgetManager, BudgetConfig, DeviceRef as DR
-            from tools.mock_tools import dns_lookup as _dns, syslog_search as _slog
             mgr   = ContextBudgetManager(BudgetConfig(total_cap_tokens=800))
-            facts = ["payments-service: prod, healthy", "DNS: confirmed OK"]
+            facts = ["device: ap-01, status: healthy", "config: validated OK"]
             ws    = [DR(id="ap-01", label="AP-01 Site-A"), DR(id="sw-core", label="Core Switch")]
             env   = {"site": "Site-A", "change_window": False}
-            sm    = await _dns({"hostname": "payments.internal"})
-            big   = await _slog({"lines": 300})
-            sm_ref  = mgr.store_tool_result("dns_lookup", sm)
-            big_ref = mgr.store_tool_result("syslog_search", big)
+            # Synthetic payloads — no live tool call needed to test budget assembly
+            sm  = "payments.internal -> 10.0.1.42 (A record, TTL 300)"
+            big = "\n".join(f"2024-01-01 {h:02d}:00 ap-01 ERROR auth fail" for h in range(50))
+            sm_ref  = mgr.store_tool_result("get_device_status", sm)
+            big_ref = mgr.store_tool_result("get_syslog", big)
             ctx = mgr.assemble(confirmed_facts=facts, working_set=ws,
-                               tool_outputs={"dns_lookup": sm_ref, "syslog_search": big_ref},
+                               tool_outputs={"get_device_status": sm_ref, "get_syslog": big_ref},
                                env_context=env)
             result = {
                 "budget_cap_tokens": 800,
@@ -2326,8 +2438,35 @@ async def _submit_hitl_decision(
         comment=req.comment,
         parameter_patch=req.parameter_patch,
     )
-    result = await hitl_router.handle_decision(decision)
-    return JSONResponse(content=result.to_dict())
+    result     = await hitl_router.handle_decision(decision)
+    result_dict = result.to_dict()
+
+    # Post-HITL synthesis: run one LLM turn to summarise the tool execution result
+    # so the chat shows a meaningful response after the operator approves.
+    _loop = services.get("runtime_loop")
+    _tool_result = result_dict.get("tool_result", "")
+    _tool_name   = result_dict.get("tool_name", "the approved tool")
+    if _loop and _tool_result and result_dict.get("decision") == "approve":
+        try:
+            _synthesis_query = (
+                f"The HITL-approved tool '{_tool_name}' has just been executed. "
+                f"Summarise the result for the operator in 2-3 sentences."
+            )
+            _synthesis_facts = [f"TOOL_RESULT: {str(_tool_result)[:800]}"]
+            _full_text = ""
+            async for _chunk in _loop.stream(
+                query           = _synthesis_query,
+                session_id      = f"hitl__{interrupt_id[:8]}",
+                confirmed_facts = _synthesis_facts,
+            ):
+                if _chunk.get("type") == "token":
+                    _full_text += _chunk.get("token", "")
+            if _full_text.strip():
+                result_dict["synthesis"] = _full_text.strip()
+        except Exception as _e:
+            logger.debug("Post-HITL synthesis failed: %s", _e)
+
+    return JSONResponse(content=result_dict)
 
 
 def _push_history(session_id: str, msg: dict, store: dict) -> None:

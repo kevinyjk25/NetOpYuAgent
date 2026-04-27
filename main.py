@@ -27,6 +27,12 @@ from config import cfg
 import logging_config as _lc
 _lc.configure(mode=cfg.logging.mode)
 
+# Install log redaction filter ASAP — before any module logs anything sensitive.
+# Scrubs passwords, secrets, community strings, Bearer tokens before they reach
+# any handler (console, file, syslog).
+from log_redaction import install_log_filter
+install_log_filter()
+
 from fastapi import FastAPI
 
 logger = logging.getLogger(__name__)
@@ -68,15 +74,18 @@ async def build_services() -> dict[str, Any]:
     _print_banner()
 
     # ── 1. Memory ────────────────────────────────────────────────────────────
-    from memory import create_memory_router
-    memory_router = await create_memory_router(
-        redis_url     = cfg.memory.redis_url,
-        postgres_dsn  = cfg.memory.postgres_dsn,
-        chroma_path   = cfg.memory.chroma_path,
-        embedding_dim = cfg.embeddings.dim,
+    # Production memory backend: agent_memory.MemoryManager wrapped by
+    # MemoryAdapter for async + per-operator scoping.
+    # Multi-user isolated, SQLite WAL persistent, 311 unit tests.
+    from memory import MemoryAdapter
+    memory_router = MemoryAdapter(
+        data_dir          = cfg.memory.data_dir,
+        inline_threshold  = 4_000,
+        session_ttl       = 86_400,
+        enable_user_model = True,
     )
     services["memory"] = memory_router
-    logger.info("Memory module ready")
+    logger.info("Memory module ready (agent_memory backend)")
 
     # ── 2. HITL ──────────────────────────────────────────────────────────────
     from hitl import (
@@ -101,7 +110,7 @@ async def build_services() -> dict[str, Any]:
         pagerduty_routing_key = cfg.hitl.pagerduty_routing_key,
         enable_sse            = True,
     )
-    hitl_audit     = HitlAuditService.in_memory()
+    hitl_audit     = HitlAuditService.sqlite("data/hitl_audit.db")
     review_service = HitlReviewService.from_config(review_config)
     hitl_graph     = build_hitl_graph(hitl_config)
     hitl_router    = HitlDecisionRouter(graph=hitl_graph, audit=hitl_audit)
@@ -160,7 +169,7 @@ async def build_services() -> dict[str, Any]:
             MCPClient, OpenAPIClient, LLMEngine, ToolRouter,
             patch_runtime_loop, patch_hitl_graph,
         )
-        from tools import TOOL_REGISTRY, make_read_stored_result_tool
+        from tools import make_read_stored_result_tool
         from runtime import ToolResultStore
 
         tool_store = ToolResultStore()
@@ -177,6 +186,33 @@ async def build_services() -> dict[str, Any]:
         services["llm_engine"] = llm_engine  # patch_hitl_graph called after tool registry is built
         logger.info("LLM engine: %s/%s", cfg.llm.backend, cfg.llm.model)
 
+        # Wire the LLM into the memory module so fact extraction works for
+        # any language (default rule-based extractor is English-only regex).
+        try:
+            import asyncio as _asyncio
+            def _sync_llm_for_memory(prompt: str) -> str:
+                """
+                Sync wrapper for the FactExtractor. Uses the engine's lightweight
+                _chat primitive (single-message, no full system prompt) so the
+                extractor sees only its own EXTRACT_PROMPT.
+                """
+                messages = [{"role": "user", "content": prompt}]
+                async def _go():
+                    if hasattr(llm_engine, "_chat"):
+                        return await llm_engine._chat(messages)
+                    return await llm_engine.call(prompt, "", state=None)
+                try:
+                    return _asyncio.run(_go())
+                except RuntimeError:
+                    new_loop = _asyncio.new_event_loop()
+                    try:
+                        return new_loop.run_until_complete(_go())
+                    finally:
+                        new_loop.close()
+            memory_router.set_llm_fn(_sync_llm_for_memory)
+        except Exception as _exc:
+            logger.warning("memory llm_fn wiring failed: %s — facts will use rule-based extraction", _exc)
+
         # 6b. Real embeddings — always (both modes)
         try:
             from integrations.embedder import build_embedder
@@ -187,14 +223,18 @@ async def build_services() -> dict[str, Any]:
         except Exception as exc:
             logger.warning("Embedder init failed (%s) — using hash stub", exc)
 
-        # 6c. Build tool registry based on mode
-        tool_registry_local = dict(TOOL_REGISTRY)   # always include mock_tools as base
+        # 6c. Build tool registry via ToolLoader — single source of truth by mode.
+        # ToolLoader assembles: builtin tools + mode-specific tools (mock XOR pragmatic).
+        # No tool name is hardcoded here or in llm_engine — metadata comes from registries.
+        from tools.loader import ToolLoader as _ToolLoader
+        _loader = _ToolLoader(mode=cfg.mode)
         read_stored_fn, process_chunks_fn = make_read_stored_result_tool(tool_store)
+        tool_registry_local = _loader.build_callables()
         tool_registry_local["read_stored_result"]    = read_stored_fn
         tool_registry_local["process_stored_chunks"] = process_chunks_fn
-
-        if cfg.is_pragmatic:
-            tool_registry_local = await _build_pragmatic_tools(tool_registry_local)
+        # Store loader on services so llm_engine can build the dynamic tool section
+        services["tool_loader"] = _loader
+        logger.info("ToolLoader[%s]: %d tools assembled", cfg.mode, len(tool_registry_local))
         
         # 6d. MCP client
         mcp_client = await _build_mcp_client(MCPClient)
@@ -227,113 +267,63 @@ async def build_services() -> dict[str, Any]:
         executor._tool_registry = real_registry
         patch_hitl_graph(llm_engine, tool_registry=real_registry)
         patch_runtime_loop(executor, llm_engine)
+
+        # ── Wire prompt-based PolicyEngine ────────────────────────────────────
+        # Loads policies from config.yaml and registers the global singleton.
+        # classify(), pre_verify(), and HITL triggers use this automatically.
+        try:
+            from runtime.policy_engine import (
+                PolicyEngine, load_policies_from_config, set_policy_engine
+            )
+            # cfg.policies is populated from config.yaml at import time
+            _policy_defs = load_policies_from_config(cfg.policies)
+
+            async def _policy_llm_call(system: str, user: str) -> str:
+                """Thin wrapper: call the real LLM for policy evaluation (JSON output)."""
+                # Use a minimal context so the policy call is fast and cheap
+                return await llm_engine.call(
+                    query=user,
+                    context=system,
+                    state=None,
+                    skill_catalog=None,
+                )
+
+            _policy_engine = PolicyEngine(
+                policies    = _policy_defs,
+                llm_call    = _policy_llm_call,
+                cache_ttl_s = 120,
+            )
+            set_policy_engine(_policy_engine)
+            logger.info(
+                "PolicyEngine: wired with %d policies from config.yaml",
+                len(_policy_defs),
+            )
+        except Exception as _pe_exc:
+            logger.warning("PolicyEngine: startup failed (%s) — keyword heuristics active", _pe_exc)
+
+        # ── Skill catalog — built from ToolLoader.skill_definitions() ──────────────
+        # Skills are mode-specific: only the correct set is loaded.
+        # No cross-mode contamination; no filter_to_registry needed here because
+        # the loader only returns skills valid for the current mode.
+        try:
+            from skills import SkillCatalogService
+            _skill_defs = _loader.skill_definitions()
+            _skill_catalog = SkillCatalogService()
+            _skill_catalog.register_all(_skill_defs)
+            services["skill_catalog"] = _skill_catalog
+            logger.info(
+                "SkillCatalog[%s]: %d skills registered", cfg.mode, len(_skill_catalog._skills)
+            )
+        except Exception as _sc_exc:
+            logger.warning("SkillCatalog: build failed (%s) — catalog unavailable", _sc_exc)
+
         logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
 
     except Exception as exc:
         logger.warning("Integrations layer failed (%s). Running degraded.", exc)
 
-    # ── 7. Embedder injection into memory pipelines ───────────────────────────
-    embedder = services.get("embedder")
-    if embedder:
-        try:
-            from memory.pipelines.ingestion import IngestionPipeline
-            _inject_embedder(memory_router, embedder, IngestionPipeline)
-        except Exception as exc:
-            logger.warning("Embedder injection failed: %s", exc)
-
-    # ── 8. Hermes + DTM ──────────────────────────────────────────────────────
-    try:
-        from memory.fts_store  import FTS5SessionStore
-        from memory.curator    import MemoryCurator
-        from memory.user_model import UserModelEngine
-        from memory.dual_track import DualTrackMemory
-        from skills.evolver    import SkillEvolver
-
-        _data_dir = pathlib.Path(cfg.memory.data_dir)
-        _data_dir.mkdir(parents=True, exist_ok=True)
-
-        fts_store = FTS5SessionStore(db_path=str(_data_dir / "state.db"))
-        await fts_store.initialize()
-
-        llm_engine = services.get("llm_engine")
-        llm_fn = None
-        if llm_engine:
-            async def _llm_fn(system: str, user: str, _e=llm_engine) -> str:
-                if hasattr(_e, "_chat"):
-                    messages = [
-                        {"role": "system", "content": system},
-                        {"role": "user",   "content": user},
-                    ]
-                    raw = await _e._chat(messages)
-                    return _e._strip_think(raw) if hasattr(_e, "_strip_think") else raw
-                return await _e.call(user, context=system)
-            llm_fn = _llm_fn
-
-        if llm_fn:
-            async def _fts_summarizer(results, query, _fn=llm_fn):
-                import datetime as _dt
-                excerpts = "\n".join(
-                    f"[{_dt.datetime.fromtimestamp(r.ts).strftime('%Y-%m-%d')}] "
-                    f"{r.user_text[:120]} → {r.assistant_text[:120]}"
-                    for r in results[:5]
-                )
-                return await _fn(
-                    "You are an IT operations assistant. "
-                    "Summarise past session excerpts in 2-3 concise sentences.",
-                    f"Query: {query}\n\nPast session excerpts:\n{excerpts}",
-                )
-            fts_store._summarizer = _fts_summarizer
-
-        skill_catalog  = services.get("skill_catalog")
-        memory_router2 = services.get("memory")
-
-        memory_curator = MemoryCurator(
-            fts_store     = fts_store,
-            memory_router = memory_router2 or _NullMemoryRouter(),
-            llm_fn        = llm_fn,
-        )
-        user_model = UserModelEngine(fts_store=fts_store, llm_fn=llm_fn)
-        skill_evolver = SkillEvolver(
-            catalog    = skill_catalog or _NullSkillCatalog(),
-            llm_fn     = llm_fn,
-            fts_store  = fts_store,
-            skills_dir = str(_data_dir / "skills"),
-        )
-        dtm = DualTrackMemory(
-            fts_store               = fts_store,
-            curator                 = memory_curator,
-            user_model              = user_model,
-            data_dir                = str(_data_dir),
-            llm_fn                  = llm_fn,
-            compaction_turns        = cfg.memory.dtm.compaction_turns,
-            nudge_turns             = cfg.memory.dtm.nudge_turns,
-            track_b_weight          = cfg.memory.dtm.track_b_weight,
-            temporal_half_life_days = cfg.memory.dtm.temporal_half_life_days,
-        )
-        services.update({
-            "fts_store":      fts_store,
-            "memory_curator": memory_curator,
-            "user_model":     user_model,
-            "skill_evolver":  skill_evolver,
-            "dtm":            dtm,
-            "_llm_backend":   cfg.llm.backend,
-            "_llm_model":     cfg.llm.model,
-            "_hermes_data":   str(_data_dir / "state.db"),
-            "_mcp_mock":      cfg.tools.mcp.use_mock,
-        })
-        executor = services.get("executor")
-        if executor:
-            executor._fts_store     = fts_store
-            executor._curator       = memory_curator
-            executor._user_model    = user_model
-            executor._skill_evolver = skill_evolver
-            executor._skill_catalog = skill_catalog
-            executor._dtm           = dtm
-
-        logger.info(cfg.dump_summary())
-
-    except Exception as exc:
-        logger.warning("Hermes DTM failed to initialise: %s", exc)
+    # MemoryAdapter (set above as services["memory"]) wraps agent_memory.MemoryManager,
+    # which handles its own embedding internally — no separate injection step needed.
 
     return services
 
@@ -342,21 +332,6 @@ async def build_services() -> dict[str, Any]:
 # Mode-specific helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def _build_pragmatic_tools(base_registry: dict) -> dict:
-    """Load real Netmiko/NAPALM tools and register devices from config."""
-    from tools.pragmatic_tools import PRAGMATIC_TOOL_REGISTRY, register_devices
-    if not cfg.pragmatic.device_inventory:
-        logger.warning(
-            "Pragmatic mode: no devices in pragmatic.device_inventory — "
-            "real device tools registered but will return 'no devices' until config populated."
-        )
-    else:
-        register_devices(cfg.pragmatic.device_inventory)
-    # Pragmatic tools override mock tools with same name
-    merged = dict(base_registry)
-    merged.update(PRAGMATIC_TOOL_REGISTRY)
-    logger.info("Pragmatic tools loaded: %s", list(PRAGMATIC_TOOL_REGISTRY.keys()))
-    return merged
 
 
 async def _build_mcp_client(MCPClient):
@@ -420,18 +395,6 @@ async def _load_pragmatic_mcp_servers(MCPClient) -> list:
     return clients
 
 
-def _inject_embedder(memory_router, embedder, IngestionPipeline) -> None:
-    injected = 0
-    for attr in ("_ingestion", "_pipeline", "pipeline", "ingestion"):
-        obj = getattr(memory_router, attr, None)
-        if isinstance(obj, IngestionPipeline):
-            obj.set_embedder(embedder)
-            injected += 1
-    if injected == 0:
-        logger.debug("_inject_embedder: no IngestionPipeline found in memory_router")
-    else:
-        logger.info("Embedder injected into %d IngestionPipeline(s)", injected)
-
 
 # ─────────────────────────────────────────────────────────────────────────────
 # FastAPI lifespan
@@ -471,32 +434,18 @@ async def lifespan(app: FastAPI):
     webui = create_webui_app(_services)
     app.mount("/webui", webui)
     logger.info("All modules mounted")
-
-    from memory.consolidation import LifecycleManager
-    lifecycle      = LifecycleManager(_services["memory"])
     watchdog_task  = asyncio.create_task(_services["hitl_watchdog"].run())
-    lifecycle_task = asyncio.create_task(lifecycle.run())
 
     yield
 
     _services["hitl_watchdog"].stop()
     await _services["registry"].stop()
-    lifecycle.stop()
-    for t in (watchdog_task, lifecycle_task):
+    for t in (watchdog_task,):
         t.cancel()
         try:
             await t
         except asyncio.CancelledError:
             pass
-    # Flush any pending DTM daily buffer so no turns are lost on shutdown
-    dtm = _services.get("dtm")
-    if dtm and hasattr(dtm, "_compact_today") and getattr(dtm, "_today_turns", []):
-        try:
-            await dtm._compact_today()
-            logger.info("DTM: flushed %d turn(s) to daily file on shutdown",
-                        len(getattr(dtm, "_today_turns", [])))
-        except Exception as exc:
-            logger.warning("DTM shutdown flush failed: %s", exc)
     logger.info("IT Ops Agent shut down cleanly")
 
 

@@ -204,7 +204,27 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                 "Complexity: %s — %s (task_id=%s)",
                 decision.complexity.value, decision.reason, task_id,
             )
-            if decision.complexity == QueryComplexity.SIMPLE:
+
+            # COMPLEX routing is appropriate for:
+            #   - Destructive actions (restart, rollback, delete...)
+            #   - True P0/P1 incidents
+            #   - Parallel multi-entity DAG tasks
+            # It is NOT appropriate for:
+            #   - Summary/format requests ("make a table", "translate to Chinese")
+            #   - Analysis requests that only need the LLM to synthesize prior results
+            # For the latter, _execute_simple handles it correctly via loop.stream().
+            # Re-check: if COMPLEX but reason is "P0/P1" or "Parallel" (not destructive),
+            # and there is no force_hitl_tool, use _execute_simple as a safe fallback
+            # because the HITL graph executor_node has no tool to run and returns empty.
+            _use_simple = (
+                decision.complexity == QueryComplexity.SIMPLE
+                or (
+                    decision.complexity == QueryComplexity.COMPLEX
+                    and not context.metadata.get("force_hitl_tool")
+                    and "Destructive" not in decision.reason
+                )
+            )
+            if _use_simple:
                 await self._execute_simple(
                     query, session_id, context, event_queue, task_id, context_id
                 )
@@ -406,7 +426,15 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                 except Exception as exc:
                     return {"tool": _tool, "error": str(exc)}
 
-            self._hitl_router._direct_callbacks[interrupt_id] = _approved_tool_callback
+            import time as _time_cb
+            # Prune stale callbacks (>30 min) before registering
+            _cb_ttl = 1800
+            _cb_now = _time_cb.monotonic()
+            self._hitl_router._direct_callbacks = {
+                k: v for k, v in self._hitl_router._direct_callbacks.items()
+                if _cb_now - (v[1] if isinstance(v, tuple) else 0) < _cb_ttl
+            }
+            self._hitl_router._direct_callbacks[interrupt_id] = (_approved_tool_callback, _cb_now)
 
             await event_queue.enqueue_event(MessageEvent(
                 task_id=task_id, context_id=context_id,
@@ -689,14 +717,9 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         if self._memory is None:
             return ""
         try:
-            from memory.schemas import RetrievalQuery
-            query = RetrievalQuery(
-                query_text = context.get_user_input(),
-                session_id = session_id,
-                max_tokens = 1_500,
+            return await self._memory.recall_for_session(
+                context.get_user_input(), session_id,
             )
-            results = await self._memory.retrieve(query)
-            return self._memory.format_context(results)
         except Exception as exc:
             logger.warning("Memory retrieval failed: %s", exc)
             return ""

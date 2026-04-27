@@ -61,52 +61,97 @@ logger = logging.getLogger(__name__)
 # ToolResultStore
 # ---------------------------------------------------------------------------
 
+
+class _SqliteStoreProxy:
+    """Dict-like proxy over the SQLite results table for backward-compat access."""
+    def __init__(self, conn: Any) -> None:
+        self._conn = conn
+
+    def __len__(self) -> int:
+        row = self._conn.execute("SELECT COUNT(*) FROM results").fetchone()
+        return row[0] if row else 0
+
+    def get(self, ref_id: str, default: str = "") -> str:
+        ref_id = ref_id.strip("[]")
+        if ":" in ref_id:
+            ref_id = ref_id.rsplit(":", 1)[-1].strip()
+        row = self._conn.execute(
+            "SELECT content FROM results WHERE ref_id=?", (ref_id,)
+        ).fetchone()
+        return row[0] if row else default
+
+
 class ToolResultStore:
     """
     Stores large tool outputs externally so the prompt only carries a reference.
 
-    In production swap _store for Redis or object storage.
+    Backed by SQLite (default) for persistence across restarts.
+    Pass db_path=":memory:" for in-memory (tests only).
+    Pass db_path=None to auto-locate at data/tool_results.db.
     """
 
     MAX_INLINE_CHARS = 4_000   # ~1 000 tokens: store externally above this
+    TTL_SECONDS      = 86_400  # prune entries older than 24 h
 
-    def __init__(self) -> None:
-        self._store: dict[str, str] = {}   # ref_id → full text
+    def __init__(self, db_path: Optional[str] = None) -> None:
+        import sqlite3, pathlib, time as _time, os
+        if db_path is None:
+            _data_dir = pathlib.Path("data")
+            _data_dir.mkdir(exist_ok=True)
+            db_path = str(_data_dir / "tool_results.db")
+        self._db_path = db_path
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
+        self._conn.execute(
+            "CREATE TABLE IF NOT EXISTS results "
+            "(ref_id TEXT PRIMARY KEY, content TEXT, created_at REAL)"
+        )
+        self._conn.execute("CREATE INDEX IF NOT EXISTS idx_created ON results(created_at)")
+        self._conn.commit()
+        # Prune stale entries from prior runs
+        self._prune()
+        # Compatibility shim: expose dict-like _store interface for code that
+        # reads self._store.get() directly (HTTP endpoint total_chars calc)
+        self._store = _SqliteStoreProxy(self._conn)
+
+    def _prune(self) -> None:
+        import time as _time
+        cutoff = _time.time() - self.TTL_SECONDS
+        self._conn.execute("DELETE FROM results WHERE created_at < ?", (cutoff,))
+        self._conn.commit()
 
     def store(self, tool_name: str, raw_output: str) -> str:
         """
         Store *raw_output* if it exceeds the inline threshold.
-
-        Returns a short reference string for prompt injection:
-            '[STORED:tool_name:ref_id — use read_result(ref_id) to access]'
-        Or the original text if small enough.
+        Persisted to SQLite — survives restarts.
+        Returns '[STORED:tool_name:ref_id] Preview: <first 80 chars>'
+        or the original text if small enough to inline.
         """
+        import time as _time
         if len(raw_output) <= self.MAX_INLINE_CHARS:
             return raw_output
-
-        ref_id = str(uuid.uuid4())[:8]
-        self._store[ref_id] = raw_output
-        preview = raw_output[:300].replace("\n", " ").strip()
-        label = f"[STORED:{tool_name}:{ref_id}] Preview: {preview}..."
-        logger.debug(
-            "ToolResultStore: stored %d chars for tool=%s ref=%s",
-            len(raw_output), tool_name, ref_id,
+        import uuid
+        ref_id = uuid.uuid4().hex[:8]
+        self._conn.execute(
+            "INSERT OR REPLACE INTO results(ref_id, content, created_at) VALUES(?,?,?)",
+            (ref_id, raw_output, _time.time()),
         )
-        return label
+        self._conn.commit()
+        preview = raw_output[:80].replace("\n", " ")
+        return f"[STORED:{tool_name}:{ref_id}] Preview: {preview}"
+
 
     def read(self, ref_id: str, offset: int = 0, length: int = 2_000) -> Optional[str]:
-        """Retrieve a slice of a stored result (for a 'read_result' tool call).
-
-        Accepts both plain ref_id (e.g. "6ac5ade7") and the full label form
-        the LLM copies from context (e.g. "netflow_dump:6ac5ade7" or
-        "[STORED:netflow_dump:6ac5ade7]"). Strips any prefix to get just the UUID.
-        """
-        # Strip surrounding brackets if LLM included them
+        """Retrieve a slice of a stored result. Accepts full label or plain ref_id."""
+        # Normalise: strip brackets and tool_name: prefix
         ref_id = ref_id.strip("[]")
-        # If the LLM sent "tool_name:uuid", keep only the uuid part (after last ":")
         if ":" in ref_id:
             ref_id = ref_id.rsplit(":", 1)[-1].strip()
-        full = self._store.get(ref_id)
+        row = self._conn.execute(
+            "SELECT content FROM results WHERE ref_id=?", (ref_id,)
+        ).fetchone()
+        full = row[0] if row else None
+        if full is None:
+            full = None
         if full is None:
             return None
         return full[offset : offset + length]
@@ -287,8 +332,19 @@ class ContextBudgetManager:
 
     @staticmethod
     def _format_memory(results: list[Any]) -> str:
+        """
+        Format memory recall results. Accepts:
+        - Plain strings (from MemoryAdapter.recall_for_session)
+        - Records with .tier and .record attributes (legacy format)
+        """
         lines = []
         for r in results:
+            if isinstance(r, str):
+                # MemoryAdapter returns a single recalled-context string per call
+                if r.strip():
+                    lines.append(r.strip())
+                continue
+            # Legacy record format with .tier
             tier = getattr(r.tier, "value", str(r.tier)).upper()
             content = getattr(r, "record", r)
             text = getattr(content, "content", str(content))
@@ -305,15 +361,42 @@ class ContextBudgetManager:
         """
         Format accumulated tool results for the LLM context.
 
-        Keys are _call_key fingerprints (e.g. "validate_device_config|{"device_id": "ap-01"}").
-        We strip the args fingerprint for display, keeping just the tool name label.
-        All results from the current session accumulate here — never overwritten.
+        Per-entry compression rules to prevent context overload:
+        - [STORED:] entries: show only the preview line (full data is in the store)
+        - read_stored_result entries: show in full (this IS the paged data)
+        - Other entries: show first 600 chars — enough to act on, not enough to overload
+        - Most recent entry: shown in full up to 1200 chars
+
+        This prevents the LLM from receiving multi-KB raw data from previous turns
+        while still getting the current turn's full result.
         """
+        _STORED_LABEL_LIMIT = 1   # [STORED:] label is one line, show as-is
+        _PAGED_RESULT_LIMIT = 1200  # read_stored_result: show up to 1200 chars
+        _NORMAL_LIMIT       = 600   # other tools: 600 chars is enough context
+        _LATEST_BONUS       = 600   # extra chars for the most recent result
+
         parts = ["Tool outputs:"]
-        for key, output in outputs.items():
-            # Key format: "tool_name|{args_json}" or plain "tool_name"
+        items = list(outputs.items())
+        for i, (key, output) in enumerate(items):
             label = key.split("|")[0] if "|" in key else key
-            parts.append(f"[TOOL: {label}]\n{output}")
+            is_latest = (i == len(items) - 1)
+
+            if "[STORED:" in output:
+                # Only show the reference label + preview — full data is in the store
+                # Extract just the [STORED:...] line and the preview
+                lines = output.splitlines()
+                stored_lines = [l for l in lines if l.startswith("[STORED:") or l.startswith("Preview:")]
+                display = "\n".join(stored_lines[:3]) if stored_lines else output[:200]
+            elif label == "read_stored_result":
+                # Paged data — show in full but capped (LLM needs this to answer)
+                cap = _PAGED_RESULT_LIMIT + (_LATEST_BONUS if is_latest else 0)
+                display = output[:cap] + (f"\n… [{len(output)-cap} more chars — call read_stored_result with next offset]" if len(output) > cap else "")
+            else:
+                # Normal result — show enough to act on
+                cap = _NORMAL_LIMIT + (_LATEST_BONUS if is_latest else 0)
+                display = output[:cap] + (f"\n… [truncated — {len(output)} total chars]" if len(output) > cap else "")
+
+            parts.append(f"[TOOL: {label}]\n{display}")
         return "\n\n".join(parts)
 
     @staticmethod
@@ -336,3 +419,52 @@ class ContextBudgetManager:
         if len(text) <= max_chars:
             return text
         return text[:max_chars - 20] + "\n... [truncated]"
+
+def compress_paged_outputs(outputs: dict) -> dict:
+    """
+    Keep only the most recent read_stored_result page per ref_id in tool_outputs.
+    Older pages are replaced by a compact summary note.
+
+    This prevents context overflow when paging through large stored results across
+    many turns. The LLM's own response text (written while reading each page) is
+    saved to FTS5 by Hermes, so findings from prior pages survive via memory recall.
+    """
+    import json as _j, re as _re
+
+    paged: dict = {}   # ref_id → [(offset, key, val)]
+    result: dict = {}
+
+    for key, val in outputs.items():
+        tool = key.split("|")[0] if "|" in key else key
+        if tool == "read_stored_result" and "_summary" not in key:
+            try:
+                args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
+                ref    = args.get("ref_id", "").strip("[]")
+                ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
+                offset = int(args.get("offset", 0))
+                paged.setdefault(ref, []).append((offset, key, val))
+            except Exception:
+                result[key] = val
+        else:
+            result[key] = val
+
+    for ref_id, pages in paged.items():
+        pages = sorted(pages, key=lambda x: x[0])
+        if len(pages) == 1:
+            result[pages[0][1]] = pages[0][2]
+        else:
+            last_val = pages[-1][2]
+            has_more = "Has more: True" in last_val
+            total_m  = _re.search(r"Total size:\s*([\d,]+)", last_val)
+            total_sz = total_m.group(1) if total_m else "?"
+            covered  = pages[-2][0] + 2000
+            note = (
+                f"[PAGED-SUMMARY ref_id={ref_id} pages_read={len(pages)} "
+                f"bytes_covered=0-{covered} total={total_sz} has_more={has_more}]\n"
+                f"Prior page findings written to response — see memory context for analysis so far."
+            )
+            summary_key = _j.dumps({"read_stored_result": ref_id, "_summary": True})
+            result[summary_key] = note
+            result[pages[-1][1]] = pages[-1][2]
+
+    return result

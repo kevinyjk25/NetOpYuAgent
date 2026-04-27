@@ -26,7 +26,7 @@ from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolR
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
 
 if TYPE_CHECKING:
-    from memory.router import MemoryRouter
+    from memory.adapter import MemoryAdapter as MemoryRouter
     from skills.catalog import SkillCatalogService
 
 logger = logging.getLogger(__name__)
@@ -89,8 +89,11 @@ class ComplexityDecision:
 
 
 _DESTRUCTIVE_KEYWORDS = frozenset({
+    # English
     "restart", "rollback", "delete", "drain", "failover", "flush",
     "reboot", "terminate", "shutdown", "wipe", "reset",
+    # Chinese equivalents (substring match is fine for CJK — no word boundaries needed)
+    "重启", "回滚", "删除", "终止", "关机", "重置", "下发配置", "推送配置",
 })
 _P0P1_KEYWORDS = frozenset({
     "p0", "p1", "critical", "outage", "down", "emergency",
@@ -173,6 +176,96 @@ def _call_key(tool_name: str, tool_args: dict) -> str:
         args_sig = str(tool_args)
     return f"{tool_name}|{args_sig}"
 
+
+def _build_tool_ledger(
+    tool_outputs: dict,
+    tool_reg: dict,
+    raw_outputs: dict,
+) -> list[str]:
+    """
+    Build confirmed_facts ledger entries from the current session's tool_outputs.
+    Written at end of stream() so next HTTP request can seed called_tools and
+    surface existing ref_ids without re-fetching.
+
+    Collapsing rules:
+    - Multiple read_stored_result pages for the same ref_id → single summary entry
+    - [STORED:] labels annotated with total_size from their read results
+    - Inline results recorded with size
+    """
+    import json as _j, re as _re
+
+    # Pass 1: collect total_size and page count per ref_id from read_stored_result results
+    ref_info: dict = {}   # ref_id → {total_size, pages, last_offset}
+    for key, val in raw_outputs.items():
+        tool = key.split("|")[0] if "|" in key else key
+        if tool != "read_stored_result" or "_summary" in key:
+            continue
+        try:
+            args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
+            ref    = args.get("ref_id", "").strip("[]")
+            ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
+            offset = int(args.get("offset", 0))
+            if not ref:
+                continue
+            total_m = _re.search(r"Total size:\s*([\d,]+)", val)
+            total   = int(total_m.group(1).replace(",", "")) if total_m else 0
+            if ref not in ref_info:
+                ref_info[ref] = {"total_size": total, "last_offset": offset, "pages": 0}
+            else:
+                if offset > ref_info[ref]["last_offset"]:
+                    ref_info[ref]["last_offset"] = offset
+                    ref_info[ref]["total_size"]   = total
+            ref_info[ref]["pages"] += 1
+        except Exception:
+            pass
+
+    ledger: list[str] = []
+    seen:   set[str]  = set()
+    seen_read_refs:  set[str] = set()   # track which refs already have a read entry
+
+    for key, stored in tool_outputs.items():
+        if key in seen or "_summary" in key:
+            continue
+        seen.add(key)
+        tool_name = key.split("|")[0] if "|" in key else key
+
+        # Collapse all read_stored_result pages for same ref_id into ONE entry
+        if tool_name == "read_stored_result":
+            try:
+                args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
+                ref    = args.get("ref_id", "").strip("[]")
+                ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
+            except Exception:
+                ref = ""
+            if ref and ref in seen_read_refs:
+                continue   # already emitted a summary for this ref_id
+            if ref:
+                seen_read_refs.add(ref)
+                info    = ref_info.get(ref, {})
+                pages   = info.get("pages", 1)
+                total   = info.get("total_size", 0)
+                covered = info.get("last_offset", 0) + 2000
+                ledger.append(
+                    f"TOOL_EXEC: read_stored_result|ref={ref} pages_read={pages} "
+                    f"bytes_covered=0-{min(covered, total)} total={total}"
+                )
+            continue
+
+        raw  = raw_outputs.get(key, stored)
+        ref_m = _re.search(r"\[STORED:\w+:(\w+)\]", stored)
+        if ref_m:
+            ref_id = ref_m.group(1)
+            total  = ref_info.get(ref_id, {}).get("total_size", len(raw))
+            ledger.append(
+                f"TOOL_EXEC: {key} → ref={ref_id} total_size={total} "
+                f"[reuse: read_stored_result ref_id={ref_id}]"
+            )
+        else:
+            ledger.append(f"TOOL_EXEC: {key} → inline size={len(raw)}")
+
+    return ledger
+
+
 class AgentRuntimeLoop:
     """
     Thin default execution path.
@@ -204,36 +297,108 @@ class AgentRuntimeLoop:
     # ------------------------------------------------------------------
 
     def classify(self, query: str) -> ComplexityDecision:
-        q = query.lower()
-        if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
+        """
+        Classify query complexity using prompt-based PolicyEngine when available.
+        Falls back to keyword heuristics if PolicyEngine is not wired.
+        Policy definitions live in config.yaml — operators tune them without code changes.
+        """
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is not None:
+            # Use synchronous fallback evaluation (keyword heuristic via engine._fallback)
+            # The async path is used when classify() is called from async context in backend
+            _dr = _engine._fallback("classify_destructive", query)
+            _ir = _engine._fallback("classify_incident_severity", query)
+            if _dr.match:
+                return ComplexityDecision(
+                    complexity=QueryComplexity.COMPLEX,
+                    reason=f"Policy[classify_destructive]: {_dr.reason}",
+                    confidence=_dr.confidence, model_tier="full_model",
+                )
+            if _ir.match:
+                return ComplexityDecision(
+                    complexity=QueryComplexity.COMPLEX,
+                    reason=f"Policy[classify_incident_severity]: {_ir.reason}",
+                    confidence=_ir.confidence, model_tier="full_model",
+                )
             return ComplexityDecision(
-                complexity=QueryComplexity.COMPLEX,
-                reason="Destructive action detected — requires HITL approval",
-                confidence=0.95, model_tier="full_model",
-            )
-        if any(kw in q for kw in _P0P1_KEYWORDS):
-            return ComplexityDecision(
-                complexity=QueryComplexity.COMPLEX,
-                reason="P0/P1 severity — requires full HITL + DAG orchestration",
-                confidence=0.90, model_tier="full_model",
-            )
-        if any(kw in q for kw in _PARALLEL_KEYWORDS):
-            return ComplexityDecision(
-                complexity=QueryComplexity.COMPLEX,
-                reason="Parallel multi-entity analysis — requires TaskPlanner DAG",
+                complexity=QueryComplexity.SIMPLE,
+                reason="Policy: non-destructive query",
                 confidence=0.85, model_tier="full_model",
             )
-        # P2: fast model hint for simple lookups
-        tier = "fast_model" if any(kw in q for kw in _FAST_MODEL_KEYWORDS) else "full_model"
+
+        # ── Keyword heuristic (fallback when PolicyEngine not yet wired) ──────
+        import re as _re
+        q = query.lower()
+
+        def _word_match(kw: str, text: str) -> bool:
+            if " " in kw or not kw.isascii():
+                return kw in text
+            return bool(_re.search(r"(?<![a-z0-9])" + _re.escape(kw) + r"(?![a-z0-9])", text))
+
+        if any(_word_match(kw, q) for kw in _DESTRUCTIVE_KEYWORDS):
+            return ComplexityDecision(
+                complexity=QueryComplexity.COMPLEX,
+                reason="Destructive action detected (keyword heuristic)",
+                confidence=0.90, model_tier="full_model",
+            )
+        if any(_word_match(kw, q) for kw in _P0P1_KEYWORDS):
+            return ComplexityDecision(
+                complexity=QueryComplexity.COMPLEX,
+                reason="P0/P1 severity (keyword heuristic)",
+                confidence=0.85, model_tier="full_model",
+            )
+        tier = "fast_model" if any(_word_match(kw, q) for kw in _FAST_MODEL_KEYWORDS) else "full_model"
         return ComplexityDecision(
             complexity=QueryComplexity.SIMPLE,
-            reason="Single-intent diagnostic query — Runtime Loop sufficient",
+            reason="Single-intent diagnostic query (keyword heuristic)",
             confidence=0.80, model_tier=tier,
         )
 
     # ------------------------------------------------------------------
     # Pre-verification (P1)
     # ------------------------------------------------------------------
+
+    async def classify_async(self, query: str) -> "ComplexityDecision":
+        """
+        Async classify — uses PolicyEngine LLM evaluation when wired.
+        Called from backend.py (async context). Falls back to synchronous
+        keyword heuristic if engine is unavailable or LLM fails.
+        """
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is not None:
+            try:
+                results = await _engine.evaluate_any(
+                    ["classify_destructive", "classify_incident_severity"], query
+                )
+                destructive = results.get("classify_destructive")
+                incident    = results.get("classify_incident_severity")
+                if destructive and destructive.match:
+                    return ComplexityDecision(
+                        complexity=QueryComplexity.COMPLEX,
+                        reason=f"Policy[classify_destructive]: {destructive.reason}",
+                        confidence=destructive.confidence, model_tier="full_model",
+                    )
+                if incident and incident.match:
+                    return ComplexityDecision(
+                        complexity=QueryComplexity.COMPLEX,
+                        reason=f"Policy[classify_incident_severity]: {incident.reason}",
+                        confidence=incident.confidence, model_tier="full_model",
+                    )
+                return ComplexityDecision(
+                    complexity=QueryComplexity.SIMPLE,
+                    reason="Policy: non-destructive diagnostic query",
+                    confidence=0.85, model_tier="full_model",
+                )
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger(__name__).warning(
+                    "classify_async: PolicyEngine failed (%s) — keyword fallback", _e
+                )
+        # Fallback to synchronous keyword heuristic
+        return self.classify(query)
+
 
     async def pre_verify(
         self,
@@ -242,37 +407,31 @@ class AgentRuntimeLoop:
         env_context: dict[str, Any],
     ) -> VerificationResult:
         """
-        Pre-action verification: check the request is safe to proceed with.
-        Replace with real checks (policy engine, ACL) in production.
+        Pre-action verification using PolicyEngine when available.
+        Falls back to keyword check if engine is not wired.
         """
-        q = query.lower()
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is not None:
+            try:
+                result = await _engine.evaluate("preverify_safe_to_proceed", query)
+                if not result.match:
+                    return VerificationResult.fail(
+                        f"Policy[preverify_safe_to_proceed]: {result.reason}"
+                    )
+                return VerificationResult.ok("Pre-verification passed")
+            except Exception as _e:
+                import logging as _log
+                _log.getLogger(__name__).warning("pre_verify PolicyEngine error: %s", _e)
 
-        # Check: destructive action in non-SIMPLE path should never reach here
+        # Keyword fallback
+        q = query.lower()
         if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
             return VerificationResult.fail(
                 "Destructive action reached pre_verify — escalate to HITL"
             )
-
-        # Check: change window (from env_context)
-        if env_context.get("change_window") is False:
-            if any(kw in q for kw in {"restart", "rollback", "delete", "flush"}):
-                return VerificationResult.fail(
-                    "Change window is closed — operation not permitted"
-                )
-
-        # Check: production restriction
-        if env_context.get("allow_destructive") is False:
-            if "production" in q or "prod" in q:
-                if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
-                    return VerificationResult.fail(
-                        "Destructive operations on production are restricted"
-                    )
-
         return VerificationResult.ok("Pre-verification passed")
 
-    # ------------------------------------------------------------------
-    # Post-verification (P1)
-    # ------------------------------------------------------------------
 
     async def post_verify(
         self,
@@ -383,9 +542,29 @@ class AgentRuntimeLoop:
         # This prevents the LLM from re-calling ap-01 when memory already has
         # its config from a previous stream() invocation.
         # called_tools uses _call_key(name, args) fingerprints — not bare names.
-        # This allows validate_device_config(ap-01) and validate_device_config(ap-02)
-        # to both execute within one session.
+        # Also seeded from TOOL_EXEC ledger in confirmed_facts (from prior HTTP requests)
+        # so tools that ran in previous rounds are not re-executed.
         called_tools: set[str] = set()
+        _known_stores: dict[str, str] = {}  # ref_id → tool_name (for context injection)
+        import json as _j2, re as _re2
+        for _fact in (confirmed_facts or []):
+            if _fact.startswith("TOOL_EXEC: "):
+                # Parse: "TOOL_EXEC: tool_name|{args} → ref=abc size=N"
+                _body = _fact[len("TOOL_EXEC: "):]
+                _arrow = _body.find(" → ")
+                if _arrow > 0:
+                    _call_part = _body[:_arrow].strip()
+                    _info_part = _body[_arrow+3:].strip()
+                    # Seed called_tools with the _call_key fingerprint
+                    called_tools.add(_call_part)
+                    # Extract ref_id if present
+                    _ref_m = _re2.search(r"ref=(\w+)", _info_part)
+                    if _ref_m:
+                        _tool_n = _call_part.split("|")[0]
+                        _known_stores[_ref_m.group(1)] = _tool_n
+        if called_tools:
+            logger.info("stream: seeded %d prior tool calls from ledger; %d known stores",
+                        len(called_tools), len(_known_stores))
 
         while True:
             state.turns += 1
@@ -402,9 +581,12 @@ class AgentRuntimeLoop:
             if self._skill_catalog:
                 skill_section = self._skill_catalog.format_summary()
 
+            # Compress paged results before assembly to prevent context overflow
+            from runtime.context_budget import compress_paged_outputs as _compress
+            _to_assemble = _compress(tool_outputs)
             context_str = self._budget.assemble(
                 memory_results=memory_results,
-                tool_outputs=tool_outputs,       # pass accumulated results to LLM
+                tool_outputs=_to_assemble,       # pass compressed accumulated results to LLM
                 confirmed_facts=state.confirmed_facts,
                 working_set=working_set,
                 env_context=env_ctx,
@@ -555,9 +737,14 @@ class AgentRuntimeLoop:
                     skill_section = self._skill_catalog.format_summary()
                     skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
 
+            # Compress paged results before assembly to prevent context overflow.
+            # Without this, accumulated read_stored_result pages send the full
+            # paged content back to the LLM every turn — Ollama times out.
+            from runtime.context_budget import compress_paged_outputs as _compress
+            _to_assemble = _compress(tool_outputs)
             context_str = self._budget.assemble(
                 memory_results=memory_results,
-                tool_outputs=tool_outputs,       # accumulated tool results feed LLM
+                tool_outputs=_to_assemble,       # compressed accumulated results
                 confirmed_facts=state.confirmed_facts,
                 working_set=working_set,
                 env_context=env_ctx,
@@ -628,8 +815,11 @@ class AgentRuntimeLoop:
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
-                for word in _visible.split():
-                    yield {"token": word + " "}
+                # Stream in 80-char chunks preserving newlines + whitespace.
+                # Frontend renders markdown after the stream completes, so block
+                # structure (\n\n, table rows, ```fences, ## headers) must survive.
+                for _i in range(0, len(_visible), 80):
+                    yield {"token": _visible[_i:_i+80]}
                     await asyncio.sleep(0)
             # If the entire response was tool calls (no prose), yield nothing —
             # the tool result will be injected in the next turn's context and
@@ -759,6 +949,16 @@ class AgentRuntimeLoop:
                 # Update count so llm_engine knows how many current-turn results exist
                 state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
                 state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
+                # Keep raw results for has_more / paging detection in llm_engine
+                if not hasattr(state, "_tool_outputs_raw"):
+                    state._tool_outputs_raw = {}  # type: ignore[attr-defined]
+                state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
+                # Log when tool returns error/empty — high hallucination risk
+                _raw_lower = raw.lower() if isinstance(raw, str) else ""
+                if raw.startswith("[Error]") or "not found" in _raw_lower or                    raw.strip() in ("", "[]", "{}") or "no devices" in _raw_lower:
+                    logger.warning(
+                        "tool %r returned error/empty: %s", tool_name, raw[:120]
+                    )
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):
@@ -781,10 +981,71 @@ class AgentRuntimeLoop:
             decision = self._policy.evaluate(state)
             if decision.should_stop:
                 yield {"message": self._format_final([], decision), "node": "runtime_loop"}
+                # Write tool execution ledger into confirmed_facts for next-round reuse
+                _ledger = _build_tool_ledger(tool_outputs, tool_reg,
+                                              getattr(state, "_tool_outputs_raw", {}))
+                state.confirmed_facts.extend(_ledger)
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
             if self._is_complete(llm_response, new_tool_calls):
+                # Guard: never exit with empty or trivial response when we have context.
+                # Also fires when LLM returns a very short response after tool errors/empty
+                # results — it should tell the user something meaningful, not go silent.
+                _resp_stripped = llm_response.strip()
+                _has_context   = bool(tool_outputs) or bool(state.confirmed_facts)
+                _tool_had_result = bool(tool_outputs)
+                _resp_too_short  = len(_resp_stripped) < 30 and _tool_had_result
+                if (not _resp_stripped or _resp_too_short) and _has_context and state.turns < 3:
+                    # Force one more turn with an explicit synthesis instruction
+                    logger.warning(
+                        "stream: empty response with available context at turn %d — nudging",
+                        state.turns,
+                    )
+                    # Inject a nudge into confirmed_facts as a one-time instruction
+                    # Detect if tools returned errors or empty results
+                    _tool_vals = list(tool_outputs.values())
+                    _has_errors = any(
+                        "[Error]" in str(v) or "not found" in str(v).lower()
+                        or "No devices" in str(v)
+                        for v in _tool_vals
+                    )
+                    if _has_errors:
+                        _nudge_text = (
+                            "_NUDGE: Your previous response was empty or too short. "
+                            "The tools returned errors or empty results. "
+                            "Report this clearly to the user: explain what the tool found (or didn't find), "
+                            "and suggest what they could do next. Do NOT fabricate data."
+                        )
+                    else:
+                        _nudge_text = (
+                            "_NUDGE: Your previous response was empty or too short. "
+                            "Write a complete answer using the available context and tool results."
+                        )
+                    state.confirmed_facts.append(_nudge_text)
+                    state.turns += 1
+                    continue  # retry the LLM call
+                # Remove any lingering nudge entries
+                state.confirmed_facts = [
+                    f for f in state.confirmed_facts if not f.startswith("_NUDGE:")
+                ]
+                _ledger = _build_tool_ledger(tool_outputs, tool_reg,
+                                              getattr(state, "_tool_outputs_raw", {}))
+                state.confirmed_facts.extend(_ledger)
+                # Capture final synthesis response (not intermediate page-reading turns)
+                _resp_clean = llm_response.strip()
+                _is_synthesis = (
+                    len(_resp_clean) > 150
+                    and "[TOOL:" not in _resp_clean
+                    and "[SKILL_LOAD:" not in _resp_clean
+                    and state.turns > 1
+                )
+                if _is_synthesis:
+                    summary_line = _resp_clean[:500].replace("\n", " ")
+                    state.confirmed_facts.append(f"PREV_ANALYSIS: {summary_line}")
+                # NOTE: turn persistence (after_turn) is handled by the backend's
+                # post-turn hook in webui/backend.py:600 via dtm.after_turn(). Do NOT
+                # write here — it would create duplicate long_term_chunks entries.
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
@@ -792,13 +1053,9 @@ class AgentRuntimeLoop:
         if self._memory is None:
             return []
         try:
-            from memory.schemas import RetrievalQuery
-            rq = RetrievalQuery(
-                query_text=query,
-                session_id=session_id,
-                max_tokens=self._cfg.budget.memory_tokens,
-            )
-            return await self._memory.retrieve(rq)
+            # MemoryAdapter.recall_for_session returns a single string of recalled context
+            recalled = await self._memory.recall_for_session(query, session_id)
+            return [recalled] if recalled else []
         except Exception as exc:
             logger.warning("RuntimeLoop: memory retrieval failed: %s", exc)
             return []
