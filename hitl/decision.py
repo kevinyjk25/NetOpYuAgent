@@ -133,6 +133,20 @@ class HitlDecisionRouter:
 
     async def register_interrupt(self, payload: HitlPayload) -> None:
         """Called when a new HITL interrupt fires. Stores the payload. Idempotent."""
+        # Prune expired direct callbacks (>30 min old) to prevent memory growth
+        # in long-running services. The TTL also bounds how late an operator
+        # can approve — after 30 min the callback is gone and approval fails.
+        try:
+            import time as _time_pr
+            _ttl = 1800  # 30 minutes
+            _now = _time_pr.monotonic()
+            self._direct_callbacks = {
+                k: v for k, v in self._direct_callbacks.items()
+                if _now - (v[1] if isinstance(v, tuple) else 0) < _ttl
+            }
+        except Exception:
+            pass
+
         if payload.interrupt_id in self._payload_store:
             logger.debug("register_interrupt: %s already registered, skipping",
                         payload.interrupt_id[:12])

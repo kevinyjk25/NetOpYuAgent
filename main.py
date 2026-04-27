@@ -213,6 +213,15 @@ async def build_services() -> dict[str, Any]:
         except Exception as _exc:
             logger.warning("memory llm_fn wiring failed: %s — facts will use rule-based extraction", _exc)
 
+        # Attach the LLM engine to the HITL executor so that interrupts without
+        # a specific tool callback (low_confidence triggers) can produce a real
+        # LLM answer when approved, instead of empty no-op execution.
+        try:
+            executor._llm_engine = llm_engine
+            logger.info("HITL executor: LLM-answer fallback enabled")
+        except Exception as _exc:
+            logger.warning("HITL executor LLM wiring failed: %s", _exc)
+
         # 6b. Real embeddings — always (both modes)
         try:
             from integrations.embedder import build_embedder

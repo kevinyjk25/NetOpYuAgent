@@ -69,7 +69,15 @@ async def _identity() -> Identity:
 
 
 from log_redaction import redact_text
-from rate_limit import per_operator_limit, global_concurrency
+# Rate-limit / concurrency dependencies are intentionally NOT wired right now.
+# They were previously injected via FastAPI Depends() but the parameter-inference
+# path conflicted with the body-param recognition for ChatRequest. To re-enable:
+# 1) import per_operator_limit, global_concurrency from rate_limit
+# 2) call them inline at the start of each rate-limited endpoint, e.g.:
+#       async def chat_stream(req: ChatRequest):
+#           await per_operator_limit_check(operator_id, rate_per_min=20)
+#           ...
+# This keeps the body-only signature that FastAPI parses cleanly.
 from memory import set_current_operator
 
 logger = logging.getLogger(__name__)
@@ -466,6 +474,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                             # Real HITL interrupt — emit and switch console to HITL tab
                                             yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,**data})}\n\n"
                                             await asyncio.sleep(0)
+                                            # Mark stream terminal state so terminal
+                                            # event becomes 'awaiting_hitl' (⏸) not 'done' (✅).
+                                            stop_outcome = "stop_hitl: awaiting operator approval"
                                         elif data.get("node_step"):
                                             yield f"data: {json.dumps({'node_step':data['node_step'],'node':data.get('node','')})}\n\n"
                                             await asyncio.sleep(0)
@@ -560,6 +571,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             except (asyncio.TimeoutError, Exception):
                                 pass
                             _hitl_intercepted = True
+                            # Mark this stream's terminal state so the outer code
+                            # emits 'awaiting_hitl' (⏸) instead of 'done' (✅).
+                            stop_outcome = "stop_hitl: awaiting operator approval"
                             break
 
                         yield f"data: {json.dumps(chunk)}\n\n"
@@ -606,7 +620,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     if curator:
                         try:
                             memories = await curator.after_turn(session_id, req.query, full_text, tc)
-                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':[m.memory_type.value for m in memories[:5]]})}\n\n"
+                            _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
+                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
                             await asyncio.sleep(0)
                         except Exception as _e:
                             logger.debug("Curation skipped: %s", _e)
@@ -634,7 +649,21 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                 # Include confirmed_facts so frontend can carry them to next query
                 _done_facts = getattr(loop, '_last_confirmed_facts', []) or []
-                yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
+
+                # Distinguish HITL-pending terminal state from a real "done".
+                # When the agent is paused waiting for operator approval, do NOT
+                # emit a 'done' event (that fires the ✅ Done step in the UI).
+                # Emit 'awaiting_hitl' instead — the UI will show ⏸ status and
+                # finalize the run only after the operator decides + post-action runs.
+                _is_hitl_pending = (
+                    "hitl" in str(stop_outcome).lower()
+                    or "approval" in str(stop_outcome).lower()
+                    or "interrupt" in str(stop_outcome).lower()
+                )
+                if _is_hitl_pending:
+                    yield f"data: {json.dumps({'type':'awaiting_hitl','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
                 yield "data: [DONE]\n\n"
 
             except Exception as exc:
@@ -677,8 +706,23 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         Upload a Python tool file (.py).  The file must define one or more
         async functions and a TOOL_REGISTRY dict mapping names → functions,
         OR export individual functions whose names are the tool IDs.
-        Uses Request directly (not File()) to work correctly in mounted sub-apps.
+
+        SECURITY: This endpoint executes uploaded Python code. It is gated
+        behind the 'admin' role (when auth.enabled=true) and runs an AST
+        denylist check before exec to block obvious shell-out / file-system
+        escape attempts. The AST check is best-effort, NOT a sandbox — only
+        deploy this endpoint inside a trusted operator network, never expose
+        it to the public internet.
         """
+        # Require admin role. When auth.enabled=false, _identity() returns
+        # the dev-user with admin role anyway, so dev mode still works.
+        ident = await _identity()
+        if not ident.has_role("admin"):
+            raise HTTPException(
+                status_code=403,
+                detail="Tool upload requires the 'admin' role",
+            )
+
         try:
             form = await request.form()
         except Exception as exc:
@@ -700,14 +744,50 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
 
-        # Compile first to catch syntax errors before exec
+        # AST denylist — block obviously dangerous imports/calls before exec.
+        # This is NOT a sandbox; a determined attacker can bypass it. Pair with
+        # admin-role gating + trusted-network deployment.
+        import ast as _ast_mod
+        _DENIED_IMPORTS = {
+            "os", "subprocess", "sys", "shutil", "socket", "ctypes",
+            "multiprocessing", "pty", "popen2", "commands",
+            "_winreg", "winreg",
+        }
+        _DENIED_CALLS = {"eval", "exec", "compile", "__import__", "open"}
+        try:
+            tree = _ast_mod.parse(source, filename=filename)
+        except SyntaxError as exc:
+            raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
+
+        for node in _ast_mod.walk(tree):
+            if isinstance(node, _ast_mod.Import):
+                for n in node.names:
+                    if n.name.split(".")[0] in _DENIED_IMPORTS:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Import of {n.name!r} is not allowed in uploaded tools",
+                        )
+            elif isinstance(node, _ast_mod.ImportFrom):
+                if node.module and node.module.split(".")[0] in _DENIED_IMPORTS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Import from {node.module!r} is not allowed in uploaded tools",
+                    )
+            elif isinstance(node, _ast_mod.Call):
+                fn = node.func
+                if isinstance(fn, _ast_mod.Name) and fn.id in _DENIED_CALLS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Call to {fn.id!r} is not allowed in uploaded tools",
+                    )
+
+        # Compile (we already parsed; compile catches anything ast.parse missed)
         try:
             code = compile(source, filename, "exec")
         except SyntaxError as exc:
             raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
 
-        # Execute in an isolated namespace with standard library pre-imported
-        # (exec'd functions need __builtins__ and common stdlib available)
+        # Execute in an isolated namespace
         import asyncio as _asyncio_mod, inspect as _inspect_mod
         ns: dict = {"__builtins__": __builtins__}
         try:
@@ -909,7 +989,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         Upload a skill markdown file (.md) or JSON definition (.json).
         The skill is registered in the catalog and persisted to HERMES_DATA_DIR/skills/.
         Uses Request directly (not File()) to work correctly in mounted sub-apps.
+        Gated behind 'admin' role.
         """
+        ident = await _identity()
+        if not ident.has_role("admin"):
+            raise HTTPException(
+                status_code=403,
+                detail="Skill upload requires the 'admin' role",
+            )
+
         catalog    = services.get("skill_catalog")
         skill_evol = services.get("skill_evolver")
         if not catalog:

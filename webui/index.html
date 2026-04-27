@@ -1909,6 +1909,16 @@ function dispatchChunk(c, query, sid) {
     }
     return;
   }
+  if (c.type==='awaiting_hitl') {
+    // Stream is paused for operator approval. Don't show "Done" — show ⏸.
+    // The full run completes after the operator decides and the post-HITL action returns.
+    addStep('hitl-wait',`⏸ Awaiting operator approval`,'',`turns so far: ${c.turns||'?'}`);
+    flowEvent('hitl-wait','⏸ Awaiting approval',`${c.turns||'?'} turns so far`,`session: ${sid}`);
+    if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
+      _sessionFacts = c.confirmed_facts;
+    }
+    return;
+  }
   if (c.type==='hermes_write') {
     addStep('fts','FTS5 Write','Turn → SQLite FTS5',`session: ${c.session_id}`);
     flowEvent('fts','🗄 FTS5 Write',`session: ${c.session_id}`,'cross-session recall updated');
@@ -2322,6 +2332,9 @@ Error: ${data.error}`,'system');
         '**Tool output:**\n```\n' + String(data.tool_result).slice(0, 4000) + '\n```',
         'agent');
       addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
+      // Mark the original turn as DONE — the post-HITL action has completed.
+      addStep('done',`✅ Post-HITL action complete — ${toolName}`,'',`interrupt: ${id.slice(0,12)}`);
+      flowEvent('done','✅ Post-HITL action complete',toolName,`interrupt: ${id.slice(0,12)}`);
       switchTab('cache');
     } else if (dec==='approve') {
       // No tool_result returned — render synthesis as markdown if present.

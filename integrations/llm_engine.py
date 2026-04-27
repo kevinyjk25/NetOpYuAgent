@@ -283,7 +283,7 @@ Return format:
                 if _extra:
                     _extra_lines = ["\nUPLOADED/REGISTERED TOOLS — also available:"]
                     for _n in sorted(_extra):
-                        _extra_lines.append(f"  [TOOL:{_n}] {{"<arg>": "<value>"}}")
+                        _extra_lines.append(f'  [TOOL:{_n}] {{"<arg>": "<value>"}}')
                     extra_tools_section += "\n".join(_extra_lines)
         except Exception as _te:
             # Fallback: list tools from registry with no descriptions
@@ -494,7 +494,10 @@ class OllamaEngine(LLMEngine):
                 1 for k in _tool_output_keys
                 if k.split("|")[0] not in _large_data_tools or "|" not in k
             )
-            if len(_tool_output_keys) >= 3 and not _has_more_pages and not _all_stored:
+            # Use real-results count (excluding big-data tools that legitimately
+            # generate many calls for paging) so the synthesis nudge fires only
+            # when the model has actually gathered enough small-tool data.
+            if _n_real_results >= 3 and not _has_more_pages and not _all_stored:
                 stop_note += (
                     "\n\nYou have gathered sufficient tool results. "
                     "Provide your complete analysis and recommendations now."

@@ -136,6 +136,8 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         skill_catalog:  Optional[Any]             = None,
         # ── v4: Dual-Track Memory ──────────────────────────────────────
         dtm:            Optional[Any]             = None,
+        # ── LLM engine for post-HITL llm_answer fallback ───────────────
+        llm_engine:     Optional[Any]             = None,
     ) -> None:
         self._hitl_router    = hitl_router
         self._review_service = review_service
@@ -157,6 +159,9 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
 
         # ── v4: DTM — primary recall/write path ───────────────────────
         self._dtm            = dtm
+
+        # ── LLM engine for fallback post-HITL answer generation ───────
+        self._llm_engine     = llm_engine
 
         self._runtime = AgentRuntimeLoop(
             memory_router=memory_router,
@@ -688,6 +693,46 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
             ),
         )
         await self._hitl_router.register_interrupt(payload)
+
+        # Fallback: if no tool-specific callback was registered for this interrupt
+        # (e.g. low_confidence triggers from COMPLEX classification), register a
+        # callback that runs an LLM answer on approval. Without this, approve
+        # would route through LangGraph's stub planner and produce empty steps.
+        if interrupt_id not in self._hitl_router._direct_callbacks:
+            _llm = getattr(self, "_llm_engine", None) or getattr(self, "_engine", None)
+            _user_query = context.get_user_input() or ""
+            _sid_local  = session_id
+
+            async def _llm_answer_callback(
+                _llm_ref=_llm, _q=_user_query, _sid=_sid_local,
+            ):
+                # No specific tool — produce an LLM answer to the original query.
+                if _llm_ref is None:
+                    return {
+                        "tool":   "llm_answer",
+                        "result": "Approved, but no tool is configured to handle this query "
+                                  "automatically. Manual investigation required.",
+                    }
+                try:
+                    prompt = (
+                        "The operator just approved this request:\n"
+                        f"  {_q}\n\n"
+                        "There is no specific automated tool registered for this exact intent. "
+                        "Provide your best answer or recommended next steps based on what you know. "
+                        "Reply in the SAME LANGUAGE as the request, using markdown structure: "
+                        "brief verdict, key points as bullets, and a short next-step recommendation."
+                    )
+                    messages = [{"role": "user", "content": prompt}]
+                    if hasattr(_llm_ref, "_chat"):
+                        text = await _llm_ref._chat(messages)
+                    else:
+                        text = await _llm_ref.call(prompt, "", state=None)
+                    return {"tool": "llm_answer", "result": (text or "").strip()}
+                except Exception as exc:
+                    return {"tool": "llm_answer", "error": str(exc)}
+
+            import time as _time_fb
+            self._hitl_router._direct_callbacks[interrupt_id] = (_llm_answer_callback, _time_fb.monotonic())
         asyncio.create_task(self._review_service.notify(payload))
         if self._task_system and self._task_system.hitl_bridge:
             try:

@@ -956,7 +956,10 @@ class AgentRuntimeLoop:
                 state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
                 # Log when tool returns error/empty — high hallucination risk
                 _raw_lower = raw.lower() if isinstance(raw, str) else ""
-                if raw.startswith("[Error]") or "not found" in _raw_lower or                    raw.strip() in ("", "[]", "{}") or "no devices" in _raw_lower:
+                if (raw.startswith("[Error]")
+                        or "not found" in _raw_lower
+                        or raw.strip() in ("", "[]", "{}")
+                        or "no devices" in _raw_lower):
                     logger.warning(
                         "tool %r returned error/empty: %s", tool_name, raw[:120]
                     )
@@ -1024,7 +1027,10 @@ class AgentRuntimeLoop:
                             "Write a complete answer using the available context and tool results."
                         )
                     state.confirmed_facts.append(_nudge_text)
-                    state.turns += 1
+                    # NOTE: do NOT manually increment state.turns here — the
+                    # `continue` jumps back to the top of the while loop where
+                    # `state.turns += 1` runs as the first statement. Manual
+                    # increment caused the < 3 check to allow only 1 retry.
                     continue  # retry the LLM call
                 # Remove any lingering nudge entries
                 state.confirmed_facts = [
@@ -1083,10 +1089,8 @@ class AgentRuntimeLoop:
         Preserves everything outside the think block.
         """
         import re
-        # Remove <think>...</think> (may be multiline, non-greedy)
-        cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL)
-        # Also handle /think variant
-        cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.DOTALL | re.IGNORECASE)
+        # Remove <think>...</think> blocks (case-insensitive, multiline, non-greedy)
+        cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL | re.IGNORECASE)
         return cleaned.strip()
 
     def _parse_tool_calls(self, response: str) -> list[tuple[str, dict[str, Any]]]:
@@ -1198,14 +1202,19 @@ class AgentRuntimeLoop:
     def _is_complete(response: str, tool_calls: list) -> bool:
         # If the LLM emitted a SKILL_LOAD directive, it needs one more turn
         # to read the loaded detail and then call the actual tools.
-        # BUT: if the response ONLY contains SKILL_LOAD with no other content
-        # and no tool calls, limit to one extension (dedup in called_tools handles the rest).
+        # A pure SKILL_LOAD response (no prose, no tool calls) means the model
+        # asked for skill detail and is waiting for it — keep the loop running
+        # so next turn can read the loaded detail. Only mark complete if the
+        # model produced real prose + tool calls alongside the SKILL_LOAD.
         import re as _re
         skill_loads = _re.findall(r"\[SKILL_LOAD:\w+\]", response)
         if skill_loads:
-            # Only extend if there's actual content beyond the SKILL_LOAD directives
             stripped = _re.sub(r"\[SKILL_LOAD:\w+\]", "", response).strip()
-            return len(stripped) == 0 and len(tool_calls) == 0  # pure SKILL_LOAD with nothing else → complete
+            if len(stripped) == 0 and len(tool_calls) == 0:
+                # Pure SKILL_LOAD — keep looping so next turn sees the detail
+                return False
+            # SKILL_LOAD plus other content — completion follows the tool-call rule
+            return len(tool_calls) == 0
         return len(tool_calls) == 0
 
     @staticmethod
