@@ -1729,6 +1729,42 @@ async def _submit_hitl_decision(
         except Exception as _e:
             logger.warning("Post-HITL synthesis failed: %s", _e)
 
+    # Memory write + curation for the post-HITL turn so the conversation
+    # is recoverable from sessions and the Memory tab reflects the action.
+    # Frontend reads these flags to render FTS5 Write / Curation / DONE steps.
+    _memory = services.get("memory")
+    if _memory and result_dict.get("decision") == "approve" and _tool_result:
+        try:
+            user_query = ""
+            payload2 = hitl_router._payload_store.get(interrupt_id)
+            if payload2:
+                user_query = payload2.user_query or ""
+            # Build assistant_text from synthesis + tool_result (synthesis is the user-facing answer)
+            assistant_text = result_dict.get("synthesis") or ""
+            if not assistant_text:
+                assistant_text = str(_tool_result)[:2000]
+            # Bind operator to the same id used during the original turn.
+            set_current_operator((await _identity()).operator_id)
+            # Reuse the original session_id from the interrupt payload for continuity.
+            session_id = payload2.context_id if payload2 else f"hitl__{interrupt_id[:8]}"
+            new_facts = await _memory.after_turn(
+                session_id      = session_id,
+                user_text       = user_query,
+                assistant_text  = assistant_text,
+                tool_calls      = [{"tool": _tool_name}] if _tool_name else [],
+                importance      = 0.7,
+            )
+            result_dict["memory_write"] = {"session_id": session_id, "ok": True}
+            if new_facts:
+                _types = [getattr(f, "fact_type", getattr(f, "memory_type", "fact"))
+                          for f in new_facts[:5]]
+                result_dict["memory_curate"] = {
+                    "memories_count": len(new_facts),
+                    "types":          _types,
+                }
+        except Exception as _e:
+            logger.warning("Post-HITL memory write failed: %s", _e)
+
     return JSONResponse(content=result_dict)
 
 

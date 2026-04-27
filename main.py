@@ -442,6 +442,19 @@ async def lifespan(app: FastAPI):
     from webui.backend import create_webui_app
     webui = create_webui_app(_services)
     app.mount("/webui", webui)
+
+    # Attach the runtime loop to the HITL executor so post-HITL fallback
+    # callbacks can run the full agent (with tool registry + memory recall +
+    # skills) on approved queries — not just a single-shot LLM call.
+    try:
+        _executor   = _services.get("executor")
+        _agent_loop = _services.get("runtime_loop")
+        if _executor is not None and _agent_loop is not None:
+            _executor._runtime_loop = _agent_loop
+            logger.info("HITL executor: full-agent post-HITL fallback enabled")
+    except Exception as _exc:
+        logger.warning("HITL executor runtime-loop wiring failed: %s", _exc)
+
     logger.info("All modules mounted")
     watchdog_task  = asyncio.create_task(_services["hitl_watchdog"].run())
 

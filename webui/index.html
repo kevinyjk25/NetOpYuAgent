@@ -2332,9 +2332,23 @@ Error: ${data.error}`,'system');
         '**Tool output:**\n```\n' + String(data.tool_result).slice(0, 4000) + '\n```',
         'agent');
       addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
+      // Render the same Hermes lifecycle steps that the simple-path produces
+      // (FTS5 Write / Memory Curation) so the post-HITL turn looks complete.
+      if (data.memory_write) {
+        addStep('fts','FTS5 Write','Turn → SQLite FTS5',`session: ${data.memory_write.session_id||''}`);
+        flowEvent('fts','🗄 FTS5 Write',`session: ${data.memory_write.session_id||''}`,'post-HITL turn persisted');
+      }
+      if (data.memory_curate) {
+        const types = (data.memory_curate.types||[]).join(', ');
+        addStep('curate',`Memory Curation — ${data.memory_curate.memories_count} memories`,types||'',
+          `memories: ${data.memory_curate.memories_count}\ntypes: ${types||'—'}`);
+        flowEvent('curate','🧠 Curation',`${data.memory_curate.memories_count} memories`,types||'');
+      }
       // Mark the original turn as DONE — the post-HITL action has completed.
       addStep('done',`✅ Post-HITL action complete — ${toolName}`,'',`interrupt: ${id.slice(0,12)}`);
       flowEvent('done','✅ Post-HITL action complete',toolName,`interrupt: ${id.slice(0,12)}`);
+      // Refresh sessions panel so the post-HITL turn shows up
+      setTimeout(loadSessions, 800);
       switchTab('cache');
     } else if (dec==='approve') {
       // No tool_result returned — render synthesis as markdown if present.

@@ -696,28 +696,53 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
 
         # Fallback: if no tool-specific callback was registered for this interrupt
         # (e.g. low_confidence triggers from COMPLEX classification), register a
-        # callback that runs an LLM answer on approval. Without this, approve
-        # would route through LangGraph's stub planner and produce empty steps.
+        # callback that runs the FULL AGENT LOOP on approval. This gives the
+        # post-HITL action access to the tool registry, system prompt, memory
+        # recall, and skill catalog — so it can actually call tools (e.g.
+        # get_device_config) instead of just answering from memory.
         if interrupt_id not in self._hitl_router._direct_callbacks:
+            _agent_loop = getattr(self, "_runtime_loop", None)
             _llm = getattr(self, "_llm_engine", None) or getattr(self, "_engine", None)
             _user_query = context.get_user_input() or ""
             _sid_local  = session_id
 
-            async def _llm_answer_callback(
-                _llm_ref=_llm, _q=_user_query, _sid=_sid_local,
+            async def _post_hitl_agent_callback(
+                _loop=_agent_loop, _llm_ref=_llm, _q=_user_query, _sid=_sid_local,
             ):
-                # No specific tool — produce an LLM answer to the original query.
+                """
+                Run the agent on the approved query. Prefer the full runtime
+                loop (real tool calls); fall back to single-shot LLM if no loop
+                is wired.
+                """
+                # Path A — full agent loop (preferred). Tool registry, memory,
+                # skills all available; the LLM can call get_device_config etc.
+                if _loop is not None and hasattr(_loop, "stream"):
+                    try:
+                        full_text = ""
+                        post_sid  = f"posthitl__{_sid}"
+                        async for chunk in _loop.stream(
+                            query      = _q,
+                            session_id = post_sid,
+                        ):
+                            tok = chunk.get("token") if isinstance(chunk, dict) else None
+                            if tok:
+                                full_text += tok
+                        if full_text.strip():
+                            return {"tool": "agent_loop", "result": full_text.strip()}
+                    except Exception as exc:
+                        logger.warning("Post-HITL agent loop failed, falling back to LLM: %s", exc)
+
+                # Path B — direct LLM call (no tool access)
                 if _llm_ref is None:
                     return {
                         "tool":   "llm_answer",
-                        "result": "Approved, but no tool is configured to handle this query "
-                                  "automatically. Manual investigation required.",
+                        "result": "Approved, but no agent loop or LLM is configured. "
+                                  "Manual investigation required.",
                     }
                 try:
                     prompt = (
                         "The operator just approved this request:\n"
                         f"  {_q}\n\n"
-                        "There is no specific automated tool registered for this exact intent. "
                         "Provide your best answer or recommended next steps based on what you know. "
                         "Reply in the SAME LANGUAGE as the request, using markdown structure: "
                         "brief verdict, key points as bullets, and a short next-step recommendation."
@@ -732,7 +757,7 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                     return {"tool": "llm_answer", "error": str(exc)}
 
             import time as _time_fb
-            self._hitl_router._direct_callbacks[interrupt_id] = (_llm_answer_callback, _time_fb.monotonic())
+            self._hitl_router._direct_callbacks[interrupt_id] = (_post_hitl_agent_callback, _time_fb.monotonic())
         asyncio.create_task(self._review_service.notify(payload))
         if self._task_system and self._task_system.hitl_bridge:
             try:
