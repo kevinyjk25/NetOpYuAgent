@@ -70,10 +70,27 @@ class DecisionResult:
         }
         # Include tool execution result when callback ran successfully
         if self.graph_result:
+            # Direct callback path: graph_result is {"tool", "args", "result"}
             if "result" in self.graph_result:
                 d["tool_result"] = self.graph_result["result"]
             if "tool" in self.graph_result:
                 d["tool_name"] = self.graph_result["tool"]
+            # LangGraph resume path: graph_result has "execution_results" list of step dicts.
+            # Concatenate each step's output text so the operator sees what happened.
+            if "execution_results" in self.graph_result and "tool_result" not in d:
+                steps = self.graph_result["execution_results"] or []
+                outputs = []
+                for s in steps:
+                    label = s.get("step", "")
+                    out   = s.get("output", "")
+                    status = s.get("status", "ok")
+                    outputs.append(f"[{status}] {label}\n{out}" if label else out)
+                if outputs:
+                    d["tool_result"] = "\n\n".join(outputs)
+                # Fallback tool_name: from action target if no specific tool name available
+                if "tool_name" not in d:
+                    action = self.graph_result.get("proposed_action") or {}
+                    d["tool_name"] = action.get("action_type", "executed_action")
             if "error" in self.graph_result and not d["error"]:
                 d["error"] = self.graph_result["error"]
         return d

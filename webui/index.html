@@ -2311,24 +2311,27 @@ async function hitlDec(id,dec) {
 Outcome: ${outcome}
 Error: ${data.error}`,'system');
     } else if (data.tool_result && dec==='approve') {
-      // Tool executed successfully — show result + synthesis if available
+      // Tool executed successfully — show synthesis (markdown) + raw tool output.
       const toolName = data.tool_name || 'tool';
-      const synthNote = data.synthesis ? `
-
-${data.synthesis}` : '';
+      const synthesisBlock = data.synthesis
+        ? data.synthesis + '\n\n---\n\n'
+        : '';
       addMessage('agent',
-        `✓ HITL approved — ${toolName} executed:${synthNote}
-
-${data.tool_result}`,
+        synthesisBlock +
+        `**✓ HITL approved — \`${toolName}\` executed**\n\n` +
+        '**Tool output:**\n```\n' + String(data.tool_result).slice(0, 4000) + '\n```',
         'agent');
       addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
       switchTab('cache');
     } else if (dec==='approve') {
-      // No tool_result yet — show synthesis or fallback message
-      const synthNote = data.synthesis
-          ? `\nSummary: ${data.synthesis}`
-          : `\nTool is executing — check Results tab for output.`;
-      addMessage('agent',`HITL APPROVE: ${id.slice(0,10)}…\nOutcome: ${outcome}${synthNote}`,'system');
+      // No tool_result returned — render synthesis as markdown if present.
+      if (data.synthesis) {
+        addMessage('agent', data.synthesis, 'agent');
+      } else {
+        addMessage('agent',
+          `**✓ HITL approved** — \`${id.slice(0,10)}…\`\n\nThe approved action is executing. Check the Results tab when complete.`,
+          'agent');
+      }
     } else {
       addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
 Outcome: ${outcome}`,'system');

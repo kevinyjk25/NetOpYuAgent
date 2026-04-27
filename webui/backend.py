@@ -1610,30 +1610,36 @@ async def _submit_hitl_decision(
     result     = await hitl_router.handle_decision(decision)
     result_dict = result.to_dict()
 
-    # Post-HITL synthesis: run one LLM turn to summarise the tool execution result
-    # so the chat shows a meaningful response after the operator approves.
-    _loop = services.get("runtime_loop")
+    # Post-HITL synthesis: run one LLM call to summarise the tool result so
+    # the chat shows a meaningful response after the operator approves.
+    # Uses llm_engine._chat directly (no full agent loop needed).
+    _llm = services.get("llm_engine")
     _tool_result = result_dict.get("tool_result", "")
-    _tool_name   = result_dict.get("tool_name", "the approved tool")
-    if _loop and _tool_result and result_dict.get("decision") == "approve":
+    _tool_name   = result_dict.get("tool_name", "the approved action")
+    if _llm and _tool_result and result_dict.get("decision") == "approve":
         try:
-            _synthesis_query = (
-                f"The HITL-approved tool '{_tool_name}' has just been executed. "
-                f"Summarise the result for the operator in 2-3 sentences."
+            user_query = ""
+            payload2 = hitl_router._payload_store.get(interrupt_id)
+            if payload2:
+                user_query = payload2.user_query or ""
+            _prompt = (
+                f"The operator just approved this request:\n"
+                f"  {user_query}\n\n"
+                f"The tool '{_tool_name}' executed and returned:\n"
+                f"-----\n{str(_tool_result)[:4000]}\n-----\n\n"
+                f"Write a clear answer to the operator in the SAME LANGUAGE as the original request. "
+                f"Use markdown: a brief verdict, key findings as bullets, and a short next-step "
+                f"recommendation. Do not invent data — only summarise what the tool actually returned."
             )
-            _synthesis_facts = [f"TOOL_RESULT: {str(_tool_result)[:800]}"]
-            _full_text = ""
-            async for _chunk in _loop.stream(
-                query           = _synthesis_query,
-                session_id      = f"hitl__{interrupt_id[:8]}",
-                confirmed_facts = _synthesis_facts,
-            ):
-                if _chunk.get("type") == "token":
-                    _full_text += _chunk.get("token", "")
-            if _full_text.strip():
-                result_dict["synthesis"] = _full_text.strip()
+            messages = [{"role": "user", "content": _prompt}]
+            if hasattr(_llm, "_chat"):
+                synth = await _llm._chat(messages)
+            else:
+                synth = await _llm.call(_prompt, "", state=None)
+            if synth and synth.strip():
+                result_dict["synthesis"] = synth.strip()
         except Exception as _e:
-            logger.debug("Post-HITL synthesis failed: %s", _e)
+            logger.warning("Post-HITL synthesis failed: %s", _e)
 
     return JSONResponse(content=result_dict)
 
