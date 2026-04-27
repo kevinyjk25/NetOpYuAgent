@@ -40,10 +40,10 @@ Usage
 
     prompt_section = budget_mgr.assemble(
         memory_results=results,          # list[RetrievalResult]
-        tool_outputs={"prometheus": big_json},
-        confirmed_facts=["payments-service is in prod", "DNS confirmed OK"],
-        working_set=[DeviceRef(id="ap-01", label="AP-01 at Site-A")],
-        env_context={"site": "Site-A", "change_window": False},
+        tool_outputs={"<tool>": big_json},
+        confirmed_facts=["<fact-1>", "<fact-2>"],
+        working_set=[DeviceRef(id="<device-id>", label="<device-label>")],
+        env_context={"site": "<site>", "change_window": False},
     )
     # → compact string ready for {context} slot in the system prompt
 """

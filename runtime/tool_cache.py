@@ -14,7 +14,6 @@ P0 requirement (from PDF review):
    模型如需细节，再调用 ReadResult / DrillDown 工具读取局部内容"
 
 Usage (via WebUI):
-  POST /runtime/cache/demo   → stores a large mock tool result, returns ref_id
   GET  /runtime/cache/{ref_id}?offset=0&length=2000  → reads a page
   GET  /runtime/cache/        → lists all entries for the session
   DELETE /runtime/cache/{ref_id}  → removes one entry
@@ -218,85 +217,11 @@ class ReadRequest(BaseModel):
     length:     int  = 2_000
 
 
-class DemoRequest(BaseModel):
-    session_id:  str = "demo-session"
-    tool_name:   str = "syslog_search"
-    size_chars:  int = 20_000   # how large a payload to generate
-
-
 def create_cache_router():
     from fastapi import APIRouter, HTTPException
     from fastapi.responses import JSONResponse
     api = APIRouter(tags=["Tool Cache (P0)"])
     cache = get_tool_cache()
-
-    # ------------------------------------------------------------------
-    # Demo: store a large mock payload and return ref_id
-    # ------------------------------------------------------------------
-    @api.post("/demo", summary="Demo: store large mock tool output")
-    async def demo_store(req: DemoRequest) -> JSONResponse:
-        """
-        Generates a large mock tool result (syslog lines, NPM metrics, etc.),
-        stores it in the cache, and returns the ref_id so you can read it back.
-
-        This demonstrates the full P0 ToolResultCache cycle:
-          1. Tool produces large payload
-          2. Cache stores it → returns compact reference label
-          3. Only the label enters the LLM prompt
-          4. A follow-up read_result() call retrieves any page on demand
-
-        Try it in the WebUI:
-          POST /runtime/cache/demo  →  note the ref_id
-          GET  /runtime/cache/{ref_id}?session_id=demo-session  →  read page 1
-          GET  /runtime/cache/{ref_id}?session_id=demo-session&offset=2000  →  page 2
-        """
-        # Build a realistic large mock payload
-        lines: list[str] = []
-        if req.tool_name == "syslog_search":
-            for i in range(req.size_chars // 120):
-                ts = f"2025-01-01T00:{i//60:02d}:{i%60:02d}Z"
-                lines.append(
-                    f"{ts} payments-service ERROR [req-{1000+i}] "
-                    f"connection pool exhausted after 30s timeout; "
-                    f"active=50 idle=0 waiting={i%20}"
-                )
-        elif req.tool_name == "prometheus_query":
-            for i in range(req.size_chars // 80):
-                lines.append(
-                    f"{{job='payments', instance='10.0.0.{i%256}', "
-                    f"pod='payments-{i%10}'}} "
-                    f"http_request_duration_seconds_bucket{{le='0.1'}} "
-                    f"{0.85 + (i % 10) * 0.01:.4f} {1704067200000 + i * 15000}"
-                )
-        else:
-            for i in range(req.size_chars // 60):
-                lines.append(
-                    f"device-{i%50:03d}: metric_value={i * 1.23:.2f} "
-                    f"status={'ok' if i % 7 != 0 else 'WARN'}"
-                )
-        raw_payload = "\n".join(lines)
-
-        label = cache.store(req.tool_name, raw_payload, req.session_id)
-        entry = None
-
-        if "[STORED:" in label:
-            ref_id = label.split(":")[2].split(" ")[0]
-            entry  = cache.get_entry(ref_id, req.session_id)
-
-        return JSONResponse({
-            "stored":        "[STORED:" in label,
-            "ref_id":        entry.ref_id if entry else None,
-            "tool_name":     req.tool_name,
-            "session_id":    req.session_id,
-            "total_chars":   len(raw_payload),
-            "total_bytes":   entry.byte_size if entry else len(raw_payload),
-            "prompt_label":  label[:400],
-            "how_to_read":   (
-                f"GET /runtime/cache/{entry.ref_id}"
-                f"?session_id={req.session_id}&offset=0&length=2000"
-            ) if entry else "payload was small enough to be inlined",
-            "pages_available": (len(raw_payload) // 2000 + 1) if entry else 1,
-        })
 
     # ------------------------------------------------------------------
     # Read a page from the cache

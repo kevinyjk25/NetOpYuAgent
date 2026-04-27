@@ -570,7 +570,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   <div class="status-dot" id="status-dot"></div>
   <span class="hbadge" id="session-badge">session: —</span>
   <div class="header-right">
-    <a href="/webui/demos" class="demo-link">🧪 Demo Lab</a>
+    <a href="/webui/demos" class="demo-link" style="display:none">🧪 Demo Lab</a>
     <span class="hbadge warn" id="hitl-badge">● HITL PENDING</span>
     <span class="hbadge" id="cache-badge">cache: 0</span>
     <span class="hbadge" id="model-badge">loop: —</span>
@@ -615,51 +615,22 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
     </div>
   </div>
 
-  <!-- HITL triggers (collapsed by default) -->
-  <div class="acc-head" onclick="toggleAcc(this)" id="acc-hitl">
+  <!-- HITL triggers — operators type real queries; this list intentionally empty. -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-hitl" style="display:none">
     <span>⚠ hitl triggers</span>
     <span class="acc-arrow">▶</span>
   </div>
-  <div class="acc-body" id="acc-body-hitl">
-    <div style="padding:3px 0" id="hitl-queries">
-      <div class="tool-item" onclick="setQuery('restart the payments-service in production')">
-        <div class="risk-dot risk-high"></div>
-        <div><div class="skill-name">restart payments-service</div><div class="skill-purpose">→ HITL: destructive op</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('rollback auth-service to version 3.2.1')">
-        <div class="risk-dot risk-high"></div>
-        <div><div class="skill-name">rollback auth-service</div><div class="skill-purpose">→ HITL: rollback deploy</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('drain k8s-worker-03 for maintenance')">
-        <div class="risk-dot risk-high"></div>
-        <div><div class="skill-name">drain k8s-worker-03</div><div class="skill-purpose">→ HITL: drain node</div></div>
-      </div>
-    </div>
+  <div class="acc-body" id="acc-body-hitl" style="display:none">
+    <div style="padding:3px 0" id="hitl-queries"></div>
   </div>
 
-  <!-- Skill ambiguity demos (collapsed by default) -->
-  <div class="acc-head" onclick="toggleAcc(this)" id="acc-ambiguity">
+  <!-- Skill ambiguity — empty for production; populate via config if desired. -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-ambiguity" style="display:none">
     <span>🔀 skill ambiguity</span>
     <span class="acc-arrow">▶</span>
   </div>
-  <div class="acc-body" id="acc-body-ambiguity">
-    <div style="padding:3px 0" id="ambiguity-queries">
-      <div class="tool-item" onclick="setQuery('get system logs and metrics')">
-        <div class="risk-dot risk-medium"></div>
-        <div><div class="skill-name">logs and metrics</div><div class="skill-purpose">syslog vs prometheus (tie)</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('get device metrics')">
-        <div class="risk-dot risk-medium"></div>
-        <div><div class="skill-name">device metrics</div><div class="skill-purpose">device_info vs prometheus</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('check network status')">
-        <div class="risk-dot risk-medium"></div>
-        <div><div class="skill-name">network status</div><div class="skill-purpose">service_health vs netflow</div></div>
-      </div>
-      <div style="padding:4px 10px;font-size:9px;color:var(--dim)">
-        Set HITL_SKILL_AMBIGUITY=true to route these to approval
-      </div>
-    </div>
+  <div class="acc-body" id="acc-body-ambiguity" style="display:none">
+    <div style="padding:3px 0" id="ambiguity-queries"></div>
   </div>
 
   <!-- Skill evolution (collapsed by default) -->
@@ -724,33 +695,17 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
       <div class="avatar avatar-sys">SYS</div>
       <div class="msg-body">
         <div class="msg-meta">system • now</div>
-        <div class="bubble system">IT Ops Agent v4 ready — all modules live.
+        <div class="bubble system">IT Ops Agent — ready.
 
 ▶  Thinking fold shows every module step (click row to expand detail)
 📦  Cache tab auto-opens when large tool results are stored + paged scroll
-📊  Flow tab logs every real server event (classify → recall → tools → hermes)
+📊  Flow tab logs every real server event (classify → recall → tools → memory)
 
-─── Diagnostic queries (SIMPLE → Runtime Loop) ──────────────────────────
-  search syslogs for errors on ap-01
-  why is RADIUS authentication failing for wireless users?
-  show BGP neighbors for router-01
-  check DNS resolution for payments.internal
-  get NetFlow traffic dump for site-a
-
-─── HITL queries (COMPLEX → Human approval required) ────────────────────
-  restart the payments-service in production
-  rollback auth-service to version 3.2.1
-  drain k8s-worker-03 for maintenance
-  delete stale DNS records for old-site.internal
-
-  Send one of the above → watch HITL tab → Approve or Reject.
-  Uses the A2A executor path: classify=COMPLEX → HITL graph → interrupt.
-
-─── Skill evolution trigger ──────────────────────────────────────────────
-  investigate and resolve the RADIUS certificate expiry on ap-03
-
-  After completion → Demo Lab → Skill Creation to see the auto-generated
-  skill, then Skill Feedback to self-improve it with operator feedback.</div>
+Type a query below. The agent will:
+  • classify it as SIMPLE (autonomous loop) or COMPLEX (HITL approval required)
+  • match relevant skills from the catalog
+  • call tools, store large results, and paginate when needed
+  • write turn memory after each completed answer</div>
       </div>
     </div>
   </div>
@@ -2126,21 +2081,9 @@ function clearFlow() {
 }
 
 // Left panel
-// Skill evolution trigger items — shows 📄 preview when evolved skill exists in catalog
-const SKILL_EVO_TRIGGERS = [
-  {
-    label:   'RADIUS cert expiry',
-    query:   'investigate and resolve the RADIUS certificate expiry affecting wireless users at site-a',
-    skillId: 'radius_cert_expiry',    // expected skill_id after evolution
-    hint:    'complex → auto-skill',
-  },
-  {
-    label:   'BGP route flapping',
-    query:   'diagnose BGP route flapping on router-01 and recommend remediation steps',
-    skillId: 'bgp_route_flapping',
-    hint:    'complex → auto-skill',
-  },
-];
+// Skill evolution trigger items — populated dynamically as skills evolve.
+// To pre-seed example triggers, push entries with {label, query, skillId, hint} here.
+const SKILL_EVO_TRIGGERS = [];
 
 // known_evolved_ids is populated by loadSkills() so renderSkillEvoTriggers knows what exists
 let known_evolved_ids = new Set();

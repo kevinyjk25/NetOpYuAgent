@@ -1,26 +1,23 @@
 """
 tools/mock_tools.py
 --------------------
-Mock IT-ops tools with realistic outputs.
+Mock IT-ops tools with realistic synthetic outputs.
 
-Three tools intentionally return large payloads to demonstrate P0 caching:
-  - syslog_search  : returns hundreds of log lines
-  - prometheus_query: returns time-series data
-  - netflow_dump   : returns raw flow records
+Used in mock mode (no real network access required). Each tool is an async
+callable matching the signature `async def tool(args: dict) -> str` and
+registered through tools/loader.py for the runtime loop.
 
-All tools are async callables matching the signature:
-    async def tool(args: dict) -> str
-and registered in TOOL_REGISTRY for injection into AgentRuntimeLoop.
+Several tools intentionally return large payloads (hundreds of log lines,
+time-series series, raw flow records) to exercise the ToolResultStore +
+read_stored_result paging path:
+  - syslog_search    → log lines
+  - prometheus_query → time-series data
+  - netflow_dump     → raw flow records
 
-P0 demo path
-------------
 When a tool output exceeds ToolResultStore.MAX_INLINE_CHARS (4 000 chars),
-the Budget Manager automatically stores it and returns a reference label.
-The WebUI can then call GET /tools/result/{ref_id}?offset=0 to page through
-the stored data without re-running the tool.
-
-Example ref label returned in the prompt:
-    [STORED:syslog_search:a3f9c12b] Preview: Apr 10 09:12:01 ap-01 dhcp...
+the Budget Manager automatically stores it and returns a reference label
+in the form [STORED:<tool_name>:<ref_id>]. The agent then calls
+[TOOL:read_stored_result] to page through the data.
 """
 from __future__ import annotations
 

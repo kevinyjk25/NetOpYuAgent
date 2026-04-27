@@ -165,8 +165,8 @@ class LoopResult:
 def _call_key(tool_name: str, tool_args: dict) -> str:
     """
     Deduplicate tool calls by name+args fingerprint, not just name.
-    This allows calling validate_device_config(ap-01) and validate_device_config(ap-02)
-    in the same session without the second being blocked as a duplicate.
+    This allows calling the same tool with different args (e.g. different
+    device_ids) in one session without the second being blocked as a duplicate.
     Only blocks genuinely identical calls (same tool, same arguments).
     """
     import json as _json
@@ -450,7 +450,8 @@ class AgentRuntimeLoop:
             warnings.append("Result contains 'error'/'fail' — manual check recommended")
 
         if action_type == "restart_service":
-            # Stub: should call service_health tool to verify recovery
+            # TODO: post-action health probe — verify the restarted service via
+            # whatever health-check tool is registered for it.
             if "healthy" not in result_lower:
                 return VerificationResult.fail(
                     f"Post-restart health check inconclusive for {action_type}",
@@ -539,8 +540,8 @@ class AgentRuntimeLoop:
         last_tool_result  = ""
         tool_outputs: dict[str, str] = {}   # persists across turns — tool results feed next LLM call
         # Seed called_tools from any prior tool calls visible in memory context.
-        # This prevents the LLM from re-calling ap-01 when memory already has
-        # its config from a previous stream() invocation.
+        # This prevents the LLM from re-calling the same tool+args when memory
+        # already has the result from a previous stream() invocation.
         # called_tools uses _call_key(name, args) fingerprints — not bare names.
         # Also seeded from TOOL_EXEC ledger in confirmed_facts (from prior HTTP requests)
         # so tools that ran in previous rounds are not re-executed.
@@ -571,10 +572,10 @@ class AgentRuntimeLoop:
             memory_results = await self._retrieve_memory(query, session_id)
 
             # NOTE: We intentionally do NOT seed called_tools from memory context.
-            # Memory may mention [TOOL: validate_device_config] from a prior call on
-            # device X, but we still need to call it for devices Y and Z.
-            # Deduplication is now by _call_key (name+args), so the same tool with
-            # different device_id args is allowed. Same call with same args is blocked.
+            # Memory may mention a prior tool call on device X, but we still need
+            # to allow that tool to run for devices Y and Z in the current turn.
+            # Deduplication is by _call_key (name+args), so the same tool with
+            # different args is allowed; same call with same args is blocked.
 
             # P2: skill catalog summary always prepended (cache-stable prefix)
             skill_section = ""
@@ -1062,132 +1063,17 @@ class AgentRuntimeLoop:
 
     async def _call_llm(self, query: str, context: str, state: LoopState) -> str:
         """
-        Central LLM dispatch for the runtime loop.
+        Default no-op stub. Raises if called — production code MUST patch this.
 
-        Development stub (no LLM installed):
-          Turn 1  → emits one [TOOL:name] call matched by keyword sets
-          Turn 2+ → tool results are in context → plain summary, no more calls
-
-        Production: patch_runtime_loop(loop, engine) replaces this method
-        entirely. The stub is never called after patching.
-
-        Keyword sets (any()) replace the old if/elif chain — easier to
-        extend and easier to test without touching control flow.
+        At startup, integrations.llm_engine.patch_runtime_loop() replaces this
+        method with one that dispatches to the real LLM engine (Ollama / OpenAI /
+        Anthropic). If you see this exception in logs, patching never ran —
+        check that main.py reached `patch_runtime_loop(executor, llm_engine)`.
         """
-        import json as _json
-        import re as _re
-
-        await asyncio.sleep(0)
-        q = query.lower()
-
-        has_results = (
-            state.turns > 1
-            or "[STORED:" in context
-            or "Tool outputs:" in context
+        raise RuntimeError(
+            "AgentRuntimeLoop._call_llm has not been patched. "
+            "Call integrations.llm_engine.patch_runtime_loop(loop, engine) at startup."
         )
-
-        # ── Turn 2+: summarise from context, no tool call ─────────────
-        if has_results:
-            ctx = context.lower()
-            if any(k in ctx for k in ("syslog", "error log", "log entry")):
-                return (
-                    "Based on syslog analysis:\n"
-                    "Found error patterns in recent logs. "
-                    "Recommend reviewing certificate expiry, interface flapping, "
-                    "and RADIUS timeout. No immediate P0 condition."
-                )
-            if any(k in ctx for k in ("bgp", "neighbor", "route table")):
-                return (
-                    "BGP analysis complete:\n"
-                    "Neighbour table retrieved. Sessions established. "
-                    "No route flapping detected in last 5 minutes."
-                )
-            if any(k in ctx for k in ("dns", "resolv", "nxdomain")):
-                return "DNS analysis: resolution operational. No NXDOMAIN or timeout errors."
-            if any(k in ctx for k in ("device", "firmware", "cpu usage")):
-                return "Device status: reachable and operational. CPU/memory within normal ranges."
-            if any(k in ctx for k in ("incident", " p1 ", " p0 ")):
-                return "Incident summary: 2 open P1 incidents — INC-1291 (RADIUS), INC-1305 (DNS)."
-            return (
-                "Analysis complete:\n"
-                "Reviewed telemetry. No critical anomalies in current state."
-            )
-
-        # ── Turn 1: intent → tool mapping ─────────────────────────────
-        # Each entry: (keyword_set, tool_name, default_args_dict)
-        INTENT_MAP = [
-            (
-                {"netflow", "traffic", "flow", "bandwidth"},
-                "netflow_dump",
-                {"site": "site-a", "flows": 500},
-            ),
-            (
-                {"metric", "prometheus", "utilisa", "cpu", "memory"},
-                "prometheus_query",
-                {"metric": "up", "job": "network_devices", "range_minutes": 60},
-            ),
-            (
-                {"dns", "resolv", "nslookup"},
-                "dns_lookup",
-                {"hostname": "payments.internal"},
-            ),
-            (
-                {"auth", "radius", "certificate", "cert", "login"},
-                "syslog_search",
-                {"host": "radius-*", "severity": "error", "lines": 50},
-            ),
-            (
-                {"bgp", "routing", "prefix", "neighbor"},
-                "get_bgp_summary",
-                {"router": "router-01"},
-            ),
-            (
-                {"incident", "ticket", "open incident"},
-                "list_incidents",
-                {"severity": "P1", "status": "open"},
-            ),
-            (
-                {"ip address", "ipam", "subnet"},
-                "search_ip_addresses",
-                {"prefix": "10.0.0.0/8"},
-            ),
-            # syslog is last so more-specific intents (auth, radius) match first
-            (
-                {"syslog", "log", "error", "alert"},
-                "syslog_search",
-                {"host": "ap-*", "severity": "error", "lines": 100},
-            ),
-        ]
-
-        for keywords, tool_name, default_args in INTENT_MAP:
-            if any(k in q for k in keywords):
-                args_str = _json.dumps(default_args)
-                return (
-                    f"Analysing: {query}\n"
-                    f"[TOOL:{tool_name}] {args_str}\n"
-                    "Retrieving data for analysis."
-                )
-
-        # Device / AP / switch queries — extract device ID from query
-        if any(k in q for k in ("device", "status", "switch", "interface", "port")):
-            m = _re.search(r"(ap-\d+|sw-[\w-]+|router-\d+)", q)
-            dev = m.group(1) if m else "ap-01"
-            args_str = _json.dumps({"device_id": dev})
-            return (
-                f"Checking device: {query}\n"
-                f"[TOOL:get_device_status] {args_str}\n"
-                "Fetching live device metrics."
-            )
-
-        # No matching intent — general query, no tool needed
-        return (
-            f"Analysing: {query}\n"
-            "Based on system context, this appears to be a general operational query. "
-            "All monitored services are nominal. For targeted diagnostics, "
-            "provide a device name, time range, or affected service."
-        )
-
-
 
     @staticmethod
     def _strip_thinking(response: str) -> str:
