@@ -322,10 +322,29 @@ class MidTermStore:
             sql += " AND fact_type=?"; params.append(fact_type)
         rows = self._pool.execute_read(sql, tuple(params))
 
+        # Fact-type relevance boost (ported from legacy dual_track.py): some
+        # fact types carry more durable operational value than others —
+        # incident lessons and tool patterns generalise across sessions, while
+        # one-off user preferences should not crowd them out.
+        # Keys map agent_memory's 7-class taxonomy to a relevance multiplier;
+        # missing types fall back to 1.0.
+        _TYPE_BOOST = {
+            "lesson":     1.30,    # incident lessons — high reuse value
+            "procedure":  1.20,    # tool patterns / runbooks
+            "config":     1.10,    # device/service configurations
+            "entity":     1.05,    # named devices, services
+            "env":        1.00,    # environment facts (baseline)
+            "general":    0.95,    # uncategorised
+            "preference": 0.85,    # user habits — relevant but local
+        }
+
         scored = [
-            (tfidf_score.get(r["fact_id"], 0.0) * max(r["confidence"], 0.01)
-             + (0.5 if r["fact_id"] in fts_ids else 0.0),
-             r["updated_at"], r)
+            (
+                (tfidf_score.get(r["fact_id"], 0.0) * max(r["confidence"], 0.01)
+                 + (0.5 if r["fact_id"] in fts_ids else 0.0))
+                * _TYPE_BOOST.get(r["fact_type"], 1.0),
+                r["updated_at"], r
+            )
             for r in rows
         ]
         scored.sort(key=lambda x: (x[0], x[1]), reverse=True)

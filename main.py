@@ -210,6 +210,23 @@ async def build_services() -> dict[str, Any]:
                     finally:
                         new_loop.close()
             memory_router.set_llm_fn(_sync_llm_for_memory)
+            # Smoke test: invoke the wrapper once with a tiny prompt to confirm
+            # the LLM is reachable. If this fails, fact extraction silently
+            # falls back to English-only regex and B-track stays at 0 forever.
+            try:
+                _smoke = _sync_llm_for_memory(
+                    "Return ONLY this JSON array, no other text: []"
+                )
+                logger.info(
+                    "Memory LLM smoke test OK — response %d chars: %r",
+                    len(_smoke or ""), (_smoke or "")[:120],
+                )
+            except Exception as _smk:
+                logger.warning(
+                    "Memory LLM smoke test FAILED: %s — fact extraction will "
+                    "fall back to rule-based regex (English-only). Facts (track B) "
+                    "will likely stay at 0 for non-English conversations.", _smk,
+                )
         except Exception as _exc:
             logger.warning("memory llm_fn wiring failed: %s — facts will use rule-based extraction", _exc)
 
@@ -244,7 +261,7 @@ async def build_services() -> dict[str, Any]:
         # Store loader on services so llm_engine can build the dynamic tool section
         services["tool_loader"] = _loader
         logger.info("ToolLoader[%s]: %d tools assembled", cfg.mode, len(tool_registry_local))
-        
+
         # 6d. MCP client
         mcp_client = await _build_mcp_client(MCPClient)
         await mcp_client.connect_all()
