@@ -363,13 +363,14 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 yield f"data: {json.dumps({'type':'classify','complexity':decision.complexity.value,'tier':decision.model_tier,'reason':decision.reason[:100]})}\n\n"
                 await asyncio.sleep(0)
 
-                # ── Step 2: Pre-verify ────────────────────────────────────
-                pre = await loop.pre_verify(req.query, req.confirmed_facts, req.env_context)
-                yield f"data: {json.dumps({'type':'pre_verify','passed':pre.passed,'reason':pre.reason[:150]})}\n\n"
-                await asyncio.sleep(0)
-
-                # ── Step 3: Cross-session recall (DTM v4 or FTS5 v3) ─────
+                # ── Step 2: Cross-session recall (DTM v4) ────────────────
+                # Recall MUST happen BEFORE pre_verify so that policy
+                # evaluation can see same-session context (e.g. "this device"
+                # in the user query refers to ap-02 from the prior turn).
+                # Without this, pre_verify treats every reference-bearing query
+                # as ambiguous and BLOCKs follow-up questions.
                 recall_text = ""
+                memory_items: list = []
                 if memory:
                     try:
                         # operator_id was set by `set_current_operator((await _identity())…)`
@@ -391,6 +392,16 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         await asyncio.sleep(0)
                     except Exception as _e:
                         logger.debug("FTS5 recall skipped: %s", _e)
+
+                # ── Step 3: Pre-verify (with recalled context) ───────────
+                # Pass recall_text in env_context so PolicyEngine can resolve
+                # references like "this device" against the session history.
+                _pre_env = dict(req.env_context or {})
+                if recall_text:
+                    _pre_env["_fts_context"] = recall_text
+                pre = await loop.pre_verify(req.query, req.confirmed_facts, _pre_env)
+                yield f"data: {json.dumps({'type':'pre_verify','passed':pre.passed,'reason':pre.reason[:150]})}\n\n"
+                await asyncio.sleep(0)
 
                 # ── Step 4: Execute via loop (all queries) ────────────────
                 # Uses the real patched LLM + real ToolRouter registry
@@ -1682,6 +1693,15 @@ async def _submit_hitl_decision(
     if not hitl_router:
         raise HTTPException(status_code=503, detail="HITL router not available")
 
+    # CRITICAL: bind operator at the TOP so that handle_decision() — and any
+    # post-HITL callback it triggers (including loop.stream → _retrieve_memory
+    # → MemoryAdapter.recall, which reads get_current_operator() to scope the
+    # user_id) — runs inside the same operator's memory namespace as the
+    # original chat_stream turn. Without this, recall happens under user_id
+    # "system" (the contextvar default), finds nothing, and the post-HITL
+    # agent loop runs without any prior-turn context.
+    set_current_operator((await _identity()).operator_id)
+
     payload = hitl_router._payload_store.get(interrupt_id)
     if payload is None:
         raise HTTPException(status_code=404, detail=f"Interrupt {interrupt_id!r} not found")
@@ -1695,24 +1715,29 @@ async def _submit_hitl_decision(
         comment=req.comment,
         parameter_patch=req.parameter_patch,
     )
-    result     = await hitl_router.handle_decision(decision)
+    result      = await hitl_router.handle_decision(decision)
     result_dict = result.to_dict()
+
+    _decision    = result_dict.get("decision")
+    _tool_result = result_dict.get("tool_result", "")
+    _tool_name   = result_dict.get("tool_name", "the approved action")
+    _user_query  = payload.user_query or ""
 
     # Post-HITL synthesis: run one LLM call to summarise the tool result so
     # the chat shows a meaningful response after the operator approves.
-    # Uses llm_engine._chat directly (no full agent loop needed).
+    # SKIP synthesis when tool_name == "agent_loop": the post-HITL agent
+    # loop already produced a complete user-facing markdown answer; running
+    # synthesis on top of it would just be a degraded summary-of-summary
+    # that wastes tokens and loses information.
     _llm = services.get("llm_engine")
-    _tool_result = result_dict.get("tool_result", "")
-    _tool_name   = result_dict.get("tool_name", "the approved action")
-    if _llm and _tool_result and result_dict.get("decision") == "approve":
+    if (
+        _llm and _tool_result and _decision == "approve"
+        and _tool_name != "agent_loop"
+    ):
         try:
-            user_query = ""
-            payload2 = hitl_router._payload_store.get(interrupt_id)
-            if payload2:
-                user_query = payload2.user_query or ""
             _prompt = (
                 f"The operator just approved this request:\n"
-                f"  {user_query}\n\n"
+                f"  {_user_query}\n\n"
                 f"The tool '{_tool_name}' executed and returned:\n"
                 f"-----\n{str(_tool_result)[:4000]}\n-----\n\n"
                 f"Write a clear answer to the operator in the SAME LANGUAGE as the original request. "
@@ -1728,31 +1753,45 @@ async def _submit_hitl_decision(
                 result_dict["synthesis"] = synth.strip()
         except Exception as _e:
             logger.warning("Post-HITL synthesis failed: %s", _e)
+    elif _tool_name == "agent_loop" and _tool_result:
+        # The agent loop output IS the user-facing answer — promote it to
+        # `synthesis` so the frontend renders it once (not twice).
+        result_dict["synthesis"] = str(_tool_result).strip()
 
-    # Memory write + curation for the post-HITL turn so the conversation
-    # is recoverable from sessions and the Memory tab reflects the action.
-    # Frontend reads these flags to render FTS5 Write / Curation / DONE steps.
+    # Memory write + curation for every post-HITL turn (approve / reject /
+    # escalate are all auditable operations facts worth persisting).
+    # Frontend reads memory_write / memory_curate flags to render FTS5 Write
+    # and Memory Curation steps.
     _memory = services.get("memory")
-    if _memory and result_dict.get("decision") == "approve" and _tool_result:
+    if _memory and _decision in ("approve", "reject", "escalate"):
         try:
-            user_query = ""
-            payload2 = hitl_router._payload_store.get(interrupt_id)
-            if payload2:
-                user_query = payload2.user_query or ""
-            # Build assistant_text from synthesis + tool_result (synthesis is the user-facing answer)
-            assistant_text = result_dict.get("synthesis") or ""
-            if not assistant_text:
-                assistant_text = str(_tool_result)[:2000]
-            # Bind operator to the same id used during the original turn.
-            set_current_operator((await _identity()).operator_id)
+            # Build assistant_text. For approves with tool output use the
+            # synthesised answer (or raw tool output if synthesis was skipped).
+            # For rejects / escalates write a concise audit-style message so
+            # the conversation history reflects the operator's decision.
+            if _decision == "approve":
+                assistant_text = (
+                    result_dict.get("synthesis")
+                    or (str(_tool_result)[:2000] if _tool_result else "")
+                    or f"[HITL approved — {_tool_name}]"
+                )
+            else:
+                _comment = (req.comment or "").strip()
+                assistant_text = (
+                    f"[HITL {_decision} — {_tool_name}] "
+                    f"operator={req.operator_id or 'unknown'}"
+                    + (f" — {_comment}" if _comment else "")
+                )
+            # operator is already bound at the top of _submit_hitl_decision —
+            # no need to re-set here.
             # Reuse the original session_id from the interrupt payload for continuity.
-            session_id = payload2.context_id if payload2 else f"hitl__{interrupt_id[:8]}"
+            session_id = payload.context_id or f"hitl__{interrupt_id[:8]}"
             new_facts = await _memory.after_turn(
                 session_id      = session_id,
-                user_text       = user_query,
+                user_text       = _user_query,
                 assistant_text  = assistant_text,
                 tool_calls      = [{"tool": _tool_name}] if _tool_name else [],
-                importance      = 0.7,
+                importance      = 0.7 if _decision == "approve" else 0.5,
             )
             result_dict["memory_write"] = {"session_id": session_id, "ok": True}
             if new_facts:
@@ -1765,6 +1804,19 @@ async def _submit_hitl_decision(
         except Exception as _e:
             logger.warning("Post-HITL memory write failed: %s", _e)
 
+    # Diagnostic: log exactly what we send back to the frontend so we can
+    # tell whether the issue is server-side (we never sent it) or client-side
+    # (frontend received it but didn't render).
+    _synth_len = len(result_dict.get("synthesis") or "")
+    _tres_len  = len(str(result_dict.get("tool_result") or ""))
+    logger.info(
+        "_submit_hitl_decision: returning to frontend — interrupt=%s "
+        "decision=%s tool_name=%r synthesis=%d chars tool_result=%d chars "
+        "memory_write=%s memory_curate=%s",
+        interrupt_id[:12], _decision, _tool_name, _synth_len, _tres_len,
+        bool(result_dict.get("memory_write")),
+        bool(result_dict.get("memory_curate")),
+    )
     return JSONResponse(content=result_dict)
 
 

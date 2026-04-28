@@ -2323,27 +2323,25 @@ Error: ${data.error}`,'system');
     } else if (data.tool_result && dec==='approve') {
       // Tool executed successfully — show synthesis (markdown) + raw tool output.
       const toolName = data.tool_name || 'tool';
-      const synthesisBlock = data.synthesis
-        ? data.synthesis + '\n\n---\n\n'
-        : '';
-      addMessage('agent',
-        synthesisBlock +
-        `**✓ HITL approved — \`${toolName}\` executed**\n\n` +
-        '**Tool output:**\n```\n' + String(data.tool_result).slice(0, 4000) + '\n```',
-        'agent');
+      // For agent_loop, synthesis IS the answer — the tool_result is the same
+      // text, so don't render the raw "Tool output" block (would duplicate).
+      const isAgentLoop = toolName === 'agent_loop';
+      if (isAgentLoop && data.synthesis) {
+        addMessage('agent',
+          data.synthesis + '\n\n---\n\n' +
+          `**✓ HITL approved — agent loop completed**`,
+          'agent');
+      } else {
+        const synthesisBlock = data.synthesis
+          ? data.synthesis + '\n\n---\n\n'
+          : '';
+        addMessage('agent',
+          synthesisBlock +
+          `**✓ HITL approved — \`${toolName}\` executed**\n\n` +
+          '**Tool output:**\n```\n' + String(data.tool_result).slice(0, 4000) + '\n```',
+          'agent');
+      }
       addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
-      // Render the same Hermes lifecycle steps that the simple-path produces
-      // (FTS5 Write / Memory Curation) so the post-HITL turn looks complete.
-      if (data.memory_write) {
-        addStep('fts','FTS5 Write','Turn → SQLite FTS5',`session: ${data.memory_write.session_id||''}`);
-        flowEvent('fts','🗄 FTS5 Write',`session: ${data.memory_write.session_id||''}`,'post-HITL turn persisted');
-      }
-      if (data.memory_curate) {
-        const types = (data.memory_curate.types||[]).join(', ');
-        addStep('curate',`Memory Curation — ${data.memory_curate.memories_count} memories`,types||'',
-          `memories: ${data.memory_curate.memories_count}\ntypes: ${types||'—'}`);
-        flowEvent('curate','🧠 Curation',`${data.memory_curate.memories_count} memories`,types||'');
-      }
       // Mark the original turn as DONE — the post-HITL action has completed.
       addStep('done',`✅ Post-HITL action complete — ${toolName}`,'',`interrupt: ${id.slice(0,12)}`);
       flowEvent('done','✅ Post-HITL action complete',toolName,`interrupt: ${id.slice(0,12)}`);
@@ -2362,6 +2360,19 @@ Error: ${data.error}`,'system');
     } else {
       addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
 Outcome: ${outcome}`,'system');
+    }
+    // Render Hermes lifecycle steps (FTS5 Write / Memory Curation) for ANY
+    // decision that produced a memory write — approve / reject / escalate
+    // are all auditable operations and the Memory tab should reflect them.
+    if (data.memory_write) {
+      addStep('fts','FTS5 Write','Turn → SQLite FTS5',`session: ${data.memory_write.session_id||''}`);
+      flowEvent('fts','🗄 FTS5 Write',`session: ${data.memory_write.session_id||''}`,'post-HITL turn persisted');
+    }
+    if (data.memory_curate) {
+      const types = (data.memory_curate.types||[]).join(', ');
+      addStep('curate',`Memory Curation — ${data.memory_curate.memories_count} memories`,types||'',
+        `memories: ${data.memory_curate.memories_count}\ntypes: ${types||'—'}`);
+      flowEvent('curate','🧠 Curation',`${data.memory_curate.memories_count} memories`,types||'');
     }
     flowAdd('hitl',`⚠ HITL ${dec.toUpperCase()}`,`${id.slice(0,12)}…`,`outcome: ${outcome}`,data);
     setTimeout(()=>refreshHitl(0),400);

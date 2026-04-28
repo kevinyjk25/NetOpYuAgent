@@ -409,12 +409,30 @@ class AgentRuntimeLoop:
         """
         Pre-action verification using PolicyEngine when available.
         Falls back to keyword check if engine is not wired.
+
+        We pass any recalled session context (env_context["_fts_context"]) and
+        confirmed_facts to the policy so that follow-up queries with pronouns
+        ("this device", "it", "the AP") can be resolved against prior turns.
+        Without this, multi-turn queries get BLOCKed for "missing device ID".
         """
         from runtime.policy_engine import get_policy_engine as _get_pe
         _engine = _get_pe()
         if _engine is not None:
             try:
-                result = await _engine.evaluate("preverify_safe_to_proceed", query)
+                # Build a context block the policy LLM can read alongside the query.
+                _ctx_parts: list[str] = []
+                _fts = (env_context or {}).get("_fts_context")
+                if _fts:
+                    _ctx_parts.append(str(_fts)[:1500])
+                if confirmed_facts:
+                    _ctx_parts.append(
+                        "Confirmed facts:\n" +
+                        "\n".join(f"- {f}" for f in list(confirmed_facts)[:10])
+                    )
+                _ctx = "\n\n".join(_ctx_parts)
+                result = await _engine.evaluate(
+                    "preverify_safe_to_proceed", query, context=_ctx
+                )
                 if not result.match:
                     return VerificationResult.fail(
                         f"Policy[preverify_safe_to_proceed]: {result.reason}"
@@ -525,20 +543,14 @@ class AgentRuntimeLoop:
         state.confirmed_facts = list(confirmed_facts or [])
         setattr(state, "working_set", list(working_set or []))
 
-        # P1: pre-verification
-        if self._cfg.enable_pre_verification:
-            pre = await self.pre_verify(query, state.confirmed_facts, env_ctx)
-            if not pre.passed:
-                return LoopResult(
-                    outcome=StopOutcome.STOP_HITL,
-                    final_response=f"Pre-verification failed: {pre.reason}",
-                    confirmed_facts=state.confirmed_facts,
-                    verification=pre,
-                )
+        # Pre-verification deferred until AFTER first memory recall (see below)
+        # so PolicyEngine can see prior session context. See identical fix in
+        # stream() for the rationale.
 
         chunks: list[str] = []
         last_tool_result  = ""
         tool_outputs: dict[str, str] = {}   # persists across turns — tool results feed next LLM call
+        _pre_verified = False                # run pre_verify exactly once, after first recall
         # Seed called_tools from any prior tool calls visible in memory context.
         # This prevents the LLM from re-calling the same tool+args when memory
         # already has the result from a previous stream() invocation.
@@ -570,6 +582,26 @@ class AgentRuntimeLoop:
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
+
+            # P1: pre-verification (deferred until first recall; runs once)
+            if not _pre_verified and self._cfg.enable_pre_verification:
+                _pre_env = dict(env_ctx)
+                if "_fts_context" not in _pre_env and memory_results:
+                    try:
+                        _pre_env["_fts_context"] = "\n".join(
+                            str(m) for m in memory_results
+                        )[:1500]
+                    except Exception:
+                        pass
+                pre = await self.pre_verify(query, state.confirmed_facts, _pre_env)
+                _pre_verified = True
+                if not pre.passed:
+                    return LoopResult(
+                        outcome=StopOutcome.STOP_HITL,
+                        final_response=f"Pre-verification failed: {pre.reason}",
+                        confirmed_facts=state.confirmed_facts,
+                        verification=pre,
+                    )
 
             # NOTE: We intentionally do NOT seed called_tools from memory context.
             # Memory may mention a prior tool call on device X, but we still need
@@ -695,7 +727,15 @@ class AgentRuntimeLoop:
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
+        skip_pre_verify: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
+        """
+        skip_pre_verify: when True, bypass the PolicyEngine pre-verification
+        gate. Post-HITL callers MUST set this to True — operator approval is
+        the final authority on whether a destructive action proceeds, and
+        running PolicyEngine afterwards causes it to second-guess and BLOCK
+        already-approved actions on keywords like "修复" / "restart" / "rollback".
+        """
         env_ctx  = env_context or {}
         tool_reg = tool_registry or {}
 
@@ -709,18 +749,41 @@ class AgentRuntimeLoop:
         state.confirmed_facts = list(confirmed_facts or [])
         setattr(state, "working_set", list(working_set or []))
 
-        if self._cfg.enable_pre_verification:
-            pre = await self.pre_verify(query, state.confirmed_facts, env_ctx)
-            if not pre.passed:
-                yield {"message": f"Pre-verification failed: {pre.reason}", "node": "pre_verify"}
-                return
+        # Pre-verification deferred until AFTER memory recall (see below) so
+        # that PolicyEngine can resolve references like "this device" against
+        # prior turns. Without this, post-HITL callbacks (and any caller that
+        # doesn't pre-fill env_context with _fts_context) would run pre_verify
+        # with empty context and mis-classify pronoun queries as ambiguous.
 
         tool_outputs: dict[str, str] = {}   # persists across turns
         called_tools: set[str] = set()       # dedup guard
+        _pre_verified = False                # run pre_verify exactly once
 
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
+
+            # Run pre_verify on the FIRST turn only, AFTER recall. Inject the
+            # recalled context (and any caller-supplied _fts_context) so the
+            # policy LLM can see entities mentioned earlier in the session.
+            # Skipped when caller has already obtained operator approval (HITL).
+            if (not _pre_verified
+                    and self._cfg.enable_pre_verification
+                    and not skip_pre_verify):
+                _pre_env = dict(env_ctx)
+                # Prefer caller-supplied context; otherwise use freshly recalled.
+                if "_fts_context" not in _pre_env and memory_results:
+                    try:
+                        _pre_env["_fts_context"] = "\n".join(
+                            str(m) for m in memory_results
+                        )[:1500]
+                    except Exception:
+                        pass
+                pre = await self.pre_verify(query, state.confirmed_facts, _pre_env)
+                _pre_verified = True
+                if not pre.passed:
+                    yield {"message": f"Pre-verification failed: {pre.reason}", "node": "pre_verify"}
+                    return
 
             skill_section  = ""
             skill_count    = 0

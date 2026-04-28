@@ -702,33 +702,137 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
         # get_device_config) instead of just answering from memory.
         if interrupt_id not in self._hitl_router._direct_callbacks:
             _agent_loop = getattr(self, "_runtime_loop", None)
-            _llm = getattr(self, "_llm_engine", None) or getattr(self, "_engine", None)
+            _llm = self._llm_engine
             _user_query = context.get_user_input() or ""
             _sid_local  = session_id
+            # Capture the live tool registry so the post-HITL agent loop can
+            # actually call tools (get_device_config, validate_device_config, …)
+            # instead of running with an empty registry and answering blind.
+            _tool_reg_local = self._tool_registry
+            # Capture the memory adapter so the callback can pre-recall the
+            # session context. We pass it to stream() via env_context so that
+            # stream's INTERNAL pre_verify (which runs BEFORE its own internal
+            # _retrieve_memory) can see prior-turn context. Without this, the
+            # PolicyEngine call inside stream.pre_verify gets an empty context
+            # and the LLM downstream has no idea what device "该设备" refers to.
+            _memory_local = getattr(_agent_loop, "_memory", None)
 
             async def _post_hitl_agent_callback(
                 _loop=_agent_loop, _llm_ref=_llm, _q=_user_query, _sid=_sid_local,
+                _tool_reg=_tool_reg_local, _mem=_memory_local,
             ):
                 """
                 Run the agent on the approved query. Prefer the full runtime
                 loop (real tool calls); fall back to single-shot LLM if no loop
                 is wired.
                 """
+                # Pre-recall: fetch session context BEFORE handing to stream so
+                # stream's internal pre_verify (which fires before its own
+                # _retrieve_memory) gets the same recall the chat_stream path
+                # gets. Without this, the post-HITL turn runs with NO awareness
+                # of prior turns — see "After HITL" prompt in user reports.
+                _env_ctx: dict = {}
+                if _mem is not None and _q:
+                    try:
+                        _rec = await _mem.recall(_q, _sid, max_chars=1200)
+                        if _rec and getattr(_rec, "prompt_context", ""):
+                            _env_ctx["_fts_context"] = _rec.prompt_context
+                            logger.info(
+                                "Post-HITL callback: pre-recalled context "
+                                "for session=%s query=%r → %d chars",
+                                _sid, _q[:60], len(_rec.prompt_context),
+                            )
+                        else:
+                            logger.info(
+                                "Post-HITL callback: pre-recall returned EMPTY "
+                                "for session=%s query=%r — Path B will answer blind",
+                                _sid, _q[:60],
+                            )
+                    except Exception as _re:
+                        logger.warning("Post-HITL pre-recall failed: %s", _re)
+
                 # Path A — full agent loop (preferred). Tool registry, memory,
                 # skills all available; the LLM can call get_device_config etc.
                 if _loop is not None and hasattr(_loop, "stream"):
                     try:
                         full_text = ""
-                        post_sid  = f"posthitl__{_sid}"
+                        last_message = ""
+                        # Wrap the user query with a post-HITL banner so the LLM
+                        # knows operator approval has ALREADY been granted for
+                        # this request and it should NOT ask the user to
+                        # "reply 确认 to trigger HITL approval".
+                        #
+                        # CRITICAL: the LLM has been observed to ignore softer
+                        # instructions and still produce "请回复确认或执行" /
+                        # "是否确认执行此修改" pseudo-confirmation text. The
+                        # banner below uses very explicit MUST/MUST-NOT framing
+                        # plus a forbidden-phrases list to stop this behaviour.
+                        _approved_query = (
+                            "================================================================\n"
+                            "【SYSTEM OVERRIDE — POST-HITL EXECUTION CONTEXT】\n"
+                            "================================================================\n"
+                            "An operator has ALREADY clicked Approve on this request.\n"
+                            "This turn IS the approved execution. There is NO further\n"
+                            "user confirmation step. You are NOT in the planning phase.\n"
+                            "\n"
+                            "MUST DO (one of):\n"
+                            "  (a) Call the relevant config/action tool DIRECTLY in this\n"
+                            "      same turn — e.g. [TOOL:edit_device_config] {...}.\n"
+                            "      That tool itself is HITL-flagged and will surface a\n"
+                            "      fine-grained approval card showing the exact change.\n"
+                            "      You do NOT need to ask the user for permission first.\n"
+                            "  (b) If the request is purely informational/diagnostic and\n"
+                            "      no action tool is needed, give your final analysis as\n"
+                            "      a terminal answer (no [TOOL:] line at all).\n"
+                            "\n"
+                            "MUST NOT, under any circumstance:\n"
+                            "  • Output 'Are you sure?' / '是否确认' / '是否执行此修改'\n"
+                            "  • Output '请回复 确认 / 执行 / yes / proceed'\n"
+                            "  • Output 'reply confirm to trigger HITL approval'\n"
+                            "  • Ask the user any clarification, confirmation, or\n"
+                            "    permission question. The operator already approved.\n"
+                            "  • Produce a 'plan / proposal' phrased as a request for\n"
+                            "    user sign-off. If you have a plan, EXECUTE it via the\n"
+                            "    tool, do not describe it as pending approval.\n"
+                            "\n"
+                            "Approved request:\n"
+                            f"  {_q}\n"
+                            "================================================================"
+                        )
+                        # Use the ORIGINAL session_id so _retrieve_memory can
+                        # recall facts from the pre-HITL turns of this same
+                        # conversation (e.g. a router-01 config fetched moments
+                        # ago). Prefixing with "posthitl__" creates a brand-new
+                        # empty session and breaks contextual continuity.
                         async for chunk in _loop.stream(
-                            query      = _q,
-                            session_id = post_sid,
+                            query           = _approved_query,
+                            session_id      = _sid,
+                            tool_registry   = _tool_reg,
+                            env_context     = _env_ctx,
+                            skip_pre_verify = True,   # ← operator approval is final
                         ):
                             tok = chunk.get("token") if isinstance(chunk, dict) else None
                             if tok:
                                 full_text += tok
+                            # Capture stop/error messages so we can log why
+                            # Path A produced no text (typical reasons: pre_verify
+                            # blocked, stop_policy fired, LLM patch missing).
+                            msg = chunk.get("message") if isinstance(chunk, dict) else None
+                            if msg:
+                                last_message = msg
                         if full_text.strip():
+                            logger.info(
+                                "Post-HITL callback: Path A (agent loop) "
+                                "succeeded — %d chars",
+                                len(full_text),
+                            )
                             return {"tool": "agent_loop", "result": full_text.strip()}
+                        else:
+                            logger.warning(
+                                "Post-HITL callback: Path A (agent loop) produced "
+                                "no tokens — falling back to Path B. last_message=%r",
+                                last_message[:200],
+                            )
                     except Exception as exc:
                         logger.warning("Post-HITL agent loop failed, falling back to LLM: %s", exc)
 
@@ -740,12 +844,37 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                                   "Manual investigation required.",
                     }
                 try:
+                    # Include recalled session context so the LLM can resolve
+                    # references like "该设备" / "this device" against prior turns.
+                    # Without this, Path B answers blind ("未提供具体设备型号...").
+                    _ctx_block = ""
+                    _fts = _env_ctx.get("_fts_context") if _env_ctx else None
+                    if _fts:
+                        _ctx_block = (
+                            "Prior conversation context (entities mentioned "
+                            "earlier in this session count as known — use this "
+                            "to resolve references like '该设备', 'this device', "
+                            "'it'):\n"
+                            f"-----\n{str(_fts)[:1500]}\n-----\n\n"
+                        )
                     prompt = (
-                        "The operator just approved this request:\n"
+                        f"{_ctx_block}"
+                        "[POST-HITL EXECUTION CONTEXT — operator approval already granted]\n"
+                        "The operator has ALREADY approved this request:\n"
                         f"  {_q}\n\n"
-                        "Provide your best answer or recommended next steps based on what you know. "
-                        "Reply in the SAME LANGUAGE as the request, using markdown structure: "
-                        "brief verdict, key points as bullets, and a short next-step recommendation."
+                        "Provide your best answer based on the prior context above. "
+                        "Reply in the SAME LANGUAGE as the request, using markdown: "
+                        "brief verdict, key points as bullets, and a short next-step "
+                        "recommendation. "
+                        "IMPORTANT: do NOT ask the user to 'reply 确认' / 'reply 执行' / "
+                        "'trigger HITL approval' — there is no such pseudo-command and "
+                        "approval was already granted for THIS turn. Give your final "
+                        "answer directly."
+                    )
+                    logger.info(
+                        "Post-HITL callback: Path B (direct LLM) — prompt %d chars "
+                        "(of which %d chars are recalled context)",
+                        len(prompt), len(_ctx_block),
                     )
                     messages = [{"role": "user", "content": prompt}]
                     if hasattr(_llm_ref, "_chat"):

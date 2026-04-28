@@ -113,22 +113,68 @@ class MemoryAdapter:
         query:      str,
         session_id: str,
         max_chars:  int = 1200,
+        recent_turns: int = 4,
     ) -> RecallResult:
         """Build memory context for a given query within the current
-        operator's scope. Returns prompt-ready text plus counts."""
+        operator's scope. Returns prompt-ready text plus counts.
+
+        Multi-turn coreference fix: in addition to query-based retrieval
+        (which fails when the user uses pronouns like "this device" / "它"
+        that don't share keywords with prior turns), we ALWAYS prepend the
+        most recent `recent_turns` chunks from the SAME session_id, so the
+        model can resolve references to entities discussed moments ago.
+        """
         user_id = get_current_operator()
 
         def _do() -> RecallResult:
+            # ── 1. Same-session recent turns (UNCONDITIONAL — no query matching) ──
+            # This is the primary fix for multi-turn pronoun references.
+            # Budget ~40% of max_chars for this; the remaining 60% goes to
+            # query-matched cross-session retrieval.
+            recent_section = ""
+            recent_chunks: list = []
+            recent_budget = int(max_chars * 0.40)
+            if session_id and recent_turns > 0 and recent_budget > 0:
+                try:
+                    rows = self._mgr.long_term.get_chunks_by_session(
+                        user_id, session_id
+                    )
+                    # rows are ASC by created_at; take the last N
+                    rows = rows[-recent_turns:] if rows else []
+                    if rows:
+                        lines = ["## Recent turns (this session)"]
+                        used = len(lines[0]) + 1
+                        for r in rows:
+                            text = (r.get("text") or "").replace("\n", " ")
+                            line = f"- {text[:400]}"
+                            if used + len(line) + 1 > recent_budget:
+                                break
+                            lines.append(line)
+                            used += len(line) + 1
+                            recent_chunks.append(r)
+                        if len(lines) > 1:
+                            recent_section = "\n".join(lines)
+                except Exception as exc:
+                    logger.warning("MemoryAdapter.recall recent_turns failed: %s", exc)
+
+            # ── 2. Query-matched retrieval (existing behaviour) ──
+            remaining_budget = max(200, max_chars - len(recent_section))
             ctx_str = self._mgr.build_context(
                 user_id    = user_id,
                 query      = query,
                 session_id = session_id,
-                max_chars  = max_chars,
+                max_chars  = remaining_budget,
                 include_user_profile = True,
                 include_facts        = True,
                 include_chunks       = True,
                 include_skills       = True,
             )
+            # Combine: recent turns FIRST so it's most prominent in the prompt.
+            if recent_section and ctx_str:
+                final_ctx = recent_section + "\n\n" + ctx_str
+            else:
+                final_ctx = recent_section or ctx_str
+
             # search() returns {"long_term": RetrievalResult, "mid_term": RetrievalResult}
             search_out = self._mgr.search(
                 user_id    = user_id,
@@ -144,6 +190,18 @@ class MemoryAdapter:
             # Serialize for the Memory tab. Each item is either a MemoryChunk
             # (long_term/Track A) or MemoryFact (mid_term/Track B).
             serialized = []
+            # Recent-turn chunks shown first with a special source tag so the
+            # Memory tab makes it obvious why they were included.
+            for r in recent_chunks:
+                serialized.append({
+                    "track":       "A",
+                    "score":       1.0,   # recent turns are top-priority
+                    "source":      "recent_turn",
+                    "memory_type": "chunk",
+                    "content":     (r.get("text") or "")[:500],
+                    "recency_ts":  r.get("created_at", 0),
+                    "tags":        ["same-session"],
+                })
             for it in chunk_items:
                 serialized.append({
                     "track":       "A",
@@ -165,7 +223,8 @@ class MemoryAdapter:
                     "tags":        [],
                 })
 
-            chunk_count = len(chunk_items)
+            # Counts include recent-turn chunks so the UI shows non-zero A.
+            chunk_count = len(chunk_items) + len(recent_chunks)
             fact_count  = len(fact_items)
             if chunk_count > fact_count:
                 winner = "A"
@@ -177,7 +236,7 @@ class MemoryAdapter:
                 winner = ""
 
             return RecallResult(
-                prompt_context = ctx_str,
+                prompt_context = final_ctx,
                 fact_count     = fact_count,
                 chunk_count    = chunk_count,
                 results        = serialized,

@@ -75,9 +75,27 @@ class PolicyEngine:
 
     # ── Async API (primary path) ──────────────────────────────────────────────
 
-    async def evaluate(self, policy_name: str, query: str) -> PolicyResult:
-        """Evaluate one policy against query using real LLM. Cached per TTL."""
-        cache_key = f"{policy_name}|{query}"
+    async def evaluate(
+        self,
+        policy_name: str,
+        query: str,
+        context: str = "",
+    ) -> PolicyResult:
+        """Evaluate one policy against query using real LLM. Cached per TTL.
+
+        `context` is optional supplementary information (e.g. recalled session
+        history, confirmed facts) that the policy LLM can use to resolve
+        references. Cache key includes a short hash of context so different
+        contexts produce different cached results.
+        """
+        # Include context in the cache key — same query under different prior
+        # session histories may legitimately get different policy decisions.
+        if context:
+            import hashlib as _hash
+            _ck = _hash.md5(context.encode("utf-8", "replace")).hexdigest()[:12]
+            cache_key = f"{policy_name}|{query}|ctx:{_ck}"
+        else:
+            cache_key = f"{policy_name}|{query}"
         cached = self._cache.get(cache_key)
         if cached:
             result, ts = cached
@@ -95,7 +113,7 @@ class PolicyEngine:
 
         t0 = time.monotonic()
         try:
-            result = await self._evaluate_with_llm(policy, query)
+            result = await self._evaluate_with_llm(policy, query, context)
         except Exception as exc:
             logger.warning("PolicyEngine: LLM eval failed (%s) — fallback", exc)
             result = self._fallback(policy_name, query)
@@ -163,7 +181,7 @@ class PolicyEngine:
     # ── LLM path ─────────────────────────────────────────────────────────────
 
     async def _evaluate_with_llm(
-        self, policy: PolicyDefinition, query: str
+        self, policy: PolicyDefinition, query: str, context: str = ""
     ) -> PolicyResult:
         parts = [
             f"Policy: {policy.description}\n",
@@ -174,6 +192,16 @@ class PolicyEngine:
             for ex in policy.examples:
                 m = "true" if ex.get("match") else "false"
                 parts.append(f'  Query: "{ex["query"]}" -> match: {m}')
+        # Inject recalled session context so policies can resolve pronouns
+        # ("this device", "it") against prior turns instead of treating
+        # every reference-bearing query as ambiguous.
+        if context:
+            parts.append(
+                "\n\nPrior conversation context (use this to resolve references "
+                "like 'this device', 'it', 'the AP' — entities mentioned earlier "
+                "in the session count as known):\n"
+                f"-----\n{context[:1500]}\n-----"
+            )
         parts.append(
             '\n\nEvaluate the user query below.'
             '\nReturn ONLY valid JSON, nothing else:'
