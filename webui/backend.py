@@ -1634,11 +1634,63 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     async def system_wiring() -> JSONResponse:
         """
         Returns what is actually wired vs stub.
-        Check this first when diagnosing why LLM / HITL / Hermes don't work.
+        Check this first when diagnosing why LLM / HITL / Memory don't work.
+
+        The legacy "fts_store / memory_curator / user_model / dtm" names are
+        kept in the response shape for UI compatibility, but the actual checks
+        now look at the unified MemoryManager subsystems:
+          fts_store      → memory._mgr.long_term       (FTS5 + TF-IDF over chunks)
+          memory_curator → memory._mgr.extractor       (FactExtractor with LLM)
+          user_model     → memory._mgr.user_model      (UserModelEngine)
+          dtm            → recall_orchestrator         (always available since it's a module)
         """
-        backend  = services.get("_llm_backend", "unknown")
-        model    = services.get("_llm_model",   "unknown")
+        backend  = services.get("_llm_backend", "ollama")
+        model    = services.get("_llm_model",   "qwen3.5:27b")
         has_real_llm = backend not in ("mock", "unknown")
+
+        # Resolve the new memory subsystems through MemoryAdapter._mgr
+        memory_adapter = services.get("memory")
+        mgr = getattr(memory_adapter, "_mgr", None) if memory_adapter else None
+
+        fts_alive       = bool(mgr and getattr(mgr, "long_term", None))
+        extractor_alive = bool(mgr and getattr(mgr, "extractor", None))
+        # FactExtractor with LLM is the spiritual successor to the old MemoryCurator
+        extractor_has_llm = bool(
+            extractor_alive and getattr(mgr.extractor, "_llm_fn", None) is not None
+        )
+        user_model_alive = bool(mgr and getattr(mgr, "user_model", None))
+        # DTM has been replaced by recall_orchestrator (always available as a module)
+        dtm_alive = False
+        try:
+            from agent_memory.retrieval import recall_orchestrator as _orch  # noqa: F401
+            dtm_alive = True
+        except Exception:
+            dtm_alive = False
+
+        # Stats — show recall orchestrator's tunables so the UI confirms
+        # which version of the algorithm is wired.
+        dtm_stats: dict = {}
+        if dtm_alive:
+            try:
+                from agent_memory.retrieval.recall_orchestrator import (
+                    TRACK_B_WEIGHT, MMR_LAMBDA,
+                    SHALLOW_NUDGE_INTERVAL, DEEP_NUDGE_INTERVAL,
+                )
+                dtm_stats = {
+                    "engine":              "recall_orchestrator",
+                    "track_b_weight":      TRACK_B_WEIGHT,
+                    "mmr_lambda":          MMR_LAMBDA,
+                    "shallow_nudge_every": SHALLOW_NUDGE_INTERVAL,
+                    "deep_nudge_every":    DEEP_NUDGE_INTERVAL,
+                }
+            except Exception:
+                pass
+
+        # Memory storage path — sourced from MemoryManager directly
+        db_path = "not initialised"
+        if mgr is not None:
+            db_path = str(getattr(mgr, "_db_path", services.get("_hermes_data", "unknown")))
+
         return JSONResponse(content={
             "llm": {
                 "backend":      backend,
@@ -1647,25 +1699,25 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 "note": "Set LLM_BACKEND=ollama LLM_MODEL=qwen3.5:27b LLM_BASE_URL=http://localhost:11434" if not has_real_llm else "real LLM active",
             },
             "hermes": {
-                "fts_store":      services.get("fts_store") is not None,
-                "memory_curator": services.get("memory_curator") is not None,
-                "user_model":     services.get("user_model") is not None,
+                "fts_store":      fts_alive,                   # → memory._mgr.long_term
+                "memory_curator": extractor_alive and extractor_has_llm,  # → FactExtractor with LLM wired
+                "user_model":     user_model_alive,            # → UserModelEngine
                 "skill_evolver":  services.get("skill_evolver") is not None,
-                "dtm":            services.get("dtm") is not None,
-                "db_path":        services.get("_hermes_data", "not initialised"),
-                "dtm_stats":      services.get("dtm").stats() if services.get("dtm") else {},
+                "dtm":            dtm_alive,                   # → recall_orchestrator module
+                "db_path":        db_path,
+                "dtm_stats":      dtm_stats,
             },
             "executor": {
-                "wired":       services.get("executor") is not None,
-                "hitl_router": services.get("hitl_router") is not None,
-                "tool_router": services.get("tool_router") is not None,
+                "wired":         services.get("executor") is not None,
+                "hitl_router":   services.get("hitl_router") is not None,
+                "tool_router":   services.get("tool_router") is not None,
                 "skill_catalog": services.get("skill_catalog") is not None,
             },
             "startup_env": {
-                "LLM_BACKEND":   backend,
-                "LLM_MODEL":     model,
-                "MCP_USE_MOCK":  str(services.get("_mcp_mock", True)),
-                "HERMES_DATA_DIR": services.get("_hermes_data", "./data/state.db"),
+                "LLM_BACKEND":     backend,
+                "LLM_MODEL":       model,
+                "MCP_USE_MOCK":    str(services.get("_mcp_mock", True)),
+                "HERMES_DATA_DIR": services.get("_hermes_data", "./data"),
             },
         })
 

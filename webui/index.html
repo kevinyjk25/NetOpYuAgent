@@ -2410,9 +2410,16 @@ async function refreshStats() {
         exec.wired       ? ok('Executor')         : bad('Executor not wired'),
         exec.hitl_router ? ok('HITL router')      : bad('HITL router missing'),
         exec.tool_router ? ok('ToolRouter')        : bad('ToolRouter — tools are stubs'),
-        hermes.fts_store ? ok('FTS5 store',d.hermes?.db_path?.split('/').pop()) : bad('FTS5 store'),
-        hermes.memory_curator ? ok('MemoryCurator') : bad('MemoryCurator'),
-        hermes.user_model     ? ok('UserModel')     : bad('UserModel'),
+        hermes.fts_store ? ok('LongTerm store (FTS5+TF-IDF)', d.hermes?.db_path?.split('/').pop())
+                         : bad('LongTerm store'),
+        hermes.memory_curator ? ok('FactExtractor (LLM-curated)','dual-language ready')
+                              : bad('FactExtractor','no LLM wired → English-regex fallback'),
+        hermes.user_model     ? ok('UserModel','behaviour profile')
+                              : bad('UserModel'),
+        hermes.dtm            ? ok('Recall Orchestrator',
+                                    'MMR λ='+(d.hermes?.dtm_stats?.mmr_lambda ?? '?')
+                                    +' · TrackB×'+(d.hermes?.dtm_stats?.track_b_weight ?? '?'))
+                              : bad('Recall Orchestrator'),
         hermes.skill_evolver  ? ok('SkillEvolver')  : bad('SkillEvolver'),
       ].join('</div>');
       box.innerHTML = rows + '</div>';
