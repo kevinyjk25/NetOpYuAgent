@@ -651,6 +651,15 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   </div>
   <div class="acc-body" id="acc-body-upload">
   <div style="padding:4px 6px">
+    <!-- Skill: generate from conversation text -->
+    <div style="margin-bottom:6px">
+      <div style="font-size:10px;color:var(--dim);margin-bottom:3px">generate skill from text</div>
+      <button id="skill-gen-btn" onclick="openSkillGenDialog()"
+        style="display:block;width:100%;border:1px solid var(--border);background:var(--card);border-radius:4px;padding:6px 8px;cursor:pointer;font-size:10px;color:var(--accent);text-align:center">
+        ✨ from chat / paste text
+      </button>
+      <div id="skill-gen-status" style="font-size:10px;color:var(--dim);margin-top:2px;min-height:14px"></div>
+    </div>
     <!-- Skill upload -->
     <div style="margin-bottom:6px">
       <div style="font-size:10px;color:var(--dim);margin-bottom:3px">skill (.md or .json)</div>
@@ -2463,6 +2472,236 @@ function clearChat() {
 }
 
 // ── CAP 4: Upload handlers ────────────────────────────────────────────────
+
+// ── Skill: generate from conversation/text ──────────────────────────────
+// Opens an inline modal where the user pastes (or auto-fills from chat
+// history) a free-form description. Backend /skills/generate converts
+// the text to standard skill markdown via LLM and returns a draft +
+// similarity hint. The user reviews, optionally edits, then clicks
+// Confirm to upload via /skills/upload.
+function openSkillGenDialog() {
+  // Auto-fill: take the last user query + agent answer (best signal for
+  // "what procedure did we just work through?").
+  const msgs = document.querySelectorAll('#chat-window .msg');
+  let prefill = '';
+  if (msgs.length >= 2) {
+    const lastTwo = Array.from(msgs).slice(-4);  // up to 2 user+agent pairs
+    prefill = lastTwo.map(m => {
+      const role = m.classList.contains('user') ? 'User' :
+                   m.classList.contains('agent') ? 'Assistant' : 'System';
+      const txt = (m.querySelector('.msg-body')?.innerText || m.innerText || '').trim();
+      return txt ? `${role}: ${txt}` : '';
+    }).filter(Boolean).join('\n\n');
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'skill-gen-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px';
+  overlay.innerHTML = `
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;width:min(720px,100%);max-height:90vh;display:flex;flex-direction:column;font-size:12px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:13px">Generate skill from conversation/text</strong>
+        <span onclick="closeSkillGenDialog()" style="cursor:pointer;color:var(--mid);font-size:18px;line-height:1">×</span>
+      </div>
+      <div style="padding:12px 16px;overflow:auto;flex:1">
+        <div style="margin-bottom:6px;color:var(--dim);font-size:10px">
+          Paste a chat excerpt or describe a procedure. The agent will convert it to standard skill format.
+          ${prefill ? '(prefilled from your last turn)' : ''}
+        </div>
+        <textarea id="skill-gen-text" rows="8"
+          style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:12px;resize:vertical">${
+            (prefill || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          }</textarea>
+
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+          <input id="skill-gen-name" placeholder="Optional skill name hint"
+            style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:11px"/>
+          <input id="skill-gen-tags" placeholder="Optional tags, comma-separated"
+            style="flex:1.5;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:11px"/>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:10px">
+          <button id="skill-gen-go" onclick="runSkillGen()"
+            style="background:var(--accent);color:#000;border:none;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">
+            ✨ Generate draft
+          </button>
+        </div>
+
+        <div id="skill-gen-result" style="margin-top:14px;display:none">
+          <div id="skill-gen-similar" style="display:none;background:rgba(255,193,7,.12);border:1px solid rgba(255,193,7,.4);border-radius:4px;padding:8px;margin-bottom:8px;font-size:11px"></div>
+          <div style="color:var(--dim);font-size:10px;margin-bottom:4px">Generated draft (editable):</div>
+          <textarea id="skill-gen-draft" rows="14"
+            style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:'SF Mono',Consolas,monospace;font-size:11px;resize:vertical"></textarea>
+          <div id="skill-gen-id-row" style="display:flex;gap:8px;margin-top:6px;align-items:center;font-size:11px">
+            <span style="color:var(--dim)">skill_id:</span>
+            <code id="skill-gen-id" style="background:var(--bg);padding:2px 6px;border-radius:3px"></code>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+            <button onclick="closeSkillGenDialog()"
+              style="background:transparent;color:var(--mid);border:1px solid var(--border);border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px">
+              Cancel
+            </button>
+            <button id="skill-gen-confirm" onclick="confirmSkillGen()"
+              style="background:var(--metric-green,#4ade80);color:#000;border:none;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">
+              ✓ Register skill
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('skill-gen-text')?.focus(), 50);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeSkillGenDialog();
+  });
+}
+
+function closeSkillGenDialog() {
+  document.getElementById('skill-gen-overlay')?.remove();
+}
+
+async function runSkillGen() {
+  const text  = document.getElementById('skill-gen-text').value.trim();
+  if (!text) {
+    alert('Please paste some text to convert');
+    return;
+  }
+  const name  = document.getElementById('skill-gen-name').value.trim();
+  const tagsRaw = document.getElementById('skill-gen-tags').value.trim();
+  const tags  = tagsRaw ? tagsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  const btn = document.getElementById('skill-gen-go');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  try {
+    const res = await fetch(`${BASE}/skills/generate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text, hint_name: name, hint_tags: tags}),
+    });
+    let data;
+    try { data = await res.json(); } catch(_) { data = {}; }
+    if (!res.ok) {
+      const msg = data.detail || res.statusText || `HTTP ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    document.getElementById('skill-gen-result').style.display = 'block';
+    document.getElementById('skill-gen-draft').value = data.markdown;
+    document.getElementById('skill-gen-id').textContent = data.skill_id;
+    document.getElementById('skill-gen-id').dataset.original = data.skill_id;
+    const simEl = document.getElementById('skill-gen-similar');
+
+    if (data.id_collides && !data.similar_to) {
+      // Exact id already in catalog (rare — happens when user re-generates
+      // same hint_name). Treat as "merge by overwrite".
+      simEl.innerHTML =
+        `⚠ <strong>Skill ID <code>${data.skill_id}</code> already exists</strong> in the catalog. ` +
+        `Confirming will REPLACE its current content (a new version will be saved).`;
+      simEl.style.display = 'block';
+    } else if (data.similar_to) {
+      // Similar skill found — give the user a clear choice between
+      // merge-into-existing vs register-as-new with a forced unique id.
+      const sum = data.similar_summary || {};
+      const tagsLine = (sum.tags && sum.tags.length)
+        ? `<div style="margin-top:4px"><span style="color:var(--dim)">tags:</span> ${sum.tags.map(t => `<code>${t}</code>`).join(' ')}</div>`
+        : '';
+      simEl.innerHTML = `
+        <strong>⚠ A similar skill already exists</strong>
+        <div style="margin-top:4px"><span style="color:var(--dim)">id:</span> <code>${data.similar_to}</code> (similarity ${data.similarity})</div>
+        ${sum.name ? `<div><span style="color:var(--dim)">name:</span> ${escapeHtml(sum.name)}</div>` : ''}
+        ${sum.purpose ? `<div><span style="color:var(--dim)">purpose:</span> ${escapeHtml(sum.purpose)}</div>` : ''}
+        ${tagsLine}
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="chooseSkillGenAction('merge', '${data.similar_to}')"
+            style="background:rgba(255,193,7,.25);color:var(--text);border:1px solid rgba(255,193,7,.5);border-radius:3px;padding:4px 10px;cursor:pointer;font-size:11px">
+            Merge into <code>${data.similar_to}</code> (recommended)
+          </button>
+          <button onclick="chooseSkillGenAction('new')"
+            style="background:transparent;color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 10px;cursor:pointer;font-size:11px">
+            Register as new skill
+          </button>
+        </div>
+        <div id="skill-gen-action-status" style="margin-top:6px;font-size:10px;color:var(--mid)"></div>
+      `;
+      simEl.style.display = 'block';
+      // Disable the bottom Register button until the user picks an action
+      document.getElementById('skill-gen-confirm').disabled = true;
+      document.getElementById('skill-gen-confirm').textContent = '✓ Choose merge or new above';
+    } else {
+      simEl.style.display = 'none';
+      document.getElementById('skill-gen-confirm').disabled = false;
+      document.getElementById('skill-gen-confirm').textContent = '✓ Register skill';
+    }
+    btn.textContent = '✨ Re-generate';
+  } catch (e) {
+    alert(`Generation failed: ${e.message || e}`);
+    btn.textContent = '✨ Generate draft';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Tiny HTML escape for similar-skill metadata display
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+// User picks merge vs new from the similarity prompt
+function chooseSkillGenAction(action, existingId) {
+  const idEl = document.getElementById('skill-gen-id');
+  const status = document.getElementById('skill-gen-action-status');
+  const confirmBtn = document.getElementById('skill-gen-confirm');
+  if (action === 'merge' && existingId) {
+    idEl.textContent = existingId;
+    if (status) status.textContent = `→ will merge into "${existingId}" (creates a new version)`;
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = `✓ Merge into ${existingId}`;
+  } else {
+    // Register as new — append a numeric suffix to the auto-generated id
+    // so it doesn't collide with the similar one.
+    const orig = idEl.dataset.original || idEl.textContent;
+    const suffix = '_' + Math.floor(Date.now() / 1000).toString(36);
+    idEl.textContent = orig + suffix;
+    if (status) status.textContent = `→ will register as new skill "${orig + suffix}"`;
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '✓ Register as new';
+  }
+}
+
+async function confirmSkillGen() {
+  const skillId  = document.getElementById('skill-gen-id').textContent.trim();
+  const markdown = document.getElementById('skill-gen-draft').value;
+  if (!skillId || !markdown) return;
+
+  const btn = document.getElementById('skill-gen-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Registering…';
+  try {
+    // Wrap as a Blob so the existing /skills/upload handler can read it as a .md file
+    const blob = new File([markdown], `${skillId}.md`, {type: 'text/markdown'});
+    const fd = new FormData();
+    fd.append('file', blob);
+    const res = await fetch(`${BASE}/skills/upload`, {method: 'POST', body: fd});
+    let data;
+    try { data = await res.json(); } catch(_) { data = {}; }
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+
+    const statusEl = document.getElementById('skill-gen-status');
+    statusEl.textContent = `✓ registered: ${data.skill_id}`;
+    statusEl.style.color = 'var(--metric-green, #4ade80)';
+    flowEvent('skill', '✨ Skill Generated', data.skill_id, `${markdown.length} chars`);
+    await loadSkills();
+    closeSkillGenDialog();
+  } catch (e) {
+    alert(`Registration failed: ${e.message || e}`);
+    btn.textContent = '✓ Register skill';
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 async function handleSkillUpload(file) {
   if (!file) return;

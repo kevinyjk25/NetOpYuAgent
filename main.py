@@ -343,6 +343,60 @@ async def build_services() -> dict[str, Any]:
         except Exception as _sc_exc:
             logger.warning("SkillCatalog: build failed (%s) — catalog unavailable", _sc_exc)
 
+        # ── SkillEvolver — wires the LLM so /skills/generate produces real content ─
+        # Without this, backend.py auto-creates a fallback evolver with no LLM,
+        # and every "Generate skill from text" call returns the hardcoded
+        # _stub_llm output (the generic Network Diagnostic Procedure markdown).
+        try:
+            from skills.evolver import SkillEvolver
+            import os as _os, pathlib as _pl
+
+            # Async wrapper matching SkillEvolver._call_llm's signature:
+            #   async (system: str, user: str) -> str
+            # SkillEvolver expects raw markdown OR a JSON object string back.
+            async def _async_llm_for_skills(system: str, user: str) -> str:
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ]
+                if hasattr(llm_engine, "_chat"):
+                    return await llm_engine._chat(messages)
+                # Fallback: call() takes (user, system, state)
+                return await llm_engine.call(user, system, state=None)
+
+            _skills_dir = _os.getenv("HERMES_DATA_DIR", "./data")
+            _skill_evolver = SkillEvolver(
+                catalog    = services["skill_catalog"],
+                llm_fn     = _async_llm_for_skills,
+                skills_dir = str(_pl.Path(_skills_dir) / "skills"),
+            )
+            services["skill_evolver"] = _skill_evolver
+
+            # Smoke test: prove the LLM actually responds. We don't care about
+            # the content — just that no exception is raised. If this fails,
+            # /skills/generate would silently fall back to stubs.
+            try:
+                _probe = await _async_llm_for_skills(
+                    "You are a helper. Reply with a single short word.",
+                    "Reply with: ok",
+                )
+                logger.info(
+                    "SkillEvolver: LLM smoke test OK — got %d chars: %r",
+                    len(_probe or ""), (_probe or "")[:80],
+                )
+            except Exception as _se_exc:
+                logger.warning(
+                    "SkillEvolver: LLM smoke test FAILED (%s) — /skills/generate "
+                    "will fall back to stub content. Verify llm_engine is reachable.",
+                    _se_exc,
+                )
+        except Exception as _se_outer:
+            logger.warning(
+                "SkillEvolver setup failed (%s) — backend will create a no-LLM "
+                "fallback evolver and /skills/generate will return stub content.",
+                _se_outer,
+            )
+
         logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
 
     except Exception as exc:
