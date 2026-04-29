@@ -76,6 +76,35 @@ SHALLOW_NUDGE_INTERVAL = 5
 DEEP_NUDGE_INTERVAL    = 20
 
 
+def _is_stale_hitl_placeholder(text: str) -> bool:
+    """Detect HITL-pending placeholder turns left by older chat_stream code.
+
+    These are turns whose assistant_text is just the "⚠ HITL interrupt —
+    awaiting approval" notice that was written BEFORE the operator made
+    a decision. Once the operator approves/rejects/escalates, the proper
+    completed turn is written in a separate turn (with a [HITL …] tag),
+    leaving the placeholder as stale data that would mislead future
+    recalls into thinking the action is still pending.
+
+    Used by recall() in two places:
+      1. Recent-turns prepend  — filter so pronoun resolution doesn't
+         see the placeholder.
+      2. Cross-session search — filter so query-driven retrieval
+         doesn't surface the placeholder either.
+    """
+    if not text:
+        return False
+    t = text
+    # Markers from chat_stream's old HITL placeholder writes:
+    if "human approval required" in t and "Interrupt ID" in t:
+        return True
+    if "HITL interrupt" in t and "Click Approve or Reject to continue" in t:
+        return True
+    if "Approval card is now in the HITL tab" in t:
+        return True
+    return False
+
+
 # ── Public dataclass — kept stable, used by callers (backend.py, etc.) ──
 
 @dataclass
@@ -188,12 +217,37 @@ def recall(
     recent_budget = int(max_chars * RECENT_TURNS_BUDGET_FRAC)
     if session_id and recent_turns > 0 and recent_budget > 0:
         try:
-            rows = mgr.long_term.get_chunks_by_session(user_id, session_id)
-            rows = rows[-recent_turns:] if rows else []
-            if rows:
+            # Use the LIMIT-aware fast path so very long sessions don't
+            # scan thousands of rows just to grab the last N turns.
+            # Pull a few extra rows (×2) so we can drop legacy "⚠ HITL
+            # interrupt — awaiting approval" placeholder turns that
+            # versions before the chat_stream/_submit_hitl_decision split
+            # may have written. After filtering we still keep `recent_turns`
+            # genuinely-actionable turns.
+            fetch_limit = recent_turns * 2
+            if hasattr(mgr.long_term, "get_recent_chunks_by_session"):
+                rows = mgr.long_term.get_recent_chunks_by_session(
+                    user_id, session_id, limit=fetch_limit,
+                )
+            else:
+                # Fallback for older long_term implementations
+                rows = mgr.long_term.get_chunks_by_session(user_id, session_id)
+                rows = rows[-fetch_limit:] if rows else []
+
+            # Filter: any turn whose assistant_text is just a "HITL pending"
+            # placeholder is stale by definition (see _is_stale_hitl_placeholder
+            # docstring at module top). Drop them from recent_turns so the LLM
+            # doesn't see "still awaiting approval" for actions that have since
+            # completed in a later turn.
+            filtered_rows = [
+                r for r in rows
+                if not _is_stale_hitl_placeholder(r.get("text") or "")
+            ][-recent_turns:]   # keep last N actionable turns
+
+            if filtered_rows:
                 lines = ["## Recent turns (this session)"]
                 used = len(lines[0]) + 1
-                for r in rows:
+                for r in filtered_rows:
                     text = (r.get("text") or "").replace("\n", " ")
                     line = f"- {text[:400]}"
                     if used + len(line) + 1 > recent_budget:
@@ -203,49 +257,95 @@ def recall(
                     recent_chunks.append(r)
                 if len(lines) > 1:
                     recent_section = "\n".join(lines)
+
+            # Diagnostic: how many stale placeholders did we drop?
+            n_dropped = len(rows) - len(filtered_rows) if rows else 0
+            if n_dropped > 0:
+                logger.info(
+                    "recall: filtered %d stale HITL-pending placeholder(s) "
+                    "from session=%s recent turns",
+                    n_dropped, session_id[:12],
+                )
         except Exception as exc:
             logger.warning("recall: recent_turns gather failed: %s", exc)
 
-    # ── 2. Query-driven retrieval (existing build_context handles facts +
-    #      cross-session chunks + user profile + skills) ──────────────────
-    remaining_budget = max(200, max_chars - len(recent_section))
-    try:
-        ctx_str = mgr.build_context(
-            user_id    = user_id,
-            query      = query,
-            session_id = session_id,
-            max_chars  = remaining_budget,
-            include_user_profile = True,
-            include_facts        = True,
-            include_chunks       = True,
-            include_skills       = True,
-        )
-    except Exception as exc:
-        logger.warning("recall: build_context failed: %s", exc)
-        ctx_str = ""
-
-    final_ctx = (
-        recent_section + "\n\n" + ctx_str if (recent_section and ctx_str)
-        else (recent_section or ctx_str)
-    )
-
-    # ── 3. Get raw items for the Memory tab + MMR selection ─────────────
+    # ── 2. Single-pass retrieval — pull facts AND chunks ONCE.
+    #      Old code ran build_context (which queries both layers) AND then
+    #      mgr.search (which queries them again), doubling the SQL load on
+    #      every recall. Now we run search once, then build prompt_context
+    #      from the same items used for the Memory tab.
     chunk_items: list = []
     fact_items: list  = []
     try:
         search_out = mgr.search(
-            user_id=user_id, query=query, session_id=session_id, top_k=5,
+            user_id=user_id, query=query, session_id=session_id, top_k=top_k,
         )
         chunks_rr = search_out.get("long_term")
         facts_rr  = search_out.get("mid_term")
         if chunks_rr and hasattr(chunks_rr, "items"):
-            chunk_items = chunks_rr.items
+            # Filter stale HITL-pending placeholders from cross-session
+            # retrieval too — same rationale as in the recent-turns filter.
+            # Without this, a query like "did we fix ap-02" hits the legacy
+            # placeholder via FTS5 and surfaces it as "Relevant Memory",
+            # confusing the LLM into reporting the action still pending.
+            chunk_items = [
+                it for it in chunks_rr.items
+                if not _is_stale_hitl_placeholder(getattr(it, "text", "") or "")
+            ]
+            n_dropped_xs = len(chunks_rr.items) - len(chunk_items)
+            if n_dropped_xs > 0:
+                logger.info(
+                    "recall: filtered %d stale HITL placeholder(s) from "
+                    "cross-session chunk results", n_dropped_xs,
+                )
         if facts_rr and hasattr(facts_rr, "items"):
             fact_items = facts_rr.items
     except Exception as exc:
         logger.warning("recall: search failed: %s", exc)
 
-    # ── 4. Serialize items with scoring (Track B weight + type boost) ───
+    # User profile + skills (cheap, in-memory ops — no SQL on the hot path)
+    profile_section = ""
+    skills_section  = ""
+    try:
+        if getattr(mgr, "user_model", None):
+            profile_section = mgr.user_model.get_prompt_section(
+                user_id, max_chars=int(max_chars * 0.15),
+            ) or ""
+    except Exception:
+        pass
+    try:
+        if getattr(mgr, "skill_store", None):
+            skills_ctx = mgr.skill_store.build_skills_context(
+                user_id, query, top_k=2,
+            ) or ""
+            skills_section = skills_ctx[:int(max_chars * 0.20)]
+    except Exception:
+        pass
+
+    # Format facts + chunks sections from the SAME items the Memory tab uses
+    fact_section  = ""
+    chunk_section = ""
+    remaining = max(200, max_chars - len(recent_section) - len(profile_section) - len(skills_section))
+    fact_budget  = int(remaining * 0.55)
+    chunk_budget = int(remaining * 0.45)
+    if fact_items:
+        try:
+            fact_section = mgr._format_facts(fact_items, max_chars=fact_budget) or ""
+        except Exception:
+            pass
+    if chunk_items:
+        try:
+            chunk_section = mgr._format_chunks(chunk_items, max_chars=chunk_budget) or ""
+        except Exception:
+            pass
+
+    # Assemble prompt_context: recent_turns first (resolves pronouns),
+    # then profile, skills, facts, chunks.
+    parts = [s for s in [recent_section, profile_section, skills_section,
+                          fact_section, chunk_section] if s]
+    final_ctx = "\n\n".join(parts)
+
+    # ── 3. Serialize items with scoring (Track B weight + type boost) ───
     serialized: list[dict] = []
 
     # Recent-session chunks first — flag them so the UI shows why they're top.
@@ -288,7 +388,7 @@ def recall(
             "tags":        list(getattr(it, "metadata", {}).get("tags", []))[:6],
         })
 
-    # ── 5. MMR diversity dedup over the combined pool ────────────────────
+    # ── 4. MMR diversity dedup over the combined pool ────────────────────
     serialized = mmr_select(serialized, top_k=top_k, lambda_=MMR_LAMBDA)
 
     # Counts reflect what survived MMR (not the raw retrieval set)
@@ -341,8 +441,13 @@ def run_nudge(
     stats = {"reviewed_turns": 0, "new_facts": 0, "contradictions": 0}
 
     try:
-        rows = mgr.long_term.get_chunks_by_session(user_id, session_id)
-        recent_rows = rows[-n_turns:] if rows else []
+        if hasattr(mgr.long_term, "get_recent_chunks_by_session"):
+            recent_rows = mgr.long_term.get_recent_chunks_by_session(
+                user_id, session_id, limit=n_turns,
+            )
+        else:
+            rows = mgr.long_term.get_chunks_by_session(user_id, session_id)
+            recent_rows = rows[-n_turns:] if rows else []
         if not recent_rows:
             return stats
         stats["reviewed_turns"] = len(recent_rows)

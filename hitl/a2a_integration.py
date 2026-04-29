@@ -821,12 +821,49 @@ class ITOpsHitlAgentExecutor(AgentExecutor):
                             if msg:
                                 last_message = msg
                         if full_text.strip():
-                            logger.info(
-                                "Post-HITL callback: Path A (agent loop) "
-                                "succeeded — %d chars",
-                                len(full_text),
+                            # Quality check: did the agent actually FINISH the
+                            # task, or did it stop mid-plan? Pattern observed:
+                            #   "我将对 ap-01 和 ap-02 进行配置修复...
+                            #    第一步：修复 ap-01 的 RADIUS 超时配置"
+                            #   <stream ends — never says "已修复" or "完成">
+                            # When this happens, downstream recall sees a
+                            # turn whose body is full of future-tense "will do"
+                            # text, so the LLM in the NEXT turn correctly
+                            # concludes nothing was actually done. Detect this
+                            # case and fall back to Path B for a final summary.
+                            _ft_lower = full_text.lower()
+                            _has_completion_marker = any(
+                                kw in full_text or kw in _ft_lower
+                                for kw in (
+                                    "已修复", "已完成", "已应用", "修复成功", "修复完成",
+                                    "配置已", "已生效", "已优化", "执行完毕",
+                                    "completed", "applied", "fixed successfully",
+                                    "has been", "configuration updated",
+                                )
                             )
-                            return {"tool": "agent_loop", "result": full_text.strip()}
+                            _has_plan_only = any(
+                                kw in full_text
+                                for kw in (
+                                    "我将立即", "我将对", "我将依次", "首先",
+                                    "第一步", "第二步", "## 第", "首先获取",
+                                )
+                            ) and not _has_completion_marker
+                            if _has_plan_only:
+                                logger.warning(
+                                    "Post-HITL callback: Path A produced a PLAN-ONLY "
+                                    "response (no completion marker). Falling through "
+                                    "to Path B so the operator gets a final summary "
+                                    "with explicit action results. preview=%r",
+                                    full_text[:200],
+                                )
+                                # Don't return; fall through to Path B below
+                            else:
+                                logger.info(
+                                    "Post-HITL callback: Path A (agent loop) "
+                                    "succeeded — %d chars",
+                                    len(full_text),
+                                )
+                                return {"tool": "agent_loop", "result": full_text.strip()}
                         else:
                             logger.warning(
                                 "Post-HITL callback: Path A (agent loop) produced "

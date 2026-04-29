@@ -78,7 +78,7 @@ from log_redaction import redact_text
 #           await per_operator_limit_check(operator_id, rate_per_min=20)
 #           ...
 # This keeps the body-only signature that FastAPI parses cleanly.
-from memory import set_current_operator
+from memory import set_current_operator, get_current_operator
 
 logger = logging.getLogger(__name__)
 
@@ -390,6 +390,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             tokens: list[str] = []
             full_text = ""
             decision  = None
+            # _hitl_intercepted is read by the post-stream memory-write block
+            # below, but only the SIMPLE path actually sets it (line ~545).
+            # The COMPLEX/executor path never enters that branch, so the
+            # variable would be undefined at the read site → UnboundLocalError.
+            # Initialise it here so every path has a defined value.
+            _hitl_intercepted = False
             try:
                 # ── Step 1: Classify ──────────────────────────────────────
                 decision = await loop.classify_async(req.query)
@@ -521,6 +527,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                             # Mark stream terminal state so terminal
                                             # event becomes 'awaiting_hitl' (⏸) not 'done' (✅).
                                             stop_outcome = "stop_hitl: awaiting operator approval"
+                                            # Also mark the post-stream skip flag so the
+                                            # memory-write block below doesn't persist
+                                            # the placeholder "⚠ HITL interrupt" text.
+                                            # _submit_hitl_decision will write the
+                                            # completed turn after operator approves.
+                                            _hitl_intercepted = True
                                         elif data.get("node_step"):
                                             yield f"data: {json.dumps({'node_step':data['node_step'],'node':data.get('node','')})}\n\n"
                                             await asyncio.sleep(0)
@@ -542,7 +554,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                 else:
                     # SIMPLE path: loop.stream() with real LLM + ToolRouter
-                    _hitl_intercepted = False
+                    # _hitl_intercepted was initialised at the top of generate()
                     async for chunk in loop.stream(
                         query=req.query,
                         session_id=session_id,
@@ -628,68 +640,85 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 _push_history(session_id, {"role": "assistant", "content": full_text},    _message_history)
 
                 # ── Step 5: Post-turn Hermes hooks ────────────────────────
-                import re as _re
-                tc = [{"tool": m} for m in _re.findall(r"\[TOOL:(\w+)\]", full_text)]
-
-                if dtm:
-                    # v4 path: DTM.after_turn() handles Track A (FTS5 + daily .md
-                    # compaction) and Track B (curator → facts.jsonl) in one call.
-                    try:
-                        memories = await dtm.after_turn(
-                            session_id     = session_id,
-                            user_text      = req.query,
-                            assistant_text = full_text,
-                            tool_calls     = tc,
-                            importance     = 0.7,
-                        )
-                        yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12],'track':'A+B'})}\n\n"
-                        await asyncio.sleep(0)
-                        if memories:
-                            # MemoryFact uses .fact_type (not .memory_type)
-                            _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
-                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
-                            await asyncio.sleep(0)
-                    except Exception as _e:
-                        logger.debug("DTM after_turn skipped: %s", _e)
+                # IMPORTANT: when this turn was intercepted by HITL, the work
+                # is NOT done — the operator still has to approve, and the
+                # actual answer arrives later via _submit_hitl_decision. Do
+                # NOT persist this turn to memory yet. If we did, recall on
+                # later turns would surface the bare "⚠ HITL interrupt …
+                # awaiting approval" text as if it were the final answer,
+                # making the agent think the action is still pending even
+                # after it has actually completed. _submit_hitl_decision
+                # writes the proper {user_query, synthesis} pair when the
+                # operator approves / rejects / escalates.
+                if _hitl_intercepted:
+                    logger.info(
+                        "chat_stream: skipping memory write for session=%s "
+                        "(HITL intercepted; _submit_hitl_decision will persist "
+                        "the completed turn after operator decision)",
+                        session_id[:12],
+                    )
                 else:
-                    # v3 fallback: individual hooks when DTM not wired
-                    if fts:
+                    import re as _re
+                    tc = [{"tool": m} for m in _re.findall(r"\[TOOL:(\w+)\]", full_text)]
+
+                    if dtm:
+                        # v4 path: DTM.after_turn() handles Track A (FTS5 + daily
+                        # .md compaction) and Track B (curator → facts.jsonl).
                         try:
-                            await fts.write_turn(session_id, req.query, full_text, tool_calls=tc, importance=0.7)
-                            yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12]})}\n\n"
+                            memories = await dtm.after_turn(
+                                session_id     = session_id,
+                                user_text      = req.query,
+                                assistant_text = full_text,
+                                tool_calls     = tc,
+                                importance     = 0.7,
+                            )
+                            yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12],'track':'A+B'})}\n\n"
+                            await asyncio.sleep(0)
+                            if memories:
+                                _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
+                                yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
+                                await asyncio.sleep(0)
+                        except Exception as _e:
+                            logger.debug("DTM after_turn skipped: %s", _e)
+                    else:
+                        # v3 fallback: individual hooks when DTM not wired
+                        if fts:
+                            try:
+                                await fts.write_turn(session_id, req.query, full_text, tool_calls=tc, importance=0.7)
+                                yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12]})}\n\n"
+                                await asyncio.sleep(0)
+                            except Exception as _e:
+                                logger.debug("FTS5 write skipped: %s", _e)
+
+                        if curator:
+                            try:
+                                memories = await curator.after_turn(session_id, req.query, full_text, tc)
+                                _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
+                                yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
+                                await asyncio.sleep(0)
+                            except Exception as _e:
+                                logger.debug("Curation skipped: %s", _e)
+
+                    # User model always runs (not inside DTM scope)
+                    if user_model:
+                        try:
+                            profile = await user_model.after_turn(session_id, req.query, full_text, tc)
+                            yield f"data: {json.dumps({'type':'hermes_umodel','technical_level':profile.technical_level.value,'domain_counts':dict(list(profile.domain_counts.items())[:5]),'trait_count':len(profile.traits)})}\n\n"
                             await asyncio.sleep(0)
                         except Exception as _e:
-                            logger.debug("FTS5 write skipped: %s", _e)
+                            logger.debug("User model skipped: %s", _e)
 
-                    if curator:
+                    if evolver and decision and decision.complexity.value == "complex":
                         try:
-                            memories = await curator.after_turn(session_id, req.query, full_text, tc)
-                            _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
-                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
+                            proposal = await evolver.after_task(
+                                task_description=req.query, solution_summary=full_text[:400],
+                                tools_used=[t["tool"] for t in tc], solution_steps=[],
+                                key_observations=[], complexity=7.0, session_id=session_id,
+                            )
+                            yield f"data: {json.dumps({'type':'hermes_skill','created':proposal is not None,'skill_id':proposal.skill_id if proposal else None})}\n\n"
                             await asyncio.sleep(0)
                         except Exception as _e:
-                            logger.debug("Curation skipped: %s", _e)
-
-                # User model always runs (not inside DTM scope)
-                if user_model:
-                    try:
-                        profile = await user_model.after_turn(session_id, req.query, full_text, tc)
-                        yield f"data: {json.dumps({'type':'hermes_umodel','technical_level':profile.technical_level.value,'domain_counts':dict(list(profile.domain_counts.items())[:5]),'trait_count':len(profile.traits)})}\n\n"
-                        await asyncio.sleep(0)
-                    except Exception as _e:
-                        logger.debug("User model skipped: %s", _e)
-
-                if evolver and decision and decision.complexity.value == "complex":
-                    try:
-                        proposal = await evolver.after_task(
-                            task_description=req.query, solution_summary=full_text[:400],
-                            tools_used=[t["tool"] for t in tc], solution_steps=[],
-                            key_observations=[], complexity=7.0, session_id=session_id,
-                        )
-                        yield f"data: {json.dumps({'type':'hermes_skill','created':proposal is not None,'skill_id':proposal.skill_id if proposal else None})}\n\n"
-                        await asyncio.sleep(0)
-                    except Exception as _e:
-                        logger.debug("Skill evolver skipped: %s", _e)
+                            logger.debug("Skill evolver skipped: %s", _e)
 
                 # Include confirmed_facts so frontend can carry them to next query
                 _done_facts = getattr(loop, '_last_confirmed_facts', []) or []
@@ -1644,8 +1673,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
           user_model     → memory._mgr.user_model      (UserModelEngine)
           dtm            → recall_orchestrator         (always available since it's a module)
         """
-        backend  = services.get("_llm_backend", "ollama")
-        model    = services.get("_llm_model",   "qwen3.5:27b")
+        backend  = services.get("_llm_backend", "unknown")
+        model    = services.get("_llm_model",   "unknown")
         has_real_llm = backend not in ("mock", "unknown")
 
         # Resolve the new memory subsystems through MemoryAdapter._mgr
@@ -2024,22 +2053,68 @@ async def _submit_hitl_decision(
     # Frontend reads memory_write / memory_curate flags to render FTS5 Write
     # and Memory Curation steps.
     _memory = services.get("memory")
+    logger.info(
+        "_submit_hitl_decision: memory write check — _memory=%s _decision=%r "
+        "tool_name=%r user_query=%r synthesis_len=%d tool_result_len=%d",
+        bool(_memory), _decision, _tool_name,
+        (_user_query or "")[:80],
+        len(result_dict.get("synthesis") or ""),
+        len(str(_tool_result) if _tool_result else ""),
+    )
     if _memory and _decision in ("approve", "reject", "escalate"):
         try:
             # Build assistant_text. For approves with tool output use the
             # synthesised answer (or raw tool output if synthesis was skipped).
             # For rejects / escalates write a concise audit-style message so
             # the conversation history reflects the operator's decision.
+            #
+            # Prefix approves with an explicit "[HITL APPROVED — completed]"
+            # tag so future recall makes it unambiguous that this turn FINISHED
+            # successfully. Without the tag, an LLM looking at recall context
+            # can confuse a synthesis answer with a pending interrupt note
+            # (both contain the same user query) and report the action as
+            # still awaiting approval — see screenshot bug report.
             if _decision == "approve":
-                assistant_text = (
+                _body = (
                     result_dict.get("synthesis")
                     or (str(_tool_result)[:2000] if _tool_result else "")
                     or f"[HITL approved — {_tool_name}]"
                 )
+                # Detect whether the body actually contains completion markers.
+                # If not, label this turn so future recall surfaces it as
+                # "executed but result inconclusive" rather than as a
+                # successful change. Without this discriminator, Path A's
+                # plan-only output (e.g. "我将修复 ap-01... 第一步: ...")
+                # would get the same [APPROVED & COMPLETED] tag as a real
+                # successful completion, and the LLM next turn can't tell
+                # them apart.
+                _has_done_marker = any(
+                    kw in _body
+                    for kw in (
+                        "已修复", "已完成", "已应用", "修复成功", "修复完成",
+                        "配置已", "已生效", "已优化", "执行完毕",
+                        "completed", "applied", "fixed successfully",
+                        "has been updated", "configuration updated",
+                    )
+                )
+                _status_tag = (
+                    "[HITL APPROVED & COMPLETED"
+                    if _has_done_marker
+                    else "[HITL APPROVED & EXECUTED — result inconclusive"
+                )
+                # Add an explicit one-line summary at the very top so the
+                # LLM seeing this in recall context can immediately classify
+                # the turn without parsing the full body.
+                _summary_line = (
+                    f"{_status_tag} — {_tool_name}] "
+                    f"operator={req.operator_id or 'unknown'} "
+                    f"request={(_user_query or '')[:80]!r}"
+                )
+                assistant_text = f"{_summary_line}\n{_body}"
             else:
                 _comment = (req.comment or "").strip()
                 assistant_text = (
-                    f"[HITL {_decision} — {_tool_name}] "
+                    f"[HITL {_decision.upper()} — {_tool_name}] "
                     f"operator={req.operator_id or 'unknown'}"
                     + (f" — {_comment}" if _comment else "")
                 )
@@ -2047,6 +2122,12 @@ async def _submit_hitl_decision(
             # no need to re-set here.
             # Reuse the original session_id from the interrupt payload for continuity.
             session_id = payload.context_id or f"hitl__{interrupt_id[:8]}"
+            logger.info(
+                "_submit_hitl_decision: writing memory — session_id=%r "
+                "operator=%s assistant_text_len=%d preview=%r",
+                session_id, get_current_operator(),
+                len(assistant_text), assistant_text[:120],
+            )
             new_facts = await _memory.after_turn(
                 session_id      = session_id,
                 user_text       = _user_query,
@@ -2055,6 +2136,10 @@ async def _submit_hitl_decision(
                 importance      = 0.7 if _decision == "approve" else 0.5,
             )
             result_dict["memory_write"] = {"session_id": session_id, "ok": True}
+            logger.info(
+                "_submit_hitl_decision: memory write OK — %d new facts",
+                len(new_facts) if new_facts else 0,
+            )
             if new_facts:
                 _types = [getattr(f, "fact_type", getattr(f, "memory_type", "fact"))
                           for f in new_facts[:5]]
@@ -2063,7 +2148,19 @@ async def _submit_hitl_decision(
                     "types":          _types,
                 }
         except Exception as _e:
-            logger.warning("Post-HITL memory write failed: %s", _e)
+            # Log the FULL traceback so we can see where it actually fails.
+            # The previous `logger.warning("Post-HITL memory write failed: %s")`
+            # was eaten silently in many cases.
+            logger.error(
+                "_submit_hitl_decision: memory write FAILED — %s",
+                _e, exc_info=True,
+            )
+    else:
+        logger.warning(
+            "_submit_hitl_decision: SKIPPING memory write — _memory=%s "
+            "_decision=%r (not in approve/reject/escalate)",
+            bool(_memory), _decision,
+        )
 
     # Diagnostic: log exactly what we send back to the frontend so we can
     # tell whether the issue is server-side (we never sent it) or client-side

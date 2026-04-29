@@ -392,6 +392,29 @@ class LongTermStore:
         )
         return [dict(r) for r in rows]
 
+    def get_recent_chunks_by_session(
+        self, user_id: str, session_id: str, limit: int = 4,
+    ) -> list[dict]:
+        """Return the LAST N chunks for a session in chronological order.
+
+        Fast path for recall_orchestrator's "recent turns" prepend feature.
+        Pulls only `limit` rows via the (user_id, session_id) index instead
+        of scanning the entire session — important for sessions that have
+        accumulated thousands of turns. Roughly O(limit) regardless of total
+        session size.
+        """
+        if limit <= 0:
+            return []
+        # Take the most recent N by descending timestamp, then re-order
+        # ascending so the caller still sees chronological order.
+        rows = self._pool.execute_read(
+            "SELECT chunk_id, text, source, importance, created_at "
+            "FROM long_term_chunks WHERE user_id=? AND session_id=? "
+            "ORDER BY created_at DESC LIMIT ?",
+            (user_id, session_id, int(limit)),
+        )
+        return [dict(r) for r in reversed(rows)]
+
     def count(self, user_id: str) -> int:
         rows = self._pool.execute_read(
             "SELECT COUNT(*) as n FROM long_term_chunks WHERE user_id=?", (user_id,)
