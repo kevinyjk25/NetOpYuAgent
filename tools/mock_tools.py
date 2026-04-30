@@ -1,26 +1,23 @@
 """
 tools/mock_tools.py
 --------------------
-Mock IT-ops tools with realistic outputs.
+Mock IT-ops tools with realistic synthetic outputs.
 
-Three tools intentionally return large payloads to demonstrate P0 caching:
-  - syslog_search  : returns hundreds of log lines
-  - prometheus_query: returns time-series data
-  - netflow_dump   : returns raw flow records
+Used in mock mode (no real network access required). Each tool is an async
+callable matching the signature `async def tool(args: dict) -> str` and
+registered through tools/loader.py for the runtime loop.
 
-All tools are async callables matching the signature:
-    async def tool(args: dict) -> str
-and registered in TOOL_REGISTRY for injection into AgentRuntimeLoop.
+Several tools intentionally return large payloads (hundreds of log lines,
+time-series series, raw flow records) to exercise the ToolResultStore +
+read_stored_result paging path:
+  - syslog_search    → log lines
+  - prometheus_query → time-series data
+  - netflow_dump     → raw flow records
 
-P0 demo path
-------------
 When a tool output exceeds ToolResultStore.MAX_INLINE_CHARS (4 000 chars),
-the Budget Manager automatically stores it and returns a reference label.
-The WebUI can then call GET /tools/result/{ref_id}?offset=0 to page through
-the stored data without re-running the tool.
-
-Example ref label returned in the prompt:
-    [STORED:syslog_search:a3f9c12b] Preview: Apr 10 09:12:01 ap-01 dhcp...
+the Budget Manager automatically stores it and returns a reference label
+in the form [STORED:<tool_name>:<ref_id>]. The agent then calls
+[TOOL:read_stored_result] to page through the data.
 """
 from __future__ import annotations
 
@@ -524,6 +521,73 @@ _DEVICE_INVENTORY = [
     {"id": "radius-02",  "type": "server",  "role": "radius_server", "site": "site-b", "model": "Linux VM / FreeRADIUS",    "ip": "10.0.2.100"},
 ]
 
+
+# ---------------------------------------------------------------------------
+# In-memory device state overlay
+# ---------------------------------------------------------------------------
+# Tracks changes pushed via edit_device_config so subsequent
+# validate_device_config / get_device_config calls reflect those changes
+# instead of returning the same seed-based baseline forever.
+#
+# Lifetime: process-lifetime only (resets on restart). For demos this is
+# the right granularity — enough state to make a multi-turn fix workflow
+# coherent within one session, but no spillover between server restarts.
+#
+# Schema: {device_id: {state_key: value, ...}}
+# Recognised keys (per device type):
+#   wireless_ap : radius_timeout (int seconds), ntp_configured (bool),
+#                 vlan_acl_applied (bool)
+# Add more as additional fixers exercise more keys.
+_DEVICE_STATE: dict[str, dict[str, Any]] = {}
+
+
+def _apply_config_lines_to_state(device_id: str, config_lines: list[str]) -> dict[str, Any]:
+    """Parse IOS-style config lines and update _DEVICE_STATE for this device.
+
+    Returns the dict of recognised changes so the caller can echo them in
+    the audit log. Lines that aren't recognised are silently logged into a
+    `_unparsed_lines` list under the device's overlay so debugging is
+    possible without crashing the tool.
+    """
+    overlay = _DEVICE_STATE.setdefault(device_id, {})
+    recognised: dict[str, Any] = {}
+
+    for raw in config_lines:
+        line = (raw or "").strip().lower()
+        if not line:
+            continue
+
+        # radius-server timeout N    →    radius_timeout = N
+        if line.startswith("radius-server"):
+            import re as _re
+            m = _re.search(r"timeout\s+(\d+)", line)
+            if m:
+                overlay["radius_timeout"] = int(m.group(1))
+                recognised["radius_timeout"] = int(m.group(1))
+                continue
+
+        # ntp server <ip>    →    ntp_configured = True
+        if line.startswith("ntp server "):
+            overlay["ntp_configured"] = True
+            recognised["ntp_configured"] = True
+            continue
+        if line.startswith("no ntp server"):
+            overlay["ntp_configured"] = False
+            recognised["ntp_configured"] = False
+            continue
+
+        # access-list / ip access-group — heuristic: any ACL line applied
+        if "access-list" in line or "access-group" in line:
+            overlay["vlan_acl_applied"] = True
+            recognised["vlan_acl_applied"] = True
+            continue
+
+        # Unrecognised — track for diagnostics but don't fail
+        overlay.setdefault("_unparsed_lines", []).append(raw)
+
+    return recognised
+
+
 async def list_devices(args: dict[str, Any]) -> str:
     """List all network devices in inventory, with optional filtering."""
     device_type = args.get("type", "").lower()    # wireless_ap | switch | router | server | ""
@@ -640,6 +704,17 @@ async def get_device_config(args: dict[str, Any]) -> str:
     vlan_acl_ok    = (seed % 3 != 1)
     ip = dev["ip"]
 
+    # Apply in-memory state overlay so changes pushed via edit_device_config
+    # are reflected in the rendered running-config text (otherwise the LLM
+    # asking "what's the current config?" after a fix would see stale data).
+    overlay = _DEVICE_STATE.get(device_id, {})
+    if "radius_timeout" in overlay:
+        radius_timeout = overlay["radius_timeout"]
+    if "ntp_configured" in overlay:
+        ntp_missing = not overlay["ntp_configured"]
+    if "vlan_acl_applied" in overlay:
+        vlan_acl_ok = overlay["vlan_acl_applied"]
+
     if dev["type"] == "wireless_ap":
         if section == "radius":
             return (f"# RADIUS config for {device_id}\n"
@@ -676,7 +751,14 @@ async def get_device_config(args: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 
 async def validate_device_config(args: dict[str, Any]) -> str:
-    """Mock: deterministic PASS/WARN/FAIL report seeded by device ID."""
+    """Mock: deterministic PASS/WARN/FAIL report seeded by device ID.
+
+    Honours the in-memory device-state overlay populated by previous
+    edit_device_config calls in the same process. Without this, the
+    seed-based baseline would always report the same warnings even
+    after the operator pushed a fix — making post-fix validation
+    appear to ignore the change.
+    """
     device_id = args.get("device_id", "ap-01")
     await asyncio.sleep(0.03)
 
@@ -688,10 +770,23 @@ async def validate_device_config(args: dict[str, Any]) -> str:
     seed = int(_hs.md5(device_id.encode()).hexdigest()[:4], 16)
     issues, warnings, passed = [], [], []
 
+    # Apply in-memory overlay so changes pushed via edit_device_config
+    # are reflected here. _DEVICE_STATE is keyed by device_id.
+    overlay = _DEVICE_STATE.get(device_id, {})
+
     if dev["type"] == "wireless_ap":
         ntp_missing    = (seed % 4 == 0)
         radius_timeout = 3 + (seed % 4)
         vlan_acl_ok    = (seed % 3 != 1)
+
+        # Overlay overrides — operator's edits take precedence over baseline
+        if "radius_timeout" in overlay:
+            radius_timeout = overlay["radius_timeout"]
+        if "ntp_configured" in overlay:
+            ntp_missing = not overlay["ntp_configured"]
+        if "vlan_acl_applied" in overlay:
+            vlan_acl_ok = overlay["vlan_acl_applied"]
+
         if ntp_missing:
             issues.append("FAIL  [NTP]    NTP server not configured — clock drift risk")
         else:
@@ -716,6 +811,11 @@ async def validate_device_config(args: dict[str, Any]) -> str:
     lines += issues + warnings + passed
     lines += ["=" * 65,
               f"Summary: {len(issues)} issue(s), {len(warnings)} warning(s), {len(passed)} check(s) passed"]
+    if overlay:
+        lines.append(
+            f"Note: this device has {len(overlay)} pending in-memory change(s) from "
+            f"prior edit_device_config calls (mock state)"
+        )
     return "\n".join(lines)
 
 
@@ -818,6 +918,19 @@ async def edit_device_config(args: dict[str, Any]) -> str:
                 f"Received: {received}. "
                 f"Provide config_lines (list of IOS commands), or section + changes with recognized keys.]")
 
+    # Persist changes into the in-memory state overlay so subsequent
+    # validate_device_config / get_device_config calls reflect them.
+    # Without this step, the mock validator would always recompute its
+    # seed-based baseline and report the original warnings forever, even
+    # after the operator approved a fix — making post-HITL workflows
+    # appear broken in the demo (the LLM in the next turn correctly sees
+    # the validator output and concludes nothing changed).
+    applied_state = _apply_config_lines_to_state(device_id, config_lines)
+    state_summary = (
+        " ; ".join(f"{k}={v}" for k, v in applied_state.items())
+        if applied_state else "(no recognised state-affecting lines)"
+    )
+
     # Simulate config push
     lines_applied = "\n".join(f"  {l}" for l in config_lines)
     return (
@@ -830,7 +943,7 @@ async def edit_device_config(args: dict[str, Any]) -> str:
         f"# {'─'*60}\n"
         f"# Result: Configuration applied successfully (mock)\n"
         f"# Device acknowledged: OK\n"
-        f"# Write memory: Done\n"
+        f"# Mock state updated: {state_summary}\n"
         f"# Note: run validate_device_config to verify the change took effect"
     )
 

@@ -168,6 +168,86 @@ Respond with ONLY a JSON object. No explanation, no markdown.
 {"updated_content": "full updated markdown", "changes": ["change 1", "change 2"], "quality_delta": -1.0 to +1.0}"""
 
 
+_SKILL_MERGE_SYSTEM = """You are merging a new IT operations solution into an existing skill.
+
+The existing skill already covers a similar problem. A new instance of that
+problem was solved with a slightly different approach. Your job: produce a
+SINGLE updated skill file that captures the best of both, without
+duplicating content or contradicting the existing version.
+
+Rules:
+  - Preserve the existing skill's structure (Purpose / Tags / Risk / HITL /
+    Parameters / Steps / Constraints / Notes).
+  - Add new tools to the Tags list if they widen coverage.
+  - Add new steps to the Steps list ONLY if they're genuinely new
+    (not paraphrases of existing steps).
+  - Append a `## Notes` entry if the new solution found a useful edge case
+    or alternative path.
+  - Never grow the file past 1500 chars — trim verbose Notes if needed.
+
+Output ONLY the merged markdown. No code fences, no preamble, no explanation.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Module-level helpers
+# ---------------------------------------------------------------------------
+
+def _tokenize_for_similarity(text: str) -> set[str]:
+    """Tokenise text for Jaccard similarity computation.
+
+    Strategy:
+      - Lowercase
+      - Extract ASCII tokens (English words, device IDs, tool names) directly
+      - For runs of CJK characters: emit BOTH unigrams (single chars) and
+        bigrams (adjacent pairs) so 'RADIUS 认证' matches '诊断 RADIUS 认证'
+        even though Chinese has no word boundaries
+      - Drop common stop words and very short ASCII tokens
+
+    Returns an empty set when nothing usable — caller treats that as
+    'no signal, skip similarity check'.
+    """
+    if not text:
+        return set()
+    lower = text.lower()
+    tokens: set[str] = set()
+
+    # 1. ASCII tokens (English words + device IDs like ap-01, sw-3).
+    #    For device ids, also emit the bare prefix ('ap-01' → both 'ap_01'
+    #    AND 'ap') so a description mentioning a specific device can still
+    #    match an existing skill tagged with the device family.
+    for tok in re.findall(r"[a-z][a-z0-9_\-]+", lower):
+        if len(tok) < 2:
+            continue
+        unified = tok.replace("-", "_")
+        tokens.add(unified)
+        # Emit base prefix too, for device-id ↔ family bridging
+        m = re.match(r"^([a-z]{2,})[\-_]?\d", tok)
+        if m:
+            tokens.add(m.group(1))
+
+    # 2. CJK runs: unigrams + bigrams. This catches the common case where
+    #    a Chinese description shares technical terms with an English-tagged
+    #    skill — the ASCII terms (radius, ap, etc.) carry through, and CJK
+    #    n-grams add a bit more signal between two Chinese descriptions.
+    cjk_runs = re.findall(r"[\u4e00-\u9fff]+", text)
+    for run in cjk_runs:
+        for ch in run:
+            tokens.add(ch)
+        for i in range(len(run) - 1):
+            tokens.add(run[i:i+2])
+
+    # Drop noise
+    stop = {
+        "the","a","an","for","to","of","in","on","with","and","or","is","are",
+        "was","were","be","been","this","that","it","as","by","at","from","can",
+        "do","does","not","skill","task","help","check","please",
+        "用","的","了","是","有","和","在","或","可以","对","我","你","他","它",
+        "请","帮","如何","怎么","什么","这个","那个",
+    }
+    return {t for t in tokens if t not in stop and len(t) >= 1}
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -256,14 +336,39 @@ class SkillEvolver:
             )
             return None
 
-        # Step 2: Check for similar existing skill (avoid duplicates)
-        existing_id = await self._find_similar_skill(task_description)
-        if existing_id:
+        # Step 2: Check for similar existing skill — if found, MERGE the
+        # new solution's delta into it instead of creating a duplicate.
+        similar = await self._find_similar_skill(task_description)
+        if similar:
+            existing_id, jaccard = similar
             logger.info(
-                "SkillEvolver: similar skill already exists (%s), skipping creation for: %s",
-                existing_id, task_description[:60],
+                "SkillEvolver: similar skill exists (%s, jaccard=%.2f) → merging delta",
+                existing_id, jaccard,
             )
-            return None
+            merged = await self._merge_into_existing_skill(
+                existing_id      = existing_id,
+                task_description = task_description,
+                solution_steps   = solution_steps,
+                tools_used       = tools_used,
+                key_observations = key_observations,
+                operator_prefs   = operator_prefs,
+            )
+            if merged and merged.new_version > merged.old_version:
+                # Return a proposal-shaped object pointing at the merged skill
+                # so the UI can show "skill updated" instead of "skill created".
+                return SkillCreationProposal(
+                    should_create   = False,    # nothing new — but updated existing
+                    skill_id        = existing_id,
+                    reuse_potential = proposal.reuse_potential,
+                    complexity_score= proposal.complexity_score,
+                    markdown_content= "",
+                    rationale       = (
+                        f"Merged into existing skill '{existing_id}' "
+                        f"(jaccard={jaccard:.2f}, version→{merged.new_version})"
+                    ),
+                )
+            # Merge failed — fall through to a fresh creation as last resort
+            logger.debug("SkillEvolver: merge failed, falling through to fresh creation")
 
         # Step 3: Write the skill content via LLM
         markdown = await self._write_skill_content(
@@ -474,19 +579,177 @@ class SkillEvolver:
         # Strip any accidental code fences from the markdown
         return re.sub(r"^```(?:markdown)?\s*\n?", "", raw.strip()).rstrip("```").strip()
 
-    async def _find_similar_skill(self, task_description: str) -> Optional[str]:
-        """Use FTS5 search to find if a similar skill already exists."""
-        if self._fts is None:
+    async def _find_similar_skill(self, task_description: str) -> Optional[tuple[str, float]]:
+        """Find an existing skill semantically similar to the proposed task.
+
+        Returns (skill_id, similarity_score) for the best match above the
+        threshold, or None if nothing close enough exists.
+
+        Algorithm: token-Jaccard over (skill name + purpose + tags) vs the
+        task description. This is intentionally cheap — for a pool of <100
+        skills it runs in <1ms and avoids an LLM round-trip.
+
+        Threshold is dynamic:
+          - 0.35 by default (English-heavy or mixed descriptions)
+          - 0.20 when the description is CJK-dominant (CJK n-grams inflate
+            the token-set denominator, lowering Jaccard scores even for
+            obvious paraphrases — compensate by lowering the bar)
+        """
+        if not self._catalog:
             return None
         try:
-            results = await self._fts.search(query=task_description, limit=3)
-            if results:
-                logger.debug(
-                    "SkillEvolver: found %d potentially similar FTS results", len(results)
+            task_tokens = _tokenize_for_similarity(task_description)
+            if not task_tokens:
+                return None
+
+            # Heuristic: if any meaningful chunk of the description is CJK,
+            # treat as CJK-influenced and use a much lower threshold. CJK
+            # n-grams inflate the token-set denominator (each character
+            # becomes ≥ 2 tokens: the unigram + a bigram), and they don't
+            # overlap with ASCII-tagged English skills at all — so the
+            # signal-to-noise ratio in jaccard collapses.
+            cjk_chars = sum(1 for c in task_description if "\u4e00" <= c <= "\u9fff")
+            ascii_chars = sum(1 for c in task_description if c.isascii() and c.isalpha())
+            total_letters = cjk_chars + ascii_chars
+            cjk_share = (cjk_chars / total_letters) if total_letters else 0.0
+            if cjk_share > 0.50:
+                threshold = 0.08    # CJK-dominant — almost no n-gram overlap with EN tags
+            elif cjk_share > 0.20:
+                threshold = 0.15    # mixed — partial ASCII overlap
+            else:
+                threshold = 0.35    # English-dominant — strict
+
+            best_id    = None
+            best_score = 0.0
+            for summary in self._catalog.list_skills():
+                signature = " ".join([
+                    summary.name or "",
+                    summary.purpose or "",
+                    " ".join(summary.tags or []),
+                ])
+                sk_tokens = _tokenize_for_similarity(signature)
+                if not sk_tokens:
+                    continue
+                union = len(task_tokens | sk_tokens)
+                if union == 0:
+                    continue
+                jaccard = len(task_tokens & sk_tokens) / union
+                if jaccard > best_score:
+                    best_score = jaccard
+                    best_id    = summary.skill_id
+            if best_id and best_score >= threshold:
+                logger.info(
+                    "SkillEvolver: similar skill found — id=%s jaccard=%.2f "
+                    "(threshold=%.2f, cjk_share=%.2f)",
+                    best_id, best_score, threshold, cjk_share,
                 )
-        except Exception:
-            pass
-        return None   # similarity LLM check would go here in production
+                return (best_id, best_score)
+        except Exception as exc:
+            logger.debug("_find_similar_skill failed: %s", exc)
+        return None
+
+    async def _merge_into_existing_skill(
+        self,
+        existing_id:      str,
+        task_description: str,
+        solution_steps:   list[str],
+        tools_used:       list[str],
+        key_observations: list[str],
+        operator_prefs:   str,
+    ) -> Optional[FeedbackApplication]:
+        """When a similar skill already exists, merge the new solution's
+        delta (extra tools / new steps / new observations) into it instead
+        of creating a duplicate. Produces a new version of the existing
+        skill — same id, version++.
+
+        Algorithm:
+          1. Load existing skill markdown
+          2. Send (existing_md + new_solution_signals) to the LLM with a
+             merge prompt that says "ADD what's missing, KEEP what works"
+          3. Persist as new version via apply_feedback path
+
+        Returns a FeedbackApplication (same shape as apply_feedback) so
+        callers can log/audit consistently.
+        """
+        existing_md = self._catalog.as_markdown(existing_id) if self._catalog else None
+        if not existing_md:
+            logger.debug("merge_skill: existing %s has no markdown — skip merge", existing_id)
+            return None
+
+        steps_text = "\n".join(f"{i+1}. {s}" for i, s in enumerate(solution_steps[:8]))
+        obs_text   = "\n".join(f"- {o}" for o in key_observations[:4])
+        user_content = (
+            f"=== Existing skill ===\n{existing_md}\n\n"
+            f"=== New solution observed for similar task ===\n"
+            f"Task: {task_description[:300]}\n"
+            f"Steps taken:\n{steps_text}\n"
+            f"Tools used: {', '.join(tools_used[:6])}\n"
+            f"Key observations:\n{obs_text}\n"
+            f"Operator preferences: {operator_prefs[:200] or 'not specified'}\n\n"
+            f"Merge instructions:\n"
+            f"  - KEEP everything in the existing skill that still applies.\n"
+            f"  - ADD any new steps / tools / observations that genuinely "
+            f"    extend the skill's coverage.\n"
+            f"  - DEDUPE: don't repeat what's already there.\n"
+            f"  - If the new solution contradicts the existing skill, keep "
+            f"    the existing version unchanged and note the alternative in "
+            f"    a `## Notes` section.\n"
+            f"  - Stay under 1500 chars total."
+        )
+        try:
+            raw = await self._call_llm(_SKILL_MERGE_SYSTEM, user_content)
+            updated = re.sub(r"^```(?:markdown)?\s*\n?", "", raw.strip()).rstrip("```").strip()
+            if not updated or len(updated) < 50:
+                logger.debug("merge_skill: LLM produced empty/tiny content — skip")
+                return None
+        except Exception as exc:
+            logger.warning("merge_skill: LLM call failed (%s) — skip merge", exc)
+            return None
+
+        # Reuse the apply_feedback persistence path: it already handles
+        # version++, catalog re-registration, disk save.
+        return await self._persist_merged_version(
+            skill_id    = existing_id,
+            new_content = updated,
+            note        = f"Merged delta from task: {task_description[:80]}",
+        )
+
+    async def _persist_merged_version(
+        self, skill_id: str, new_content: str, note: str,
+    ) -> FeedbackApplication:
+        """Write a new version of an existing skill's markdown.
+        Mirrors the persistence half of apply_feedback()."""
+        if self._catalog:
+            try:
+                parsed = self._parse_markdown_to_definition(skill_id, new_content)
+                self._catalog.register_all({skill_id: parsed})
+            except Exception as exc:
+                logger.warning("merge_skill: catalog re-register failed: %s", exc)
+
+        self._save_skill_to_disk(skill_id, new_content)
+
+        history = self._versions.setdefault(skill_id, [])
+        next_v  = (history[-1].version + 1) if history else 2
+        v = SkillVersion(
+            skill_id=skill_id, version=next_v,
+            content=new_content,
+            reason=SkillChangeReason.MERGE,
+            author="agent",
+            diff_summary=note,
+            quality_score=0.0,    # quality re-evaluated on next use
+        )
+        history.append(v)
+        logger.info(
+            "SkillEvolver: merged into %s (version %d) — %s",
+            skill_id, next_v, note[:60],
+        )
+        return FeedbackApplication(
+            skill_id      = skill_id,
+            old_version   = next_v - 1,
+            new_version   = next_v,
+            changes       = [note],
+            quality_delta = 0.0,
+        )
 
     async def _register_skill(
         self, proposal: SkillCreationProposal, session_id: str
@@ -636,25 +899,47 @@ class SkillEvolver:
         return defn
 
     async def _call_llm(self, system: str, user: str) -> str:
-        """
-        Call LLM with system+user separation.
-        Always returns a string that starts with [ or { (valid JSON),
-        or the stub output — never raw prose that breaks JSON parsers downstream.
+        """Call LLM with system+user separation.
+
+        Returns the cleaned response. Two response shapes are valid:
+          - JSON (starts with '[' or '{') for eligibility / similarity checks
+          - Markdown (starts with '#' or any text) for skill content writing
+
+        Only falls back to stub when llm_fn is missing OR the LLM throws.
+        Empty-ish responses also fall back. Non-JSON/non-markdown responses
+        are now PASSED THROUGH (the caller decides how to handle them) —
+        previously these triggered a stub fallback that overwrote real LLM
+        output with hardcoded boilerplate.
         """
         import re as _re
         if self._llm_fn is None:
+            logger.debug("SkillEvolver: no llm_fn configured — using stub")
             return await self._stub_llm(system + "\n\n" + user)
         try:
             raw = await self._llm_fn(system, user)
-            raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL | _re.IGNORECASE).strip()
-            # Strip markdown fences that some models wrap JSON in
-            raw = _re.sub(r"^```json?\s*", "", raw)
-            raw = _re.sub(r"\s*```$", "", raw).strip()
-            first = raw.lstrip()[:1]
-            if not raw or first not in ("[", "{", "#"):
-                # Non-JSON non-markdown — fall back to stub for this call
-                logger.debug("SkillEvolver: non-JSON response (%r...) — using stub", raw[:60])
+            if not raw:
+                logger.warning("SkillEvolver: llm_fn returned empty — falling back to stub")
                 return await self._stub_llm(system + "\n\n" + user)
+            # Strip <think>...</think> blocks (qwen3-thinking, deepseek-r1, etc.)
+            raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL | _re.IGNORECASE).strip()
+            # Strip markdown fences that some models wrap output in
+            raw = _re.sub(r"^```(?:json|markdown)?\s*\n?", "", raw)
+            raw = _re.sub(r"\n?\s*```\s*$", "", raw).strip()
+            if not raw:
+                logger.warning("SkillEvolver: response was empty after cleanup — using stub")
+                return await self._stub_llm(system + "\n\n" + user)
+            # Heuristic: for JSON-expecting prompts (eligibility / similarity),
+            # the system prompt contains the keyword "JSON object". When the
+            # model returned non-JSON text in that case, fall back to stub so
+            # downstream json.loads doesn't crash.
+            wants_json = "JSON object" in system or "JSON array" in system
+            if wants_json and raw.lstrip()[:1] not in ("[", "{"):
+                logger.warning(
+                    "SkillEvolver: expected JSON but got %r... — falling back to stub",
+                    raw[:80],
+                )
+                return await self._stub_llm(system + "\n\n" + user)
+            # For markdown-writing prompts, accept anything non-empty.
             return raw
         except Exception as exc:
             logger.warning("SkillEvolver: llm_fn failed (%s) — using stub", exc)
@@ -662,11 +947,55 @@ class SkillEvolver:
 
     @staticmethod
     def _generate_skill_id(task_description: str) -> str:
-        """Generate a snake_case skill_id from task description."""
-        words = re.sub(r"[^a-z0-9\s]", "", task_description.lower()).split()
-        stop_words = {"the", "a", "an", "for", "to", "of", "in", "on", "with", "and", "or"}
-        key_words  = [w for w in words if w not in stop_words][:4]
-        return "_".join(key_words) or "auto_skill_" + str(int(time.time()))[-6:]
+        """Generate a stable snake_case skill_id from a task description.
+
+        Handles three input shapes:
+          1. JSON body with explicit 'skill_id' or 'name' field — use them
+             directly. Avoids ids like 'skill_id_xxx_name_description' that
+             would otherwise be assembled from JSON key tokens.
+          2. English-heavy prose — top 4 non-stopword tokens.
+          3. Pure CJK / no usable tokens — md5 hash of the description so
+             same input → same id (deterministic, no timestamp collisions).
+        """
+        import hashlib as _h
+
+        # 1. JSON-shaped input: respect explicit skill_id / name fields,
+        #    don't infer from surrounding JSON keys.
+        stripped = task_description.strip()
+        if stripped.startswith("{") and stripped.endswith("}"):
+            try:
+                data = json.loads(stripped)
+                if isinstance(data, dict):
+                    explicit = data.get("skill_id") or data.get("id") or data.get("name")
+                    if explicit and isinstance(explicit, str):
+                        # Sanitise to snake_case ASCII; if all CJK, fall through to hash
+                        cleaned = re.sub(r"[^a-z0-9_]+", "_", explicit.lower()).strip("_")
+                        if cleaned and len(cleaned) >= 3:
+                            return cleaned[:50]
+            except (json.JSONDecodeError, ValueError):
+                pass
+
+        # 2. ASCII-ish technical tokens — domain proper nouns survive even
+        #    when the surrounding prose is non-Latin. Filter out generic
+        #    JSON-structure words and meta-keywords that pollute output.
+        ascii_tokens = re.findall(r"[a-z][a-z0-9_\-]{2,}", task_description.lower())
+        stop = {
+            # English filler
+            "the","a","an","for","to","of","in","on","with","and","or",
+            "is","are","skill","task","check","do","please",
+            # JSON / schema metadata that creeps in when users paste JSON bodies
+            "skill_id","id","name","description","version","category",
+            "priority","steps","step_id","action","tools","input_params",
+            "tags","risk","hitl","string","integer","boolean","array",
+        }
+        key_words = [w.replace("-", "_") for w in ascii_tokens if w not in stop][:4]
+        if key_words:
+            return "_".join(key_words)
+
+        # 3. No usable ASCII tokens — use a stable hash so the same task
+        #    hashes to the same id (deterministic, no timestamp collisions).
+        digest = _h.md5(task_description.encode("utf-8", "replace")).hexdigest()[:8]
+        return f"skill_{digest}"
 
     @staticmethod
     def _parse_json_response(raw: str) -> dict:

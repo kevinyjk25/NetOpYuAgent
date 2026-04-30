@@ -570,7 +570,7 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   <div class="status-dot" id="status-dot"></div>
   <span class="hbadge" id="session-badge">session: —</span>
   <div class="header-right">
-    <a href="/webui/demos" class="demo-link">🧪 Demo Lab</a>
+    <a href="/webui/demos" class="demo-link" style="display:none">🧪 Demo Lab</a>
     <span class="hbadge warn" id="hitl-badge">● HITL PENDING</span>
     <span class="hbadge" id="cache-badge">cache: 0</span>
     <span class="hbadge" id="model-badge">loop: —</span>
@@ -615,51 +615,22 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
     </div>
   </div>
 
-  <!-- HITL triggers (collapsed by default) -->
-  <div class="acc-head" onclick="toggleAcc(this)" id="acc-hitl">
+  <!-- HITL triggers — operators type real queries; this list intentionally empty. -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-hitl" style="display:none">
     <span>⚠ hitl triggers</span>
     <span class="acc-arrow">▶</span>
   </div>
-  <div class="acc-body" id="acc-body-hitl">
-    <div style="padding:3px 0" id="hitl-queries">
-      <div class="tool-item" onclick="setQuery('restart the payments-service in production')">
-        <div class="risk-dot risk-high"></div>
-        <div><div class="skill-name">restart payments-service</div><div class="skill-purpose">→ HITL: destructive op</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('rollback auth-service to version 3.2.1')">
-        <div class="risk-dot risk-high"></div>
-        <div><div class="skill-name">rollback auth-service</div><div class="skill-purpose">→ HITL: rollback deploy</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('drain k8s-worker-03 for maintenance')">
-        <div class="risk-dot risk-high"></div>
-        <div><div class="skill-name">drain k8s-worker-03</div><div class="skill-purpose">→ HITL: drain node</div></div>
-      </div>
-    </div>
+  <div class="acc-body" id="acc-body-hitl" style="display:none">
+    <div style="padding:3px 0" id="hitl-queries"></div>
   </div>
 
-  <!-- Skill ambiguity demos (collapsed by default) -->
-  <div class="acc-head" onclick="toggleAcc(this)" id="acc-ambiguity">
+  <!-- Skill ambiguity — empty for production; populate via config if desired. -->
+  <div class="acc-head" onclick="toggleAcc(this)" id="acc-ambiguity" style="display:none">
     <span>🔀 skill ambiguity</span>
     <span class="acc-arrow">▶</span>
   </div>
-  <div class="acc-body" id="acc-body-ambiguity">
-    <div style="padding:3px 0" id="ambiguity-queries">
-      <div class="tool-item" onclick="setQuery('get system logs and metrics')">
-        <div class="risk-dot risk-medium"></div>
-        <div><div class="skill-name">logs and metrics</div><div class="skill-purpose">syslog vs prometheus (tie)</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('get device metrics')">
-        <div class="risk-dot risk-medium"></div>
-        <div><div class="skill-name">device metrics</div><div class="skill-purpose">device_info vs prometheus</div></div>
-      </div>
-      <div class="tool-item" onclick="setQuery('check network status')">
-        <div class="risk-dot risk-medium"></div>
-        <div><div class="skill-name">network status</div><div class="skill-purpose">service_health vs netflow</div></div>
-      </div>
-      <div style="padding:4px 10px;font-size:9px;color:var(--dim)">
-        Set HITL_SKILL_AMBIGUITY=true to route these to approval
-      </div>
-    </div>
+  <div class="acc-body" id="acc-body-ambiguity" style="display:none">
+    <div style="padding:3px 0" id="ambiguity-queries"></div>
   </div>
 
   <!-- Skill evolution (collapsed by default) -->
@@ -680,6 +651,15 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   </div>
   <div class="acc-body" id="acc-body-upload">
   <div style="padding:4px 6px">
+    <!-- Skill: generate from conversation text -->
+    <div style="margin-bottom:6px">
+      <div style="font-size:10px;color:var(--dim);margin-bottom:3px">generate skill from text</div>
+      <button id="skill-gen-btn" onclick="openSkillGenDialog()"
+        style="display:block;width:100%;border:1px solid var(--border);background:var(--card);border-radius:4px;padding:6px 8px;cursor:pointer;font-size:10px;color:var(--accent);text-align:center">
+        ✨ from chat / paste text
+      </button>
+      <div id="skill-gen-status" style="font-size:10px;color:var(--dim);margin-top:2px;min-height:14px"></div>
+    </div>
     <!-- Skill upload -->
     <div style="margin-bottom:6px">
       <div style="font-size:10px;color:var(--dim);margin-bottom:3px">skill (.md or .json)</div>
@@ -724,33 +704,17 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
       <div class="avatar avatar-sys">SYS</div>
       <div class="msg-body">
         <div class="msg-meta">system • now</div>
-        <div class="bubble system">IT Ops Agent v4 ready — all modules live.
+        <div class="bubble system">IT Ops Agent — ready.
 
 ▶  Thinking fold shows every module step (click row to expand detail)
 📦  Cache tab auto-opens when large tool results are stored + paged scroll
-📊  Flow tab logs every real server event (classify → recall → tools → hermes)
+📊  Flow tab logs every real server event (classify → recall → tools → memory)
 
-─── Diagnostic queries (SIMPLE → Runtime Loop) ──────────────────────────
-  search syslogs for errors on ap-01
-  why is RADIUS authentication failing for wireless users?
-  show BGP neighbors for router-01
-  check DNS resolution for payments.internal
-  get NetFlow traffic dump for site-a
-
-─── HITL queries (COMPLEX → Human approval required) ────────────────────
-  restart the payments-service in production
-  rollback auth-service to version 3.2.1
-  drain k8s-worker-03 for maintenance
-  delete stale DNS records for old-site.internal
-
-  Send one of the above → watch HITL tab → Approve or Reject.
-  Uses the A2A executor path: classify=COMPLEX → HITL graph → interrupt.
-
-─── Skill evolution trigger ──────────────────────────────────────────────
-  investigate and resolve the RADIUS certificate expiry on ap-03
-
-  After completion → Demo Lab → Skill Creation to see the auto-generated
-  skill, then Skill Feedback to self-improve it with operator feedback.</div>
+Type a query below. The agent will:
+  • classify it as SIMPLE (autonomous loop) or COMPLEX (HITL approval required)
+  • match relevant skills from the catalog
+  • call tools, store large results, and paginate when needed
+  • write turn memory after each completed answer</div>
       </div>
     </div>
   </div>
@@ -1954,6 +1918,16 @@ function dispatchChunk(c, query, sid) {
     }
     return;
   }
+  if (c.type==='awaiting_hitl') {
+    // Stream is paused for operator approval. Don't show "Done" — show ⏸.
+    // The full run completes after the operator decides and the post-HITL action returns.
+    addStep('hitl-wait',`⏸ Awaiting operator approval`,'',`turns so far: ${c.turns||'?'}`);
+    flowEvent('hitl-wait','⏸ Awaiting approval',`${c.turns||'?'} turns so far`,`session: ${sid}`);
+    if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
+      _sessionFacts = c.confirmed_facts;
+    }
+    return;
+  }
   if (c.type==='hermes_write') {
     addStep('fts','FTS5 Write','Turn → SQLite FTS5',`session: ${c.session_id}`);
     flowEvent('fts','🗄 FTS5 Write',`session: ${c.session_id}`,'cross-session recall updated');
@@ -2126,21 +2100,9 @@ function clearFlow() {
 }
 
 // Left panel
-// Skill evolution trigger items — shows 📄 preview when evolved skill exists in catalog
-const SKILL_EVO_TRIGGERS = [
-  {
-    label:   'RADIUS cert expiry',
-    query:   'investigate and resolve the RADIUS certificate expiry affecting wireless users at site-a',
-    skillId: 'radius_cert_expiry',    // expected skill_id after evolution
-    hint:    'complex → auto-skill',
-  },
-  {
-    label:   'BGP route flapping',
-    query:   'diagnose BGP route flapping on router-01 and recommend remediation steps',
-    skillId: 'bgp_route_flapping',
-    hint:    'complex → auto-skill',
-  },
-];
+// Skill evolution trigger items — populated dynamically as skills evolve.
+// To pre-seed example triggers, push entries with {label, query, skillId, hint} here.
+const SKILL_EVO_TRIGGERS = [];
 
 // known_evolved_ids is populated by loadSkills() so renderSkillEvoTriggers knows what exists
 let known_evolved_ids = new Set();
@@ -2324,6 +2286,25 @@ async function refreshHitl(retries=0) {
       el.innerHTML='<div style="color:var(--dim);font-size:10px;font-family:var(--mono);font-style:italic;padding:6px 0">No pending interrupts — send a destructive query to trigger HITL</div>';
       return;
     }
+
+    // Snapshot any in-flight operator input before we re-render the cards.
+    // The poll runs every few seconds and would otherwise wipe the user's
+    // typing mid-keystroke. We cache values keyed by (interrupt_id, field_key)
+    // and any selected radio choice, then restore after innerHTML rebuild.
+    const _savedInputs = {};       // "iid::key"  → string value
+    const _savedChoices = {};      // iid → selected choice id
+    const _focusedId = {};         // iid → field key that had focus
+    el.querySelectorAll('input[data-iid], textarea[data-iid]').forEach(node => {
+      const iid = node.dataset.iid;
+      const key = node.dataset.clarKey || node.dataset.editKey;
+      if (key) _savedInputs[`${iid}::${key}`] = node.value;
+      if (node === document.activeElement) _focusedId[iid] = key;
+    });
+    el.querySelectorAll('input[type="radio"]:checked').forEach(node => {
+      const m = (node.name || '').match(/^choice-(.+)$/);
+      if (m) _savedChoices[m[1]] = node.value;
+    });
+
     el.innerHTML='';
     for (const p of list) {
       const card=document.createElement('div');
@@ -2333,28 +2314,238 @@ async function refreshHitl(retries=0) {
       const rl=esc((p.risk_level||'high').toUpperCase());
       const iid=esc((p.interrupt_id||'').slice(0,10));
       const sla=p.sla_seconds||600;
-      const summary=esc(p.intent_summary||p.user_query||'Destructive operation requires human approval');
+      const summary=esc(p.intent_summary||p.user_query||'Operator action required');
       const actionHtml=action.action_type
         ?`<div style="font-family:var(--mono);font-size:9px;color:var(--dim);margin:4px 0">
             action: <span style="color:var(--warn)">${esc(action.action_type)}</span>
             on <span style="color:var(--accent)">${esc(action.target||'?')}</span>
             ${action.reversible===false?'<span style="color:var(--danger)"> ⚠ irreversible</span>':''}
           </div>`:''
+
+      // ── Pick body & buttons by trigger_kind ────────────────────────
+      let bodyHtml = '';
+      let actionsHtml = '';
+
+      if (p.trigger_kind === 'user_choice' && (p.choices||[]).length) {
+        // ── Type 1: USER_CHOICE — render a list of selectable options ──
+        bodyHtml = `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+            ${p.choices.map(c => `
+              <label style="display:flex;align-items:flex-start;gap:6px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;background:var(--card);transition:background .1s"
+                onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='var(--card)'">
+                <input type="radio" name="choice-${esc(p.interrupt_id)}" value="${esc(c.id)}" style="margin-top:2px"/>
+                <div style="flex:1">
+                  <div style="font-weight:600;color:var(--text)">${esc(c.label||c.id)}</div>
+                  ${c.description?`<div style="color:var(--dim);font-size:10px;margin-top:1px">${esc(c.description)}</div>`:''}
+                  ${c.metadata && Object.keys(c.metadata).length
+                    ? `<div style="font-family:var(--mono);font-size:9px;color:var(--mid);margin-top:2px">${
+                        Object.entries(c.metadata).map(([k,v]) => `${esc(k)}=${esc(String(v))}`).join(' · ')
+                      }</div>`
+                    : ''}
+                </div>
+              </label>
+            `).join('')}
+          </div>`;
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlSubmitChoice('${p.interrupt_id}')">✓ Use selected</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Cancel</button>`;
+
+      } else if (p.trigger_kind === 'clarification' && (p.clarification_fields||[]).length) {
+        // ── Type 3: CLARIFICATION — render input fields ────────────────
+        bodyHtml = `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+            ${p.clarification_fields.map(f => `
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text);margin-bottom:2px">
+                  ${esc(f.prompt)} ${f.required?'<span style="color:var(--danger)">*</span>':''}
+                </label>
+                <input type="text" data-clar-key="${esc(f.key)}" data-iid="${esc(p.interrupt_id)}"
+                  placeholder="${esc(f.placeholder||'')}"
+                  style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 6px;font-size:11px;font-family:inherit"
+                />
+              </div>
+            `).join('')}
+          </div>`;
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlSubmitAnswer('${p.interrupt_id}')">↪ Submit answers</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Cancel</button>`;
+
+      } else if ((p.editable_param_keys||[]).length && action.parameters) {
+        // ── Type 2: EDIT — render editable parameter fields ────────────
+        bodyHtml = `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;
+                      background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px">
+            <div style="font-size:10px;color:var(--dim)">Editable parameters (you may modify before approving):</div>
+            ${p.editable_param_keys.map(k => {
+              const v = action.parameters[k];
+              const vStr = (typeof v === 'object') ? JSON.stringify(v, null, 2) : String(v ?? '');
+              const isMulti = vStr.includes('\n') || vStr.length > 60;
+              if (isMulti) {
+                return `
+                  <div>
+                    <label style="display:block;font-size:11px;color:var(--text);margin-bottom:2px">${esc(k)}:</label>
+                    <textarea data-edit-key="${esc(k)}" data-iid="${esc(p.interrupt_id)}" rows="3"
+                      style="width:100%;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 6px;font-size:10px;font-family:var(--mono);resize:vertical">${esc(vStr)}</textarea>
+                  </div>`;
+              }
+              return `
+                <div>
+                  <label style="display:block;font-size:11px;color:var(--text);margin-bottom:2px">${esc(k)}:</label>
+                  <input type="text" data-edit-key="${esc(k)}" data-iid="${esc(p.interrupt_id)}" value="${esc(vStr)}"
+                    style="width:100%;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 6px;font-size:10px;font-family:var(--mono)"/>
+                </div>`;
+            }).join('')}
+          </div>`;
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlSubmitEdit('${p.interrupt_id}')">✓ Approve with edits</button>
+          <button class="btn btn-success btn-sm" onclick="hitlDec('${p.interrupt_id}','approve')" style="opacity:.7">↪ Approve as-is</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Reject</button>`;
+
+      } else {
+        // ── Default: classic approve / reject ──────────────────────────
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlDec('${p.interrupt_id}','approve')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Reject</button>`;
+      }
+
       card.innerHTML=`
         <div class="hitl-title">⚠ ${tk} — ${rl}</div>
         <div class="hitl-meta">${iid}… | SLA: ${sla}s | ${new Date().toLocaleTimeString()}</div>
         <div class="hitl-summary">${summary}</div>
         ${actionHtml}
-        <div class="hitl-actions">
-          <button class="btn btn-success btn-sm" onclick="hitlDec('${p.interrupt_id}','approve')">✓ Approve</button>
-          <button class="btn btn-danger btn-sm"  onclick="hitlDec('${p.interrupt_id}','reject')">✗ Reject</button>
+        ${bodyHtml}
+        <div class="hitl-actions" style="margin-top:8px">
+          ${actionsHtml}
         </div>`;
       el.appendChild(card);
     }
+
+    // Restore any in-flight operator input that was saved before re-render.
+    // Without this, the polling refresh wipes whatever the operator was
+    // typing mid-keystroke. Restoring after appendChild() means the new DOM
+    // nodes get the cached values populated on top of the freshly-built
+    // skeleton.
+    Object.entries(_savedInputs).forEach(([k, v]) => {
+      const [iid, key] = k.split('::');
+      const node = el.querySelector(`[data-iid="${iid}"][data-clar-key="${key}"], [data-iid="${iid}"][data-edit-key="${key}"]`);
+      if (node) node.value = v;
+    });
+    Object.entries(_savedChoices).forEach(([iid, val]) => {
+      const radio = el.querySelector(`input[name="choice-${iid}"][value="${val}"]`);
+      if (radio) radio.checked = true;
+    });
+    // Restore focus + caret position (place caret at end so typing continues
+    // smoothly even if the value was empty).
+    Object.entries(_focusedId).forEach(([iid, key]) => {
+      const node = el.querySelector(`[data-iid="${iid}"][data-clar-key="${key}"], [data-iid="${iid}"][data-edit-key="${key}"]`);
+      if (node && typeof node.focus === 'function') {
+        node.focus();
+        try { node.setSelectionRange(node.value.length, node.value.length); } catch (_) {}
+      }
+    });
   } catch(e){ console.warn('HITL poll error:',e); }
 }
 
+// ── Type 1: submit USER_CHOICE selection ──────────────────────────
+async function hitlSubmitChoice(id) {
+  const radio = document.querySelector(`input[name="choice-${id}"]:checked`);
+  if (!radio) {
+    alert('Please select an option first');
+    return;
+  }
+  await hitlDecExtra(id, 'choose', { selected_choice_id: radio.value });
+}
+
+// ── Type 2: submit EDIT with parameter_patch ──────────────────────
+async function hitlSubmitEdit(id) {
+  const patch = {};
+  document.querySelectorAll(`[data-iid="${id}"][data-edit-key]`).forEach(el => {
+    const key = el.dataset.editKey;
+    let val = el.value;
+    // Try to JSON-parse so list/dict params come through structured
+    if (val.trim().startsWith('[') || val.trim().startsWith('{')) {
+      try { val = JSON.parse(val); } catch(_) { /* keep as string */ }
+    }
+    patch[key] = val;
+  });
+  await hitlDecExtra(id, 'edit', { parameter_patch: patch });
+}
+
+// ── Type 3: submit CLARIFICATION answers ──────────────────────────
+async function hitlSubmitAnswer(id) {
+  const answers = {};
+  let missing = [];
+  document.querySelectorAll(`[data-iid="${id}"][data-clar-key]`).forEach(el => {
+    const key = el.dataset.clarKey;
+    const val = el.value.trim();
+    if (val) answers[key] = val;
+  });
+  await hitlDecExtra(id, 'answer', { clarification_answers: answers });
+}
+
+// Shared helper: POST to /hitl/{id}/{decision} with extra body fields
+async function hitlDecExtra(id, dec, extras) {
+  // Same guard as hitlDec — stop double-submit producing "already resolved".
+  if (_hitlInFlight.has(id)) {
+    console.warn(`hitlDecExtra: decision already in flight for ${id}, ignoring`);
+    return;
+  }
+  _hitlInFlight.add(id);
+  document.querySelectorAll(`button[onclick*="${id}"]`).forEach(btn => {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  });
+  try {
+    const body = Object.assign(
+      { operator_id: 'webui-operator', comment: `${dec} via Console` },
+      extras || {}
+    );
+    const res = await fetch(`${BASE}/hitl/${id}/${dec}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(()=>({}));
+    if (data.error) {
+      addMessage('agent', `HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nError: ${data.error}`, 'system');
+    } else {
+      addMessage('agent', `**✓ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n${data.synthesis || data.tool_result || 'Decision recorded'}`, 'agent');
+      addStep('done', `✅ Post-HITL ${dec} complete`, '', `interrupt: ${id.slice(0,12)}`);
+      flowEvent('done', `✅ Post-HITL ${dec} complete`, dec, `interrupt: ${id.slice(0,12)}`);
+      setTimeout(loadSessions, 800);
+      switchTab('cache');
+    }
+    refreshHitl();
+  } catch (e) {
+    console.warn('hitlDecExtra error:', e);
+    alert('Submit failed: ' + (e.message||e));
+  } finally {
+    _hitlInFlight.delete(id);
+  }
+}
+
+// In-flight HITL decisions — prevents double-clicks and stops "Interrupt
+// already resolved" errors when polling re-renders a card whose decision
+// is already being processed. Cleared in hitlDec/hitlDecExtra finally.
+const _hitlInFlight = new Set();
+
 async function hitlDec(id,dec) {
+  // Guard: don't fire a second decision while one is in flight for the
+  // same interrupt. Without this, a slightly-laggy double-click on Approve
+  // produces "Error: Interrupt already resolved" because the second POST
+  // arrives after DecisionRouter has already moved the payload to RESOLVED.
+  if (_hitlInFlight.has(id)) {
+    console.warn(`hitlDec: decision already in flight for ${id}, ignoring`);
+    return;
+  }
+  _hitlInFlight.add(id);
+  // Disable all buttons on this card so visually the operator can't click
+  // again either. We do this by fading the card and adding a "submitting"
+  // overlay.
+  document.querySelectorAll(`button[onclick*="${id}"]`).forEach(btn => {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  });
   try {
     const res=await fetch(`${BASE}/hitl/${id}/${dec}`,{method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -2368,33 +2559,70 @@ async function hitlDec(id,dec) {
 Outcome: ${outcome}
 Error: ${data.error}`,'system');
     } else if (data.tool_result && dec==='approve') {
-      // Tool executed successfully — show result + synthesis if available
+      // Tool executed successfully — show synthesis (markdown) + raw tool output.
       const toolName = data.tool_name || 'tool';
-      const synthNote = data.synthesis ? `
-
-${data.synthesis}` : '';
-      addMessage('agent',
-        `✓ HITL approved — ${toolName} executed:${synthNote}
-
-${data.tool_result}`,
-        'agent');
+      // For agent_loop, synthesis IS the answer — the tool_result is the same
+      // text, so don't render the raw "Tool output" block (would duplicate).
+      const isAgentLoop = toolName === 'agent_loop';
+      if (isAgentLoop && data.synthesis) {
+        addMessage('agent',
+          data.synthesis + '\n\n---\n\n' +
+          `**✓ HITL approved — agent loop completed**`,
+          'agent');
+      } else {
+        const synthesisBlock = data.synthesis
+          ? data.synthesis + '\n\n---\n\n'
+          : '';
+        addMessage('agent',
+          synthesisBlock +
+          `**✓ HITL approved — \`${toolName}\` executed**\n\n` +
+          '**Tool output:**\n```\n' + String(data.tool_result).slice(0, 4000) + '\n```',
+          'agent');
+      }
       addToolResult(toolName, `approved by operator`, data.tool_result, false, null);
+      // Mark the original turn as DONE — the post-HITL action has completed.
+      addStep('done',`✅ Post-HITL action complete — ${toolName}`,'',`interrupt: ${id.slice(0,12)}`);
+      flowEvent('done','✅ Post-HITL action complete',toolName,`interrupt: ${id.slice(0,12)}`);
+      // Refresh sessions panel so the post-HITL turn shows up
+      setTimeout(loadSessions, 800);
       switchTab('cache');
     } else if (dec==='approve') {
-      // No tool_result yet — show synthesis or fallback message
-      const synthNote = data.synthesis
-          ? `\nSummary: ${data.synthesis}`
-          : `\nTool is executing — check Results tab for output.`;
-      addMessage('agent',`HITL APPROVE: ${id.slice(0,10)}…\nOutcome: ${outcome}${synthNote}`,'system');
+      // No tool_result returned — render synthesis as markdown if present.
+      if (data.synthesis) {
+        addMessage('agent', data.synthesis, 'agent');
+      } else {
+        addMessage('agent',
+          `**✓ HITL approved** — \`${id.slice(0,10)}…\`\n\nThe approved action is executing. Check the Results tab when complete.`,
+          'agent');
+      }
     } else {
       addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
 Outcome: ${outcome}`,'system');
+    }
+    // Render Hermes lifecycle steps (FTS5 Write / Memory Curation) for ANY
+    // decision that produced a memory write — approve / reject / escalate
+    // are all auditable operations and the Memory tab should reflect them.
+    if (data.memory_write) {
+      addStep('fts','FTS5 Write','Turn → SQLite FTS5',`session: ${data.memory_write.session_id||''}`);
+      flowEvent('fts','🗄 FTS5 Write',`session: ${data.memory_write.session_id||''}`,'post-HITL turn persisted');
+    }
+    if (data.memory_curate) {
+      const types = (data.memory_curate.types||[]).join(', ');
+      addStep('curate',`Memory Curation — ${data.memory_curate.memories_count} memories`,types||'',
+        `memories: ${data.memory_curate.memories_count}\ntypes: ${types||'—'}`);
+      flowEvent('curate','🧠 Curation',`${data.memory_curate.memories_count} memories`,types||'');
     }
     flowAdd('hitl',`⚠ HITL ${dec.toUpperCase()}`,`${id.slice(0,12)}…`,`outcome: ${outcome}`,data);
     setTimeout(()=>refreshHitl(0),400);
     // Refresh session list to pick up the new turn written by Hermes
     setTimeout(loadSessions, 1200);
   } catch(e){ addMessage('system','HITL decision error: '+e.message,'error'); }
+  finally {
+    // Always clear the in-flight marker — even on error — so the operator
+    // can retry if the network glitched. The polling refresh will redraw
+    // the card if the interrupt is still pending.
+    _hitlInFlight.delete(id);
+  }
 }
 
 async function refreshStats() {
@@ -2417,9 +2645,16 @@ async function refreshStats() {
         exec.wired       ? ok('Executor')         : bad('Executor not wired'),
         exec.hitl_router ? ok('HITL router')      : bad('HITL router missing'),
         exec.tool_router ? ok('ToolRouter')        : bad('ToolRouter — tools are stubs'),
-        hermes.fts_store ? ok('FTS5 store',d.hermes?.db_path?.split('/').pop()) : bad('FTS5 store'),
-        hermes.memory_curator ? ok('MemoryCurator') : bad('MemoryCurator'),
-        hermes.user_model     ? ok('UserModel')     : bad('UserModel'),
+        hermes.fts_store ? ok('LongTerm store (FTS5+TF-IDF)', d.hermes?.db_path?.split('/').pop())
+                         : bad('LongTerm store'),
+        hermes.memory_curator ? ok('FactExtractor (LLM-curated)','dual-language ready')
+                              : bad('FactExtractor','no LLM wired → English-regex fallback'),
+        hermes.user_model     ? ok('UserModel','behaviour profile')
+                              : bad('UserModel'),
+        hermes.dtm            ? ok('Recall Orchestrator',
+                                    'MMR λ='+(d.hermes?.dtm_stats?.mmr_lambda ?? '?')
+                                    +' · TrackB×'+(d.hermes?.dtm_stats?.track_b_weight ?? '?'))
+                              : bad('Recall Orchestrator'),
         hermes.skill_evolver  ? ok('SkillEvolver')  : bad('SkillEvolver'),
       ].join('</div>');
       box.innerHTML = rows + '</div>';
@@ -2479,6 +2714,236 @@ function clearChat() {
 }
 
 // ── CAP 4: Upload handlers ────────────────────────────────────────────────
+
+// ── Skill: generate from conversation/text ──────────────────────────────
+// Opens an inline modal where the user pastes (or auto-fills from chat
+// history) a free-form description. Backend /skills/generate converts
+// the text to standard skill markdown via LLM and returns a draft +
+// similarity hint. The user reviews, optionally edits, then clicks
+// Confirm to upload via /skills/upload.
+function openSkillGenDialog() {
+  // Auto-fill: take the last user query + agent answer (best signal for
+  // "what procedure did we just work through?").
+  const msgs = document.querySelectorAll('#chat-window .msg');
+  let prefill = '';
+  if (msgs.length >= 2) {
+    const lastTwo = Array.from(msgs).slice(-4);  // up to 2 user+agent pairs
+    prefill = lastTwo.map(m => {
+      const role = m.classList.contains('user') ? 'User' :
+                   m.classList.contains('agent') ? 'Assistant' : 'System';
+      const txt = (m.querySelector('.msg-body')?.innerText || m.innerText || '').trim();
+      return txt ? `${role}: ${txt}` : '';
+    }).filter(Boolean).join('\n\n');
+  }
+
+  const overlay = document.createElement('div');
+  overlay.id = 'skill-gen-overlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9999;display:flex;align-items:center;justify-content:center;padding:24px';
+  overlay.innerHTML = `
+    <div style="background:var(--card);border:1px solid var(--border);border-radius:8px;width:min(720px,100%);max-height:90vh;display:flex;flex-direction:column;font-size:12px">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">
+        <strong style="font-size:13px">Generate skill from conversation/text</strong>
+        <span onclick="closeSkillGenDialog()" style="cursor:pointer;color:var(--mid);font-size:18px;line-height:1">×</span>
+      </div>
+      <div style="padding:12px 16px;overflow:auto;flex:1">
+        <div style="margin-bottom:6px;color:var(--dim);font-size:10px">
+          Paste a chat excerpt or describe a procedure. The agent will convert it to standard skill format.
+          ${prefill ? '(prefilled from your last turn)' : ''}
+        </div>
+        <textarea id="skill-gen-text" rows="8"
+          style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:inherit;font-size:12px;resize:vertical">${
+            (prefill || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+          }</textarea>
+
+        <div style="display:flex;gap:8px;margin-top:8px;align-items:center">
+          <input id="skill-gen-name" placeholder="Optional skill name hint"
+            style="flex:1;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:11px"/>
+          <input id="skill-gen-tags" placeholder="Optional tags, comma-separated"
+            style="flex:1.5;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:5px 8px;font-size:11px"/>
+        </div>
+
+        <div style="display:flex;justify-content:flex-end;margin-top:10px">
+          <button id="skill-gen-go" onclick="runSkillGen()"
+            style="background:var(--accent);color:#000;border:none;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">
+            ✨ Generate draft
+          </button>
+        </div>
+
+        <div id="skill-gen-result" style="margin-top:14px;display:none">
+          <div id="skill-gen-similar" style="display:none;background:rgba(255,193,7,.12);border:1px solid rgba(255,193,7,.4);border-radius:4px;padding:8px;margin-bottom:8px;font-size:11px"></div>
+          <div style="color:var(--dim);font-size:10px;margin-bottom:4px">Generated draft (editable):</div>
+          <textarea id="skill-gen-draft" rows="14"
+            style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:8px;font-family:'SF Mono',Consolas,monospace;font-size:11px;resize:vertical"></textarea>
+          <div id="skill-gen-id-row" style="display:flex;gap:8px;margin-top:6px;align-items:center;font-size:11px">
+            <span style="color:var(--dim)">skill_id:</span>
+            <code id="skill-gen-id" style="background:var(--bg);padding:2px 6px;border-radius:3px"></code>
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:10px">
+            <button onclick="closeSkillGenDialog()"
+              style="background:transparent;color:var(--mid);border:1px solid var(--border);border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px">
+              Cancel
+            </button>
+            <button id="skill-gen-confirm" onclick="confirmSkillGen()"
+              style="background:var(--metric-green,#4ade80);color:#000;border:none;border-radius:4px;padding:6px 14px;cursor:pointer;font-size:12px;font-weight:600">
+              ✓ Register skill
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  setTimeout(() => document.getElementById('skill-gen-text')?.focus(), 50);
+  overlay.addEventListener('click', e => {
+    if (e.target === overlay) closeSkillGenDialog();
+  });
+}
+
+function closeSkillGenDialog() {
+  document.getElementById('skill-gen-overlay')?.remove();
+}
+
+async function runSkillGen() {
+  const text  = document.getElementById('skill-gen-text').value.trim();
+  if (!text) {
+    alert('Please paste some text to convert');
+    return;
+  }
+  const name  = document.getElementById('skill-gen-name').value.trim();
+  const tagsRaw = document.getElementById('skill-gen-tags').value.trim();
+  const tags  = tagsRaw ? tagsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  const btn = document.getElementById('skill-gen-go');
+  btn.disabled = true;
+  btn.textContent = 'Generating…';
+  try {
+    const res = await fetch(`${BASE}/skills/generate`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({text, hint_name: name, hint_tags: tags}),
+    });
+    let data;
+    try { data = await res.json(); } catch(_) { data = {}; }
+    if (!res.ok) {
+      const msg = data.detail || res.statusText || `HTTP ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    document.getElementById('skill-gen-result').style.display = 'block';
+    document.getElementById('skill-gen-draft').value = data.markdown;
+    document.getElementById('skill-gen-id').textContent = data.skill_id;
+    document.getElementById('skill-gen-id').dataset.original = data.skill_id;
+    const simEl = document.getElementById('skill-gen-similar');
+
+    if (data.id_collides && !data.similar_to) {
+      // Exact id already in catalog (rare — happens when user re-generates
+      // same hint_name). Treat as "merge by overwrite".
+      simEl.innerHTML =
+        `⚠ <strong>Skill ID <code>${data.skill_id}</code> already exists</strong> in the catalog. ` +
+        `Confirming will REPLACE its current content (a new version will be saved).`;
+      simEl.style.display = 'block';
+    } else if (data.similar_to) {
+      // Similar skill found — give the user a clear choice between
+      // merge-into-existing vs register-as-new with a forced unique id.
+      const sum = data.similar_summary || {};
+      const tagsLine = (sum.tags && sum.tags.length)
+        ? `<div style="margin-top:4px"><span style="color:var(--dim)">tags:</span> ${sum.tags.map(t => `<code>${t}</code>`).join(' ')}</div>`
+        : '';
+      simEl.innerHTML = `
+        <strong>⚠ A similar skill already exists</strong>
+        <div style="margin-top:4px"><span style="color:var(--dim)">id:</span> <code>${data.similar_to}</code> (similarity ${data.similarity})</div>
+        ${sum.name ? `<div><span style="color:var(--dim)">name:</span> ${escapeHtml(sum.name)}</div>` : ''}
+        ${sum.purpose ? `<div><span style="color:var(--dim)">purpose:</span> ${escapeHtml(sum.purpose)}</div>` : ''}
+        ${tagsLine}
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          <button onclick="chooseSkillGenAction('merge', '${data.similar_to}')"
+            style="background:rgba(255,193,7,.25);color:var(--text);border:1px solid rgba(255,193,7,.5);border-radius:3px;padding:4px 10px;cursor:pointer;font-size:11px">
+            Merge into <code>${data.similar_to}</code> (recommended)
+          </button>
+          <button onclick="chooseSkillGenAction('new')"
+            style="background:transparent;color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 10px;cursor:pointer;font-size:11px">
+            Register as new skill
+          </button>
+        </div>
+        <div id="skill-gen-action-status" style="margin-top:6px;font-size:10px;color:var(--mid)"></div>
+      `;
+      simEl.style.display = 'block';
+      // Disable the bottom Register button until the user picks an action
+      document.getElementById('skill-gen-confirm').disabled = true;
+      document.getElementById('skill-gen-confirm').textContent = '✓ Choose merge or new above';
+    } else {
+      simEl.style.display = 'none';
+      document.getElementById('skill-gen-confirm').disabled = false;
+      document.getElementById('skill-gen-confirm').textContent = '✓ Register skill';
+    }
+    btn.textContent = '✨ Re-generate';
+  } catch (e) {
+    alert(`Generation failed: ${e.message || e}`);
+    btn.textContent = '✨ Generate draft';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Tiny HTML escape for similar-skill metadata display
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({
+    '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+  }[c]));
+}
+
+// User picks merge vs new from the similarity prompt
+function chooseSkillGenAction(action, existingId) {
+  const idEl = document.getElementById('skill-gen-id');
+  const status = document.getElementById('skill-gen-action-status');
+  const confirmBtn = document.getElementById('skill-gen-confirm');
+  if (action === 'merge' && existingId) {
+    idEl.textContent = existingId;
+    if (status) status.textContent = `→ will merge into "${existingId}" (creates a new version)`;
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = `✓ Merge into ${existingId}`;
+  } else {
+    // Register as new — append a numeric suffix to the auto-generated id
+    // so it doesn't collide with the similar one.
+    const orig = idEl.dataset.original || idEl.textContent;
+    const suffix = '_' + Math.floor(Date.now() / 1000).toString(36);
+    idEl.textContent = orig + suffix;
+    if (status) status.textContent = `→ will register as new skill "${orig + suffix}"`;
+    confirmBtn.disabled = false;
+    confirmBtn.textContent = '✓ Register as new';
+  }
+}
+
+async function confirmSkillGen() {
+  const skillId  = document.getElementById('skill-gen-id').textContent.trim();
+  const markdown = document.getElementById('skill-gen-draft').value;
+  if (!skillId || !markdown) return;
+
+  const btn = document.getElementById('skill-gen-confirm');
+  btn.disabled = true;
+  btn.textContent = 'Registering…';
+  try {
+    // Wrap as a Blob so the existing /skills/upload handler can read it as a .md file
+    const blob = new File([markdown], `${skillId}.md`, {type: 'text/markdown'});
+    const fd = new FormData();
+    fd.append('file', blob);
+    const res = await fetch(`${BASE}/skills/upload`, {method: 'POST', body: fd});
+    let data;
+    try { data = await res.json(); } catch(_) { data = {}; }
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+
+    const statusEl = document.getElementById('skill-gen-status');
+    statusEl.textContent = `✓ registered: ${data.skill_id}`;
+    statusEl.style.color = 'var(--metric-green, #4ade80)';
+    flowEvent('skill', '✨ Skill Generated', data.skill_id, `${markdown.length} chars`);
+    await loadSkills();
+    closeSkillGenDialog();
+  } catch (e) {
+    alert(`Registration failed: ${e.message || e}`);
+    btn.textContent = '✓ Register skill';
+  } finally {
+    btn.disabled = false;
+  }
+}
 
 async function handleSkillUpload(file) {
   if (!file) return;

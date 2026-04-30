@@ -83,6 +83,15 @@ class StopPolicyConfig:
     confidence_floor:       float = 0.45   # below this for too long → stop
     low_confidence_turns:   int   = 2      # allowed turns below floor
 
+    # Clarification gate
+    # When the agent's confidence is below `clarification_threshold` AND it
+    # has not yet exhausted the per-session budget, the loop emits a
+    # CLARIFICATION HITL interrupt instead of guessing. The threshold sits
+    # above confidence_floor so we ASK rather than escalate to a generic
+    # HITL stop. Set max_clarifications=0 to disable entirely.
+    clarification_threshold:    float = 0.50
+    max_clarifications:         int   = 2
+
     # Parallel delegation guard
     max_parallel_delegations: int = 5
 
@@ -102,6 +111,12 @@ class LoopState:
     # Progress tracking
     no_progress_turns:   int   = 0
     last_response_hash:  Optional[str] = None    # detect repeated outputs
+
+    # Clarification budget — caps active "ask the operator" interrupts
+    # so a hopelessly under-specified query can't trap the loop in a
+    # rapid-fire interrogation. Soft cap; the loop falls back to default
+    # assumptions or stop_graceful when exceeded.
+    clarifications_asked: int = 0
 
     # Confidence tracking
     current_confidence:  float = 1.0

@@ -8,7 +8,6 @@ Core exports (no fastapi/pydantic dependency at import time):
   StopPolicy, StopPolicyConfig, StopDecision, StopOutcome, LoopState
 
 Optional submodules (imported lazily inside their factory functions):
-  tool_cache.py      — requires fastapi (create_cache_router lazy-imports it)
   skill_catalog.py   — standalone, no fastapi dep
   delegation.py      — standalone
   model_tier.py      — standalone

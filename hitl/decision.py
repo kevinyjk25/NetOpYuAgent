@@ -70,10 +70,27 @@ class DecisionResult:
         }
         # Include tool execution result when callback ran successfully
         if self.graph_result:
+            # Direct callback path: graph_result is {"tool", "args", "result"}
             if "result" in self.graph_result:
                 d["tool_result"] = self.graph_result["result"]
             if "tool" in self.graph_result:
                 d["tool_name"] = self.graph_result["tool"]
+            # LangGraph resume path: graph_result has "execution_results" list of step dicts.
+            # Concatenate each step's output text so the operator sees what happened.
+            if "execution_results" in self.graph_result and "tool_result" not in d:
+                steps = self.graph_result["execution_results"] or []
+                outputs = []
+                for s in steps:
+                    label = s.get("step", "")
+                    out   = s.get("output", "")
+                    status = s.get("status", "ok")
+                    outputs.append(f"[{status}] {label}\n{out}" if label else out)
+                if outputs:
+                    d["tool_result"] = "\n\n".join(outputs)
+                # Fallback tool_name: from action target if no specific tool name available
+                if "tool_name" not in d:
+                    action = self.graph_result.get("proposed_action") or {}
+                    d["tool_name"] = action.get("action_type", "executed_action")
             if "error" in self.graph_result and not d["error"]:
                 d["error"] = self.graph_result["error"]
         return d
@@ -116,6 +133,20 @@ class HitlDecisionRouter:
 
     async def register_interrupt(self, payload: HitlPayload) -> None:
         """Called when a new HITL interrupt fires. Stores the payload. Idempotent."""
+        # Prune expired direct callbacks (>30 min old) to prevent memory growth
+        # in long-running services. The TTL also bounds how late an operator
+        # can approve — after 30 min the callback is gone and approval fails.
+        try:
+            import time as _time_pr
+            _ttl = 1800  # 30 minutes
+            _now = _time_pr.monotonic()
+            self._direct_callbacks = {
+                k: v for k, v in self._direct_callbacks.items()
+                if _now - (v[1] if isinstance(v, tuple) else 0) < _ttl
+            }
+        except Exception:
+            pass
+
         if payload.interrupt_id in self._payload_store:
             logger.debug("register_interrupt: %s already registered, skipping",
                         payload.interrupt_id[:12])
@@ -189,6 +220,16 @@ class HitlDecisionRouter:
         elif decision.decision == DecisionKind.EDIT:
             return await self._resume_with_edit(decision, payload, thread_cfg)
 
+        elif decision.decision == DecisionKind.CHOOSE:
+            # Operator picked one of the offered choices. Validate, persist,
+            # and resume the callback with the selection bound.
+            return await self._resume_with_choice(decision, payload, thread_cfg)
+
+        elif decision.decision == DecisionKind.ANSWER:
+            # Operator answered the clarification questions. Resume callback
+            # with the answers as additional context.
+            return await self._resume_with_answer(decision, payload, thread_cfg)
+
         elif decision.decision == DecisionKind.REJECT:
             return await self._abort(
                 decision, payload, thread_cfg, reason="operator_rejected"
@@ -227,7 +268,20 @@ class HitlDecisionRouter:
             callback = _cb_entry[0] if _cb_entry else None
             if callback:
                 logger.info("_resume: running direct callback for interrupt %s", decision.interrupt_id[:12])
-                graph_result = await callback()
+                # Pass the decision so callback can react to EDIT / CHOOSE /
+                # ANSWER. Old callbacks defined as `def cb()` won't accept
+                # the kwarg — fall back to no-arg call.
+                import inspect as _inspect
+                try:
+                    sig = _inspect.signature(callback)
+                    if "decision" in sig.parameters:
+                        graph_result = await callback(decision=decision)
+                    elif len(sig.parameters) >= 1:
+                        graph_result = await callback(decision)
+                    else:
+                        graph_result = await callback()
+                except (ValueError, TypeError):
+                    graph_result = await callback()
                 await self._audit.write(HitlAuditRecord(
                     interrupt_id=decision.interrupt_id,
                     thread_id=payload.thread_id,
@@ -241,7 +295,7 @@ class HitlDecisionRouter:
                     resumed=True,
                     graph_result=graph_result or {},
                 )
-            # LangGraph resume path
+            # LangGraph resume path (unchanged)
             self._graph.update_state(
                 thread_cfg,
                 {"hitl_decision": decision.model_dump()},
@@ -293,7 +347,87 @@ class HitlDecisionRouter:
                 decision.parameter_patch,
             )
 
-        self._graph.update_state(thread_cfg, patch)
+        # Note: update_state is a no-op when this interrupt was created via
+        # the direct-callback path (no graph state exists). Safe to call;
+        # the patch lives on the decision object which _resume passes to
+        # the callback.
+        try:
+            self._graph.update_state(thread_cfg, patch)
+        except Exception as exc:
+            logger.debug("update_state skipped (likely direct callback path): %s", exc)
+        return await self._resume(decision, payload, thread_cfg)
+
+    async def _resume_with_choice(
+        self,
+        decision: HitlDecision,
+        payload: HitlPayload,
+        thread_cfg: dict,
+    ) -> DecisionResult:
+        """Validate the operator's chosen option and resume the callback.
+
+        The callback inspects `decision.selected_choice_id` to decide which
+        of the offered candidates to act on (e.g. which skill to invoke,
+        which device(s) to query).
+        """
+        valid_ids = {c.id for c in (payload.choices or [])}
+        if not valid_ids:
+            return DecisionResult(
+                interrupt_id=decision.interrupt_id,
+                decision=decision.decision,
+                resumed=False,
+                error="payload.choices is empty — CHOOSE decision invalid",
+            )
+        if decision.selected_choice_id not in valid_ids:
+            return DecisionResult(
+                interrupt_id=decision.interrupt_id,
+                decision=decision.decision,
+                resumed=False,
+                error=(
+                    f"selected_choice_id={decision.selected_choice_id!r} "
+                    f"not in payload.choices ({sorted(valid_ids)})"
+                ),
+            )
+        logger.info(
+            "Operator chose option — interrupt_id=%s id=%s",
+            decision.interrupt_id, decision.selected_choice_id,
+        )
+        try:
+            self._graph.update_state(
+                thread_cfg, {"hitl_decision": decision.model_dump()},
+            )
+        except Exception as exc:
+            logger.debug("update_state skipped: %s", exc)
+        return await self._resume(decision, payload, thread_cfg)
+
+    async def _resume_with_answer(
+        self,
+        decision: HitlDecision,
+        payload: HitlPayload,
+        thread_cfg: dict,
+    ) -> DecisionResult:
+        """Validate that the operator answered all required clarification
+        fields and resume the callback. The callback merges the answers
+        into its working context and continues."""
+        required_keys = {f.key for f in (payload.clarification_fields or []) if f.required}
+        answers = decision.clarification_answers or {}
+        missing = sorted(k for k in required_keys if not answers.get(k, "").strip())
+        if missing:
+            return DecisionResult(
+                interrupt_id=decision.interrupt_id,
+                decision=decision.decision,
+                resumed=False,
+                error=f"Missing required clarifications: {missing}",
+            )
+        logger.info(
+            "Operator answered clarification — interrupt_id=%s keys=%s",
+            decision.interrupt_id, sorted(answers.keys()),
+        )
+        try:
+            self._graph.update_state(
+                thread_cfg, {"hitl_decision": decision.model_dump()},
+            )
+        except Exception as exc:
+            logger.debug("update_state skipped: %s", exc)
         return await self._resume(decision, payload, thread_cfg)
 
     async def _abort(

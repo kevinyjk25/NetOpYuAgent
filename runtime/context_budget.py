@@ -40,10 +40,10 @@ Usage
 
     prompt_section = budget_mgr.assemble(
         memory_results=results,          # list[RetrievalResult]
-        tool_outputs={"prometheus": big_json},
-        confirmed_facts=["payments-service is in prod", "DNS confirmed OK"],
-        working_set=[DeviceRef(id="ap-01", label="AP-01 at Site-A")],
-        env_context={"site": "Site-A", "change_window": False},
+        tool_outputs={"<tool>": big_json},
+        confirmed_facts=["<fact-1>", "<fact-2>"],
+        working_set=[DeviceRef(id="<device-id>", label="<device-label>")],
+        env_context={"site": "<site>", "change_window": False},
     )
     # → compact string ready for {context} slot in the system prompt
 """
@@ -149,11 +149,9 @@ class ToolResultStore:
         row = self._conn.execute(
             "SELECT content FROM results WHERE ref_id=?", (ref_id,)
         ).fetchone()
-        full = row[0] if row else None
-        if full is None:
-            full = None
-        if full is None:
+        if row is None:
             return None
+        full = row[0]
         return full[offset : offset + length]
 
     def clear_session(self, session_id: str) -> None:
@@ -457,7 +455,9 @@ def compress_paged_outputs(outputs: dict) -> dict:
             has_more = "Has more: True" in last_val
             total_m  = _re.search(r"Total size:\s*([\d,]+)", last_val)
             total_sz = total_m.group(1) if total_m else "?"
-            covered  = pages[-2][0] + 2000
+            # pages are sorted by offset asc; last page has highest offset.
+            # bytes_covered ≈ last_offset + page_size (default 2000).
+            covered  = pages[-1][0] + 2000
             note = (
                 f"[PAGED-SUMMARY ref_id={ref_id} pages_read={len(pages)} "
                 f"bytes_covered=0-{covered} total={total_sz} has_more={has_more}]\n"

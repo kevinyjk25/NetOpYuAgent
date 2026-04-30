@@ -35,16 +35,6 @@ Endpoints
   GET  /webui/session       → current session state (facts, working set)
   GET  /webui/system/status → health of all sub-systems
   GET  /webui/ws            → WebSocket HITL + live events channel
-
-P0 demo flow (shown in the UI)
---------------------------------
-  1. POST /webui/chat  {"query": "search syslogs for errors on ap-01"}
-  2. Runtime Loop calls syslog_search → 300 lines (~6000 chars)
-  3. ToolResultStore stores it → returns [STORED:syslog_search:abc12345]
-  4. Response shows the ref label + preview
-  5. GET /webui/tools/result/abc12345?offset=0  → first 2KB
-  6. GET /webui/tools/result/abc12345?offset=2000 → next 2KB
-  7. Each page shows "Has more: True/False" and next offset
 """
 from __future__ import annotations
 
@@ -79,8 +69,16 @@ async def _identity() -> Identity:
 
 
 from log_redaction import redact_text
-from rate_limit import per_operator_limit, global_concurrency
-from memory import set_current_operator
+# Rate-limit / concurrency dependencies are intentionally NOT wired right now.
+# They were previously injected via FastAPI Depends() but the parameter-inference
+# path conflicted with the body-param recognition for ChatRequest. To re-enable:
+# 1) import per_operator_limit, global_concurrency from rate_limit
+# 2) call them inline at the start of each rate-limited endpoint, e.g.:
+#       async def chat_stream(req: ChatRequest):
+#           await per_operator_limit_check(operator_id, rate_per_min=20)
+#           ...
+# This keeps the body-only signature that FastAPI parses cleanly.
+from memory import set_current_operator, get_current_operator
 
 logger = logging.getLogger(__name__)
 
@@ -122,11 +120,10 @@ class HitlDecisionRequest(BaseModel):
     operator_id:     str = "webui-operator"
     comment:         Optional[str] = None
     parameter_patch: Optional[dict] = None
-
-
-class DemoRunRequest(BaseModel):
-    scenario: str
-    params:   dict = {}
+    # For DecisionKind.CHOOSE — id of the operator-picked option
+    selected_choice_id: Optional[str] = None
+    # For DecisionKind.ANSWER — operator's answers to clarification fields
+    clarification_answers: Optional[dict[str, str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -198,10 +195,43 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         import os as _os, pathlib as _pl
         from skills.evolver import SkillEvolver
         _skills_dir = _os.getenv("HERMES_DATA_DIR", "./data")
+
+        # Wire the LLM into SkillEvolver — without this, ALL skill content
+        # generation falls through to _stub_llm() and returns hardcoded
+        # "Network Diagnostic Procedure" boilerplate regardless of input.
+        # SkillEvolver._call_llm signature: async (system, user) -> str.
+        _llm_engine_for_skills = services.get("llm_engine")
+        _skill_llm_fn = None
+        if _llm_engine_for_skills is not None:
+            async def _async_llm_for_skills(system: str, user: str) -> str:
+                """Async LLM wrapper for SkillEvolver. Uses the engine's
+                _chat primitive when available so we can pass system+user
+                cleanly; falls back to engine.call() otherwise."""
+                if hasattr(_llm_engine_for_skills, "_chat"):
+                    messages = [
+                        {"role": "system", "content": system},
+                        {"role": "user",   "content": user},
+                    ]
+                    return await _llm_engine_for_skills._chat(messages)
+                return await _llm_engine_for_skills.call(user, system, state=None)
+            _skill_llm_fn = _async_llm_for_skills
+
         services["skill_evolver"] = SkillEvolver(
-            catalog=services["skill_catalog"],
-            skills_dir=str(_pl.Path(_skills_dir) / "skills"),
+            catalog    = services["skill_catalog"],
+            skills_dir = str(_pl.Path(_skills_dir) / "skills"),
+            llm_fn     = _skill_llm_fn,
         )
+        if _skill_llm_fn:
+            logger.info(
+                "SkillEvolver: LLM-driven generation enabled (engine=%s)",
+                type(_llm_engine_for_skills).__name__,
+            )
+        else:
+            logger.warning(
+                "SkillEvolver: NO llm_engine in services — content generation "
+                "will use stub placeholder. Skill auto-creation and "
+                "/skills/generate will produce fixed boilerplate."
+            )
 
     # Wire read_stored_result and process_stored_chunks tools with the live store
     # Build mode-appropriate tool registry (no mock tools in pragmatic mode)
@@ -364,19 +394,26 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             tokens: list[str] = []
             full_text = ""
             decision  = None
+            # _hitl_intercepted is read by the post-stream memory-write block
+            # below, but only the SIMPLE path actually sets it (line ~545).
+            # The COMPLEX/executor path never enters that branch, so the
+            # variable would be undefined at the read site → UnboundLocalError.
+            # Initialise it here so every path has a defined value.
+            _hitl_intercepted = False
             try:
                 # ── Step 1: Classify ──────────────────────────────────────
                 decision = await loop.classify_async(req.query)
                 yield f"data: {json.dumps({'type':'classify','complexity':decision.complexity.value,'tier':decision.model_tier,'reason':decision.reason[:100]})}\n\n"
                 await asyncio.sleep(0)
 
-                # ── Step 2: Pre-verify ────────────────────────────────────
-                pre = await loop.pre_verify(req.query, req.confirmed_facts, req.env_context)
-                yield f"data: {json.dumps({'type':'pre_verify','passed':pre.passed,'reason':pre.reason[:150]})}\n\n"
-                await asyncio.sleep(0)
-
-                # ── Step 3: Cross-session recall (DTM v4 or FTS5 v3) ─────
+                # ── Step 2: Cross-session recall (DTM v4) ────────────────
+                # Recall MUST happen BEFORE pre_verify so that policy
+                # evaluation can see same-session context (e.g. "this device"
+                # in the user query refers to ap-02 from the prior turn).
+                # Without this, pre_verify treats every reference-bearing query
+                # as ambiguous and BLOCKs follow-up questions.
                 recall_text = ""
+                memory_items: list = []
                 if memory:
                     try:
                         # operator_id was set by `set_current_operator((await _identity())…)`
@@ -398,6 +435,16 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         await asyncio.sleep(0)
                     except Exception as _e:
                         logger.debug("FTS5 recall skipped: %s", _e)
+
+                # ── Step 3: Pre-verify (with recalled context) ───────────
+                # Pass recall_text in env_context so PolicyEngine can resolve
+                # references like "this device" against the session history.
+                _pre_env = dict(req.env_context or {})
+                if recall_text:
+                    _pre_env["_fts_context"] = recall_text
+                pre = await loop.pre_verify(req.query, req.confirmed_facts, _pre_env)
+                yield f"data: {json.dumps({'type':'pre_verify','passed':pre.passed,'reason':pre.reason[:150]})}\n\n"
+                await asyncio.sleep(0)
 
                 # ── Step 4: Execute via loop (all queries) ────────────────
                 # Uses the real patched LLM + real ToolRouter registry
@@ -481,6 +528,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                             # Real HITL interrupt — emit and switch console to HITL tab
                                             yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,**data})}\n\n"
                                             await asyncio.sleep(0)
+                                            # Mark stream terminal state so terminal
+                                            # event becomes 'awaiting_hitl' (⏸) not 'done' (✅).
+                                            stop_outcome = "stop_hitl: awaiting operator approval"
+                                            # Also mark the post-stream skip flag so the
+                                            # memory-write block below doesn't persist
+                                            # the placeholder "⚠ HITL interrupt" text.
+                                            # _submit_hitl_decision will write the
+                                            # completed turn after operator approves.
+                                            _hitl_intercepted = True
                                         elif data.get("node_step"):
                                             yield f"data: {json.dumps({'node_step':data['node_step'],'node':data.get('node','')})}\n\n"
                                             await asyncio.sleep(0)
@@ -502,11 +558,16 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                 else:
                     # SIMPLE path: loop.stream() with real LLM + ToolRouter
-                    _hitl_intercepted = False
+                    # _hitl_intercepted was initialised at the top of generate()
+                    # Inject the classify-time confidence so stream's
+                    # clarification gate can decide whether to ask first.
+                    _stream_env = dict(env_ctx)
+                    if decision is not None:
+                        _stream_env["_initial_confidence"] = float(getattr(decision, "confidence", 1.0))
                     async for chunk in loop.stream(
                         query=req.query,
                         session_id=session_id,
-                        env_context=env_ctx,
+                        env_context=_stream_env,
                         confirmed_facts=list(req.confirmed_facts or []),
                         working_set=_parse_working_set(list(req.working_set or [])),
                         tool_registry=real_registry,
@@ -519,7 +580,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         if chunk.get("message"):
                             stop_outcome = chunk["message"][:60]
 
-                        # HITL gate: skill-ambiguity or tool-watchlist triggered from SIMPLE path
+                        # HITL gate: skill-ambiguity / clarification / tool-watchlist
                         # Re-route to executor so HITL graph fires and approval card appears
                         if chunk.get("stop_hitl") and executor is not None:
                             yield f"data: {json.dumps(chunk)}\n\n"
@@ -533,6 +594,14 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             # the graph can force the interrupt and replay after approval.
                             _hitl_tool = chunk.get("tool_name", "")
                             _hitl_args = chunk.get("tool_args", {})
+                            # New: pick up multi-mode HITL signals so the
+                            # executor fires USER_CHOICE / CLARIFICATION
+                            # instead of a vanilla destructive-op interrupt.
+                            _hitl_kind = chunk.get("hitl_kind", "")
+                            _hitl_summary = chunk.get("summary", "")
+                            _hitl_choices = chunk.get("choices") or []
+                            _hitl_clar    = chunk.get("clarification_fields") or []
+                            _hitl_editable = chunk.get("editable_param_keys") or []
                             ctx = RequestContext(
                                 task_id=task_id,
                                 context_id=context_id,
@@ -545,6 +614,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                     "force_hitl_tool": _hitl_tool,   # bypass LLM trigger eval
                                     "force_hitl_args": _hitl_args,   # replay args after approval
                                     "action_type":     f"tool_call:{_hitl_tool}",
+                                    # Multi-mode HITL pass-through
+                                    "hitl_kind":               _hitl_kind,
+                                    "hitl_summary":            _hitl_summary,
+                                    "hitl_choices":            _hitl_choices,
+                                    "hitl_clarification_fields": _hitl_clar,
+                                    "hitl_editable_param_keys": _hitl_editable,
                                 },
                             )
                             exec_task = asyncio.create_task(executor.execute(ctx, eq))
@@ -575,6 +650,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             except (asyncio.TimeoutError, Exception):
                                 pass
                             _hitl_intercepted = True
+                            # Mark this stream's terminal state so the outer code
+                            # emits 'awaiting_hitl' (⏸) instead of 'done' (✅).
+                            stop_outcome = "stop_hitl: awaiting operator approval"
                             break
 
                         yield f"data: {json.dumps(chunk)}\n\n"
@@ -585,71 +663,103 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 _push_history(session_id, {"role": "assistant", "content": full_text},    _message_history)
 
                 # ── Step 5: Post-turn Hermes hooks ────────────────────────
-                import re as _re
-                tc = [{"tool": m} for m in _re.findall(r"\[TOOL:(\w+)\]", full_text)]
-
-                if dtm:
-                    # v4 path: DTM.after_turn() handles Track A (FTS5 + daily .md
-                    # compaction) and Track B (curator → facts.jsonl) in one call.
-                    try:
-                        memories = await dtm.after_turn(
-                            session_id     = session_id,
-                            user_text      = req.query,
-                            assistant_text = full_text,
-                            tool_calls     = tc,
-                            importance     = 0.7,
-                        )
-                        yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12],'track':'A+B'})}\n\n"
-                        await asyncio.sleep(0)
-                        if memories:
-                            # MemoryFact uses .fact_type (not .memory_type)
-                            _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
-                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
-                            await asyncio.sleep(0)
-                    except Exception as _e:
-                        logger.debug("DTM after_turn skipped: %s", _e)
+                # IMPORTANT: when this turn was intercepted by HITL, the work
+                # is NOT done — the operator still has to approve, and the
+                # actual answer arrives later via _submit_hitl_decision. Do
+                # NOT persist this turn to memory yet. If we did, recall on
+                # later turns would surface the bare "⚠ HITL interrupt …
+                # awaiting approval" text as if it were the final answer,
+                # making the agent think the action is still pending even
+                # after it has actually completed. _submit_hitl_decision
+                # writes the proper {user_query, synthesis} pair when the
+                # operator approves / rejects / escalates.
+                if _hitl_intercepted:
+                    logger.info(
+                        "chat_stream: skipping memory write for session=%s "
+                        "(HITL intercepted; _submit_hitl_decision will persist "
+                        "the completed turn after operator decision)",
+                        session_id[:12],
+                    )
                 else:
-                    # v3 fallback: individual hooks when DTM not wired
-                    if fts:
+                    import re as _re
+                    tc = [{"tool": m} for m in _re.findall(r"\[TOOL:(\w+)\]", full_text)]
+
+                    if dtm:
+                        # v4 path: DTM.after_turn() handles Track A (FTS5 + daily
+                        # .md compaction) and Track B (curator → facts.jsonl).
                         try:
-                            await fts.write_turn(session_id, req.query, full_text, tool_calls=tc, importance=0.7)
-                            yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12]})}\n\n"
+                            memories = await dtm.after_turn(
+                                session_id     = session_id,
+                                user_text      = req.query,
+                                assistant_text = full_text,
+                                tool_calls     = tc,
+                                importance     = 0.7,
+                            )
+                            yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12],'track':'A+B'})}\n\n"
+                            await asyncio.sleep(0)
+                            if memories:
+                                _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
+                                yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
+                                await asyncio.sleep(0)
+                        except Exception as _e:
+                            logger.debug("DTM after_turn skipped: %s", _e)
+                    else:
+                        # v3 fallback: individual hooks when DTM not wired
+                        if fts:
+                            try:
+                                await fts.write_turn(session_id, req.query, full_text, tool_calls=tc, importance=0.7)
+                                yield f"data: {json.dumps({'type':'hermes_write','session_id':session_id[:12]})}\n\n"
+                                await asyncio.sleep(0)
+                            except Exception as _e:
+                                logger.debug("FTS5 write skipped: %s", _e)
+
+                        if curator:
+                            try:
+                                memories = await curator.after_turn(session_id, req.query, full_text, tc)
+                                _types = [getattr(m, 'fact_type', getattr(m, 'memory_type', 'fact')) for m in memories[:5]]
+                                yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':_types})}\n\n"
+                                await asyncio.sleep(0)
+                            except Exception as _e:
+                                logger.debug("Curation skipped: %s", _e)
+
+                    # User model always runs (not inside DTM scope)
+                    if user_model:
+                        try:
+                            profile = await user_model.after_turn(session_id, req.query, full_text, tc)
+                            yield f"data: {json.dumps({'type':'hermes_umodel','technical_level':profile.technical_level.value,'domain_counts':dict(list(profile.domain_counts.items())[:5]),'trait_count':len(profile.traits)})}\n\n"
                             await asyncio.sleep(0)
                         except Exception as _e:
-                            logger.debug("FTS5 write skipped: %s", _e)
+                            logger.debug("User model skipped: %s", _e)
 
-                    if curator:
+                    if evolver and decision and decision.complexity.value == "complex":
                         try:
-                            memories = await curator.after_turn(session_id, req.query, full_text, tc)
-                            yield f"data: {json.dumps({'type':'hermes_curate','memories_count':len(memories),'types':[m.memory_type.value for m in memories[:5]]})}\n\n"
+                            proposal = await evolver.after_task(
+                                task_description=req.query, solution_summary=full_text[:400],
+                                tools_used=[t["tool"] for t in tc], solution_steps=[],
+                                key_observations=[], complexity=7.0, session_id=session_id,
+                            )
+                            yield f"data: {json.dumps({'type':'hermes_skill','created':proposal is not None,'skill_id':proposal.skill_id if proposal else None})}\n\n"
                             await asyncio.sleep(0)
                         except Exception as _e:
-                            logger.debug("Curation skipped: %s", _e)
-
-                # User model always runs (not inside DTM scope)
-                if user_model:
-                    try:
-                        profile = await user_model.after_turn(session_id, req.query, full_text, tc)
-                        yield f"data: {json.dumps({'type':'hermes_umodel','technical_level':profile.technical_level.value,'domain_counts':dict(list(profile.domain_counts.items())[:5]),'trait_count':len(profile.traits)})}\n\n"
-                        await asyncio.sleep(0)
-                    except Exception as _e:
-                        logger.debug("User model skipped: %s", _e)
-
-                if evolver and decision and decision.complexity.value == "complex":
-                    try:
-                        proposal = await evolver.after_task(
-                            task_description=req.query, solution_summary=full_text[:400],
-                            tools_used=[t["tool"] for t in tc], solution_steps=[],
-                            key_observations=[], complexity=7.0, session_id=session_id,
-                        )
-                        yield f"data: {json.dumps({'type':'hermes_skill','created':proposal is not None,'skill_id':proposal.skill_id if proposal else None})}\n\n"
-                        await asyncio.sleep(0)
-                    except Exception as _e:
-                        logger.debug("Skill evolver skipped: %s", _e)
+                            logger.debug("Skill evolver skipped: %s", _e)
 
                 # Include confirmed_facts so frontend can carry them to next query
                 _done_facts = getattr(loop, '_last_confirmed_facts', []) or []
-                yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
+
+                # Distinguish HITL-pending terminal state from a real "done".
+                # When the agent is paused waiting for operator approval, do NOT
+                # emit a 'done' event (that fires the ✅ Done step in the UI).
+                # Emit 'awaiting_hitl' instead — the UI will show ⏸ status and
+                # finalize the run only after the operator decides + post-action runs.
+                _is_hitl_pending = (
+                    "hitl" in str(stop_outcome).lower()
+                    or "approval" in str(stop_outcome).lower()
+                    or "interrupt" in str(stop_outcome).lower()
+                )
+                if _is_hitl_pending:
+                    yield f"data: {json.dumps({'type':'awaiting_hitl','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
+                else:
+                    yield f"data: {json.dumps({'type':'done','session_id':session_id,'turns':turns_taken,'stop_outcome':stop_outcome,'confirmed_facts':_done_facts})}\n\n"
                 yield "data: [DONE]\n\n"
 
             except Exception as exc:
@@ -692,8 +802,23 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         Upload a Python tool file (.py).  The file must define one or more
         async functions and a TOOL_REGISTRY dict mapping names → functions,
         OR export individual functions whose names are the tool IDs.
-        Uses Request directly (not File()) to work correctly in mounted sub-apps.
+
+        SECURITY: This endpoint executes uploaded Python code. It is gated
+        behind the 'admin' role (when auth.enabled=true) and runs an AST
+        denylist check before exec to block obvious shell-out / file-system
+        escape attempts. The AST check is best-effort, NOT a sandbox — only
+        deploy this endpoint inside a trusted operator network, never expose
+        it to the public internet.
         """
+        # Require admin role. When auth.enabled=false, _identity() returns
+        # the dev-user with admin role anyway, so dev mode still works.
+        ident = await _identity()
+        if not ident.has_role("admin"):
+            raise HTTPException(
+                status_code=403,
+                detail="Tool upload requires the 'admin' role",
+            )
+
         try:
             form = await request.form()
         except Exception as exc:
@@ -715,14 +840,50 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"Failed to read file: {exc}")
 
-        # Compile first to catch syntax errors before exec
+        # AST denylist — block obviously dangerous imports/calls before exec.
+        # This is NOT a sandbox; a determined attacker can bypass it. Pair with
+        # admin-role gating + trusted-network deployment.
+        import ast as _ast_mod
+        _DENIED_IMPORTS = {
+            "os", "subprocess", "sys", "shutil", "socket", "ctypes",
+            "multiprocessing", "pty", "popen2", "commands",
+            "_winreg", "winreg",
+        }
+        _DENIED_CALLS = {"eval", "exec", "compile", "__import__", "open"}
+        try:
+            tree = _ast_mod.parse(source, filename=filename)
+        except SyntaxError as exc:
+            raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
+
+        for node in _ast_mod.walk(tree):
+            if isinstance(node, _ast_mod.Import):
+                for n in node.names:
+                    if n.name.split(".")[0] in _DENIED_IMPORTS:
+                        raise HTTPException(
+                            status_code=400,
+                            detail=f"Import of {n.name!r} is not allowed in uploaded tools",
+                        )
+            elif isinstance(node, _ast_mod.ImportFrom):
+                if node.module and node.module.split(".")[0] in _DENIED_IMPORTS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Import from {node.module!r} is not allowed in uploaded tools",
+                    )
+            elif isinstance(node, _ast_mod.Call):
+                fn = node.func
+                if isinstance(fn, _ast_mod.Name) and fn.id in _DENIED_CALLS:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"Call to {fn.id!r} is not allowed in uploaded tools",
+                    )
+
+        # Compile (we already parsed; compile catches anything ast.parse missed)
         try:
             code = compile(source, filename, "exec")
         except SyntaxError as exc:
             raise HTTPException(status_code=400, detail=f"Syntax error: {exc}")
 
-        # Execute in an isolated namespace with standard library pre-imported
-        # (exec'd functions need __builtins__ and common stdlib available)
+        # Execute in an isolated namespace
         import asyncio as _asyncio_mod, inspect as _inspect_mod
         ns: dict = {"__builtins__": __builtins__}
         try:
@@ -924,7 +1085,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         Upload a skill markdown file (.md) or JSON definition (.json).
         The skill is registered in the catalog and persisted to HERMES_DATA_DIR/skills/.
         Uses Request directly (not File()) to work correctly in mounted sub-apps.
+        Gated behind 'admin' role.
         """
+        ident = await _identity()
+        if not ident.has_role("admin"):
+            raise HTTPException(
+                status_code=403,
+                detail="Skill upload requires the 'admin' role",
+            )
+
         catalog    = services.get("skill_catalog")
         skill_evol = services.get("skill_evolver")
         if not catalog:
@@ -997,6 +1166,182 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             "skill_id": skill_id,
             "chars":    len(content),
             "persisted": bool(skill_evol and getattr(skill_evol, "_skills_dir", None)),
+        })
+
+    @app.post("/skills/generate")
+    async def generate_skill_from_text(request: Request) -> JSONResponse:
+        """
+        Generate a skill markdown draft from a free-form conversation snippet.
+
+        The user pastes a chat excerpt (or any prose describing a procedure);
+        the LLM converts it to the standard skill format. The draft is
+        RETURNED but NOT registered — the user reviews + edits it in the UI,
+        then POSTs to /skills/upload to actually register it.
+
+        Body (JSON):
+          {
+            "text":       "<conversation excerpt or procedure description>",
+            "hint_name":  "<optional desired skill name>",
+            "hint_tags":  ["optional", "tags"]
+          }
+
+        Returns:
+          {
+            "skill_id":   "<auto-generated stable id>",
+            "markdown":   "<draft markdown content>",
+            "similar_to": "<existing_id>" | null,   // if Jaccard ≥ 0.35
+            "similarity": 0.42                      // Jaccard score
+          }
+
+        The frontend can then:
+          - Show the draft in an editable textarea
+          - If `similar_to` is set, offer "Merge into <existing>" instead of new
+          - On confirm, send the (possibly edited) markdown to /skills/upload
+        """
+        ident = await _identity()
+        if not ident.has_role("admin"):
+            raise HTTPException(
+                status_code=403,
+                detail="Skill generation requires the 'admin' role",
+            )
+
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="Body must be JSON")
+
+        text = (body or {}).get("text", "").strip()
+        if not text:
+            raise HTTPException(status_code=400, detail="`text` field is required")
+        if len(text) > 10_000:
+            raise HTTPException(status_code=400, detail="`text` exceeds 10000 chars")
+
+        hint_name = (body or {}).get("hint_name", "").strip()
+        hint_tags = (body or {}).get("hint_tags", []) or []
+
+        skill_evol = services.get("skill_evolver")
+        catalog    = services.get("skill_catalog")
+        if skill_evol is None:
+            raise HTTPException(status_code=503, detail="SkillEvolver not configured")
+
+        # Diagnostic: warn early if SkillEvolver has no LLM wired — without
+        # this the response would be the static stub regardless of input.
+        if getattr(skill_evol, "_llm_fn", None) is None:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "SkillEvolver has no LLM configured — generation would "
+                    "produce hardcoded boilerplate. Check server logs for "
+                    "'SkillEvolver: NO llm_engine in services' and ensure "
+                    "llm_engine is registered in services."
+                ),
+            )
+
+        # 1. Generate the skill markdown FIRST. Doing this before we compute
+        #    the skill_id and similarity lets us derive the id from the
+        #    actual generated title (semantically meaningful) instead of
+        #    from arbitrary tokens in the user's raw input (which may be
+        #    JSON keys, prose, or just "故障诊断").
+        from skills.evolver import _SKILL_WRITE_SYSTEM
+        user_content = (
+            f"Source text (operator-supplied conversation/procedure):\n"
+            f"-----\n{text[:6000]}\n-----\n\n"
+            f"Desired skill name hint: {hint_name or '(infer from text)'}\n"
+            f"Desired tags hint: {', '.join(hint_tags) if hint_tags else '(infer)'}\n\n"
+            f"Convert the source text above into a standard skill markdown file. "
+            f"Capture the actionable steps, identify which tools/parameters are used, "
+            f"and infer a reasonable Risk and HITL level. The Tags line MUST contain "
+            f"3-5 short English/lowercase keywords describing the skill domain "
+            f"(e.g. [network, dns, troubleshooting]). Keep total length under 1500 chars."
+        )
+        try:
+            raw = await skill_evol._call_llm(_SKILL_WRITE_SYSTEM, user_content)
+            import re as _re_local
+            markdown = _re_local.sub(r"^```(?:markdown)?\s*\n?", "", raw.strip()).rstrip("```").strip()
+        except Exception as exc:
+            logger.warning("/skills/generate LLM call failed: %s", exc)
+            raise HTTPException(status_code=502, detail=f"LLM generation failed: {exc}")
+
+        if not markdown or len(markdown) < 30:
+            raise HTTPException(status_code=502, detail="LLM produced empty/too-short content")
+
+        # Detect stub fallback: if the response equals the well-known stub
+        # output, refuse instead of returning misleading boilerplate.
+        if "Network Diagnostic Procedure" in markdown[:80] and "get_device_status" in markdown:
+            # Cross-check: was the input actually about generic network diagnostic?
+            text_lower = text.lower()
+            looks_legitimately_about_topic = any(
+                k in text_lower for k in ("network diagnostic", "diagnose network", "get_device_status")
+            )
+            if not looks_legitimately_about_topic:
+                logger.error(
+                    "/skills/generate: LLM appears to have returned the stub "
+                    "fallback (Network Diagnostic Procedure) — input did NOT "
+                    "request that. LLM call likely failed silently."
+                )
+                raise HTTPException(
+                    status_code=502,
+                    detail=(
+                        "LLM returned stub-fallback content (hardcoded "
+                        "'Network Diagnostic Procedure'). Your input was about "
+                        "something else. Check llm_engine connectivity in server logs."
+                    ),
+                )
+
+        # 2. Derive a stable, meaningful skill_id from the generated markdown.
+        #    Priority: hint_name → H1 title → text fallback.
+        title_source = hint_name
+        if not title_source:
+            m = _re_local.match(r"^\s*#\s+(.+)$", markdown, flags=_re_local.MULTILINE)
+            if m:
+                title_source = m.group(1).strip()
+        skill_id = skill_evol._generate_skill_id(title_source or text[:200])
+
+        # 3. Run similarity check on the GENERATED skill signature (H1 + tags
+        #    parsed from the markdown). This is far more accurate than running
+        #    similarity on raw user input — generated skills always include
+        #    standardised English tag keywords that match catalog entries.
+        signature_for_sim = title_source or text[:200]
+        # Augment with parsed tags from the generated markdown
+        tag_match = _re_local.search(
+            r"\*\*Tags:\*\*\s*\[([^\]]*)\]", markdown, flags=_re_local.IGNORECASE,
+        )
+        if tag_match:
+            signature_for_sim += " " + tag_match.group(1)
+
+        similar = await skill_evol._find_similar_skill(signature_for_sim)
+        similar_id      = similar[0] if similar else None
+        similar_score   = similar[1] if similar else 0.0
+        similar_summary = None
+        if similar_id and catalog:
+            sm = catalog.get_summary(similar_id)
+            if sm:
+                similar_summary = {
+                    "name":    sm.name,
+                    "purpose": sm.purpose,
+                    "tags":    sm.tags,
+                }
+
+        # 4. Detect explicit id collision (same skill_id already registered)
+        #    so the UI can warn even when similarity is below threshold.
+        id_collides = False
+        if catalog and skill_id:
+            try:
+                id_collides = catalog.get_summary(skill_id) is not None
+            except Exception:
+                id_collides = False
+
+        logger.info(
+            "/skills/generate: id=%s draft_chars=%d similar_to=%s (j=%.2f) id_collides=%s",
+            skill_id, len(markdown), similar_id, similar_score, id_collides,
+        )
+        return JSONResponse(content={
+            "skill_id":         skill_id,
+            "markdown":         markdown,
+            "similar_to":       similar_id,
+            "similarity":       round(similar_score, 3),
+            "similar_summary":  similar_summary,    # name/purpose/tags of conflict, for UI
+            "id_collides":      id_collides,        # exact id already exists
         })
 
     @app.get("/skills/{skill_id}/content")
@@ -1108,6 +1453,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             if hasattr(p, "proposed_action") and p.proposed_action and hasattr(p.proposed_action, "model_dump")
                             else getattr(p, "proposed_action", {}) or {}
                         ),
+                        "choices": [
+                            c.model_dump() if hasattr(c, "model_dump") else c
+                            for c in (getattr(p, "choices", []) or [])
+                        ],
+                        "clarification_fields": [
+                            f.model_dump() if hasattr(f, "model_dump") else f
+                            for f in (getattr(p, "clarification_fields", []) or [])
+                        ],
+                        "editable_param_keys": list(getattr(p, "editable_param_keys", []) or []),
                     }
                 result.append(dumped)
         logger.info("/hitl/pending: returning %d pending interrupts", len(result))
@@ -1147,6 +1501,30 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "edit", req, services
+        )
+
+    @app.post("/hitl/{interrupt_id}/choose")
+    async def choose_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        """Operator picked one of the offered choices. The selection id
+        comes in via req.selected_choice_id (set by the frontend)."""
+        req.operator_id = (await _identity()).operator_id
+        return await _submit_hitl_decision(
+            interrupt_id, "choose", req, services
+        )
+
+    @app.post("/hitl/{interrupt_id}/answer")
+    async def answer_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        """Operator answered the agent's clarification questions. The
+        answers dict comes in via req.clarification_answers."""
+        req.operator_id = (await _identity()).operator_id
+        return await _submit_hitl_decision(
+            interrupt_id, "answer", req, services
         )
 
     # ==================================================================
@@ -1341,11 +1719,63 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     async def system_wiring() -> JSONResponse:
         """
         Returns what is actually wired vs stub.
-        Check this first when diagnosing why LLM / HITL / Hermes don't work.
+        Check this first when diagnosing why LLM / HITL / Memory don't work.
+
+        The legacy "fts_store / memory_curator / user_model / dtm" names are
+        kept in the response shape for UI compatibility, but the actual checks
+        now look at the unified MemoryManager subsystems:
+          fts_store      → memory._mgr.long_term       (FTS5 + TF-IDF over chunks)
+          memory_curator → memory._mgr.extractor       (FactExtractor with LLM)
+          user_model     → memory._mgr.user_model      (UserModelEngine)
+          dtm            → recall_orchestrator         (always available since it's a module)
         """
         backend  = services.get("_llm_backend", "unknown")
         model    = services.get("_llm_model",   "unknown")
         has_real_llm = backend not in ("mock", "unknown")
+
+        # Resolve the new memory subsystems through MemoryAdapter._mgr
+        memory_adapter = services.get("memory")
+        mgr = getattr(memory_adapter, "_mgr", None) if memory_adapter else None
+
+        fts_alive       = bool(mgr and getattr(mgr, "long_term", None))
+        extractor_alive = bool(mgr and getattr(mgr, "extractor", None))
+        # FactExtractor with LLM is the spiritual successor to the old MemoryCurator
+        extractor_has_llm = bool(
+            extractor_alive and getattr(mgr.extractor, "_llm_fn", None) is not None
+        )
+        user_model_alive = bool(mgr and getattr(mgr, "user_model", None))
+        # DTM has been replaced by recall_orchestrator (always available as a module)
+        dtm_alive = False
+        try:
+            from agent_memory.retrieval import recall_orchestrator as _orch  # noqa: F401
+            dtm_alive = True
+        except Exception:
+            dtm_alive = False
+
+        # Stats — show recall orchestrator's tunables so the UI confirms
+        # which version of the algorithm is wired.
+        dtm_stats: dict = {}
+        if dtm_alive:
+            try:
+                from agent_memory.retrieval.recall_orchestrator import (
+                    TRACK_B_WEIGHT, MMR_LAMBDA,
+                    SHALLOW_NUDGE_INTERVAL, DEEP_NUDGE_INTERVAL,
+                )
+                dtm_stats = {
+                    "engine":              "recall_orchestrator",
+                    "track_b_weight":      TRACK_B_WEIGHT,
+                    "mmr_lambda":          MMR_LAMBDA,
+                    "shallow_nudge_every": SHALLOW_NUDGE_INTERVAL,
+                    "deep_nudge_every":    DEEP_NUDGE_INTERVAL,
+                }
+            except Exception:
+                pass
+
+        # Memory storage path — sourced from MemoryManager directly
+        db_path = "not initialised"
+        if mgr is not None:
+            db_path = str(getattr(mgr, "_db_path", services.get("_hermes_data", "unknown")))
+
         return JSONResponse(content={
             "llm": {
                 "backend":      backend,
@@ -1354,25 +1784,25 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 "note": "Set LLM_BACKEND=ollama LLM_MODEL=qwen3.5:27b LLM_BASE_URL=http://localhost:11434" if not has_real_llm else "real LLM active",
             },
             "hermes": {
-                "fts_store":      services.get("fts_store") is not None,
-                "memory_curator": services.get("memory_curator") is not None,
-                "user_model":     services.get("user_model") is not None,
+                "fts_store":      fts_alive,                   # → memory._mgr.long_term
+                "memory_curator": extractor_alive and extractor_has_llm,  # → FactExtractor with LLM wired
+                "user_model":     user_model_alive,            # → UserModelEngine
                 "skill_evolver":  services.get("skill_evolver") is not None,
-                "dtm":            services.get("dtm") is not None,
-                "db_path":        services.get("_hermes_data", "not initialised"),
-                "dtm_stats":      services.get("dtm").stats() if services.get("dtm") else {},
+                "dtm":            dtm_alive,                   # → recall_orchestrator module
+                "db_path":        db_path,
+                "dtm_stats":      dtm_stats,
             },
             "executor": {
-                "wired":       services.get("executor") is not None,
-                "hitl_router": services.get("hitl_router") is not None,
-                "tool_router": services.get("tool_router") is not None,
+                "wired":         services.get("executor") is not None,
+                "hitl_router":   services.get("hitl_router") is not None,
+                "tool_router":   services.get("tool_router") is not None,
                 "skill_catalog": services.get("skill_catalog") is not None,
             },
             "startup_env": {
-                "LLM_BACKEND":   backend,
-                "LLM_MODEL":     model,
-                "MCP_USE_MOCK":  str(services.get("_mcp_mock", True)),
-                "HERMES_DATA_DIR": services.get("_hermes_data", "./data/state.db"),
+                "LLM_BACKEND":     backend,
+                "LLM_MODEL":       model,
+                "MCP_USE_MOCK":    str(services.get("_mcp_mock", True)),
+                "HERMES_DATA_DIR": services.get("_hermes_data", "./data"),
             },
         })
 
@@ -1591,822 +2021,6 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         except Exception as exc:
             logger.exception("WebUI WebSocket error: %s", exc)
 
-    # ==================================================================
-    # Demo runner endpoint
-    # ==================================================================
-
-    @app.post("/demos/run")
-    async def run_demo(req: DemoRunRequest) -> JSONResponse:
-        """Execute a named demo scenario and return structured results."""
-        import re as _re
-        loop    = services["runtime_loop"]
-        catalog = services["skill_catalog"]
-        store   = services["tool_store"]
-        sid     = f"demo-{req.scenario}-{uuid.uuid4().hex[:6]}"
-        result  = {}
-
-        # P0-A: Large payload cache
-        if req.scenario == "p0_large_cache":
-            tool_name = req.params.get("tool", "syslog_search")
-            tool_args = req.params.get("args", {"host": "ap-*", "keyword": "error", "lines": 300})
-            fn  = tool_registry.get(tool_name)
-            raw = await fn(tool_args) if fn else "[Tool not found]"
-            label = store.store(tool_name, raw)
-            is_stored = label != raw
-            ref_id = None
-            if is_stored:
-                m = _re.search(r"\[STORED:[^:]+:([^\]]+)\]", label)
-                ref_id = m.group(1) if m else None
-            page1 = store.read(ref_id, 0, 2000) if ref_id else None
-            result = {
-                "tool": tool_name, "args": tool_args,
-                "raw_chars": len(raw), "is_stored": is_stored,
-                "ref_id": ref_id, "label": label[:200],
-                "first_page_chars": len(page1) if page1 else 0,
-                "first_page_preview": page1[:300] if page1 else None,
-                "total_chars": len(raw),
-                "pages_needed": (len(raw) // 2000) + 1 if is_stored else 1,
-                "retrieve_url": f"/webui/tools/result/{ref_id}" if ref_id else None,
-            }
-
-        # P0-B: Context budget assembly
-        elif req.scenario == "p0_context_budget":
-            from runtime.context_budget import ContextBudgetManager, BudgetConfig, DeviceRef as DR
-            mgr   = ContextBudgetManager(BudgetConfig(total_cap_tokens=800))
-            facts = ["device: ap-01, status: healthy", "config: validated OK"]
-            ws    = [DR(id="ap-01", label="AP-01 Site-A"), DR(id="sw-core", label="Core Switch")]
-            env   = {"site": "Site-A", "change_window": False}
-            # Synthetic payloads — no live tool call needed to test budget assembly
-            sm  = "payments.internal -> 10.0.1.42 (A record, TTL 300)"
-            big = "\n".join(f"2024-01-01 {h:02d}:00 ap-01 ERROR auth fail" for h in range(50))
-            sm_ref  = mgr.store_tool_result("get_device_status", sm)
-            big_ref = mgr.store_tool_result("get_syslog", big)
-            ctx = mgr.assemble(confirmed_facts=facts, working_set=ws,
-                               tool_outputs={"get_device_status": sm_ref, "get_syslog": big_ref},
-                               env_context=env)
-            result = {
-                "budget_cap_tokens": 800,
-                "dns_chars": len(sm), "dns_inline": "[STORED" not in sm_ref,
-                "syslog_chars": len(big), "syslog_stored": "[STORED" in big_ref,
-                "assembled_tokens": len(ctx) // 4,
-                "context_preview": ctx[:500],
-                "explanation": "dns_lookup (small) returned inline; syslog_search (large) stored externally — only a reference label entered the prompt",
-            }
-
-        # P0-C: Stop policy trace
-        elif req.scenario == "p0_stop_policy":
-            from runtime.stop_policy import StopPolicy, StopPolicyConfig, LoopState
-            cfg    = StopPolicyConfig(
-                max_turns=req.params.get("max_turns", 4),
-                max_tool_calls=req.params.get("max_tool_calls", 6),
-                token_budget=req.params.get("token_budget", 1200),
-                confidence_floor=0.5, low_confidence_turns=2, max_no_progress_turns=2,
-            )
-            policy = StopPolicy(cfg)
-            trace  = []
-            state  = LoopState()
-            for turn in range(10):
-                state.turns         = turn + 1
-                state.tool_calls    = (turn + 1) * 2
-                state.tokens_consumed = (turn + 1) * 250
-                if turn >= 2:
-                    state.no_progress_turns = turn - 1
-                dec = policy.evaluate(state)
-                trace.append({"turn": state.turns, "tool_calls": state.tool_calls,
-                               "tokens": state.tokens_consumed, "no_progress": state.no_progress_turns,
-                               "outcome": dec.outcome.value, "stopped": dec.should_stop, "reason": dec.reason})
-                if dec.should_stop:
-                    break
-            result = {"config": {"max_turns": cfg.max_turns, "max_tool_calls": cfg.max_tool_calls,
-                                 "token_budget": cfg.token_budget}, "trace": trace}
-
-        # P1-A: Skill catalog progressive disclosure
-        elif req.scenario == "p1_skill_catalog":
-            skill_id = req.params.get("skill_id", "syslog_search")
-            summary  = catalog.format_summary()
-            detail   = catalog.load_detail(skill_id)
-            s        = catalog.get_summary(skill_id)
-            result   = {
-                "skill_id": skill_id,
-                "total_skills": catalog.skill_count,
-                "requires_hitl": catalog.requires_hitl(skill_id),
-                "risk_level": s.risk_level if s else "unknown",
-                "level1_tokens": len(summary) // 4,
-                "level2_tokens": len(detail) // 4 if detail else 0,
-                "token_saved_pct": round((1 - len(detail or "") / max(len(summary), 1)) * 100, 1) if detail else 0,
-                "level1_preview": summary[:400],
-                "level2_detail": detail or "(not found)",
-                "explanation": "Level 1 injected every turn (~compact). Level 2 loaded only when model requests [SKILL_LOAD:skill_id].",
-            }
-
-        # P1-B: Forked delegation
-        elif req.scenario == "p1_forked_delegation":
-            from runtime.loop import DelegationMode, ForkContextPolicy
-            from runtime.stop_policy import LoopState
-            from runtime.context_budget import DeviceRef as DR
-            parent = LoopState()
-            parent.confirmed_facts = [
-                "INC-1291: RADIUS timeout on ap-03",
-                "DNS confirmed OK — not a DNS issue",
-                "40 wireless clients affected at Site-A",
-            ]
-            setattr(parent, "working_set", [DR(id="ap-03", label="AP-03 Site-A"),
-                                             DR(id="radius-01", label="RADIUS Server")])
-            fork_fo = loop.build_fork_context(parent, ForkContextPolicy.FACTS_ONLY)
-            fork_ws = loop.build_fork_context(parent, ForkContextPolicy.WORKING_SET)
-            fork_fl = loop.build_fork_context(parent, ForkContextPolicy.FULL)
-            res = await loop.run(query="check RADIUS server health", session_id=sid,
-                                 delegation_mode=DelegationMode.FORKED,
-                                 parent_state=parent, tool_registry=tool_registry)
-            result = {
-                "parent_facts": parent.confirmed_facts,
-                "parent_working_set": [str(w) for w in getattr(parent, "working_set", [])],
-                "policies": {
-                    "FACTS_ONLY":   {"keys": list(fork_fo.keys()), "facts_inherited": len(fork_fo.get("confirmed_facts", []))},
-                    "WORKING_SET":  {"keys": list(fork_ws.keys()), "facts_inherited": len(fork_ws.get("confirmed_facts", []))},
-                    "FULL":         {"keys": list(fork_fl.keys())},
-                },
-                "forked_query": "check RADIUS server health",
-                "response_preview": res.final_response[:300],
-                "inherited_facts_in_response": len(res.confirmed_facts),
-                "turns": res.turns_taken,
-                "explanation": "Forked sub-agent inherited parent facts without re-transmitting full context. Fresh agent would have started from zero.",
-            }
-
-        # P1-C: Pre/Post verification
-        elif req.scenario == "p1_verification":
-            cases = [
-                ("safe DNS query",         "check DNS for payments.internal", {}, True),
-                ("destructive — no env",   "restart payments-service",        {}, False),
-                ("closed change window",   "rollback deployment to v2.1",     {"change_window": False}, False),
-                ("open window + allowed",  "check service health",            {"change_window": True, "allow_destructive": True}, True),
-            ]
-            pre_results = []
-            for label, q, env, expected in cases:
-                r = await loop.pre_verify(q, [], env)
-                pre_results.append({"label": label, "query": q, "env": env,
-                                    "passed": r.passed, "expected": expected,
-                                    "correct": r.passed == expected, "reason": r.reason})
-            post_cases = [
-                ("dns_lookup",    "A → 10.0.1.42 (TTL 300)"),
-                ("service_health","Status: error — connection refused"),
-                ("alert_summary", "P1 (high): 2 active incidents"),
-            ]
-            post_results = []
-            for tool, output in post_cases:
-                r = await loop.post_verify(tool, output, [])
-                post_results.append({"tool": tool, "output_preview": output,
-                                     "passed": r.passed, "warnings": r.warnings})
-            result = {"pre_verification": pre_results, "post_verification": post_results,
-                      "explanation": "Pre-verify runs before execution; post-verify runs after each tool call to catch error states."}
-
-        # P1-D: Confirmed Facts + Working Set context priority
-        elif req.scenario == "p1_working_set":
-            from runtime.context_budget import ContextBudgetManager, BudgetConfig, DeviceRef as DR
-            facts = ["INC-1291 RADIUS timeout ap-03", "DNS OK", "40 clients affected"]
-            ws    = [DR(id="ap-03", label="AP-03 Site-A (focus)"),
-                     DR(id="radius-01", label="RADIUS-01 (suspect)"),
-                     DR(id="sw-access", label="SW-Access-02 (upstream)")]
-            env   = {"site": "Site-A", "change_window": False}
-            mgr   = ContextBudgetManager(BudgetConfig(total_cap_tokens=500))
-            no_ctx   = mgr.assemble(env_context=env)
-            with_ctx = mgr.assemble(confirmed_facts=facts, working_set=ws, env_context=env)
-            result = {
-                "facts": facts, "working_set": [str(w) for w in ws],
-                "baseline_tokens": len(no_ctx) // 4,
-                "enriched_tokens": len(with_ctx) // 4,
-                "baseline_preview": no_ctx[:150] or "(only env injected)",
-                "enriched_preview": with_ctx[:500],
-                "priority_order": ["1. Confirmed Facts (highest)", "2. Working Set",
-                                   "3. Memory", "4. Tool outputs", "5. Environment"],
-                "explanation": "Confirmed Facts and Working Set are injected before memory results. LLM sees the most critical structured knowledge first.",
-            }
-
-        # P2-A: Model tier routing classification
-        elif req.scenario == "p2_model_tier":
-            queries = [
-                ("check DNS for site-a",                   "simple / fast_model"),
-                ("status of payments-service",             "simple / fast_model"),
-                ("search syslogs for errors across all sites", "complex — parallel keyword"),
-                ("P1 outage: auth service is down",        "complex — P1 keyword"),
-                ("restart the payments-service in prod",   "complex — destructive keyword"),
-                ("analyse auth failures and predict trend","complex — parallel/multi-step"),
-                ("what is the uptime of ap-01",            "simple / fast_model"),
-                ("compare latency across all regions",     "complex — parallel keyword"),
-            ]
-            rows = []
-            for q, expected in queries:
-                d = loop.classify(q)
-                rows.append({"query": q, "complexity": d.complexity.value,
-                             "tier": d.model_tier, "confidence": d.confidence,
-                             "reason": d.reason[:60], "expected_label": expected})
-            result = {
-                "rows": rows,
-                "simple": sum(1 for r in rows if r["complexity"] == "simple"),
-                "complex": sum(1 for r in rows if r["complexity"] == "complex"),
-                "fast_model": sum(1 for r in rows if r["tier"] == "fast_model"),
-                "full_model": sum(1 for r in rows if r["tier"] == "full_model"),
-                "explanation": "fast_model routes to a lighter model (e.g. haiku). full_model uses the analysis model. Neither is actually called here — this is the routing decision layer.",
-            }
-
-        # P2-B: Prompt cache-friendly ordering
-        elif req.scenario == "p2_prompt_cache":
-            stable   = catalog.format_summary()
-            facts    = ["RADIUS timeout on ap-03", "DNS OK"]
-            ws_text  = "AP-03 Site-A, RADIUS-01"
-            volatile = "site=Site-A change_window=False"
-            total    = len(stable) + len(facts[0]) + len(ws_text) + len(volatile)
-            result   = {
-                "sections": [
-                    {"name": "Skill Catalog Summary", "chars": len(stable),
-                     "pct": round(len(stable)/total*100,1),
-                     "stability": "stable — same every turn (cacheable prefix)",
-                     "preview": stable[:200]},
-                    {"name": "Confirmed Facts + Working Set", "chars": len(facts[0])+len(ws_text),
-                     "pct": round((len(facts[0])+len(ws_text))/total*100,1),
-                     "stability": "semi-stable — changes when facts update"},
-                    {"name": "Environment Context", "chars": len(volatile),
-                     "pct": round(len(volatile)/total*100,1),
-                     "stability": "volatile — may change each turn"},
-                ],
-                "explanation": "Stable prefix (skill catalog) is placed first so the prompt cache hits on repeated turns. Volatile sections at the end don't invalidate the cache.",
-            }
-
-        # HITL flow simulation
-        elif req.scenario == "hitl_flow":
-            q = req.params.get("query", "restart the payments-service in production")
-            d = loop.classify(q)
-            pre = await loop.pre_verify(q, ["payments P1 active"],
-                                        {"change_window": True, "allow_destructive": True})
-            result = {
-                "query": q,
-                "classify": {"complexity": d.complexity.value, "reason": d.reason},
-                "pre_verify": {"passed": pre.passed, "reason": pre.reason},
-                "path": "HITL Graph" if d.complexity.value == "complex" else "Runtime Loop",
-                "trigger_chain": [
-                    {"priority": 1, "trigger": "DestructiveActionTrigger",
-                     "fires": "restart" in q.lower(), "reason": "restart in destructive_action_types"},
-                    {"priority": 2, "trigger": "SeverityTrigger",
-                     "fires": False, "reason": "not evaluated — higher priority trigger hit first"},
-                ],
-                "notifications": ["A2A webhook", "Slack Block Kit", "PagerDuty Events API v2",
-                                  "SSE dashboard broadcast", "WebSocket external agents"],
-                "decision_options": ["approve", "reject", "edit (patch parameters)", "escalate", "timeout (SLA)"],
-                "sla_map": {"critical": "300s", "high": "600s", "medium": "900s", "low": "1800s"},
-            }
-
-        # Memory module flow
-        elif req.scenario == "memory_flow":
-            mem = services.get("memory")
-            result = {
-                "query": req.params.get("query", "authentication failure analysis"),
-                "four_tiers": [
-                    {"tier": "L1 REALTIME",   "backend": "in-process list",        "ttl": "request lifetime", "search": "sequential scan"},
-                    {"tier": "L2 SHORT_TERM", "backend": "Redis sorted set",       "ttl": "86400s",           "search": "time-ordered ZREVRANGE"},
-                    {"tier": "L3 MID_TERM",   "backend": "ChromaDB vector index",  "ttl": "30 days",          "search": "cosine + time decay"},
-                    {"tier": "L4 LONG_TERM",  "backend": "PostgreSQL pg_trgm",     "ttl": "permanent",        "search": "trigram similarity"},
-                ],
-                "ingestion_thresholds": {"L1+L2": "importance < 0.40", "L1+L2+L3": "0.40 ≤ importance < 0.75", "all 4": "importance ≥ 0.75"},
-                "retrieval_pipeline": ["embed(query)", "4-layer asyncio.gather", "blend scores (rel×0.7 + recency×0.3)", "MMR dedup λ=0.6", "token trim"],
-                "consolidation": ["summarise last N turns via LLM", "extract named entities", "decay low-access mid-term records"],
-                "memory_available": mem is not None,
-            }
-
-        # Registry flow
-        elif req.scenario == "registry_flow":
-            reg    = services.get("registry")
-            agents = await reg.list_agents() if reg else []
-            result = {
-                "registered_agents": len(agents),
-                "discovery_paths": ["/.well-known/agent-card.json", "/agent-card",
-                                    "/api/v1/a2a/.well-known/agent-card.json", "/api/v1/a2a/agent-card"],
-                "lb_strategies": {"round_robin": "default, stateful last-index", "random": "stateless",
-                                  "least_loaded": "uses record_task_start/end counters"},
-                "health_check_interval": "60s",
-                "card_refresh_interval": "300s",
-                "health_states": ["unknown", "healthy", "degraded (still routed)", "unhealthy (excluded)"],
-                "agent_list": [{"id": a.agent_id[:8] + "…", "name": a.card.name,
-                                "health": a.health.value,
-                                "skills": list(a.skill_index.keys())[:4]}
-                               for a in agents[:5]],
-            }
-
-        # E2E simple query
-        elif req.scenario == "e2e_simple":
-            q   = req.params.get("query", "why is user authentication failing?")
-            cls = loop.classify(q)
-            pre = await loop.pre_verify(q, [], {})
-            res = await loop.run(query=q, session_id=sid,
-                                 env_context={"site": "Site-A"},
-                                 tool_registry=tool_registry)
-            result = {
-                "query": q,
-                "classify": {"complexity": cls.complexity.value, "tier": cls.model_tier},
-                "pre_verify": {"passed": pre.passed},
-                "path": "Runtime Loop (no LangGraph)",
-                "turns": res.turns_taken,
-                "stop_outcome": res.outcome.value,
-                "tools_called": res.tool_summaries,
-                "response_preview": res.final_response[:400],
-                "modules": ["runtime/loop.py", "runtime/context_budget.py", "runtime/stop_policy.py",
-                            "skills/catalog.py", "tools/mock_tools.py"],
-            }
-
-        # E2E complex query (classify only — HITL graph not run in demo)
-        elif req.scenario == "e2e_complex":
-            q   = req.params.get("query", "restart the payments-service in production")
-            cls = loop.classify(q)
-            pre = await loop.pre_verify(q, [], {})
-            result = {
-                "query": q,
-                "classify": {"complexity": cls.complexity.value, "tier": cls.model_tier, "reason": cls.reason},
-                "pre_verify": {"passed": pre.passed, "reason": pre.reason},
-                "path": "HITL Graph + TaskPlanner DAG",
-                "hitl_steps": {
-                    "1": "evaluate_triggers() → DestructiveActionTrigger fires",
-                    "2": "LangGraph interrupt() → state serialised to MemorySaver",
-                    "3": "HitlReviewService.notify() → 5 channels concurrently",
-                    "4": "Operator submits via /hitl/{id}/approve",
-                    "5": "graph.update_state() + ainvoke(None) → resumes",
-                    "6": "_verify_action_result() → post-action health check",
-                },
-                "modules": ["hitl/a2a_integration.py", "hitl/graph.py", "hitl/triggers.py",
-                            "hitl/decision.py", "hitl/review.py", "hitl/audit.py",
-                            "task/intra/planner.py", "registry/registry.py"],
-            }
-
-        # ── Hermes: FTS5 session write + search ──────────────────────────
-        elif req.scenario == "hermes_fts_search":
-            fts = services.get("fts_store")
-            query = req.params.get("query", "RADIUS authentication failure")
-            if fts is None:
-                result = {"error": "FTS5SessionStore not initialised — check HERMES_DATA_DIR"}
-            else:
-                stats_before = await fts.get_stats()
-                # Write a synthetic turn so search has something to find
-                await fts.write_turn(
-                    session_id=sid,
-                    user_text=f"Demo turn: {query} on ap-03 and ap-07",
-                    assistant_text=(
-                        "Searched syslogs — RADIUS certificate expired. "
-                        "Renewed cert via admin console, auth restored for 40 clients."
-                    ),
-                    tool_calls=[{"tool": "syslog_search", "result": "cert expired 2 days ago"}],
-                    importance=0.85,
-                    tags=["demo", "radius", "auth"],
-                )
-                results = await fts.search(query=query, limit=5)
-                stats_after = await fts.get_stats()
-                summary = await fts.summarize_results(results, query)
-                sessions = await fts.list_sessions()
-                result = {
-                    "query":           query,
-                    "turns_before":    stats_before["total_turns"],
-                    "turns_after":     stats_after["total_turns"],
-                    "sessions_total":  stats_after["total_sessions"],
-                    "db_size_kb":      stats_after["db_size_kb"],
-                    "search_results":  len(results),
-                    "top_result": {
-                        "session_id":    results[0].session_id if results else None,
-                        "snippet":       results[0].snippet if results else None,
-                        "rank":          results[0].rank if results else None,
-                        "user_text":     results[0].user_text[:120] if results else None,
-                    } if results else None,
-                    "llm_summary":     summary,
-                    "recent_sessions": [
-                        {"session_id": s.session_id[:16]+"…",
-                         "turn_count": s.turn_count, "topic": s.topic_summary}
-                        for s in sessions[:5]
-                    ],
-                    "explanation": (
-                        "Every turn is written to SQLite FTS5. "
-                        "New sessions search past turns by keyword before building the prompt — "
-                        "only the top-K relevant excerpts are injected, not the full history."
-                    ),
-                }
-
-        # ── Hermes: Memory curation (per-turn + nudge) ───────────────────
-        elif req.scenario == "hermes_curation":
-            curator = services.get("memory_curator")
-            if curator is None:
-                result = {"error": "MemoryCurator not initialised"}
-            else:
-                turns = req.params.get("turns", [
-                    ("RADIUS auth failing for all APs at site-a",
-                     "Found expired cert on RADIUS-01. Renewed — auth restored.",
-                     [{"tool": "syslog_search", "result": "cert_expired"}]),
-                    ("I prefer httpx over requests for all HTTP calls",
-                     "Noted. Using httpx for all outbound HTTP.",
-                     []),
-                    ("Check BGP summary for router-01",
-                     "BGP summary: 3 neighbors established, 1 active, 0 idle.",
-                     [{"tool": "get_bgp_summary", "result": "3 established"}]),
-                ])
-                all_memories = []
-                for user_t, asst_t, tc in turns:
-                    memories = await curator.after_turn(sid, user_t, asst_t, tc)
-                    all_memories.extend(memories)
-                counter = curator._turn_counter.get(sid, 0)
-                result = {
-                    "session_id":       sid,
-                    "turns_processed":  len(turns),
-                    "turn_counter":     counter,
-                    "memories_curated": len(all_memories),
-                    "curated": [
-                        {
-                            "content":     m.content[:120],
-                            "type":        m.memory_type.value,
-                            "confidence":  round(m.confidence, 2),
-                            "tags":        m.tags,
-                        }
-                        for m in all_memories
-                    ],
-                    "nudge_status": (
-                        f"Nudge fires at intervals {curator._shallow_n} (shallow) "
-                        f"and {curator._deep_n} (deep). "
-                        f"Current turn: {counter}. "
-                        f"Next shallow at turn {((counter // curator._shallow_n) + 1) * curator._shallow_n}."
-                    ),
-                    "explanation": (
-                        "After each turn, the LLM is asked: 'What is worth remembering?' "
-                        "Only distilled facts (not raw chat) are written to long-term memory. "
-                        "Every 5 turns a shallow nudge scans for missed facts. "
-                        "Every 20 turns a deep nudge re-evaluates preferences and detects contradictions."
-                    ),
-                }
-
-        # ── Hermes: User model behavioral inference ──────────────────────
-        elif req.scenario == "hermes_user_model":
-            user_model = services.get("user_model")
-            if user_model is None:
-                result = {"error": "UserModelEngine not initialised"}
-            else:
-                # Run a representative sequence of turns
-                demo_turns = [
-                    ("RADIUS auth failing on ap-03 and ap-07",
-                     "Searched syslogs — cert expired on RADIUS-01.",
-                     [{"tool": "syslog_search"}, {"tool": "get_device_status"}]),
-                    ("WiFi RSSI below threshold on 5GHz channels at site-a",
-                     "Channel 6 congested. Recommend switching to channel 1.",
-                     [{"tool": "get_device_status"}]),
-                    ("I prefer httpx over requests for all HTTP tool calls",
-                     "Noted, using httpx going forward.",
-                     []),
-                    ("Show BGP summary and check for route flapping",
-                     "BGP: 3 neighbors. Route to 10.0.0.0/8 flapping every 30s.",
-                     [{"tool": "get_bgp_summary"}, {"tool": "syslog_search"}]),
-                    ("List open P1 incidents",
-                     "2 open P1 incidents: INC-1291 (RADIUS), INC-1305 (DNS).",
-                     [{"tool": "list_incidents"}]),
-                ]
-                for user_t, asst_t, tc in demo_turns:
-                    await user_model.after_turn(sid, user_t, asst_t, tc)
-                profile = user_model.get_profile(sid)
-                prompt_section = user_model.get_prompt_section(sid)
-                result = {
-                    "session_id":       sid,
-                    "turns_processed":  len(demo_turns),
-                    "technical_level":  profile.technical_level.value,
-                    "comm_style":       profile.communication_style.value,
-                    "total_turns":      profile.total_turns,
-                    "domain_counts":    dict(sorted(profile.domain_counts.items(), key=lambda x: -x[1])),
-                    "tool_usage":       dict(sorted(profile.tool_usage.items(), key=lambda x: -x[1])),
-                    "stated_prefs":     profile.stated_preferences,
-                    "revealed_prefs":   profile.revealed_preferences,
-                    "contradictions":   profile.contradictions,
-                    "trait_count":      len(profile.traits),
-                    "top_traits": [
-                        {"trait": k, "value": str(v.value)[:80],
-                         "confidence": round(v.confidence, 2),
-                         "contradicted": v.contradicted}
-                        for k, v in sorted(profile.traits.items(),
-                                           key=lambda x: -x[1].confidence)[:5]
-                    ],
-                    "hourly_activity":  {str(h): c for h, c in sorted(profile.hourly_activity.items())},
-                    "prompt_section":   prompt_section,
-                    "explanation": (
-                        "The user model tracks REVEALED preferences (actual tool choices, query patterns) "
-                        "separately from STATED preferences (what the operator says). "
-                        "Contradictions are flagged when behavior doesn't match claims. "
-                        "The [OPERATOR PROFILE] section is injected as hidden context every session."
-                    ),
-                }
-
-        # ── Hermes: Skill auto-creation ──────────────────────────────────
-        elif req.scenario == "hermes_skill_creation":
-            evolver = services.get("skill_evolver")
-            if evolver is None:
-                result = {"error": "SkillEvolver not initialised (needs skill_catalog in services)"}
-            else:
-                complexity = float(req.params.get("complexity", 7.5))
-                proposal = await evolver.after_task(
-                    task_description=req.params.get(
-                        "task", "RADIUS certificate renewal for production AP network"
-                    ),
-                    solution_summary=(
-                        "Identified expired certificate on RADIUS-01 via syslog. "
-                        "Renewed cert via admin console. Verified auth restored for 40 clients."
-                    ),
-                    tools_used=["syslog_search", "get_device_status", "get_bgp_summary"],
-                    solution_steps=[
-                        "Search syslogs with severity=error for RADIUS errors",
-                        "Identify cert expiry timestamp from log message",
-                        "Access RADIUS admin console and navigate to Certificates",
-                        "Renew certificate and restart RADIUS service",
-                        "Verify AP auth by checking syslog for 'Auth OK' messages",
-                        "Confirm all 40 affected clients have reconnected",
-                    ],
-                    key_observations=[
-                        "Certificate had expired 2 days prior — no auto-renewal configured",
-                        "Auth restored within 90 seconds of cert renewal",
-                        "All 40 clients reconnected without manual intervention",
-                    ],
-                    complexity=complexity,
-                    session_id=sid,
-                )
-                if proposal:
-                    versions = evolver.get_version_history(proposal.skill_id)
-                    stats = evolver.get_all_skill_stats()
-                    result = {
-                        "created":         True,
-                        "skill_id":        proposal.skill_id,
-                        "reuse_potential": round(proposal.reuse_potential, 2),
-                        "complexity_score": round(proposal.complexity_score, 2),
-                        "rationale":       proposal.rationale,
-                        "version_count":   len(versions),
-                        "version_history": versions,
-                        "markdown_preview": proposal.markdown_content[:800],
-                        "total_auto_skills": len(stats),
-                        "eligibility_threshold": {
-                            "min_complexity":      evolver._min_complex,
-                            "min_reuse_potential": evolver._min_reuse,
-                            "passed":              True,
-                        },
-                        "explanation": (
-                            "After each complex task, the agent asks: 'Should this be a reusable Skill?' "
-                            f"This task scored complexity={complexity} (threshold={evolver._min_complex}) "
-                            f"and reuse_potential={round(proposal.reuse_potential, 2)} "
-                            f"(threshold={evolver._min_reuse}). "
-                            "The markdown skill was written and registered in SkillCatalogService."
-                        ),
-                    }
-                else:
-                    result = {
-                        "created":  False,
-                        "reason":   f"Below threshold: complexity={complexity} (min={evolver._min_complex if evolver else 'N/A'})",
-                        "eligibility_threshold": {
-                            "min_complexity":      evolver._min_complex if evolver else None,
-                            "min_reuse_potential": evolver._min_reuse if evolver else None,
-                            "passed":              False,
-                        },
-                    }
-
-        # ── Hermes: Skill self-improvement via feedback ──────────────────
-        elif req.scenario == "hermes_skill_feedback":
-            evolver = services.get("skill_evolver")
-            if evolver is None:
-                result = {"error": "SkillEvolver not initialised"}
-            else:
-                # Create a skill first if none exist
-                skill_id = req.params.get("skill_id", "")
-                if not skill_id or not evolver.get_version_history(skill_id):
-                    proposal = await evolver.after_task(
-                        task_description="RADIUS certificate renewal procedure",
-                        solution_summary="Renewed cert, auth restored",
-                        tools_used=["syslog_search"],
-                        solution_steps=["Check syslog", "Renew cert", "Verify"],
-                        key_observations=["Cert expired 2 days ago"],
-                        complexity=6.0,
-                        session_id=sid,
-                    )
-                    skill_id = proposal.skill_id if proposal else ""
-
-                feedback = req.params.get(
-                    "feedback",
-                    "Step 1 should also check interface metrics before syslog to rule out network issues first.",
-                )
-                if skill_id:
-                    v_before = len(evolver.get_version_history(skill_id))
-                    fb_result = await evolver.apply_feedback(
-                        skill_id=skill_id,
-                        feedback=feedback,
-                        success=True,
-                        problem_step="Check syslog",
-                    )
-                    v_after = len(evolver.get_version_history(skill_id))
-                    history = evolver.get_version_history(skill_id)
-                    result = {
-                        "skill_id":      skill_id,
-                        "feedback":      feedback,
-                        "version_before": v_before,
-                        "version_after":  v_after,
-                        "changes":        fb_result.changes if fb_result else [],
-                        "quality_delta":  round(fb_result.quality_delta, 3) if fb_result else 0,
-                        "quality_improved": (fb_result.quality_delta > 0) if fb_result else False,
-                        "version_history": history,
-                        "explanation": (
-                            "Operator feedback triggers an LLM patch of the skill's steps. "
-                            "Only the identified problem step is changed — the rest is preserved. "
-                            "A new SkillVersion is created with the diff summary. "
-                            "Rollback to any previous version is available."
-                        ),
-                    }
-                else:
-                    result = {"error": "Could not create or find a skill to apply feedback to"}
-
-        # ── Hermes: Full learning loop (all 5 nodes in one demo) ─────────
-        elif req.scenario == "hermes_full_loop":
-            fts     = services.get("fts_store")
-            curator = services.get("memory_curator")
-            umodel  = services.get("user_model")
-            evolver = services.get("skill_evolver")
-            loop_sid = f"loop-demo-{sid}"
-
-            steps = []
-
-            # Node 1: FTS5 recall
-            if fts:
-                recall_results = await fts.search("RADIUS authentication", limit=3)
-                steps.append({
-                    "node": "1 — FTS5 Cross-Session Recall",
-                    "status": "executed",
-                    "detail": f"Searched past sessions for 'RADIUS authentication'. Found {len(recall_results)} relevant turns.",
-                    "recall_count": len(recall_results),
-                })
-            else:
-                steps.append({"node": "1 — FTS5 Cross-Session Recall", "status": "skipped", "detail": "FTS5 not initialised"})
-
-            # Node 2: Simulate turn + write to FTS5
-            user_q = "RADIUS auth failing for wireless users at site-a. Check ap-03 and ap-07."
-            asst_r = "Searched syslogs — RADIUS-01 certificate expired 2 days ago. Renewing now. Auth should restore in 60s."
-            tool_calls_demo = [{"tool": "syslog_search", "result": "cert_expired_RADIUS-01"}]
-            if fts:
-                await fts.write_turn(loop_sid, user_q, asst_r, tool_calls=tool_calls_demo, importance=0.9)
-                stats = await fts.get_stats()
-                steps.append({
-                    "node": "2 — FTS5 Turn Write",
-                    "status": "executed",
-                    "detail": f"Turn written. DB now has {stats['total_turns']} total turns across {stats['total_sessions']} sessions.",
-                    "db_size_kb": stats["db_size_kb"],
-                })
-            else:
-                steps.append({"node": "2 — FTS5 Turn Write", "status": "skipped", "detail": "FTS5 not initialised"})
-
-            # Node 3: Memory curation
-            curated_count = 0
-            if curator:
-                memories = await curator.after_turn(loop_sid, user_q, asst_r, tool_calls_demo)
-                curated_count = len(memories)
-                steps.append({
-                    "node": "3 — Memory Curation",
-                    "status": "executed",
-                    "detail": f"LLM curated {curated_count} memories from this turn.",
-                    "memories": [{"content": m.content[:100], "type": m.memory_type.value, "confidence": round(m.confidence,2)} for m in memories],
-                })
-            else:
-                steps.append({"node": "3 — Memory Curation", "status": "skipped", "detail": "MemoryCurator not initialised"})
-
-            # Node 4: User model update
-            if umodel:
-                profile = await umodel.after_turn(loop_sid, user_q, asst_r, tool_calls_demo)
-                steps.append({
-                    "node": "4 — User Model Update",
-                    "status": "executed",
-                    "detail": f"Profile updated. Domains: {dict(list(profile.domain_counts.items())[:3])}. Tools: {dict(list(profile.tool_usage.items())[:3])}.",
-                    "technical_level": profile.technical_level.value,
-                    "domain_counts":   profile.domain_counts,
-                })
-            else:
-                steps.append({"node": "4 — User Model Update", "status": "skipped", "detail": "UserModelEngine not initialised"})
-
-            # Node 5: Skill auto-creation
-            if evolver:
-                proposal = await evolver.after_task(
-                    task_description="RADIUS authentication certificate renewal",
-                    solution_summary=asst_r,
-                    tools_used=["syslog_search"],
-                    solution_steps=["Search syslog", "Identify cert expiry", "Renew cert", "Verify auth"],
-                    key_observations=["Cert expired 2 days ago", "Auth restored in 60s"],
-                    complexity=6.5,
-                    session_id=loop_sid,
-                )
-                steps.append({
-                    "node": "5 — Skill Auto-Creation",
-                    "status": "executed" if proposal else "skipped (below threshold)",
-                    "detail": (
-                        f"Created skill '{proposal.skill_id}' (reuse={round(proposal.reuse_potential,2)})"
-                        if proposal else "Task complexity below threshold for skill creation"
-                    ),
-                    "skill_id":    proposal.skill_id if proposal else None,
-                    "reuse":       round(proposal.reuse_potential, 2) if proposal else None,
-                })
-            else:
-                steps.append({"node": "5 — Skill Auto-Creation", "status": "skipped", "detail": "SkillEvolver not initialised"})
-
-            result = {
-                "session_id":    loop_sid,
-                "query":         user_q,
-                "assistant":     asst_r,
-                "loop_steps":    steps,
-                "modules_active": {
-                    "fts_store":      fts is not None,
-                    "memory_curator": curator is not None,
-                    "user_model":     umodel is not None,
-                    "skill_evolver":  evolver is not None,
-                },
-                "explanation": (
-                    "This is the complete Hermes 5-node learning loop run in sequence for one turn. "
-                    "In production, all nodes fire after every turn. "
-                    "The loop is what makes the agent get better with use — not just remember more."
-                ),
-            }
-
-        # ── Live skill evolution: run query → get result → evolve skill ─────
-        elif req.scenario == "skill_evolve_live":
-            evolver = services.get("skill_evolver")
-            loop    = services.get("runtime_loop")
-            if evolver is None:
-                result = {"error": "SkillEvolver not initialised"}
-            else:
-                query = req.params.get("query", "why is RADIUS authentication failing for wireless users?")
-                # Step 1: Run a real loop query to get actual tool results
-                step1_result = "not run"
-                step1_tools  = []
-                try:
-                    res = await loop.run(
-                        query=query,
-                        session_id=sid,
-                        tool_registry=tool_registry,
-                    )
-                    step1_result = res.final_response[:400]
-                    step1_tools  = res.tool_summaries or []
-                except Exception as exc:
-                    step1_result = f"Loop error: {exc}"
-
-                # Step 2: Trigger skill evolution from the completed task
-                proposal = await evolver.after_task(
-                    task_description=query,
-                    solution_summary=step1_result,
-                    tools_used=step1_tools[:4] or ["syslog_search", "get_device_status"],
-                    solution_steps=[
-                        "Search syslogs for authentication errors",
-                        "Check RADIUS server certificate expiry",
-                        "Verify device connectivity to RADIUS server",
-                        "Confirm auth restoration after remediation",
-                    ],
-                    key_observations=[
-                        "RADIUS certificate expiry is the most common cause",
-                        "syslog_search with severity=error reveals the root cause",
-                        "Auth restores within 60s of certificate renewal",
-                    ],
-                    complexity=req.params.get("complexity", 7.0),
-                    session_id=sid,
-                )
-
-                # Step 3: Apply simulated operator feedback if skill was created
-                feedback_result = None
-                if proposal:
-                    fb = req.params.get("feedback",
-                        "Step 1 should also check interface metrics before syslog to rule out network-layer issues.")
-                    if fb:
-                        feedback_result = await evolver.apply_feedback(
-                            skill_id=proposal.skill_id,
-                            feedback=fb,
-                            success=True,
-                            problem_step="Search syslogs for authentication errors",
-                        )
-
-                result = {
-                    "query":          query,
-                    "step1_loop_result": step1_result,
-                    "step1_tools_called": step1_tools,
-                    "step2_skill_created": proposal is not None,
-                    "skill_id":       proposal.skill_id if proposal else None,
-                    "reuse_potential": round(proposal.reuse_potential, 2) if proposal else None,
-                    "markdown_preview": proposal.markdown_content[:600] if proposal else None,
-                    "step3_feedback_applied": feedback_result is not None,
-                    "version_after_feedback": feedback_result.new_version if feedback_result else None,
-                    "quality_delta":  round(feedback_result.quality_delta, 3) if feedback_result else None,
-                    "version_history": evolver.get_version_history(proposal.skill_id) if proposal else [],
-                    "explanation": (
-                        "This demo runs a real loop query, feeds its output to SkillEvolver, "
-                        "creates a skill if complexity threshold is met, then applies feedback "
-                        "to self-improve the skill — the complete Hermes §05 flow end-to-end."
-                    ),
-                }
-
-        else:
-            return JSONResponse(content={"error": f"Unknown scenario: {req.scenario}"}, status_code=400)
-
-        return JSONResponse(content={"scenario": req.scenario, "result": result})
-
-    @app.get("/demos", response_class=HTMLResponse)
-    async def serve_demos():
-        page = _STATIC_DIR / "demos.html"
-        if page.exists():
-            return HTMLResponse(content=page.read_text(encoding="utf-8"))
-        return HTMLResponse(content="<h1>demos.html not found</h1>")
-
 
     return app
 
@@ -2425,6 +2039,15 @@ async def _submit_hitl_decision(
     if not hitl_router:
         raise HTTPException(status_code=503, detail="HITL router not available")
 
+    # CRITICAL: bind operator at the TOP so that handle_decision() — and any
+    # post-HITL callback it triggers (including loop.stream → _retrieve_memory
+    # → MemoryAdapter.recall, which reads get_current_operator() to scope the
+    # user_id) — runs inside the same operator's memory namespace as the
+    # original chat_stream turn. Without this, recall happens under user_id
+    # "system" (the contextvar default), finds nothing, and the post-HITL
+    # agent loop runs without any prior-turn context.
+    set_current_operator((await _identity()).operator_id)
+
     payload = hitl_router._payload_store.get(interrupt_id)
     if payload is None:
         raise HTTPException(status_code=404, detail=f"Interrupt {interrupt_id!r} not found")
@@ -2437,35 +2060,179 @@ async def _submit_hitl_decision(
         operator_id=req.operator_id,
         comment=req.comment,
         parameter_patch=req.parameter_patch,
+        selected_choice_id=req.selected_choice_id,
+        clarification_answers=req.clarification_answers,
     )
-    result     = await hitl_router.handle_decision(decision)
+    result      = await hitl_router.handle_decision(decision)
     result_dict = result.to_dict()
 
-    # Post-HITL synthesis: run one LLM turn to summarise the tool execution result
-    # so the chat shows a meaningful response after the operator approves.
-    _loop = services.get("runtime_loop")
+    _decision    = result_dict.get("decision")
     _tool_result = result_dict.get("tool_result", "")
-    _tool_name   = result_dict.get("tool_name", "the approved tool")
-    if _loop and _tool_result and result_dict.get("decision") == "approve":
-        try:
-            _synthesis_query = (
-                f"The HITL-approved tool '{_tool_name}' has just been executed. "
-                f"Summarise the result for the operator in 2-3 sentences."
-            )
-            _synthesis_facts = [f"TOOL_RESULT: {str(_tool_result)[:800]}"]
-            _full_text = ""
-            async for _chunk in _loop.stream(
-                query           = _synthesis_query,
-                session_id      = f"hitl__{interrupt_id[:8]}",
-                confirmed_facts = _synthesis_facts,
-            ):
-                if _chunk.get("type") == "token":
-                    _full_text += _chunk.get("token", "")
-            if _full_text.strip():
-                result_dict["synthesis"] = _full_text.strip()
-        except Exception as _e:
-            logger.debug("Post-HITL synthesis failed: %s", _e)
+    _tool_name   = result_dict.get("tool_name", "the approved action")
+    _user_query  = payload.user_query or ""
 
+    # Post-HITL synthesis: run one LLM call to summarise the tool result so
+    # the chat shows a meaningful response after the operator approves.
+    # SKIP synthesis when tool_name == "agent_loop": the post-HITL agent
+    # loop already produced a complete user-facing markdown answer; running
+    # synthesis on top of it would just be a degraded summary-of-summary
+    # that wastes tokens and loses information.
+    _llm = services.get("llm_engine")
+    if (
+        _llm and _tool_result and _decision == "approve"
+        and _tool_name != "agent_loop"
+    ):
+        try:
+            _prompt = (
+                f"The operator just approved this request:\n"
+                f"  {_user_query}\n\n"
+                f"The tool '{_tool_name}' executed and returned:\n"
+                f"-----\n{str(_tool_result)[:4000]}\n-----\n\n"
+                f"Write a clear answer to the operator in the SAME LANGUAGE as the original request. "
+                f"Use markdown: a brief verdict, key findings as bullets, and a short next-step "
+                f"recommendation. Do not invent data — only summarise what the tool actually returned."
+            )
+            messages = [{"role": "user", "content": _prompt}]
+            if hasattr(_llm, "_chat"):
+                synth = await _llm._chat(messages)
+            else:
+                synth = await _llm.call(_prompt, "", state=None)
+            if synth and synth.strip():
+                result_dict["synthesis"] = synth.strip()
+        except Exception as _e:
+            logger.warning("Post-HITL synthesis failed: %s", _e)
+    elif _tool_name == "agent_loop" and _tool_result:
+        # The agent loop output IS the user-facing answer — promote it to
+        # `synthesis` so the frontend renders it once (not twice).
+        result_dict["synthesis"] = str(_tool_result).strip()
+
+    # Memory write + curation for every post-HITL turn (approve / reject /
+    # escalate are all auditable operations facts worth persisting).
+    # Frontend reads memory_write / memory_curate flags to render FTS5 Write
+    # and Memory Curation steps.
+    _memory = services.get("memory")
+    logger.info(
+        "_submit_hitl_decision: memory write check — _memory=%s _decision=%r "
+        "tool_name=%r user_query=%r synthesis_len=%d tool_result_len=%d",
+        bool(_memory), _decision, _tool_name,
+        (_user_query or "")[:80],
+        len(result_dict.get("synthesis") or ""),
+        len(str(_tool_result) if _tool_result else ""),
+    )
+    if _memory and _decision in ("approve", "reject", "escalate"):
+        try:
+            # Build assistant_text. For approves with tool output use the
+            # synthesised answer (or raw tool output if synthesis was skipped).
+            # For rejects / escalates write a concise audit-style message so
+            # the conversation history reflects the operator's decision.
+            #
+            # Prefix approves with an explicit "[HITL APPROVED — completed]"
+            # tag so future recall makes it unambiguous that this turn FINISHED
+            # successfully. Without the tag, an LLM looking at recall context
+            # can confuse a synthesis answer with a pending interrupt note
+            # (both contain the same user query) and report the action as
+            # still awaiting approval — see screenshot bug report.
+            if _decision == "approve":
+                _body = (
+                    result_dict.get("synthesis")
+                    or (str(_tool_result)[:2000] if _tool_result else "")
+                    or f"[HITL approved — {_tool_name}]"
+                )
+                # Detect whether the body actually contains completion markers.
+                # If not, label this turn so future recall surfaces it as
+                # "executed but result inconclusive" rather than as a
+                # successful change. Without this discriminator, Path A's
+                # plan-only output (e.g. "我将修复 ap-01... 第一步: ...")
+                # would get the same [APPROVED & COMPLETED] tag as a real
+                # successful completion, and the LLM next turn can't tell
+                # them apart.
+                _has_done_marker = any(
+                    kw in _body
+                    for kw in (
+                        "已修复", "已完成", "已应用", "修复成功", "修复完成",
+                        "配置已", "已生效", "已优化", "执行完毕",
+                        "completed", "applied", "fixed successfully",
+                        "has been updated", "configuration updated",
+                    )
+                )
+                _status_tag = (
+                    "[HITL APPROVED & COMPLETED"
+                    if _has_done_marker
+                    else "[HITL APPROVED & EXECUTED — result inconclusive"
+                )
+                # Add an explicit one-line summary at the very top so the
+                # LLM seeing this in recall context can immediately classify
+                # the turn without parsing the full body.
+                _summary_line = (
+                    f"{_status_tag} — {_tool_name}] "
+                    f"operator={req.operator_id or 'unknown'} "
+                    f"request={(_user_query or '')[:80]!r}"
+                )
+                assistant_text = f"{_summary_line}\n{_body}"
+            else:
+                _comment = (req.comment or "").strip()
+                assistant_text = (
+                    f"[HITL {_decision.upper()} — {_tool_name}] "
+                    f"operator={req.operator_id or 'unknown'}"
+                    + (f" — {_comment}" if _comment else "")
+                )
+            # operator is already bound at the top of _submit_hitl_decision —
+            # no need to re-set here.
+            # Reuse the original session_id from the interrupt payload for continuity.
+            session_id = payload.context_id or f"hitl__{interrupt_id[:8]}"
+            logger.info(
+                "_submit_hitl_decision: writing memory — session_id=%r "
+                "operator=%s assistant_text_len=%d preview=%r",
+                session_id, get_current_operator(),
+                len(assistant_text), assistant_text[:120],
+            )
+            new_facts = await _memory.after_turn(
+                session_id      = session_id,
+                user_text       = _user_query,
+                assistant_text  = assistant_text,
+                tool_calls      = [{"tool": _tool_name}] if _tool_name else [],
+                importance      = 0.7 if _decision == "approve" else 0.5,
+            )
+            result_dict["memory_write"] = {"session_id": session_id, "ok": True}
+            logger.info(
+                "_submit_hitl_decision: memory write OK — %d new facts",
+                len(new_facts) if new_facts else 0,
+            )
+            if new_facts:
+                _types = [getattr(f, "fact_type", getattr(f, "memory_type", "fact"))
+                          for f in new_facts[:5]]
+                result_dict["memory_curate"] = {
+                    "memories_count": len(new_facts),
+                    "types":          _types,
+                }
+        except Exception as _e:
+            # Log the FULL traceback so we can see where it actually fails.
+            # The previous `logger.warning("Post-HITL memory write failed: %s")`
+            # was eaten silently in many cases.
+            logger.error(
+                "_submit_hitl_decision: memory write FAILED — %s",
+                _e, exc_info=True,
+            )
+    else:
+        logger.warning(
+            "_submit_hitl_decision: SKIPPING memory write — _memory=%s "
+            "_decision=%r (not in approve/reject/escalate)",
+            bool(_memory), _decision,
+        )
+
+    # Diagnostic: log exactly what we send back to the frontend so we can
+    # tell whether the issue is server-side (we never sent it) or client-side
+    # (frontend received it but didn't render).
+    _synth_len = len(result_dict.get("synthesis") or "")
+    _tres_len  = len(str(result_dict.get("tool_result") or ""))
+    logger.info(
+        "_submit_hitl_decision: returning to frontend — interrupt=%s "
+        "decision=%s tool_name=%r synthesis=%d chars tool_result=%d chars "
+        "memory_write=%s memory_curate=%s",
+        interrupt_id[:12], _decision, _tool_name, _synth_len, _tres_len,
+        bool(result_dict.get("memory_write")),
+        bool(result_dict.get("memory_curate")),
+    )
     return JSONResponse(content=result_dict)
 
 

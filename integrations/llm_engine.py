@@ -129,7 +129,7 @@ TOOL RESULT HANDLING — when a tool returns an error or empty result:
 
 STOP CONDITION: Once you have gathered enough information to fully answer the user's question, write your final analysis WITHOUT any [TOOL:] line.
 - For single-device queries: one tool call is usually enough — summarise after that result.
-- For multi-device queries (e.g. "check all site-a devices"): call the tool once per device, then summarise ALL results together. Do NOT stop after the first device.
+- For multi-device queries (e.g. "check all devices at <site>"): call the tool once per device, then summarise ALL results together. Do NOT stop after the first device.
 - NEVER call the same tool with the same arguments twice.
 
 LARGE DATA STRATEGY — when reading a stored result page by page:
@@ -156,29 +156,29 @@ RESPONSE STRUCTURE — write answers the UI can render cleanly:
 - Keep each paragraph focused on one idea. Break long answers into clear sections.
 - End with a one-line summary or a call-to-action ("如需查看…，请告诉我设备 ID。").
 
-ASCII topology example:
+ASCII topology example (generic — replace placeholder names with real device IDs from tool results):
 ```
-                    [router-01]  ← edge, NAT/firewall
+                    [<router>]   ← edge
                          │
               ┌──────────┴──────────┐
-         [sw-core-01]           [sw-core-02]   ← VRRP/HSRP pair
+         [<core-1>]              [<core-2>]   ← redundant pair
               │                      │
      ┌────────┼────────┐       ┌─────┴──────┐
-[sw-acc-01][sw-acc-02][sw-acc-03]           …
+[<acc-1>] [<acc-2>] [<acc-3>]            …
      │           │           │
-   ap-01,02   ap-03,04      …                ← Wi-Fi APs
+   <ap-a,b>  <ap-c,d>      …                ← Wi-Fi APs
 ```
 
-Mermaid example:
+Mermaid example (generic — replace placeholder names with real device IDs):
 ```mermaid
 graph TD
-  R[router-01] --> C1[sw-core-01]
-  R --> C2[sw-core-02]
-  C1 --> A1[sw-acc-01]
-  C1 --> A2[sw-acc-02]
-  C2 --> A3[sw-acc-03]
-  A1 --> AP1[ap-01]
-  A1 --> AP2[ap-02]
+  R[<router>] --> C1[<core-1>]
+  R --> C2[<core-2>]
+  C1 --> A1[<acc-1>]
+  C1 --> A2[<acc-2>]
+  C2 --> A3[<acc-3>]
+  A1 --> AP1[<ap-a>]
+  A1 --> AP2[<ap-b>]
 ```
 
 {extra_tools_section}
@@ -283,7 +283,7 @@ Return format:
                 if _extra:
                     _extra_lines = ["\nUPLOADED/REGISTERED TOOLS — also available:"]
                     for _n in sorted(_extra):
-                        _extra_lines.append(f"  [TOOL:{_n}] {{"<arg>": "<value>"}}")
+                        _extra_lines.append(f'  [TOOL:{_n}] {{"<arg>": "<value>"}}')
                     extra_tools_section += "\n".join(_extra_lines)
         except Exception as _te:
             # Fallback: list tools from registry with no descriptions
@@ -494,7 +494,10 @@ class OllamaEngine(LLMEngine):
                 1 for k in _tool_output_keys
                 if k.split("|")[0] not in _large_data_tools or "|" not in k
             )
-            if len(_tool_output_keys) >= 3 and not _has_more_pages and not _all_stored:
+            # Use real-results count (excluding big-data tools that legitimately
+            # generate many calls for paging) so the synthesis nudge fires only
+            # when the model has actually gathered enough small-tool data.
+            if _n_real_results >= 3 and not _has_more_pages and not _all_stored:
                 stop_note += (
                     "\n\nYou have gathered sufficient tool results. "
                     "Provide your complete analysis and recommendations now."

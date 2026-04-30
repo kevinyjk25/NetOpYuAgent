@@ -210,8 +210,34 @@ async def build_services() -> dict[str, Any]:
                     finally:
                         new_loop.close()
             memory_router.set_llm_fn(_sync_llm_for_memory)
+            # Smoke test: invoke the wrapper once with a tiny prompt to confirm
+            # the LLM is reachable. If this fails, fact extraction silently
+            # falls back to English-only regex and B-track stays at 0 forever.
+            try:
+                _smoke = _sync_llm_for_memory(
+                    "Return ONLY this JSON array, no other text: []"
+                )
+                logger.info(
+                    "Memory LLM smoke test OK — response %d chars: %r",
+                    len(_smoke or ""), (_smoke or "")[:120],
+                )
+            except Exception as _smk:
+                logger.warning(
+                    "Memory LLM smoke test FAILED: %s — fact extraction will "
+                    "fall back to rule-based regex (English-only). Facts (track B) "
+                    "will likely stay at 0 for non-English conversations.", _smk,
+                )
         except Exception as _exc:
             logger.warning("memory llm_fn wiring failed: %s — facts will use rule-based extraction", _exc)
+
+        # Attach the LLM engine to the HITL executor so that interrupts without
+        # a specific tool callback (low_confidence triggers) can produce a real
+        # LLM answer when approved, instead of empty no-op execution.
+        try:
+            executor._llm_engine = llm_engine
+            logger.info("HITL executor: LLM-answer fallback enabled")
+        except Exception as _exc:
+            logger.warning("HITL executor LLM wiring failed: %s", _exc)
 
         # 6b. Real embeddings — always (both modes)
         try:
@@ -235,7 +261,7 @@ async def build_services() -> dict[str, Any]:
         # Store loader on services so llm_engine can build the dynamic tool section
         services["tool_loader"] = _loader
         logger.info("ToolLoader[%s]: %d tools assembled", cfg.mode, len(tool_registry_local))
-        
+
         # 6d. MCP client
         mcp_client = await _build_mcp_client(MCPClient)
         await mcp_client.connect_all()
@@ -316,6 +342,60 @@ async def build_services() -> dict[str, Any]:
             )
         except Exception as _sc_exc:
             logger.warning("SkillCatalog: build failed (%s) — catalog unavailable", _sc_exc)
+
+        # ── SkillEvolver — wires the LLM so /skills/generate produces real content ─
+        # Without this, backend.py auto-creates a fallback evolver with no LLM,
+        # and every "Generate skill from text" call returns the hardcoded
+        # _stub_llm output (the generic Network Diagnostic Procedure markdown).
+        try:
+            from skills.evolver import SkillEvolver
+            import os as _os, pathlib as _pl
+
+            # Async wrapper matching SkillEvolver._call_llm's signature:
+            #   async (system: str, user: str) -> str
+            # SkillEvolver expects raw markdown OR a JSON object string back.
+            async def _async_llm_for_skills(system: str, user: str) -> str:
+                messages = [
+                    {"role": "system", "content": system},
+                    {"role": "user",   "content": user},
+                ]
+                if hasattr(llm_engine, "_chat"):
+                    return await llm_engine._chat(messages)
+                # Fallback: call() takes (user, system, state)
+                return await llm_engine.call(user, system, state=None)
+
+            _skills_dir = _os.getenv("HERMES_DATA_DIR", "./data")
+            _skill_evolver = SkillEvolver(
+                catalog    = services["skill_catalog"],
+                llm_fn     = _async_llm_for_skills,
+                skills_dir = str(_pl.Path(_skills_dir) / "skills"),
+            )
+            services["skill_evolver"] = _skill_evolver
+
+            # Smoke test: prove the LLM actually responds. We don't care about
+            # the content — just that no exception is raised. If this fails,
+            # /skills/generate would silently fall back to stubs.
+            try:
+                _probe = await _async_llm_for_skills(
+                    "You are a helper. Reply with a single short word.",
+                    "Reply with: ok",
+                )
+                logger.info(
+                    "SkillEvolver: LLM smoke test OK — got %d chars: %r",
+                    len(_probe or ""), (_probe or "")[:80],
+                )
+            except Exception as _se_exc:
+                logger.warning(
+                    "SkillEvolver: LLM smoke test FAILED (%s) — /skills/generate "
+                    "will fall back to stub content. Verify llm_engine is reachable.",
+                    _se_exc,
+                )
+        except Exception as _se_outer:
+            logger.warning(
+                "SkillEvolver setup failed (%s) — backend will create a no-LLM "
+                "fallback evolver and /skills/generate will return stub content.",
+                _se_outer,
+            )
 
         logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
 
@@ -433,6 +513,19 @@ async def lifespan(app: FastAPI):
     from webui.backend import create_webui_app
     webui = create_webui_app(_services)
     app.mount("/webui", webui)
+
+    # Attach the runtime loop to the HITL executor so post-HITL fallback
+    # callbacks can run the full agent (with tool registry + memory recall +
+    # skills) on approved queries — not just a single-shot LLM call.
+    try:
+        _executor   = _services.get("executor")
+        _agent_loop = _services.get("runtime_loop")
+        if _executor is not None and _agent_loop is not None:
+            _executor._runtime_loop = _agent_loop
+            logger.info("HITL executor: full-agent post-HITL fallback enabled")
+    except Exception as _exc:
+        logger.warning("HITL executor runtime-loop wiring failed: %s", _exc)
+
     logger.info("All modules mounted")
     watchdog_task  = asyncio.create_task(_services["hitl_watchdog"].run())
 
