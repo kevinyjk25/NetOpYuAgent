@@ -120,6 +120,10 @@ class HitlDecisionRequest(BaseModel):
     operator_id:     str = "webui-operator"
     comment:         Optional[str] = None
     parameter_patch: Optional[dict] = None
+    # For DecisionKind.CHOOSE — id of the operator-picked option
+    selected_choice_id: Optional[str] = None
+    # For DecisionKind.ANSWER — operator's answers to clarification fields
+    clarification_answers: Optional[dict[str, str]] = None
 
 
 # ---------------------------------------------------------------------------
@@ -555,10 +559,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 else:
                     # SIMPLE path: loop.stream() with real LLM + ToolRouter
                     # _hitl_intercepted was initialised at the top of generate()
+                    # Inject the classify-time confidence so stream's
+                    # clarification gate can decide whether to ask first.
+                    _stream_env = dict(env_ctx)
+                    if decision is not None:
+                        _stream_env["_initial_confidence"] = float(getattr(decision, "confidence", 1.0))
                     async for chunk in loop.stream(
                         query=req.query,
                         session_id=session_id,
-                        env_context=env_ctx,
+                        env_context=_stream_env,
                         confirmed_facts=list(req.confirmed_facts or []),
                         working_set=_parse_working_set(list(req.working_set or [])),
                         tool_registry=real_registry,
@@ -571,7 +580,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         if chunk.get("message"):
                             stop_outcome = chunk["message"][:60]
 
-                        # HITL gate: skill-ambiguity or tool-watchlist triggered from SIMPLE path
+                        # HITL gate: skill-ambiguity / clarification / tool-watchlist
                         # Re-route to executor so HITL graph fires and approval card appears
                         if chunk.get("stop_hitl") and executor is not None:
                             yield f"data: {json.dumps(chunk)}\n\n"
@@ -585,6 +594,14 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             # the graph can force the interrupt and replay after approval.
                             _hitl_tool = chunk.get("tool_name", "")
                             _hitl_args = chunk.get("tool_args", {})
+                            # New: pick up multi-mode HITL signals so the
+                            # executor fires USER_CHOICE / CLARIFICATION
+                            # instead of a vanilla destructive-op interrupt.
+                            _hitl_kind = chunk.get("hitl_kind", "")
+                            _hitl_summary = chunk.get("summary", "")
+                            _hitl_choices = chunk.get("choices") or []
+                            _hitl_clar    = chunk.get("clarification_fields") or []
+                            _hitl_editable = chunk.get("editable_param_keys") or []
                             ctx = RequestContext(
                                 task_id=task_id,
                                 context_id=context_id,
@@ -597,6 +614,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                                     "force_hitl_tool": _hitl_tool,   # bypass LLM trigger eval
                                     "force_hitl_args": _hitl_args,   # replay args after approval
                                     "action_type":     f"tool_call:{_hitl_tool}",
+                                    # Multi-mode HITL pass-through
+                                    "hitl_kind":               _hitl_kind,
+                                    "hitl_summary":            _hitl_summary,
+                                    "hitl_choices":            _hitl_choices,
+                                    "hitl_clarification_fields": _hitl_clar,
+                                    "hitl_editable_param_keys": _hitl_editable,
                                 },
                             )
                             exec_task = asyncio.create_task(executor.execute(ctx, eq))
@@ -1430,6 +1453,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             if hasattr(p, "proposed_action") and p.proposed_action and hasattr(p.proposed_action, "model_dump")
                             else getattr(p, "proposed_action", {}) or {}
                         ),
+                        "choices": [
+                            c.model_dump() if hasattr(c, "model_dump") else c
+                            for c in (getattr(p, "choices", []) or [])
+                        ],
+                        "clarification_fields": [
+                            f.model_dump() if hasattr(f, "model_dump") else f
+                            for f in (getattr(p, "clarification_fields", []) or [])
+                        ],
+                        "editable_param_keys": list(getattr(p, "editable_param_keys", []) or []),
                     }
                 result.append(dumped)
         logger.info("/hitl/pending: returning %d pending interrupts", len(result))
@@ -1469,6 +1501,30 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "edit", req, services
+        )
+
+    @app.post("/hitl/{interrupt_id}/choose")
+    async def choose_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        """Operator picked one of the offered choices. The selection id
+        comes in via req.selected_choice_id (set by the frontend)."""
+        req.operator_id = (await _identity()).operator_id
+        return await _submit_hitl_decision(
+            interrupt_id, "choose", req, services
+        )
+
+    @app.post("/hitl/{interrupt_id}/answer")
+    async def answer_hitl(
+        interrupt_id: str,
+        req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        """Operator answered the agent's clarification questions. The
+        answers dict comes in via req.clarification_answers."""
+        req.operator_id = (await _identity()).operator_id
+        return await _submit_hitl_decision(
+            interrupt_id, "answer", req, services
         )
 
     # ==================================================================
@@ -2004,6 +2060,8 @@ async def _submit_hitl_decision(
         operator_id=req.operator_id,
         comment=req.comment,
         parameter_patch=req.parameter_patch,
+        selected_choice_id=req.selected_choice_id,
+        clarification_answers=req.clarification_answers,
     )
     result      = await hitl_router.handle_decision(decision)
     result_dict = result.to_dict()

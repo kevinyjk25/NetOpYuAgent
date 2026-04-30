@@ -139,6 +139,25 @@ class RuntimeConfig:
     # Populated from HITL_TOOL_NAMES env var in main.py
     hitl_tool_names: frozenset = field(default_factory=frozenset)
 
+    # ── Type #2 EDIT-flavoured HITL ────────────────────────────────────
+    # Tools where the operator should be allowed to edit the proposed
+    # parameters before approving (e.g. edit the config_lines list).
+    # Subset of hitl_tool_names — for any tool in BOTH sets, the executor
+    # raises trigger_edit_approval (with editable_param_keys) instead of
+    # the bare approve/reject panel.
+    editable_hitl_tools: dict[str, list[str]] = field(default_factory=lambda: {
+        "edit_device_config":  ["config_lines", "reason"],
+        "rollback_deploy":     ["snapshot_id", "reason"],
+        "restart_service":     ["service_name", "graceful"],
+    })
+
+    # ── Type #3 CLARIFICATION ───────────────────────────────────────────
+    # Auto-clarify when the agent's confidence in its plan is below this
+    # threshold AND the operator hasn't exceeded their per-session budget.
+    # 0 disables auto-clarify entirely.
+    clarification_confidence_floor: float = 0.45
+    clarification_max_per_session:  int   = 2
+
 
 # ---------------------------------------------------------------------------
 # Loop result
@@ -160,6 +179,91 @@ class LoopResult:
 # ---------------------------------------------------------------------------
 # AgentRuntimeLoop
 # ---------------------------------------------------------------------------
+
+
+def _heuristic_missing_fields(query: str) -> list[dict]:
+    """Best-effort extraction of likely missing parameters from a user query.
+
+    Used by the clarification gate when the caller didn't supply explicit
+    `_clarification_fields`. Pattern matches on common IT-ops verbs:
+
+      - "查日志 / show logs / syslog"   → device_id, time_range, severity
+      - "查配置 / get config"            → device_id
+      - "修复 / fix / repair / 修改"      → device_id, what_to_change
+      - "重启 / restart / reboot"        → device_id, scope
+      - generic short query              → device_id alone
+
+    Returns a list of {key, prompt, placeholder?, required?} dicts.
+    Empty list when query is specific enough that we'd just be asking
+    redundant questions.
+    """
+    q = (query or "").lower()
+    fields: list[dict] = []
+
+    has_device_id = bool(__import__("re").search(
+        # Matches ap-01, sw-3, router1, sw-core-01, sw-acc-02, ap-floor3 etc.
+        r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])", q
+    ))
+
+    asks_logs = any(kw in q for kw in (
+        "syslog", "log", "日志", "事件", "show logs",
+    ))
+    asks_config = any(kw in q for kw in (
+        "config", "running-config", "配置",
+    )) and not asks_logs
+    asks_change = any(kw in q for kw in (
+        "修复", "fix", "repair", "修改", "改", "调整",
+        "restart", "reboot", "重启", "重置", "rollback",
+    ))
+
+    if asks_logs:
+        if not has_device_id:
+            fields.append({"key": "device_id",
+                           "prompt": "要查哪台设备的日志？",
+                           "placeholder": "ap-01 / sw-core-01 / router-01",
+                           "required": True})
+        fields.append({"key": "time_range",
+                       "prompt": "时间范围？",
+                       "placeholder": "last 1h / last 24h / 2026-04-29",
+                       "required": False})
+        fields.append({"key": "severity",
+                       "prompt": "日志级别？",
+                       "placeholder": "error / warn / info",
+                       "required": False})
+        return fields
+
+    if asks_change and not has_device_id:
+        fields.append({"key": "device_id",
+                       "prompt": "要操作哪台设备？",
+                       "placeholder": "ap-01 / sw-core-01",
+                       "required": True})
+        fields.append({"key": "what_to_change",
+                       "prompt": "具体要修改什么配置项？",
+                       "placeholder": "RADIUS timeout / NTP server / VLAN ACL",
+                       "required": True})
+        return fields
+
+    if asks_config and not has_device_id:
+        fields.append({"key": "device_id",
+                       "prompt": "要查哪台设备的配置？",
+                       "placeholder": "ap-01 / sw-core-01",
+                       "required": True})
+        return fields
+
+    # Generic ambiguous: ask for a target device only if the query is short
+    # and devicey-sounding. Avoid over-asking for casual queries.
+    # Note: use regex word boundary so "ap" doesn't match "approval".
+    _has_devicey_term = bool(__import__("re").search(
+        r"(?<![a-z])(ap|switch|device|router|sw)(?![a-z])|设备",
+        q,
+    ))
+    if len(q) < 20 and not has_device_id and _has_devicey_term:
+        fields.append({"key": "device_id",
+                       "prompt": "请问您指的是哪台设备？",
+                       "placeholder": "ap-01 / sw-core-01 / router-01",
+                       "required": True})
+
+    return fields
 
 
 def _call_key(tool_name: str, tool_args: dict) -> str:
@@ -291,6 +395,122 @@ class AgentRuntimeLoop:
         self._budget       = ContextBudgetManager(self._cfg.budget, self._store)
         self._policy       = StopPolicy(self._cfg.stop_policy)
         self._skill_catalog = skill_catalog
+        # Per-session clarification counter so the agent can't loop on
+        # "ask user → low confidence → ask again". Capped by config.
+        self._clarification_counts: dict[str, int] = {}
+
+    # ------------------------------------------------------------------
+    # Clarification gate — Type #3 multi-mode HITL
+    # ------------------------------------------------------------------
+
+    # Action verbs that indicate the user wants a write/destructive op.
+    # If one of these appears in the query but no concrete target does,
+    # the agent is about to hallucinate — better to ask.
+    _ACTION_VERBS = frozenset({
+        # English
+        "fix", "repair", "modify", "edit", "change", "update", "set",
+        "restart", "reboot", "rollback", "deploy", "delete", "remove",
+        # Chinese
+        "修复", "修改", "更改", "下发", "推送", "重启", "回滚", "删除",
+        "调整", "优化", "配置",
+    })
+
+    # Read/diagnostic verbs — don't NEED a target (could be "查所有设备")
+    # but DO need a scope to avoid scanning everything.
+    _READ_VERBS = frozenset({
+        "查", "查询", "看", "检查", "诊断", "show", "list", "check",
+        "look", "find", "search", "view", "diagnose",
+    })
+
+    @staticmethod
+    def _query_has_action_verb(q_lower: str) -> bool:
+        return any(v in q_lower for v in AgentRuntimeLoop._ACTION_VERBS)
+
+    @staticmethod
+    def _query_has_read_verb(q_lower: str) -> bool:
+        return any(v in q_lower for v in AgentRuntimeLoop._READ_VERBS)
+
+    @staticmethod
+    def _query_mentions_concrete_target(q: str) -> bool:
+        """Heuristic: does the query name a specific device/service?
+        Looks for tokens like ap-NN, sw-core-NN, router-NN, IPs, hostnames.
+        """
+        import re as _re
+        # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01
+        if _re.search(r"\b[a-z]{2,}[-_]\w{2,}\b", q.lower()):
+            return True
+        # IPv4
+        if _re.search(r"\b\d+\.\d+\.\d+\.\d+\b", q):
+            return True
+        return False
+
+    def _maybe_clarification_fields(
+        self,
+        *,
+        query: str,
+        top_skill_score: float,
+        asked_count: int,
+        recent_context: str = "",
+    ) -> list[dict]:
+        """Return a list of clarification fields if the query is too vague
+        to act on safely; empty list otherwise.
+
+        Heuristics (cheap, no LLM call):
+          0. Prior turn already asked clarification → treat current query
+             as the answer, don't re-ask
+          1. Already asked at-budget → don't ask again, let agent guess
+          2. Top skill score >= floor → confident enough, proceed
+          3. Action verb + no concrete target → ask which device
+          4. Read verb + no scope → ask which device & time range
+          5. Otherwise: proceed (no clarification needed)
+        """
+        # Prior-turn check — if recent recall context contains the agent's
+        # own clarification preamble, this query IS the answer the
+        # operator typed in response. Re-asking would loop forever.
+        if recent_context and (
+            "为了准确处理这个请求，我需要您补充" in recent_context
+            or "Clarification asked via chat turn" in recent_context
+        ):
+            return []
+
+        if asked_count >= self._cfg.clarification_max_per_session:
+            return []
+        if top_skill_score >= self._cfg.clarification_confidence_floor:
+            return []
+
+        q_lower = query.lower().strip()
+        has_target = self._query_mentions_concrete_target(query)
+        has_action = self._query_has_action_verb(q_lower)
+        has_read   = self._query_has_read_verb(q_lower)
+
+        # Case A: action verb + no concrete target → ask for device
+        if has_action and not has_target:
+            return [{
+                "key":         "device_id",
+                "prompt":      "Which device should this action target?",
+                "placeholder": "e.g. ap-01, sw-core-01",
+                "required":    True,
+            }]
+
+        # Case B: read/diagnostic + no concrete target — ask scope
+        if has_read and not has_target and len(q_lower) < 30:
+            return [
+                {
+                    "key":         "device_id",
+                    "prompt":      "Which device(s) do you want to query?",
+                    "placeholder": "e.g. ap-01, or 'all aps'",
+                    "required":    True,
+                },
+                {
+                    "key":         "time_range",
+                    "prompt":      "Time range (only for log/event queries)?",
+                    "placeholder": "e.g. last 1h, last 24h",
+                    "required":    False,
+                },
+            ]
+
+        # No clarification needed
+        return []
 
     # ------------------------------------------------------------------
     # Classify
@@ -759,6 +979,95 @@ class AgentRuntimeLoop:
         called_tools: set[str] = set()       # dedup guard
         _pre_verified = False                # run pre_verify exactly once
 
+        # ── Clarification gate (runs ONCE before the first turn) ─────────
+        # When the caller has supplied a complexity decision and its
+        # confidence is below the clarification threshold, ask the operator
+        # for missing info instead of guessing.
+        #
+        # Two interaction modes — the choice depends on whether the agent
+        # already knows the candidate space:
+        #   (a) No closed candidate list  → ask via plain chat turn.
+        #       The agent prints its question(s) and returns; the operator's
+        #       next turn carries the answer naturally. This is the right
+        #       UX for open-ended "which device?" — the operator might type
+        #       any of dozens of devices, and a side panel with one
+        #       narrow input box doesn't help.
+        #   (b) Closed candidate list (e.g. "4 APs match")  → USER_CHOICE
+        #       card with clickable options, handled by the skill ambiguity
+        #       gate downstream. This gate only handles (a).
+        # Soft-capped by max_clarifications to prevent loops.
+        _clarification_done = bool(env_ctx.get("_clarification_resolved"))
+        _initial_confidence = env_ctx.get("_initial_confidence")
+        try:
+            _initial_confidence = float(_initial_confidence) if _initial_confidence is not None else None
+        except (TypeError, ValueError):
+            _initial_confidence = None
+
+        if (
+            not _clarification_done
+            and not skip_pre_verify
+            and _initial_confidence is not None
+            and _initial_confidence < self._cfg.stop_policy.clarification_threshold
+            and self._cfg.stop_policy.max_clarifications > 0
+        ):
+            # Skip if prior turn already asked clarification — the current
+            # query IS the operator's answer; running the gate again would
+            # double-ask. We detect this by sniffing recent recall context
+            # for the agent's question marker.
+            _prior_recall = env_ctx.get("_fts_context", "") or ""
+            if (
+                "为了准确处理这个请求，我需要您补充" in _prior_recall
+                or "Clarification asked via chat turn" in _prior_recall
+            ):
+                logger.info(
+                    "Clarification gate: prior turn already asked — "
+                    "treating this query as the answer, skipping gate",
+                )
+            else:
+                # Derive what's likely missing — use the LLM-extracted gaps the
+                # caller has supplied via env_context, otherwise heuristic.
+                missing = env_ctx.get("_clarification_fields") or _heuristic_missing_fields(query)
+                if missing:
+                    logger.info(
+                        "Clarification gate: confidence=%.2f < threshold=%.2f — "
+                        "asking operator for %s via chat turn",
+                        _initial_confidence,
+                        self._cfg.stop_policy.clarification_threshold,
+                        [f["key"] for f in missing],
+                    )
+                    # Render a friendly chat-turn message that lists the
+                    # questions. The operator's next message in the same
+                    # session naturally provides the answers; no card UI
+                    # needed. The agent reads recall context next time so
+                    # it sees both the question and the answer.
+                    _q_lines = []
+                    for f in missing:
+                        _ph = f.get("placeholder", "")
+                        _star = "" if f.get("required", True) else "（可选）"
+                        line = f"- **{f['prompt']}**{_star}"
+                        if _ph:
+                            line += f"  _例: {_ph}_"
+                        _q_lines.append(line)
+                    _ask_text = (
+                        "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
+                        + "\n".join(_q_lines)
+                        + "\n\n请直接回复，我会基于您的补充继续。"
+                    )
+                    # Stream as tokens so the chat UI shows it like any
+                    # normal agent reply.
+                    for _i in range(0, len(_ask_text), 80):
+                        yield {"token": _ask_text[_i:_i+80]}
+                    yield {
+                        "node":      "clarification_chat",
+                        "node_step": "Clarification asked via chat turn",
+                        "reason":    "clarification_needed",
+                        "confidence": _initial_confidence,
+                        # Persist a hint for the next-turn coreference resolver
+                        "_clarification_fields_asked": [f["key"] for f in missing],
+                        "message": "Clarification asked — awaiting operator's next message",
+                    }
+                    return
+
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
@@ -825,20 +1134,124 @@ class AgentRuntimeLoop:
                     "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
                     "ambiguous": skill_ambiguous,
                 }
-                # Q4 ambiguity: if top skills are too similar, escalate to HITL
-                # Only when explicitly enabled via HITL_SKILL_AMBIGUITY=true env var
+                # Q4 ambiguity: top skills are too similar — surface them as
+                # a USER_CHOICE so the operator picks the intended one
+                # instead of the loop guessing or grinding to a generic HITL.
+                # Enabled by default; set HITL_SKILL_AMBIGUITY=false to disable.
                 import os as _os
-                if skill_ambiguous and _os.getenv("HITL_SKILL_AMBIGUITY", "false").lower() == "true":
-                    top2 = [sid for sid, _ in selected_skills[:2]]
+                if skill_ambiguous and _os.getenv("HITL_SKILL_AMBIGUITY", "true").lower() != "false":
+                    # Build choice options from the top-N candidate skills.
+                    # Capped at 5 to keep the UI scannable.
+                    _choices = []
+                    for sid, score in selected_skills[:5]:
+                        summary = self._catalog.get_summary(sid) if hasattr(self, "_catalog") and self._catalog else None
+                        if summary is None and self._skill_catalog is not None:
+                            try:
+                                summary = self._skill_catalog.get_summary(sid)
+                            except Exception:
+                                summary = None
+                        _choices.append({
+                            "id":       sid,
+                            "label":    (summary.name if summary else sid),
+                            "description": (
+                                f"{(summary.purpose if summary else '')[:120]}"
+                                + (f" · {summary.risk_level}" if summary and summary.risk_level else "")
+                            ),
+                            "metadata": {
+                                "skill_id": sid,
+                                "score":    round(float(score), 3),
+                                "tags":     (summary.tags[:4] if summary else []),
+                            },
+                        })
                     yield {
                         "message": (
-                            f"stop_hitl: ambiguous skill match — top skills {top2} have "
-                            "nearly identical scores. Routing to HITL for clarification."
+                            f"Multiple skills match this request — top candidates: "
+                            f"{[c['id'] for c in _choices[:3]]}"
                         ),
-                        "node": "hitl_gate",
-                        "stop_hitl": True,
-                        "reason": "skill_ambiguity",
-                        "top_skills": top2,
+                        "node":           "hitl_gate",
+                        "stop_hitl":      True,
+                        "reason":         "skill_ambiguity",
+                        "hitl_kind":      "user_choice",
+                        "summary":        f"找到多个匹配的 skill，请选择要使用的具体 skill：",
+                        "choices":        _choices,
+                        # Keep top_skills for backwards compatibility
+                        "top_skills":     [c["id"] for c in _choices[:2]],
+                    }
+                    return
+
+            # ── Type #3 CLARIFICATION gate ────────────────────────────
+            # When the agent is about to hallucinate a plan from too little
+            # info, ask the operator for missing pieces instead. Triggered by:
+            #   - top skill score < clarification_confidence_floor AND
+            #   - query mentions an action word but no concrete target (e.g.
+            #     "修复" without device_id, "查日志" without time range), AND
+            #   - we haven't already asked the operator clarification_max_per_session
+            #     times in this session (avoid loops).
+            # Skipped on subsequent turns (state.turns > 1) — clarify only at
+            # the start of a new request, never mid-execution.
+            if state.turns == 1 and self._cfg.clarification_max_per_session > 0:
+                # Build recent_context from current turn's recall + caller-supplied
+                # _fts_context. _maybe_clarification_fields uses this to detect
+                # "prior turn already asked" and skip re-asking.
+                _recent_for_clar = env_ctx.get("_fts_context", "") or ""
+                if not _recent_for_clar and memory_results:
+                    try:
+                        _recent_for_clar = "\n".join(str(m) for m in memory_results)[:1500]
+                    except Exception:
+                        pass
+                clar_fields = self._maybe_clarification_fields(
+                    query=query,
+                    top_skill_score=(selected_skills[0][1] if selected_skills else 0.0),
+                    asked_count=self._clarification_counts.get(session_id, 0),
+                    recent_context=_recent_for_clar,
+                )
+                if clar_fields:
+                    self._clarification_counts[session_id] = (
+                        self._clarification_counts.get(session_id, 0) + 1
+                    )
+                    # Open-ended clarification — render as a CHAT TURN, not a
+                    # HITL card. The operator's next message in the same
+                    # session naturally provides the answers. This is the
+                    # right UX for "which device do you mean?" — operators
+                    # have hundreds of devices to potentially reference and
+                    # a one-line input box doesn't help them.
+                    # Closed candidate lists (e.g. "4 APs match") still go
+                    # through the USER_CHOICE card path — see skill ambiguity.
+                    logger.info(
+                        "Clarification gate (turn 1): asking operator for %s via chat turn",
+                        [getattr(f, "key", f.get("key") if isinstance(f, dict) else "?")
+                         for f in clar_fields],
+                    )
+                    _q_lines = []
+                    for f in clar_fields:
+                        if hasattr(f, "key"):  # ClarificationField object
+                            _key = f.key
+                            _prompt = f.prompt
+                            _ph = getattr(f, "placeholder", "") or ""
+                            _required = getattr(f, "required", True)
+                        else:                    # plain dict
+                            _key = f.get("key", "")
+                            _prompt = f.get("prompt", _key)
+                            _ph = f.get("placeholder", "")
+                            _required = f.get("required", True)
+                        _star = "" if _required else "（可选）"
+                        line = f"- **{_prompt}**{_star}"
+                        if _ph:
+                            line += f"  _例: {_ph}_"
+                        _q_lines.append(line)
+                    _ask_text = (
+                        "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
+                        + "\n".join(_q_lines)
+                        + "\n\n请直接回复，我会基于您的补充继续。"
+                    )
+                    # Stream as chat tokens — no card, no stop_hitl.
+                    for _i in range(0, len(_ask_text), 80):
+                        yield {"token": _ask_text[_i:_i+80]}
+                    yield {
+                        "node":      "clarification_chat",
+                        "node_step": "Clarification asked via chat turn",
+                        "reason":    "clarification_needed",
+                        "message":   "Clarification asked — awaiting operator's next message",
                     }
                     return
 
@@ -987,6 +1400,13 @@ class AgentRuntimeLoop:
                         pass
                 if _needs_hitl:
                     import json as _json
+                    # Type #2: if this tool is on the editable list, surface
+                    # the keys the operator should be allowed to tweak before
+                    # approving. The executor will fire trigger_edit_approval
+                    # (showing inline editors) instead of a bare approve panel.
+                    _editable_keys = list(
+                        self._cfg.editable_hitl_tools.get(tool_name, [])
+                    )
                     yield {
                         "message": (
                             f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
@@ -998,6 +1418,10 @@ class AgentRuntimeLoop:
                         "tool_name": tool_name,
                         "tool_args": tool_args,          # carry args for post-approval replay
                         "tool_args_json": _json.dumps(tool_args, default=str),
+                        # Type #2 multi-mode HITL: signal to the executor that
+                        # the operator may edit these specific param keys.
+                        "hitl_kind":            "edit" if _editable_keys else None,
+                        "editable_param_keys":  _editable_keys,
                     }
                     return
 

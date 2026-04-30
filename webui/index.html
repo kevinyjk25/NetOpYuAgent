@@ -2286,6 +2286,25 @@ async function refreshHitl(retries=0) {
       el.innerHTML='<div style="color:var(--dim);font-size:10px;font-family:var(--mono);font-style:italic;padding:6px 0">No pending interrupts — send a destructive query to trigger HITL</div>';
       return;
     }
+
+    // Snapshot any in-flight operator input before we re-render the cards.
+    // The poll runs every few seconds and would otherwise wipe the user's
+    // typing mid-keystroke. We cache values keyed by (interrupt_id, field_key)
+    // and any selected radio choice, then restore after innerHTML rebuild.
+    const _savedInputs = {};       // "iid::key"  → string value
+    const _savedChoices = {};      // iid → selected choice id
+    const _focusedId = {};         // iid → field key that had focus
+    el.querySelectorAll('input[data-iid], textarea[data-iid]').forEach(node => {
+      const iid = node.dataset.iid;
+      const key = node.dataset.clarKey || node.dataset.editKey;
+      if (key) _savedInputs[`${iid}::${key}`] = node.value;
+      if (node === document.activeElement) _focusedId[iid] = key;
+    });
+    el.querySelectorAll('input[type="radio"]:checked').forEach(node => {
+      const m = (node.name || '').match(/^choice-(.+)$/);
+      if (m) _savedChoices[m[1]] = node.value;
+    });
+
     el.innerHTML='';
     for (const p of list) {
       const card=document.createElement('div');
@@ -2295,28 +2314,238 @@ async function refreshHitl(retries=0) {
       const rl=esc((p.risk_level||'high').toUpperCase());
       const iid=esc((p.interrupt_id||'').slice(0,10));
       const sla=p.sla_seconds||600;
-      const summary=esc(p.intent_summary||p.user_query||'Destructive operation requires human approval');
+      const summary=esc(p.intent_summary||p.user_query||'Operator action required');
       const actionHtml=action.action_type
         ?`<div style="font-family:var(--mono);font-size:9px;color:var(--dim);margin:4px 0">
             action: <span style="color:var(--warn)">${esc(action.action_type)}</span>
             on <span style="color:var(--accent)">${esc(action.target||'?')}</span>
             ${action.reversible===false?'<span style="color:var(--danger)"> ⚠ irreversible</span>':''}
           </div>`:''
+
+      // ── Pick body & buttons by trigger_kind ────────────────────────
+      let bodyHtml = '';
+      let actionsHtml = '';
+
+      if (p.trigger_kind === 'user_choice' && (p.choices||[]).length) {
+        // ── Type 1: USER_CHOICE — render a list of selectable options ──
+        bodyHtml = `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+            ${p.choices.map(c => `
+              <label style="display:flex;align-items:flex-start;gap:6px;padding:6px 8px;border:1px solid var(--border);border-radius:4px;cursor:pointer;font-size:11px;background:var(--card);transition:background .1s"
+                onmouseover="this.style.background='var(--bg)'" onmouseout="this.style.background='var(--card)'">
+                <input type="radio" name="choice-${esc(p.interrupt_id)}" value="${esc(c.id)}" style="margin-top:2px"/>
+                <div style="flex:1">
+                  <div style="font-weight:600;color:var(--text)">${esc(c.label||c.id)}</div>
+                  ${c.description?`<div style="color:var(--dim);font-size:10px;margin-top:1px">${esc(c.description)}</div>`:''}
+                  ${c.metadata && Object.keys(c.metadata).length
+                    ? `<div style="font-family:var(--mono);font-size:9px;color:var(--mid);margin-top:2px">${
+                        Object.entries(c.metadata).map(([k,v]) => `${esc(k)}=${esc(String(v))}`).join(' · ')
+                      }</div>`
+                    : ''}
+                </div>
+              </label>
+            `).join('')}
+          </div>`;
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlSubmitChoice('${p.interrupt_id}')">✓ Use selected</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Cancel</button>`;
+
+      } else if (p.trigger_kind === 'clarification' && (p.clarification_fields||[]).length) {
+        // ── Type 3: CLARIFICATION — render input fields ────────────────
+        bodyHtml = `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px">
+            ${p.clarification_fields.map(f => `
+              <div>
+                <label style="display:block;font-size:11px;color:var(--text);margin-bottom:2px">
+                  ${esc(f.prompt)} ${f.required?'<span style="color:var(--danger)">*</span>':''}
+                </label>
+                <input type="text" data-clar-key="${esc(f.key)}" data-iid="${esc(p.interrupt_id)}"
+                  placeholder="${esc(f.placeholder||'')}"
+                  style="width:100%;background:var(--bg);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 6px;font-size:11px;font-family:inherit"
+                />
+              </div>
+            `).join('')}
+          </div>`;
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlSubmitAnswer('${p.interrupt_id}')">↪ Submit answers</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Cancel</button>`;
+
+      } else if ((p.editable_param_keys||[]).length && action.parameters) {
+        // ── Type 2: EDIT — render editable parameter fields ────────────
+        bodyHtml = `
+          <div style="margin-top:8px;display:flex;flex-direction:column;gap:6px;
+                      background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px">
+            <div style="font-size:10px;color:var(--dim)">Editable parameters (you may modify before approving):</div>
+            ${p.editable_param_keys.map(k => {
+              const v = action.parameters[k];
+              const vStr = (typeof v === 'object') ? JSON.stringify(v, null, 2) : String(v ?? '');
+              const isMulti = vStr.includes('\n') || vStr.length > 60;
+              if (isMulti) {
+                return `
+                  <div>
+                    <label style="display:block;font-size:11px;color:var(--text);margin-bottom:2px">${esc(k)}:</label>
+                    <textarea data-edit-key="${esc(k)}" data-iid="${esc(p.interrupt_id)}" rows="3"
+                      style="width:100%;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 6px;font-size:10px;font-family:var(--mono);resize:vertical">${esc(vStr)}</textarea>
+                  </div>`;
+              }
+              return `
+                <div>
+                  <label style="display:block;font-size:11px;color:var(--text);margin-bottom:2px">${esc(k)}:</label>
+                  <input type="text" data-edit-key="${esc(k)}" data-iid="${esc(p.interrupt_id)}" value="${esc(vStr)}"
+                    style="width:100%;background:var(--card);color:var(--text);border:1px solid var(--border);border-radius:3px;padding:4px 6px;font-size:10px;font-family:var(--mono)"/>
+                </div>`;
+            }).join('')}
+          </div>`;
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlSubmitEdit('${p.interrupt_id}')">✓ Approve with edits</button>
+          <button class="btn btn-success btn-sm" onclick="hitlDec('${p.interrupt_id}','approve')" style="opacity:.7">↪ Approve as-is</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Reject</button>`;
+
+      } else {
+        // ── Default: classic approve / reject ──────────────────────────
+        actionsHtml = `
+          <button class="btn btn-success btn-sm" onclick="hitlDec('${p.interrupt_id}','approve')">✓ Approve</button>
+          <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Reject</button>`;
+      }
+
       card.innerHTML=`
         <div class="hitl-title">⚠ ${tk} — ${rl}</div>
         <div class="hitl-meta">${iid}… | SLA: ${sla}s | ${new Date().toLocaleTimeString()}</div>
         <div class="hitl-summary">${summary}</div>
         ${actionHtml}
-        <div class="hitl-actions">
-          <button class="btn btn-success btn-sm" onclick="hitlDec('${p.interrupt_id}','approve')">✓ Approve</button>
-          <button class="btn btn-danger btn-sm"  onclick="hitlDec('${p.interrupt_id}','reject')">✗ Reject</button>
+        ${bodyHtml}
+        <div class="hitl-actions" style="margin-top:8px">
+          ${actionsHtml}
         </div>`;
       el.appendChild(card);
     }
+
+    // Restore any in-flight operator input that was saved before re-render.
+    // Without this, the polling refresh wipes whatever the operator was
+    // typing mid-keystroke. Restoring after appendChild() means the new DOM
+    // nodes get the cached values populated on top of the freshly-built
+    // skeleton.
+    Object.entries(_savedInputs).forEach(([k, v]) => {
+      const [iid, key] = k.split('::');
+      const node = el.querySelector(`[data-iid="${iid}"][data-clar-key="${key}"], [data-iid="${iid}"][data-edit-key="${key}"]`);
+      if (node) node.value = v;
+    });
+    Object.entries(_savedChoices).forEach(([iid, val]) => {
+      const radio = el.querySelector(`input[name="choice-${iid}"][value="${val}"]`);
+      if (radio) radio.checked = true;
+    });
+    // Restore focus + caret position (place caret at end so typing continues
+    // smoothly even if the value was empty).
+    Object.entries(_focusedId).forEach(([iid, key]) => {
+      const node = el.querySelector(`[data-iid="${iid}"][data-clar-key="${key}"], [data-iid="${iid}"][data-edit-key="${key}"]`);
+      if (node && typeof node.focus === 'function') {
+        node.focus();
+        try { node.setSelectionRange(node.value.length, node.value.length); } catch (_) {}
+      }
+    });
   } catch(e){ console.warn('HITL poll error:',e); }
 }
 
+// ── Type 1: submit USER_CHOICE selection ──────────────────────────
+async function hitlSubmitChoice(id) {
+  const radio = document.querySelector(`input[name="choice-${id}"]:checked`);
+  if (!radio) {
+    alert('Please select an option first');
+    return;
+  }
+  await hitlDecExtra(id, 'choose', { selected_choice_id: radio.value });
+}
+
+// ── Type 2: submit EDIT with parameter_patch ──────────────────────
+async function hitlSubmitEdit(id) {
+  const patch = {};
+  document.querySelectorAll(`[data-iid="${id}"][data-edit-key]`).forEach(el => {
+    const key = el.dataset.editKey;
+    let val = el.value;
+    // Try to JSON-parse so list/dict params come through structured
+    if (val.trim().startsWith('[') || val.trim().startsWith('{')) {
+      try { val = JSON.parse(val); } catch(_) { /* keep as string */ }
+    }
+    patch[key] = val;
+  });
+  await hitlDecExtra(id, 'edit', { parameter_patch: patch });
+}
+
+// ── Type 3: submit CLARIFICATION answers ──────────────────────────
+async function hitlSubmitAnswer(id) {
+  const answers = {};
+  let missing = [];
+  document.querySelectorAll(`[data-iid="${id}"][data-clar-key]`).forEach(el => {
+    const key = el.dataset.clarKey;
+    const val = el.value.trim();
+    if (val) answers[key] = val;
+  });
+  await hitlDecExtra(id, 'answer', { clarification_answers: answers });
+}
+
+// Shared helper: POST to /hitl/{id}/{decision} with extra body fields
+async function hitlDecExtra(id, dec, extras) {
+  // Same guard as hitlDec — stop double-submit producing "already resolved".
+  if (_hitlInFlight.has(id)) {
+    console.warn(`hitlDecExtra: decision already in flight for ${id}, ignoring`);
+    return;
+  }
+  _hitlInFlight.add(id);
+  document.querySelectorAll(`button[onclick*="${id}"]`).forEach(btn => {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  });
+  try {
+    const body = Object.assign(
+      { operator_id: 'webui-operator', comment: `${dec} via Console` },
+      extras || {}
+    );
+    const res = await fetch(`${BASE}/hitl/${id}/${dec}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    const data = await res.json().catch(()=>({}));
+    if (data.error) {
+      addMessage('agent', `HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nError: ${data.error}`, 'system');
+    } else {
+      addMessage('agent', `**✓ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n${data.synthesis || data.tool_result || 'Decision recorded'}`, 'agent');
+      addStep('done', `✅ Post-HITL ${dec} complete`, '', `interrupt: ${id.slice(0,12)}`);
+      flowEvent('done', `✅ Post-HITL ${dec} complete`, dec, `interrupt: ${id.slice(0,12)}`);
+      setTimeout(loadSessions, 800);
+      switchTab('cache');
+    }
+    refreshHitl();
+  } catch (e) {
+    console.warn('hitlDecExtra error:', e);
+    alert('Submit failed: ' + (e.message||e));
+  } finally {
+    _hitlInFlight.delete(id);
+  }
+}
+
+// In-flight HITL decisions — prevents double-clicks and stops "Interrupt
+// already resolved" errors when polling re-renders a card whose decision
+// is already being processed. Cleared in hitlDec/hitlDecExtra finally.
+const _hitlInFlight = new Set();
+
 async function hitlDec(id,dec) {
+  // Guard: don't fire a second decision while one is in flight for the
+  // same interrupt. Without this, a slightly-laggy double-click on Approve
+  // produces "Error: Interrupt already resolved" because the second POST
+  // arrives after DecisionRouter has already moved the payload to RESOLVED.
+  if (_hitlInFlight.has(id)) {
+    console.warn(`hitlDec: decision already in flight for ${id}, ignoring`);
+    return;
+  }
+  _hitlInFlight.add(id);
+  // Disable all buttons on this card so visually the operator can't click
+  // again either. We do this by fading the card and adding a "submitting"
+  // overlay.
+  document.querySelectorAll(`button[onclick*="${id}"]`).forEach(btn => {
+    btn.disabled = true;
+    btn.style.opacity = '0.5';
+  });
   try {
     const res=await fetch(`${BASE}/hitl/${id}/${dec}`,{method:'POST',
       headers:{'Content-Type':'application/json'},
@@ -2388,6 +2617,12 @@ Outcome: ${outcome}`,'system');
     // Refresh session list to pick up the new turn written by Hermes
     setTimeout(loadSessions, 1200);
   } catch(e){ addMessage('system','HITL decision error: '+e.message,'error'); }
+  finally {
+    // Always clear the in-flight marker — even on error — so the operator
+    // can retry if the network glitched. The polling refresh will redraw
+    // the card if the interrupt is still pending.
+    _hitlInFlight.delete(id);
+  }
 }
 
 async function refreshStats() {

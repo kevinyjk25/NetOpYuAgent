@@ -31,12 +31,16 @@ class TriggerKind(str, Enum):
     DESTRUCTIVE       = "destructive_action"
     AMBIGUOUS_INTENT  = "ambiguous_intent"
     DESTRUCTIVE_OP    = "destructive_op"
+    USER_CHOICE       = "user_choice"        # multi-option pick (skill, devices, scope)
+    CLARIFICATION     = "clarification"      # agent asks for missing info
 
 
 class DecisionKind(str, Enum):
     APPROVE   = "approve"
     REJECT    = "reject"
     EDIT      = "edit"       # approve with modified params
+    CHOOSE    = "choose"     # operator picked one of payload.choices
+    ANSWER    = "answer"     # operator supplied missing info (free text)
     ESCALATE  = "escalate"
     TIMEOUT   = "timeout"    # set automatically by timeout watchdog
 
@@ -70,6 +74,38 @@ class ProposedAction(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Choice option — for trigger_kind == USER_CHOICE
+# ---------------------------------------------------------------------------
+
+class ChoiceOption(BaseModel):
+    """One selectable option in a multi-choice HITL prompt.
+
+    Used when the agent has narrowed down the request to N candidates
+    (skills, devices, scopes) and needs the operator to pick which to
+    proceed with. The operator's reply binds `selected_choice_id`.
+    """
+    id: str                                # stable identifier — sent back as selected_choice_id
+    label: str                             # short display name (one line)
+    description: Optional[str] = None      # optional second-line detail
+    metadata: dict[str, Any] = Field(default_factory=dict)
+                                           # e.g. {"site": "site-a", "model": "...", "score": 0.42}
+
+
+# ---------------------------------------------------------------------------
+# Clarification field — for trigger_kind == CLARIFICATION
+# ---------------------------------------------------------------------------
+
+class ClarificationField(BaseModel):
+    """One piece of missing information the agent is asking the operator
+    to provide. The operator's reply binds `clarification_answers[key]`.
+    """
+    key: str                               # field name returned in answers dict
+    prompt: str                            # the question shown to the operator
+    placeholder: Optional[str] = None      # hint shown in the input box
+    required: bool = True
+
+
+# ---------------------------------------------------------------------------
 # HITL Payload  (agent → operator)
 # ---------------------------------------------------------------------------
 
@@ -93,6 +129,22 @@ class HitlPayload(BaseModel):
 
     # What the agent proposes to do
     proposed_action: ProposedAction
+
+    # ── Multi-mode HITL extensions ───────────────────────────────────────
+    # When trigger_kind == USER_CHOICE: list of selectable options.
+    # The operator picks one and sends back its `id` as selected_choice_id.
+    choices: list[ChoiceOption] = Field(default_factory=list)
+
+    # When trigger_kind == CLARIFICATION: list of fields the agent is
+    # asking the operator to fill in. The operator returns a dict keyed
+    # by field.key.
+    clarification_fields: list[ClarificationField] = Field(default_factory=list)
+
+    # When trigger_kind allows EDIT: list of parameter keys the operator is
+    # explicitly invited to edit before approving (the UI will surface
+    # them as editable fields). If empty, the UI falls back to a generic
+    # JSON editor over proposed_action.parameters.
+    editable_param_keys: list[str] = Field(default_factory=list)
 
     # Supporting evidence
     context_snapshot: dict[str, Any] = Field(default_factory=dict)
@@ -124,6 +176,14 @@ class HitlDecision(BaseModel):
 
     # For DecisionKind.EDIT — partial override of ProposedAction.parameters
     parameter_patch: Optional[dict[str, Any]] = None
+
+    # For DecisionKind.CHOOSE — the id of the ChoiceOption the operator picked.
+    # Validated against payload.choices on receipt.
+    selected_choice_id: Optional[str] = None
+
+    # For DecisionKind.ANSWER — operator's responses to clarification_fields,
+    # keyed by ClarificationField.key.
+    clarification_answers: Optional[dict[str, str]] = None
 
     # For DecisionKind.ESCALATE
     escalation_target: Optional[str] = None   # e.g. "on-call-sre"
