@@ -88,39 +88,118 @@ async def build_services() -> dict[str, Any]:
     logger.info("Memory module ready (agent_memory backend)")
 
     # ── 2. HITL ──────────────────────────────────────────────────────────────
-    from hitl import (
-        HitlAuditService, HitlDecisionRouter, HitlReviewService,
-        HitlTimeoutWatchdog, ReviewChannelConfig, build_hitl_graph,
-    )
-    from hitl.triggers import HitlConfig
-    import dataclasses as _dc
+    # HITL_BACKEND env var picks which implementation to wire up:
+    #   "langgraph" (default) — original hitl/* + LangGraph StateGraph
+    #   "core"               — new hitl_core/ + integrations/hitl_executor
+    # Both backends export the same external API surface (HitlRouter +
+    # ITOpsHitlAgentExecutor), so the rest of main.py and webui/backend
+    # don't change. Switch via:  HITL_BACKEND=core python main.py
+    import os as _os
+    _hitl_backend = (_os.getenv("HITL_BACKEND") or "langgraph").lower()
+    logger.info("HITL backend selected: %s", _hitl_backend)
 
-    _hitl_tool_names = tuple(cfg.tools.hitl_tool_names)
-    _hitl_fields     = {f.name for f in _dc.fields(HitlConfig)}
-    _hitl_kwargs: dict = {
-        "confidence_threshold": cfg.hitl.confidence_threshold,
-        "max_auto_host_count":  cfg.hitl.max_auto_host_count,
-    }
-    if "tool_call_hitl_tools" in _hitl_fields and _hitl_tool_names:
-        _hitl_kwargs["tool_call_hitl_tools"] = _hitl_tool_names
+    if _hitl_backend == "core":
+        # New path — hitl_core
+        from hitl_core import (
+            HitlPipeline, HitlRouter, InMemoryCheckpointStore,
+            AuditLogger, InMemoryAuditSink, FileAuditSink,
+            build_default_device_coreferencer,
+        )
 
-    hitl_config    = HitlConfig(**_hitl_kwargs)
-    review_config  = ReviewChannelConfig(
-        slack_webhook_url     = cfg.hitl.slack_webhook_url,
-        pagerduty_routing_key = cfg.hitl.pagerduty_routing_key,
-        enable_sse            = True,
-    )
-    hitl_audit     = HitlAuditService.sqlite("data/hitl_audit.db")
-    review_service = HitlReviewService.from_config(review_config)
-    hitl_graph     = build_hitl_graph(hitl_config)
-    hitl_router    = HitlDecisionRouter(graph=hitl_graph, audit=hitl_audit)
-    hitl_watchdog  = HitlTimeoutWatchdog(router=hitl_router, poll_interval=60.0)
-    services.update(dict(
-        hitl_audit=hitl_audit, review_service=review_service,
-        hitl_router=hitl_router, hitl_watchdog=hitl_watchdog,
-        hitl_config=hitl_config,
-    ))
-    logger.info("HITL module ready")
+        # Pick checkpoint backend by env
+        _cp_backend = (_os.getenv("HITL_CHECKPOINT_BACKEND") or "memory").lower()
+        if _cp_backend == "redis":
+            from hitl_core import RedisCheckpointStore
+            hitl_store = RedisCheckpointStore(
+                redis_url=_os.getenv("HITL_REDIS_URL", cfg.memory.redis_url
+                                                       or "redis://localhost:6379/0"),
+            )
+        elif _cp_backend == "sqlite":
+            from hitl_core import SqliteCheckpointStore
+            hitl_store = SqliteCheckpointStore(
+                db_path=_os.getenv("HITL_SQLITE_PATH", "data/hitl_checkpoints.db"),
+            )
+        else:
+            hitl_store = InMemoryCheckpointStore()
+        logger.info("HITL checkpoint backend: %s", _cp_backend)
+
+        # Audit sink: file by default in production, in-memory for dev
+        _audit_path = _os.getenv("HITL_AUDIT_LOG_PATH")
+        if _audit_path:
+            audit_sink = FileAuditSink(_audit_path)
+        else:
+            audit_sink = InMemoryAuditSink(max_records=10_000)
+        audit_logger = AuditLogger(sink=audit_sink)
+
+        # Build router + pipeline (sharing the batch coordinator)
+        hitl_core_router = HitlRouter(
+            store=hitl_store, on_audit=audit_logger.as_hook(),
+        )
+        hitl_core_pipeline = HitlPipeline(
+            store=hitl_store,
+            batch_coordinator=hitl_core_router.batch,  # share batch coord
+            on_audit=audit_logger.as_hook(),
+        )
+        services.update(dict(
+            hitl_core_router   = hitl_core_router,
+            hitl_core_pipeline = hitl_core_pipeline,
+            hitl_core_store    = hitl_store,
+            hitl_core_audit    = audit_logger,
+        ))
+
+        # Stub the old-path objects with None so any leftover references
+        # to services["hitl_router"] / services["hitl_audit"] error
+        # loudly instead of silently doing the wrong thing.
+        services.update(dict(
+            hitl_router    = None,
+            hitl_audit     = None,
+            review_service = None,
+            hitl_watchdog  = None,
+            hitl_config    = None,
+        ))
+        logger.info("HITL module ready (backend=core, %d step(s) wired)",
+                    len(hitl_core_pipeline._steps))
+
+    else:
+        # Legacy path — hitl/* + LangGraph
+        from hitl import (
+            HitlAuditService, HitlDecisionRouter, HitlReviewService,
+            HitlTimeoutWatchdog, ReviewChannelConfig, build_hitl_graph,
+        )
+        from hitl.triggers import HitlConfig
+        import dataclasses as _dc
+
+        _hitl_tool_names = tuple(cfg.tools.hitl_tool_names)
+        _hitl_fields     = {f.name for f in _dc.fields(HitlConfig)}
+        _hitl_kwargs: dict = {
+            "confidence_threshold": cfg.hitl.confidence_threshold,
+            "max_auto_host_count":  cfg.hitl.max_auto_host_count,
+        }
+        if "tool_call_hitl_tools" in _hitl_fields and _hitl_tool_names:
+            _hitl_kwargs["tool_call_hitl_tools"] = _hitl_tool_names
+
+        hitl_config    = HitlConfig(**_hitl_kwargs)
+        review_config  = ReviewChannelConfig(
+            slack_webhook_url     = cfg.hitl.slack_webhook_url,
+            pagerduty_routing_key = cfg.hitl.pagerduty_routing_key,
+            enable_sse            = True,
+        )
+        hitl_audit     = HitlAuditService.sqlite("data/hitl_audit.db")
+        review_service = HitlReviewService.from_config(review_config)
+        hitl_graph     = build_hitl_graph(hitl_config)
+        hitl_router    = HitlDecisionRouter(graph=hitl_graph, audit=hitl_audit)
+        hitl_watchdog  = HitlTimeoutWatchdog(router=hitl_router, poll_interval=60.0)
+        services.update(dict(
+            hitl_audit=hitl_audit, review_service=review_service,
+            hitl_router=hitl_router, hitl_watchdog=hitl_watchdog,
+            hitl_config=hitl_config,
+        ))
+        # Stub the new-path objects so backend.py doesn't break either way
+        services.update(dict(
+            hitl_core_router=None, hitl_core_pipeline=None,
+            hitl_core_store=None,  hitl_core_audit=None,
+        ))
+        logger.info("HITL module ready (backend=langgraph)")
 
     # ── 3. Registry ──────────────────────────────────────────────────────────
     from registry import create_registry, RegistryConfig as RegCfg
@@ -141,27 +220,39 @@ async def build_services() -> dict[str, Any]:
     logger.info("Agent Registry ready — %d peer(s)", len(cfg.registry.agent_urls))
 
     # ── 4. Task module ───────────────────────────────────────────────────────
+    # Task system needs a hitl_router. In core mode we don't have the legacy
+    # router, but task_system uses it only for register/decide which we can
+    # adapter-shim. For now, in core mode we pass None and let the task
+    # system gracefully degrade (HITL escalation in tasks goes through the
+    # core router via the executor instead).
     from task import create_task_system
     task_system = await create_task_system(
-        hitl_router = hitl_router,
-        review_svc  = review_service,
+        hitl_router = (hitl_router if _hitl_backend != "core" else None),
+        review_svc  = (review_service if _hitl_backend != "core" else None),
         registry    = registry,
     )
     services["task_system"] = task_system
     logger.info("Task module ready")
 
     # ── 5. A2A executor ──────────────────────────────────────────────────────
-    from hitl import ITOpsHitlAgentExecutor
-    executor = ITOpsHitlAgentExecutor(
-        hitl_router    = hitl_router,
-        review_service = review_service,
-        audit_service  = hitl_audit,
-        hitl_config    = hitl_config,
-        memory_router  = memory_router,
-        task_system    = task_system,
-    )
-    services["executor"] = executor
-    logger.info("A2A executor ready")
+    if _hitl_backend == "core":
+        # New executor — built later, after llm_engine + tool_registry are
+        # available (section 6). Stub the slot for now so any reference
+        # to services["executor"] before then errors clearly.
+        services["executor"] = None
+        logger.info("A2A executor (core) — deferred to after LLM + tool wiring")
+    else:
+        from hitl import ITOpsHitlAgentExecutor
+        executor = ITOpsHitlAgentExecutor(
+            hitl_router    = hitl_router,
+            review_service = review_service,
+            audit_service  = hitl_audit,
+            hitl_config    = hitl_config,
+            memory_router  = memory_router,
+            task_system    = task_system,
+        )
+        services["executor"] = executor
+        logger.info("A2A executor ready (langgraph)")
 
     # ── 6. Integrations ──────────────────────────────────────────────────────
     try:
@@ -233,11 +324,16 @@ async def build_services() -> dict[str, Any]:
         # Attach the LLM engine to the HITL executor so that interrupts without
         # a specific tool callback (low_confidence triggers) can produce a real
         # LLM answer when approved, instead of empty no-op execution.
-        try:
-            executor._llm_engine = llm_engine
-            logger.info("HITL executor: LLM-answer fallback enabled")
-        except Exception as _exc:
-            logger.warning("HITL executor LLM wiring failed: %s", _exc)
+        # In core mode, the executor doesn't exist yet (built in section 6
+        # after LLM + tool wiring) — that path constructs it WITH llm_engine
+        # already, so there's nothing to attach here.
+        _early_executor = services.get("executor")
+        if _early_executor is not None:
+            try:
+                _early_executor._llm_engine = llm_engine
+                logger.info("HITL executor: LLM-answer fallback enabled")
+            except Exception as _exc:
+                logger.warning("HITL executor LLM wiring failed: %s", _exc)
 
         # 6b. Real embeddings — always (both modes)
         try:
@@ -290,9 +386,34 @@ async def build_services() -> dict[str, Any]:
                     counts.get("mcp", 0), counts.get("openapi", 0), counts.get("local", 0))
 
         real_registry = router.registry
-        executor._tool_registry = real_registry
-        patch_hitl_graph(llm_engine, tool_registry=real_registry)
-        patch_runtime_loop(executor, llm_engine)
+        if _hitl_backend == "core":
+            # Build the core executor now that we have llm_engine + tool_registry.
+            # This replaces the legacy hitl/a2a_integration ITOpsHitlAgentExecutor
+            # but presents the same external interface (.execute / .cancel)
+            # so webui/backend doesn't change.
+            from integrations.hitl_executor import HitlExecutor
+            executor = HitlExecutor(
+                runtime_loop=None,             # injected later from services["runtime_loop"]
+                llm_engine=llm_engine,
+                tool_registry=real_registry,
+                memory_router=memory_router,
+                hitl_router=services["hitl_core_router"],
+                hitl_pipeline=services["hitl_core_pipeline"],
+                audit_logger=services["hitl_core_audit"],
+            )
+            services["executor"] = executor
+            logger.info("A2A executor (core) constructed with %d tool(s)",
+                        len(real_registry))
+            # Don't patch the langgraph hitl_graph — it doesn't exist in core mode.
+            # Don't patch_runtime_loop(executor, ...) either — that's a legacy
+            # path for executors that have their own internal AgentRuntimeLoop;
+            # the core executor uses the external (already-patched) services
+            # ["runtime_loop"] instance instead, which gets patched separately
+            # in webui/backend.py at startup.
+        else:
+            executor._tool_registry = real_registry
+            patch_hitl_graph(llm_engine, tool_registry=real_registry)
+            patch_runtime_loop(executor, llm_engine)
 
         # ── Wire prompt-based PolicyEngine ────────────────────────────────────
         # Loads policies from config.yaml and registers the global singleton.
@@ -497,14 +618,21 @@ async def lifespan(app: FastAPI):
     )
     app.mount("/api/v1/a2a", a2a_app)
 
-    from hitl.router import create_hitl_router
-    from hitl.review import get_sse_channel
-    hitl_api = create_hitl_router(
-        decision_router = _services["hitl_router"],
-        audit           = _services["hitl_audit"],
-        sse_channel     = get_sse_channel(),
-    )
-    app.include_router(hitl_api, prefix="/hitl")
+    # Mount the legacy /hitl/* router only when running on the langgraph
+    # backend. In core mode, /hitl/* endpoints are served by webui/backend
+    # (which speaks to hitl_core.HitlRouter directly via services).
+    if _services.get("hitl_router") is not None:
+        from hitl.router import create_hitl_router
+        from hitl.review import get_sse_channel
+        hitl_api = create_hitl_router(
+            decision_router = _services["hitl_router"],
+            audit           = _services["hitl_audit"],
+            sse_channel     = get_sse_channel(),
+        )
+        app.include_router(hitl_api, prefix="/hitl")
+        logger.info("Legacy /hitl/* router mounted (langgraph backend)")
+    else:
+        logger.info("Legacy /hitl/* router skipped (core backend; webui/backend handles HITL endpoints)")
 
     from registry.router import create_registry_router
     reg_api = create_registry_router(_services["registry"])
@@ -527,16 +655,19 @@ async def lifespan(app: FastAPI):
         logger.warning("HITL executor runtime-loop wiring failed: %s", _exc)
 
     logger.info("All modules mounted")
-    watchdog_task  = asyncio.create_task(_services["hitl_watchdog"].run())
+    watchdog_task = None
+    if _services.get("hitl_watchdog") is not None:
+        watchdog_task = asyncio.create_task(_services["hitl_watchdog"].run())
 
     yield
 
-    _services["hitl_watchdog"].stop()
+    if _services.get("hitl_watchdog") is not None:
+        _services["hitl_watchdog"].stop()
     await _services["registry"].stop()
-    for t in (watchdog_task,):
-        t.cancel()
+    if watchdog_task is not None:
+        watchdog_task.cancel()
         try:
-            await t
+            await watchdog_task
         except asyncio.CancelledError:
             pass
     logger.info("IT Ops Agent shut down cleanly")

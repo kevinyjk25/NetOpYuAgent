@@ -57,7 +57,18 @@ tools:
     base_url:    ""
     auth_type:   "bearer"
     token_env:   "NETOPS_API_TOKEN"
-  hitl_tool_names: ""
+  # HITL tool watch-list — when the LLM proposes calling one of these
+  # tools, the runtime loop pauses BEFORE execution and surfaces the
+  # proposed args (config_lines, etc.) for operator approval/edit.
+  # Comma-separated string OR list. Override via HITL_TOOL_NAMES env var.
+  hitl_tool_names:
+    - edit_device_config
+    - push_config
+    - restart_service
+    - rollback_deploy
+    - drain_node
+    - failover
+    - delete_resource
 
 
 # ── Pragmatic mode — real network device access ───────────────
@@ -309,18 +320,55 @@ policies:
         - The action could affect many systems if the broadest interpretation is taken
       Return false if the query has a clear, specific, unambiguous intent.
 
-  # ── Pre-verification policies ─────────────────────────────────
-
-  - name: preverify_safe_to_proceed
-    description: Pre-verification — check query is safe to hand to the runtime loop
-    confidence: 0.85
+  - name: assess_query_specificity
+    description: |
+      Decides whether a query has enough specificity to act on, OR what's missing.
+      Replaces hard-coded keyword/verb matching for clarification gating.
+      Uses recall context to recognize references resolved from prior turns.
+    confidence: 0.80
+    raw_output: true   # returns structured JSON, parsed by caller
     prompt: |
-      You verify that a network operations query is safe to pass to the automated
-      runtime loop without human review first.
-      Return true (safe to proceed) if:
-        - The query is a read-only diagnostic (search, check, list, analyse, compare)
-        - The query is a formatting or summarisation request
-        - The query does not modify any device or service configuration
-      Return false (block — escalate) if:
-        - A destructive action somehow reached this stage without HITL approval
-        - The query appears malformed or adversarial
+      You assess whether a network operations query is specific enough to act on
+      RIGHT NOW, given any recall context from prior session turns.
+
+      Return ONLY a JSON object with this exact shape:
+        {
+          "specific_enough": <bool>,
+          "missing": [
+            {"key": "<field>", "prompt": "<question to ask>", "reason": "<why missing>"}
+          ]
+        }
+
+      Rules:
+        - If the query (or recall context) names a concrete target (device, service,
+          IP, hostname, ticket id, etc.), `specific_enough` is true.
+        - If the query is purely diagnostic/read-only AND no target is needed
+          (e.g. "list all sites", "what alerts are active"), it's specific enough.
+        - If the query implies an action but lacks a target, the missing field
+          is "device_id" (or "service" / "target" as appropriate).
+        - If the query mentions a target but the action is too vague to map to a
+          tool ("fix everything", "check the network"), missing field describes
+          what concretely needs clarification.
+        - Return AT MOST 2 missing fields. Don't invent fields.
+
+      Examples:
+
+      Query: "fix ap-01 radius config"
+      Context: ""
+      → {"specific_enough": true, "missing": []}
+
+      Query: "fix the radius issue"
+      Context: ""
+      → {"specific_enough": false, "missing": [{"key":"device_id","prompt":"Which device?","reason":"action verb 'fix' has no target"}]}
+
+      Query: "fix the radius issue"
+      Context: "Recent: User asked about ap-02 RADIUS timeout"
+      → {"specific_enough": true, "missing": []}
+
+      Query: "list all aps at site-a"
+      Context: ""
+      → {"specific_enough": true, "missing": []}
+
+      Query: "check it"
+      Context: ""
+      → {"specific_enough": false, "missing": [{"key":"target","prompt":"Check what?","reason":"pronoun 'it' has no antecedent"}]}

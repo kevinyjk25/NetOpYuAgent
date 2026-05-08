@@ -33,6 +33,14 @@ class PolicyDefinition:
     prompt:      str
     confidence:  float = 0.85
     examples:    list  = field(default_factory=list)
+    # When True, the policy's own prompt already specifies the LLM output
+    # schema (e.g. structured JSON beyond {match, reason}). The engine will
+    # NOT inject the default `{"match": ..., "reason": ...}` template, and
+    # will store the raw LLM response in `result.reason` for the caller
+    # to parse. `result.match` defaults to True (informational policies
+    # don't gate flow on a single bool — the caller decides based on the
+    # parsed JSON content).
+    raw_output:  bool = False
 
 
 @dataclass
@@ -202,13 +210,30 @@ class PolicyEngine:
                 "in the session count as known):\n"
                 f"-----\n{context[:1500]}\n-----"
             )
-        parts.append(
-            '\n\nEvaluate the user query below.'
-            '\nReturn ONLY valid JSON, nothing else:'
-            '\n{"match": true or false, "reason": "one sentence"}'
-        )
+        if policy.raw_output:
+            # Policy defines its own JSON schema — caller will parse the
+            # raw output. Just hand the LLM the user query.
+            parts.append("\n\nEvaluate the user query below. Return ONLY the JSON specified above.")
+        else:
+            parts.append(
+                '\n\nEvaluate the user query below.'
+                '\nReturn ONLY valid JSON, nothing else:'
+                '\n{"match": true or false, "reason": "one sentence"}'
+            )
         system = "\n".join(parts)
         raw    = await self._llm_call(system, query)
+        if policy.raw_output:
+            # Stash raw LLM response as reason; match=True by default since
+            # raw_output policies are informational, not gating booleans.
+            cleaned = raw.strip()
+            cleaned = re.sub(r"^```json?\s*", "", cleaned)
+            cleaned = re.sub(r"\s*```$",      "", cleaned)
+            return PolicyResult(
+                match      = True,
+                reason     = cleaned[:2000],
+                confidence = policy.confidence,
+                policy     = policy.name,
+            )
         return self._parse_result(raw, policy)
 
     @staticmethod
@@ -255,13 +280,6 @@ class PolicyEngine:
                 reason="keyword: incident" if match else "keyword: no incident",
                 confidence=0.70, policy=policy_name, from_fallback=True,
             )
-        if policy_name == "preverify_safe_to_proceed":
-            match = not any(_wm(kw) for kw in self._FALLBACK_DESTRUCTIVE)
-            return PolicyResult(
-                match=match,
-                reason="keyword: safe to proceed" if match else "keyword: destructive blocked",
-                confidence=0.75, policy=policy_name, from_fallback=True,
-            )
         return PolicyResult(
             match=False, reason="unknown policy — safe default",
             confidence=0.5, policy=policy_name, from_fallback=True,
@@ -280,6 +298,7 @@ def load_policies_from_config(cfg_policies: list[dict]) -> list[PolicyDefinition
                 prompt      = p["prompt"],
                 confidence  = float(p.get("confidence", 0.85)),
                 examples    = p.get("examples", []),
+                raw_output  = bool(p.get("raw_output", False)),
             ))
         except (KeyError, TypeError) as e:
             logger.warning("PolicyEngine: skipping malformed policy: %s", e)

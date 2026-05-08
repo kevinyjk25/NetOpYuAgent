@@ -88,6 +88,11 @@ class ComplexityDecision:
     model_tier: str   = "full_model"   # P2: fast_model | full_model
 
 
+# Keyword frozensets used ONLY as fallback when PolicyEngine is unavailable
+# (e.g. LLM service down). The primary path is config.yaml policies +
+# PolicyEngine.evaluate(). Do not add new behavior that depends on these —
+# they exist purely to keep the classifier functional under degraded
+# conditions. New gating logic should be expressed as a policy.
 _DESTRUCTIVE_KEYWORDS = frozenset({
     # English
     "restart", "rollback", "delete", "drain", "failover", "flush",
@@ -181,89 +186,20 @@ class LoopResult:
 # ---------------------------------------------------------------------------
 
 
-def _heuristic_missing_fields(query: str) -> list[dict]:
-    """Best-effort extraction of likely missing parameters from a user query.
-
-    Used by the clarification gate when the caller didn't supply explicit
-    `_clarification_fields`. Pattern matches on common IT-ops verbs:
-
-      - "查日志 / show logs / syslog"   → device_id, time_range, severity
-      - "查配置 / get config"            → device_id
-      - "修复 / fix / repair / 修改"      → device_id, what_to_change
-      - "重启 / restart / reboot"        → device_id, scope
-      - generic short query              → device_id alone
-
-    Returns a list of {key, prompt, placeholder?, required?} dicts.
-    Empty list when query is specific enough that we'd just be asking
-    redundant questions.
-    """
-    q = (query or "").lower()
-    fields: list[dict] = []
-
-    has_device_id = bool(__import__("re").search(
-        # Matches ap-01, sw-3, router1, sw-core-01, sw-acc-02, ap-floor3 etc.
-        r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])", q
-    ))
-
-    asks_logs = any(kw in q for kw in (
-        "syslog", "log", "日志", "事件", "show logs",
-    ))
-    asks_config = any(kw in q for kw in (
-        "config", "running-config", "配置",
-    )) and not asks_logs
-    asks_change = any(kw in q for kw in (
-        "修复", "fix", "repair", "修改", "改", "调整",
-        "restart", "reboot", "重启", "重置", "rollback",
-    ))
-
-    if asks_logs:
-        if not has_device_id:
-            fields.append({"key": "device_id",
-                           "prompt": "要查哪台设备的日志？",
-                           "placeholder": "ap-01 / sw-core-01 / router-01",
-                           "required": True})
-        fields.append({"key": "time_range",
-                       "prompt": "时间范围？",
-                       "placeholder": "last 1h / last 24h / 2026-04-29",
-                       "required": False})
-        fields.append({"key": "severity",
-                       "prompt": "日志级别？",
-                       "placeholder": "error / warn / info",
-                       "required": False})
-        return fields
-
-    if asks_change and not has_device_id:
-        fields.append({"key": "device_id",
-                       "prompt": "要操作哪台设备？",
-                       "placeholder": "ap-01 / sw-core-01",
-                       "required": True})
-        fields.append({"key": "what_to_change",
-                       "prompt": "具体要修改什么配置项？",
-                       "placeholder": "RADIUS timeout / NTP server / VLAN ACL",
-                       "required": True})
-        return fields
-
-    if asks_config and not has_device_id:
-        fields.append({"key": "device_id",
-                       "prompt": "要查哪台设备的配置？",
-                       "placeholder": "ap-01 / sw-core-01",
-                       "required": True})
-        return fields
-
-    # Generic ambiguous: ask for a target device only if the query is short
-    # and devicey-sounding. Avoid over-asking for casual queries.
-    # Note: use regex word boundary so "ap" doesn't match "approval".
-    _has_devicey_term = bool(__import__("re").search(
-        r"(?<![a-z])(ap|switch|device|router|sw)(?![a-z])|设备",
-        q,
-    ))
-    if len(q) < 20 and not has_device_id and _has_devicey_term:
-        fields.append({"key": "device_id",
-                       "prompt": "请问您指的是哪台设备？",
-                       "placeholder": "ap-01 / sw-core-01 / router-01",
-                       "required": True})
-
-    return fields
+# NOTE: A keyword-based `_heuristic_missing_fields` used to live here. It
+# scanned the query for ASCII/Chinese verbs (修复, fix, restart, ...) and
+# returned a hard-coded list of clarification fields. That approach was
+# deleted because:
+#   - case-sensitivity / language-bound (missed 修一下, please-change, etc.)
+#   - couldn't use recall context to resolve references like "fix it"
+#   - couldn't be tuned without code changes
+# Replaced by PolicyEngine[assess_query_specificity] which lets the LLM
+# decide based on full query + recall context. The policy is defined in
+# config.yaml under `policies` and can be edited without touching code.
+# Callers that previously imported `_heuristic_missing_fields` should now
+# either: (a) call PolicyEngine.evaluate("assess_query_specificity", ...)
+# directly, or (b) rely on the runtime loop's `_maybe_clarification_fields`
+# which wraps that policy.
 
 
 def _call_key(tool_name: str, tool_args: dict) -> str:
@@ -404,47 +340,47 @@ class AgentRuntimeLoop:
     # ------------------------------------------------------------------
 
     # Action verbs that indicate the user wants a write/destructive op.
-    # If one of these appears in the query but no concrete target does,
-    # the agent is about to hallucinate — better to ask.
-    _ACTION_VERBS = frozenset({
-        # English
-        "fix", "repair", "modify", "edit", "change", "update", "set",
-        "restart", "reboot", "rollback", "deploy", "delete", "remove",
-        # Chinese
-        "修复", "修改", "更改", "下发", "推送", "重启", "回滚", "删除",
-        "调整", "优化", "配置",
-    })
+    # Note: action-verb / read-verb classification used to live here as
+    # hard-coded keyword frozensets, used to decide whether a query was a
+    # destructive intent. This was brittle (case-sensitive, language-bound,
+    # missed paraphrases). It's now handled by PolicyEngine[assess_query_specificity]
+    # which the LLM evaluates against the full query + recall context.
 
-    # Read/diagnostic verbs — don't NEED a target (could be "查所有设备")
-    # but DO need a scope to avoid scanning everything.
-    _READ_VERBS = frozenset({
-        "查", "查询", "看", "检查", "诊断", "show", "list", "check",
-        "look", "find", "search", "view", "diagnose",
-    })
-
-    @staticmethod
-    def _query_has_action_verb(q_lower: str) -> bool:
-        return any(v in q_lower for v in AgentRuntimeLoop._ACTION_VERBS)
-
-    @staticmethod
-    def _query_has_read_verb(q_lower: str) -> bool:
-        return any(v in q_lower for v in AgentRuntimeLoop._READ_VERBS)
 
     @staticmethod
     def _query_mentions_concrete_target(q: str) -> bool:
         """Heuristic: does the query name a specific device/service?
         Looks for tokens like ap-NN, sw-core-NN, router-NN, IPs, hostnames.
+
+        IMPORTANT: do NOT use \\b here — Python regex \\b only treats
+        ASCII letter↔non-letter as a word boundary, so "ap-01" tucked
+        between Chinese characters (e.g. "修复ap-01设备") fails the
+        \\b match. Use ASCII-explicit lookbehind/lookahead instead so
+        Chinese-glued device IDs are correctly recognised.
         """
         import re as _re
-        # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01
-        if _re.search(r"\b[a-z]{2,}[-_]\w{2,}\b", q.lower()):
+        q_lower = q.lower()
+        # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01.
+        # The (?<![a-z0-9]) / (?![a-z0-9]) anchors mean "not preceded /
+        # followed by another ASCII alphanumeric" — Chinese characters
+        # satisfy this constraint, so embedded device IDs are matched.
+        if _re.search(
+            r"(?<![a-z0-9])[a-z]{2,}[-_]\w{2,}(?![a-z0-9])", q_lower
+        ):
             return True
-        # IPv4
-        if _re.search(r"\b\d+\.\d+\.\d+\.\d+\b", q):
+        # Also accept the structured device pattern used elsewhere in
+        # this file (ap/sw/router/switch + digits) to stay consistent.
+        if _re.search(
+            r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])",
+            q_lower,
+        ):
+            return True
+        # IPv4 (no character-class boundary issue for digits + dots)
+        if _re.search(r"(?<!\d)\d+\.\d+\.\d+\.\d+(?!\d)", q):
             return True
         return False
 
-    def _maybe_clarification_fields(
+    async def _maybe_clarification_fields(
         self,
         *,
         query: str,
@@ -455,62 +391,84 @@ class AgentRuntimeLoop:
         """Return a list of clarification fields if the query is too vague
         to act on safely; empty list otherwise.
 
-        Heuristics (cheap, no LLM call):
-          0. Prior turn already asked clarification → treat current query
-             as the answer, don't re-ask
-          1. Already asked at-budget → don't ask again, let agent guess
+        Uses PolicyEngine[assess_query_specificity] to ask an LLM:
+        "given this query + recall context, is it specific enough?"
+        The LLM returns structured JSON listing missing fields.
+
+        Cheap pre-checks (no LLM call) handle obvious cases:
+          0. Prior turn already asked clarification → don't re-ask
+          1. Already asked at-budget → don't re-ask, let agent guess
           2. Top skill score >= floor → confident enough, proceed
-          3. Action verb + no concrete target → ask which device
-          4. Read verb + no scope → ask which device & time range
-          5. Otherwise: proceed (no clarification needed)
+          3. Query already names a concrete entity (device/IP) → proceed
+        Only when those don't short-circuit do we spend an LLM call.
         """
-        # Prior-turn check — if recent recall context contains the agent's
-        # own clarification preamble, this query IS the answer the
-        # operator typed in response. Re-asking would loop forever.
+        # Pre-check 0: prior-turn — if recent recall context contains the agent's
+        # own clarification preamble, this query IS the answer the operator
+        # typed in response. Re-asking would loop forever.
         if recent_context and (
             "为了准确处理这个请求，我需要您补充" in recent_context
             or "Clarification asked via chat turn" in recent_context
         ):
             return []
 
+        # Pre-check 1: at-budget
         if asked_count >= self._cfg.clarification_max_per_session:
             return []
+
+        # Pre-check 2: skill confidence high enough
         if top_skill_score >= self._cfg.clarification_confidence_floor:
             return []
 
-        q_lower = query.lower().strip()
-        has_target = self._query_mentions_concrete_target(query)
-        has_action = self._query_has_action_verb(q_lower)
-        has_read   = self._query_has_read_verb(q_lower)
+        # Pre-check 3: query already names a concrete entity. This is a
+        # cheap regex (entity recognition, not intent inference) and lets
+        # us skip the LLM call for the common case "fix ap-01 radius".
+        if self._query_mentions_concrete_target(query):
+            return []
 
-        # Case A: action verb + no concrete target → ask for device
-        if has_action and not has_target:
-            return [{
-                "key":         "device_id",
-                "prompt":      "Which device should this action target?",
-                "placeholder": "e.g. ap-01, sw-core-01",
-                "required":    True,
-            }]
+        # Pre-checks didn't short-circuit — ask PolicyEngine.
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is None:
+            # No PolicyEngine wired — be conservative, don't gate.
+            return []
+        try:
+            result = await _engine.evaluate(
+                "assess_query_specificity", query, context=recent_context,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Clarification assessment LLM failed: %s — proceeding without gate", exc,
+            )
+            return []
 
-        # Case B: read/diagnostic + no concrete target — ask scope
-        if has_read and not has_target and len(q_lower) < 30:
-            return [
-                {
-                    "key":         "device_id",
-                    "prompt":      "Which device(s) do you want to query?",
-                    "placeholder": "e.g. ap-01, or 'all aps'",
-                    "required":    True,
-                },
-                {
-                    "key":         "time_range",
-                    "prompt":      "Time range (only for log/event queries)?",
-                    "placeholder": "e.g. last 1h, last 24h",
-                    "required":    False,
-                },
-            ]
+        # The policy is raw_output: result.reason holds the LLM's JSON.
+        try:
+            import json as _json
+            data = _json.loads(result.reason)
+        except Exception:
+            logger.debug(
+                "Clarification policy returned non-JSON: %s — proceeding", result.reason[:120],
+            )
+            return []
 
-        # No clarification needed
-        return []
+        if data.get("specific_enough", True):
+            return []
+
+        # Translate LLM-emitted missing list into the dict shape the
+        # downstream chat-turn renderer expects.
+        out: list[dict] = []
+        for f in (data.get("missing") or [])[:2]:
+            key = (f.get("key") or "").strip()
+            if not key:
+                continue
+            out.append({
+                "key":         key,
+                "prompt":      f.get("prompt") or f"Please specify {key}.",
+                "placeholder": f.get("placeholder", "") or "",
+                "required":    bool(f.get("required", True)),
+                "reason":      f.get("reason", "") or "",
+            })
+        return out
 
     # ------------------------------------------------------------------
     # Classify
@@ -627,19 +585,20 @@ class AgentRuntimeLoop:
         env_context: dict[str, Any],
     ) -> VerificationResult:
         """
-        Pre-action verification using PolicyEngine when available.
-        Falls back to keyword check if engine is not wired.
+        DEPRECATED — kept only for backwards compatibility with code that
+        may still call this method directly.
 
-        We pass any recalled session context (env_context["_fts_context"]) and
-        confirmed_facts to the policy so that follow-up queries with pronouns
-        ("this device", "it", "the AP") can be resolved against prior turns.
-        Without this, multi-turn queries get BLOCKed for "missing device ID".
+        The active loop no longer pre-verifies queries against PolicyEngine
+        before letting the LLM run. Destructive-action gating now happens
+        at a single, authoritative point: the LLM produces a tool_call,
+        and `_cfg.hitl_tool_names` watch-list intercepts before execution.
+
+        This function will be removed once external callers migrate.
         """
         from runtime.policy_engine import get_policy_engine as _get_pe
         _engine = _get_pe()
         if _engine is not None:
             try:
-                # Build a context block the policy LLM can read alongside the query.
                 _ctx_parts: list[str] = []
                 _fts = (env_context or {}).get("_fts_context")
                 if _fts:
@@ -763,14 +722,9 @@ class AgentRuntimeLoop:
         state.confirmed_facts = list(confirmed_facts or [])
         setattr(state, "working_set", list(working_set or []))
 
-        # Pre-verification deferred until AFTER first memory recall (see below)
-        # so PolicyEngine can see prior session context. See identical fix in
-        # stream() for the rationale.
-
         chunks: list[str] = []
         last_tool_result  = ""
         tool_outputs: dict[str, str] = {}   # persists across turns — tool results feed next LLM call
-        _pre_verified = False                # run pre_verify exactly once, after first recall
         # Seed called_tools from any prior tool calls visible in memory context.
         # This prevents the LLM from re-calling the same tool+args when memory
         # already has the result from a previous stream() invocation.
@@ -802,26 +756,6 @@ class AgentRuntimeLoop:
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
-
-            # P1: pre-verification (deferred until first recall; runs once)
-            if not _pre_verified and self._cfg.enable_pre_verification:
-                _pre_env = dict(env_ctx)
-                if "_fts_context" not in _pre_env and memory_results:
-                    try:
-                        _pre_env["_fts_context"] = "\n".join(
-                            str(m) for m in memory_results
-                        )[:1500]
-                    except Exception:
-                        pass
-                pre = await self.pre_verify(query, state.confirmed_facts, _pre_env)
-                _pre_verified = True
-                if not pre.passed:
-                    return LoopResult(
-                        outcome=StopOutcome.STOP_HITL,
-                        final_response=f"Pre-verification failed: {pre.reason}",
-                        confirmed_facts=state.confirmed_facts,
-                        verification=pre,
-                    )
 
             # NOTE: We intentionally do NOT seed called_tools from memory context.
             # Memory may mention a prior tool call on device X, but we still need
@@ -947,14 +881,19 @@ class AgentRuntimeLoop:
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
-        skip_pre_verify: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
-        """
-        skip_pre_verify: when True, bypass the PolicyEngine pre-verification
-        gate. Post-HITL callers MUST set this to True — operator approval is
-        the final authority on whether a destructive action proceeds, and
-        running PolicyEngine afterwards causes it to second-guess and BLOCK
-        already-approved actions on keywords like "修复" / "restart" / "rollback".
+        """Run one full turn of the agent loop and stream chunks.
+
+        Destructive-action gating happens at a SINGLE point: the LLM
+        produces a tool_call, and `_cfg.hitl_tool_names` watch-list
+        intercepts before execution, emitting a stop_hitl chunk with
+        the LLM-proposed tool_args. The host (HitlExecutor) raises a
+        HITL interrupt for operator review.
+
+        There is no pre_verify policy run on the raw query. The LLM is
+        the authoritative source of "this is destructive" — it sees full
+        context (recall, tool outputs, confirmed_facts) and produces
+        concrete tool_args operators can review.
         """
         env_ctx  = env_context or {}
         tool_reg = tool_registry or {}
@@ -969,15 +908,8 @@ class AgentRuntimeLoop:
         state.confirmed_facts = list(confirmed_facts or [])
         setattr(state, "working_set", list(working_set or []))
 
-        # Pre-verification deferred until AFTER memory recall (see below) so
-        # that PolicyEngine can resolve references like "this device" against
-        # prior turns. Without this, post-HITL callbacks (and any caller that
-        # doesn't pre-fill env_context with _fts_context) would run pre_verify
-        # with empty context and mis-classify pronoun queries as ambiguous.
-
         tool_outputs: dict[str, str] = {}   # persists across turns
         called_tools: set[str] = set()       # dedup guard
-        _pre_verified = False                # run pre_verify exactly once
 
         # ── Clarification gate (runs ONCE before the first turn) ─────────
         # When the caller has supplied a complexity decision and its
@@ -1003,96 +935,18 @@ class AgentRuntimeLoop:
         except (TypeError, ValueError):
             _initial_confidence = None
 
-        if (
-            not _clarification_done
-            and not skip_pre_verify
-            and _initial_confidence is not None
-            and _initial_confidence < self._cfg.stop_policy.clarification_threshold
-            and self._cfg.stop_policy.max_clarifications > 0
-        ):
-            # Skip if prior turn already asked clarification — the current
-            # query IS the operator's answer; running the gate again would
-            # double-ask. We detect this by sniffing recent recall context
-            # for the agent's question marker.
-            _prior_recall = env_ctx.get("_fts_context", "") or ""
-            if (
-                "为了准确处理这个请求，我需要您补充" in _prior_recall
-                or "Clarification asked via chat turn" in _prior_recall
-            ):
-                logger.info(
-                    "Clarification gate: prior turn already asked — "
-                    "treating this query as the answer, skipping gate",
-                )
-            else:
-                # Derive what's likely missing — use the LLM-extracted gaps the
-                # caller has supplied via env_context, otherwise heuristic.
-                missing = env_ctx.get("_clarification_fields") or _heuristic_missing_fields(query)
-                if missing:
-                    logger.info(
-                        "Clarification gate: confidence=%.2f < threshold=%.2f — "
-                        "asking operator for %s via chat turn",
-                        _initial_confidence,
-                        self._cfg.stop_policy.clarification_threshold,
-                        [f["key"] for f in missing],
-                    )
-                    # Render a friendly chat-turn message that lists the
-                    # questions. The operator's next message in the same
-                    # session naturally provides the answers; no card UI
-                    # needed. The agent reads recall context next time so
-                    # it sees both the question and the answer.
-                    _q_lines = []
-                    for f in missing:
-                        _ph = f.get("placeholder", "")
-                        _star = "" if f.get("required", True) else "（可选）"
-                        line = f"- **{f['prompt']}**{_star}"
-                        if _ph:
-                            line += f"  _例: {_ph}_"
-                        _q_lines.append(line)
-                    _ask_text = (
-                        "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
-                        + "\n".join(_q_lines)
-                        + "\n\n请直接回复，我会基于您的补充继续。"
-                    )
-                    # Stream as tokens so the chat UI shows it like any
-                    # normal agent reply.
-                    for _i in range(0, len(_ask_text), 80):
-                        yield {"token": _ask_text[_i:_i+80]}
-                    yield {
-                        "node":      "clarification_chat",
-                        "node_step": "Clarification asked via chat turn",
-                        "reason":    "clarification_needed",
-                        "confidence": _initial_confidence,
-                        # Persist a hint for the next-turn coreference resolver
-                        "_clarification_fields_asked": [f["key"] for f in missing],
-                        "message": "Clarification asked — awaiting operator's next message",
-                    }
-                    return
+        # Note: an "initial" clarification gate used to live here, running
+        # BEFORE the first turn's recall + skill loading. It was removed
+        # because turn-level clarification (in the main while loop, after
+        # skill selection) does the same job — and now uses
+        # PolicyEngine[assess_query_specificity] which the LLM evaluates
+        # against full context. Two gates with overlapping logic only
+        # made the timing harder to reason about.
+
 
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
-
-            # Run pre_verify on the FIRST turn only, AFTER recall. Inject the
-            # recalled context (and any caller-supplied _fts_context) so the
-            # policy LLM can see entities mentioned earlier in the session.
-            # Skipped when caller has already obtained operator approval (HITL).
-            if (not _pre_verified
-                    and self._cfg.enable_pre_verification
-                    and not skip_pre_verify):
-                _pre_env = dict(env_ctx)
-                # Prefer caller-supplied context; otherwise use freshly recalled.
-                if "_fts_context" not in _pre_env and memory_results:
-                    try:
-                        _pre_env["_fts_context"] = "\n".join(
-                            str(m) for m in memory_results
-                        )[:1500]
-                    except Exception:
-                        pass
-                pre = await self.pre_verify(query, state.confirmed_facts, _pre_env)
-                _pre_verified = True
-                if not pre.passed:
-                    yield {"message": f"Pre-verification failed: {pre.reason}", "node": "pre_verify"}
-                    return
 
             skill_section  = ""
             skill_count    = 0
@@ -1134,50 +988,27 @@ class AgentRuntimeLoop:
                     "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
                     "ambiguous": skill_ambiguous,
                 }
-                # Q4 ambiguity: top skills are too similar — surface them as
-                # a USER_CHOICE so the operator picks the intended one
-                # instead of the loop guessing or grinding to a generic HITL.
-                # Enabled by default; set HITL_SKILL_AMBIGUITY=false to disable.
-                import os as _os
-                if skill_ambiguous and _os.getenv("HITL_SKILL_AMBIGUITY", "true").lower() != "false":
-                    # Build choice options from the top-N candidate skills.
-                    # Capped at 5 to keep the UI scannable.
-                    _choices = []
-                    for sid, score in selected_skills[:5]:
-                        summary = self._catalog.get_summary(sid) if hasattr(self, "_catalog") and self._catalog else None
-                        if summary is None and self._skill_catalog is not None:
-                            try:
-                                summary = self._skill_catalog.get_summary(sid)
-                            except Exception:
-                                summary = None
-                        _choices.append({
-                            "id":       sid,
-                            "label":    (summary.name if summary else sid),
-                            "description": (
-                                f"{(summary.purpose if summary else '')[:120]}"
-                                + (f" · {summary.risk_level}" if summary and summary.risk_level else "")
-                            ),
-                            "metadata": {
-                                "skill_id": sid,
-                                "score":    round(float(score), 3),
-                                "tags":     (summary.tags[:4] if summary else []),
-                            },
-                        })
+                # Skill ambiguity is no longer surfaced as a HITL card.
+                # Reasoning: skills are *reference material* injected into the
+                # LLM prompt, not workflows the operator must explicitly pick.
+                # The LLM reads the candidates, the user query, and the tool
+                # outputs, then decides which TOOLs to call. Destructive
+                # gating happens at exactly one point: tool watch-list
+                # interception of the LLM's chosen tool_call. Asking the
+                # operator to pre-select a skill (a) blocks the LLM from
+                # working, and (b) doesn't actually execute the skill —
+                # it just narrows the prompt, which the LLM was going to do
+                # automatically anyway.
+                #
+                # Ambiguity is logged as a node_step so operators can see
+                # which skills were considered; no card is raised.
+                if skill_ambiguous:
                     yield {
-                        "message": (
-                            f"Multiple skills match this request — top candidates: "
-                            f"{[c['id'] for c in _choices[:3]]}"
-                        ),
-                        "node":           "hitl_gate",
-                        "stop_hitl":      True,
-                        "reason":         "skill_ambiguity",
-                        "hitl_kind":      "user_choice",
-                        "summary":        f"找到多个匹配的 skill，请选择要使用的具体 skill：",
-                        "choices":        _choices,
-                        # Keep top_skills for backwards compatibility
-                        "top_skills":     [c["id"] for c in _choices[:2]],
+                        "node_step": "skill_ambiguous (informational, not blocking)",
+                        "node":      "skill_load",
+                        "skill_count": skill_count,
+                        "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills[:5]],
                     }
-                    return
 
             # ── Type #3 CLARIFICATION gate ────────────────────────────
             # When the agent is about to hallucinate a plan from too little
@@ -1199,7 +1030,7 @@ class AgentRuntimeLoop:
                         _recent_for_clar = "\n".join(str(m) for m in memory_results)[:1500]
                     except Exception:
                         pass
-                clar_fields = self._maybe_clarification_fields(
+                clar_fields = await self._maybe_clarification_fields(
                     query=query,
                     top_skill_score=(selected_skills[0][1] if selected_skills else 0.0),
                     asked_count=self._clarification_counts.get(session_id, 0),

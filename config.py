@@ -442,7 +442,7 @@ def _validate_on_load() -> None:
     _policies = getattr(cfg, "policies", None) or []
     _found    = {p.get("name", "") for p in _policies if isinstance(p, dict)}
     _required = {"classify_destructive", "classify_incident_severity",
-                 "hitl_high_risk", "preverify_safe_to_proceed"}
+                 "hitl_high_risk"}
     for _p in _required - _found:
         _log.warning("config: recommended policy %r missing from config.yaml", _p)
 
@@ -501,7 +501,7 @@ def validate_config(cfg: "AppConfig") -> list[str]:
     policies = getattr(cfg, "policies", None) or []
     required_policies = {
         "classify_destructive", "classify_incident_severity",
-        "hitl_high_risk", "preverify_safe_to_proceed",
+        "hitl_high_risk",
     }
     found_policies = {p.get("name", "") for p in policies if isinstance(p, dict)}
     missing = required_policies - found_policies

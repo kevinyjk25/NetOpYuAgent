@@ -1799,9 +1799,12 @@ function dispatchChunk(c, query, sid) {
     return;
   }
   if (c.type==='routing') {
-    addStep('hitl','hitl',`Route: ${c.path}`,c.reason||'','');
-    flowAdd('hitl',`⚡ ${c.path}`,c.reason||'','',{path:c.path});
-    if(c.path==='hitl_executor'){ switchTab('hitl'); refreshHitl(); }
+    // The 'routing' event is now emitted for every query (single path
+    // through hitl_executor) — don't auto-switch to the HITL tab and
+    // don't tag it as a HITL trigger. HITL only fires when an actual
+    // hitl_interrupt event arrives.
+    addStep('classify','route',`→ ${c.path}`,c.reason||'','');
+    flowAdd('classify',`→ ${c.path}`,c.reason||'','',{path:c.path});
     return;
   }
   if (c.type==='task_status') {

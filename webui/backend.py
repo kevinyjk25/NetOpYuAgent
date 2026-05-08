@@ -259,9 +259,24 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     if "runtime_loop" not in services:
         import os as _os
-        _hitl_tools = frozenset(
-            t.strip() for t in _os.getenv("HITL_TOOL_NAMES", "").split(",") if t.strip()
-        )
+        # HITL tool watch-list — used by runtime/loop.py to gate LLM-proposed
+        # destructive tool calls before execution. Two sources, env wins:
+        #   1. HITL_TOOL_NAMES env var (comma-separated)
+        #   2. cfg.tools.hitl_tool_names from config.yaml (list)
+        # Without this, destructive tools execute unsupervised.
+        _env_ht = _os.getenv("HITL_TOOL_NAMES", "").strip()
+        if _env_ht:
+            _hitl_tools = frozenset(
+                t.strip() for t in _env_ht.split(",") if t.strip()
+            )
+        else:
+            try:
+                from config import cfg as _app_cfg
+                _hitl_tools = frozenset(_app_cfg.tools.hitl_tool_names or [])
+            except Exception as _exc:
+                logger.warning("backend: cfg fallback for hitl_tool_names failed: %s", _exc)
+                _hitl_tools = frozenset()
+        logger.info("backend: runtime_loop hitl_tool_names=%s", sorted(_hitl_tools))
         services["runtime_loop"] = AgentRuntimeLoop(
             memory_router=services.get("memory"),
             config=RuntimeConfig(hitl_tool_names=_hitl_tools),
@@ -407,11 +422,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 await asyncio.sleep(0)
 
                 # ── Step 2: Cross-session recall (DTM v4) ────────────────
-                # Recall MUST happen BEFORE pre_verify so that policy
-                # evaluation can see same-session context (e.g. "this device"
-                # in the user query refers to ap-02 from the prior turn).
-                # Without this, pre_verify treats every reference-bearing query
-                # as ambiguous and BLOCKs follow-up questions.
+                # Recall happens before agent execution so the LLM sees prior
+                # session context (e.g. "this device" in the user query refers
+                # to ap-02 from the prior turn). Recalled context is injected
+                # into env_context["_fts_context"] for the runtime loop.
                 recall_text = ""
                 memory_items: list = []
                 if memory:
@@ -436,18 +450,11 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     except Exception as _e:
                         logger.debug("FTS5 recall skipped: %s", _e)
 
-                # ── Step 3: Pre-verify (with recalled context) ───────────
-                # Pass recall_text in env_context so PolicyEngine can resolve
-                # references like "this device" against the session history.
-                _pre_env = dict(req.env_context or {})
-                if recall_text:
-                    _pre_env["_fts_context"] = recall_text
-                pre = await loop.pre_verify(req.query, req.confirmed_facts, _pre_env)
-                yield f"data: {json.dumps({'type':'pre_verify','passed':pre.passed,'reason':pre.reason[:150]})}\n\n"
-                await asyncio.sleep(0)
-
-                # ── Step 4: Execute via loop (all queries) ────────────────
-                # Uses the real patched LLM + real ToolRouter registry
+                # ── Step 3: Execute via loop (all queries) ────────────────
+                # Uses the real patched LLM + real ToolRouter registry.
+                # Destructive-action gating is enforced by the loop's
+                # tool watch-list (cfg.tools.hitl_tool_names) — there is
+                # no separate pre_verify policy run here.
                 real_registry = getattr(services.get("tool_router"), "registry", tool_registry)
 
                 # Inject recalled context + user profile into env_context
@@ -472,192 +479,102 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 turns_taken  = 0
                 stop_outcome = "done"
 
-                # COMPLEX queries: route through HITL graph if executor is available
-                if decision.complexity.value == "complex" and executor is not None:
-                    yield f"data: {json.dumps({'type':'routing','path':'hitl_executor','reason':'complex query routed to HITL graph'})}\n\n"
-                    await asyncio.sleep(0)
+                # ── Single execution path: HitlExecutor wraps the loop ────
+                # All queries (simple read-only and complex destructive) go
+                # through the executor. Destructive-action gating is handled
+                # by the loop's tool watch-list (cfg.tools.hitl_tool_names);
+                # when the LLM proposes a watched tool, the executor raises
+                # a HITL interrupt with the LLM's concrete tool_args.
+                #
+                # The executor calls back via on_chunk for every loop chunk
+                # so we can forward steps/recall/tokens to SSE without
+                # re-implementing chunk handling.
+                if executor is None:
+                    _err_msg = "HitlExecutor not wired (services['executor'] is None)"
+                    yield f"data: {json.dumps({'type':'error','error':_err_msg})}\n\n"
+                    return
 
-                    from a2a.event_queue import EventQueue, RequestContext
-                    from a2a.schemas import Message, TextPart
+                yield f"data: {json.dumps({'type':'routing','path':'hitl_executor','reason':'all queries route through hitl_executor'})}\n\n"
+                await asyncio.sleep(0)
 
-                    eq  = EventQueue()
-                    ctx = RequestContext(
-                        task_id=task_id,
-                        context_id=context_id,
-                        message=Message(role="user", parts=[TextPart(text=req.query)]),
-                        metadata={
-                            "session_id":      session_id,
-                            "env_context":     env_ctx,
-                            "confirmed_facts": list(req.confirmed_facts or []),
-                            "working_set":     list(req.working_set or []),
-                        },
-                    )
+                _stream_env = dict(env_ctx)
+                if decision is not None:
+                    _stream_env["_initial_confidence"] = float(getattr(decision, "confidence", 1.0))
 
-                    # Run executor in background, stream events as SSE
-                    exec_task = asyncio.create_task(executor.execute(ctx, eq))
+                # Build a queue we can push to from on_chunk and drain via SSE
+                _chunk_queue: asyncio.Queue = asyncio.Queue()
 
-                    async for event in eq.consume():
-                        kind = event.kind  # camelCase: taskStatusUpdate, taskArtifactUpdate, message
+                async def _on_chunk(ch: dict) -> None:
+                    """Receive every chunk from runtime/loop.stream,
+                    forward to SSE. The executor itself separately inspects
+                    HITL signals on the same chunks."""
+                    if "token" in ch:
+                        tokens.append(ch["token"])
+                    if isinstance(ch.get("node_step"), str) and ch["node_step"].startswith("Turn "):
+                        nonlocal_turns[0] = nonlocal_turns[0] + 1
+                    if ch.get("message"):
+                        nonlocal_outcome[0] = ch["message"][:60]
+                    if ch.get("stop_hitl"):
+                        # Surface HITL trigger to the FE for the routing log.
+                        nonlocal_outcome[0] = "stop_hitl: awaiting operator approval"
+                        nonlocal_intercepted[0] = True
+                    await _chunk_queue.put(("chunk", ch))
 
-                        if kind == "taskStatusUpdate":
-                            state_val = event.status.state.value if event.status else "unknown"
-                            yield f"data: {json.dumps({'type':'task_status','state':state_val,'task_id':task_id})}\n\n"
-                            await asyncio.sleep(0)
+                # Mutable holders so the nested function can update outer state
+                nonlocal_turns       = [0]
+                nonlocal_outcome     = ["done"]
+                nonlocal_intercepted = [False]
 
-                        elif kind == "message":
-                            # Terminal event — extract text and emit as token stream
-                            for part in (event.message.parts if event.message else []):
-                                if hasattr(part, "text") and part.text:
-                                    tokens.append(part.text)
-                                    # Stream the text in 80-char chunks, PRESERVING newlines and
-                                    # all whitespace exactly. The frontend renders markdown after
-                                    # the stream completes, so block structure (\n\n, table rows,
-                                    # ```fences, ## headers) must survive transmission.
-                                    _txt = part.text
-                                    for _i in range(0, len(_txt), 80):
-                                        yield f"data: {json.dumps({'token': _txt[_i:_i+80]})}\n\n"
-                                    await asyncio.sleep(0)
-
-                        elif kind == "taskArtifactUpdate":
-                            if event.artifact:
-                                for part in event.artifact.parts:
-                                    if hasattr(part, "data") and isinstance(part.data, dict):
-                                        data = part.data
-                                        art_kind = data.get("tag") or data.get("kind") or ""
-                                        if art_kind == "hitl_interrupt":
-                                            # Real HITL interrupt — emit and switch console to HITL tab
-                                            yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,**data})}\n\n"
-                                            await asyncio.sleep(0)
-                                            # Mark stream terminal state so terminal
-                                            # event becomes 'awaiting_hitl' (⏸) not 'done' (✅).
-                                            stop_outcome = "stop_hitl: awaiting operator approval"
-                                            # Also mark the post-stream skip flag so the
-                                            # memory-write block below doesn't persist
-                                            # the placeholder "⚠ HITL interrupt" text.
-                                            # _submit_hitl_decision will write the
-                                            # completed turn after operator approves.
-                                            _hitl_intercepted = True
-                                        elif data.get("node_step"):
-                                            yield f"data: {json.dumps({'node_step':data['node_step'],'node':data.get('node','')})}\n\n"
-                                            await asyncio.sleep(0)
-                                        elif data.get("node_result"):
-                                            yield f"data: {json.dumps({'node_result':data['node_result']})}\n\n"
-                                            await asyncio.sleep(0)
-                                        else:
-                                            yield f"data: {json.dumps({'type':'artifact','data':data})}\n\n"
-                                            await asyncio.sleep(0)
-
+                async def _run_executor() -> None:
                     try:
-                        # Wait for exec_task to finish (it completes once MessageEvent sent)
-                        await asyncio.wait_for(exec_task, timeout=120.0)
-                    except asyncio.TimeoutError:
-                        logger.warning("Executor task timed out after 120s — likely HITL pending")
+                        result = await executor.execute_query(
+                            query=req.query,
+                            session_id=session_id,
+                            confirmed_facts=list(req.confirmed_facts or []),
+                            env_context=_stream_env,
+                            on_chunk=_on_chunk,
+                        )
+                        # Surface the result via the queue so the SSE drain
+                        # loop can finalise.
+                        await _chunk_queue.put(("done", result))
                     except Exception as exc:
-                        logger.debug("Executor task ended: %s", exc)
-                    full_text = "".join(tokens)
+                        logger.exception("executor.execute_query failed: %s", exc)
+                        await _chunk_queue.put(("error", str(exc)))
 
-                else:
-                    # SIMPLE path: loop.stream() with real LLM + ToolRouter
-                    # _hitl_intercepted was initialised at the top of generate()
-                    # Inject the classify-time confidence so stream's
-                    # clarification gate can decide whether to ask first.
-                    _stream_env = dict(env_ctx)
-                    if decision is not None:
-                        _stream_env["_initial_confidence"] = float(getattr(decision, "confidence", 1.0))
-                    async for chunk in loop.stream(
-                        query=req.query,
-                        session_id=session_id,
-                        env_context=_stream_env,
-                        confirmed_facts=list(req.confirmed_facts or []),
-                        working_set=_parse_working_set(list(req.working_set or [])),
-                        tool_registry=real_registry,
-                        delegation_mode=dm,
-                    ):
-                        if "token" in chunk:
-                            tokens.append(chunk["token"])
-                        if isinstance(chunk.get("node_step"), str) and chunk["node_step"].startswith("Turn "):
-                            turns_taken += 1
-                        if chunk.get("message"):
-                            stop_outcome = chunk["message"][:60]
+                exec_task = asyncio.create_task(_run_executor())
 
-                        # HITL gate: skill-ambiguity / clarification / tool-watchlist
-                        # Re-route to executor so HITL graph fires and approval card appears
-                        if chunk.get("stop_hitl") and executor is not None:
-                            yield f"data: {json.dumps(chunk)}\n\n"
-                            await asyncio.sleep(0)
-                            yield f"data: {json.dumps({'type':'routing','path':'hitl_executor','reason':chunk.get('message','HITL gate triggered')[:80]})}\n\n"
-                            await asyncio.sleep(0)
-                            from a2a.event_queue import EventQueue, RequestContext
-                            from a2a.schemas import Message, TextPart
-                            eq  = EventQueue()
-                            # Pass the tool name and args that triggered HITL so
-                            # the graph can force the interrupt and replay after approval.
-                            _hitl_tool = chunk.get("tool_name", "")
-                            _hitl_args = chunk.get("tool_args", {})
-                            # New: pick up multi-mode HITL signals so the
-                            # executor fires USER_CHOICE / CLARIFICATION
-                            # instead of a vanilla destructive-op interrupt.
-                            _hitl_kind = chunk.get("hitl_kind", "")
-                            _hitl_summary = chunk.get("summary", "")
-                            _hitl_choices = chunk.get("choices") or []
-                            _hitl_clar    = chunk.get("clarification_fields") or []
-                            _hitl_editable = chunk.get("editable_param_keys") or []
-                            ctx = RequestContext(
-                                task_id=task_id,
-                                context_id=context_id,
-                                message=Message(role="user", parts=[TextPart(text=req.query)]),
-                                metadata={
-                                    "session_id":      session_id,
-                                    "env_context":     env_ctx,
-                                    "confirmed_facts": list(req.confirmed_facts or []),
-                                    "working_set":     list(req.working_set or []),
-                                    "force_hitl_tool": _hitl_tool,   # bypass LLM trigger eval
-                                    "force_hitl_args": _hitl_args,   # replay args after approval
-                                    "action_type":     f"tool_call:{_hitl_tool}",
-                                    # Multi-mode HITL pass-through
-                                    "hitl_kind":               _hitl_kind,
-                                    "hitl_summary":            _hitl_summary,
-                                    "hitl_choices":            _hitl_choices,
-                                    "hitl_clarification_fields": _hitl_clar,
-                                    "hitl_editable_param_keys": _hitl_editable,
-                                },
-                            )
-                            exec_task = asyncio.create_task(executor.execute(ctx, eq))
-                            async for event in eq.consume():
-                                kind = event.kind
-                                if kind == "taskStatusUpdate":
-                                    state_val = event.status.state.value if event.status else "unknown"
-                                    yield f"data: {json.dumps({'type':'task_status','state':state_val,'task_id':task_id})}\n\n"
-                                    await asyncio.sleep(0)
-                                elif kind == "message":
-                                    for part in (event.message.parts if event.message else []):
-                                        if hasattr(part, "text") and part.text:
-                                            tokens.append(part.text)
-                                            _txt = part.text
-                                            for _i in range(0, len(_txt), 80):
-                                                yield f"data: {json.dumps({'token': _txt[_i:_i+80]})}\n\n"
-                                            await asyncio.sleep(0)
-                                elif kind == "taskArtifactUpdate":
-                                    if event.artifact:
-                                        for part in event.artifact.parts:
-                                            if hasattr(part, "data") and isinstance(part.data, dict):
-                                                data = part.data
-                                                if (data.get("tag") or data.get("kind")) == "hitl_interrupt":
-                                                    yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,**data})}\n\n"
-                                                    await asyncio.sleep(0)
-                            try:
-                                await asyncio.wait_for(exec_task, timeout=120.0)
-                            except (asyncio.TimeoutError, Exception):
-                                pass
-                            _hitl_intercepted = True
-                            # Mark this stream's terminal state so the outer code
-                            # emits 'awaiting_hitl' (⏸) instead of 'done' (✅).
-                            stop_outcome = "stop_hitl: awaiting operator approval"
-                            break
-
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                # Drain queue → SSE
+                _final_text = ""
+                _final_interrupt: Optional[str] = None
+                while True:
+                    try:
+                        kind, payload = await asyncio.wait_for(_chunk_queue.get(), timeout=180.0)
+                    except asyncio.TimeoutError:
+                        logger.warning("executor.execute_query stream stalled (180s)")
+                        break
+                    if kind == "chunk":
+                        yield f"data: {json.dumps(payload)}\n\n"
                         await asyncio.sleep(0)
-                    full_text = "".join(tokens)
+                    elif kind == "done":
+                        _final_text       = payload.get("text", "")
+                        _final_interrupt  = payload.get("interrupt_id") if payload.get("interrupted") else None
+                        if _final_interrupt:
+                            yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,'interrupt_id':_final_interrupt})}\n\n"
+                            await asyncio.sleep(0)
+                        break
+                    elif kind == "error":
+                        yield f"data: {json.dumps({'type':'error','error':str(payload)})}\n\n"
+                        break
+
+                try:
+                    await asyncio.wait_for(exec_task, timeout=5.0)
+                except (asyncio.TimeoutError, Exception):
+                    pass
+
+                turns_taken     = nonlocal_turns[0]
+                stop_outcome    = nonlocal_outcome[0]
+                _hitl_intercepted = nonlocal_intercepted[0] or bool(_final_interrupt)
+                full_text       = _final_text or "".join(tokens)
 
                 _push_history(session_id, {"role": "user",      "content": req.query},   _message_history)
                 _push_history(session_id, {"role": "assistant", "content": full_text},    _message_history)
@@ -1418,9 +1335,38 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     @app.get("/hitl/pending")
     async def list_pending_hitl(
     ) -> JSONResponse:
+        # Prefer hitl_core if wired up (HITL_BACKEND=core); fall back to
+        # legacy hitl_router. The two paths return the same JSON shape so
+        # the frontend doesn't need to change.
+        hitl_core_router = services.get("hitl_core_router")
+        if hitl_core_router is not None:
+            entries = await hitl_core_router.list_pending(limit=100)
+            result = []
+            for entry in entries:
+                p = entry.payload
+                result.append({
+                    "interrupt_id":   p.interrupt_id,
+                    "thread_id":      p.thread_id,
+                    "trigger_kind":   p.trigger_kind.value,
+                    "risk_level":     p.risk_level.value,
+                    "user_query":     p.user_query,
+                    "intent_summary": p.intent_summary,
+                    "sla_seconds":    p.sla_seconds,
+                    "proposed_action": (
+                        p.proposed_action.model_dump()
+                        if p.proposed_action else {}
+                    ),
+                    "choices":               [c.model_dump() for c in (p.choices or [])],
+                    "clarification_fields":  [f.model_dump() for f in (p.clarification_fields or [])],
+                    "editable_param_keys":   list(p.editable_param_keys or []),
+                })
+            logger.info("/hitl/pending [core]: returning %d", len(result))
+            return JSONResponse(content=result)
+
+        # Legacy path
         hitl_router = services.get("hitl_router")
         if not hitl_router:
-            logger.warning("/hitl/pending: hitl_router not in services")
+            logger.warning("/hitl/pending: no HITL router available")
             return JSONResponse(content=[])
         from hitl.schemas import InterruptState
         store_size = len(hitl_router._payload_store)
@@ -2035,41 +1981,148 @@ async def _submit_hitl_decision(
     req: HitlDecisionRequest,
     services: dict,
 ) -> JSONResponse:
-    hitl_router = services.get("hitl_router")
-    if not hitl_router:
-        raise HTTPException(status_code=503, detail="HITL router not available")
-
-    # CRITICAL: bind operator at the TOP so that handle_decision() — and any
-    # post-HITL callback it triggers (including loop.stream → _retrieve_memory
-    # → MemoryAdapter.recall, which reads get_current_operator() to scope the
-    # user_id) — runs inside the same operator's memory namespace as the
-    # original chat_stream turn. Without this, recall happens under user_id
-    # "system" (the contextvar default), finds nothing, and the post-HITL
-    # agent loop runs without any prior-turn context.
+    # CRITICAL: bind operator at the TOP so that the post-HITL callback
+    # (whichever backend is active) runs inside the same operator's
+    # memory namespace as the original chat_stream turn.
     set_current_operator((await _identity()).operator_id)
 
-    payload = hitl_router._payload_store.get(interrupt_id)
-    if payload is None:
-        raise HTTPException(status_code=404, detail=f"Interrupt {interrupt_id!r} not found")
+    # ── Core backend path ────────────────────────────────────────────
+    hitl_core_router = services.get("hitl_core_router")
+    if hitl_core_router is not None:
+        from hitl_core import (
+            DecisionKind, DecisionValidationError, HitlDecision, ResumeError,
+        )
+        # Map legacy decision_kind strings to hitl_core DecisionKind enum
+        kind_map = {
+            "approve":  DecisionKind.APPROVE,
+            "reject":   DecisionKind.REJECT,
+            "edit":     DecisionKind.EDIT,
+            "choose":   DecisionKind.CHOOSE,
+            "answer":   DecisionKind.ANSWER,
+            "escalate": DecisionKind.ESCALATE,
+        }
+        if decision_kind not in kind_map:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Unknown decision_kind: {decision_kind!r}",
+            )
+        decision = HitlDecision(
+            interrupt_id=interrupt_id,
+            decision=kind_map[decision_kind],
+            operator_id=req.operator_id,
+            comment=req.comment,
+            parameter_patch=req.parameter_patch,
+            selected_choice_id=req.selected_choice_id,
+            clarification_answers=req.clarification_answers,
+        )
+        try:
+            outcome = await hitl_core_router.deliver(decision)
+        except DecisionValidationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
+        except ResumeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc))
 
-    from hitl.schemas import HitlDecision
-    decision = HitlDecision(
-        interrupt_id=interrupt_id,
-        thread_id=payload.thread_id,
-        decision=decision_kind,
-        operator_id=req.operator_id,
-        comment=req.comment,
-        parameter_patch=req.parameter_patch,
-        selected_choice_id=req.selected_choice_id,
-        clarification_answers=req.clarification_answers,
-    )
-    result      = await hitl_router.handle_decision(decision)
-    result_dict = result.to_dict()
+        # Map hitl_core outcome shape to legacy result_dict shape so the
+        # frontend's existing rendering code keeps working.
+        # `outcome["result"]` is whatever the resumer returned. The
+        # tool_call_resumer returns a dict with .result/.tool_result
+        # keys (string-typed); the agent_loop_resumer returns a dict
+        # with .text. Plain strings or None also possible. Normalise
+        # to a string here so the frontend doesn't get "[object Object]"
+        # nor crash on `.slice` calls.
+        _raw_result = outcome.get("result")
+        if isinstance(_raw_result, dict):
+            _tool_result_str = (
+                _raw_result.get("tool_result")
+                or _raw_result.get("result")
+                or _raw_result.get("text")
+                or _raw_result.get("error")
+                or ""
+            )
+        elif _raw_result is None:
+            _tool_result_str = ""
+        else:
+            _tool_result_str = str(_raw_result)
 
-    _decision    = result_dict.get("decision")
-    _tool_result = result_dict.get("tool_result", "")
-    _tool_name   = result_dict.get("tool_name", "the approved action")
-    _user_query  = payload.user_query or ""
+        result_dict = {
+            "interrupt_id":     outcome.get("interrupt_id"),
+            "decision":         outcome.get("outcome"),
+            "already_resolved": outcome.get("already_resolved", False),
+            "tool_result":      _tool_result_str,
+            # tool_name will be filled in by the synthesis block below
+            # by introspecting the resume_handle if needed.
+            "tool_name":        "",
+        }
+        # Look up the resolved entry to recover tool_name + the original
+        # user_query for synthesis. We fetch from the store rather than
+        # holding a reference because outcome doesn't carry it.
+        try:
+            entry = await hitl_core_router.load(interrupt_id)
+            if entry is not None:
+                result_dict["tool_name"] = entry.resume_handle.state.get(
+                    "tool_name", "agent_loop",
+                )
+                _user_query_local = entry.payload.user_query or ""
+            else:
+                _user_query_local = ""
+        except Exception as exc:
+            logger.debug("post-deliver entry lookup failed: %s", exc)
+            _user_query_local = ""
+
+        # Synthesis is the same for both backends; share that block by
+        # falling through to the existing logic below. We mock up
+        # `payload` to satisfy the legacy variable references. The shim
+        # populates every attribute the post-synthesis code (memory
+        # writeback, audit, etc.) reads off the legacy pydantic payload.
+        _context_id_local = ""
+        _thread_id_local  = ""
+        try:
+            if entry is not None:
+                _context_id_local = entry.payload.context_id or ""
+                _thread_id_local  = entry.payload.thread_id or ""
+        except Exception:
+            pass
+
+        class _PayloadShim:
+            user_query   = _user_query_local
+            context_id   = _context_id_local
+            thread_id    = _thread_id_local
+            interrupt_id_str = interrupt_id  # avoid name shadowing in inner class
+        payload = _PayloadShim()
+        # Re-bind locals the legacy synthesis block uses
+        _decision    = result_dict["decision"]
+        _tool_result = result_dict.get("tool_result", "")
+        _tool_name   = result_dict.get("tool_name", "agent_loop")
+        _user_query  = _user_query_local
+        # Continue to the LLM synthesis section (line below).
+    else:
+        # ── Legacy backend path ─────────────────────────────────────
+        hitl_router = services.get("hitl_router")
+        if not hitl_router:
+            raise HTTPException(status_code=503, detail="HITL router not available")
+
+        payload = hitl_router._payload_store.get(interrupt_id)
+        if payload is None:
+            raise HTTPException(status_code=404, detail=f"Interrupt {interrupt_id!r} not found")
+
+        from hitl.schemas import HitlDecision
+        decision = HitlDecision(
+            interrupt_id=interrupt_id,
+            thread_id=payload.thread_id,
+            decision=decision_kind,
+            operator_id=req.operator_id,
+            comment=req.comment,
+            parameter_patch=req.parameter_patch,
+            selected_choice_id=req.selected_choice_id,
+            clarification_answers=req.clarification_answers,
+        )
+        result      = await hitl_router.handle_decision(decision)
+        result_dict = result.to_dict()
+
+        _decision    = result_dict.get("decision")
+        _tool_result = result_dict.get("tool_result", "")
+        _tool_name   = result_dict.get("tool_name", "the approved action")
+        _user_query  = payload.user_query or ""
 
     # Post-HITL synthesis: run one LLM call to summarise the tool result so
     # the chat shows a meaningful response after the operator approves.
