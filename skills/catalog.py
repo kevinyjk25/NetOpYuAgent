@@ -274,7 +274,8 @@ class SkillCatalogService:
         self,
         query: str,
         top_k: int = 5,
-        ambiguity_threshold: float = 0.15,
+        ambiguity_threshold: float = 0.08,
+        ambiguity_floor:     float = 0.40,
     ) -> "SkillSelectionResult":
         """
         Score all registered skills against the query and return the top-K.
@@ -314,9 +315,17 @@ class SkillCatalogService:
         scored.sort(reverse=True)
         top = scored[:top_k]
 
+        # ambiguous fires only when:
+        #   1. top score is HIGH ENOUGH to be worth loading (>=
+        #      ambiguity_floor; otherwise nothing's a real match — just
+        #      let the LLM read the catalog summary), AND
+        #   2. top-2 scores are within ambiguity_threshold (real tie).
+        # This prevents weak matches (e.g. top=0.22, second=0.16) from
+        # being flagged as "ambiguous" — when no skill is a strong fit,
+        # the LLM picks from the prompt context without operator help.
         ambiguous = (
             len(top) >= 2
-            and top[0][0] > 0.05
+            and top[0][0] >= ambiguity_floor
             and abs(top[0][0] - top[1][0]) < ambiguity_threshold
         )
 

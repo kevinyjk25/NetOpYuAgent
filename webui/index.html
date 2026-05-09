@@ -1696,7 +1696,7 @@ function appendToken(token) {
 
 function finalizeStream() {
   if (!streamState) return;
-  const {sid} = streamState;
+  const {sid, paused} = streamState;
   // Re-render the streamed text as markdown now that the message is complete.
   const bub = document.getElementById(sid+'-bubble');
   if (bub) {
@@ -1712,8 +1712,15 @@ function finalizeStream() {
   const hdr = document.querySelector(`#${sid}-stream .action-header`);
   if (hdr) {
     hdr.classList.remove('open');
-    const lbl = document.getElementById(sid+'-label');
-    if (lbl) lbl.textContent = `${streamState.toolCalls} tool calls · ${streamState.skillLoads} skill loads · ${streamState.hermesEvents} hermes events`;
+    // If the stream was interrupted by stop_hitl, the dispatchChunk
+    // handler set streamState.paused=true and wrote the "Paused for
+    // HITL approval — ..." label. Don't overwrite it with a stale
+    // "0 tool calls" summary — the trace really is interrupted, not
+    // a no-op turn. Post-HITL chunks render in a NEW block.
+    if (!paused) {
+      const lbl = document.getElementById(sid+'-label');
+      if (lbl) lbl.textContent = `${streamState.toolCalls} tool calls · ${streamState.skillLoads} skill loads · ${streamState.hermesEvents} hermes events`;
+    }
   }
   streamState = null;
 }
@@ -1963,6 +1970,16 @@ function dispatchChunk(c, query, sid) {
     const tool = c.tool_name||'';
     addStep('hitl','🔒 Tool HITL Gate',`'${tool}' requires approval`,c.message||'');
     flowEvent('hitl',`🔒 HITL Gate: ${tool}`,'tool is on watch-list','routing to HITL graph');
+    // Re-label the thinking-trace summary so it's clear this stream
+    // was *interrupted* — not "0 tool calls" (which reads as "did
+    // nothing"). Post-HITL trace continues in a second block after
+    // the operator decides. The `paused` flag stops finalizeStream()
+    // from overwriting our label with a stale tool-count summary.
+    if (streamState && streamState.sid) {
+      streamState.paused = true;
+      const lbl = document.getElementById(streamState.sid + '-label');
+      if (lbl) lbl.textContent = 'Paused for HITL approval — continues after decision';
+    }
     switchTab('hitl');
     refreshHitl(5);
     return;
