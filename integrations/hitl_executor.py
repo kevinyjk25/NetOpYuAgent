@@ -401,13 +401,16 @@ class HitlExecutor:
     ) -> dict[str, Any]:
         """Resumer registered with the router — runs when an operator
         approves / edits a tool-call HITL. Merges parameter_patch into
-        tool_args, invokes the tool, persists the result.
+        tool_args, invokes the tool, persists the result, and returns
+        a list of chunks describing what happened so the calling
+        endpoint can paint thinking-trace steps in the UI.
         """
         state = entry.resume_handle.state
         tool_name = state.get("tool_name")
         tool_args = dict(state.get("tool_args") or {})
         session_id = state.get("session_id", "")
         original_query = state.get("original_query", "")
+        _chunks: list[dict] = []
 
         if decision.decision == DecisionKind.REJECT:
             await self._writeback(
@@ -415,7 +418,7 @@ class HitlExecutor:
                 f"[HITL REJECTED — operator declined tool call `{tool_name}`]",
                 session_id,
             )
-            return {"tool": tool_name, "decision": "reject"}
+            return {"tool": tool_name, "decision": "reject", "chunks": _chunks}
 
         # APPROVE or EDIT — merge patch and invoke
         if decision.decision == DecisionKind.EDIT and decision.parameter_patch:
@@ -424,13 +427,22 @@ class HitlExecutor:
                 "Tool HITL: applying operator edit — patch_keys=%s",
                 list(decision.parameter_patch.keys()),
             )
+            _chunks.append({
+                "node":        "hitl_edit",
+                "node_step":   f"Operator edited args: {list(decision.parameter_patch.keys())}",
+            })
 
         if tool_name not in self._tool_registry:
             logger.warning(
                 "tool_call_resumer: tool %r not in registry", tool_name,
             )
-            return {"error": f"tool {tool_name!r} not registered"}
+            return {"error": f"tool {tool_name!r} not registered", "chunks": _chunks}
 
+        # Step: tool dispatch
+        _chunks.append({
+            "node":      "tool_call",
+            "node_step": f"Calling tool: {tool_name}",
+        })
         try:
             result = await self._tool_registry[tool_name](tool_args)
         except Exception as exc:
@@ -440,7 +452,11 @@ class HitlExecutor:
                 f"[HITL APPROVED — tool {tool_name} FAILED] {exc}",
                 session_id,
             )
-            return {"tool": tool_name, "error": str(exc)}
+            _chunks.append({
+                "node":      "tool_error",
+                "node_step": f"Tool {tool_name} FAILED: {exc}",
+            })
+            return {"tool": tool_name, "error": str(exc), "chunks": _chunks}
 
         result_text = str(result)[:1500]
         await self._writeback(
@@ -448,13 +464,21 @@ class HitlExecutor:
             f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
             session_id,
         )
-        # Return structured info: tool_result is the *string* the UI shows
-        # (avoid [object Object] rendering); the dict carries metadata for
-        # any caller that wants the structured form.
+        # Step: tool returned
+        _chunks.append({
+            "node":        "tool_result",
+            "node_step":   f"Inline: {tool_name}",
+            "node_result": {
+                "tool":   tool_name,
+                "args":   tool_args,
+                "result": result_text[:300],
+            },
+        })
         return {
             "tool":        tool_name,
             "result":      result_text,
             "tool_result": result_text,
+            "chunks":      _chunks,
         }
 
     # ────────────────────────────────────────────────────────────────
@@ -543,13 +567,32 @@ class HitlExecutor:
             )
             return {"decision": "reject"}
 
-        # Build augmented query
+        # Build augmented query + env_context based on what kind of
+        # operator input we got back.
+        _resume_env: dict = {}
         if kind == "user_choice":
             chosen = decision.selected_choice_id or ""
-            augmented = (
-                f"{original_query}\n\n"
-                f"[OPERATOR DISAMBIGUATION] Use specifically: {chosen}"
-            )
+            if chosen and chosen != "__none__":
+                # Operator picked a specific skill — tell the loop which
+                # one to favour, and mark ambiguity as resolved so the
+                # gate doesn't fire again.
+                augmented = (
+                    f"{original_query}\n\n"
+                    f"[OPERATOR DISAMBIGUATION] Use specifically the skill: `{chosen}`. "
+                    f"Apply its recipe and tools when relevant to the request."
+                )
+                _resume_env["_skill_choice_resolved"] = True
+                _resume_env["_forced_skill_id"]      = chosen
+            else:
+                # Operator picked "none" — ambiguity is acknowledged,
+                # let the LLM decide unaided. Same flag prevents the
+                # gate from re-firing.
+                augmented = (
+                    f"{original_query}\n\n"
+                    f"[OPERATOR DISAMBIGUATION] No specific skill selected — "
+                    f"proceed using context and tools without binding to a skill recipe."
+                )
+                _resume_env["_skill_choice_resolved"] = True
         elif kind == "clarification":
             answers = decision.clarification_answers or {}
             ans_lines = "\n".join(f"  - {k}: {v}" for k, v in answers.items() if v)
@@ -557,15 +600,39 @@ class HitlExecutor:
                 f"{original_query}\n\n"
                 f"[OPERATOR-PROVIDED CLARIFICATIONS]\n{ans_lines}"
             )
+            _resume_env["_clarification_resolved"] = True
         else:
             augmented = original_query
 
-        # Re-run agent loop with operator's clarifications appended.
+        # Re-run agent loop. The env_ctx flags above tell the loop to
+        # skip whichever gate produced this interrupt, so we don't loop.
+        # We capture every chunk emitted by the sub-stream so the calling
+        # /hitl/{id}/approve endpoint can forward them to the UI's
+        # thinking trace — otherwise the UI loses sight of everything
+        # that happens after operator approval (TURN N, Tool Call,
+        # nested HITL, post-action steps).
+        _chunk_log: list[dict] = []
+
+        async def _capture_chunk(ch: dict) -> None:
+            try:
+                _chunk_log.append(dict(ch))
+            except Exception:
+                pass
+
         result = await self.execute_query(
             query=augmented, session_id=session_id,
-            env_context={"_clarification_resolved": True},
+            env_context=_resume_env,
+            on_chunk=_capture_chunk,
         )
-        return {"text": result.get("text", ""), "decision": decision.decision.value}
+        return {
+            "text":       result.get("text", ""),
+            "decision":   decision.decision.value,
+            "chunks":     _chunk_log,
+            # Surface any nested HITL the sub-stream raised so the
+            # frontend can switch tabs and refresh /hitl/pending.
+            "interrupted":  result.get("interrupted", False),
+            "interrupt_id": result.get("interrupt_id"),
+        }
 
     # ────────────────────────────────────────────────────────────────
     # Batch HITL — proxy to pipeline.request_batch_approval

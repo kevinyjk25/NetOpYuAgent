@@ -1846,12 +1846,13 @@ function dispatchChunk(c, query, sid) {
       const names  = skills.length
         ? skills.map(s=>`${s.id}(${s.score.toFixed(2)})`).join(', ')
         : step.replace(/Skills matched:\s*/i,'').replace(/Loading skill details:\s*/i,'');
-      const ambig  = c.ambiguous ? '  ⚠ ambiguous — HITL may trigger' : '';
+      // Note: ambiguity is informational only — the LLM decides which
+      // skill to use from the prompt context. HITL is no longer raised
+      // for skill ambiguity (deleted in Phase 7B refactor).
+      const ambig  = c.ambiguous ? '  · ambiguous (LLM will pick)' : '';
       addStep('skill', `Skills matched (${cnt})`, names + ambig, names);
       flowEvent('skill', `📋 Skills matched (${cnt})`, names, ambig||'injected into context');
-      if (c.ambiguous) {
-        flowEvent('hitl', '⚠ Skill ambiguity', 'top skills too similar', 'routing to HITL');
-      }
+      // Removed: flowEvent('hitl', '⚠ Skill ambiguity', ...) — no longer fires.
     } else if (step.includes('Calling tool:')) {
       const tool = step.replace(/Calling tool:\s*/i,'');
       addStep('tool','Tool Call: '+tool,'→ ToolRouter dispatch',
@@ -2556,6 +2557,70 @@ async function hitlDec(id,dec) {
     const data=await res.json().catch(()=>({}));
     const outcome=data.outcome||data.decision||dec;
 
+    // Replay any sub-stream chunks captured by the resumer back into the
+    // thinking trace so the post-approval steps (TURN N, Tool Call,
+    // hitl_edit, tool_result, nested HITL) are visible. Without this the
+    // trace dies at "HITL-WAIT" and operators see nothing of what happened
+    // after they clicked Approve.
+    //
+    // CRITICAL: the original stream's `streamState` was nulled by endStream()
+    // when the SSE flow paused for HITL. addStep() early-returns if
+    // streamState is null, so we MUST rebuild it (via startStream which
+    // creates a fresh "agent ·" thinking block) before replaying chunks.
+    // This produces a SECOND thinking trace block under the agent message,
+    // showing exactly what happened post-approval — a clean visual
+    // separation from the pre-HITL block above.
+    // Replay any sub-stream chunks captured by the resumer back into the
+    // thinking trace so the post-approval steps (TURN N, Tool Call,
+    // hitl_edit, tool_result, nested HITL) are visible. Without this the
+    // trace dies at "HITL-WAIT" and operators see nothing of what happened
+    // after they clicked Approve.
+    //
+    // CRITICAL: the original stream's `streamState` was nulled by endStream()
+    // when the SSE flow paused for HITL. addStep() early-returns if
+    // streamState is null, so we MUST rebuild it (via startStream which
+    // creates a fresh "agent ·" thinking block) before replaying chunks
+    // OR rendering Hermes lifecycle events (FTS5 / curation / skill evolve).
+    // This produces a SECOND thinking trace block under the agent message,
+    // showing exactly what happened post-approval — clean visual separation
+    // from the pre-HITL block above.
+    const _hasSubChunks = Array.isArray(data.sub_chunks) && data.sub_chunks.length;
+    const _hasHermes    = !!(data.memory_write || data.memory_curate || data.skill_evolved);
+
+    // === DIAGNOSTIC === uncomment if Post-HITL trace doesn't appear:
+    console.log('[hitlDec] dec=%s, sub_chunks=%d, hermes=%s, nested=%s',
+                dec, (data.sub_chunks||[]).length, _hasHermes,
+                !!(data.nested_hitl && data.nested_hitl.interrupted));
+    if (_hasSubChunks) {
+      console.log('[hitlDec] sub_chunks sample:', data.sub_chunks.slice(0,3));
+    }
+
+    if (_hasSubChunks || _hasHermes) {
+      // Fresh thinking block — new sid, new badges, new body.
+      startStream();
+      const lbl = document.getElementById(streamState.sid+'-label');
+      if (lbl) lbl.textContent = `Post-HITL trace (${dec})…`;
+      console.log('[hitlDec] startStream done, streamState.sid=%s',
+                  streamState && streamState.sid);
+    }
+    if (_hasSubChunks) {
+      let _replayed = 0;
+      for (const sub of data.sub_chunks) {
+        try { dispatchChunk(sub, '', ''); _replayed++; }
+        catch (e) { console.warn('sub_chunk replay failed:', e, sub); }
+      }
+      console.log('[hitlDec] replayed %d/%d sub_chunks', _replayed, data.sub_chunks.length);
+    }
+    // If the sub-stream raised a NESTED HITL, switch to HITL tab and
+    // refresh /hitl/pending so the operator sees the new approval card.
+    if (data.nested_hitl && data.nested_hitl.interrupted) {
+      const niid = data.nested_hitl.interrupt_id || '';
+      addStep('hitl','HITL Interrupt (nested)',`Awaiting next approval`,
+        `interrupt: ${niid.slice(0,12)}`);
+      switchTab('hitl');
+      refreshHitl(5);
+    }
+
     if (data.error) {
       // Decision failed (already resolved, not found, etc.)
       addMessage('agent',`HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…
@@ -2615,10 +2680,23 @@ Outcome: ${outcome}`,'system');
         `memories: ${data.memory_curate.memories_count}\ntypes: ${types||'—'}`);
       flowEvent('curate','🧠 Curation',`${data.memory_curate.memories_count} memories`,types||'');
     }
+    if (data.skill_evolved) {
+      const sid = data.skill_evolved.skill_id || '';
+      const name = data.skill_evolved.name || sid;
+      addStep('evolve',`Skill Auto-Created: ${name}`,'registered in catalog',
+        `skill_id: ${sid}`);
+      flowEvent('evolve','⚡ Skill evolved',name,`registered as ${sid}`);
+    }
     flowAdd('hitl',`⚠ HITL ${dec.toUpperCase()}`,`${id.slice(0,12)}…`,`outcome: ${outcome}`,data);
     setTimeout(()=>refreshHitl(0),400);
     // Refresh session list to pick up the new turn written by Hermes
     setTimeout(loadSessions, 1200);
+    // If we opened a post-HITL thinking block (sub_chunks replay or
+    // Hermes addSteps fired into a fresh streamState), close it now so
+    // the badge bar gets the final tool/skill/hermes counts.
+    if (streamState) {
+      try { finalizeStream(); } catch (e) { /* noop */ }
+    }
   } catch(e){ addMessage('system','HITL decision error: '+e.message,'error'); }
   finally {
     // Always clear the in-flight marker — even on error — so the operator

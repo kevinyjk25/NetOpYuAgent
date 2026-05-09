@@ -387,7 +387,23 @@ class HitlRouter:
         )
 
         # Dispatch
+        logger.info(
+            "deliver: dispatching decision %s — interrupt=%s, "
+            "resumer_name=%r, waiters_count=%d, batch_id=%s",
+            decision.decision.value,
+            decision.interrupt_id[:12],
+            entry.resume_handle.resumer_name,
+            len(self._waiters),
+            get_batch_id(entry.payload.context_snapshot),
+        )
         result = await self._dispatch(decision, updated)
+        logger.info(
+            "deliver: dispatch returned — interrupt=%s, result_type=%s, "
+            "result_keys=%s",
+            decision.interrupt_id[:12],
+            type(result).__name__,
+            (list(result.keys())[:8] if isinstance(result, dict) else None),
+        )
         return {
             "interrupt_id":     decision.interrupt_id,
             "outcome":          decision.decision.value,

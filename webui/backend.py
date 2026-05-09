@@ -2031,6 +2031,14 @@ async def _submit_hitl_decision(
         # to a string here so the frontend doesn't get "[object Object]"
         # nor crash on `.slice` calls.
         _raw_result = outcome.get("result")
+        logger.info(
+            "_submit_hitl_decision: outcome shape — outcome_keys=%s, "
+            "_raw_result_type=%s, _raw_result_keys=%s",
+            list(outcome.keys()),
+            type(_raw_result).__name__,
+            (list(_raw_result.keys())[:10] if isinstance(_raw_result, dict)
+             else None),
+        )
         if isinstance(_raw_result, dict):
             _tool_result_str = (
                 _raw_result.get("tool_result")
@@ -2053,6 +2061,38 @@ async def _submit_hitl_decision(
             # by introspecting the resume_handle if needed.
             "tool_name":        "",
         }
+        # The resumer can return additional thinking-trace chunks (sub-loop
+        # steps that ran AFTER operator approval — TURN N, Tool Call,
+        # nested HITL, etc). Surface them so the UI can replay them into
+        # the thinking trace; without this, the trace dies at "HITL-WAIT"
+        # and the user sees nothing of what happened post-approval.
+        if isinstance(_raw_result, dict):
+            _sub = _raw_result.get("chunks")
+            if isinstance(_sub, list) and _sub:
+                result_dict["sub_chunks"] = _sub
+                logger.info(
+                    "_submit_hitl_decision: forwarding %d sub_chunks to UI "
+                    "(first kinds: %s)",
+                    len(_sub),
+                    [c.get("node_step") or c.get("type") or list(c.keys())[:2] for c in _sub[:5]],
+                )
+            else:
+                logger.info(
+                    "_submit_hitl_decision: NO sub_chunks in resumer outcome "
+                    "(_raw_result keys=%s)", list(_raw_result.keys()),
+                )
+            # If the sub-stream raised a NESTED HITL (e.g. user_choice
+            # resolved → loop ran → emitted another stop_hitl for tool
+            # watch-list), surface that so the UI re-pivots to HITL tab.
+            if _raw_result.get("interrupted"):
+                result_dict["nested_hitl"] = {
+                    "interrupted":  True,
+                    "interrupt_id": _raw_result.get("interrupt_id"),
+                }
+                logger.info(
+                    "_submit_hitl_decision: nested HITL detected — "
+                    "interrupt_id=%s", _raw_result.get("interrupt_id"),
+                )
         # Look up the resolved entry to recover tool_name + the original
         # user_query for synthesis. We fetch from the store rather than
         # holding a reference because outcome doesn't carry it.
@@ -2172,7 +2212,7 @@ async def _submit_hitl_decision(
         len(result_dict.get("synthesis") or ""),
         len(str(_tool_result) if _tool_result else ""),
     )
-    if _memory and _decision in ("approve", "reject", "escalate"):
+    if _memory and _decision in ("approve", "reject", "escalate", "choose", "answer"):
         try:
             # Build assistant_text. For approves with tool output use the
             # synthesised answer (or raw tool output if synthesis was skipped).
@@ -2185,7 +2225,7 @@ async def _submit_hitl_decision(
             # can confuse a synthesis answer with a pending interrupt note
             # (both contain the same user query) and report the action as
             # still awaiting approval — see screenshot bug report.
-            if _decision == "approve":
+            if _decision in ("approve", "choose", "answer"):
                 _body = (
                     result_dict.get("synthesis")
                     or (str(_tool_result)[:2000] if _tool_result else "")
@@ -2244,7 +2284,7 @@ async def _submit_hitl_decision(
                 user_text       = _user_query,
                 assistant_text  = assistant_text,
                 tool_calls      = [{"tool": _tool_name}] if _tool_name else [],
-                importance      = 0.7 if _decision == "approve" else 0.5,
+                importance      = 0.7 if _decision in ("approve", "choose", "answer") else 0.5,
             )
             result_dict["memory_write"] = {"session_id": session_id, "ok": True}
             logger.info(
@@ -2272,6 +2312,37 @@ async def _submit_hitl_decision(
             "_decision=%r (not in approve/reject/escalate)",
             bool(_memory), _decision,
         )
+
+    # ── Skill evolution after approve ────────────────────────────────
+    # If the operator approved a destructive action and a tool actually
+    # executed, ask SkillEvolver whether the request+solution forms a
+    # reusable pattern worth canonicalizing. Surfaces in thinking trace
+    # via result_dict["skill_evolved"].
+    if _decision in ("approve", "choose", "answer") and _tool_name and _tool_name != "agent_loop":
+        _evolver = services.get("skill_evolver")
+        if _evolver is not None:
+            try:
+                proposal = await _evolver.after_task(
+                    task_description = _user_query,
+                    solution_summary = (result_dict.get("synthesis") or "")[:400],
+                    tools_used       = [_tool_name],
+                    solution_steps   = [],
+                    key_observations = [],
+                    complexity       = 7.0,
+                    session_id       = session_id,
+                )
+                if proposal is not None:
+                    result_dict["skill_evolved"] = {
+                        "skill_id":   proposal.skill_id,
+                        "name":       getattr(proposal, "name", proposal.skill_id),
+                        "registered": True,
+                    }
+                    logger.info(
+                        "_submit_hitl_decision: skill evolved — id=%s",
+                        proposal.skill_id,
+                    )
+            except Exception as _e:
+                logger.debug("Post-HITL skill evolver skipped: %s", _e)
 
     # Diagnostic: log exactly what we send back to the frontend so we can
     # tell whether the issue is server-side (we never sent it) or client-side

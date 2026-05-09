@@ -988,27 +988,69 @@ class AgentRuntimeLoop:
                     "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
                     "ambiguous": skill_ambiguous,
                 }
-                # Skill ambiguity is no longer surfaced as a HITL card.
-                # Reasoning: skills are *reference material* injected into the
-                # LLM prompt, not workflows the operator must explicitly pick.
-                # The LLM reads the candidates, the user query, and the tool
-                # outputs, then decides which TOOLs to call. Destructive
-                # gating happens at exactly one point: tool watch-list
-                # interception of the LLM's chosen tool_call. Asking the
-                # operator to pre-select a skill (a) blocks the LLM from
-                # working, and (b) doesn't actually execute the skill —
-                # it just narrows the prompt, which the LLM was going to do
-                # automatically anyway.
+                # When multiple skills match closely, surface a USER_CHOICE
+                # HITL card so the operator picks which to apply (or none).
+                # The selection is then injected into env_context as
+                # `_selected_skills` for the rest of this stream call —
+                # the loop continues, it does NOT terminate here. The
+                # operator can also pick "none" which means "let the LLM
+                # decide from prompt context unaided".
                 #
-                # Ambiguity is logged as a node_step so operators can see
-                # which skills were considered; no card is raised.
-                if skill_ambiguous:
+                # Set HITL_SKILL_AMBIGUITY=false to disable this gate
+                # (LLM picks from the prompt unaided).
+                import os as _os
+                _ambig_already_resolved = bool(env_ctx.get("_skill_choice_resolved"))
+                if (
+                    skill_ambiguous
+                    and not _ambig_already_resolved
+                    and _os.getenv("HITL_SKILL_AMBIGUITY", "true").lower() != "false"
+                ):
+                    # Build choices from top candidates + a "none" option.
+                    _choices = []
+                    for sid, score in selected_skills[:5]:
+                        summary = None
+                        if self._skill_catalog is not None:
+                            try:
+                                summary = self._skill_catalog.get_summary(sid)
+                            except Exception:
+                                summary = None
+                        _choices.append({
+                            "id":       sid,
+                            "label":    (summary.name if summary else sid),
+                            "description": (
+                                f"{(summary.purpose if summary else '')[:120]}"
+                                + (f" · {summary.risk_level}" if summary and summary.risk_level else "")
+                            ),
+                            "metadata": {
+                                "skill_id": sid,
+                                "score":    round(float(score), 3),
+                                "tags":     (summary.tags[:4] if summary else []),
+                            },
+                        })
+                    # Always offer a "do not use any skill" option so
+                    # operators aren't forced to pick — the LLM has
+                    # access to all skill catalog summaries via prompt
+                    # injection regardless of this choice.
+                    _choices.append({
+                        "id":       "__none__",
+                        "label":    "Do not load any skill",
+                        "description": "Let the LLM decide from the prompt context without loading a specific skill recipe.",
+                        "metadata": {"skill_id": None, "score": 0.0, "tags": []},
+                    })
                     yield {
-                        "node_step": "skill_ambiguous (informational, not blocking)",
-                        "node":      "skill_load",
-                        "skill_count": skill_count,
-                        "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills[:5]],
+                        "message": (
+                            f"Multiple skills match this request — top candidates: "
+                            f"{[c['id'] for c in _choices[:3]]}"
+                        ),
+                        "node":           "hitl_gate",
+                        "stop_hitl":      True,
+                        "reason":         "skill_ambiguity",
+                        "hitl_kind":      "user_choice",
+                        "summary":        f"找到多个匹配的 skill，请选择要使用的具体 skill (或选择不使用)：",
+                        "choices":        _choices,
+                        "top_skills":     [c["id"] for c in _choices[:3] if c["id"] != "__none__"],
                     }
+                    return
 
             # ── Type #3 CLARIFICATION gate ────────────────────────────
             # When the agent is about to hallucinate a plan from too little
