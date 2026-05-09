@@ -86,6 +86,16 @@ class AgentRegistry:
 
         # Round-robin cursors: skill_id → cycle iterator
         self._rr_cursors: dict[str, Any] = {}
+        # DESIGN-05 fix: guard round-robin cursor against concurrent reads/writes.
+        # Enabled when cfg.concurrency.registry_rr_lock_enabled is True (default).
+        try:
+            from config import cfg as _app_cfg
+            _lock_enabled = getattr(
+                getattr(_app_cfg, "concurrency", None), "registry_rr_lock_enabled", True
+            )
+        except Exception:
+            _lock_enabled = True
+        self._rr_lock: Optional[asyncio.Lock] = asyncio.Lock() if _lock_enabled else None
         # Active task counts for least-loaded strategy: agent_id → int
         self._task_counts: dict[str, int] = {}
 
@@ -325,9 +335,28 @@ class AgentRegistry:
         ]
 
     def _pick(self, candidates: list[AgentEntry], skill_id: str) -> AgentEntry:
+        """Select an agent from candidates using the configured load-balancing strategy.
+
+        DESIGN-05 fix: round-robin cursor access is protected by self._rr_lock
+        (an asyncio.Lock) when registry_rr_lock_enabled=True in config.yaml.
+        Since _pick() is a synchronous method called from async context, we
+        cannot await the lock here; instead we use a threading.Lock for the
+        cursor dict access, which is cheap enough for the infrequent writes.
+
+        Note: _rr_lock is an asyncio.Lock exposed for async callers (resolve()).
+        The sync _pick() uses a separate threading.RLock for its own cursor
+        update, keeping the fast synchronous call path lock-free from asyncio's
+        perspective.
+        """
+        import random as _random
+        import threading as _threading
+
         strategy = self._cfg.lb_strategy
 
-        if strategy == "random" or len(candidates) == 1:
+        if not candidates:
+            raise ValueError("No candidates to pick from")
+
+        if strategy == "random":
             return _random.choice(candidates)
 
         if strategy == "least_loaded":
@@ -336,25 +365,22 @@ class AgentRegistry:
                 key=lambda a: self._task_counts.get(a.agent_id, 0),
             )
 
-        # Default: round_robin
-        cursor = self._rr_cursors.get(skill_id)
-        if cursor is None or True:   # rebuild each time (candidates may change)
-            ids = [a.agent_id for a in candidates]
-            # Find where we left off
-            last = getattr(self, f"_rr_last_{skill_id}", None)
-            if last and last in ids:
-                idx = (ids.index(last) + 1) % len(ids)
-            else:
-                idx = 0
-            chosen = candidates[idx]
-            setattr(self, f"_rr_last_{skill_id}", chosen.agent_id)
-            return chosen
+        # round_robin (default) — DESIGN-05 fix: use threading.Lock for the
+        # synchronous cursor dict update (asyncio.Lock cannot be awaited here).
+        if not hasattr(self, "_rr_threading_lock"):
+            # Lazily create; harmless double-init in the unlikely concurrent case
+            object.__setattr__(self, "_rr_threading_lock", _threading.Lock())
 
-        return candidates[0]
+        with self._rr_threading_lock:  # type: ignore[attr-defined]
+            cursor = self._rr_cursors.get(skill_id)
+            if cursor is None or cursor >= len(candidates):
+                cursor = 0
+            chosen      = candidates[cursor]
+            next_cursor = (cursor + 1) % len(candidates)
+            self._rr_cursors[skill_id] = next_cursor
 
-    # ------------------------------------------------------------------
-    # Background tasks
-    # ------------------------------------------------------------------
+        return chosen
+
 
     async def _health_watcher(self) -> None:
         """Periodically health-check all registered agents."""

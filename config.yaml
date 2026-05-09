@@ -372,3 +372,219 @@ policies:
       Query: "check it"
       Context: ""
       → {"specific_enough": false, "missing": [{"key":"target","prompt":"Check what?","reason":"pronoun 'it' has no antecedent"}]}
+
+# ── Hermes learning pipeline ──────────────────────────────────────────────────
+hermes:
+  # Timeout (seconds) for each individual LLM call inside SkillEvolver.
+  # Prevents Ollama hangs from blocking the post-turn cleanup indefinitely.
+  # Override: HERMES_SKILL_EVOLVER_TIMEOUT
+  skill_evolver_llm_timeout_seconds: 30.0
+  skill_evolver_enabled: true
+  skill_min_complexity_score: 0.6
+  skill_max_similar_distance: 0.3
+  reflection_enabled: true
+  consolidation_enabled: true
+
+
+# ── Post-action verification rules ───────────────────────────────────────────
+# Each rule maps a tool-name regex to health-check keywords.
+# First matching rule wins. Set default_pass: false for strict mode.
+post_verify:
+  default_pass: true
+  rules:
+    - pattern: "restart.*service|service.*restart"
+      require_any: ["healthy", "running", "active", "started", "ok"]
+      require_none: ["error", "failed", "crash"]
+    - pattern: "push.*config|config.*push|edit.*config|config.*edit"
+      require_any: []
+      require_none: ["syntax error", "invalid", "rejected"]
+    - pattern: "rollback|failover|drain"
+      require_any: []
+      require_none: ["error", "failed", "timeout"]
+
+
+# ── Session store (per-session in-memory counters) ───────────────────────────
+session_store:
+  # Evict clarification counters for sessions older than this many seconds.
+  # Override: SESSION_CLARIF_TTL_SECONDS
+  clarification_session_ttl_seconds: 3600
+  clarification_max_sessions: 10000
+
+
+# ── Concurrency tuning ────────────────────────────────────────────────────────
+concurrency:
+  # Poll interval for HITL pipeline _run_steps waiter detection (milliseconds).
+  # Lower = faster HITL response, higher CPU. Override: HITL_PIPELINE_POLL_INTERVAL_MS
+  hitl_pipeline_poll_interval_ms: 50
+  # Enable asyncio.Lock around round-robin cursor to prevent race conditions.
+  # Override: REGISTRY_RR_LOCK_ENABLED
+  registry_rr_lock_enabled: true
+
+
+# ── SSE streaming timeouts ────────────────────────────────────────────────────
+streaming:
+  # If the SSE chunk queue idles longer than this, the stream is closed.
+  # Lower for snappier disconnect detection; higher for long LLM responses.
+  # Override: SSE_STALL_TIMEOUT_SECONDS
+  sse_stall_timeout_seconds: 180.0
+  # After the stream ends, wait up to this many seconds for the executor task
+  # to drain gracefully before forcing cleanup.
+  # Override: SSE_EXEC_DRAIN_TIMEOUT_SECONDS
+  exec_task_drain_timeout_seconds: 5.0
+  # Maximum chunks queued before producers block (back-pressure).
+  chunk_queue_maxsize: 1000
+
+
+# ── Prose truncation caps ─────────────────────────────────────────────────────
+# These are character-count limits applied to prose snippets passed to LLMs
+# or stored as cross-turn context. Independent of token budgets.
+truncation:
+  recall_context_chars:    1500   # _fts_context truncation in clarification gate
+  confirmed_facts_preview: 10     # max facts shown in pre-verify summary
+  skill_detail_chars:      2000   # current_detail in evolver feedback patches
+  operator_feedback_chars:  500
+  operator_prefs_chars:     200
+  rationale_chars:          100   # diff_summary in skill creation
+  response_preview_chars:   200   # llm_trace previews in Flow tab
+  tool_debug_chars:        2000   # TOOL RESULT debug log entries
+  final_response_summary:   500   # PREV_ANALYSIS summary line truncation
+  log_redaction_preview:    120   # warning log message preview length
+
+
+# ── Context budget display caps (per-tool result preview in prompt) ──────────
+# These control how much of each tool's output the LLM sees in-context.
+# The full output is always available via read_stored_result; these caps
+# prevent the prompt from blowing up when many tools have large results.
+context_budget_display:
+  paged_result_limit:   1200   # read_stored_result page display cap
+  normal_result_limit:   600   # other tools' inline display cap
+  latest_result_bonus:   600   # extra chars for the most recent tool result
+  stored_lines_preview:    3   # number of [STORED:]/Preview lines to show
+  fallback_preview:      200   # bytes shown when [STORED:] preview fails to parse
+  page_default_size:    2000   # bytes per read_stored_result page (offset advance)
+  working_set_show:        10   # max device refs shown in the working_set context section
+
+
+
+# ── Classifier keyword fallback ───────────────────────────────────────────────
+# These lists are used by AgentRuntimeLoop.classify() ONLY when the PolicyEngine
+# LLM is unavailable (degraded mode). Operators can extend or replace them
+# without touching runtime code. Each value is matched as a whole word
+# (\b…\b) for ASCII; substring match for CJK.
+classifier_fallback:
+  destructive_keywords:
+    - restart
+    - rollback
+    - delete
+    - drain
+    - failover
+    - flush
+    - reboot
+    - terminate
+    - shutdown
+    - wipe
+    - reset
+    - 重启
+    - 回滚
+    - 删除
+    - 终止
+    - 关机
+    - 重置
+    - 下发配置
+    - 推送配置
+  p0p1_keywords:
+    - p0
+    - p1
+    - critical
+    - outage
+    - down
+    - emergency
+    - sev0
+    - sev1
+    - major incident
+  fast_model_keywords:
+    - dns
+    - ping
+    - status
+    - check
+    - what is
+    - show me
+    - list
+
+
+
+# ── Runtime per-turn refresh cadence (PERF tuning) ───────────────────────────
+# These knobs control how often stream() re-runs query-stable computations
+# (memory recall, skill selection). Higher values = less work per turn but
+# slower to react to mid-conversation changes. Tune based on workload.
+#
+# These fields belong logically under `runtime:` but are repeated here as a
+# top-level note for visibility. The loader reads from runtime.* if you put
+# them inside the `runtime:` block in your config.
+
+# runtime:
+#   recall_refresh_every_n_turns:        3     # default: refresh memory every 3 turns
+#   skill_select_refresh_every_n_turns:  5     # default: refresh skill selection every 5 turns
+#   recall_refresh_facts_growth:         3     # also refresh when ≥3 new facts arrive
+#   emit_matched_skills_only_on_change:  true  # don't re-emit unchanged skill SSE events
+
+
+
+# ── WebUI frontend tuning ─────────────────────────────────────────────────────
+webui:
+  # How often the WebUI polls /hitl/pending (ms). Lower = snappier HITL response,
+  # higher = less load on the backend during quiet periods.
+  # Override: WEBUI_HITL_POLL_INTERVAL_MS
+  hitl_poll_interval_ms: 3000
+  # How often the WebUI refreshes system status / wiring (ms).
+  # Override: WEBUI_STATS_POLL_INTERVAL_MS
+  stats_poll_interval_ms: 20000
+  # When true, every /hitl/pending poll logs at INFO (verbose).
+  # Default false: only log at INFO when there's actually something pending.
+  # Override: WEBUI_HITL_PENDING_LOG_INFO
+  hitl_pending_log_at_info: false
+
+
+# ── Retrieval (tool/skill top-K) ──────────────────────────────────────────────
+# Replaces full-catalog dump with semantic top-K retrieval at prompt-build time.
+# Drops prompt size 30-50% on systems with >10 tools/skills.
+retrieval:
+  # Engine: hybrid | bm25 | embedding | keyword
+  # hybrid    = BM25 + embedding fusion (recommended default)
+  # bm25      = lexical only, no embedder needed
+  # embedding = vector only, requires embeddings backend
+  # keyword   = legacy word-overlap (fallback / tests)
+  backend: "hybrid"
+
+  # Top-K caps for prompt injection
+  tool_top_k:   5      # tools matched to query injected into prompt
+  skill_top_k:  3      # skills matched to query (replaces format_summary)
+
+  # Hybrid fusion knobs
+  hybrid:
+    bm25_weight:   0.5
+    embed_weight:  0.5
+    fusion:       "weighted_sum"   # weighted_sum | rrf
+    rrf_k:         60               # only used when fusion=rrf
+    oversample:    4                # each component fetches K*oversample candidates
+
+  # Always-injected tools (HITL safety net)
+  # These tools are ALWAYS in the prompt regardless of query, because the
+  # operator-approval gate triggers ONLY when the LLM emits the call.
+  # The set comes from cfg.tools.hitl_tool_names by default; this knob
+  # lets you add framework-level tools (e.g. "agent_loop", "sub_agent").
+  always_inject_extra_tools: []
+
+  # Reduce TOOL_CALL_SYSTEM size after turn 1 (the LLM has learnt the format).
+  # Saves ~3000 chars / 750 tokens on every turn after the first.
+  shorten_tool_system_after_turn: 1
+
+
+# ── Meta tools ────────────────────────────────────────────────────────────────
+meta_tools:
+  # Built-in meta tools to register at startup (in addition to any
+  # custom ones registered programmatically via get_meta_tool_registry()).
+  builtin:
+    list_tools:    true     # discover tools matching a query
+    list_skills:   true     # discover skills matching a query
+    tool_details:  true     # full info for one named tool

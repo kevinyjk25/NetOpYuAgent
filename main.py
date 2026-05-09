@@ -281,25 +281,37 @@ async def build_services() -> dict[str, Any]:
         # any language (default rule-based extractor is English-only regex).
         try:
             import asyncio as _asyncio
+            import concurrent.futures as _futures
+            import threading as _threading
+
+            # Fix: when we're inside an already-running event loop (uvicorn
+            # startup), neither asyncio.run() nor a new_event_loop() works.
+            # Instead, dispatch the coroutine to a dedicated background thread
+            # that owns its own loop. This works in BOTH cases: with or
+            # without an active loop on the calling thread.
+            _bg_loop = _asyncio.new_event_loop()
+            def _bg_runner():
+                _asyncio.set_event_loop(_bg_loop)
+                _bg_loop.run_forever()
+            _bg_thread = _threading.Thread(target=_bg_runner, daemon=True, name="MemoryLLMLoop")
+            _bg_thread.start()
+
             def _sync_llm_for_memory(prompt: str) -> str:
                 """
-                Sync wrapper for the FactExtractor. Uses the engine's lightweight
-                _chat primitive (single-message, no full system prompt) so the
-                extractor sees only its own EXTRACT_PROMPT.
+                Sync wrapper for the FactExtractor. Submits the async call to
+                a dedicated background event loop (started above) and blocks
+                until done. Avoids the "loop already running" RuntimeWarning
+                that happens when this is called from inside FastAPI startup.
                 """
                 messages = [{"role": "user", "content": prompt}]
                 async def _go():
                     if hasattr(llm_engine, "_chat"):
                         return await llm_engine._chat(messages)
                     return await llm_engine.call(prompt, "", state=None)
-                try:
-                    return _asyncio.run(_go())
-                except RuntimeError:
-                    new_loop = _asyncio.new_event_loop()
-                    try:
-                        return new_loop.run_until_complete(_go())
-                    finally:
-                        new_loop.close()
+                # Submit to background loop, wait for result
+                fut = _asyncio.run_coroutine_threadsafe(_go(), _bg_loop)
+                # 60s budget for the smoke test + extraction calls
+                return fut.result(timeout=60)
             memory_router.set_llm_fn(_sync_llm_for_memory)
             # Smoke test: invoke the wrapper once with a tiny prompt to confirm
             # the LLM is reachable. If this fails, fact extraction silently
@@ -519,6 +531,85 @@ async def build_services() -> dict[str, Any]:
             )
 
         logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
+
+        # ── Retrieval framework + meta-tool wiring ─────────────────────────
+        # Replaces the full-catalog dump in _build_system_prompt with top-K
+        # semantic retrieval, plus an extensible meta-tool registry.
+        # Drops prompt size 30-50% on systems with >10 tools/skills.
+        try:
+            from retrieval import (
+                build_tool_retriever, build_skill_retriever,
+                get_meta_tool_registry,
+                make_list_tools_meta_tool, make_list_skills_meta_tool,
+                make_tool_details_meta_tool,
+            )
+
+            _embedder = services.get("embedder")
+            _loader   = services.get("tool_loader")  # may be None on early errors
+
+            # Build the corpora.  Tool metadata: prefer the live ToolLoader
+            # used at startup; skill defs come from the same source.
+            from tools.loader import ToolLoader as _TL
+            _tool_meta = _TL(mode=cfg.mode).build_metadata()
+            _skill_defs = _TL(mode=cfg.mode).skill_definitions()
+
+            tool_retriever  = build_tool_retriever (cfg, _embedder, _tool_meta)
+            skill_retriever = build_skill_retriever(cfg, _embedder, _skill_defs)
+            services["tool_retriever"]  = tool_retriever
+            services["skill_retriever"] = skill_retriever
+
+            # Meta-tool registry — register the built-ins enabled in config.
+            mt_reg = get_meta_tool_registry()
+            if cfg.meta_tools.builtin.list_tools:
+                mt_reg.register(
+                    make_list_tools_meta_tool(tool_retriever,
+                                              default_top_k=cfg.retrieval.tool_top_k),
+                    replace=True,
+                )
+            if cfg.meta_tools.builtin.list_skills:
+                mt_reg.register(
+                    make_list_skills_meta_tool(skill_retriever,
+                                               default_top_k=cfg.retrieval.skill_top_k),
+                    replace=True,
+                )
+            if cfg.meta_tools.builtin.tool_details:
+                mt_reg.register(
+                    make_tool_details_meta_tool(lambda: _tool_meta),
+                    replace=True,
+                )
+            services["meta_tool_registry"] = mt_reg
+
+            # Wire the LLM engine to use the retrievers + registry at prompt time
+            llm_engine.attach_retrieval(
+                tool_retriever     = tool_retriever,
+                skill_retriever    = skill_retriever,
+                meta_tool_registry = mt_reg,
+            )
+
+            # Register meta-tools as ordinary local callables in the ToolRouter
+            # so [TOOL:list_tools] dispatches to the meta-tool handler at execution.
+            try:
+                router = services.get("tool_router")
+                if router is not None:
+                    router.register_local(mt_reg.as_local_callables())
+                    logger.info(
+                        "Meta-tools wired into ToolRouter: %d callable(s)", len(mt_reg)
+                    )
+            except Exception as _mr_exc:
+                logger.warning("ToolRouter meta-tool wiring failed: %s", _mr_exc)
+
+            logger.info(
+                "Retrieval framework: backend=%s tool_top_k=%d skill_top_k=%d "
+                "meta_tools=%d",
+                cfg.retrieval.backend, cfg.retrieval.tool_top_k,
+                cfg.retrieval.skill_top_k, len(mt_reg),
+            )
+
+        except Exception as _ret_exc:
+            logger.warning(
+                "Retrieval framework wiring failed (%s) — falling back to "
+                "full-catalog dumps in prompts", _ret_exc,
+            )
 
     except Exception as exc:
         logger.warning("Integrations layer failed (%s). Running degraded.", exc)

@@ -3207,8 +3207,21 @@ document.getElementById('query-input').addEventListener('keydown', function(e) {
 });
 
 restoreLastSession(); loadSkills(); loadTools(); refreshStats();
-setInterval(refreshHitl, 3000);
-setInterval(refreshStats, 20000);
+// PERF-3: read poll intervals from /system/wiring; fall back to defaults.
+// Operators can tune in config.yaml under webui.* without touching this file.
+(async function _wireRefreshIntervals() {
+  let hitlMs = 3000, statsMs = 20000;
+  try {
+    const res = await fetch(`${BASE}/system/wiring`);
+    const wiring = await res.json();
+    if (wiring && wiring.webui) {
+      hitlMs  = parseInt(wiring.webui.hitl_poll_interval_ms,  10) || hitlMs;
+      statsMs = parseInt(wiring.webui.stats_poll_interval_ms, 10) || statsMs;
+    }
+  } catch (_e) { /* ignore — keep defaults */ }
+  setInterval(refreshHitl,  hitlMs);
+  setInterval(refreshStats, statsMs);
+})();
 </script>
 </body>
 </html>

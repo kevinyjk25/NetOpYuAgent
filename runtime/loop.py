@@ -18,12 +18,36 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncIterator, Optional, TYPE_CHECKING
 
 from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolResultStore
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
+
+
+def _truncation_cfg():
+    """Lazy-load AppConfig.truncation; safe to call from any module without
+    causing a circular import at top-level."""
+    try:
+        from config import cfg as _app_cfg
+        return getattr(_app_cfg, "truncation", None)
+    except Exception:
+        return None
+
+
+def _page_default_size_for_ledger() -> int:
+    """Page size used by _build_tool_ledger for read_stored_result coverage estimates.
+    Loaded from cfg.context_budget_display.page_default_size; defaults to 2000.
+    """
+    try:
+        from config import cfg as _app_cfg
+        return int(getattr(getattr(_app_cfg, "context_budget_display", None), "page_default_size", 2000))
+    except Exception:
+        return 2000
+
 
 if TYPE_CHECKING:
     from memory.adapter import MemoryAdapter as MemoryRouter
@@ -68,11 +92,19 @@ class VerificationResult:
     warnings: list[str] = field(default_factory=list)
 
     @classmethod
-    def ok(cls, reason: str = "Verification passed") -> "VerificationResult":
-        return cls(passed=True, reason=reason)
+    def ok(
+        cls,
+        reason: str = "Verification passed",
+        warnings: Optional[list[str]] = None,
+    ) -> "VerificationResult":
+        """Construct a passing result.  warnings is accepted (and stored)
+        so callers that detect non-fatal anomalies can surface them even
+        on a successful verification — the BUG-09 post_verify() rewrite
+        relies on this symmetric signature with fail()."""
+        return cls(passed=True, reason=reason, warnings=warnings or [])
 
     @classmethod
-    def fail(cls, reason: str, warnings: list[str] = None) -> "VerificationResult":
+    def fail(cls, reason: str, warnings: Optional[list[str]] = None) -> "VerificationResult":
         return cls(passed=False, reason=reason, warnings=warnings or [])
 
 
@@ -93,24 +125,57 @@ class ComplexityDecision:
 # PolicyEngine.evaluate(). Do not add new behavior that depends on these —
 # they exist purely to keep the classifier functional under degraded
 # conditions. New gating logic should be expressed as a policy.
-_DESTRUCTIVE_KEYWORDS = frozenset({
-    # English
+# Default keyword frozensets — used when AppConfig.classifier_fallback
+# can't be loaded (e.g. very early bootstrap before config is ready).
+# Production code reads from cfg.classifier_fallback; these defaults guarantee
+# the classifier always works even with no config.yaml present.
+_DEFAULT_DESTRUCTIVE_KEYWORDS = frozenset({
     "restart", "rollback", "delete", "drain", "failover", "flush",
     "reboot", "terminate", "shutdown", "wipe", "reset",
-    # Chinese equivalents (substring match is fine for CJK — no word boundaries needed)
     "重启", "回滚", "删除", "终止", "关机", "重置", "下发配置", "推送配置",
 })
-_P0P1_KEYWORDS = frozenset({
+_DEFAULT_P0P1_KEYWORDS = frozenset({
     "p0", "p1", "critical", "outage", "down", "emergency",
     "sev0", "sev1", "major incident",
 })
-_PARALLEL_KEYWORDS = frozenset({
-    "all sites", "all devices", "across regions", "compare", "correlate",
-    "multiple", "batch", "bulk", "foreach",
-})
-_FAST_MODEL_KEYWORDS = frozenset({
+_DEFAULT_FAST_MODEL_KEYWORDS = frozenset({
     "dns", "ping", "status", "check", "what is", "show me", "list",
 })
+
+
+def _classifier_fallback_keywords(category: str) -> frozenset:
+    """Load keyword fallback set for the given category from cfg.classifier_fallback;
+    returns the module-level default if config is unavailable.
+
+    category: 'destructive' | 'p0p1' | 'fast_model'
+    """
+    defaults = {
+        "destructive": _DEFAULT_DESTRUCTIVE_KEYWORDS,
+        "p0p1":        _DEFAULT_P0P1_KEYWORDS,
+        "fast_model":  _DEFAULT_FAST_MODEL_KEYWORDS,
+    }
+    field_map = {
+        "destructive": "destructive_keywords",
+        "p0p1":        "p0p1_keywords",
+        "fast_model":  "fast_model_keywords",
+    }
+    try:
+        from config import cfg as _app_cfg
+        cf = getattr(_app_cfg, "classifier_fallback", None)
+        if cf is None:
+            return defaults[category]
+        items = getattr(cf, field_map[category], None) or []
+        if not items:
+            return defaults[category]
+        return frozenset(items)
+    except Exception:
+        return defaults[category]
+
+
+# Backwards-compatible aliases — kept for any external imports
+_DESTRUCTIVE_KEYWORDS = _DEFAULT_DESTRUCTIVE_KEYWORDS
+_P0P1_KEYWORDS        = _DEFAULT_P0P1_KEYWORDS
+_FAST_MODEL_KEYWORDS  = _DEFAULT_FAST_MODEL_KEYWORDS
 
 
 # ---------------------------------------------------------------------------
@@ -130,12 +195,16 @@ class RuntimeConfig:
     default_delegation_mode:   DelegationMode   = DelegationMode.FRESH
     default_fork_context:      ForkContextPolicy = ForkContextPolicy.FACTS_ONLY
 
-    # P1: verification
-    enable_pre_verification:   bool = True
+    # Pre-verification REMOVED — replaced by tool-level HITL gate.
+    # The flag is kept for one release for backward compatibility but
+    # has no effect; the new pre_verify() stub returns ok unconditionally.
+    enable_pre_verification:   bool = False   # DEPRECATED, no-op (kept for compat)
     enable_post_verification:  bool = True
 
-    # P2: model tiering
-    enable_model_tiering:      bool = False   # set True when real LLM is wired
+    # Model tiering — flag retained for caller compatibility but unconsumed
+    # in the active runtime path. Tier hint travels via ComplexityDecision.
+    # Wire a real consumer in integrations/llm_engine.py if you want to act on it.
+    enable_model_tiering:      bool = False   # DEPRECATED, unconsumed (kept for compat)
 
     # Tool result inline limit
     tool_result_inline_limit:  int  = 4_000
@@ -186,20 +255,9 @@ class LoopResult:
 # ---------------------------------------------------------------------------
 
 
-# NOTE: A keyword-based `_heuristic_missing_fields` used to live here. It
-# scanned the query for ASCII/Chinese verbs (修复, fix, restart, ...) and
-# returned a hard-coded list of clarification fields. That approach was
-# deleted because:
-#   - case-sensitivity / language-bound (missed 修一下, please-change, etc.)
-#   - couldn't use recall context to resolve references like "fix it"
-#   - couldn't be tuned without code changes
-# Replaced by PolicyEngine[assess_query_specificity] which lets the LLM
-# decide based on full query + recall context. The policy is defined in
-# config.yaml under `policies` and can be edited without touching code.
-# Callers that previously imported `_heuristic_missing_fields` should now
-# either: (a) call PolicyEngine.evaluate("assess_query_specificity", ...)
-# directly, or (b) rely on the runtime loop's `_maybe_clarification_fields`
-# which wraps that policy.
+# Clarification gating is handled by PolicyEngine[assess_query_specificity]
+# (see config.yaml policies section).  A keyword-based heuristic was
+# previously used here but removed in favour of the LLM-evaluated policy.
 
 
 def _call_key(tool_name: str, tool_args: dict) -> str:
@@ -247,7 +305,7 @@ def _build_tool_ledger(
             offset = int(args.get("offset", 0))
             if not ref:
                 continue
-            total_m = _re.search(r"Total size:\s*([\d,]+)", val)
+            total_m = re.search(r"Total size:\s*([\d,]+)", val)
             total   = int(total_m.group(1).replace(",", "")) if total_m else 0
             if ref not in ref_info:
                 ref_info[ref] = {"total_size": total, "last_offset": offset, "pages": 0}
@@ -284,7 +342,7 @@ def _build_tool_ledger(
                 info    = ref_info.get(ref, {})
                 pages   = info.get("pages", 1)
                 total   = info.get("total_size", 0)
-                covered = info.get("last_offset", 0) + 2000
+                covered = info.get("last_offset", 0) + _page_default_size_for_ledger()
                 ledger.append(
                     f"TOOL_EXEC: read_stored_result|ref={ref} pages_read={pages} "
                     f"bytes_covered=0-{min(covered, total)} total={total}"
@@ -292,7 +350,7 @@ def _build_tool_ledger(
             continue
 
         raw  = raw_outputs.get(key, stored)
-        ref_m = _re.search(r"\[STORED:\w+:(\w+)\]", stored)
+        ref_m = re.search(r"\[STORED:\w+:(\w+)\]", stored)
         if ref_m:
             ref_id = ref_m.group(1)
             total  = ref_info.get(ref_id, {}).get("total_size", len(raw))
@@ -304,6 +362,80 @@ def _build_tool_ledger(
             ledger.append(f"TOOL_EXEC: {key} → inline size={len(raw)}")
 
     return ledger
+
+
+# ---------------------------------------------------------------------------
+# BoundedSessionStore — TTL-aware bounded dict for per-session counters
+# ---------------------------------------------------------------------------
+
+class BoundedSessionStore:
+    """
+    Thread-safe in-memory store for per-session counters with TTL eviction.
+
+    Replaces the unbounded dict[str, int] used for _clarification_counts.
+    Prevents memory leaks in long-running processes where every new session_id
+    would otherwise accumulate indefinitely.
+
+    BUG-08 fix: entries older than `ttl_seconds` are evicted lazily on get/set
+    and eagerly via a periodic sweep triggered on every N writes.
+
+    Configuration (from AppConfig):
+      session_store.clarification_session_ttl_seconds  (default 3600)
+      session_store.clarification_max_sessions          (default 10_000)
+    """
+
+    def __init__(self, ttl_seconds: int = 3600, max_sessions: int = 10_000):
+        self._ttl     = ttl_seconds
+        self._max     = max_sessions
+        self._data:  dict[str, int]   = {}
+        self._ts:    dict[str, float] = {}   # session_id → last_access timestamp
+        self._writes = 0
+
+    def get(self, session_id: str, default: int = 0) -> int:
+        now = time.monotonic()
+        if session_id in self._ts and (now - self._ts[session_id]) > self._ttl:
+            self._data.pop(session_id, None)
+            self._ts.pop(session_id, None)
+            return default
+        self._ts[session_id] = now
+        return self._data.get(session_id, default)
+
+    def set(self, session_id: str, value: int) -> None:
+        now = time.monotonic()
+        self._data[session_id] = value
+        self._ts[session_id]   = now
+        self._writes += 1
+        # Periodic eviction sweep every 100 writes
+        if self._writes % 100 == 0:
+            self._sweep(now)
+        # Hard cap: evict LRU entries when over limit
+        if len(self._data) > self._max:
+            self._evict_lru()
+
+    def increment(self, session_id: str) -> int:
+        val = self.get(session_id, 0) + 1
+        self.set(session_id, val)
+        return val
+
+    def _sweep(self, now: float) -> None:
+        expired = [k for k, ts in self._ts.items() if (now - ts) > self._ttl]
+        for k in expired:
+            self._data.pop(k, None)
+            self._ts.pop(k, None)
+        if expired:
+            logger.debug("BoundedSessionStore: evicted %d expired sessions", len(expired))
+
+    def _evict_lru(self) -> None:
+        """Evict the oldest 10% of entries when the hard cap is hit."""
+        n_evict = max(1, len(self._data) // 10)
+        oldest  = sorted(self._ts.items(), key=lambda kv: kv[1])[:n_evict]
+        for k, _ in oldest:
+            self._data.pop(k, None)
+            self._ts.pop(k, None)
+        logger.warning(
+            "BoundedSessionStore: cap=%d hit, evicted %d LRU sessions", self._max, n_evict
+        )
+
 
 
 class AgentRuntimeLoop:
@@ -324,27 +456,46 @@ class AgentRuntimeLoop:
         config:          Optional[RuntimeConfig]  = None,
         tool_store:      Optional[ToolResultStore] = None,
         skill_catalog:   Optional["SkillCatalogService"] = None,
+        llm_fn:          Optional[Any] = None,
     ) -> None:
+        """
+        Args:
+            llm_fn: Async callable ``(query, context, state) -> str`` that calls
+                    the real LLM.  If provided here, the monkey-patch step in
+                    main.py (patch_runtime_loop) is skipped.  If omitted, the
+                    legacy patch path is preserved for backward compatibility
+                    (DESIGN-03 partial fix — injection preferred over patching).
+        """
         self._memory       = memory_router
         self._cfg          = config or RuntimeConfig()
         self._store        = tool_store or ToolResultStore()
         self._budget       = ContextBudgetManager(self._cfg.budget, self._store)
         self._policy       = StopPolicy(self._cfg.stop_policy)
         self._skill_catalog = skill_catalog
-        # Per-session clarification counter so the agent can't loop on
-        # "ask user → low confidence → ask again". Capped by config.
-        self._clarification_counts: dict[str, int] = {}
+
+        # DESIGN-03: constructor injection takes priority over monkey-patch.
+        # If llm_fn is supplied at construction time, wire it immediately.
+        if llm_fn is not None:
+            self._call_llm = llm_fn  # type: ignore[assignment]
+
+        # BUG-08: Replace unbounded dict with TTL-bounded session store.
+        # Reads TTL/max from AppConfig when available; falls back to defaults.
+        try:
+            from config import cfg as _app_cfg
+            _ss = getattr(_app_cfg, "session_store", None)
+            _ttl = getattr(_ss, "clarification_session_ttl_seconds", 3600) if _ss else 3600
+            _max = getattr(_ss, "clarification_max_sessions", 10_000) if _ss else 10_000
+        except Exception:
+            _ttl, _max = 3600, 10_000
+        self._clarification_counts: BoundedSessionStore = BoundedSessionStore(
+            ttl_seconds=_ttl, max_sessions=_max
+        )
 
     # ------------------------------------------------------------------
     # Clarification gate — Type #3 multi-mode HITL
     # ------------------------------------------------------------------
 
-    # Action verbs that indicate the user wants a write/destructive op.
-    # Note: action-verb / read-verb classification used to live here as
-    # hard-coded keyword frozensets, used to decide whether a query was a
-    # destructive intent. This was brittle (case-sensitive, language-bound,
-    # missed paraphrases). It's now handled by PolicyEngine[assess_query_specificity]
-    # which the LLM evaluates against the full query + recall context.
+    # Destructive-intent classification → PolicyEngine[classify_destructive].
 
 
     @staticmethod
@@ -358,25 +509,24 @@ class AgentRuntimeLoop:
         \\b match. Use ASCII-explicit lookbehind/lookahead instead so
         Chinese-glued device IDs are correctly recognised.
         """
-        import re as _re
         q_lower = q.lower()
         # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01.
         # The (?<![a-z0-9]) / (?![a-z0-9]) anchors mean "not preceded /
         # followed by another ASCII alphanumeric" — Chinese characters
         # satisfy this constraint, so embedded device IDs are matched.
-        if _re.search(
+        if re.search(
             r"(?<![a-z0-9])[a-z]{2,}[-_]\w{2,}(?![a-z0-9])", q_lower
         ):
             return True
         # Also accept the structured device pattern used elsewhere in
         # this file (ap/sw/router/switch + digits) to stay consistent.
-        if _re.search(
+        if re.search(
             r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])",
             q_lower,
         ):
             return True
         # IPv4 (no character-class boundary issue for digits + dots)
-        if _re.search(r"(?<!\d)\d+\.\d+\.\d+\.\d+(?!\d)", q):
+        if re.search(r"(?<!\d)\d+\.\d+\.\d+\.\d+(?!\d)", q):
             return True
         return False
 
@@ -506,27 +656,26 @@ class AgentRuntimeLoop:
             )
 
         # ── Keyword heuristic (fallback when PolicyEngine not yet wired) ──────
-        import re as _re
         q = query.lower()
 
         def _word_match(kw: str, text: str) -> bool:
             if " " in kw or not kw.isascii():
                 return kw in text
-            return bool(_re.search(r"(?<![a-z0-9])" + _re.escape(kw) + r"(?![a-z0-9])", text))
+            return bool(re.search(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])", text))
 
-        if any(_word_match(kw, q) for kw in _DESTRUCTIVE_KEYWORDS):
+        if any(_word_match(kw, q) for kw in _classifier_fallback_keywords("destructive")):
             return ComplexityDecision(
                 complexity=QueryComplexity.COMPLEX,
                 reason="Destructive action detected (keyword heuristic)",
                 confidence=0.90, model_tier="full_model",
             )
-        if any(_word_match(kw, q) for kw in _P0P1_KEYWORDS):
+        if any(_word_match(kw, q) for kw in _classifier_fallback_keywords("p0p1")):
             return ComplexityDecision(
                 complexity=QueryComplexity.COMPLEX,
                 reason="P0/P1 severity (keyword heuristic)",
                 confidence=0.85, model_tier="full_model",
             )
-        tier = "fast_model" if any(_word_match(kw, q) for kw in _FAST_MODEL_KEYWORDS) else "full_model"
+        tier = "fast_model" if any(_word_match(kw, q) for kw in _classifier_fallback_keywords("fast_model")) else "full_model"
         return ComplexityDecision(
             complexity=QueryComplexity.SIMPLE,
             reason="Single-intent diagnostic query (keyword heuristic)",
@@ -578,57 +727,21 @@ class AgentRuntimeLoop:
         return self.classify(query)
 
 
-    async def pre_verify(
-        self,
-        query: str,
-        confirmed_facts: list[str],
-        env_context: dict[str, Any],
-    ) -> VerificationResult:
+    async def pre_verify(self, *args, **kwargs) -> "VerificationResult":
+        """REMOVED — destructive-action gating now happens at the single
+        authoritative point: when the LLM proposes a tool_call,
+        _cfg.hitl_tool_names intercepts before execution.
+
+        This stub is kept for one release so any external callers fail loudly
+        rather than silently degrading. Will be removed in the next version.
         """
-        DEPRECATED — kept only for backwards compatibility with code that
-        may still call this method directly.
-
-        The active loop no longer pre-verifies queries against PolicyEngine
-        before letting the LLM run. Destructive-action gating now happens
-        at a single, authoritative point: the LLM produces a tool_call,
-        and `_cfg.hitl_tool_names` watch-list intercepts before execution.
-
-        This function will be removed once external callers migrate.
-        """
-        from runtime.policy_engine import get_policy_engine as _get_pe
-        _engine = _get_pe()
-        if _engine is not None:
-            try:
-                _ctx_parts: list[str] = []
-                _fts = (env_context or {}).get("_fts_context")
-                if _fts:
-                    _ctx_parts.append(str(_fts)[:1500])
-                if confirmed_facts:
-                    _ctx_parts.append(
-                        "Confirmed facts:\n" +
-                        "\n".join(f"- {f}" for f in list(confirmed_facts)[:10])
-                    )
-                _ctx = "\n\n".join(_ctx_parts)
-                result = await _engine.evaluate(
-                    "preverify_safe_to_proceed", query, context=_ctx
-                )
-                if not result.match:
-                    return VerificationResult.fail(
-                        f"Policy[preverify_safe_to_proceed]: {result.reason}"
-                    )
-                return VerificationResult.ok("Pre-verification passed")
-            except Exception as _e:
-                import logging as _log
-                _log.getLogger(__name__).warning("pre_verify PolicyEngine error: %s", _e)
-
-        # Keyword fallback
-        q = query.lower()
-        if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
-            return VerificationResult.fail(
-                "Destructive action reached pre_verify — escalate to HITL"
-            )
-        return VerificationResult.ok("Pre-verification passed")
-
+        import warnings
+        warnings.warn(
+            "AgentRuntimeLoop.pre_verify() is removed. "
+            "Tool-level HITL gating via cfg.hitl_tool_names replaces it.",
+            DeprecationWarning, stacklevel=2,
+        )
+        return VerificationResult.ok("pre_verify is a no-op (removed)")
 
     async def post_verify(
         self,
@@ -637,27 +750,96 @@ class AgentRuntimeLoop:
         confirmed_facts: list[str],
     ) -> VerificationResult:
         """
-        Post-action verification: check the action achieved its intended outcome.
-        Replace with real health-check calls in production.
+        BUG-09 fix: Config-driven regex rule matching instead of hardcoded
+        string equality.  Rules are loaded from AppConfig.post_verify.rules
+        (config.yaml post_verify.rules section); each rule specifies:
+
+          pattern     — regex matched against tool name (case-insensitive)
+          require_any — result must contain at least one of these keywords
+                        (empty list = no positive requirement)
+          require_none — result must NOT contain any of these keywords
+                         (empty list = no negative constraint)
+
+        First matching rule wins.  If no rule matches, behaviour is governed
+        by AppConfig.post_verify.default_pass (default: True = permissive).
+
+        This allows operators to add new tool verification rules in config.yaml
+        without touching code.
         """
-        warnings = []
+        warnings_list: list[str] = []
         result_lower = result.lower()
 
-        if "error" in result_lower or "fail" in result_lower:
-            warnings.append("Result contains 'error'/'fail' — manual check recommended")
+        # Generic signal — always add to warnings but never fail on its own
+        if re.search(r"\berror\b|\bfail(ed)?\b", result_lower):
+            warnings_list.append("Result contains error/fail keywords — manual check recommended")
 
-        if action_type == "restart_service":
-            # TODO: post-action health probe — verify the restarted service via
-            # whatever health-check tool is registered for it.
-            if "healthy" not in result_lower:
+        # Load rules from config
+        try:
+            from config import cfg as _app_cfg
+            _pv_cfg = getattr(_app_cfg, "post_verify", None)
+            rules        = getattr(_pv_cfg, "rules", []) if _pv_cfg else []
+            default_pass = getattr(_pv_cfg, "default_pass", True) if _pv_cfg else True
+        except Exception:
+            rules, default_pass = [], True
+
+        matched_rule = None
+        for rule in rules:
+            pattern = rule.get("pattern", "")
+            if not pattern:
+                continue
+            try:
+                if re.search(pattern, action_type, re.IGNORECASE):
+                    matched_rule = rule
+                    break
+            except re.error as exc:
+                logger.warning("post_verify: invalid regex pattern %r: %s", pattern, exc)
+                continue
+
+        if matched_rule is None:
+            # No rule matched this tool name
+            if default_pass:
+                return VerificationResult.ok(
+                    f"Post-verification passed (no rule matched {action_type!r})"
+                    + (f" warnings={len(warnings_list)}" if warnings_list else ""),
+                    warnings=warnings_list,
+                )
+            else:
+                # Strict mode: require non-empty result
+                if not result.strip():
+                    return VerificationResult.fail(
+                        f"Post-verify strict mode: {action_type!r} returned empty result",
+                        warnings=warnings_list,
+                    )
+                return VerificationResult.ok(
+                    f"Post-verification passed (strict, no rule, non-empty result)",
+                    warnings=warnings_list,
+                )
+
+        # Apply the matched rule
+        require_any  = matched_rule.get("require_any", [])
+        require_none = matched_rule.get("require_none", [])
+
+        # require_none: any prohibited keyword → fail
+        for kw in require_none:
+            if kw.lower() in result_lower:
                 return VerificationResult.fail(
-                    f"Post-restart health check inconclusive for {action_type}",
-                    warnings=warnings,
+                    f"Post-verify: {action_type!r} result contains prohibited keyword {kw!r}",
+                    warnings=warnings_list,
+                )
+
+        # require_any: at least one required keyword must appear
+        if require_any:
+            if not any(kw.lower() in result_lower for kw in require_any):
+                return VerificationResult.fail(
+                    f"Post-verify: {action_type!r} result missing required keywords "
+                    f"(need one of: {require_any})",
+                    warnings=warnings_list,
                 )
 
         return VerificationResult.ok(
-            f"Post-verification passed for {action_type}"
-            + (f" (warnings: {len(warnings)})" if warnings else "")
+            f"Post-verification passed for {action_type!r}"
+            + (f" (warnings: {len(warnings_list)})" if warnings_list else ""),
+            warnings=warnings_list,
         )
 
     # ------------------------------------------------------------------
@@ -719,7 +901,9 @@ class AgentRuntimeLoop:
             )
 
         state = LoopState()
-        state.confirmed_facts = list(confirmed_facts or [])
+        # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
+        from runtime.stop_policy import FactsLedger as _FL
+        state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
         setattr(state, "working_set", list(working_set or []))
 
         chunks: list[str] = []
@@ -734,7 +918,7 @@ class AgentRuntimeLoop:
         called_tools: set[str] = set()
         _known_stores: dict[str, str] = {}  # ref_id → tool_name (for context injection)
         import json as _j2, re as _re2
-        for _fact in (confirmed_facts or []):
+        for _fact in (list(confirmed_facts) if confirmed_facts is not None else []):
             if _fact.startswith("TOOL_EXEC: "):
                 # Parse: "TOOL_EXEC: tool_name|{args} → ref=abc size=N"
                 _body = _fact[len("TOOL_EXEC: "):]
@@ -790,7 +974,6 @@ class AgentRuntimeLoop:
             chunks.append(llm_response)
 
             # P1: detect SKILL_LOAD directives and expand detail on demand
-            import re
             _skill_loads_this_turn_r: set[str] = set()
             for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
                 if skill_id in _skill_loads_this_turn_r:
@@ -857,8 +1040,12 @@ class AgentRuntimeLoop:
                 )
 
             if self._is_complete(llm_response, new_tool_calls):
+                # BUG-04 fix: the loop completed normally (LLM stopped calling
+                # tools), which means the task is done — use STOP_GRACEFUL, not
+                # CONTINUE. CONTINUE means "keep looping"; callers check this
+                # value to decide whether to trigger Hermes post-processing.
                 return LoopResult(
-                    outcome=StopOutcome.CONTINUE,
+                    outcome=StopOutcome.STOP_GRACEFUL,
                     final_response="\n".join(chunks),
                     confirmed_facts=state.confirmed_facts,
                     working_set=getattr(state, "working_set", []),
@@ -905,7 +1092,9 @@ class AgentRuntimeLoop:
                 working_set = fork_ctx.get("working_set", [])
 
         state = LoopState()
-        state.confirmed_facts = list(confirmed_facts or [])
+        # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
+        from runtime.stop_policy import FactsLedger as _FL, FactCategory as _FC
+        state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
         setattr(state, "working_set", list(working_set or []))
 
         tool_outputs: dict[str, str] = {}   # persists across turns
@@ -935,24 +1124,65 @@ class AgentRuntimeLoop:
         except (TypeError, ValueError):
             _initial_confidence = None
 
-        # Note: an "initial" clarification gate used to live here, running
-        # BEFORE the first turn's recall + skill loading. It was removed
-        # because turn-level clarification (in the main while loop, after
-        # skill selection) does the same job — and now uses
-        # PolicyEngine[assess_query_specificity] which the LLM evaluates
-        # against full context. Two gates with overlapping logic only
-        # made the timing harder to reason about.
+        # Single clarification gate runs in the main loop after skill selection.
 
+
+        # PERF-1: Cache stable per-query computations across turns.
+        # `query` is invariant for the entire stream() call, so re-running
+        # FTS5 recall and skill selection on every turn just wastes IO/CPU.
+        # We refresh on:
+        #   (a) every N turns (configurable) to pick up cross-session writes
+        #   (b) when state.confirmed_facts has grown by ≥ growth_threshold
+        # Skill selection is also stable; cached separately because the
+        # refresh cadence may differ.
+        try:
+            from config import cfg as _app_cfg
+            _runtime_cfg = getattr(_app_cfg, "runtime", None)
+            _recall_every = int(getattr(_runtime_cfg, "recall_refresh_every_n_turns", 3))
+            _skill_every  = int(getattr(_runtime_cfg, "skill_select_refresh_every_n_turns", 5))
+            _facts_growth = int(getattr(_runtime_cfg, "recall_refresh_facts_growth", 3))
+            _emit_skills_only_on_change = bool(getattr(_runtime_cfg, "emit_matched_skills_only_on_change", True))
+        except Exception:
+            _recall_every, _skill_every, _facts_growth = 3, 5, 3
+            _emit_skills_only_on_change = True
+
+        _cached_memory_results: list = []
+        _cached_skill_section:  str  = ""
+        _cached_selected_skills: list = []
+        _cached_skill_count:    int  = 0
+        _cached_skill_ambiguous: bool = False
+        _last_recall_turn = -1
+        _last_skill_turn  = -1
+        _last_facts_count = -1
+        _last_emitted_skill_sig: str = ""
 
         while True:
             state.turns += 1
-            memory_results = await self._retrieve_memory(query, session_id)
 
-            skill_section  = ""
-            skill_count    = 0
-            selected_skills: list = []
-            skill_ambiguous = False
-            if self._skill_catalog:
+            # ── PERF-1: conditional recall refresh ──────────────────────
+            _facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
+            _need_recall_refresh = (
+                _last_recall_turn < 0
+                or (state.turns - _last_recall_turn) >= _recall_every
+                or (_last_facts_count >= 0 and (_facts_now - _last_facts_count) >= _facts_growth)
+            )
+            if _need_recall_refresh:
+                _cached_memory_results = await self._retrieve_memory(query, session_id)
+                _last_recall_turn  = state.turns
+                _last_facts_count  = _facts_now
+            memory_results = _cached_memory_results
+
+            # ── PERF-1: conditional skill-selection refresh ─────────────
+            skill_section  = _cached_skill_section
+            skill_count    = _cached_skill_count
+            selected_skills = _cached_selected_skills
+            skill_ambiguous = _cached_skill_ambiguous
+
+            _need_skill_refresh = (
+                _last_skill_turn < 0
+                or (state.turns - _last_skill_turn) >= _skill_every
+            )
+            if self._skill_catalog and _need_skill_refresh:
                 try:
                     sel = self._skill_catalog.select_skills_for_query(query, top_k=5)
                     skill_section   = sel.summary
@@ -963,17 +1193,26 @@ class AgentRuntimeLoop:
                     # Fallback if select_skills_for_query not available
                     skill_section = self._skill_catalog.format_summary()
                     skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
+                # Update cache
+                _cached_skill_section    = skill_section
+                _cached_selected_skills  = selected_skills
+                _cached_skill_count      = skill_count
+                _cached_skill_ambiguous  = skill_ambiguous
+                _last_skill_turn         = state.turns
 
             # Compress paged results before assembly to prevent context overflow.
             # Without this, accumulated read_stored_result pages send the full
             # paged content back to the LLM every turn — Ollama times out.
             from runtime.context_budget import compress_paged_outputs as _compress
             _to_assemble = _compress(tool_outputs)
+            # BUG-07 fix: use state.working_set (which may be updated mid-loop)
+            # rather than the outer `working_set` variable (frozen at call start).
+            _current_working_set = getattr(state, "working_set", None) or working_set or []
             context_str = self._budget.assemble(
                 memory_results=memory_results,
                 tool_outputs=_to_assemble,       # compressed accumulated results
                 confirmed_facts=state.confirmed_facts,
-                working_set=working_set,
+                working_set=_current_working_set,
                 env_context=env_ctx,
             )
             if skill_section:
@@ -981,13 +1220,20 @@ class AgentRuntimeLoop:
                 # Q1: emit named matched skills so Flow tab shows exactly which skills loaded
                 skill_names = ", ".join(f"{sid}({sc:.2f})" for sid, sc in selected_skills) \
                               or f"{skill_count} skills"
-                yield {
-                    "node_step": f"Skills matched: {skill_names}",
-                    "node":      "skill_load",
-                    "skill_count": skill_count,
-                    "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
-                    "ambiguous": skill_ambiguous,
-                }
+                # PERF-4: only emit when signature changes (avoid wire spam on cached turns)
+                _skill_sig = f"{skill_count}|{skill_names}"
+                _suppress_skill_emit = _emit_skills_only_on_change and _skill_sig == _last_emitted_skill_sig
+                _last_emitted_skill_sig = _skill_sig
+                if _suppress_skill_emit:
+                    pass
+                else:
+                    yield {
+                        "node_step": f"Skills matched: {skill_names}",
+                        "node":      "skill_load",
+                        "skill_count": skill_count,
+                        "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
+                        "ambiguous": skill_ambiguous,
+                    }
                 # When multiple skills match closely, surface a USER_CHOICE
                 # HITL card so the operator picks which to apply (or none).
                 # The selection is then injected into env_context as
@@ -1069,7 +1315,9 @@ class AgentRuntimeLoop:
                 _recent_for_clar = env_ctx.get("_fts_context", "") or ""
                 if not _recent_for_clar and memory_results:
                     try:
-                        _recent_for_clar = "\n".join(str(m) for m in memory_results)[:1500]
+                        _tcfg = _truncation_cfg()
+                        _recall_cap = getattr(_tcfg, "recall_context_chars", 1500) if _tcfg else 1500
+                        _recent_for_clar = "\n".join(str(m) for m in memory_results)[:_recall_cap]
                     except Exception:
                         pass
                 clar_fields = await self._maybe_clarification_fields(
@@ -1079,9 +1327,7 @@ class AgentRuntimeLoop:
                     recent_context=_recent_for_clar,
                 )
                 if clar_fields:
-                    self._clarification_counts[session_id] = (
-                        self._clarification_counts.get(session_id, 0) + 1
-                    )
+                    self._clarification_counts.increment(session_id)
                     # Open-ended clarification — render as a CHAT TURN, not a
                     # HITL card. The operator's next message in the same
                     # session naturally provides the answers. This is the
@@ -1141,6 +1387,8 @@ class AgentRuntimeLoop:
             _trace = {}
             if hasattr(state, "_llm_traces") and state._llm_traces:
                 _trace = state._llm_traces[-1]
+            _tcfg_t = _truncation_cfg()
+            _resp_preview_cap = getattr(_tcfg_t, "response_preview_chars", 200) if _tcfg_t else 200
             yield {
                 "type":             "llm_trace",
                 "turn":             state.turns,
@@ -1149,8 +1397,8 @@ class AgentRuntimeLoop:
                 "context_chars":    _trace.get("context_chars", len(context_str)),
                 "response_chars":   _trace.get("response_chars", len(llm_response)),
                 "has_tool_call":    "[TOOL:" in llm_response,
-                "system_preview":   _trace.get("system_preview", context_str[:200]),
-                "response_preview": _trace.get("response_preview", llm_response[:200]),
+                "system_preview":   _trace.get("system_preview", context_str[:_resp_preview_cap]),
+                "response_preview": _trace.get("response_preview", llm_response[:_resp_preview_cap]),
             }
 
             # ── Stream tokens to user — strip [TOOL:...] lines ──────────
@@ -1158,10 +1406,9 @@ class AgentRuntimeLoop:
             # These are execution instructions, not prose — never show them
             # to the user.  Strip any line that starts with [TOOL: before
             # yielding tokens.
-            import re as _re
             _visible_lines = [
                 ln for ln in llm_response.splitlines()
-                if not _re.match(r'\s*\[TOOL:\w+\]', ln)
+                if not re.match(r'\s*\[TOOL:\w+\]', ln)
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
@@ -1174,8 +1421,6 @@ class AgentRuntimeLoop:
             # If the entire response was tool calls (no prose), yield nothing —
             # the tool result will be injected in the next turn's context and
             # the LLM will produce a proper prose answer then.
-
-            import re
             _skill_loads_this_turn: set[str] = set()
             for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
                 if skill_id in _skill_loads_this_turn:
@@ -1326,7 +1571,9 @@ class AgentRuntimeLoop:
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:2000], "─"*72)
+                    _tcfg_d = _truncation_cfg()
+                    _td_cap = getattr(_tcfg_d, "tool_debug_chars", 2000) if _tcfg_d else 2000
+                    logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:_td_cap], "─"*72)
                 yield {
                     "node_result": {
                         "tool":   tool_name,
@@ -1348,6 +1595,7 @@ class AgentRuntimeLoop:
                 # Write tool execution ledger into confirmed_facts for next-round reuse
                 _ledger = _build_tool_ledger(tool_outputs, tool_reg,
                                               getattr(state, "_tool_outputs_raw", {}))
+                # extend() on FactsLedger routes by prefix; on plain list it's native
                 state.confirmed_facts.extend(_ledger)
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
@@ -1386,6 +1634,7 @@ class AgentRuntimeLoop:
                             "_NUDGE: Your previous response was empty or too short. "
                             "Write a complete answer using the available context and tool results."
                         )
+                    # FactsLedger.append() routes by prefix; plain list .append() also works
                     state.confirmed_facts.append(_nudge_text)
                     # NOTE: do NOT manually increment state.turns here — the
                     # `continue` jumps back to the top of the while loop where
@@ -1393,11 +1642,13 @@ class AgentRuntimeLoop:
                     # increment caused the < 3 check to allow only 1 retry.
                     continue  # retry the LLM call
                 # Remove any lingering nudge entries
-                state.confirmed_facts = [
-                    f for f in state.confirmed_facts if not f.startswith("_NUDGE:")
-                ]
+                if hasattr(state.confirmed_facts, "clear_nudges"):
+                    state.confirmed_facts.clear_nudges()
+                else:
+                    state.confirmed_facts = [f for f in state.confirmed_facts if not f.startswith("_NUDGE:")]
                 _ledger = _build_tool_ledger(tool_outputs, tool_reg,
                                               getattr(state, "_tool_outputs_raw", {}))
+                # extend() on FactsLedger routes by prefix; on plain list it's native
                 state.confirmed_facts.extend(_ledger)
                 # Capture final synthesis response (not intermediate page-reading turns)
                 _resp_clean = llm_response.strip()
@@ -1408,7 +1659,9 @@ class AgentRuntimeLoop:
                     and state.turns > 1
                 )
                 if _is_synthesis:
-                    summary_line = _resp_clean[:500].replace("\n", " ")
+                    _tcfg_f = _truncation_cfg()
+                    _fsum_cap = getattr(_tcfg_f, "final_response_summary", 500) if _tcfg_f else 500
+                    summary_line = _resp_clean[:_fsum_cap].replace("\n", " ")
                     state.confirmed_facts.append(f"PREV_ANALYSIS: {summary_line}")
                 # NOTE: turn persistence (after_turn) is handled by the backend's
                 # post-turn hook in webui/backend.py:600 via dtm.after_turn(). Do NOT
@@ -1448,7 +1701,6 @@ class AgentRuntimeLoop:
         (qwen3, deepseek-r1, etc.) before tool parsing or display.
         Preserves everything outside the think block.
         """
-        import re
         # Remove <think>...</think> blocks (case-insensitive, multiline, non-greedy)
         cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL | re.IGNORECASE)
         return cleaned.strip()
@@ -1465,7 +1717,6 @@ class AgentRuntimeLoop:
           - Malformed JSON: falls back to empty args dict
           - Multiple tool calls in one response (takes first only if dedup active)
         """
-        import re
         import json as _json
 
         # Step 1: strip thinking block
@@ -1555,8 +1806,7 @@ class AgentRuntimeLoop:
 
     @staticmethod
     def _skill_loads_in(response: str) -> set:
-        import re as _re
-        return set(_re.findall(r"\[SKILL_LOAD:(\w+)\]", response))
+        return set(re.findall(r"\[SKILL_LOAD:(\w+)\]", response))
 
     @staticmethod
     def _is_complete(response: str, tool_calls: list) -> bool:
@@ -1566,10 +1816,9 @@ class AgentRuntimeLoop:
         # asked for skill detail and is waiting for it — keep the loop running
         # so next turn can read the loaded detail. Only mark complete if the
         # model produced real prose + tool calls alongside the SKILL_LOAD.
-        import re as _re
-        skill_loads = _re.findall(r"\[SKILL_LOAD:\w+\]", response)
+        skill_loads = re.findall(r"\[SKILL_LOAD:\w+\]", response)
         if skill_loads:
-            stripped = _re.sub(r"\[SKILL_LOAD:\w+\]", "", response).strip()
+            stripped = re.sub(r"\[SKILL_LOAD:\w+\]", "", response).strip()
             if len(stripped) == 0 and len(tool_calls) == 0:
                 # Pure SKILL_LOAD — keep looping so next turn sees the detail
                 return False

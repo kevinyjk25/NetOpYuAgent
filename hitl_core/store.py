@@ -70,6 +70,95 @@ def _entry_from_bytes(data: bytes) -> CheckpointEntry:
 
 
 # ---------------------------------------------------------------------------
+# Lua CAS script for atomic mark_resolved in Redis (BUG-02 fix).
+# Atomically: load entry → check state == PENDING → mutate → save.
+# Returns the serialised entry bytes on success, or nil if the entry
+# didn't exist or was already resolved (idempotent guard).
+# ---------------------------------------------------------------------------
+_LUA_MARK_RESOLVED = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+local ok, entry = pcall(cmsgpack.unpack, raw)
+if not ok then
+    -- Fallback: try JSON (when msgpack unavailable at write time)
+    ok, entry = pcall(cjson.decode, raw)
+    if not ok then return nil end
+end
+if entry['state'] ~= 'pending' then return nil end
+entry['state'] = 'resolved'
+entry['decision'] = cmsgpack.unpack(ARGV[1])
+entry['decided_at'] = tonumber(ARGV[2])
+local new_raw = cmsgpack.pack(entry)
+redis.call('SET', KEYS[1], new_raw, 'KEEPTTL')
+redis.call('ZREM', KEYS[2], KEYS[3])
+return new_raw
+"""
+
+# Pure-JSON fallback Lua (when msgpack not available on Redis side)
+_LUA_MARK_RESOLVED_JSON = """
+local raw = redis.call('GET', KEYS[1])
+if not raw then return nil end
+local entry = cjson.decode(raw)
+if entry['state'] ~= 'pending' then return nil end
+entry['state'] = 'resolved'
+entry['decision'] = cjson.decode(ARGV[1])
+entry['decided_at'] = tonumber(ARGV[2])
+local new_raw = cjson.encode(entry)
+redis.call('SET', KEYS[1], new_raw, 'KEEPTTL')
+redis.call('ZREM', KEYS[2], KEYS[3])
+return new_raw
+"""
+
+
+# ---------------------------------------------------------------------------
+# SQLite connection pool helper (DESIGN-07 fix)
+# ---------------------------------------------------------------------------
+# Reuses per-thread connections for SqliteCheckpointStore instead of
+# opening/closing a new connection on every read/write.
+
+import threading as _threading
+
+class _SqlitePool:
+    """Minimal thread-local SQLite connection pool."""
+    def __init__(self, db_path: str):
+        self._db_path  = db_path
+        self._local    = _threading.local()
+
+    def get_conn(self):
+        """Return the thread-local connection, creating it if needed."""
+        import sqlite3
+        conn = getattr(self._local, "conn", None)
+        if conn is None:
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
+            conn.execute("PRAGMA journal_mode=WAL")
+            conn.execute("PRAGMA synchronous=NORMAL")
+            self._local.conn = conn
+        return conn
+
+    def close_all(self) -> None:
+        """Close the current thread's connection (call at thread exit)."""
+        conn = getattr(self._local, "conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except Exception:
+                pass
+            self._local.conn = None
+
+
+_SQLITE_POOLS: dict[str, "_SqlitePool"] = {}
+_POOL_LOCK = _threading.Lock()
+
+
+def _get_sqlite_pool(db_path: str) -> "_SqlitePool":
+    """Return (creating if needed) the shared pool for db_path."""
+    with _POOL_LOCK:
+        if db_path not in _SQLITE_POOLS:
+            _SQLITE_POOLS[db_path] = _SqlitePool(db_path)
+        return _SQLITE_POOLS[db_path]
+
+
+# ---------------------------------------------------------------------------
 # Abstract base
 # ---------------------------------------------------------------------------
 
@@ -355,14 +444,69 @@ class RedisCheckpointStore(BaseCheckpointStore):
     async def mark_resolved(
         self, interrupt_id: str, decision: HitlDecision,
     ) -> Optional[CheckpointEntry]:
-        entry = await self.load(interrupt_id)
-        if entry is None or entry.state != InterruptState.PENDING:
+        """Atomic CAS via Lua script — prevents double-approval race (BUG-02).
+
+        The Lua script runs atomically on the Redis server:
+          GET entry → check state == PENDING → mutate → SET back
+        No window between load and save; concurrent calls on any replica
+        will see either the original PENDING state or the already-RESOLVED
+        state, never both succeeding.
+
+        Falls back to JSON Lua script if msgpack is unavailable on Redis,
+        and finally to a Python-level load-check-save with a logged warning
+        if the Lua script itself fails (e.g. old Redis without EVALSHA).
+        """
+        now_ts = datetime.now(timezone.utc).timestamp()
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        # Serialise decision for Lua consumption
+        try:
+            import msgpack as _mp
+            decision_bytes = _mp.packb(decision.model_dump(mode="json"), use_bin_type=True)
+            lua_script = _LUA_MARK_RESOLVED
+        except (ImportError, Exception):
+            import json as _json
+            decision_bytes = _json.dumps(decision.model_dump(mode="json")).encode()
+            lua_script = _LUA_MARK_RESOLVED_JSON
+
+        entry_key   = self.PREFIX_ENTRY + interrupt_id
+        pending_key = self.KEY_PENDING_IX
+
+        try:
+            result = await self._redis.eval(
+                lua_script,
+                3,                              # numkeys
+                entry_key, pending_key, interrupt_id,
+                decision_bytes, str(now_ts),
+            )
+        except Exception as lua_err:
+            # Lua eval failed (old Redis, NOSCRIPT, etc.) — fall back to
+            # Python-level CAS with a WARNING so ops knows atomicity is degraded.
+            logger.warning(
+                "mark_resolved: Lua eval failed (%s) — falling back to "
+                "non-atomic Python CAS. Concurrent double-approval possible.",
+                lua_err,
+            )
+            entry = await self.load(interrupt_id)
+            if entry is None or entry.state != InterruptState.PENDING:
+                return None
+            entry.state    = InterruptState.RESOLVED
+            entry.decision = decision
+            entry.decided_at = datetime.now(timezone.utc)
+            await self.save(entry)
+            return entry
+
+        if result is None:
+            # Entry didn't exist or was already resolved — idempotent
             return None
-        entry.state = InterruptState.RESOLVED
-        entry.decision = decision
-        entry.decided_at = datetime.now(timezone.utc)
-        await self.save(entry)
-        return entry
+
+        # Deserialise the mutated entry returned by Lua
+        try:
+            return _entry_from_bytes(bytes(result))
+        except Exception as exc:
+            logger.warning("mark_resolved: failed to deserialise Lua result: %s", exc)
+            # Best-effort: load from Redis after Lua already resolved it
+            return await self.load(interrupt_id)
 
     async def save_batch(self, batch: HitlBatch) -> None:
         data = self._serialise_batch(batch)
@@ -479,6 +623,13 @@ class SqliteCheckpointStore(BaseCheckpointStore):
         self._db_path = db_path
         self._init_lock = asyncio.Lock()
         self._initialised = False
+        # DESIGN-07 fix: reuse thread-local connections via _SqlitePool
+        self._pool: _SqlitePool = _get_sqlite_pool(db_path)
+        # BUG-02 fix: serialise concurrent mark_resolved calls.
+        # SQLite's per-row locking is at the storage level; we also need
+        # application-level serialisation to prevent two coroutines both
+        # reading state=PENDING before either writes state=RESOLVED.
+        self._resolve_lock = asyncio.Lock()
 
     async def _ensure_init(self) -> None:
         if self._initialised:
@@ -490,9 +641,9 @@ class SqliteCheckpointStore(BaseCheckpointStore):
             self._initialised = True
 
     def _init_sync(self) -> None:
-        import sqlite3
-        with sqlite3.connect(self._db_path) as conn:
-            conn.executescript("""
+        # Use pool connection for schema init too
+        conn = self._pool.get_conn()
+        conn.executescript("""
                 CREATE TABLE IF NOT EXISTS checkpoints (
                     interrupt_id   TEXT PRIMARY KEY,
                     thread_id      TEXT NOT NULL DEFAULT '',
@@ -518,7 +669,7 @@ class SqliteCheckpointStore(BaseCheckpointStore):
                 CREATE INDEX IF NOT EXISTS idx_b_thread
                     ON batches(thread_id, state);
             """)
-            conn.commit()
+        conn.commit()
 
     async def save(self, entry: CheckpointEntry) -> None:
         await self._ensure_init()
@@ -554,8 +705,9 @@ class SqliteCheckpointStore(BaseCheckpointStore):
         return await asyncio.to_thread(self._load_sync, interrupt_id)
 
     def _load_sync(self, interrupt_id: str) -> Optional[CheckpointEntry]:
-        import sqlite3
-        with sqlite3.connect(self._db_path) as conn:
+        conn = self._pool.get_conn()
+        conn.isolation_level = None  # autocommit off; explicit commit below
+        if True:  # pool connection block (DESIGN-07)
             row = conn.execute(
                 "SELECT data FROM checkpoints WHERE interrupt_id = ?",
                 (interrupt_id,),
@@ -574,8 +726,9 @@ class SqliteCheckpointStore(BaseCheckpointStore):
         return await asyncio.to_thread(self._delete_sync, interrupt_id)
 
     def _delete_sync(self, interrupt_id: str) -> bool:
-        import sqlite3
-        with sqlite3.connect(self._db_path) as conn:
+        conn = self._pool.get_conn()
+        conn.isolation_level = None  # autocommit off; explicit commit below
+        if True:  # pool connection block (DESIGN-07)
             cur = conn.execute(
                 "DELETE FROM checkpoints WHERE interrupt_id = ?",
                 (interrupt_id,),
@@ -592,8 +745,9 @@ class SqliteCheckpointStore(BaseCheckpointStore):
     def _list_pending_sync(
         self, limit: int, thread_id: Optional[str],
     ) -> list[CheckpointEntry]:
-        import sqlite3
-        with sqlite3.connect(self._db_path) as conn:
+        conn = self._pool.get_conn()
+        conn.isolation_level = None  # autocommit off; explicit commit below
+        if True:  # pool connection block (DESIGN-07)
             if thread_id:
                 rows = conn.execute("""
                     SELECT data FROM checkpoints
@@ -617,16 +771,22 @@ class SqliteCheckpointStore(BaseCheckpointStore):
     async def mark_resolved(
         self, interrupt_id: str, decision: HitlDecision,
     ) -> Optional[CheckpointEntry]:
-        # Load → mutate → save. No native transaction required because
-        # each call is atomic within the sqlite UPSERT.
-        entry = await self.load(interrupt_id)
-        if entry is None or entry.state != InterruptState.PENDING:
-            return None
-        entry.state = InterruptState.RESOLVED
-        entry.decision = decision
-        entry.decided_at = datetime.now(timezone.utc)
-        await self.save(entry)
-        return entry
+        """BUG-02 fix: lock the full load-check-mutate-save sequence so
+        concurrent coroutines cannot both observe state=PENDING and both
+        proceed to write state=RESOLVED (double-approval).
+
+        The asyncio.Lock() is sufficient for single-host (one process) SQLite
+        deployments. For multi-host, use RedisCheckpointStore with Lua CAS.
+        """
+        async with self._resolve_lock:
+            entry = await self.load(interrupt_id)
+            if entry is None or entry.state != InterruptState.PENDING:
+                return None
+            entry.state    = InterruptState.RESOLVED
+            entry.decision = decision
+            entry.decided_at = datetime.now(timezone.utc)
+            await self.save(entry)
+            return entry
 
     async def save_batch(self, batch: HitlBatch) -> None:
         await self._ensure_init()
@@ -652,8 +812,9 @@ class SqliteCheckpointStore(BaseCheckpointStore):
         return await asyncio.to_thread(self._load_batch_sync, batch_id)
 
     def _load_batch_sync(self, batch_id: str) -> Optional[HitlBatch]:
-        import sqlite3
-        with sqlite3.connect(self._db_path) as conn:
+        conn = self._pool.get_conn()
+        conn.isolation_level = None  # autocommit off; explicit commit below
+        if True:  # pool connection block (DESIGN-07)
             row = conn.execute(
                 "SELECT data FROM batches WHERE batch_id = ?", (batch_id,),
             ).fetchone()
@@ -674,8 +835,9 @@ class SqliteCheckpointStore(BaseCheckpointStore):
     def _list_pending_batches_sync(
         self, limit: int, thread_id: Optional[str],
     ) -> list[HitlBatch]:
-        import sqlite3
-        with sqlite3.connect(self._db_path) as conn:
+        conn = self._pool.get_conn()
+        conn.isolation_level = None  # autocommit off; explicit commit below
+        if True:  # pool connection block (DESIGN-07)
             if thread_id:
                 rows = conn.execute("""
                     SELECT data FROM batches
@@ -701,8 +863,9 @@ class SqliteCheckpointStore(BaseCheckpointStore):
         return await asyncio.to_thread(self._delete_batch_sync, batch_id)
 
     def _delete_batch_sync(self, batch_id: str) -> bool:
-        import sqlite3
-        with sqlite3.connect(self._db_path) as conn:
+        conn = self._pool.get_conn()
+        conn.isolation_level = None  # autocommit off; explicit commit below
+        if True:  # pool connection block (DESIGN-07)
             cur = conn.execute("DELETE FROM batches WHERE batch_id = ?", (batch_id,))
             conn.commit()
             return cur.rowcount > 0
@@ -727,6 +890,11 @@ class SqliteCheckpointStore(BaseCheckpointStore):
         except ImportError:
             unpacked = json.loads(data.decode("utf-8"))
         return HitlBatch.model_validate(unpacked)
+
+
+    async def close(self) -> None:
+        """DESIGN-07: close thread-local connection for this store."""
+        await asyncio.to_thread(self._pool.close_all)
 
 
 # ---------------------------------------------------------------------------

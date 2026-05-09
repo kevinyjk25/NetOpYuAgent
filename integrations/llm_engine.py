@@ -85,6 +85,23 @@ class LLMEngine:
     Subclass or configure via LLMEngine.from_config(cfg).
     """
 
+    # Slim system prompt — used from turn 2+ when shorten_tool_system_after_turn fires.
+    # The LLM has already learned the tool-call format from turn 1's full prompt;
+    # repeating the rules every turn just wastes tokens.
+    TOOL_CALL_SYSTEM_SLIM = """You are an expert IT network operations assistant.
+
+TOOL CALL FORMAT: [TOOL:name] {{"arg": "value"}}
+Rules: one tool per response, never repeat a call, end with analysis (no [TOOL:] line) when you have enough info.
+Destructive tools (⚠HITL) — propose with concrete args; the operator will review before execution.
+Large results show as [STORED:tool:ref_id] — read with [TOOL:read_stored_result] {{"ref_id": "..."}}.
+
+{extra_tools_section}
+
+{skill_summary}
+
+{confirmed_facts_section}
+"""
+
     TOOL_CALL_SYSTEM = """You are an expert IT network operations assistant.
 
 TOOL CALLING FORMAT — use EXACTLY this syntax on its own line:
@@ -213,6 +230,30 @@ Return format:
         self.model       = model
         self.temperature = temperature
         self.max_tokens  = max_tokens
+        # Retrieval framework attachments (optional, set via attach_retrieval()).
+        # When None, _build_system_prompt falls back to legacy full-catalog dump.
+        self._tool_retriever:     Any = None
+        self._skill_retriever:    Any = None
+        self._meta_tool_registry: Any = None
+
+    def attach_retrieval(
+        self,
+        *,
+        tool_retriever:     Any = None,
+        skill_retriever:    Any = None,
+        meta_tool_registry: Any = None,
+    ) -> None:
+        """Attach the prompt-time retrieval framework. Idempotent — call any
+        time after construction. Pass None to leave a slot unchanged."""
+        if tool_retriever     is not None: self._tool_retriever     = tool_retriever
+        if skill_retriever    is not None: self._skill_retriever    = skill_retriever
+        if meta_tool_registry is not None: self._meta_tool_registry = meta_tool_registry
+        logger.info(
+            "LLMEngine: retrieval attached  tool=%s skill=%s meta=%s",
+            getattr(tool_retriever, "name", None),
+            getattr(skill_retriever, "name", None),
+            "yes" if meta_tool_registry else "no",
+        )
 
     @classmethod
     def from_config(cls, cfg: dict) -> "LLMEngine":
@@ -260,54 +301,211 @@ Return format:
         """
         raise NotImplementedError
 
-    def _build_system_prompt(
-        self, context: str, skill_catalog: Any = None,
-        confirmed_facts: list[str] | None = None,
-        tool_registry: dict | None = None,
+
+    # ─────────────────────────────────────────────────────────────────
+    # Section builders (retriever-aware)
+    # ─────────────────────────────────────────────────────────────────
+
+    def _build_tools_section(
+        self,
+        *,
+        query:              Optional[str],
+        tool_retriever:     Any,
+        meta_tool_registry: Any,
+        tool_registry:      dict | None,
     ) -> str:
-        # ── Uploaded / extra tools section ───────────────────────────
-        # Base tools are listed in TOOL_CALL_SYSTEM examples.
-        # Any tools registered AFTER startup (via upload) are injected here
-        # so the LLM knows they exist and can call them.
-        # Build AVAILABLE TOOLS section dynamically from ToolLoader metadata.
-        # No tool name is hardcoded here — the section is assembled from
-        # tools/{mock,pragmatic,builtin}/registry.py for the active mode.
-        extra_tools_section = ""
-        _tool_loader = (
-            # Prefer the loader stored by build_services (has correct mode)
-            None  # will be populated below
-        )
+        """Build the AVAILABLE TOOLS prompt section.
+
+        Three layers, concatenated in order:
+          1. META TOOLS (always injected, from MetaToolRegistry)
+          2. SAFETY-NET TOOLS (always injected — HITL gate would not fire
+             unless the LLM emits the call, so destructive tools must be
+             visible regardless of query)
+          3. RETRIEVED TOOLS (top-K from query, when retriever + query present)
+
+        Falls back to the full ToolLoader dump when no retriever / no query.
+        """
         try:
-            # Try to get the loader from the services context if available
-            # Fall back to building from tool_registry keys (registered/uploaded tools)
+            from config import cfg as _app_cfg
+            tool_top_k = int(getattr(_app_cfg.retrieval, "tool_top_k", 5))
+            extra_always = list(
+                getattr(_app_cfg.retrieval, "always_inject_extra_tools", []) or []
+            )
+            hitl_names = list(getattr(_app_cfg.tools, "hitl_tool_names", []) or [])
+        except Exception:
+            tool_top_k, extra_always, hitl_names = 5, [], []
+
+        lines: list[str] = []
+
+        # 1) Meta tools
+        if meta_tool_registry is not None:
+            try:
+                meta_block = meta_tool_registry.build_prompt_section()
+                if meta_block:
+                    lines.append(meta_block)
+            except Exception as exc:
+                logger.warning("MetaToolRegistry section failed: %s", exc)
+
+        # 2/3) Retrieval-driven listing
+        if tool_retriever is not None and query:
+            try:
+                # Always-inject tools (HITL safety net + extras)
+                always_inject_set = set(hitl_names) | set(extra_always)
+
+                # Retrieve top-K matching the query
+                res = tool_retriever.retrieve(query, top_k=tool_top_k)
+                retrieved_ids = [m.id for m in res.matches]
+
+                # Compute the union: always-injected + retrieved (no dups)
+                final_ids: list[str] = []
+                seen: set[str] = set()
+                for tid in list(always_inject_set) + retrieved_ids:
+                    if tid in seen:
+                        continue
+                    seen.add(tid)
+                    final_ids.append(tid)
+
+                # Look up full metadata for each (the retriever item already
+                # contains description/parameters/tags from the corpus adapter)
+                # but tags/HITL etc are stored on the corpus item — pull them.
+                # We stored full metadata in retriever items, so look them up.
+                items_by_id = {m.id: m.item for m in res.matches}
+                # For always-inject IDs not in retrieved set, try to load from corpus.
+                # Use the retriever's internal item list if present.
+                _all_corpus = getattr(tool_retriever, "_items", None) or []
+                for it in _all_corpus:
+                    if it["id"] in always_inject_set and it["id"] not in items_by_id:
+                        items_by_id[it["id"]] = it
+
+                tool_lines = ["AVAILABLE TOOLS (top-K matched + safety-net):"]
+                for tid in final_ids:
+                    info = items_by_id.get(tid)
+                    if info is None:
+                        # Tool not in retriever index (shouldn't happen) — skip
+                        continue
+                    hitl = " ⚠HITL" if info.get("hitl") else ""
+                    tool_lines.append(
+                        f"  [TOOL:{tid}]{hitl} — {info.get('description','')[:140]}"
+                    )
+                    params = info.get("parameters") or {}
+                    if params:
+                        tool_lines.append(
+                            "    Args: " + ", ".join(list(params.keys())[:6])
+                        )
+                tool_lines.append(
+                    "  (use [TOOL:list_tools] to discover other tools by description)"
+                )
+                lines.append("\n".join(tool_lines))
+                return "\n\n".join(p for p in lines if p)
+            except Exception as exc:
+                logger.warning(
+                    "Retriever-driven tool section failed (%s) — falling back to full dump",
+                    exc,
+                )
+
+        # Fallback: full dump (legacy behaviour)
+        try:
             from tools.loader import ToolLoader as _TL
             import config as _cfg
             _tl = _TL(mode=_cfg.cfg.mode)
-            extra_tools_section = _tl.tool_section_for_prompt()
-            # Append any registered/uploaded tools not in the mode registry
+            full = _tl.tool_section_for_prompt()
             if tool_registry:
                 _mode_names = set(_tl.build_metadata().keys())
                 _extra = {n for n in tool_registry if n not in _mode_names}
                 if _extra:
-                    _extra_lines = ["\nUPLOADED/REGISTERED TOOLS — also available:"]
-                    for _n in sorted(_extra):
-                        _extra_lines.append(f'  [TOOL:{_n}] {{"<arg>": "<value>"}}')
-                    extra_tools_section += "\n".join(_extra_lines)
-        except Exception as _te:
-            # Fallback: list tools from registry with no descriptions
+                    extra_block = ["\nUPLOADED/REGISTERED TOOLS:"]
+                    for n in sorted(_extra):
+                        extra_block.append(f'  [TOOL:{n}] {{"<arg>": "<value>"}}')
+                    full = full + "\n" + "\n".join(extra_block)
+            lines.append(full)
+        except Exception:
             if tool_registry:
-                _lines = ["AVAILABLE TOOLS (use [TOOL:name] format):"]
-                for _n in sorted(tool_registry):
-                    _lines.append(f"  [TOOL:{_n}]")
-                extra_tools_section = "\n".join(_lines)
+                _ll = ["AVAILABLE TOOLS (use [TOOL:name] format):"]
+                for n in sorted(tool_registry):
+                    _ll.append(f"  [TOOL:{n}]")
+                lines.append("\n".join(_ll))
+        return "\n\n".join(p for p in lines if p)
 
-        # ── Skill summary ─────────────────────────────────────────────
-        skill_summary = ""
+    def _build_skills_section(
+        self,
+        *,
+        query:           Optional[str],
+        skill_retriever: Any,
+        skill_catalog:   Any,
+    ) -> str:
+        """Build the Available skills prompt section.
+
+        Retriever-driven top-K when available; falls back to
+        skill_catalog.format_summary() (legacy full dump).
+        """
+        try:
+            from config import cfg as _app_cfg
+            skill_top_k = int(getattr(_app_cfg.retrieval, "skill_top_k", 3))
+        except Exception:
+            skill_top_k = 3
+
+        # Retrieval path
+        if skill_retriever is not None and query:
+            try:
+                res = skill_retriever.retrieve(query, top_k=skill_top_k)
+                if not res.matches:
+                    return "Available skills: (none matched — use [TOOL:list_skills] to search)"
+                lines = [f"Available skills (top {len(res.matches)} for query):"]
+                for m in res.matches:
+                    info = m.item
+                    hitl = " ⚠HITL" if info.get("hitl") else ""
+                    lines.append(
+                        f"  [{m.id}]{hitl} (score={m.score:.2f}) — "
+                        f"{info.get('description','')[:120]}"
+                    )
+                lines.append(
+                    "  (use [TOOL:list_skills] for more, [SKILL_LOAD:id] to read full guide)"
+                )
+                return "\n".join(lines)
+            except Exception as exc:
+                logger.warning(
+                    "Retriever-driven skill section failed (%s) — falling back",
+                    exc,
+                )
+
+        # Legacy fallback
         if skill_catalog:
             try:
-                skill_summary = "Available skills:\n" + skill_catalog.format_summary()
+                return "Available skills:\n" + skill_catalog.format_summary()
             except Exception:
                 pass
+        return ""
+
+    def _build_system_prompt(
+        self, context: str, skill_catalog: Any = None,
+        confirmed_facts: list[str] | None = None,
+        tool_registry: dict | None = None,
+        *,
+        query:           Optional[str] = None,
+        turn_no:         int           = 1,
+        tool_retriever:  Any           = None,
+        skill_retriever: Any           = None,
+        meta_tool_registry: Any        = None,
+    ) -> str:
+        # ── Tools section — retriever-driven when available ────────────
+        # NEW: cfg.retrieval drives top-K tool selection so the prompt only
+        # contains tools relevant to the current query, plus always-injected
+        # meta tools (list_tools, list_skills, ...) and HITL safety tools.
+        # FALLBACK: if no retriever / no query / retrieval disabled, the full
+        # ToolLoader catalog is dumped (legacy behaviour preserved).
+        extra_tools_section = self._build_tools_section(
+            query=query,
+            tool_retriever=tool_retriever,
+            meta_tool_registry=meta_tool_registry,
+            tool_registry=tool_registry,
+        )
+
+        # ── Skill summary — retriever-driven when available ──────────
+        skill_summary = self._build_skills_section(
+            query=query,
+            skill_retriever=skill_retriever,
+            skill_catalog=skill_catalog,
+        )
 
         # ── Confirmed facts (+ tool ledger + prior analysis) ───────────────────────
         facts_section = ""
@@ -345,7 +543,19 @@ Return format:
                 )
             facts_section = "\n\n".join(_parts)
 
-        system = self.TOOL_CALL_SYSTEM.format(
+        # ── Pick full vs slim template based on turn ───────────────
+        # Saves ~3000 chars/turn after the LLM has learnt the format.
+        try:
+            from config import cfg as _app_cfg
+            _shorten_after = int(getattr(_app_cfg.retrieval, "shorten_tool_system_after_turn", 1))
+        except Exception:
+            _shorten_after = 1
+        _template = (
+            self.TOOL_CALL_SYSTEM_SLIM
+            if turn_no > _shorten_after
+            else self.TOOL_CALL_SYSTEM
+        )
+        system = _template.format(
             skill_summary=skill_summary,
             confirmed_facts_section=facts_section,
             extra_tools_section=extra_tools_section,
@@ -520,7 +730,14 @@ class OllamaEngine(LLMEngine):
 
         # Pass the live tool_registry so uploaded tools appear in the system prompt
         _tool_reg = getattr(state, "_tool_registry", None) if state else None
-        system = self._build_system_prompt(context, skill_catalog, confirmed_facts, _tool_reg)
+        system = self._build_system_prompt(
+            context, skill_catalog, confirmed_facts, _tool_reg,
+            query=query,
+            turn_no=turns,
+            tool_retriever=self._tool_retriever,
+            skill_retriever=self._skill_retriever,
+            meta_tool_registry=self._meta_tool_registry,
+        )
         if stop_note:
             system += stop_note
 
@@ -679,7 +896,14 @@ class OllamaEngine(LLMEngine):
             raise RuntimeError("pip install httpx to use OllamaEngine")
 
         confirmed_facts = getattr(state, "confirmed_facts", None) if state else None
-        system = self._build_system_prompt(context, skill_catalog, confirmed_facts)
+        system = self._build_system_prompt(
+            context, skill_catalog, confirmed_facts,
+            query=query,
+            turn_no=turns,
+            tool_retriever=self._tool_retriever,
+            skill_retriever=self._skill_retriever,
+            meta_tool_registry=self._meta_tool_registry,
+        )
         payload = {
             "model":    self.model,
             "messages": [{"role":"system","content":system},{"role":"user","content":query}],
@@ -717,7 +941,14 @@ class OpenAIEngine(LLMEngine):
     async def call(self, query: str, context: str,
                    state: Any = None, skill_catalog: Any = None) -> str:
         confirmed_facts = getattr(state, "confirmed_facts", None) if state else None
-        system = self._build_system_prompt(context, skill_catalog, confirmed_facts)
+        system = self._build_system_prompt(
+            context, skill_catalog, confirmed_facts,
+            query=query,
+            turn_no=turns,
+            tool_retriever=self._tool_retriever,
+            skill_retriever=self._skill_retriever,
+            meta_tool_registry=self._meta_tool_registry,
+        )
         try:
             from openai import AsyncOpenAI
             kwargs = {"api_key": self._api_key}
@@ -772,7 +1003,14 @@ class AnthropicEngine(LLMEngine):
     async def call(self, query: str, context: str,
                    state: Any = None, skill_catalog: Any = None) -> str:
         confirmed_facts = getattr(state, "confirmed_facts", None) if state else None
-        system = self._build_system_prompt(context, skill_catalog, confirmed_facts)
+        system = self._build_system_prompt(
+            context, skill_catalog, confirmed_facts,
+            query=query,
+            turn_no=turns,
+            tool_retriever=self._tool_retriever,
+            skill_retriever=self._skill_retriever,
+            meta_tool_registry=self._meta_tool_registry,
+        )
         try:
             import anthropic
             client = anthropic.AsyncAnthropic(api_key=self._api_key)

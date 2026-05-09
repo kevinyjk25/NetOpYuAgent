@@ -141,6 +141,11 @@ class RuntimeConfig:
     simple_confidence_floor: float; simple_max_tool_calls: int
     tool_result_inline_limit: int; stop: StopConfig
     pre_verification: bool; post_verification: bool; model_tiering: bool
+    # PERF-1: cache cadence for per-turn recall + skill selection
+    recall_refresh_every_n_turns:        int  = 3   # refresh memory_results every N turns
+    skill_select_refresh_every_n_turns:  int  = 5   # refresh skill selection every N turns
+    recall_refresh_facts_growth:         int  = 3   # also refresh when N new facts added
+    emit_matched_skills_only_on_change:  bool = True   # PERF-4: dedup SSE skill events
 
 @dataclass
 class RegistryConfig:
@@ -190,6 +195,156 @@ class PragmaticConfig:
 
 # ── Top-level AppConfig ───────────────────────────────────────────────────────
 
+
+@dataclass
+class HermesConfig:
+    """Configuration for the Hermes post-turn learning pipeline."""
+    skill_evolver_llm_timeout_seconds: float = 30.0   # asyncio.wait_for timeout per LLM call
+    skill_evolver_enabled: bool = True
+    skill_min_complexity_score: float = 0.6           # eligibility threshold
+    skill_max_similar_distance: float = 0.3           # merge-vs-create threshold
+    reflection_enabled: bool = True
+    consolidation_enabled: bool = True
+
+@dataclass
+class PostVerifyConfig:
+    """
+    Configuration for post-action health verification.
+    Maps tool name patterns (regex) to health keywords that must appear in the result.
+    Patterns are tried in order; first match wins.
+    Set to empty list to disable all post-verification.
+    """
+    # Each entry: {"pattern": "<regex>", "require_any": ["kw1","kw2"], "require_none": ["err"]}
+    rules: list = None  # populated from config.yaml
+    # If no rule matches the tool name, default behaviour:
+    # True  = pass without inspection (permissive)
+    # False = fail unless result is non-empty (strict)
+    default_pass: bool = True
+
+    def __post_init__(self):
+        if self.rules is None:
+            self.rules = []
+
+@dataclass 
+class SessionStoreConfig:
+    """Configuration for per-session in-memory stores (clarification counter, etc.)."""
+    clarification_session_ttl_seconds: int = 3600    # evict entries older than this
+    clarification_max_sessions: int = 10_000          # max sessions tracked at once
+
+@dataclass
+class ConcurrencyConfig:
+    """Async concurrency tuning knobs."""
+    hitl_pipeline_poll_interval_ms: int = 50          # BUG-03: _run_steps poll interval
+    registry_rr_lock_enabled: bool = True             # DESIGN-05: guard _rr_cursors with asyncio.Lock
+
+@dataclass
+class ClassifierFallbackConfig:
+    """
+    Keyword fallback lists for AgentRuntimeLoop.classify() when the
+    PolicyEngine LLM is unavailable. Default English + Chinese pairs
+    cover the common destructive-action vocabulary; operators can extend
+    or replace these in config.yaml without touching runtime code.
+    """
+    destructive_keywords: list = None
+    p0p1_keywords:        list = None
+    fast_model_keywords:  list = None
+
+    def __post_init__(self):
+        if self.destructive_keywords is None:
+            self.destructive_keywords = []
+        if self.p0p1_keywords is None:
+            self.p0p1_keywords = []
+        if self.fast_model_keywords is None:
+            self.fast_model_keywords = []
+
+
+@dataclass
+class WebuiConfig:
+    """Frontend timing knobs surfaced via /webui/system/wiring."""
+    hitl_poll_interval_ms:    int = 3000      # how often UI polls /hitl/pending
+    stats_poll_interval_ms:   int = 20000     # how often UI polls system status/wiring
+    hitl_pending_log_at_info: bool = False    # PERF-3: suppress INFO log when count==0
+
+
+@dataclass
+class HybridFusionConfig:
+    bm25_weight:  float = 0.5
+    embed_weight: float = 0.5
+    fusion:       str   = "weighted_sum"   # weighted_sum | rrf
+    rrf_k:        int   = 60
+    oversample:   int   = 4
+
+
+@dataclass
+class RetrievalConfig:
+    """Per-retriever knobs for tool/skill top-K selection."""
+    backend:                          str   = "hybrid"   # hybrid | bm25 | embedding | keyword
+    tool_top_k:                       int   = 5
+    skill_top_k:                      int   = 3
+    always_inject_extra_tools:        list  = None
+    shorten_tool_system_after_turn:   int   = 1
+    hybrid: HybridFusionConfig = field(default_factory=HybridFusionConfig)
+
+    def __post_init__(self):
+        if self.always_inject_extra_tools is None:
+            self.always_inject_extra_tools = []
+
+
+@dataclass
+class MetaToolsBuiltinConfig:
+    list_tools:   bool = True
+    list_skills:  bool = True
+    tool_details: bool = True
+
+
+@dataclass
+class MetaToolsConfig:
+    builtin: MetaToolsBuiltinConfig = field(default_factory=MetaToolsBuiltinConfig)
+
+
+@dataclass
+class StreamingConfig:
+    """Server-Sent Event stream timeouts and queue limits."""
+    sse_stall_timeout_seconds:    float = 180.0    # break stream after N seconds idle
+    exec_task_drain_timeout_seconds: float = 5.0   # graceful task drain on stream end
+    chunk_queue_maxsize:          int   = 1000     # back-pressure on token producers
+
+
+@dataclass
+class TruncationConfig:
+    """
+    Length caps for prose snippets passed to LLMs and stored as context.
+    Separated from token budgets so prompt-engineering can tune one
+    independently of the other.
+    """
+    recall_context_chars:        int = 1500   # _fts_context truncation in clarification gate
+    confirmed_facts_preview:     int = 10     # max facts shown in pre_verify summary
+    skill_detail_chars:          int = 2000   # current_detail in feedback patch
+    operator_feedback_chars:     int = 500
+    operator_prefs_chars:        int = 200
+    rationale_chars:             int = 100    # diff_summary in skill creation
+    response_preview_chars:      int = 200    # llm_trace previews
+    tool_debug_chars:            int = 2000   # TOOL RESULT debug log
+    final_response_summary:      int = 500    # PREV_ANALYSIS summary line
+    log_redaction_preview:       int = 120    # warning log truncation
+
+
+@dataclass
+class ContextBudgetDisplayConfig:
+    """
+    Per-tool-output display caps used inside ContextBudgetManager.
+    These control how much of each tool's result is shown in the prompt;
+    the full result lives in the ToolResultStore and is fetched lazily.
+    """
+    paged_result_limit:    int = 1200   # read_stored_result page display cap
+    normal_result_limit:   int = 600    # other tools' display cap
+    latest_result_bonus:   int = 600    # extra chars for the most recent tool result
+    stored_lines_preview:  int = 3      # number of [STORED:]/Preview lines to show
+    fallback_preview:      int = 200    # bytes shown when [STORED:] preview parse fails
+    page_default_size:     int = 2000   # default offset advance per read_stored_result page
+    working_set_show:      int = 10     # max device refs displayed in working_set section
+
+
 @dataclass
 class AppConfig:
     mode:       str   # "mock" | "pragmatic"
@@ -205,7 +360,18 @@ class AppConfig:
     embeddings: EmbeddingsConfig
     pragmatic:  PragmaticConfig
     auth:       AuthConfig = field(default_factory=AuthConfig)
-    policies:   list = field(default_factory=list)  # prompt-based policies from config.yaml
+    policies:   list = field(default_factory=list)
+    hermes:     HermesConfig = field(default_factory=HermesConfig)
+    post_verify: PostVerifyConfig = field(default_factory=PostVerifyConfig)
+    session_store: SessionStoreConfig = field(default_factory=SessionStoreConfig)
+    concurrency: ConcurrencyConfig = field(default_factory=ConcurrencyConfig)
+    streaming:   StreamingConfig = field(default_factory=StreamingConfig)
+    truncation:  TruncationConfig = field(default_factory=TruncationConfig)
+    context_budget_display: ContextBudgetDisplayConfig = field(default_factory=ContextBudgetDisplayConfig)
+    classifier_fallback: ClassifierFallbackConfig = field(default_factory=ClassifierFallbackConfig)
+    webui:               WebuiConfig = field(default_factory=WebuiConfig)
+    retrieval:           RetrievalConfig = field(default_factory=RetrievalConfig)
+    meta_tools:          MetaToolsConfig = field(default_factory=MetaToolsConfig)  # prompt-based policies from config.yaml
     def is_mock(self) -> bool:
         return self.mode == "mock"
 
@@ -229,6 +395,136 @@ class AppConfig:
 
 
 # ── Builder ───────────────────────────────────────────────────────────────────
+
+def _load_hermes_config(h: dict) -> "HermesConfig":
+    return HermesConfig(
+        skill_evolver_llm_timeout_seconds = _env_float("HERMES_SKILL_EVOLVER_TIMEOUT",    h.get("skill_evolver_llm_timeout_seconds", 30.0)),
+        skill_evolver_enabled             = _env_bool ("HERMES_SKILL_EVOLVER_ENABLED",     h.get("skill_evolver_enabled",             True)),
+        skill_min_complexity_score        = _env_float("HERMES_SKILL_MIN_COMPLEXITY",      h.get("skill_min_complexity_score",         0.6)),
+        skill_max_similar_distance        = _env_float("HERMES_SKILL_MAX_SIMILAR_DIST",    h.get("skill_max_similar_distance",         0.3)),
+        reflection_enabled                = _env_bool ("HERMES_REFLECTION_ENABLED",         h.get("reflection_enabled",                True)),
+        consolidation_enabled             = _env_bool ("HERMES_CONSOLIDATION_ENABLED",      h.get("consolidation_enabled",             True)),
+    )
+
+def _load_post_verify_config(pv: dict) -> "PostVerifyConfig":
+    rules_raw = pv.get("rules", [])
+    # Default rules if not configured
+    if not rules_raw:
+        rules_raw = [
+            {"pattern": r"restart.*service|service.*restart", "require_any": ["healthy", "running", "active", "started", "ok"], "require_none": ["error", "failed", "crash"]},
+            {"pattern": r"push.*config|config.*push|edit.*config|config.*edit", "require_any": [], "require_none": ["syntax error", "invalid", "rejected"]},
+            {"pattern": r"rollback|failover|drain", "require_any": [], "require_none": ["error", "failed", "timeout"]},
+        ]
+    return PostVerifyConfig(
+        rules=rules_raw,
+        default_pass=bool(pv.get("default_pass", True)),
+    )
+
+def _load_session_store_config(ss: dict) -> "SessionStoreConfig":
+    return SessionStoreConfig(
+        clarification_session_ttl_seconds = _env_int("SESSION_CLARIF_TTL_SECONDS", ss.get("clarification_session_ttl_seconds", 3600)),
+        clarification_max_sessions        = _env_int("SESSION_CLARIF_MAX",         ss.get("clarification_max_sessions",        10_000)),
+    )
+
+def _load_concurrency_config(cc: dict) -> "ConcurrencyConfig":
+    return ConcurrencyConfig(
+        hitl_pipeline_poll_interval_ms = _env_int ("HITL_PIPELINE_POLL_INTERVAL_MS", cc.get("hitl_pipeline_poll_interval_ms", 50)),
+        registry_rr_lock_enabled       = _env_bool("REGISTRY_RR_LOCK_ENABLED",        cc.get("registry_rr_lock_enabled",       True)),
+    )
+
+
+def _load_streaming_config(s: dict) -> "StreamingConfig":
+    return StreamingConfig(
+        sse_stall_timeout_seconds       = _env_float("SSE_STALL_TIMEOUT_SECONDS",       s.get("sse_stall_timeout_seconds",       180.0)),
+        exec_task_drain_timeout_seconds = _env_float("SSE_EXEC_DRAIN_TIMEOUT_SECONDS",  s.get("exec_task_drain_timeout_seconds",   5.0)),
+        chunk_queue_maxsize             = _env_int  ("SSE_CHUNK_QUEUE_MAX",             s.get("chunk_queue_maxsize",             1000)),
+    )
+
+
+def _load_truncation_config(t: dict) -> "TruncationConfig":
+    return TruncationConfig(
+        recall_context_chars    = _env_int("TRUNC_RECALL_CONTEXT_CHARS",      t.get("recall_context_chars",     1500)),
+        confirmed_facts_preview = _env_int("TRUNC_CONFIRMED_FACTS_PREVIEW",   t.get("confirmed_facts_preview",  10)),
+        skill_detail_chars      = _env_int("TRUNC_SKILL_DETAIL_CHARS",        t.get("skill_detail_chars",       2000)),
+        operator_feedback_chars = _env_int("TRUNC_OPERATOR_FEEDBACK_CHARS",   t.get("operator_feedback_chars",   500)),
+        operator_prefs_chars    = _env_int("TRUNC_OPERATOR_PREFS_CHARS",      t.get("operator_prefs_chars",      200)),
+        rationale_chars         = _env_int("TRUNC_RATIONALE_CHARS",           t.get("rationale_chars",           100)),
+        response_preview_chars  = _env_int("TRUNC_RESPONSE_PREVIEW_CHARS",    t.get("response_preview_chars",    200)),
+        tool_debug_chars        = _env_int("TRUNC_TOOL_DEBUG_CHARS",          t.get("tool_debug_chars",         2000)),
+        final_response_summary  = _env_int("TRUNC_FINAL_RESPONSE_SUMMARY",    t.get("final_response_summary",    500)),
+        log_redaction_preview   = _env_int("TRUNC_LOG_REDACTION_PREVIEW",     t.get("log_redaction_preview",     120)),
+    )
+
+
+def _load_cb_display_config(c: dict) -> "ContextBudgetDisplayConfig":
+    return ContextBudgetDisplayConfig(
+        paged_result_limit   = _env_int("CTX_PAGED_RESULT_LIMIT",   c.get("paged_result_limit",   1200)),
+        normal_result_limit  = _env_int("CTX_NORMAL_RESULT_LIMIT",  c.get("normal_result_limit",   600)),
+        latest_result_bonus  = _env_int("CTX_LATEST_RESULT_BONUS",  c.get("latest_result_bonus",   600)),
+        stored_lines_preview = _env_int("CTX_STORED_LINES_PREVIEW", c.get("stored_lines_preview",    3)),
+        fallback_preview     = _env_int("CTX_FALLBACK_PREVIEW",     c.get("fallback_preview",       200)),
+        page_default_size    = _env_int("CTX_PAGE_DEFAULT_SIZE",    c.get("page_default_size",     2000)),
+        working_set_show     = _env_int("CTX_WORKING_SET_SHOW",     c.get("working_set_show",        10)),
+    )
+
+
+def _load_classifier_fallback_config(cf: dict) -> "ClassifierFallbackConfig":
+    """Load the keyword fallback lists; defaults preserve current hard-coded behaviour."""
+    DEFAULT_DESTRUCTIVE = [
+        "restart", "rollback", "delete", "drain", "failover", "flush",
+        "reboot", "terminate", "shutdown", "wipe", "reset",
+        "重启", "回滚", "删除", "终止", "关机", "重置", "下发配置", "推送配置",
+    ]
+    DEFAULT_P0P1 = [
+        "p0", "p1", "critical", "outage", "down", "emergency",
+        "sev0", "sev1", "major incident",
+    ]
+    DEFAULT_FAST = [
+        "dns", "ping", "status", "check", "what is", "show me", "list",
+    ]
+    return ClassifierFallbackConfig(
+        destructive_keywords = cf.get("destructive_keywords") or DEFAULT_DESTRUCTIVE,
+        p0p1_keywords        = cf.get("p0p1_keywords")        or DEFAULT_P0P1,
+        fast_model_keywords  = cf.get("fast_model_keywords")  or DEFAULT_FAST,
+    )
+
+
+def _load_webui_config(w: dict) -> "WebuiConfig":
+    return WebuiConfig(
+        hitl_poll_interval_ms     = _env_int ("WEBUI_HITL_POLL_INTERVAL_MS",   w.get("hitl_poll_interval_ms",   3000)),
+        stats_poll_interval_ms    = _env_int ("WEBUI_STATS_POLL_INTERVAL_MS",  w.get("stats_poll_interval_ms", 20000)),
+        hitl_pending_log_at_info  = _env_bool("WEBUI_HITL_PENDING_LOG_INFO",   w.get("hitl_pending_log_at_info",  False)),
+    )
+
+
+def _load_retrieval_config(r: dict) -> "RetrievalConfig":
+    h = r.get("hybrid", {}) or {}
+    return RetrievalConfig(
+        backend                        = _env_str("RETRIEVAL_BACKEND",  r.get("backend",  "hybrid")),
+        tool_top_k                     = _env_int("RETRIEVAL_TOOL_TOP_K",   r.get("tool_top_k",   5)),
+        skill_top_k                    = _env_int("RETRIEVAL_SKILL_TOP_K",  r.get("skill_top_k",  3)),
+        shorten_tool_system_after_turn = _env_int("RETRIEVAL_SHORTEN_AFTER_TURN", r.get("shorten_tool_system_after_turn", 1)),
+        always_inject_extra_tools      = list(r.get("always_inject_extra_tools", []) or []),
+        hybrid=HybridFusionConfig(
+            bm25_weight   = _env_float("RETRIEVAL_BM25_WEIGHT",  h.get("bm25_weight",   0.5)),
+            embed_weight  = _env_float("RETRIEVAL_EMBED_WEIGHT", h.get("embed_weight",  0.5)),
+            fusion        = _env_str  ("RETRIEVAL_FUSION",        h.get("fusion",       "weighted_sum")),
+            rrf_k         = _env_int  ("RETRIEVAL_RRF_K",         h.get("rrf_k",         60)),
+            oversample    = _env_int  ("RETRIEVAL_OVERSAMPLE",    h.get("oversample",     4)),
+        ),
+    )
+
+
+def _load_meta_tools_config(m: dict) -> "MetaToolsConfig":
+    bi = m.get("builtin", {}) or {}
+    return MetaToolsConfig(
+        builtin=MetaToolsBuiltinConfig(
+            list_tools   = _env_bool("META_TOOL_LIST_TOOLS",    bi.get("list_tools",   True)),
+            list_skills  = _env_bool("META_TOOL_LIST_SKILLS",   bi.get("list_skills",  True)),
+            tool_details = _env_bool("META_TOOL_TOOL_DETAILS",  bi.get("tool_details", True)),
+        ),
+    )
+
 
 def load(config_path: str = "config.yaml") -> AppConfig:
     y   = _load_yaml(config_path)
@@ -393,6 +689,10 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             pre_verification  = _env_bool("", r.get("pre_verification",  True)),
             post_verification = _env_bool("", r.get("post_verification", True)),
             model_tiering     = _env_bool("", r.get("model_tiering",     False)),
+            recall_refresh_every_n_turns       = _env_int("RUNTIME_RECALL_REFRESH_TURNS",       r.get("recall_refresh_every_n_turns",       3)),
+            skill_select_refresh_every_n_turns = _env_int("RUNTIME_SKILL_REFRESH_TURNS",         r.get("skill_select_refresh_every_n_turns", 5)),
+            recall_refresh_facts_growth        = _env_int("RUNTIME_RECALL_FACTS_GROWTH",         r.get("recall_refresh_facts_growth",        3)),
+            emit_matched_skills_only_on_change = _env_bool("RUNTIME_EMIT_SKILLS_ON_CHANGE",      r.get("emit_matched_skills_only_on_change", True)),
         ),
         registry=RegistryConfig(
             agent_urls            = agent_urls,
@@ -419,6 +719,17 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             jwt_secret_env = str(au.get("jwt_secret_env", "NETOPYU_JWT_SECRET")),
         ),
         policies=y.get("policies", []),
+        hermes=_load_hermes_config(y.get("hermes", {})),
+        post_verify=_load_post_verify_config(y.get("post_verify", {})),
+        session_store=_load_session_store_config(y.get("session_store", {})),
+        concurrency=_load_concurrency_config(y.get("concurrency", {})),
+        streaming=_load_streaming_config(y.get("streaming", {})),
+        truncation=_load_truncation_config(y.get("truncation", {})),
+        context_budget_display=_load_cb_display_config(y.get("context_budget_display", {})),
+        classifier_fallback=_load_classifier_fallback_config(y.get("classifier_fallback", {})),
+        webui=_load_webui_config(y.get("webui", {})),
+        retrieval=_load_retrieval_config(y.get("retrieval", {})),
+        meta_tools=_load_meta_tools_config(y.get("meta_tools", {})),
     )
 
 

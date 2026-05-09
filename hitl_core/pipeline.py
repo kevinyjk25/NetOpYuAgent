@@ -135,19 +135,40 @@ class PipelineAborted(Exception):
 
 class _DecisionWaiter:
     """Internal — holds the future a step is awaiting, so the run loop
-    can satisfy it when resume_with arrives."""
+    can satisfy it when resume_with arrives.
+
+    BUG-01 fix: use get_running_loop() (not deprecated get_event_loop()).
+    BUG-03 fix: notify Event so _run_steps wakes immediately instead of
+                relying solely on the 50ms poll interval.
+    """
     def __init__(self, payload: HitlPayload):
         self.payload = payload
-        self.future: asyncio.Future[HitlDecision] = asyncio.get_event_loop().create_future()
+        loop = asyncio.get_running_loop()
+        self.future: asyncio.Future[HitlDecision] = loop.create_future()
+        # Event set by request_approval() as soon as the waiter is installed,
+        # allowing _run_steps to detect it without waiting out the poll timeout.
+        self.ready: asyncio.Event = asyncio.Event()
+
+    def mark_ready(self) -> None:
+        """Called by PipelineContext.request_approval() once ctx._pending_waiter
+        is assigned, so the run loop wakes up immediately."""
+        self.ready.set()
 
 
 class _BatchWaiter:
     """Internal — holds the future a step awaits when it requests batch
     approval. The future resolves once the BatchCoordinator says all
-    wait-mode conditions are met (default: all children decided)."""
+    wait-mode conditions are met (default: all children decided).
+
+    BUG-03 fix: same Event-based immediate-wake pattern as _DecisionWaiter.
+    """
     def __init__(self, batch: HitlBatch, future: asyncio.Future[BatchResolution]):
         self.batch  = batch
         self.future = future
+        self.ready: asyncio.Event = asyncio.Event()
+
+    def mark_ready(self) -> None:
+        self.ready.set()
 
 
 # ---------------------------------------------------------------------------
@@ -219,9 +240,12 @@ class PipelineContext:
              "risk_level":   payload.risk_level.value},
         )
 
-        # Hand off to the run loop and wait
+        # Hand off to the run loop and wait.
+        # mark_ready() is called AFTER _pending_waiter is set so the run loop
+        # cannot observe a partial state (waiter set but event not fired).
         waiter = _DecisionWaiter(payload)
         self._pending_waiter = waiter
+        waiter.mark_ready()   # BUG-03: wake _run_steps immediately
         try:
             decision = await waiter.future
         finally:
@@ -346,6 +370,7 @@ class PipelineContext:
         future = await self._batch.open_batch(batch)
         waiter = _BatchWaiter(batch=batch, future=future)
         self._pending_batch = waiter
+        waiter.mark_ready()   # BUG-03: wake _run_steps immediately
         try:
             resolution = await future
         finally:
@@ -436,53 +461,91 @@ class HitlPipeline:
 
     # ── Execution ────────────────────────────────────────────────────
 
-    async def run(self, state: PipelineState) -> AsyncIterator[dict[str, Any]]:
+    async def run(
+        self, state: PipelineState, *, poll_interval_ms: int = 50
+    ) -> AsyncIterator[dict[str, Any]]:
         """Drive the pipeline. Yields events; consumer calls resume_with
-        on every "interrupt" event."""
+        on every "interrupt" event.
+
+        Args:
+            poll_interval_ms: Safety-net poll interval for the step waiter loop.
+                              Set via config.yaml concurrency.hitl_pipeline_poll_interval_ms.
+                              The primary wake mechanism is Event-based (immediate);
+                              this only fires when the Event path is unavailable.
+        """
         ctx = PipelineContext(
             state=state, store=self._store,
             on_audit=self._on_audit, batch_coordinator=self._batch,
         )
         self._active[state.pipeline_id] = ctx
         try:
-            async for event in self._run_steps(ctx):
+            async for event in self._run_steps(ctx, poll_interval_ms=poll_interval_ms):
                 yield event
         finally:
             self._active.pop(state.pipeline_id, None)
 
-    async def _run_steps(self, ctx: PipelineContext) -> AsyncIterator[dict[str, Any]]:
+    async def _run_steps(
+        self, ctx: PipelineContext, poll_interval_ms: int = 50
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Drive all registered steps, surfacing HITL interrupts as they occur.
+
+        BUG-03 fix: Instead of a hard-coded 50ms busy-poll, the loop waits on
+        an asyncio.Event that the waiter sets as soon as it is installed.  The
+        poll_interval_ms is kept as a safety-net fallback (prevents livelock
+        if mark_ready() is somehow missed), but the common path wakes up
+        immediately without spinning.
+
+        The poll interval is read from AppConfig at pipeline construction time
+        and passed in here so it can be tuned in config.yaml without code changes.
+        """
         for name, step in self._steps:
             logger.debug("Pipeline step: %s", name)
             # Run the step in a task so we can intercept request_approval
             # which pauses on an asyncio.Future.
             step_task = asyncio.create_task(step(ctx))
+            poll_timeout = poll_interval_ms / 1000.0   # convert ms → seconds
             while not step_task.done():
-                # Wait briefly — step is doing work or about to pause.
-                # We use a short sleep race with the task so we can detect
-                # request_approval calls promptly.
-                done, _pending = await asyncio.wait(
-                    {step_task}, timeout=0.05,
+                # Build a combined "wake me" set: the step task itself, plus
+                # any pending waiter's ready Event.  This way we wake as soon
+                # as the step installs a waiter — no spin.
+                wake_futs: set = {step_task}
+                if ctx._pending_waiter is not None:
+                    wake_futs.add(
+                        asyncio.ensure_future(ctx._pending_waiter.ready.wait())
+                    )
+                elif ctx._pending_batch is not None:
+                    wake_futs.add(
+                        asyncio.ensure_future(ctx._pending_batch.ready.wait())
+                    )
+
+                done, pending_tasks = await asyncio.wait(
+                    wake_futs, timeout=poll_timeout, return_when=asyncio.FIRST_COMPLETED
                 )
+                # Cancel any helper futures we spawned so they don't leak
+                for t in pending_tasks:
+                    if t is not step_task:
+                        t.cancel()
+
                 if step_task in done:
                     break
+
                 if ctx._pending_waiter is not None:
                     # Step is awaiting an operator decision. Yield the
-                    # interrupt to the caller and pause until resume_with
-                    # delivers a decision.
+                    # interrupt to the caller and wait until resume_with
+                    # delivers a decision via the future.
                     waiter = ctx._pending_waiter
                     yield {
                         "type":    "interrupt",
                         "payload": waiter.payload,
                     }
-                    # Now wait for the future to resolve (resume_with
-                    # sets it). The step itself will pick back up because
-                    # its `await waiter.future` completes.
+                    # Wait for the operator's decision; step resumes automatically
+                    # because its `await waiter.future` completes.
                     await waiter.future
                     # Don't break — keep looping until step_task done.
+
                 elif ctx._pending_batch is not None:
-                    # Step is awaiting a batch resolution. Yield the
-                    # batch envelope so the caller can drive the
-                    # batch UI / route batch decisions.
+                    # Step is awaiting a batch resolution. Yield the batch
+                    # envelope so the caller can surface the multi-approval UI.
                     bw = ctx._pending_batch
                     yield {
                         "type":  "batch_interrupt",
@@ -572,6 +635,84 @@ class HitlPipeline:
         return entry
 
     # ── Introspection ─────────────────────────────────────────────────
+
+
+    # ── Restart-recovery (DESIGN-01 fix) ─────────────────────────────────
+
+    async def recover_pending(
+        self,
+        *,
+        thread_id: Optional[str] = None,
+        limit: int = 100,
+    ) -> list[dict]:
+        """DESIGN-01 fix: on process restart, load all PENDING interrupt
+        checkpoints from the store and return them as interrupt-event dicts
+        so the caller (e.g. webui/backend.py on startup) can surface them
+        to operators.
+
+        This does NOT resume the original pipeline coroutine (that is gone
+        with the old process). Instead it returns the stored payloads so the
+        UI can re-display them for re-approval.  When the operator decides,
+        the decision is written to the store (mark_resolved), and the caller
+        is responsible for re-dispatching via the registered ResumeHandle.
+
+        Usage at startup::
+
+            pipeline = HitlPipeline(store=store)
+            for event in await pipeline.recover_pending():
+                # surface event["payload"] in the UI
+                ...
+
+        Returns a list of interrupt-event dicts, newest first.
+        """
+        pending = await self._store.list_pending(limit=limit, thread_id=thread_id)
+        events = []
+        for entry in pending:
+            events.append({
+                "type":            "interrupt",
+                "payload":         entry.payload,
+                "recovered":       True,          # flag: from store, not live pipeline
+                "interrupt_id":    entry.payload.interrupt_id,
+                "registered_at":   entry.registered_at.isoformat(),
+                "resumer_name":    entry.resume_handle.resumer_name if entry.resume_handle else None,
+            })
+            logger.info(
+                "recover_pending: surfacing orphaned interrupt %s (thread=%s, registered=%s)",
+                entry.payload.interrupt_id,
+                entry.payload.thread_id,
+                entry.registered_at.isoformat(),
+            )
+        return events
+
+    async def expire_overdue_interrupts(self) -> int:
+        """Sweep PENDING interrupts past their SLA deadline and transition
+        them to EXPIRED.  Safe to call periodically (e.g. from a background
+        task in main.py) to prevent the pending list growing without bound
+        after process restarts.
+
+        Returns the number of entries expired.
+        """
+        return await self._store.expire_overdue()
+
+    async def list_orphaned_interrupts(
+        self, *, thread_id: Optional[str] = None, limit: int = 50
+    ) -> list:
+        """Return PENDING checkpoints that have no matching in-process waiter.
+        Useful for health-check endpoints: if this list is non-empty after
+        startup, it means a previous process died with pending approvals.
+        """
+        pending = await self._store.list_pending(limit=limit, thread_id=thread_id)
+        orphans = []
+        for entry in pending:
+            # Check if any active context owns this interrupt_id
+            is_live = any(
+                ctx._pending_waiter is not None
+                and ctx._pending_waiter.payload.interrupt_id == entry.payload.interrupt_id
+                for ctx in self._active.values()
+            )
+            if not is_live:
+                orphans.append(entry)
+        return orphans
 
     @property
     def active_count(self) -> int:

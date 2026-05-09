@@ -325,7 +325,12 @@ class ContextBudgetManager:
 
     @staticmethod
     def _format_working_set(ws: list[DeviceRef]) -> str:
-        items = "\n".join(f"  • {ref}" for ref in ws[:10])
+        try:
+            from config import cfg as _app_cfg
+            _ws_show = int(getattr(getattr(_app_cfg, "context_budget_display", None), "working_set_show", 10))
+        except Exception:
+            _ws_show = 10
+        items = "\n".join(f"  • {ref}" for ref in ws[:_ws_show])
         return f"[WORKING SET — current focus objects]\n{items}"
 
     @staticmethod
@@ -368,10 +373,19 @@ class ContextBudgetManager:
         This prevents the LLM from receiving multi-KB raw data from previous turns
         while still getting the current turn's full result.
         """
+        # Load display caps from AppConfig.context_budget_display when available;
+        # otherwise fall back to module-level defaults (kept for test isolation).
+        try:
+            from config import cfg as _app_cfg
+            _cb_disp = getattr(_app_cfg, "context_budget_display", None)
+        except Exception:
+            _cb_disp = None
         _STORED_LABEL_LIMIT = 1   # [STORED:] label is one line, show as-is
-        _PAGED_RESULT_LIMIT = 1200  # read_stored_result: show up to 1200 chars
-        _NORMAL_LIMIT       = 600   # other tools: 600 chars is enough context
-        _LATEST_BONUS       = 600   # extra chars for the most recent result
+        _PAGED_RESULT_LIMIT = int(getattr(_cb_disp, "paged_result_limit",   1200)) if _cb_disp else 1200
+        _NORMAL_LIMIT       = int(getattr(_cb_disp, "normal_result_limit",   600)) if _cb_disp else 600
+        _LATEST_BONUS       = int(getattr(_cb_disp, "latest_result_bonus",   600)) if _cb_disp else 600
+        _STORED_LINES       = int(getattr(_cb_disp, "stored_lines_preview",    3)) if _cb_disp else 3
+        _FALLBACK_PREVIEW   = int(getattr(_cb_disp, "fallback_preview",      200)) if _cb_disp else 200
 
         parts = ["Tool outputs:"]
         items = list(outputs.items())
@@ -384,7 +398,7 @@ class ContextBudgetManager:
                 # Extract just the [STORED:...] line and the preview
                 lines = output.splitlines()
                 stored_lines = [l for l in lines if l.startswith("[STORED:") or l.startswith("Preview:")]
-                display = "\n".join(stored_lines[:3]) if stored_lines else output[:200]
+                display = "\n".join(stored_lines[:_STORED_LINES]) if stored_lines else output[:_FALLBACK_PREVIEW]
             elif label == "read_stored_result":
                 # Paged data — show in full but capped (LLM needs this to answer)
                 cap = _PAGED_RESULT_LIMIT + (_LATEST_BONUS if is_latest else 0)

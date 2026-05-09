@@ -82,6 +82,24 @@ from memory import set_current_operator, get_current_operator
 
 logger = logging.getLogger(__name__)
 
+
+def _streaming_cfg():
+    """Lazy load AppConfig.streaming; returns None if config not loaded."""
+    try:
+        from config import cfg as _app_cfg
+        return getattr(_app_cfg, "streaming", None)
+    except Exception:
+        return None
+
+
+def _truncation_cfg_webui():
+    try:
+        from config import cfg as _app_cfg
+        return getattr(_app_cfg, "truncation", None)
+    except Exception:
+        return None
+
+
 _STATIC_DIR = pathlib.Path(__file__).parent / "static"
 
 
@@ -548,9 +566,11 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 _final_interrupt: Optional[str] = None
                 while True:
                     try:
-                        kind, payload = await asyncio.wait_for(_chunk_queue.get(), timeout=180.0)
+                        _scfg = _streaming_cfg()
+                        _stall_to = float(getattr(_scfg, "sse_stall_timeout_seconds", 180.0)) if _scfg else 180.0
+                        kind, payload = await asyncio.wait_for(_chunk_queue.get(), timeout=_stall_to)
                     except asyncio.TimeoutError:
-                        logger.warning("executor.execute_query stream stalled (180s)")
+                        logger.warning("executor.execute_query stream stalled (%.1fs)", _stall_to)
                         break
                     if kind == "chunk":
                         yield f"data: {json.dumps(payload)}\n\n"
@@ -567,7 +587,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         break
 
                 try:
-                    await asyncio.wait_for(exec_task, timeout=5.0)
+                    _drain_to = (lambda _s: float(getattr(_s, "exec_task_drain_timeout_seconds", 5.0)) if _s else 5.0)(_streaming_cfg())
+                    await asyncio.wait_for(exec_task, timeout=_drain_to)
                 except (asyncio.TimeoutError, Exception):
                     pass
 
@@ -1360,7 +1381,17 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     "clarification_fields":  [f.model_dump() for f in (p.clarification_fields or [])],
                     "editable_param_keys":   list(p.editable_param_keys or []),
                 })
-            logger.info("/hitl/pending [core]: returning %d", len(result))
+            # PERF-3: only log at INFO when there's actually something pending,
+            # otherwise DEBUG to keep the log clean.
+            try:
+                from config import cfg as _app_cfg
+                _info_always = bool(getattr(getattr(_app_cfg, "webui", None), "hitl_pending_log_at_info", False))
+            except Exception:
+                _info_always = False
+            if len(result) > 0 or _info_always:
+                logger.info("/hitl/pending [core]: returning %d", len(result))
+            else:
+                logger.debug("/hitl/pending [core]: returning 0")
             return JSONResponse(content=result)
 
         # Legacy path
@@ -1410,7 +1441,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         "editable_param_keys": list(getattr(p, "editable_param_keys", []) or []),
                     }
                 result.append(dumped)
-        logger.info("/hitl/pending: returning %d pending interrupts", len(result))
+        try:
+            from config import cfg as _app_cfg
+            _info_always_2 = bool(getattr(getattr(_app_cfg, "webui", None), "hitl_pending_log_at_info", False))
+        except Exception:
+            _info_always_2 = False
+        if len(result) > 0 or _info_always_2:
+            logger.info("/hitl/pending: returning %d pending interrupts", len(result))
+        else:
+            logger.debug("/hitl/pending: returning 0 pending interrupts")
         return JSONResponse(content=result)
 
     @app.post("/hitl/{interrupt_id}/approve")
@@ -1729,6 +1768,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 "real":         has_real_llm,
                 "note": "Set LLM_BACKEND=ollama LLM_MODEL=qwen3.5:27b LLM_BASE_URL=http://localhost:11434" if not has_real_llm else "real LLM active",
             },
+            # PERF-3: surface frontend poll timings so index.html can pick them up
+            # without a hardcoded setInterval(...). Falls back to defaults if config
+            # is missing.
+            "webui": (lambda: (
+                lambda _w: {
+                    "hitl_poll_interval_ms":  int(getattr(_w, "hitl_poll_interval_ms",  3000)) if _w else 3000,
+                    "stats_poll_interval_ms": int(getattr(_w, "stats_poll_interval_ms", 20000)) if _w else 20000,
+                }
+            )(getattr(__import__("config").cfg, "webui", None)))(),
             "hermes": {
                 "fts_store":      fts_alive,                   # → memory._mgr.long_term
                 "memory_curator": extractor_alive and extractor_has_llm,  # → FactExtractor with LLM wired

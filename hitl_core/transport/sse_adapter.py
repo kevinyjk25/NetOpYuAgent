@@ -28,6 +28,17 @@ Custom event types can be added by passing an `extra_handler` callable.
 
 from __future__ import annotations
 
+
+def _pipeline_poll_interval_ms() -> int:
+    """Lazy-load pipeline poll interval from cfg.concurrency."""
+    try:
+        from config import cfg as _app_cfg
+        return int(getattr(getattr(_app_cfg, "concurrency", None), "hitl_pipeline_poll_interval_ms", 50))
+    except Exception:
+        return 50
+
+
+
 import json
 import logging
 from typing import Any, AsyncIterator, Callable, Optional
@@ -70,7 +81,7 @@ async def stream_pipeline_as_sse(
                      UI (or None to skip).
     """
     try:
-        async for event in pipeline.run(state):
+        async for event in pipeline.run(state, poll_interval_ms=_pipeline_poll_interval_ms()):
             etype = event.get("type")
 
             if etype == "token":
