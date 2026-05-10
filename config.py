@@ -266,6 +266,35 @@ class WebuiConfig:
     hitl_pending_log_at_info: bool = False    # PERF-3: suppress INFO log when count==0
 
 
+
+@dataclass
+class RetrievalCacheConfig:
+    """LRU + TTL cache wrapping the active Retriever.
+
+    Hit rates of 60-90% are typical because users often repeat or paraphrase
+    queries within a session, and intra-turn iterations always reuse the
+    same query.
+    """
+    enabled:     bool  = True
+    max_entries: int   = 1024
+    ttl_seconds: float = 600.0
+
+
+
+@dataclass
+class LLMJudgeConfig:
+    """Knobs for the two-stage LLM-judge retriever (cfg.retrieval.backend=llm_judge).
+
+    The retriever uses any base retriever (typically Hybrid) to fetch
+    first_stage_top_k candidates, then asks an LLM to rerank them.
+    """
+    first_stage_top_k:  int   = 15      # candidate pool size for reranking
+    timeout_seconds:    float = 10.0    # LLM call timeout (falls back to base)
+    fusion_alpha:       float = 0.3     # weight on base score vs LLM score
+                                          # (final = alpha * base + (1-alpha) * llm)
+    max_text_chars:     int   = 200     # truncate item text shown to LLM
+
+
 @dataclass
 class HybridFusionConfig:
     bm25_weight:  float = 0.5
@@ -276,14 +305,44 @@ class HybridFusionConfig:
 
 
 @dataclass
+class LLMJudgeConfig:
+    """Two-stage retrieve-then-rerank: first stage feeds top-K candidates to
+    an LLM that judges relevance. Best for cross-lingual / paraphrase-heavy
+    queries where BM25+embedding alone miss.
+    """
+    first_stage_top_k:  int   = 15
+    timeout_seconds:    float = 10.0
+    fusion_alpha:       float = 0.3   # 0.0=pure judge, 1.0=pure first stage
+    max_text_chars:     int   = 200   # candidate description truncation
+
+
+@dataclass
+class RetrievalCacheConfig:
+    """LRU+TTL cache around any Retriever. Composition-based: when enabled,
+    the factory wraps the chosen backend with CachedRetriever.
+
+    Hit-rate target in normal usage: 70-90% (same query repeats across
+    multi-turn conversations and across operators in the same shift)."""
+    enabled:     bool  = True
+    max_entries: int   = 1024
+    ttl_seconds: float = 600.0   # 10 minutes — typical turn duration band
+
+
+@dataclass
 class RetrievalConfig:
     """Per-retriever knobs for tool/skill top-K selection."""
-    backend:                          str   = "hybrid"   # hybrid | bm25 | embedding | keyword
+    backend:                          str   = "hybrid"   # hybrid | bm25 | embedding | keyword | llm_judge
     tool_top_k:                       int   = 5
     skill_top_k:                      int   = 3
     always_inject_extra_tools:        list  = None
     shorten_tool_system_after_turn:   int   = 1
-    hybrid: HybridFusionConfig = field(default_factory=HybridFusionConfig)
+    embed_index_concurrency:          int   = 8     # max in-flight embed() during indexing
+    hybrid:    HybridFusionConfig   = field(default_factory=HybridFusionConfig)
+    cache:     RetrievalCacheConfig = field(default_factory=RetrievalCacheConfig)
+    llm_judge: LLMJudgeConfig       = field(default_factory=LLMJudgeConfig)
+    cache:     RetrievalCacheConfig = field(default_factory=RetrievalCacheConfig)
+    llm_judge: LLMJudgeConfig        = field(default_factory=LLMJudgeConfig)
+    embed_index_concurrency: int = 8   # max in-flight embed() calls during async indexing
 
     def __post_init__(self):
         if self.always_inject_extra_tools is None:
@@ -301,6 +360,19 @@ class MetaToolsBuiltinConfig:
 class MetaToolsConfig:
     builtin: MetaToolsBuiltinConfig = field(default_factory=MetaToolsBuiltinConfig)
 
+
+
+@dataclass
+class PaginationConfig:
+    """Behaviour controls for read_stored_result pagination across many turns.
+
+    Without these guards, an LLM may keep calling read_stored_result without
+    writing findings — and since older pages get dropped from context to
+    save tokens, the final answer ends up based only on the last page.
+    """
+    findings_nudge_enabled:        bool  = True
+    findings_silent_threshold:     int   = 2     # nudge after N tool-only paged reads
+    findings_nudge_min_chars:      int   = 40    # response shorter than this = "empty findings"
 
 @dataclass
 class StreamingConfig:
@@ -371,7 +443,8 @@ class AppConfig:
     classifier_fallback: ClassifierFallbackConfig = field(default_factory=ClassifierFallbackConfig)
     webui:               WebuiConfig = field(default_factory=WebuiConfig)
     retrieval:           RetrievalConfig = field(default_factory=RetrievalConfig)
-    meta_tools:          MetaToolsConfig = field(default_factory=MetaToolsConfig)  # prompt-based policies from config.yaml
+    meta_tools:          MetaToolsConfig = field(default_factory=MetaToolsConfig)
+    pagination:          PaginationConfig = field(default_factory=PaginationConfig)  # prompt-based policies from config.yaml
     def is_mock(self) -> bool:
         return self.mode == "mock"
 
@@ -512,6 +585,18 @@ def _load_retrieval_config(r: dict) -> "RetrievalConfig":
             rrf_k         = _env_int  ("RETRIEVAL_RRF_K",         h.get("rrf_k",         60)),
             oversample    = _env_int  ("RETRIEVAL_OVERSAMPLE",    h.get("oversample",     4)),
         ),
+        cache=RetrievalCacheConfig(
+            enabled     = _env_bool ("RETRIEVAL_CACHE_ENABLED",     (r.get("cache", {}) or {}).get("enabled",     True)),
+            max_entries = _env_int  ("RETRIEVAL_CACHE_MAX_ENTRIES", (r.get("cache", {}) or {}).get("max_entries", 1024)),
+            ttl_seconds = _env_float("RETRIEVAL_CACHE_TTL_SECONDS", (r.get("cache", {}) or {}).get("ttl_seconds",  600.0)),
+        ),
+        llm_judge=LLMJudgeConfig(
+            first_stage_top_k = _env_int  ("RETRIEVAL_LLM_JUDGE_FIRST_TOP_K", (r.get("llm_judge", {}) or {}).get("first_stage_top_k", 15)),
+            timeout_seconds   = _env_float("RETRIEVAL_LLM_JUDGE_TIMEOUT",      (r.get("llm_judge", {}) or {}).get("timeout_seconds",   10.0)),
+            fusion_alpha      = _env_float("RETRIEVAL_LLM_JUDGE_ALPHA",        (r.get("llm_judge", {}) or {}).get("fusion_alpha",      0.3)),
+            max_text_chars    = _env_int  ("RETRIEVAL_LLM_JUDGE_MAX_CHARS",    (r.get("llm_judge", {}) or {}).get("max_text_chars",   200)),
+        ),
+        embed_index_concurrency = _env_int("RETRIEVAL_EMBED_INDEX_CONCURRENCY", r.get("embed_index_concurrency", 8)),
     )
 
 
@@ -523,6 +608,14 @@ def _load_meta_tools_config(m: dict) -> "MetaToolsConfig":
             list_skills  = _env_bool("META_TOOL_LIST_SKILLS",   bi.get("list_skills",  True)),
             tool_details = _env_bool("META_TOOL_TOOL_DETAILS",  bi.get("tool_details", True)),
         ),
+    )
+
+
+def _load_pagination_config(p: dict) -> "PaginationConfig":
+    return PaginationConfig(
+        findings_nudge_enabled    = _env_bool("PAGINATION_FINDINGS_NUDGE",        p.get("findings_nudge_enabled",     True)),
+        findings_silent_threshold = _env_int ("PAGINATION_FINDINGS_SILENT_THR",   p.get("findings_silent_threshold",  2)),
+        findings_nudge_min_chars  = _env_int ("PAGINATION_FINDINGS_MIN_CHARS",    p.get("findings_nudge_min_chars",   40)),
     )
 
 
@@ -730,6 +823,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
         webui=_load_webui_config(y.get("webui", {})),
         retrieval=_load_retrieval_config(y.get("retrieval", {})),
         meta_tools=_load_meta_tools_config(y.get("meta_tools", {})),
+        pagination=_load_pagination_config(y.get("pagination", {})),
     )
 
 

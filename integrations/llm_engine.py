@@ -95,6 +95,11 @@ Rules: one tool per response, never repeat a call, end with analysis (no [TOOL:]
 Destructive tools (⚠HITL) — propose with concrete args; the operator will review before execution.
 Large results show as [STORED:tool:ref_id] — read with [TOOL:read_stored_result] {{"ref_id": "..."}}.
 
+PAGINATED READING — when paging through a stored result via read_stored_result:
+- After EACH page, write 2-3 sentences of key findings BEFORE calling the next page.
+- Older pages are dropped from context to save tokens; only your written findings survive across pages.
+- When Has more: False, write the complete analysis aggregating ALL findings you wrote earlier (visible via memory recall).
+
 {extra_tools_section}
 
 {skill_summary}
@@ -372,7 +377,7 @@ Return format:
                 items_by_id = {m.id: m.item for m in res.matches}
                 # For always-inject IDs not in retrieved set, try to load from corpus.
                 # Use the retriever's internal item list if present.
-                _all_corpus = getattr(tool_retriever, "_items", None) or []
+                _all_corpus = getattr(tool_retriever, "corpus", None) or []  # works through wrappers
                 for it in _all_corpus:
                     if it["id"] in always_inject_set and it["id"] not in items_by_id:
                         items_by_id[it["id"]] = it

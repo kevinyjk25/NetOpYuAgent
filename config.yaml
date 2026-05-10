@@ -579,6 +579,28 @@ retrieval:
   # Saves ~3000 chars / 750 tokens on every turn after the first.
   shorten_tool_system_after_turn: 1
 
+  # LRU + TTL cache around the retriever. Same query within ttl_seconds
+  # returns the cached result without re-running BM25/embedding. Typical
+  # hit rate 70-90% in production multi-turn conversations.
+  cache:
+    enabled:     true
+    max_entries: 1024
+    ttl_seconds: 600.0    # 10 minutes; lower for frequently-changing catalogs
+
+  # Max in-flight embed() calls during async startup indexing.
+  # Higher = faster startup, higher load on Ollama/OpenAI.
+  embed_index_concurrency: 8
+
+  # LLM-as-judge re-ranking (only used when retrieval.backend = "llm_judge").
+  # Two-stage: hybrid first stage → LLM scores top-N candidates → fusion.
+  # Best for cross-lingual or paraphrase-heavy queries where BM25+embedding
+  # alone miss. Adds 200-2000ms per retrieve call — pair with cache.
+  llm_judge:
+    first_stage_top_k: 15      # candidates forwarded to the judge
+    timeout_seconds:   10.0    # judge call timeout (falls back to first-stage on timeout)
+    fusion_alpha:       0.3    # 0.0 = pure judge, 1.0 = pure first stage
+    max_text_chars:    200     # candidate description truncation in judge prompt
+
 
 # ── Meta tools ────────────────────────────────────────────────────────────────
 meta_tools:
@@ -588,3 +610,40 @@ meta_tools:
     list_tools:    true     # discover tools matching a query
     list_skills:   true     # discover skills matching a query
     tool_details:  true     # full info for one named tool
+
+
+# ── Retrieval cache + concurrency knobs ───────────────────────────────────────
+# Append these to the existing `retrieval:` section in production config.
+# Documented separately for visibility.
+
+# retrieval:
+#   embed_index_concurrency: 8       # max in-flight embed() during startup
+#   cache:
+#     enabled: true                  # LRU+TTL cache wrapping the retriever
+#     max_entries: 1024              # ~10KB per entry, 1024 ≈ 10MB overhead
+#     ttl_seconds: 600               # 10 min — long enough for one operator session
+
+
+# ── LLM-judge retriever (two-stage rerank) ────────────────────────────────────
+# To enable: set retrieval.backend = "llm_judge". Then the configured
+# `hybrid` / `bm25` retriever provides first_stage_top_k candidates and an
+# LLM reranks them. Pair with cache.enabled = true to amortise LLM cost.
+#
+# retrieval:
+#   backend: "llm_judge"
+#   llm_judge:
+#     first_stage_top_k: 15           # pool size for LLM rerank
+#     timeout_seconds:    10.0        # falls back to first stage on timeout
+#     fusion_alpha:        0.3        # final = alpha*base + (1-alpha)*llm
+#     max_text_chars:     200         # truncation of item text in the prompt
+
+
+# ── Pagination findings safety net ───────────────────────────────────────────
+# Catches the case where an LLM pages through a stored result via
+# read_stored_result without writing analysis between pages. Older pages
+# get dropped from context to save tokens, so without intermediate findings
+# the final answer would only reflect the last page.
+pagination:
+  findings_nudge_enabled:    true   # set false to disable Layer 2 entirely
+  findings_silent_threshold: 2      # nudge after this many silent paged reads
+  findings_nudge_min_chars:  40     # response below this = "no findings written"

@@ -61,16 +61,69 @@ class EmbeddingRetriever(Retriever):
                 len(self._items), self._dim,
             )
 
-    async def index_async(self, items: Sequence[dict[str, Any]]) -> None:
-        """Async batch indexing for use during startup inside an event loop."""
+    async def index_async(
+        self,
+        items:        Sequence[dict[str, Any]],
+        *,
+        concurrency:  int   = 8,
+        log_every:    int   = 25,
+    ) -> None:
+        """Async batch indexing for use during startup inside an event loop.
+
+        Args:
+            concurrency: max in-flight embed() calls. Prevents connection-pool
+                         exhaustion against remote embedders (Ollama/OpenAI).
+                         Tune via cfg.retrieval.embed_index_concurrency.
+            log_every:   emit a progress log every N items (0 = silent).
+
+        Failures on individual items log a warning and store a zero-vector
+        placeholder so the rest of the index still works. This avoids one bad
+        text crashing the entire startup.
+        """
+        items = list(items)
+        n = len(items)
+        if n == 0:
+            with self._index_lock:
+                self._items, self._vectors = [], []
+            return
+
+        sem = asyncio.Semaphore(max(1, concurrency))
+        results: list[list[float]] = [None] * n  # type: ignore[list-item]
+        failed   = 0
+
+        async def _one(i: int):
+            nonlocal failed
+            text = items[i].get("text", "") or ""
+            async with sem:
+                try:
+                    v = await self._embedder.embed(text)
+                    if not v:
+                        raise ValueError("empty embedding")
+                    norm = sum(x * x for x in v) ** 0.5 or 1.0
+                    results[i] = [x / norm for x in v]
+                except Exception as exc:
+                    failed += 1
+                    logger.warning(
+                        "EmbeddingRetriever: embed failed for id=%r (%s) — using zero vector",
+                        items[i].get("id", "<?>"), exc,
+                    )
+                    results[i] = [0.0] * self._dim
+            if log_every > 0 and (i + 1) % log_every == 0:
+                logger.info(
+                    "EmbeddingRetriever: indexed %d/%d items", i + 1, n
+                )
+
+        tasks = [asyncio.create_task(_one(i)) for i in range(n)]
+        await asyncio.gather(*tasks)
+
         with self._index_lock:
-            self._items = list(items)
-            tasks = [self._embedder.embed(it.get("text", "")) for it in self._items]
-            self._vectors = await asyncio.gather(*tasks)
-            logger.info(
-                "EmbeddingRetriever: async-indexed %d items (dim=%d)",
-                len(self._items), self._dim,
-            )
+            self._items   = items
+            self._vectors = results
+
+        logger.info(
+            "EmbeddingRetriever: async-indexed %d items (dim=%d, concurrency=%d, failed=%d)",
+            n, self._dim, concurrency, failed,
+        )
 
     def _embed_blocking(self, text: str) -> list[float]:
         """Run an async embedder.embed(text) from sync code without breaking

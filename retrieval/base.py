@@ -106,6 +106,16 @@ class Retriever(abc.ABC):
             min_score=min_score,
         )
 
+    # ── Inspection ────────────────────────────────────────────────────
+
+    @property
+    def corpus(self) -> "list[dict[str, Any]]":
+        """Return the indexed item list. Default: looks for self._items
+        (which all built-in retrievers populate). Subclasses may override
+        when they store the corpus elsewhere (e.g. wrappers like
+        CachedRetriever delegate to the inner retriever)."""
+        return list(getattr(self, "_items", None) or [])
+
     # ── Helpers (shared) ──────────────────────────────────────────────
 
     @staticmethod

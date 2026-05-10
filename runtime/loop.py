@@ -1589,6 +1589,69 @@ class AgentRuntimeLoop:
                     if not post.passed:
                         yield {"node_step": f"Post-verify warning: {post.reason}", "node": "post_verify"}
 
+            # ── Paginated-read findings nudge (defence in depth) ───────
+            # If the LLM is paging through a stored result with read_stored_result
+            # but writing no analysis between pages, the per-page findings
+            # never reach memory and only the LAST page survives in context.
+            # The system prompt tells the LLM to write findings; this is the
+            # safety net that catches it when the prompt is ignored.
+            try:
+                # Pagination nudge config (loaded once per turn)
+                try:
+                    from config import cfg as _app_cfg
+                    _pcfg_local = getattr(_app_cfg, "pagination", None)
+                    _min_chars = int(getattr(_pcfg_local, "findings_nudge_min_chars", 40)) if _pcfg_local else 40
+                except Exception:
+                    _min_chars = 40
+                _last_call_was_paged_read = (
+                    len(new_tool_calls) == 1
+                    and new_tool_calls[0][0] == "read_stored_result"
+                )
+                # "Tool-call-only" = response is short and contains only
+                # the [TOOL:] line plus optional minor framing
+                _resp_clean = (llm_response or "").strip()
+                _resp_no_tool = re.sub(r"\[TOOL:[^\]]+\][^\n]*", "", _resp_clean).strip()
+                _is_findings_empty = len(_resp_no_tool) < _min_chars
+
+                if _last_call_was_paged_read and _is_findings_empty:
+                    state._consecutive_paged_reads = (
+                        getattr(state, "_consecutive_paged_reads", 0) + 1
+                    )
+                else:
+                    state._consecutive_paged_reads = 0
+
+                # Threshold and toggle from cfg.pagination (no hardcode)
+                try:
+                    from config import cfg as _app_cfg
+                    _pcfg = getattr(_app_cfg, "pagination", None)
+                    _enabled         = bool(getattr(_pcfg, "findings_nudge_enabled", True)) if _pcfg else True
+                    _silent_threshold = int (getattr(_pcfg, "findings_silent_threshold", 2)) if _pcfg else 2
+                    _min_chars       = int (getattr(_pcfg, "findings_nudge_min_chars", 40)) if _pcfg else 40
+                except Exception:
+                    _enabled, _silent_threshold, _min_chars = True, 2, 40
+
+                _already_nudged = getattr(state, "_paged_findings_nudged", False)
+                if (_enabled
+                        and state._consecutive_paged_reads >= _silent_threshold
+                        and not _already_nudged):
+                    _nudge = (
+                        "_NUDGE: You're paging through a stored result without writing findings. "
+                        "Older pages are dropped from context to save tokens — only your written "
+                        "findings survive across pages. Before reading the next page, write 2-3 "
+                        "sentences summarising what you saw on the most recent page (offsets, "
+                        "anomalies, IPs, ports). When Has more: False, write the complete analysis "
+                        "aggregating all page-by-page findings."
+                    )
+                    state.confirmed_facts.append(_nudge)
+                    state._paged_findings_nudged = True
+                    yield {
+                        "node_step": "Paginated-read findings nudge injected",
+                        "node": "runtime_loop",
+                    }
+            except Exception:
+                # Defence-in-depth — never let nudge logic crash the turn
+                pass
+
             decision = self._policy.evaluate(state)
             if decision.should_stop:
                 yield {"message": self._format_final([], decision), "node": "runtime_loop"}

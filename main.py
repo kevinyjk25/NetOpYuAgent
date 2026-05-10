@@ -553,8 +553,78 @@ async def build_services() -> dict[str, Any]:
             _tool_meta = _TL(mode=cfg.mode).build_metadata()
             _skill_defs = _TL(mode=cfg.mode).skill_definitions()
 
-            tool_retriever  = build_tool_retriever (cfg, _embedder, _tool_meta)
-            skill_retriever = build_skill_retriever(cfg, _embedder, _skill_defs)
+            # Choose async or sync indexing path based on backend + embedder presence.
+            # Async path: bounded-concurrency batched embed() calls, ~5-10x faster
+            # startup vs the per-item thread-spawn fallback.
+            _use_async_index = (
+                _embedder is not None and
+                cfg.retrieval.backend in ("hybrid", "embedding")
+            )
+            if _use_async_index:
+                # Reuse the background event loop spawned for memory LLM smoke test
+                # if available; otherwise schedule on a fresh helper thread.
+                try:
+                    import asyncio as _asyncio
+                    import concurrent.futures as _futs
+                    from retrieval import (
+                        build_tool_retriever_async, build_skill_retriever_async,
+                    )
+
+                    # Try to use the bg loop from earlier in build_services
+                    _bg = locals().get("_bg_loop")
+                    # Build judge_llm_fn for backend=llm_judge.
+                    # Re-use _async_llm_for_skills if available (already wires
+                    # the active LLM engine via _chat); else build a thin shim.
+                    _judge_fn = locals().get("_async_llm_for_skills")
+                    if _judge_fn is None and llm_engine is not None:
+                        async def _judge_fn(system: str, user: str) -> str:   # noqa: F811
+                            messages = [
+                                {"role": "system", "content": system},
+                                {"role": "user",   "content": user},
+                            ]
+                            if hasattr(llm_engine, "_chat"):
+                                return await llm_engine._chat(messages)
+                            return await llm_engine.call(user, system, state=None)
+
+                    if _bg is not None:
+                        tool_fut  = _asyncio.run_coroutine_threadsafe(
+                            build_tool_retriever_async (
+                                cfg, _embedder, _tool_meta, judge_llm_fn=_judge_fn,
+                            ), _bg,
+                        )
+                        skill_fut = _asyncio.run_coroutine_threadsafe(
+                            build_skill_retriever_async(
+                                cfg, _embedder, _skill_defs, judge_llm_fn=_judge_fn,
+                            ), _bg,
+                        )
+                        # Generous timeout: 17 tools × 30s embed timeout / 8 concurrency
+                        tool_retriever  = tool_fut.result(timeout=180)
+                        skill_retriever = skill_fut.result(timeout=180)
+                    else:
+                        # No bg loop — fall back to sync indexing (still works,
+                        # just slower at startup).
+                        raise RuntimeError("no bg loop available; using sync path")
+                except Exception as _async_exc:
+                    logger.info(
+                        "Retrieval: async indexing path unavailable (%s) — using sync",
+                        _async_exc,
+                    )
+                    _judge_fn_sync = locals().get("_async_llm_for_skills")
+                    tool_retriever  = build_tool_retriever (
+                        cfg, _embedder, _tool_meta, judge_llm_fn=_judge_fn_sync,
+                    )
+                    skill_retriever = build_skill_retriever(
+                        cfg, _embedder, _skill_defs, judge_llm_fn=_judge_fn_sync,
+                    )
+            else:
+                # Pure BM25/keyword path — sync indexing is fast (millis per item)
+                _judge_fn_pure = locals().get("_async_llm_for_skills")
+                tool_retriever  = build_tool_retriever (
+                    cfg, _embedder, _tool_meta, judge_llm_fn=_judge_fn_pure,
+                )
+                skill_retriever = build_skill_retriever(
+                    cfg, _embedder, _skill_defs, judge_llm_fn=_judge_fn_pure,
+                )
             services["tool_retriever"]  = tool_retriever
             services["skill_retriever"] = skill_retriever
 
@@ -578,6 +648,32 @@ async def build_services() -> dict[str, Any]:
                     replace=True,
                 )
             services["meta_tool_registry"] = mt_reg
+
+            # ── HITL safety-net validation ─────────────────────────────
+            # Warn if cfg.tools.hitl_tool_names lists tools that aren't
+            # actually registered. The prompt builder uses those names as
+            # the "always-inject" safety net, so a mismatch silently weakens
+            # HITL coverage.
+            try:
+                _registered = set(_tool_meta.keys())
+                _hitl_cfg   = set(getattr(cfg.tools, "hitl_tool_names", []) or [])
+                _missing    = sorted(_hitl_cfg - _registered)
+                _hits       = sorted(_hitl_cfg & _registered)
+                if _missing:
+                    logger.warning(
+                        "HITL safety-net: %d/%d tool names from cfg.tools.hitl_tool_names "
+                        "are NOT registered in mode=%s — they cannot fire HITL. "
+                        "Missing: %s. Active: %s",
+                        len(_missing), len(_hitl_cfg), cfg.mode,
+                        _missing, _hits,
+                    )
+                else:
+                    logger.info(
+                        "HITL safety-net: all %d configured tool names are registered (%s)",
+                        len(_hitl_cfg), _hits,
+                    )
+            except Exception as _hsv_exc:
+                logger.warning("HITL safety-net validation failed: %s", _hsv_exc)
 
             # Wire the LLM engine to use the retrievers + registry at prompt time
             llm_engine.attach_retrieval(

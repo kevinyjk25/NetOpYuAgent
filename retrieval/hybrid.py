@@ -88,11 +88,19 @@ class HybridRetriever(Retriever):
         if self._embed:
             self._embed.index(items)
 
-    async def index_async(self, items: Sequence[dict[str, Any]]) -> None:
+    async def index_async(
+        self,
+        items:       Sequence[dict[str, Any]],
+        *,
+        concurrency: int = 8,
+        log_every:   int = 25,
+    ) -> None:
         items = list(items)
         self._bm25.index(items)   # bm25 indexing is sync and fast
         if self._embed:
-            await self._embed.index_async(items)
+            await self._embed.index_async(
+                items, concurrency=concurrency, log_every=log_every,
+            )
 
     # ── Retrieval ─────────────────────────────────────────────────────
 
