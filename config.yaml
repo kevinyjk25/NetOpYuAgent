@@ -647,3 +647,12 @@ pagination:
   findings_nudge_enabled:    true   # set false to disable Layer 2 entirely
   findings_silent_threshold: 2      # nudge after this many silent paged reads
   findings_nudge_min_chars:  40     # response below this = "no findings written"
+
+# ── Schema validation ────────────────────────────────────────────────────────
+# When true, every tool call has its args validated and coerced via the schema
+# framework BEFORE dispatch. Catches LLM shape mistakes like list-as-dict,
+# string-as-int, missing required fields. Returns structured error to LLM
+# so it can self-correct on the next turn.
+# Override: TOOLS_SCHEMA_VALIDATION
+# tools:
+#   schema_validation_enabled: true

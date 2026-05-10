@@ -532,6 +532,93 @@ async def build_services() -> dict[str, Any]:
 
         logger.info("Runtime loop and HITL graph patched with real LLM + tool registry")
 
+        # ── Schema registry — auto-import from MCP + OpenAPI + dict metadata ──
+        # One unified ArgSchema per tool. ToolRouter validates+coerces args
+        # against this schema before dispatch — catches LLM shape mistakes
+        # before they crash the tool implementation.
+        try:
+            from schema import (
+                get_schema_registry, from_mcp_input_schema,
+                from_openapi_operation, from_dict_metadata,
+            )
+            schema_reg = get_schema_registry()
+
+            n_mcp = n_oa = n_dict = 0
+
+            # 1) MCP tools (already JSON Schema in inputSchema)
+            try:
+                mcp_clients = services.get("mcp_clients") or []
+                if not mcp_clients and services.get("mcp_client"):
+                    mcp_clients = [services["mcp_client"]]
+                for client in mcp_clients:
+                    for srv in getattr(client, "_servers", {}).values():
+                        for spec in getattr(srv, "_tools", []) or []:
+                            spec_dict = {
+                                "name":         getattr(spec, "name", ""),
+                                "description":  getattr(spec, "description", ""),
+                                "inputSchema":  getattr(spec, "input_schema", {}) or
+                                                getattr(spec, "inputSchema", {}),
+                            }
+                            if spec_dict["name"]:
+                                schema_reg.register(
+                                    from_mcp_input_schema(spec_dict["name"], spec_dict)
+                                )
+                                n_mcp += 1
+            except Exception as _mcp_exc:
+                logger.warning("Schema import from MCP failed: %s", _mcp_exc)
+
+            # 2) OpenAPI operations
+            try:
+                openapi_clients = services.get("openapi_clients") or []
+                if not openapi_clients and services.get("openapi_client"):
+                    openapi_clients = [services["openapi_client"]]
+                for client in openapi_clients:
+                    for op in getattr(client, "_operations", []) or []:
+                        op_dict = {
+                            "operationId": op.operation_id if hasattr(op, "operation_id") else "",
+                            "description": getattr(op, "description", ""),
+                            "summary":     getattr(op, "summary", ""),
+                            "parameters":  [],
+                            "requestBody": getattr(op, "request_body", {}) or {},
+                        }
+                        # Convert ParamSpec list to OpenAPI shape
+                        for p in getattr(op, "parameters", []) or []:
+                            op_dict["parameters"].append({
+                                "name":        getattr(p, "name", ""),
+                                "in":          getattr(p, "location", "query"),
+                                "required":    getattr(p, "required", False),
+                                "description": getattr(p, "description", ""),
+                                "schema":      getattr(p, "schema", {"type": "string"}),
+                            })
+                        if op_dict["operationId"]:
+                            schema_reg.register(
+                                from_openapi_operation(op_dict["operationId"], op_dict)
+                            )
+                            n_oa += 1
+            except Exception as _oa_exc:
+                logger.warning("Schema import from OpenAPI failed: %s", _oa_exc)
+
+            # 3) Local tool metadata (dict format) — last so overrides auto-imports
+            try:
+                from tools.loader import ToolLoader as _TL
+                _meta = _TL(mode=cfg.mode).build_metadata()
+                for tool_name, tool_meta in _meta.items():
+                    schema_reg.register(from_dict_metadata(tool_name, tool_meta))
+                    n_dict += 1
+            except Exception as _dict_exc:
+                logger.warning("Schema import from dict metadata failed: %s", _dict_exc)
+
+            services["schema_registry"] = schema_reg
+            logger.info(
+                "Schema registry: %d total schemas (mcp=%d openapi=%d dict=%d)",
+                len(schema_reg), n_mcp, n_oa, n_dict,
+            )
+        except Exception as _sch_exc:
+            logger.warning(
+                "Schema registry wiring failed (%s) — ToolRouter will skip validation",
+                _sch_exc,
+            )
+
         # ── Retrieval framework + meta-tool wiring ─────────────────────────
         # Replaces the full-catalog dump in _build_system_prompt with top-K
         # semantic retrieval, plus an extensible meta-tool registry.

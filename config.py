@@ -97,6 +97,7 @@ class OpenAPIConfig:
 @dataclass
 class ToolsConfig:
     mcp: MCPConfig; openapi: OpenAPIConfig; hitl_tool_names: list[str]
+    schema_validation_enabled: bool = True   # validate args via schema/ before tool dispatch
 
 @dataclass
 class HITLSLAConfig:

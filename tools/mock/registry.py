@@ -44,10 +44,17 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "edit_device_config": {
         "description": "Apply a configuration change to a device. Requires HITL approval.",
-        "parameters":  {"device_id": "Device identifier", "section": "Config section to change", "changes": "Change payload dict", "reason": "Reason for change (audit log)"},
+        "parameters":  {"device_id": "Device identifier", "section": "Config section to change", "changes": "Change payload (object with field-value pairs OR list of IOS lines)", "config_lines": "list of IOS-style config commands (alternative to section+changes)", "reason": "Reason for change (audit log)"},
+        "required":    ["device_id"],
         "returns":     "Confirmation of config push with diff",
         "hitl":        True,
         "tags":        ["config", "write", "destructive"],
+        "example":     {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
+        "examples":    [
+            {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
+            {"device_id": "ap-01", "section": "ntp", "changes": {"servers": ["10.0.0.5"]}, "reason": "add NTP server"},
+            {"device_id": "ap-01", "config_lines": ["radius-server timeout 3"], "reason": "alt format"},
+        ],
     },
     "diff_device_config": {
         "description": "Show uncommitted configuration changes (running vs startup).",

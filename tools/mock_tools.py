@@ -820,6 +820,75 @@ async def validate_device_config(args: dict[str, Any]) -> str:
 
 
 
+
+
+def _coerce_changes(raw: Any) -> dict:
+    """Defensive normalisation for the `changes` arg of edit_device_config.
+
+    LLMs produce widely varying shapes for the same intent. Rather than ask
+    each LLM to obey a strict schema (brittle), we accept what they produce
+    and normalise here. Returns a dict that the rest of the function can
+    safely call .get() / .items() on.
+
+    Shape handling:
+      None                    → {}
+      dict                    → returned as-is
+      list of strings         → {"add": [each string]}
+      list of dicts           → keys merged shallowly; lists concatenated
+      list of mixed           → strings → "add"; dicts merged
+      other (str/int/...)     → {"add": [str(raw)]} (last-resort wrap)
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        merged: dict = {}
+        for item in raw:
+            if isinstance(item, str):
+                merged.setdefault("add", []).append(item)
+            elif isinstance(item, dict):
+                for k, v in item.items():
+                    if k in merged and isinstance(merged[k], list) and isinstance(v, list):
+                        merged[k].extend(v)
+                    elif k in merged and isinstance(merged[k], list):
+                        merged[k].append(v)
+                    elif k in merged and isinstance(v, list):
+                        merged[k] = [merged[k], *v]
+                    else:
+                        merged[k] = v
+            else:
+                merged.setdefault("add", []).append(str(item))
+        return merged
+    # Anything else — string, int, etc — wrap so callers don't crash
+    return {"add": [str(raw)]}
+
+
+def _coerce_config_lines(raw: Any) -> list[str]:
+    """Defensive normalisation for the `config_lines` arg.
+
+    Accepts: None, list[str], single str, list of mixed types.
+    Returns a list[str] suitable for line-by-line processing.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        # Single line passed directly — wrap in list
+        return [raw] if raw.strip() else []
+    if isinstance(raw, list):
+        out: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                if item.strip():
+                    out.append(item)
+            else:
+                # Last-resort: stringify (catches dicts, ints, ...)
+                out.append(str(item))
+        return out
+    # Anything else
+    return [str(raw)]
+
+
 # ---------------------------------------------------------------------------
 # Tool: edit_device_config  (mock)
 # ---------------------------------------------------------------------------
@@ -840,9 +909,11 @@ async def edit_device_config(args: dict[str, Any]) -> str:
       → converted to IOS commands based on section type
     """
     device_id    = args.get("device_id", "")
-    config_lines = args.get("config_lines") or []
+    config_lines = _coerce_config_lines(args.get("config_lines"))
     section      = args.get("section", "")
-    changes      = args.get("changes", {})
+    # Defensive coercion: LLMs sometimes pass `changes` as a list, dict, or string.
+    # _coerce_changes normalises any of those into the dict shape the logic below assumes.
+    changes      = _coerce_changes(args.get("changes"))
     reason       = args.get("reason", "operator change")
 
     await asyncio.sleep(0.05)
@@ -1181,14 +1252,22 @@ TOOL_DESCRIPTIONS = {
         "description": (
             "Push configuration lines to a device (HITL approval required before execution). "
             "Mock mode simulates the config push and returns a result summary. "
-            "Provide config_lines as a list of IOS-style commands."
+            "Provide either config_lines (raw IOS commands) OR section+changes (key/value pairs)."
         ),
         "parameters": {
             "device_id":    "device ID (e.g. 'ap-01', 'sw-core-01')",
             "config_lines": "list of IOS-style config commands to push",
+            "section":      "config section name (e.g. 'radius', 'ntp', 'logging') when using changes",
+            "changes":      "object with field-value pairs, e.g. {timeout: 3, host: '10.0.1.100'}",
             "reason":       "change reason for audit log",
         },
+        "required": ["device_id"],
         "returns_large": False,
         "example": {"device_id": "ap-01", "config_lines": ["radius-server host 10.0.1.100 timeout 3"], "reason": "fix RADIUS timeout"},
+        "examples": [
+            {"device_id": "ap-01", "config_lines": ["radius-server timeout 3"], "reason": "fix RADIUS timeout"},
+            {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
+            {"device_id": "ap-01", "section": "ntp", "changes": {"servers": ["10.0.0.5", "10.0.0.6"]}, "reason": "add NTP backup"},
+        ],
     },
 }

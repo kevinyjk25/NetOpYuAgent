@@ -244,6 +244,49 @@ class ToolRouter:
         meta = self._meta[tool_name]
 
         async def _dispatch(args: dict) -> str:
+            # ── Schema validation + coercion (if registered) ──────────
+            # Catches LLM-produced shape errors BEFORE the tool runs,
+            # converting common mistakes (str→int, list→dict, etc.) into
+            # canonical shape with warnings; emits a structured error back
+            # to the LLM if shape can't be coerced.
+            try:
+                from schema import get_schema_registry, validate_and_coerce
+                from config import cfg as _app_cfg
+                _validation_enabled = getattr(
+                    getattr(_app_cfg, "tools", None),
+                    "schema_validation_enabled", True,
+                )
+                if _validation_enabled:
+                    _schema = get_schema_registry().get(tool_name)
+                    if _schema is not None:
+                        _vresult = validate_and_coerce(_schema, args)
+                        if not _vresult.ok:
+                            _err_lines = [
+                                f"[ToolRouter] Schema validation failed for tool {tool_name!r}:",
+                                *(f"  - {e}" for e in _vresult.errors),
+                            ]
+                            if _vresult.warnings:
+                                _err_lines.append("Warnings (coercion attempts):")
+                                _err_lines.extend(f"  - {w}" for w in _vresult.warnings)
+                            # Show the schema so the LLM can self-correct
+                            from schema import render_args_for_prompt
+                            _err_lines.append(f"Expected: {render_args_for_prompt(_schema, 'compact')}")
+                            return "\n".join(_err_lines)
+                        # Success — replace args with coerced version
+                        if _vresult.warnings:
+                            logger.info(
+                                "ToolRouter: tool=%s schema-coerced args (warnings=%s)",
+                                tool_name, _vresult.warnings,
+                            )
+                        args = _vresult.args
+            except ImportError:
+                pass   # schema package not present — silent skip
+            except Exception as _vexc:
+                logger.warning(
+                    "ToolRouter: schema validation error for %s (%s) — passing args as-is",
+                    tool_name, _vexc,
+                )
+
             # Circuit breaker check
             if meta.disabled:
                 if time.time() < meta.disabled_until:
@@ -280,8 +323,36 @@ class ToolRouter:
                 logger.warning("ToolRouter: timeout calling tool=%s", tool_name)
                 return f"[ToolRouter] Tool {tool_name!r} timed out after {self._default_timeout}s"
             except Exception as exc:
-                logger.error("ToolRouter: error calling tool=%s: %s", tool_name, exc)
-                return f"[ToolRouter] Tool {tool_name!r} failed: {exc}"
+                # Augment the error with arg shape info so the LLM (or human
+                # debugger) can diagnose schema/coercion issues without reading
+                # the tool's source code. We summarise types only, NOT values,
+                # to avoid leaking secrets like API keys or PII.
+                arg_shapes = ", ".join(
+                    f"{k}: {type(v).__name__}"
+                    for k, v in (args or {}).items()
+                )
+                logger.error(
+                    "ToolRouter: error calling tool=%s: %s | args shape: {%s}",
+                    tool_name, exc, arg_shapes,
+                )
+                # Hint pattern for common shape errors
+                exc_str = str(exc)
+                hint = ""
+                if "has no attribute 'items'" in exc_str or "has no attribute 'get'" in exc_str:
+                    hint = (
+                        "\nHint: A dict-typed argument was passed as a list. "
+                        "Ensure each named argument has the type expected by the tool "
+                        "(see the tool's args schema)."
+                    )
+                elif "has no attribute 'append'" in exc_str or "has no attribute 'extend'" in exc_str:
+                    hint = (
+                        "\nHint: A list-typed argument was passed as a dict or scalar. "
+                        "Wrap single values in a list."
+                    )
+                return (
+                    f"[ToolRouter] Tool {tool_name!r} failed: {exc}{hint}\n"
+                    f"Received args shape: {{{arg_shapes}}}"
+                )
             finally:
                 elapsed_ms = (time.monotonic() - start) * 1000
                 meta.record_call(success, elapsed_ms)
