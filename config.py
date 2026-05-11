@@ -375,6 +375,41 @@ class PaginationConfig:
     findings_silent_threshold:     int   = 2     # nudge after N tool-only paged reads
     findings_nudge_min_chars:      int   = 40    # response shorter than this = "empty findings"
 
+
+@dataclass
+class SkillOrchestrationConfig:
+    """Skill selection, ambiguity HITL, and observability (Journal).
+
+    Three feature groups live here:
+      1. Ambiguity-triggered HITL — automatically ask the operator when
+         multiple skills score similarly above a floor.
+      2. Scoring thresholds — control which top-K skills count as "real
+         matches" vs filler.
+      3. SkillJournal — passive observability, no control-flow effect.
+    """
+    # ── Ambiguity HITL ──
+    # When True (default), runtime stream yields a stop_hitl chunk with
+    # user_choice kind when ambiguity_gap_threshold + ambiguity_floor are met.
+    hitl_on_ambiguity:        bool  = True
+    # Top-1 score must be >= this for ambiguity to even be considered.
+    # Below the floor, no skill is a real match — let the LLM improvise.
+    ambiguity_floor:          float = 0.40
+    # Top-2 score gap must be < this for ambiguity to fire.
+    # Lower = stricter (only very-close-tie triggers HITL).
+    # Higher = looser (more situations trigger operator pick).
+    ambiguity_gap_threshold:  float = 0.08
+    # Maximum number of choices to surface to the operator.
+    ambiguity_max_choices:    int   = 5
+
+    # ── SkillJournal ──
+    # Recording is essentially free, so on by default. Disable per-deployment
+    # if you have strict cardinality limits on logs / storage.
+    journal_enabled:          bool  = True
+    journal_max_entries:      int   = 200          # in-memory ring buffer cap
+    journal_persist_path:     str   = ""           # empty = no disk persistence
+    # Expose stats via /webui/skill_journal/* endpoints when True.
+    journal_api_enabled:      bool  = True
+
 @dataclass
 class StreamingConfig:
     """Server-Sent Event stream timeouts and queue limits."""
@@ -445,7 +480,8 @@ class AppConfig:
     webui:               WebuiConfig = field(default_factory=WebuiConfig)
     retrieval:           RetrievalConfig = field(default_factory=RetrievalConfig)
     meta_tools:          MetaToolsConfig = field(default_factory=MetaToolsConfig)
-    pagination:          PaginationConfig = field(default_factory=PaginationConfig)  # prompt-based policies from config.yaml
+    pagination:          PaginationConfig = field(default_factory=PaginationConfig)
+    skill_orchestration: SkillOrchestrationConfig = field(default_factory=SkillOrchestrationConfig)  # prompt-based policies from config.yaml
     def is_mock(self) -> bool:
         return self.mode == "mock"
 
@@ -617,6 +653,19 @@ def _load_pagination_config(p: dict) -> "PaginationConfig":
         findings_nudge_enabled    = _env_bool("PAGINATION_FINDINGS_NUDGE",        p.get("findings_nudge_enabled",     True)),
         findings_silent_threshold = _env_int ("PAGINATION_FINDINGS_SILENT_THR",   p.get("findings_silent_threshold",  2)),
         findings_nudge_min_chars  = _env_int ("PAGINATION_FINDINGS_MIN_CHARS",    p.get("findings_nudge_min_chars",   40)),
+    )
+
+
+def _load_skill_orchestration_config(s: dict) -> "SkillOrchestrationConfig":
+    return SkillOrchestrationConfig(
+        hitl_on_ambiguity       = _env_bool ("SKILL_HITL_ON_AMBIGUITY",       s.get("hitl_on_ambiguity",       True)),
+        ambiguity_floor         = _env_float("SKILL_AMBIGUITY_FLOOR",         s.get("ambiguity_floor",         0.40)),
+        ambiguity_gap_threshold = _env_float("SKILL_AMBIGUITY_GAP",           s.get("ambiguity_gap_threshold", 0.08)),
+        ambiguity_max_choices   = _env_int  ("SKILL_AMBIGUITY_MAX_CHOICES",   s.get("ambiguity_max_choices",      5)),
+        journal_enabled         = _env_bool ("SKILL_JOURNAL_ENABLED",         s.get("journal_enabled",         True)),
+        journal_max_entries     = _env_int  ("SKILL_JOURNAL_MAX_ENTRIES",     s.get("journal_max_entries",      200)),
+        journal_persist_path    = _env_str  ("SKILL_JOURNAL_PERSIST_PATH",    s.get("journal_persist_path",       "")),
+        journal_api_enabled     = _env_bool ("SKILL_JOURNAL_API_ENABLED",     s.get("journal_api_enabled",     True)),
     )
 
 
@@ -825,6 +874,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
         retrieval=_load_retrieval_config(y.get("retrieval", {})),
         meta_tools=_load_meta_tools_config(y.get("meta_tools", {})),
         pagination=_load_pagination_config(y.get("pagination", {})),
+        skill_orchestration=_load_skill_orchestration_config(y.get("skill_orchestration", {})),
     )
 
 

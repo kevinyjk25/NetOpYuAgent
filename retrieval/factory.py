@@ -179,31 +179,45 @@ def tools_to_corpus(tool_metadata: dict[str, dict[str, Any]]) -> list[dict[str, 
 def skills_to_corpus(skill_definitions: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
     """Convert SkillCatalog.skill_definitions() into Retriever items.
 
-    Skills have richer structured fields (purpose, tags, parameters,
-    description); pulling them all into the searchable text gives both
-    lexical and semantic surfaces.
+    The skill_definitions dict uses the FLAT format from tools/{mock,pragmatic}/registry.py:
+       {skill_id: {name, purpose, description, tags, parameters, ...}}
+    NOT a {summary: {...}, detail: {...}} nested shape (that's the Skill dataclass).
+
+    We compose the searchable text from purpose (most diagnostic), description,
+    tags, parameter names, and the skill_id itself (lexical anchor). This gives
+    BM25 and embedding both lexical and semantic matching surfaces.
     """
     corpus = []
     for skill_id, defn in skill_definitions.items():
-        summary = defn.get("summary", {}) or {}
-        detail  = defn.get("detail", {}) or {}
-        tags    = list(summary.get("tags") or detail.get("tags") or [])
-        text    = " ".join([
+        # Support BOTH flat dict (registry source) and nested dataclass-style
+        # (Skill dataclass via summary/detail) for forward compatibility.
+        summary = defn.get("summary") if isinstance(defn.get("summary"), dict) else {}
+        detail  = defn.get("detail")  if isinstance(defn.get("detail"),  dict) else {}
+
+        name        = defn.get("name")        or summary.get("name", "")        or ""
+        purpose     = defn.get("purpose")     or summary.get("purpose", "")     or ""
+        description = defn.get("description") or detail.get("description", "")  or ""
+        tags        = list(defn.get("tags") or summary.get("tags") or detail.get("tags") or [])
+        parameters  = defn.get("parameters")  or detail.get("parameters", {})   or {}
+
+        text = " ".join([
             skill_id.replace("_", " "),
             skill_id,
-            summary.get("name", "") or "",
-            summary.get("purpose", "") or "",
-            detail.get("description", "") or "",
+            name,
+            purpose,
+            description,
             " ".join(tags),
-            " ".join((detail.get("parameters") or {}).keys()),
+            " ".join((parameters or {}).keys()),
         ]).strip()
         corpus.append({
             "id":          skill_id,
             "text":        text,
-            "description": summary.get("purpose") or detail.get("description", ""),
+            "description": purpose or description,
             "tags":        tags,
-            "hitl":        bool(summary.get("requires_hitl") or detail.get("requires_hitl")),
-            "risk_level":  summary.get("risk_level", "low"),
+            "hitl":        bool(defn.get("requires_hitl") or
+                                summary.get("requires_hitl") or
+                                detail.get("requires_hitl")),
+            "risk_level":  defn.get("risk_level") or summary.get("risk_level", "low"),
         })
     return corpus
 

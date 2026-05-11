@@ -975,6 +975,125 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # Skills endpoints
     # ==================================================================
 
+    
+    @app.get("/skill_journal/recent")
+    async def skill_journal_recent(limit: int = 20):
+        """Return the most recent SkillJournal entries (newest first)."""
+        try:
+            from config import cfg as _app_cfg
+            _so = getattr(_app_cfg, "skill_orchestration", None)
+            if not _so or not getattr(_so, "journal_api_enabled", True):
+                raise HTTPException(503, "Skill journal API disabled")
+            from runtime.skill_journal import get_journal_store
+            store = get_journal_store()
+            return JSONResponse(content={"entries": store.list_recent(limit=min(max(1, limit), 100))})
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/skill_journal/recent failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/skill_journal/stats")
+    async def skill_journal_stats():
+        """Aggregate stats: outcomes, per-skill use count, dormancy."""
+        try:
+            from config import cfg as _app_cfg
+            _so = getattr(_app_cfg, "skill_orchestration", None)
+            if not _so or not getattr(_so, "journal_api_enabled", True):
+                raise HTTPException(503, "Skill journal API disabled")
+            from runtime.skill_journal import get_journal_store
+            return JSONResponse(content=get_journal_store().stats())
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/skill_journal/stats failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/skill_journal/filter")
+    async def skill_journal_filter(
+        skill_id:   Optional[str]  = None,
+        outcome:    Optional[str]  = None,
+        ambiguous:  Optional[bool] = None,
+        limit:      int            = 50,
+    ):
+        """Filter journal entries by skill, outcome, or ambiguity flag."""
+        try:
+            from config import cfg as _app_cfg
+            _so = getattr(_app_cfg, "skill_orchestration", None)
+            if not _so or not getattr(_so, "journal_api_enabled", True):
+                raise HTTPException(503, "Skill journal API disabled")
+            from runtime.skill_journal import get_journal_store
+            return JSONResponse(content={
+                "entries": get_journal_store().filter(
+                    skill_id=skill_id, outcome=outcome,
+                    ambiguous=ambiguous, limit=min(max(1, limit), 200),
+                )
+            })
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/skill_journal/filter failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/skill_journal/recent")
+    async def skill_journal_recent(limit: int = 20):
+        """Return the most recent SkillJournal entries (newest first)."""
+        try:
+            from config import cfg as _app_cfg
+            _so = getattr(_app_cfg, "skill_orchestration", None)
+            if not _so or not getattr(_so, "journal_api_enabled", True):
+                raise HTTPException(503, "Skill journal API disabled")
+            from runtime.skill_journal import get_journal_store
+            store = get_journal_store()
+            return JSONResponse(content={"entries": store.list_recent(limit=min(max(1, limit), 100))})
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/skill_journal/recent failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/skill_journal/stats")
+    async def skill_journal_stats():
+        """Aggregate stats: outcomes, per-skill use count, dormancy."""
+        try:
+            from config import cfg as _app_cfg
+            _so = getattr(_app_cfg, "skill_orchestration", None)
+            if not _so or not getattr(_so, "journal_api_enabled", True):
+                raise HTTPException(503, "Skill journal API disabled")
+            from runtime.skill_journal import get_journal_store
+            return JSONResponse(content=get_journal_store().stats())
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/skill_journal/stats failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/skill_journal/filter")
+    async def skill_journal_filter(
+        skill_id:  Optional[str]  = None,
+        outcome:   Optional[str]  = None,
+        ambiguous: Optional[bool] = None,
+        limit:     int            = 50,
+    ):
+        """Filter journal entries by skill, outcome, or ambiguity flag."""
+        try:
+            from config import cfg as _app_cfg
+            _so = getattr(_app_cfg, "skill_orchestration", None)
+            if not _so or not getattr(_so, "journal_api_enabled", True):
+                raise HTTPException(503, "Skill journal API disabled")
+            from runtime.skill_journal import get_journal_store
+            return JSONResponse(content={
+                "entries": get_journal_store().filter(
+                    skill_id=skill_id, outcome=outcome,
+                    ambiguous=ambiguous, limit=min(max(1, limit), 200),
+                )
+            })
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/skill_journal/filter failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
     @app.get("/skills")
     async def list_skills() -> JSONResponse:
         catalog    = services["skill_catalog"]

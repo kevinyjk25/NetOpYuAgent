@@ -993,6 +993,10 @@ class AgentRuntimeLoop:
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(_call_key(tool_name, tool_args))
+                _journal_tool_start_ts = (
+                    __import__("time").monotonic()
+                    if state._skill_journal is not None else None
+                )
 
                 # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
                 # When a name exists in both catalogs (e.g. list_devices is both a skill
@@ -1097,6 +1101,23 @@ class AgentRuntimeLoop:
         state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
         setattr(state, "working_set", list(working_set or []))
 
+        # ── SkillJournal — passive observability (Plan A) ──────────
+        # Records skill selection, loads, tool calls, completion outcome.
+        # No effect on control flow; data feeds /skill_journal endpoints
+        # and SkillEvolver training signal.
+        state._skill_journal = None
+        try:
+            from config import cfg as _app_cfg
+            _so_cfg = getattr(_app_cfg, "skill_orchestration", None)
+            if _so_cfg and getattr(_so_cfg, "journal_enabled", True):
+                from runtime.skill_journal import SkillJournal
+                state._skill_journal = SkillJournal(
+                    session_id=session_id,
+                    query=query,
+                )
+        except Exception as _jexc:
+            logger.debug("SkillJournal init skipped: %s", _jexc)
+
         tool_outputs: dict[str, str] = {}   # persists across turns
         called_tools: set[str] = set()       # dedup guard
 
@@ -1199,6 +1220,16 @@ class AgentRuntimeLoop:
                 _cached_skill_count      = skill_count
                 _cached_skill_ambiguous  = skill_ambiguous
                 _last_skill_turn         = state.turns
+                # Journal: first selection of this stream call
+                if state._skill_journal is not None and state.turns <= 1:
+                    try:
+                        state._skill_journal.record_selection(
+                            top_k_skills=selected_skills,
+                            ambiguous=skill_ambiguous,
+                            turn=state.turns,
+                        )
+                    except Exception as _je:
+                        logger.debug("journal.record_selection failed: %s", _je)
 
             # Compress paged results before assembly to prevent context overflow.
             # Without this, accumulated read_stored_result pages send the full
@@ -1242,18 +1273,29 @@ class AgentRuntimeLoop:
                 # operator can also pick "none" which means "let the LLM
                 # decide from prompt context unaided".
                 #
-                # Set HITL_SKILL_AMBIGUITY=false to disable this gate
-                # (LLM picks from the prompt unaided).
+                # Read trigger config from cfg.skill_orchestration with env-var fallback.
                 import os as _os
+                try:
+                    from config import cfg as _app_cfg
+                    _so = getattr(_app_cfg, "skill_orchestration", None)
+                    _hitl_on_ambig = bool(getattr(_so, "hitl_on_ambiguity", True)) if _so else True
+                    _max_choices   = int(getattr(_so, "ambiguity_max_choices", 5)) if _so else 5
+                except Exception:
+                    _hitl_on_ambig, _max_choices = True, 5
+                # Env var override (back-compat)
+                _env_val = _os.getenv("HITL_SKILL_AMBIGUITY")
+                if _env_val is not None:
+                    _hitl_on_ambig = _env_val.lower() != "false"
+
                 _ambig_already_resolved = bool(env_ctx.get("_skill_choice_resolved"))
                 if (
                     skill_ambiguous
                     and not _ambig_already_resolved
-                    and _os.getenv("HITL_SKILL_AMBIGUITY", "true").lower() != "false"
+                    and _hitl_on_ambig
                 ):
                     # Build choices from top candidates + a "none" option.
                     _choices = []
-                    for sid, score in selected_skills[:5]:
+                    for sid, score in selected_skills[:_max_choices]:
                         summary = None
                         if self._skill_catalog is not None:
                             try:
@@ -1286,7 +1328,7 @@ class AgentRuntimeLoop:
                     yield {
                         "message": (
                             f"Multiple skills match this request — top candidates: "
-                            f"{[c['id'] for c in _choices[:3]]}"
+                            f"{[c['id'] for c in _choices[:min(3, _max_choices)]]}"
                         ),
                         "node":           "hitl_gate",
                         "stop_hitl":      True,
@@ -1433,6 +1475,23 @@ class AgentRuntimeLoop:
                     if detail:
                         context_str += "\n\n" + detail   # inject for next turn
                         yield {"node_step": f"Loading skill details: {skill_id}", "node": "skill_load"}
+                        # Journal: record the load with position+score from top-k
+                        if state._skill_journal is not None:
+                            try:
+                                _pos = next(
+                                    (i for i, (sid, _) in enumerate(selected_skills) if sid == skill_id),
+                                    None,
+                                )
+                                _score = next(
+                                    (sc for sid, sc in selected_skills if sid == skill_id),
+                                    None,
+                                )
+                                state._skill_journal.record_skill_load(
+                                    skill_id=skill_id, turn=state.turns,
+                                    position=_pos, score=_score,
+                                )
+                            except Exception as _je:
+                                logger.debug("journal.record_skill_load failed: %s", _je)
 
             # ── Single tool call enforcement ──────────────────────────
             # _parse_tool_call() returns only the FIRST [TOOL:] found.
@@ -1444,6 +1503,10 @@ class AgentRuntimeLoop:
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(_call_key(tool_name, tool_args))
+                _journal_tool_start_ts = (
+                    __import__("time").monotonic()
+                    if state._skill_journal is not None else None
+                )
 
                 # ── Skill-as-tool guard ───────────────────────────────
                 # If the LLM called a SKILL name as if it were a tool,
@@ -1588,6 +1651,23 @@ class AgentRuntimeLoop:
                     post = await self.post_verify(tool_name, raw, state.confirmed_facts)
                     if not post.passed:
                         yield {"node_step": f"Post-verify warning: {post.reason}", "node": "post_verify"}
+
+                # Journal: record completed tool call (after exec + verify)
+                if state._skill_journal is not None:
+                    try:
+                        _t = __import__("time").monotonic()
+                        _elapsed = (_t - _journal_tool_start_ts) * 1000 if _journal_tool_start_ts else None
+                        _tool_ok = "[ToolRouter] Tool" not in (raw or "")[:40]
+                        state._skill_journal.record_tool_call(
+                            turn=state.turns,
+                            tool_name=tool_name,
+                            args=tool_args,
+                            ok=_tool_ok,
+                            error=(None if _tool_ok else str(raw)[:200]),
+                            elapsed_ms=_elapsed,
+                        )
+                    except Exception as _je:
+                        logger.debug("journal.record_tool_call failed: %s", _je)
 
             # ── Paginated-read findings nudge (defence in depth) ───────
             # If the LLM is paging through a stored result with read_stored_result

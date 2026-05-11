@@ -656,3 +656,22 @@ pagination:
 # Override: TOOLS_SCHEMA_VALIDATION
 # tools:
 #   schema_validation_enabled: true
+
+
+# ── Skill orchestration ──────────────────────────────────────────────────────
+# Controls skill selection, ambiguity-triggered HITL, and observability
+# (SkillJournal). All knobs are optional — defaults are production-safe.
+skill_orchestration:
+  # Ambiguity HITL — automatically pause and ask the operator which skill
+  # to use when top-2 are too close to call.
+  hitl_on_ambiguity:        true   # off → LLM picks unaided
+  ambiguity_floor:          0.40   # min score for top-1 to count as "real match"
+  ambiguity_gap_threshold:  0.08   # max gap between top-1 and top-2 to fire HITL
+                                    # lower = stricter trigger; higher = looser
+  ambiguity_max_choices:    5
+
+  # SkillJournal — passive observability, no control-flow effect.
+  journal_enabled:          true
+  journal_max_entries:      200
+  journal_persist_path:     ""     # set e.g. "data/skill_journal.jsonl" to persist
+  journal_api_enabled:      true   # exposes /webui/skill_journal/* endpoints

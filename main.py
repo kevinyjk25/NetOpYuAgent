@@ -715,6 +715,22 @@ async def build_services() -> dict[str, Any]:
             services["tool_retriever"]  = tool_retriever
             services["skill_retriever"] = skill_retriever
 
+            # Attach the retriever to the SkillCatalogService so its
+            # select_skills_for_query() uses Hybrid (BM25+embedding) scoring
+            # instead of the legacy keyword path. This is the production
+            # upgrade for skill scoring accuracy on CJK / paraphrase / rare-word
+            # queries.
+            try:
+                _sc = services.get("skill_catalog")
+                if _sc is not None and hasattr(_sc, "attach_retriever"):
+                    _sc.attach_retriever(skill_retriever)
+                    logger.info(
+                        "SkillCatalog: attached retriever for upgraded scoring (backend=%s)",
+                        getattr(skill_retriever, "name", "?"),
+                    )
+            except Exception as _arx:
+                logger.warning("SkillCatalog retriever attach failed: %s", _arx)
+
             # Meta-tool registry — register the built-ins enabled in config.
             mt_reg = get_meta_tool_registry()
             if cfg.meta_tools.builtin.list_tools:
