@@ -675,3 +675,22 @@ skill_orchestration:
   journal_max_entries:      200
   journal_persist_path:     ""     # set e.g. "data/skill_journal.jsonl" to persist
   journal_api_enabled:      true   # exposes /webui/skill_journal/* endpoints
+
+# ── Skill scoring weights (legacy path) and evolver feedback ──
+# Append these to the existing `skill_orchestration:` block.
+#
+# skill_orchestration:
+#   scoring:
+#     # Multi-field weighted scorer (kicks in only when no Retriever is attached).
+#     # Production path uses cfg.retrieval — these weights are the fallback.
+#     purpose_weight:     0.40   # most diagnostic field (raise for tighter match)
+#     description_weight: 0.20
+#     tags_weight:        0.20   # raise if you have a rich tag taxonomy
+#     params_weight:      0.10
+#     name_id_weight:     0.10   # tiebreaker
+#
+#   # SkillEvolver auto-feedback from SkillJournal observations
+#   evolver_feedback_enabled:    true
+#   evolver_feedback_interval_s: 300   # seconds between scans
+#   evolver_feedback_min_uses:   3     # need ≥N observations before feedback
+#   evolver_dormant_threshold:   0.6   # dormant/use ratio above this triggers patch

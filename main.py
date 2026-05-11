@@ -609,6 +609,7 @@ async def build_services() -> dict[str, Any]:
                 logger.warning("Schema import from dict metadata failed: %s", _dict_exc)
 
             services["schema_registry"] = schema_reg
+
             logger.info(
                 "Schema registry: %d total schemas (mcp=%d openapi=%d dict=%d)",
                 len(schema_reg), n_mcp, n_oa, n_dict,
@@ -618,6 +619,46 @@ async def build_services() -> dict[str, Any]:
                 "Schema registry wiring failed (%s) — ToolRouter will skip validation",
                 _sch_exc,
             )
+
+        # ── SkillJournalConsumer — auto-feedback to SkillEvolver ──────
+        # Periodically scans SkillJournal stats; for skills that are
+        # consistently dormant (loaded but no tool calls), generates
+        # structured feedback and calls SkillEvolver.apply_feedback().
+        # Closes the loop between observability (Plan A) and learning.
+        try:
+            _so_cfg = getattr(cfg, "skill_orchestration", None)
+            if _so_cfg and getattr(_so_cfg, "evolver_feedback_enabled", True):
+                from skills.journal_consumer import SkillJournalConsumer
+                from runtime.skill_journal import get_journal_store
+                _evolver = services.get("skill_evolver")
+                if _evolver is not None:
+                    consumer = SkillJournalConsumer(
+                        evolver=_evolver,
+                        journal_store=get_journal_store(),
+                        interval_s=int(getattr(_so_cfg, "evolver_feedback_interval_s", 300)),
+                        min_uses=int(getattr(_so_cfg, "evolver_feedback_min_uses", 3)),
+                        dormant_threshold=float(getattr(_so_cfg, "evolver_dormant_threshold", 0.6)),
+                    )
+                    services["skill_journal_consumer"] = consumer
+                    async def _start_consumer():
+                        await consumer.start()
+                    async def _stop_consumer():
+                        await consumer.stop()
+                    services["_start_consumer"] = _start_consumer
+                    services["_stop_consumer"]  = _stop_consumer
+                    logger.info(
+                        "SkillJournalConsumer ready (interval=%ds, dormant_thr=%.2f) — starts on app startup",
+                        consumer._interval, consumer._dormant_threshold,
+                    )
+                else:
+                    logger.info(
+                        "SkillJournalConsumer skipped — no SkillEvolver available "
+                        "(mode=%s)", cfg.mode,
+                    )
+            else:
+                logger.info("SkillJournalConsumer disabled (skill_orchestration.evolver_feedback_enabled=false)")
+        except Exception as _jc_exc:
+            logger.warning("SkillJournalConsumer setup failed: %s — auto-feedback off", _jc_exc)
 
         # ── Retrieval framework + meta-tool wiring ─────────────────────────
         # Replaces the full-catalog dump in _build_system_prompt with top-K
@@ -949,7 +990,23 @@ async def lifespan(app: FastAPI):
     if _services.get("hitl_watchdog") is not None:
         watchdog_task = asyncio.create_task(_services["hitl_watchdog"].run())
 
+    # Start SkillJournalConsumer background task
+    try:
+        _start = _services.get("_start_consumer")
+        if _start:
+            await _start()
+    except Exception as _jc_exc:
+        logger.warning("SkillJournalConsumer start failed: %s", _jc_exc)
+
     yield
+
+    # Stop SkillJournalConsumer before other teardown
+    try:
+        _stop = _services.get("_stop_consumer")
+        if _stop:
+            await _stop()
+    except Exception as _jc_exc:
+        logger.warning("SkillJournalConsumer stop failed: %s", _jc_exc)
 
     if _services.get("hitl_watchdog") is not None:
         _services["hitl_watchdog"].stop()

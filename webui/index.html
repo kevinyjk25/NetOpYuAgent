@@ -751,6 +751,7 @@ Type a query below. The agent will:
     <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
     <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
     <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
+    <div class="tab" onclick="switchTab('journal');refreshJournal()" id="tab-btn-journal">Journal</div>
   </div>
 
   <!-- Results tab — all tool calls grouped by turn -->
@@ -849,6 +850,56 @@ Type a query below. The agent will:
       <div class="metric-row"><span class="metric-label">Memory backend</span><span class="metric-val" id="s-memory">—</span></div>
     </div>
     <button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-top:8px" onclick="refreshStats()">↻ Refresh</button>
+  </div>
+
+  <!-- Journal tab — SkillJournal observability dashboard -->
+  <div class="tab-content" id="tab-journal" style="padding:0">
+    <div style="padding:10px 12px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1">
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
+          Aggregate stats
+          <span id="journal-count" style="color:var(--accent);margin-left:6px;font-family:var(--mono)">—</span>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:12px">
+          <div>Outcomes: <span id="journal-outcomes" style="color:var(--accent)">—</span></div>
+          <div>Ambiguous: <span id="journal-ambig-rate" style="color:var(--accent)">—</span></div>
+        </div>
+      </div>
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
+          Per-skill usage
+          <span style="color:var(--dim2);font-size:10px;text-transform:none;font-family:var(--mono)">
+            (⚠ = dormant: loaded but no tool calls)
+          </span>
+        </div>
+        <table style="width:100%;font-family:var(--mono);font-size:11px;border-collapse:collapse">
+          <thead>
+            <tr style="color:var(--dim);text-align:left">
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Skill</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:60px">Uses</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:70px">Dormant</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:80px">Dormant %</th>
+            </tr>
+          </thead>
+          <tbody id="journal-skill-tbody">
+            <tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:flex;align-items:center">
+          Recent activity
+          <button onclick="refreshJournal()" style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:3px;color:var(--dim);font-size:10px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">↻ refresh</button>
+        </div>
+        <div id="journal-recent" style="display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:11px">
+          <div style="color:var(--dim);font-style:italic">Loading…</div>
+        </div>
+      </div>
+
+    </div>
   </div>
 </div>
 
@@ -3222,6 +3273,117 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
   setInterval(refreshHitl,  hitlMs);
   setInterval(refreshStats, statsMs);
 })();
+
+
+  // ── Journal tab ──────────────────────────────────────────────
+  async function refreshJournal() {
+    try {
+      const [statsResp, recentResp] = await Promise.all([
+        fetch('/webui/skill_journal/stats'),
+        fetch('/webui/skill_journal/recent?limit=20'),
+      ]);
+      if (statsResp.status === 503 || recentResp.status === 503) {
+        document.getElementById('journal-count').textContent =
+            'Disabled (cfg.skill_orchestration.journal_api_enabled=false)';
+        return;
+      }
+      const stats   = await statsResp.json();
+      const recent  = (await recentResp.json()).entries || [];
+
+      // Aggregate header
+      document.getElementById('journal-count').textContent =
+          (stats.count || 0) + ' total entries';
+
+      const outcomes = stats.outcomes || {};
+      const outcomeStr = Object.entries(outcomes)
+          .map(([k, v]) => k + ':' + v)
+          .join('  ');
+      document.getElementById('journal-outcomes').textContent = outcomeStr || '—';
+
+      const ambig = stats.ambiguous_rate;
+      document.getElementById('journal-ambig-rate').textContent =
+          (ambig != null) ? (Math.round(ambig * 100) + '%') : '—';
+
+      // Per-skill table
+      const useCount     = stats.skill_use_count || {};
+      const dormantCount = stats.skill_dormant_count || {};
+      const allSkills = new Set([
+          ...Object.keys(useCount),
+          ...Object.keys(dormantCount),
+      ]);
+      const tbody = document.getElementById('journal-skill-tbody');
+      if (allSkills.size === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>';
+      } else {
+        const rows = Array.from(allSkills).map(sid => {
+          const uses    = useCount[sid] || 0;
+          const dormant = dormantCount[sid] || 0;
+          const rate    = uses ? (dormant / uses) : 0;
+          const flag    = (rate > 0.3 && uses >= 3) ? ' ⚠' : '';
+          const rateColor = rate > 0.5 ? '#e74c3c' : (rate > 0.3 ? '#f39c12' : 'var(--dim)');
+          return [sid, uses, dormant, rate, flag, rateColor];
+        });
+        rows.sort((a, b) => b[3] - a[3] || b[1] - a[1]);
+        tbody.innerHTML = rows.map(([sid, uses, dormant, rate, flag, rateColor]) =>
+            '<tr>' +
+              '<td style="padding:4px 6px;color:var(--text)">' + sid + flag + '</td>' +
+              '<td style="padding:4px 6px;color:var(--accent)">' + uses + '</td>' +
+              '<td style="padding:4px 6px;color:' + rateColor + '">' + dormant + '</td>' +
+              '<td style="padding:4px 6px;color:' + rateColor + '">' + Math.round(rate * 100) + '%</td>' +
+            '</tr>'
+        ).join('');
+      }
+
+      // Recent activity
+      const recDiv = document.getElementById('journal-recent');
+      if (recent.length === 0) {
+        recDiv.innerHTML = '<div style="color:var(--dim);font-style:italic">No journal entries yet</div>';
+      } else {
+        recDiv.innerHTML = recent.map(e => {
+          const ts = e.started_at ? new Date(e.started_at * 1000).toLocaleTimeString() : '—';
+          const queryEsc = (e.query || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const outcomeColor = e.outcome === 'answer' ? 'var(--accent)' :
+                               (e.outcome === 'error' ? '#e74c3c' : 'var(--dim)');
+          let attrLines = '';
+          for (const a of (e.attribution || [])) {
+            const dormFlag = a.appeared_dormant ? ' <span style="color:#f39c12">⚠ dormant</span>' : '';
+            attrLines += '<div style="padding-left:14px;color:var(--dim)">' +
+                         '  ↳ ' + a.skill_id + ': ' + a.tool_calls_in_window + ' tool calls' +
+                         dormFlag + '</div>';
+          }
+          const ambBadge = e.ambiguous ?
+              ' <span style="color:#f39c12;font-size:9px;border:1px solid #f39c12;padding:0 4px;border-radius:2px">ambig</span>' :
+              '';
+          return (
+            '<div style="border-left:2px solid var(--border);padding:4px 8px">' +
+              '<div style="display:flex;justify-content:space-between">' +
+                '<span style="color:var(--text)">' + queryEsc.substring(0, 80) + '</span>' +
+                '<span style="color:var(--dim);font-size:10px">' + ts + '</span>' +
+              '</div>' +
+              '<div style="color:var(--dim2);font-size:10px;margin-top:2px">' +
+                '<span style="color:' + outcomeColor + '">' + (e.outcome || 'unknown') + '</span>' +
+                '  · ' + (e.total_turns || 0) + ' turns' +
+                '  · ' + (e.duration_s || 0) + 's' +
+                ambBadge +
+              '</div>' +
+              attrLines +
+            '</div>'
+          );
+        }).join('');
+      }
+    } catch (err) {
+      console.warn('refreshJournal failed', err);
+    }
+  }
+
+  // Auto-refresh when Journal tab visible
+  setInterval(() => {
+    const journalTab = document.getElementById('tab-journal');
+    if (journalTab && journalTab.classList.contains('active')) {
+      refreshJournal();
+    }
+  }, 10000);
+
 </script>
 </body>
 </html>

@@ -376,6 +376,25 @@ class PaginationConfig:
     findings_nudge_min_chars:      int   = 40    # response shorter than this = "empty findings"
 
 
+
+@dataclass
+class SkillScoringConfig:
+    """Weights for the LEGACY multi-field keyword scorer.
+
+    Applied only when no Retriever is attached (production path uses retriever).
+    Weights should sum to ~1.0 but normalisation is automatic if they don't.
+
+    Tuning guidance:
+      - Increase purpose_weight when skill descriptions are tightly written
+      - Increase tags_weight when your skill taxonomy is rich
+      - Increase params_weight if param names are domain-specific keywords
+    """
+    purpose_weight:     float = 0.40
+    description_weight: float = 0.20
+    tags_weight:        float = 0.20
+    params_weight:      float = 0.10
+    name_id_weight:     float = 0.10
+
 @dataclass
 class SkillOrchestrationConfig:
     """Skill selection, ambiguity HITL, and observability (Journal).
@@ -401,6 +420,12 @@ class SkillOrchestrationConfig:
     # Maximum number of choices to surface to the operator.
     ambiguity_max_choices:    int   = 5
 
+    # ── Scoring weights (LEGACY scorer fallback path) ──
+    # Production uses the Retriever-driven path (cfg.retrieval.backend).
+    # These weights only kick in when no retriever is attached, e.g. during
+    # cold start, tests, or when retrieval is intentionally disabled.
+    scoring: "SkillScoringConfig" = field(default_factory=lambda: SkillScoringConfig())
+
     # ── SkillJournal ──
     # Recording is essentially free, so on by default. Disable per-deployment
     # if you have strict cardinality limits on logs / storage.
@@ -409,6 +434,15 @@ class SkillOrchestrationConfig:
     journal_persist_path:     str   = ""           # empty = no disk persistence
     # Expose stats via /webui/skill_journal/* endpoints when True.
     journal_api_enabled:      bool  = True
+
+    # ── SkillEvolver feedback from journal ──
+    # When True, a background task periodically scans recent journal entries
+    # and feeds dormant/failed skills back to SkillEvolver.apply_feedback().
+    # Drives the "self-improving skill" Hermes feature with real usage data.
+    evolver_feedback_enabled:    bool   = True
+    evolver_feedback_interval_s: int    = 300   # how often to scan (seconds)
+    evolver_feedback_min_uses:   int    = 3     # min observations before feedback
+    evolver_dormant_threshold:   float  = 0.6   # dormant_count/use_count above this → feedback
 
 @dataclass
 class StreamingConfig:
@@ -656,9 +690,20 @@ def _load_pagination_config(p: dict) -> "PaginationConfig":
     )
 
 
+
+def _load_skill_scoring_config(s: dict) -> "SkillScoringConfig":
+    return SkillScoringConfig(
+        purpose_weight     = _env_float("SKILL_SCORE_W_PURPOSE",     s.get("purpose_weight",     0.40)),
+        description_weight = _env_float("SKILL_SCORE_W_DESCRIPTION", s.get("description_weight", 0.20)),
+        tags_weight        = _env_float("SKILL_SCORE_W_TAGS",        s.get("tags_weight",        0.20)),
+        params_weight      = _env_float("SKILL_SCORE_W_PARAMS",      s.get("params_weight",      0.10)),
+        name_id_weight     = _env_float("SKILL_SCORE_W_NAME_ID",     s.get("name_id_weight",     0.10)),
+    )
+
 def _load_skill_orchestration_config(s: dict) -> "SkillOrchestrationConfig":
     return SkillOrchestrationConfig(
         hitl_on_ambiguity       = _env_bool ("SKILL_HITL_ON_AMBIGUITY",       s.get("hitl_on_ambiguity",       True)),
+        scoring                 = _load_skill_scoring_config(s.get("scoring", {})),
         ambiguity_floor         = _env_float("SKILL_AMBIGUITY_FLOOR",         s.get("ambiguity_floor",         0.40)),
         ambiguity_gap_threshold = _env_float("SKILL_AMBIGUITY_GAP",           s.get("ambiguity_gap_threshold", 0.08)),
         ambiguity_max_choices   = _env_int  ("SKILL_AMBIGUITY_MAX_CHOICES",   s.get("ambiguity_max_choices",      5)),
@@ -666,6 +711,10 @@ def _load_skill_orchestration_config(s: dict) -> "SkillOrchestrationConfig":
         journal_max_entries     = _env_int  ("SKILL_JOURNAL_MAX_ENTRIES",     s.get("journal_max_entries",      200)),
         journal_persist_path    = _env_str  ("SKILL_JOURNAL_PERSIST_PATH",    s.get("journal_persist_path",       "")),
         journal_api_enabled     = _env_bool ("SKILL_JOURNAL_API_ENABLED",     s.get("journal_api_enabled",     True)),
+        evolver_feedback_enabled    = _env_bool ("SKILL_EVOLVER_FEEDBACK",        s.get("evolver_feedback_enabled",    True)),
+        evolver_feedback_interval_s = _env_int  ("SKILL_EVOLVER_INTERVAL",        s.get("evolver_feedback_interval_s", 300)),
+        evolver_feedback_min_uses   = _env_int  ("SKILL_EVOLVER_MIN_USES",        s.get("evolver_feedback_min_uses",     3)),
+        evolver_dormant_threshold   = _env_float("SKILL_EVOLVER_DORMANT_THR",     s.get("evolver_dormant_threshold",   0.6)),
     )
 
 

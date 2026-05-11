@@ -306,14 +306,30 @@ class SkillCatalogService:
         # (CJK chars are word-y but the {3,} length filter cuts them all.)
         weak_token_signal = (len(query_words) == 0 and len(query) > 0)
 
-        # Per-field weights. purpose is the most diagnostic so it gets the
-        # heaviest weight; tags help with category match; parameters and
-        # name/id are tiebreakers.
-        W_PURPOSE     = 0.40
-        W_DESCRIPTION = 0.20
-        W_TAGS        = 0.20
-        W_PARAMS      = 0.10
-        W_NAME_ID     = 0.10
+        # Per-field weights, loaded from cfg.skill_orchestration.scoring.
+        # The defaults match the original hardcoded values; tune via YAML or env
+        # to bias scoring toward particular skill metadata fields.
+        try:
+            from config import cfg as _app_cfg
+            _sc_cfg = getattr(getattr(_app_cfg, "skill_orchestration", None), "scoring", None)
+            W_PURPOSE     = float(getattr(_sc_cfg, "purpose_weight",     0.40)) if _sc_cfg else 0.40
+            W_DESCRIPTION = float(getattr(_sc_cfg, "description_weight", 0.20)) if _sc_cfg else 0.20
+            W_TAGS        = float(getattr(_sc_cfg, "tags_weight",        0.20)) if _sc_cfg else 0.20
+            W_PARAMS      = float(getattr(_sc_cfg, "params_weight",      0.10)) if _sc_cfg else 0.10
+            W_NAME_ID     = float(getattr(_sc_cfg, "name_id_weight",     0.10)) if _sc_cfg else 0.10
+        except Exception:
+            W_PURPOSE, W_DESCRIPTION, W_TAGS, W_PARAMS, W_NAME_ID = 0.40, 0.20, 0.20, 0.10, 0.10
+
+        # Auto-normalise so any weight choice produces scores in roughly [0, 1].
+        # This makes the ambiguity_floor/gap_threshold thresholds reusable
+        # across different weight profiles without manual rescaling.
+        _w_sum = W_PURPOSE + W_DESCRIPTION + W_TAGS + W_PARAMS + W_NAME_ID
+        if _w_sum > 0 and abs(_w_sum - 1.0) > 0.01:
+            W_PURPOSE     /= _w_sum
+            W_DESCRIPTION /= _w_sum
+            W_TAGS        /= _w_sum
+            W_PARAMS      /= _w_sum
+            W_NAME_ID     /= _w_sum
 
         q_lower = query.lower()
         scored: list[tuple[float, str]] = []
