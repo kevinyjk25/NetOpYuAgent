@@ -136,6 +136,96 @@ class MemoryAdapter:
                 results=[], track_a_count=0, track_b_count=0, winner="",
             )
 
+    # ── Public fact-writing (cross-module integrations use this) ─────────
+    #
+    # External adapters (JournalToFactsAdapter, FactConflictDetector) need a
+    # stable surface for writing facts WITHOUT importing agent_memory internals.
+    # Keep this signature stable; it's part of the module's public API.
+
+    async def add_fact(
+        self,
+        session_id: str,
+        user_id:    str,
+        fact_text:  str,
+        *,
+        fact_type:  str   = "general",
+        confidence: float = 1.0,
+        metadata:   Optional[dict] = None,
+        ttl_days:   Optional[float] = None,
+    ) -> str:
+        """Insert a fact into the mid-term store.
+
+        Returns the fact_id. Duplicates (same user+session+text) are silently
+        deduped and return the existing id.
+        """
+        from agent_memory.schemas import MemoryFact
+        fact = MemoryFact(
+            user_id=user_id, session_id=session_id, fact=fact_text,
+            fact_type=fact_type, confidence=confidence,
+            metadata=metadata or {},
+        )
+        return await asyncio.to_thread(
+            self._mgr.mid_term.add_fact, fact, ttl_days,
+        )
+
+    async def find_similar_facts(
+        self,
+        user_id:    str,
+        query_text: str,
+        *,
+        session_id: Optional[str] = None,
+        fact_type:  Optional[str] = None,
+        top_k:      int = 5,
+    ) -> list[dict]:
+        """Find facts semantically similar to `query_text`.
+
+        Used by FactConflictDetector to find candidate conflicts before
+        inserting a new fact. Returns a list of {fact_id, fact, confidence,
+        score, metadata} dicts.
+        """
+        def _go():
+            res = self._mgr.mid_term.search(
+                user_id=user_id, query=query_text, session_id=session_id,
+                fact_type=fact_type, top_k=top_k,
+            )
+            return [
+                {
+                    "fact_id":    f.fact_id,
+                    "fact":       f.fact,
+                    "fact_type":  f.fact_type,
+                    "confidence": f.confidence,
+                    "score":      sc,
+                    "metadata":   getattr(f, "metadata", {}) or {},
+                }
+                for f, sc in zip(res.facts, res.scores)
+            ]
+        try:
+            return await asyncio.to_thread(_go)
+        except Exception as exc:
+            logger.warning("MemoryAdapter.find_similar_facts failed: %s", exc)
+            return []
+
+    async def update_fact_confidence(
+        self,
+        fact_id:    str,
+        new_confidence: float,
+        *,
+        reason: str = "",
+    ) -> bool:
+        """Adjust a fact's confidence (used by conflict reconciliation).
+        Returns True on success."""
+        def _go():
+            try:
+                self._mgr.mid_term.update_fact(
+                    fact_id=fact_id,
+                    new_confidence=max(0.0, min(1.0, new_confidence)),
+                )
+                return True
+            except Exception as exc:
+                logger.warning("update_fact_confidence(%s) failed: %s", fact_id, exc)
+                return False
+        return await asyncio.to_thread(_go)
+
     # ── Write (after every completed turn) ────────────────────────────────
 
     async def after_turn(

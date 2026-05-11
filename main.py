@@ -660,6 +660,121 @@ async def build_services() -> dict[str, Any]:
         except Exception as _jc_exc:
             logger.warning("SkillJournalConsumer setup failed: %s — auto-feedback off", _jc_exc)
 
+        # ── Cross-module: Journal → MemoryFacts (Tier 1 #1) ───────────
+        # Independent of runtime. Disabled by default; enable via config.
+        try:
+            _xm = getattr(cfg, "cross_module", None)
+            _jtf_cfg = getattr(_xm, "journal_to_facts", None) if _xm else None
+            if _jtf_cfg and _jtf_cfg.enabled:
+                from integrations.memory_facts_adapter import JournalToFactsAdapter
+                from runtime.skill_journal import get_journal_store
+                _mem_adapter = services.get("memory")
+                if _mem_adapter is not None:
+                    jtf = JournalToFactsAdapter(
+                        journal_store=get_journal_store(),
+                        fact_writer=_mem_adapter,
+                        interval_s=_jtf_cfg.interval_s,
+                        min_observations=_jtf_cfg.min_observations,
+                        dormant_threshold=_jtf_cfg.dormant_threshold,
+                        success_threshold=_jtf_cfg.success_threshold,
+                        fact_ttl_days=_jtf_cfg.fact_ttl_days,
+                        max_facts_per_scan=_jtf_cfg.max_facts_per_scan,
+                        target_user_id=_jtf_cfg.target_user_id,
+                        target_session_id=_jtf_cfg.target_session_id,
+                    )
+                    services["journal_to_facts_adapter"] = jtf
+                    _prev_start = services.get("_start_consumer")
+                    _prev_stop  = services.get("_stop_consumer")
+                    async def _start_adapters():
+                        if _prev_start: await _prev_start()
+                        await jtf.start()
+                    async def _stop_adapters():
+                        await jtf.stop()
+                        if _prev_stop: await _prev_stop()
+                    services["_start_consumer"] = _start_adapters
+                    services["_stop_consumer"]  = _stop_adapters
+                    logger.info(
+                        "JournalToFactsAdapter wired (interval=%ds) — bridges skill journal → memory",
+                        _jtf_cfg.interval_s,
+                    )
+                else:
+                    logger.info("JournalToFactsAdapter skipped — no memory adapter in services")
+            else:
+                logger.debug("JournalToFactsAdapter disabled (cfg.cross_module.journal_to_facts.enabled=false)")
+        except Exception as _jtf_exc:
+            logger.warning("JournalToFactsAdapter setup failed: %s", _jtf_exc)
+
+        # ── Cross-module: Fact conflict detection (Tier 1 #2) ─────────
+        # Wraps memory.add_fact via a detector instance attached to services.
+        # The detector is exposed as services["fact_conflict_detector"];
+        # call sites that want conflict-aware insertion use it explicitly.
+        try:
+            _fcd_cfg = getattr(_xm, "fact_conflict_detection", None) if _xm else None
+            if _fcd_cfg and _fcd_cfg.enabled:
+                from integrations.fact_conflict_detector import FactConflictDetector
+                _mem_adapter = services.get("memory")
+                if _mem_adapter is not None:
+                    _llm_for_reconcile = None
+                    if _fcd_cfg.llm_reconcile_enabled:
+                        _engine = services.get("llm_engine") or services.get("engine")
+                        if _engine and hasattr(_engine, "complete"):
+                            async def _llm_reconcile(system: str, user: str) -> str:
+                                return await _engine.complete(system=system, user=user, max_tokens=256)
+                            _llm_for_reconcile = _llm_reconcile
+                    fcd = FactConflictDetector(
+                        memory=_mem_adapter,
+                        llm_fn=_llm_for_reconcile,
+                        similarity_threshold=_fcd_cfg.similarity_threshold,
+                        equivalence_threshold=_fcd_cfg.equivalence_threshold,
+                        llm_reconcile_enabled=_fcd_cfg.llm_reconcile_enabled,
+                        llm_timeout_s=_fcd_cfg.llm_timeout_s,
+                        top_k_candidates=_fcd_cfg.top_k_candidates,
+                        confidence_boost=_fcd_cfg.confidence_boost,
+                        contradiction_demote=_fcd_cfg.contradiction_demote,
+                    )
+                    services["fact_conflict_detector"] = fcd
+                    logger.info(
+                        "FactConflictDetector wired (sim_thr=%.2f, llm_reconcile=%s)",
+                        _fcd_cfg.similarity_threshold, _fcd_cfg.llm_reconcile_enabled,
+                    )
+                else:
+                    logger.info("FactConflictDetector skipped — no memory adapter in services")
+            else:
+                logger.debug("FactConflictDetector disabled (cfg.cross_module.fact_conflict_detection.enabled=false)")
+        except Exception as _fcd_exc:
+            logger.warning("FactConflictDetector setup failed: %s", _fcd_exc)
+
+        # ── Evaluation bench on startup (Tier 2 #4) ──────────────────
+        try:
+            _eval_cfg = getattr(cfg, "evaluation", None)
+            if _eval_cfg and _eval_cfg.bench_on_startup and _eval_cfg.golden_set_path:
+                from evaluation import (
+                    load_golden_set, RetrievalBench, format_text_report,
+                )
+                _golden = load_golden_set(_eval_cfg.golden_set_path)
+                if _golden:
+                    _sr = services.get("skill_retriever")
+                    if _sr:
+                        rep = RetrievalBench(
+                            retriever=_sr, golden_set=_golden,
+                            top_k=_eval_cfg.bench_top_k,
+                        ).run()
+                        logger.info("Startup bench:\n%s", format_text_report(rep))
+                        if _eval_cfg.fail_below_mrr > 0 and rep.mrr < _eval_cfg.fail_below_mrr:
+                            raise RuntimeError(
+                                f"Startup bench MRR {rep.mrr:.3f} below threshold "
+                                f"{_eval_cfg.fail_below_mrr:.3f} — refusing to start"
+                            )
+                else:
+                    logger.warning(
+                        "evaluation.golden_set_path=%r produced 0 cases — bench skipped",
+                        _eval_cfg.golden_set_path,
+                    )
+        except RuntimeError:
+            raise   # honour fail_below_mrr gate
+        except Exception as _eval_exc:
+            logger.warning("Startup eval bench failed: %s", _eval_exc)
+
         # ── Retrieval framework + meta-tool wiring ─────────────────────────
         # Replaces the full-catalog dump in _build_system_prompt with top-K
         # semantic retrieval, plus an extensible meta-tool registry.

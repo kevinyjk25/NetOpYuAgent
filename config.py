@@ -487,6 +487,103 @@ class ContextBudgetDisplayConfig:
     working_set_show:      int = 10     # max device refs displayed in working_set section
 
 
+
+# ─────────────────────────────────────────────────────────────────────────
+# Cross-module adapters — framework principle: independent modules,
+# explicit opt-in联动 via config.
+# ─────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class JournalToFactsConfig:
+    """SkillJournal → MemoryFacts bridge (Tier 1 #1).
+
+    OFF by default; turn on once you've validated the produced facts look
+    sensible in /webui/skill_journal stats.
+    """
+    enabled:               bool   = False
+    interval_s:            int    = 600       # scan period
+    min_observations:      int    = 3         # min journal entries before promoting
+    dormant_threshold:     float  = 0.6       # dormant ratio → emit "lesson" fact
+    success_threshold:     float  = 0.9       # success ratio → emit positive fact
+    fact_ttl_days:         float  = 14.0      # auto-facts expire sooner than user-authored
+    max_facts_per_scan:    int    = 10
+    target_user_id:        str    = "_system"
+    target_session_id:     str    = "_cross_session"
+
+
+@dataclass
+class FactConflictDetectionConfig:
+    """Inserts go through FactConflictDetector when this is on (Tier 1 #2)."""
+    enabled:                bool   = False
+    similarity_threshold:   float  = 0.70     # min similarity to consider conflict
+    equivalence_threshold:  float  = 0.85     # above this, treat as equivalent
+    llm_reconcile_enabled:  bool   = False    # ask LLM when heuristic unsure
+    llm_timeout_s:          float  = 8.0
+    top_k_candidates:       int    = 5
+    confidence_boost:       float  = 0.05     # raise existing on equivalent re-insert
+    contradiction_demote:   float  = 0.4      # multiplier (1-x) applied to loser
+
+
+@dataclass
+class CrossModuleConfig:
+    """Container for inter-module联动 features.
+
+    Every feature in this section MUST be safe to disable by toggling
+    `enabled: false`. No functional regression when off.
+    """
+    journal_to_facts:        JournalToFactsConfig        = field(default_factory=JournalToFactsConfig)
+    fact_conflict_detection: FactConflictDetectionConfig = field(default_factory=FactConflictDetectionConfig)
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Context budget — pluggable strategy (Tier 2 #3)
+# ─────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class ContextBudgetConfig:
+    """Selects the context-budget strategy at runtime.
+
+    strategy:
+      "legacy"   — runtime/context_budget.py compress_paged_outputs (default,
+                   preserves all existing behaviour)
+      "priority" — runtime/context_budget_v2.TokenBudget priority-based
+                   trimming. New code must use the v2 API explicitly; legacy
+                   call sites are unchanged.
+
+    The other fields apply only when strategy="priority".
+    """
+    strategy:                 str   = "legacy"      # "legacy" | "priority"
+    total_chars:              int   = 64000          # ~16k tokens at 4 chars/token
+    # Per-section size + priority. Each section is a dict so YAML can extend.
+    section_system_core:      int   = 4000
+    section_user_profile:     int   = 500
+    section_recent_turns:     int   = 20000
+    section_tool_results:     int   = 30000
+    section_retrieved_memory: int   = 10000
+    section_skills:           int   = 5000
+    section_older_summary:    int   = 5000
+
+
+# ─────────────────────────────────────────────────────────────────────────
+# Evaluation harness (Tier 2 #4)
+# ─────────────────────────────────────────────────────────────────────────
+
+@dataclass
+class EvaluationConfig:
+    """Optional retrieval-quality evaluation harness.
+
+    Runs golden-set tests against the current retrievers. Can run:
+      - On startup (bench_on_startup=true), to gate broken changes
+      - On demand via CLI: `python -m evaluation.retrieval_bench ...`
+      - On demand via WebUI: /webui/eval/run
+    """
+    golden_set_path:    str   = ""           # path to golden_set.jsonl
+    bench_on_startup:   bool  = False
+    bench_top_k:        int   = 5
+    report_path:        str   = ""           # optional JSONL output
+    fail_below_mrr:     float = 0.0          # if >0, startup raises if MRR < this
+
+
 @dataclass
 class AppConfig:
     mode:       str   # "mock" | "pragmatic"
@@ -515,7 +612,10 @@ class AppConfig:
     retrieval:           RetrievalConfig = field(default_factory=RetrievalConfig)
     meta_tools:          MetaToolsConfig = field(default_factory=MetaToolsConfig)
     pagination:          PaginationConfig = field(default_factory=PaginationConfig)
-    skill_orchestration: SkillOrchestrationConfig = field(default_factory=SkillOrchestrationConfig)  # prompt-based policies from config.yaml
+    skill_orchestration: SkillOrchestrationConfig = field(default_factory=SkillOrchestrationConfig)
+    cross_module:        CrossModuleConfig    = field(default_factory=CrossModuleConfig)
+    context_budget:      ContextBudgetConfig  = field(default_factory=ContextBudgetConfig)
+    evaluation:          EvaluationConfig     = field(default_factory=EvaluationConfig)  # prompt-based policies from config.yaml
     def is_mock(self) -> bool:
         return self.mode == "mock"
 
@@ -698,6 +798,58 @@ def _load_skill_scoring_config(s: dict) -> "SkillScoringConfig":
         tags_weight        = _env_float("SKILL_SCORE_W_TAGS",        s.get("tags_weight",        0.20)),
         params_weight      = _env_float("SKILL_SCORE_W_PARAMS",      s.get("params_weight",      0.10)),
         name_id_weight     = _env_float("SKILL_SCORE_W_NAME_ID",     s.get("name_id_weight",     0.10)),
+    )
+
+
+def _load_cross_module_config(c: dict) -> "CrossModuleConfig":
+    j = c.get("journal_to_facts", {}) or {}
+    f = c.get("fact_conflict_detection", {}) or {}
+    return CrossModuleConfig(
+        journal_to_facts=JournalToFactsConfig(
+            enabled            = _env_bool ("XM_JOURNAL_TO_FACTS",         j.get("enabled",            False)),
+            interval_s         = _env_int  ("XM_JTF_INTERVAL",             j.get("interval_s",            600)),
+            min_observations   = _env_int  ("XM_JTF_MIN_OBSERVATIONS",     j.get("min_observations",        3)),
+            dormant_threshold  = _env_float("XM_JTF_DORMANT_THRESHOLD",    j.get("dormant_threshold",     0.6)),
+            success_threshold  = _env_float("XM_JTF_SUCCESS_THRESHOLD",    j.get("success_threshold",     0.9)),
+            fact_ttl_days      = _env_float("XM_JTF_FACT_TTL_DAYS",        j.get("fact_ttl_days",        14.0)),
+            max_facts_per_scan = _env_int  ("XM_JTF_MAX_FACTS_PER_SCAN",   j.get("max_facts_per_scan",     10)),
+            target_user_id     = _env_str  ("XM_JTF_TARGET_USER",          j.get("target_user_id",   "_system")),
+            target_session_id  = _env_str  ("XM_JTF_TARGET_SESSION",       j.get("target_session_id", "_cross_session")),
+        ),
+        fact_conflict_detection=FactConflictDetectionConfig(
+            enabled               = _env_bool ("XM_FCD_ENABLED",           f.get("enabled",            False)),
+            similarity_threshold  = _env_float("XM_FCD_SIM_THRESHOLD",     f.get("similarity_threshold",  0.70)),
+            equivalence_threshold = _env_float("XM_FCD_EQ_THRESHOLD",      f.get("equivalence_threshold", 0.85)),
+            llm_reconcile_enabled = _env_bool ("XM_FCD_LLM_RECONCILE",     f.get("llm_reconcile_enabled", False)),
+            llm_timeout_s         = _env_float("XM_FCD_LLM_TIMEOUT",       f.get("llm_timeout_s",          8.0)),
+            top_k_candidates      = _env_int  ("XM_FCD_TOP_K",             f.get("top_k_candidates",         5)),
+            confidence_boost      = _env_float("XM_FCD_BOOST",             f.get("confidence_boost",      0.05)),
+            contradiction_demote  = _env_float("XM_FCD_DEMOTE",            f.get("contradiction_demote",   0.4)),
+        ),
+    )
+
+
+def _load_context_budget_config(c: dict) -> "ContextBudgetConfig":
+    return ContextBudgetConfig(
+        strategy                 = _env_str("CTX_BUDGET_STRATEGY",            c.get("strategy",                "legacy")),
+        total_chars              = _env_int("CTX_BUDGET_TOTAL",               c.get("total_chars",               64000)),
+        section_system_core      = _env_int("CTX_BUDGET_SYSTEM_CORE",         c.get("section_system_core",        4000)),
+        section_user_profile     = _env_int("CTX_BUDGET_USER_PROFILE",        c.get("section_user_profile",        500)),
+        section_recent_turns     = _env_int("CTX_BUDGET_RECENT_TURNS",        c.get("section_recent_turns",      20000)),
+        section_tool_results     = _env_int("CTX_BUDGET_TOOL_RESULTS",        c.get("section_tool_results",      30000)),
+        section_retrieved_memory = _env_int("CTX_BUDGET_RETRIEVED_MEM",       c.get("section_retrieved_memory",  10000)),
+        section_skills           = _env_int("CTX_BUDGET_SKILLS",              c.get("section_skills",             5000)),
+        section_older_summary    = _env_int("CTX_BUDGET_OLDER_SUMMARY",       c.get("section_older_summary",      5000)),
+    )
+
+
+def _load_evaluation_config(e: dict) -> "EvaluationConfig":
+    return EvaluationConfig(
+        golden_set_path  = _env_str  ("EVAL_GOLDEN_SET_PATH",  e.get("golden_set_path",   "")),
+        bench_on_startup = _env_bool ("EVAL_BENCH_ON_STARTUP", e.get("bench_on_startup", False)),
+        bench_top_k      = _env_int  ("EVAL_BENCH_TOP_K",      e.get("bench_top_k",         5)),
+        report_path      = _env_str  ("EVAL_REPORT_PATH",      e.get("report_path",        "")),
+        fail_below_mrr   = _env_float("EVAL_FAIL_BELOW_MRR",   e.get("fail_below_mrr",    0.0)),
     )
 
 def _load_skill_orchestration_config(s: dict) -> "SkillOrchestrationConfig":
@@ -924,6 +1076,9 @@ def load(config_path: str = "config.yaml") -> AppConfig:
         meta_tools=_load_meta_tools_config(y.get("meta_tools", {})),
         pagination=_load_pagination_config(y.get("pagination", {})),
         skill_orchestration=_load_skill_orchestration_config(y.get("skill_orchestration", {})),
+        cross_module        =_load_cross_module_config       (y.get("cross_module",        {})),
+        context_budget      =_load_context_budget_config     (y.get("context_budget",      {})),
+        evaluation          =_load_evaluation_config         (y.get("evaluation",          {})),
     )
 
 

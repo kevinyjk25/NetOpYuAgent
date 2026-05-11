@@ -694,3 +694,58 @@ skill_orchestration:
 #   evolver_feedback_interval_s: 300   # seconds between scans
 #   evolver_feedback_min_uses:   3     # need ≥N observations before feedback
 #   evolver_dormant_threshold:   0.6   # dormant/use ratio above this triggers patch
+
+# ── Cross-module联动 ─────────────────────────────────────────────────────
+# Framework principle: independent modules, explicit opt-in联动 via config.
+# Every feature here must be safe to disable by toggling `enabled: false`.
+cross_module:
+  # SkillJournal observations → MemoryFacts (Tier 1 #1)
+  # When on, dormant/successful skill patterns become "lesson" facts in
+  # mid-term memory, available for recall on similar future queries.
+  journal_to_facts:
+    enabled:            false
+    interval_s:         600       # scan period (seconds)
+    min_observations:   3         # min journal entries before promoting
+    dormant_threshold:  0.6
+    success_threshold:  0.9
+    fact_ttl_days:      14.0
+    max_facts_per_scan: 10
+
+  # Fact-conflict detection + reconciliation on insert (Tier 1 #2)
+  # When on, MemoryAdapter.add_fact() runs through FactConflictDetector
+  # before writing — finds similar existing facts, applies heuristic or LLM
+  # classification, and may skip / demote based on verdict.
+  fact_conflict_detection:
+    enabled:                false
+    similarity_threshold:   0.70
+    equivalence_threshold:  0.85
+    llm_reconcile_enabled:  false     # set true once you trust the LLM judge
+    llm_timeout_s:          8.0
+    top_k_candidates:       5
+    confidence_boost:       0.05
+    contradiction_demote:   0.4
+
+# ── Context budget strategy (Tier 2 #3) ──────────────────────────────────
+# Switch between legacy (length-based, runtime/context_budget.py) and
+# priority (runtime/context_budget_v2.py).
+context_budget:
+  strategy: "legacy"               # "legacy" | "priority"
+  # Below applies only when strategy="priority":
+  total_chars:              64000  # ~16k tokens
+  section_system_core:       4000  # P0 — never trimmed
+  section_user_profile:       500  # P0
+  section_recent_turns:     20000  # P1
+  section_tool_results:     30000  # P1
+  section_retrieved_memory: 10000  # P2
+  section_skills:            5000  # P2
+  section_older_summary:     5000  # P3 — trimmed first
+
+# ── Evaluation harness (Tier 2 #4) ───────────────────────────────────────
+# Optional retrieval-quality bench. Independent of runtime; never runs in
+# the hot path unless bench_on_startup=true.
+evaluation:
+  golden_set_path:  ""             # e.g. "data/golden_set.jsonl"
+  bench_on_startup: false
+  bench_top_k:      5
+  report_path:      ""             # JSONL output, empty = stdout-only
+  fail_below_mrr:   0.0            # >0 → startup raises if MRR drops
