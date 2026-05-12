@@ -48,6 +48,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         RetrievalBench, format_text_report, format_jsonl_report,
     )
     from tools.loader import ToolLoader
+    from skills import SkillLoader
 
     cases = load_golden_set(args.golden)
     if not cases:
@@ -57,7 +58,7 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Build the right retriever for this benchmark
     if args.kind == "skill":
         from retrieval import build_skill_retriever
-        defs = ToolLoader(_config.cfg.mode).skill_definitions()
+        defs = SkillLoader(_config.cfg.mode).skill_definitions()
         retriever = build_skill_retriever(_config.cfg, embedder=None,
                                           skill_definitions=defs)
         available_ids = set(defs.keys())

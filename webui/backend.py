@@ -203,9 +203,11 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         # No filter_to_registry needed here — ToolLoader already returns the right set.
         import config as _cfg
         from tools.loader import ToolLoader as _TL
+        from skills import SkillLoader as _SL
         _tl = _TL(mode=_cfg.cfg.mode)
+        _skill_loader = _SL(mode=_cfg.cfg.mode)
         catalog = SkillCatalogService()
-        catalog.register_all(_tl.skill_definitions())
+        catalog.register_all(_skill_loader.skill_definitions())
         services["skill_catalog"] = catalog
 
     # Inject skill_evolver for upload/persist capability if not already provided by main.py
@@ -868,7 +870,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     tool_router_svc._callables[name] = fn
                     # Initialise meta entry so the circuit-breaker wrapper works
                     if hasattr(tool_router_svc, "_meta") and name not in tool_router_svc._meta:
-                        from integrations.tool_router import ToolMeta  # noqa
+                        from integrations.router.tool_router import ToolMeta  # noqa
                         tool_router_svc._meta[name] = ToolMeta(name, source)
 
         # Update the shared tool_registry in services (read by /tools and chat/stream)
@@ -1617,6 +1619,46 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "choose", req, services
+        )
+
+    @app.get("/hitl/{interrupt_id}/stream")
+    async def hitl_stream(interrupt_id: str) -> StreamingResponse:
+        """Live SSE stream of chunks emitted by the HITL resumer.
+
+        Frontend usage:
+          1. POST /hitl/<id>/choose (or approve/etc) — returns final result
+          2. IN PARALLEL: open EventSource on /hitl/<id>/stream to see
+             progressive chunks (turn-by-turn LLM responses, tool calls,
+             nested HITL interrupts) as they happen.
+
+        Stream emits the same `data: {...}` JSON line format as
+        /webui/chat/stream, so the frontend can reuse its existing
+        chunk-rendering pipeline.
+        """
+        from hitl_core.chunk_queue import get_chunk_queue_registry
+        chunk_queue = get_chunk_queue_registry()
+
+        async def _generator():
+            try:
+                async for chunk in chunk_queue.subscribe(interrupt_id):
+                    yield f"data: {json.dumps(chunk, default=str)}\n\n"
+                # Signal end-of-stream
+                yield f"data: {json.dumps({'type': 'done', 'interrupt_id': interrupt_id})}\n\n"
+            except Exception as exc:
+                logger.warning("hitl_stream[%s] generator error: %s", interrupt_id, exc)
+                yield f"data: {json.dumps({'type': 'error', 'error': str(exc)})}\n\n"
+            finally:
+                # Don't close the registry entry here — the /choose response
+                # handler may still read history. Periodic gc handles cleanup.
+                pass
+
+        return StreamingResponse(
+            _generator(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",   # disable nginx proxy buffering
+            },
         )
 
     @app.post("/hitl/{interrupt_id}/answer")

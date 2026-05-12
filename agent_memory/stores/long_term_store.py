@@ -65,7 +65,7 @@ _DDL = [
 ]
 
 _FTS5_RESERVED = re.compile(r'\b(AND|OR|NOT|NEAR|COLUMN|ROW|MATCH)\b', re.IGNORECASE)
-_FTS5_SPECIAL  = re.compile(r'["\'\(\)\*\+\-\:\^\.\/ ]+')
+_FTS5_SPECIAL  = re.compile(r'''["\'\(\)\[\]\{\}\<\>\*\+\-\:\^\.\/\?\,\;\=\!\@\#\$\%\& ]+''')
 
 DEFAULT_RECENCY_HALF_LIFE_DAYS = 14.0   # docs lose half their recency score every 14 days
 DEFAULT_MAX_USER_INDEXES = 256           # LRU cap for user TF-IDF indexes

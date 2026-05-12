@@ -26,3 +26,5 @@ __all__ = [
     "SkillDetail",
     "SkillCatalogService",
 ]
+
+from skills.loader import SkillLoader  # public re-export

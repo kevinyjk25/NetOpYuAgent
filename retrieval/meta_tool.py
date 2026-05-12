@@ -205,9 +205,13 @@ def make_list_tools_meta_tool(
         default_top_k:  fallback when caller doesn't pass top_k.
         name:           override if you want a different verbatim name.
     """
-    async def _handler(**kwargs) -> str:
-        query = str(kwargs.get("query", "") or "").strip()
-        top_k = int(kwargs.get("top_k", default_top_k))
+    async def _handler(args: dict | None = None, **kwargs) -> str:
+        # Support BOTH calling conventions:
+        #   ToolRouter: handler(args_dict)
+        #   Direct:     handler(query=..., top_k=...)
+        params = args if isinstance(args, dict) else kwargs
+        query = str(params.get("query", "") or "").strip()
+        top_k = int(params.get("top_k", default_top_k))
         if not query:
             return "Error: list_tools requires a 'query' parameter."
 
@@ -257,9 +261,13 @@ def make_list_skills_meta_tool(
     name:            str = "list_skills",
 ) -> MetaTool:
     """Factory: meta-tool that returns top-K skills matching a query."""
-    async def _handler(**kwargs) -> str:
-        query = str(kwargs.get("query", "") or "").strip()
-        top_k = int(kwargs.get("top_k", default_top_k))
+    async def _handler(args: dict | None = None, **kwargs) -> str:
+        # Support BOTH calling conventions:
+        #   ToolRouter: handler(args_dict)
+        #   Direct:     handler(query=..., top_k=...)
+        params = args if isinstance(args, dict) else kwargs
+        query = str(params.get("query", "") or "").strip()
+        top_k = int(params.get("top_k", default_top_k))
         if not query:
             return "Error: list_skills requires a 'query' parameter."
 
@@ -312,8 +320,9 @@ def make_tool_details_meta_tool(
                                 Re-evaluated on every call so dynamic registration
                                 of new tools is visible immediately.
     """
-    async def _handler(**kwargs) -> str:
-        tool_name = str(kwargs.get("tool_name", "") or "").strip()
+    async def _handler(args: dict | None = None, **kwargs) -> str:
+        params = args if isinstance(args, dict) else kwargs
+        tool_name = str(params.get("tool_name", "") or "").strip()
         if not tool_name:
             return "Error: tool_details requires 'tool_name' parameter."
         meta = tool_metadata_provider() or {}

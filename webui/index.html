@@ -2555,6 +2555,48 @@ async function hitlSubmitAnswer(id) {
   await hitlDecExtra(id, 'answer', { clarification_answers: answers });
 }
 
+
+function currentSession() { try { return sessionId || ''; } catch(_) { return ''; } }
+
+// Open an SSE on /hitl/<id>/stream to see progressive chunks while the
+// resumer runs. Called in parallel with the POST /hitl/<id>/<decision>.
+// Returns a stop function to close the EventSource on completion.
+function openHitlStream(interruptId) {
+  try {
+    const es = new EventSource(`${BASE}/hitl/${interruptId}/stream`);
+    es.onmessage = (ev) => {
+      try {
+        const chunk = JSON.parse(ev.data);
+        // The /stream endpoint emits a synthetic {type:'done'} when the
+        // resumer completes — that's our cue to close.
+        if (chunk.type === 'done') {
+          es.close();
+          return;
+        }
+        if (chunk.type === 'error') {
+          try { addStep('error', `HITL resume error`, '', chunk.error || ''); } catch(_){}
+          es.close();
+          return;
+        }
+        // Route through the SAME dispatcher as chat/stream so node_result
+        // chunks populate Results/Cache tabs, tokens accumulate, llm_trace
+        // shows turn cards, etc. Without this we lose tool results, store
+        // labels, and turn-by-turn LLM output.
+        try {
+          dispatchChunk(chunk, '(hitl resume)', (typeof getSession === 'function' ? getSession() : ''));
+        } catch (e) {
+          console.warn('openHitlStream: dispatchChunk failed:', e);
+        }
+      } catch(_) {}
+    };
+    es.onerror = () => { es.close(); };
+    return () => { try { es.close(); } catch(_){} };
+  } catch (e) {
+    console.warn('openHitlStream failed:', e);
+    return () => {};
+  }
+}
+
 // Shared helper: POST to /hitl/{id}/{decision} with extra body fields
 async function hitlDecExtra(id, dec, extras) {
   // Same guard as hitlDec — stop double-submit producing "already resolved".
@@ -2572,20 +2614,43 @@ async function hitlDecExtra(id, dec, extras) {
       { operator_id: 'webui-operator', comment: `${dec} via Console` },
       extras || {}
     );
+    // Open live progress stream BEFORE the POST so we see chunks
+    // emitted by the resumer (LLM turns, tool calls) in real time.
+    const stopStream = openHitlStream(id);
     const res = await fetch(`${BASE}/hitl/${id}/${dec}`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(body),
     });
+    // Close the stream once the final response arrives
+    try { stopStream(); } catch(_) {}
     const data = await res.json().catch(()=>({}));
     if (data.error) {
       addMessage('agent', `HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nError: ${data.error}`, 'system');
     } else {
-      addMessage('agent', `**✓ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n${data.synthesis || data.tool_result || 'Decision recorded'}`, 'agent');
+      // Process any sub_chunks the resumer emitted — this is a fallback
+      // in case the live SSE missed any (e.g. browser EventSource lag).
+      // dispatchChunk is idempotent for the cache/results tabs (registerStore
+      // is a Map.set so a duplicate replay won't double-render).
+      if (Array.isArray(data.sub_chunks)) {
+        try {
+          const sid = (typeof getSession === 'function' ? getSession() : '');
+          for (const ch of data.sub_chunks) {
+            try { dispatchChunk(ch, '(hitl resume)', sid); } catch(_) {}
+          }
+        } catch (e) { console.warn('sub_chunks replay failed:', e); }
+      }
+      // If this was a nested HITL (resumer hit ANOTHER interrupt), don't
+      // declare the turn done — refreshHitl will pick up the new card.
+      if (data.nested_hitl && data.nested_hitl.interrupted) {
+        addStep('progress', '⏸ Nested HITL', '', `awaiting: ${(data.nested_hitl.interrupt_id||'').slice(0,12)}`);
+      } else {
+        addMessage('agent', `**✓ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n${data.synthesis || data.tool_result || 'Decision recorded'}`, 'agent');
+      }
       addStep('done', `✅ Post-HITL ${dec} complete`, '', `interrupt: ${id.slice(0,12)}`);
       flowEvent('done', `✅ Post-HITL ${dec} complete`, dec, `interrupt: ${id.slice(0,12)}`);
       setTimeout(loadSessions, 800);
-      switchTab('cache');
+      switchTab('cache');   // 'cache' is the Results tab in this UI
     }
     refreshHitl();
   } catch (e) {

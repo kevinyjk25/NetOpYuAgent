@@ -1687,6 +1687,30 @@ class AgentRuntimeLoop:
                     len(new_tool_calls) == 1
                     and new_tool_calls[0][0] == "read_stored_result"
                 )
+
+                # Detect PREMATURE PIVOT: previous read_stored_result said
+                # "Has more: True" but current turn called something else
+                # (SKILL_LOAD, a different tool, or nothing). This is the
+                # bug from the screenshot — agent gave up reading mid-way.
+                _premature_pivot = False
+                try:
+                    _prev_outputs = list(tool_outputs.values())[-3:]   # last few
+                    _prev_had_more = any(
+                        ("Has more: True" in str(v)) or
+                        ("HAS MORE: True" in str(v).upper())
+                        for v in _prev_outputs
+                    )
+                    _current_pivots_away = (
+                        new_tool_calls
+                        and new_tool_calls[0][0] != "read_stored_result"
+                    )
+                    _premature_pivot = (
+                        _prev_had_more
+                        and _current_pivots_away
+                        and not getattr(state, "_premature_pivot_nudged", False)
+                    )
+                except Exception:
+                    _premature_pivot = False
                 # "Tool-call-only" = response is short and contains only
                 # the [TOOL:] line plus optional minor framing
                 _resp_clean = (llm_response or "").strip()
@@ -1726,6 +1750,25 @@ class AgentRuntimeLoop:
                     state._paged_findings_nudged = True
                     yield {
                         "node_step": "Paginated-read findings nudge injected",
+                        "node": "runtime_loop",
+                    }
+
+                # Premature-pivot nudge — different cause, different message.
+                # Fires when the LLM abandoned pagination mid-way.
+                if _premature_pivot and _enabled:
+                    _pivot_nudge = (
+                        "_NUDGE: The previous tool result shows `Has more: True` — "
+                        "more data remains to be read. You MUST continue paging "
+                        "through the stored result with [TOOL:read_stored_result] "
+                        "{\"ref_id\":\"<the ref_id from the [STORED:] label>\", "
+                        "\"offset\":<next_offset>}, writing 2-3 sentences of "
+                        "findings after each page. Do NOT pivot to other tools or "
+                        "SKILL_LOAD before completing the read."
+                    )
+                    state.confirmed_facts.append(_pivot_nudge)
+                    state._premature_pivot_nudged = True
+                    yield {
+                        "node_step": "Premature-pivot nudge injected",
                         "node": "runtime_loop",
                     }
             except Exception:
@@ -1868,6 +1911,18 @@ class AgentRuntimeLoop:
         # Step 2: also strip markdown code fences around the tool call
         text = re.sub(r"```[a-z]*\n?", "", text)
         text = re.sub(r"\n?```", "", text)
+
+        # Step 2.5: tolerate common LLM mistake — [TOOL:SKILL_LOAD:X] is invalid
+        # syntax (SKILL_LOAD is its own top-level directive, NOT a tool name).
+        # Rewrite to the correct [SKILL_LOAD:X] form so the rest of the loop
+        # can find it via _skill_loads_in() without firing a false "skill-only
+        # called as tool" warning. The system prompt explicitly forbids this
+        # pattern, but tolerance reduces user-visible noise.
+        text = re.sub(
+            r"\[TOOL:SKILL_LOAD:(\w+)\]",
+            r"[SKILL_LOAD:\1]",
+            text,
+        )
 
         calls = []
         # Match [TOOL:toolname] then optional whitespace then optional JSON object

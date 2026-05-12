@@ -349,7 +349,7 @@ async def build_services() -> dict[str, Any]:
 
         # 6b. Real embeddings — always (both modes)
         try:
-            from integrations.embedder import build_embedder
+            from integrations.clients.embedder import build_embedder
             embedder = build_embedder(cfg.embeddings)
             services["embedder"] = embedder
             logger.info("Embedder: %s/%s dim=%d",
@@ -403,7 +403,7 @@ async def build_services() -> dict[str, Any]:
             # This replaces the legacy hitl/a2a_integration ITOpsHitlAgentExecutor
             # but presents the same external interface (.execute / .cancel)
             # so webui/backend doesn't change.
-            from integrations.hitl_executor import HitlExecutor
+            from integrations.adapters.hitl_executor import HitlExecutor
             executor = HitlExecutor(
                 runtime_loop=None,             # injected later from services["runtime_loop"]
                 llm_engine=llm_engine,
@@ -465,8 +465,10 @@ async def build_services() -> dict[str, Any]:
         # No cross-mode contamination; no filter_to_registry needed here because
         # the loader only returns skills valid for the current mode.
         try:
-            from skills import SkillCatalogService
-            _skill_defs = _loader.skill_definitions()
+            from skills import SkillCatalogService, SkillLoader
+            _skill_loader = SkillLoader(mode=cfg.mode)
+            _skill_defs   = _skill_loader.skill_definitions()
+            services["skill_loader"] = _skill_loader
             _skill_catalog = SkillCatalogService()
             _skill_catalog.register_all(_skill_defs)
             services["skill_catalog"] = _skill_catalog
@@ -666,7 +668,7 @@ async def build_services() -> dict[str, Any]:
             _xm = getattr(cfg, "cross_module", None)
             _jtf_cfg = getattr(_xm, "journal_to_facts", None) if _xm else None
             if _jtf_cfg and _jtf_cfg.enabled:
-                from integrations.memory_facts_adapter import JournalToFactsAdapter
+                from integrations.adapters.memory_facts_adapter import JournalToFactsAdapter
                 from runtime.skill_journal import get_journal_store
                 _mem_adapter = services.get("memory")
                 if _mem_adapter is not None:
@@ -711,7 +713,7 @@ async def build_services() -> dict[str, Any]:
         try:
             _fcd_cfg = getattr(_xm, "fact_conflict_detection", None) if _xm else None
             if _fcd_cfg and _fcd_cfg.enabled:
-                from integrations.fact_conflict_detector import FactConflictDetector
+                from integrations.adapters.fact_conflict_detector import FactConflictDetector
                 _mem_adapter = services.get("memory")
                 if _mem_adapter is not None:
                     _llm_for_reconcile = None
@@ -794,7 +796,8 @@ async def build_services() -> dict[str, Any]:
             # used at startup; skill defs come from the same source.
             from tools.loader import ToolLoader as _TL
             _tool_meta = _TL(mode=cfg.mode).build_metadata()
-            _skill_defs = _TL(mode=cfg.mode).skill_definitions()
+            from skills import SkillLoader as _SL
+            _skill_defs = _SL(mode=cfg.mode).skill_definitions()
 
             # Choose async or sync indexing path based on backend + embedder presence.
             # Async path: bounded-concurrency batched embed() calls, ~5-10x faster
@@ -950,6 +953,39 @@ async def build_services() -> dict[str, Any]:
                     logger.info(
                         "Meta-tools wired into ToolRouter: %d callable(s)", len(mt_reg)
                     )
+
+                    # IMPORTANT: real_registry was snapshotted earlier from
+                    # router.registry. The snapshot is a fresh dict — additions
+                    # to the router AFTER that point don't propagate. Now that
+                    # meta-tools (list_tools, list_skills, tool_details) are
+                    # registered, re-snap and update every consumer that holds
+                    # the old reference.
+                    try:
+                        _refreshed_registry = router.registry
+                        # Update runtime loop
+                        _rt_loop = services.get("runtime_loop")
+                        if _rt_loop is not None and hasattr(_rt_loop, "_tool_registry"):
+                            _rt_loop._tool_registry = _refreshed_registry
+                        # Update HITL executor
+                        _exec = services.get("executor")
+                        if _exec is not None and hasattr(_exec, "_tool_registry"):
+                            _exec._tool_registry = _refreshed_registry
+                        # Re-patch HITL graph if used
+                        try:
+                            from integrations.clients.llm_engine import patch_hitl_graph
+                            patch_hitl_graph(llm_engine, tool_registry=_refreshed_registry)
+                        except Exception:
+                            pass
+                        logger.info(
+                            "Tool registry refreshed across consumers — "
+                            "now %d callable(s) including meta-tools",
+                            len(_refreshed_registry),
+                        )
+                    except Exception as _refresh_exc:
+                        logger.warning(
+                            "Tool registry refresh failed (meta-tools may not "
+                            "be dispatchable): %s", _refresh_exc,
+                        )
             except Exception as _mr_exc:
                 logger.warning("ToolRouter meta-tool wiring failed: %s", _mr_exc)
 

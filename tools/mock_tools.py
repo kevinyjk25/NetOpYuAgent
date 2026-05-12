@@ -1062,6 +1062,83 @@ async def rollback_service(args: dict[str, Any]) -> str:
     )
 
 
+async def push_config(args: dict[str, Any]) -> str:
+    """Mock: simulate pushing config to a device (HITL-required)."""
+    device_id  = args.get("device_id", "unknown")
+    config_text = args.get("config_text", "")
+    dry_run    = bool(args.get("dry_run", False))
+    await asyncio.sleep(0.1)
+    n_lines = len([l for l in config_text.split("\n") if l.strip()]) or 12
+    mode = "DRY RUN" if dry_run else "APPLIED"
+    return (
+        f"# push_config — {device_id} ({mode})\n"
+        f"# {'─'*60}\n"
+        f"  Config lines processed: {n_lines}\n"
+        f"  Errors: 0  |  Warnings: 0\n"
+        f"# Status: {'Validation complete — no changes written' if dry_run else 'Applied to running-config'}\n"
+        f"# Note: Diff vs startup-config available via diff_device_config"
+    )
+
+
+async def rollback_deploy(args: dict[str, Any]) -> str:
+    """Mock: simulate rolling back a deploy (HITL-required)."""
+    deploy_id = args.get("deploy_id", "unknown")
+    scope     = args.get("scope", "all")
+    await asyncio.sleep(0.1)
+    return (
+        f"# rollback_deploy — {deploy_id} (scope={scope})\n"
+        f"# {'─'*60}\n"
+        f"  Services reverted: 3\n"
+        f"  Pods restarted: 9\n"
+        f"# Status: Rollback complete — running previous stable version\n"
+        f"# Health check: PASS"
+    )
+
+
+async def drain_node(args: dict[str, Any]) -> str:
+    """Mock: simulate draining a node (HITL-required)."""
+    node_id    = args.get("node_id", "unknown")
+    grace_s    = int(args.get("grace_period_s", 60))
+    await asyncio.sleep(0.1)
+    return (
+        f"# drain_node — {node_id} (grace={grace_s}s)\n"
+        f"# {'─'*60}\n"
+        f"  Workloads evicted: 7\n"
+        f"  Pending: 0  |  Failed: 0\n"
+        f"# Status: Node cordoned and drained — non-schedulable\n"
+        f"# Note: Re-enable with `uncordon` after maintenance"
+    )
+
+
+async def failover(args: dict[str, Any]) -> str:
+    """Mock: simulate triggering failover to standby (HITL-required)."""
+    resource = args.get("resource_id", "unknown")
+    target   = args.get("target", "auto-selected-replica")
+    await asyncio.sleep(0.1)
+    return (
+        f"# failover — {resource} → {target}\n"
+        f"# {'─'*60}\n"
+        f"  Pre-failover writes drained: yes\n"
+        f"  Replication lag at failover: 0.2s\n"
+        f"# Status: Failover complete — {target} is now primary\n"
+        f"# Health check: PASS  |  Recommendation: monitor 30 min"
+    )
+
+
+async def delete_resource(args: dict[str, Any]) -> str:
+    """Mock: simulate deleting a resource (HITL-required)."""
+    resource = args.get("resource_id", "unknown")
+    force    = bool(args.get("force", False))
+    await asyncio.sleep(0.1)
+    return (
+        f"# delete_resource — {resource} (force={force})\n"
+        f"# {'─'*60}\n"
+        f"  Dependencies checked: {'skipped (force=True)' if force else '0 dependents found'}\n"
+        f"# Status: Resource deleted\n"
+        f"# Note: Operation is irreversible without backup"
+    )
+
+
 async def diff_device_config(args: dict[str, Any]) -> str:
     """Mock: show what changed in a device config since last known-good state."""
     device_id = args.get("device_id", "")
@@ -1098,6 +1175,11 @@ TOOL_REGISTRY: dict[str, callable] = {
     "restart_service":        restart_service,
     "rollback_service":       rollback_service,
     "diff_device_config":     diff_device_config,
+    "push_config":            push_config,
+    "rollback_deploy":        rollback_deploy,
+    "drain_node":             drain_node,
+    "failover":               failover,
+    "delete_resource":        delete_resource,
     # read_stored_result and process_stored_chunks are injected at runtime (need ToolResultStore ref)
 }
 

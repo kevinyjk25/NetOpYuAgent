@@ -119,6 +119,42 @@ TOOLS: dict[str, dict[str, Any]] = {
         "hitl":        True,
         "tags":        ["services", "destructive"],
     },
+
+    "push_config": {
+        "description": "Push a configuration block to a device. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"device_id": "Target device", "config_text": "Raw config to apply", "dry_run": "If true, validate only"},
+        "returns":     "Push status + diff summary",
+        "hitl":        True,
+        "tags":        ["destructive", "config"],
+    },
+    "rollback_deploy": {
+        "description": "Roll back a previous deploy. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"deploy_id": "Deploy identifier", "scope": "Optional scope filter"},
+        "returns":     "Rollback status",
+        "hitl":        True,
+        "tags":        ["destructive", "deploy"],
+    },
+    "drain_node": {
+        "description": "Drain a node — evict workloads. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"node_id": "Node to drain", "grace_period_s": "Grace period seconds (default 60)"},
+        "returns":     "Drain status with evicted workload count",
+        "hitl":        True,
+        "tags":        ["destructive", "node"],
+    },
+    "failover": {
+        "description": "Trigger failover to standby. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"resource_id": "Resource to fail over", "target": "Target replica"},
+        "returns":     "Failover status + new primary",
+        "hitl":        True,
+        "tags":        ["destructive", "ha"],
+    },
+    "delete_resource": {
+        "description": "Delete a resource. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"resource_id": "Resource to delete", "force": "Skip dependency check"},
+        "returns":     "Deletion status",
+        "hitl":        True,
+        "tags":        ["destructive", "delete"],
+    },
     "rollback_service": {
         "description": "Roll back a service to a previous version. Requires HITL approval.",
         "parameters":  {"service": "Service name", "version": "Target version (e.g. '3.2.1')", "environment": "prod|staging|dev"},
