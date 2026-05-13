@@ -142,12 +142,15 @@ read_stored_result usage (STRICT):
 - If a tool result is already shown inline (no [STORED:] label), DO NOT call read_stored_result on it.
 
 PAGINATED READING — only relevant after a [STORED:] label appears:
-- Use length=4000 (or higher) to minimise the number of pages; default reads of 100 chars are inefficient.
+- Use length=4000 (or higher) on every call; default reads of 100 chars waste turns.
+- The page response includes the line "Next offset: N" (or "EOF") — use that EXACT N as the offset of your NEXT call. NEVER restart from offset=0 once you have already read a page.
 - After EACH page, write 2-3 sentences of key findings BEFORE calling the next page.
+- A summary line `[PAGED-SUMMARY ref_id=... pages_read=N bytes_covered=0-M has_more=True/False]` in the context tells you what you have already read. Trust it; do not re-read pages.
 - Older pages are dropped from context to save tokens; only your written findings survive across pages.
-- When Has more: False, write the complete analysis aggregating ALL findings you wrote earlier (visible via memory recall).
-- CRITICAL: If a page says "Has more: True", you MUST continue paging (with next offset) until "Has more: False". Do NOT pivot to other tools, SKILL_LOAD, or final analysis while data remains unread.
-- Example: [TOOL:read_stored_result] {{"ref_id": "abc123", "offset": 0, "length": 4000}}
+- When Has more: False, write the complete analysis aggregating ALL findings you wrote earlier.
+- CRITICAL: If a page says "Has more: True", you MUST continue paging (using Next offset) until "Has more: False". Do NOT pivot to other tools, SKILL_LOAD, or final analysis while data remains unread.
+- Example first call:  [TOOL:read_stored_result] {{"ref_id": "abc123", "offset": 0, "length": 4000}}
+- Example next call:   [TOOL:read_stored_result] {{"ref_id": "abc123", "offset": 4000, "length": 4000}}
 
 {extra_tools_section}
 

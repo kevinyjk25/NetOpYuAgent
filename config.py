@@ -305,28 +305,11 @@ class HybridFusionConfig:
     oversample:   int   = 4
 
 
-@dataclass
-class LLMJudgeConfig:
-    """Two-stage retrieve-then-rerank: first stage feeds top-K candidates to
-    an LLM that judges relevance. Best for cross-lingual / paraphrase-heavy
-    queries where BM25+embedding alone miss.
-    """
-    first_stage_top_k:  int   = 15
-    timeout_seconds:    float = 10.0
-    fusion_alpha:       float = 0.3   # 0.0=pure judge, 1.0=pure first stage
-    max_text_chars:     int   = 200   # candidate description truncation
-
-
-@dataclass
-class RetrievalCacheConfig:
-    """LRU+TTL cache around any Retriever. Composition-based: when enabled,
-    the factory wraps the chosen backend with CachedRetriever.
-
-    Hit-rate target in normal usage: 70-90% (same query repeats across
-    multi-turn conversations and across operators in the same shift)."""
-    enabled:     bool  = True
-    max_entries: int   = 1024
-    ttl_seconds: float = 600.0   # 10 minutes — typical turn duration band
+# NOTE: Earlier dup definitions of LLMJudgeConfig (line ~286) and
+# RetrievalCacheConfig (line ~272) removed; they were exact-field copies
+# of the canonical declarations above. Python's @dataclass keeps the last
+# definition silently — leaving both confuses readers and risks the two
+# falling out of sync over time.
 
 
 @dataclass

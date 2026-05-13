@@ -248,12 +248,20 @@ class SkillJournalStore:
             self._entries.append(journal_dict)
             while len(self._entries) > self._max:
                 self._entries.pop(0)
-        if self._persist:
-            try:
-                with open(self._persist, "a", encoding="utf-8") as fp:
-                    fp.write(json.dumps(journal_dict, ensure_ascii=False) + "\n")
-            except Exception as exc:
-                logger.warning("SkillJournalStore: persist failed (%s) — continuing in-memory only", exc)
+            # Persist under the same lock — without this, two threads
+            # writing JSONL concurrently can interleave bytes mid-line and
+            # produce un-parseable corrupt records (POSIX guarantees
+            # atomic writes only up to PIPE_BUF ~4KB; a journal entry
+            # often exceeds that).
+            if self._persist:
+                try:
+                    with open(self._persist, "a", encoding="utf-8") as fp:
+                        fp.write(json.dumps(journal_dict, ensure_ascii=False) + "\n")
+                except Exception as exc:
+                    logger.warning(
+                        "SkillJournalStore: persist failed (%s) — continuing in-memory only",
+                        exc,
+                    )
 
     def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:

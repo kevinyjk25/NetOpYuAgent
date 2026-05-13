@@ -20,6 +20,7 @@ Usage (via WebUI):
 """
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from collections import OrderedDict
@@ -76,6 +77,13 @@ class ToolResultCache:
         self._entries:    OrderedDict[str, CacheEntry] = OrderedDict()
         self._max         = max_entries
         self._total_bytes = 0
+        # Thread/async safety. FastAPI runs `def` endpoints in a thread pool,
+        # so two concurrent /runtime/cache reads + writes can interleave on
+        # the OrderedDict; without this lock, `popitem()` during eviction
+        # can race with `__getitem__` and throw KeyError, or self._total_bytes
+        # drifts away from the real byte sum.
+        # RLock so methods can safely call each other while already holding it.
+        self._lock = threading.RLock()
 
     # ------------------------------------------------------------------
     # Write
@@ -108,13 +116,14 @@ class ToolResultCache:
             session_id = session_id,
             full_text  = raw_output,
         )
-        self._entries[cache_key] = entry
-        self._total_bytes += entry.byte_size
+        with self._lock:
+            self._entries[cache_key] = entry
+            self._total_bytes += entry.byte_size
 
-        # LRU eviction
-        while len(self._entries) > self._max:
-            _, evicted = self._entries.popitem(last=False)
-            self._total_bytes -= evicted.byte_size
+            # LRU eviction
+            while len(self._entries) > self._max:
+                _, evicted = self._entries.popitem(last=False)
+                self._total_bytes -= evicted.byte_size
 
         label = (
             f"[STORED:{tool_name}:{ref_id} | "
@@ -137,50 +146,58 @@ class ToolResultCache:
     ) -> Optional[str]:
         """Return a slice of the stored result, or None if not found."""
         cache_key = f"{session_id}:{ref_id}"
-        entry = self._entries.get(cache_key)
-        if entry is None:
-            return None
-        entry.hit_count += 1
-        # Move to end (LRU)
-        self._entries.move_to_end(cache_key)
-        return entry.full_text[offset : offset + length]
+        with self._lock:
+            entry = self._entries.get(cache_key)
+            if entry is None:
+                return None
+            entry.hit_count += 1
+            # Move to end (LRU)
+            self._entries.move_to_end(cache_key)
+            full = entry.full_text
+        # Slice outside the lock — the slice itself is just a substring op
+        # on the immutable str, no concurrency hazard.
+        return full[offset : offset + length]
 
     def get_entry(self, ref_id: str, session_id: str = "default") -> Optional[CacheEntry]:
-        return self._entries.get(f"{session_id}:{ref_id}")
+        with self._lock:
+            return self._entries.get(f"{session_id}:{ref_id}")
 
     # ------------------------------------------------------------------
     # List / Delete
     # ------------------------------------------------------------------
 
     def list_session(self, session_id: str) -> list[dict[str, Any]]:
-        return [
-            {
-                "ref_id":     e.ref_id,
-                "tool_name":  e.tool_name,
-                "char_count": e.char_count,
-                "byte_size":  e.byte_size,
-                "hit_count":  e.hit_count,
-                "created_at": e.created_at,
-                "preview":    e.preview(120),
-            }
-            for key, e in self._entries.items()
-            if key.startswith(f"{session_id}:")
-        ]
+        with self._lock:
+            return [
+                {
+                    "ref_id":     e.ref_id,
+                    "tool_name":  e.tool_name,
+                    "char_count": e.char_count,
+                    "byte_size":  e.byte_size,
+                    "hit_count":  e.hit_count,
+                    "created_at": e.created_at,
+                    "preview":    e.preview(120),
+                }
+                for key, e in self._entries.items()
+                if key.startswith(f"{session_id}:")
+            ]
 
     def delete(self, ref_id: str, session_id: str = "default") -> bool:
         cache_key = f"{session_id}:{ref_id}"
-        entry = self._entries.pop(cache_key, None)
-        if entry:
-            self._total_bytes -= entry.byte_size
-            return True
-        return False
+        with self._lock:
+            entry = self._entries.pop(cache_key, None)
+            if entry:
+                self._total_bytes -= entry.byte_size
+                return True
+            return False
 
     def clear_session(self, session_id: str) -> int:
-        keys = [k for k in self._entries if k.startswith(f"{session_id}:")]
-        for k in keys:
-            self._total_bytes -= self._entries[k].byte_size
-            del self._entries[k]
-        return len(keys)
+        with self._lock:
+            keys = [k for k in self._entries if k.startswith(f"{session_id}:")]
+            for k in keys:
+                self._total_bytes -= self._entries[k].byte_size
+                del self._entries[k]
+            return len(keys)
 
     # ------------------------------------------------------------------
     # Stats
@@ -188,11 +205,13 @@ class ToolResultCache:
 
     @property
     def total_entries(self) -> int:
-        return len(self._entries)
+        with self._lock:
+            return len(self._entries)
 
     @property
     def total_bytes(self) -> int:
-        return self._total_bytes
+        with self._lock:
+            return self._total_bytes
 
 
 # ---------------------------------------------------------------------------

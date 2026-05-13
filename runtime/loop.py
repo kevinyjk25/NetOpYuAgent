@@ -390,34 +390,44 @@ class BoundedSessionStore:
         self._data:  dict[str, int]   = {}
         self._ts:    dict[str, float] = {}   # session_id → last_access timestamp
         self._writes = 0
+        # Thread-safe per the docstring. Without this lock, two FastAPI
+        # threads calling increment() at once could each read the same
+        # baseline and both set it +1, losing one increment.  RLock so
+        # increment() can call get()+set() while already holding it.
+        import threading as _threading
+        self._lock = _threading.RLock()
 
     def get(self, session_id: str, default: int = 0) -> int:
         now = time.monotonic()
-        if session_id in self._ts and (now - self._ts[session_id]) > self._ttl:
-            self._data.pop(session_id, None)
-            self._ts.pop(session_id, None)
-            return default
-        self._ts[session_id] = now
-        return self._data.get(session_id, default)
+        with self._lock:
+            if session_id in self._ts and (now - self._ts[session_id]) > self._ttl:
+                self._data.pop(session_id, None)
+                self._ts.pop(session_id, None)
+                return default
+            self._ts[session_id] = now
+            return self._data.get(session_id, default)
 
     def set(self, session_id: str, value: int) -> None:
         now = time.monotonic()
-        self._data[session_id] = value
-        self._ts[session_id]   = now
-        self._writes += 1
-        # Periodic eviction sweep every 100 writes
-        if self._writes % 100 == 0:
-            self._sweep(now)
-        # Hard cap: evict LRU entries when over limit
-        if len(self._data) > self._max:
-            self._evict_lru()
+        with self._lock:
+            self._data[session_id] = value
+            self._ts[session_id]   = now
+            self._writes += 1
+            # Periodic eviction sweep every 100 writes
+            if self._writes % 100 == 0:
+                self._sweep(now)
+            # Hard cap: evict LRU entries when over limit
+            if len(self._data) > self._max:
+                self._evict_lru()
 
     def increment(self, session_id: str) -> int:
-        val = self.get(session_id, 0) + 1
-        self.set(session_id, val)
-        return val
+        with self._lock:
+            val = self.get(session_id, 0) + 1
+            self.set(session_id, val)
+            return val
 
     def _sweep(self, now: float) -> None:
+        # Caller holds self._lock
         expired = [k for k, ts in self._ts.items() if (now - ts) > self._ttl]
         for k in expired:
             self._data.pop(k, None)
@@ -426,7 +436,8 @@ class BoundedSessionStore:
             logger.debug("BoundedSessionStore: evicted %d expired sessions", len(expired))
 
     def _evict_lru(self) -> None:
-        """Evict the oldest 10% of entries when the hard cap is hit."""
+        """Evict the oldest 10% of entries when the hard cap is hit.
+        Caller holds self._lock."""
         n_evict = max(1, len(self._data) // 10)
         oldest  = sorted(self._ts.items(), key=lambda kv: kv[1])[:n_evict]
         for k, _ in oldest:
@@ -1019,7 +1030,19 @@ class AgentRuntimeLoop:
                     logger.warning("run: LLM called skill-only '%s' as tool — injecting error", tool_name)
                 else:
                     raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-                stored = self._budget.store_tool_result(tool_name, raw)
+                # Same exclusion as ToolRouter — don't double-store pagination
+                # outputs. The 'stored' label here is what the LLM sees in the
+                # next turn's context; for paged reads we want the LLM to see
+                # the actual page content, not yet another [STORED:] reference.
+                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
+                _is_page_or_ref = (
+                    raw.startswith("[STORED:")
+                    or raw.startswith("# Stored result ref_id=")
+                )
+                if tool_name in _SKIP_STORE or _is_page_or_ref:
+                    stored = raw   # pass page content through unchanged
+                else:
+                    stored = self._budget.store_tool_result(tool_name, raw)
                 tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 last_tool_result = raw
 
@@ -1613,7 +1636,19 @@ class AgentRuntimeLoop:
                     logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
                                  _json.dumps(tool_args, indent=2, default=str), "─"*72)
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-                stored = self._budget.store_tool_result(tool_name, raw)
+                # Same exclusion as ToolRouter — don't double-store pagination
+                # outputs. The 'stored' label here is what the LLM sees in the
+                # next turn's context; for paged reads we want the LLM to see
+                # the actual page content, not yet another [STORED:] reference.
+                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
+                _is_page_or_ref = (
+                    raw.startswith("[STORED:")
+                    or raw.startswith("# Stored result ref_id=")
+                )
+                if tool_name in _SKIP_STORE or _is_page_or_ref:
+                    stored = raw   # pass page content through unchanged
+                else:
+                    stored = self._budget.store_tool_result(tool_name, raw)
                 tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 # Update count so llm_engine knows how many current-turn results exist
                 state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
