@@ -566,6 +566,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 # Drain queue → SSE
                 _final_text = ""
                 _final_interrupt: Optional[str] = None
+                _stalled = False
                 while True:
                     try:
                         _scfg = _streaming_cfg()
@@ -573,6 +574,16 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         kind, payload = await asyncio.wait_for(_chunk_queue.get(), timeout=_stall_to)
                     except asyncio.TimeoutError:
                         logger.warning("executor.execute_query stream stalled (%.1fs)", _stall_to)
+                        _stalled = True
+                        # Tell the frontend WHY the stream ended so the UI
+                        # can show a meaningful message instead of just
+                        # losing the response. The single most common
+                        # cause is a slow LLM backend (e.g. Ollama on a
+                        # large model + 8K+ prompt taking 3-5 minutes on
+                        # consumer hardware); without this signal, the
+                        # operator sees the trace freeze and can't tell
+                        # whether the agent crashed or is still working.
+                        yield f"data: {json.dumps({'type':'stall','stalled':True,'timeout_s':_stall_to,'message':'LLM backend did not respond within {:.0f}s — likely a slow model or large prompt. The request was cancelled.'.format(_stall_to)})}\n\n"
                         break
                     if kind == "chunk":
                         yield f"data: {json.dumps(payload)}\n\n"
@@ -590,8 +601,19 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                 try:
                     _drain_to = (lambda _s: float(getattr(_s, "exec_task_drain_timeout_seconds", 5.0)) if _s else 5.0)(_streaming_cfg())
+                    if _stalled:
+                        # When the SSE side gave up due to a stalled LLM, the
+                        # executor task is almost certainly still blocked inside
+                        # httpx awaiting Ollama. If we don't cancel it explicitly,
+                        # the orphaned task keeps the HTTP connection open until
+                        # Ollama eventually responds (could be many more minutes)
+                        # — and the user's next query may be processed by a
+                        # backend that's still busy with the old one. Cancel so
+                        # the underlying httpx request gets aborted and resources
+                        # are reclaimed promptly.
+                        exec_task.cancel()
                     await asyncio.wait_for(exec_task, timeout=_drain_to)
-                except (asyncio.TimeoutError, Exception):
+                except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
                     pass
 
                 turns_taken     = nonlocal_turns[0]

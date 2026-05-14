@@ -1001,6 +1001,33 @@ class AgentRuntimeLoop:
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
             new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
+
+            # Repeat-tool-call recovery (mirrors stream() path; see comment there).
+            # When the LLM re-requests an already-executed tool, dedup empties
+            # new_tool_calls and _is_complete would treat the prelude prose as
+            # a final answer. Force a nudge turn instead.
+            if tool_calls and not new_tool_calls and state.turns < 3:
+                dup_name, dup_args = tool_calls[0]
+                logger.warning(
+                    "run: LLM re-requested already-executed tool %s (turn=%d) — nudging",
+                    dup_name, state.turns,
+                )
+                if dup_name == "read_stored_result":
+                    _nudge = (
+                        "_NUDGE: You just requested read_stored_result with the same "
+                        f"ref_id+offset as a prior call ({dup_args}). That page is already "
+                        "in your context. ANALYSE what you can see, OR request a different "
+                        "offset. Do not re-emit the same read."
+                    )
+                else:
+                    _nudge = (
+                        f"_NUDGE: You just requested [TOOL:{dup_name}] with the same "
+                        "arguments as a prior call. Use the existing result already in "
+                        "your context; do not re-emit the same tool call."
+                    )
+                state.confirmed_facts.append(_nudge)
+                continue
+
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(_call_key(tool_name, tool_args))
@@ -1523,6 +1550,55 @@ class AgentRuntimeLoop:
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
             new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
+
+            # Repeat-tool-call recovery: if the LLM requested a tool call we've
+            # already executed this session (same name + same args fingerprint),
+            # dedup empties new_tool_calls. Without intervention, _is_complete
+            # below would see "no new tool calls" and mark the turn DONE — but
+            # the LLM's response is just a prelude like "我将查询 X..."
+            # followed by the duplicate [TOOL:...] line, NOT a real synthesis.
+            # The user would receive that prelude as the final answer.
+            #
+            # The fix: surface the existing result back to the LLM as a nudge
+            # so the next turn synthesises from data already in context instead
+            # of re-requesting it.
+            _had_calls    = bool(tool_calls)
+            _all_dup      = _had_calls and not new_tool_calls
+            if _all_dup and state.turns < 3:
+                dup_name, dup_args = tool_calls[0]
+                dup_key = _call_key(dup_name, dup_args)
+                prior_output = tool_outputs.get(dup_key, "")
+                logger.warning(
+                    "stream: LLM re-requested already-executed tool %s (turn=%d) — "
+                    "nudging it to synthesise from existing result instead of looping",
+                    dup_name, state.turns,
+                )
+                # Detect the read_stored_result pagination pattern. When the
+                # LLM keeps asking to read the same page, it means the model
+                # decided the page wasn't useful yet but didn't move on; tell
+                # it explicitly that re-reading the same offset is futile.
+                if dup_name == "read_stored_result":
+                    _nudge_text = (
+                        "_NUDGE: You just requested read_stored_result with the same "
+                        f"ref_id+offset as a prior call ({dup_args}). The page content is "
+                        "already in the tool_outputs section of this prompt — DO NOT request "
+                        "it again. Instead either (a) ANALYSE the page content you can see "
+                        "and respond to the user, or (b) request a DIFFERENT offset to read "
+                        "the next page. Do not emit [TOOL:read_stored_result] with the same "
+                        "ref_id and offset combination you have already used."
+                    )
+                else:
+                    _nudge_text = (
+                        f"_NUDGE: You just requested [TOOL:{dup_name}] with the same "
+                        "arguments as a prior call this session. The result is already in "
+                        "your context. Do NOT re-emit that tool call. Instead, analyse the "
+                        "data you already have and respond to the user. If you genuinely "
+                        "need different data, call a different tool or change the args."
+                    )
+                state.confirmed_facts.append(_nudge_text)
+                # Continue the while loop — top of loop bumps state.turns
+                continue
+
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(_call_key(tool_name, tool_args))

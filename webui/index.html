@@ -2052,6 +2052,22 @@ function dispatchChunk(c, query, sid) {
     flowEvent('error','✗ Error',c.error,'');
     return;
   }
+  if (c.type==='stall' || c.stalled) {
+    // SSE stream gave up waiting for the LLM backend (default 180s).
+    // Show a clear, actionable message in both the thinking trace and the
+    // right-hand FLOW panel so the operator understands the request was
+    // cancelled rather than thinking the UI silently froze.
+    const msg = c.message || `Backend stalled (>${c.timeout_s||180}s). Request cancelled.`;
+    addStep('error','⏱ Timed out',msg,'');
+    flowEvent('error','⏱ LLM backend timeout',msg,'cancelled — try a smaller prompt or a faster model');
+    // Re-label the streaming-trace summary so the chat shows why nothing arrived
+    if (streamState && streamState.sid) {
+      streamState.paused = true;   // reuse the paused flag so finalizeStream() doesn't overwrite
+      const lbl = document.getElementById(streamState.sid + '-label');
+      if (lbl) lbl.textContent = '⏱ LLM backend timed out — request cancelled';
+    }
+    return;
+  }
 }
 
 // Cache tab

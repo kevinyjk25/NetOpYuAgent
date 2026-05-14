@@ -54,6 +54,63 @@ from typing import Iterable, Optional
 logger = logging.getLogger(__name__)
 
 
+# Pronouns / elliptic references that signal "the entity I just discussed".
+# Without one of these, a query like "查询站点a 流量" sharing no entity with
+# recall is a NEW TOPIC, not a coreference; treating it as one led to
+# operators reporting "I asked about site-A but the agent kept analysing
+# sw-core-01 because the previous turn happened to mention it".
+#
+# Match either:
+#   - Chinese pronoun / discourse marker: 它/这/那/此/上面/上一/刚才/继续
+#   - English pronoun / elliptical: it/this/that, "the device", "the same",
+#     "continue", "go on" (the user's natural continuation cue)
+#
+# Conservative by design: false positives here force re-resolution on a
+# query that didn't need it (mild verbosity in the LLM prompt). False
+# negatives — failing to bind a true coreference — fall through to LLM
+# inference from recall, which is its baseline behaviour anyway.
+_PRONOUN_RE = re.compile(
+    r"("
+    r"它|这台|那台|这个|那个|此|上面|上一|刚才|刚刚|继续|接着|然后呢|"
+    r"\bit\b|\bthis\b|\bthat\b|\bthe (?:device|same|one)\b|"
+    r"\bcontinue\b|\bgo on\b|\bproceed\b"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _query_looks_like_coreference(query: str) -> bool:
+    """Heuristic: should we attempt to resolve a focus entity for this
+    query? Only when the query CONTAINS a pronoun or elliptical marker,
+    OR is an extremely terse continuation cue (≤2 chars / 1 short word).
+
+    Tuned to:
+      - Catch '继续' / '更多' (2 chars), 'next' / 'more' / 'go' (1 word)
+      - NOT catch '查询流量' (4 chars but a complete verb-object phrase
+        — a new request, not a continuation).
+
+    Conservative by design: a missed coreference falls through to whatever
+    the LLM can infer from recall, which is its baseline. A false-positive
+    binding can corrupt a fresh user query (the bug we're fixing here)
+    so we err on the side of NOT binding when ambiguous.
+    """
+    q = (query or "").strip()
+    if not q:
+        return False
+    if _PRONOUN_RE.search(q):
+        return True
+    # Extremely terse continuations only — 2 chars OR a single short word.
+    # 4-char phrases like '查询流量' (verb+object) are NEW requests; we
+    # let the operator name the entity if they want it bound.
+    if len(q) <= 2:
+        return True
+    if " " not in q and len(q) <= 5 and not any(c in q for c in "?。?,,"):
+        # Single token, English-ish "next" / "more" / "redo"
+        if q.isascii() and q.isalpha():
+            return True
+    return False
+
+
 @dataclass
 class CoreferenceResult:
     """Diagnostics + the inferred entity. UIs can show "we picked X
@@ -138,7 +195,17 @@ class Coreferencer:
                 )
 
         # Step 3: free-text mention — pick the LAST entity mentioned
-        # anywhere in the context (proxy for "most recently discussed")
+        # anywhere in the context (proxy for "most recently discussed").
+        # GATED: only fall back to free_mention when the query syntactically
+        # looks like a coreference (contains a pronoun, elliptical marker,
+        # or is a very short continuation cue). A query like "站点a 异常流量"
+        # is a NEW topic and should NOT inherit the prior turn's entity
+        # just because the prior turn happened to mention one. Previously
+        # this gating was absent and operators saw their fresh queries
+        # silently bound to stale devices.
+        if not _query_looks_like_coreference(query or ""):
+            return CoreferenceResult(entity=None, source="")
+
         last_mention: Optional[str] = None
         last_evidence = ""
         for pat in self._entity_patterns:

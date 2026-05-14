@@ -73,7 +73,7 @@ _DDL = [
 ]
 
 _FTS5_RESERVED = re.compile(r'\b(AND|OR|NOT|NEAR|COLUMN|ROW|MATCH)\b', re.IGNORECASE)
-_FTS5_SPECIAL  = re.compile(r'''["\'\(\)\[\]\{\}\<\>\*\+\-\:\^\.\/\?\,\;\=\!\@\#\$\%\& ]+''')
+_FTS5_SPECIAL  = re.compile(r'''[\"\'\(\)\[\]\{\}\<\>\*\+\-\:\^\.\/\?\,\;\=\!\@\#\$\%\&\`\|\~\\\ ]+''')
 
 DEFAULT_FACT_TTL_DAYS = 30   # facts expire after 30 days by default
 CONFIDENCE_DECAY_ALPHA = 0.7  # each contradicting update: conf *= 0.7

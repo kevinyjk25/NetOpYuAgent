@@ -404,6 +404,14 @@ class HitlExecutor:
         tool_args, invokes the tool, persists the result, and returns
         a list of chunks describing what happened so the calling
         endpoint can paint thinking-trace steps in the UI.
+
+        Streams the same chunks through the global ChunkQueueRegistry
+        as they are produced, so any frontend that already subscribed
+        via GET /hitl/{interrupt_id}/stream sees progress in real time
+        (parity with _agent_loop_resumer). Without this, the operator
+        clicks approve and the trace freezes until the tool returns —
+        which for slow tools (e.g. restart_service over real SSH) can
+        be tens of seconds with no UI feedback.
         """
         state = entry.resume_handle.state
         tool_name = state.get("tool_name")
@@ -412,74 +420,117 @@ class HitlExecutor:
         original_query = state.get("original_query", "")
         _chunks: list[dict] = []
 
-        if decision.decision == DecisionKind.REJECT:
-            await self._writeback(
-                original_query,
-                f"[HITL REJECTED — operator declined tool call `{tool_name}`]",
-                session_id,
-            )
-            return {"tool": tool_name, "decision": "reject", "chunks": _chunks}
+        # Live SSE plumbing: identical pattern to _agent_loop_resumer.
+        # When the frontend subscribes via /hitl/{id}/stream the queue
+        # auto-creates the stream on first push (see chunk_queue.push's
+        # _ensure_sync), so we don't need to pre-register here.
+        from hitl_core.chunk_queue import get_chunk_queue_registry
+        _chunk_queue = get_chunk_queue_registry()
+        _interrupt_id = entry.interrupt_id or state.get("interrupt_id", "")
 
-        # APPROVE or EDIT — merge patch and invoke
-        if decision.decision == DecisionKind.EDIT and decision.parameter_patch:
-            tool_args.update(decision.parameter_patch)
-            logger.info(
-                "Tool HITL: applying operator edit — patch_keys=%s",
-                list(decision.parameter_patch.keys()),
-            )
-            _chunks.append({
-                "node":        "hitl_edit",
-                "node_step":   f"Operator edited args: {list(decision.parameter_patch.keys())}",
-            })
+        def _emit(chunk: dict) -> None:
+            """Append to the sync result list AND push to the live queue.
+            Wrapped in a try so a queue-push hiccup never blocks the tool
+            execution path."""
+            _chunks.append(chunk)
+            if _interrupt_id:
+                try:
+                    _chunk_queue.push(_interrupt_id, chunk)
+                except Exception:
+                    # Don't let a streaming hiccup block the tool path;
+                    # the synchronous return value still carries the
+                    # chunk list as a fallback.
+                    pass
 
-        if tool_name not in self._tool_registry:
-            logger.warning(
-                "tool_call_resumer: tool %r not in registry", tool_name,
-            )
-            return {"error": f"tool {tool_name!r} not registered", "chunks": _chunks}
-
-        # Step: tool dispatch
-        _chunks.append({
-            "node":      "tool_call",
-            "node_step": f"Calling tool: {tool_name}",
-        })
+        # We complete() the stream on every exit path below — package it
+        # as a finally so even bare returns / unexpected exceptions still
+        # signal end-of-stream to subscribers.
         try:
-            result = await self._tool_registry[tool_name](tool_args)
-        except Exception as exc:
-            logger.exception("Tool %s execution failed: %s", tool_name, exc)
+            if decision.decision == DecisionKind.REJECT:
+                _emit({
+                    "node":      "hitl_reject",
+                    "node_step": f"Operator rejected tool call: {tool_name}",
+                })
+                await self._writeback(
+                    original_query,
+                    f"[HITL REJECTED — operator declined tool call `{tool_name}`]",
+                    session_id,
+                )
+                return {"tool": tool_name, "decision": "reject", "chunks": _chunks}
+
+            # APPROVE or EDIT — merge patch and invoke
+            if decision.decision == DecisionKind.EDIT and decision.parameter_patch:
+                tool_args.update(decision.parameter_patch)
+                logger.info(
+                    "Tool HITL: applying operator edit — patch_keys=%s",
+                    list(decision.parameter_patch.keys()),
+                )
+                _emit({
+                    "node":        "hitl_edit",
+                    "node_step":   f"Operator edited args: {list(decision.parameter_patch.keys())}",
+                })
+
+            if tool_name not in self._tool_registry:
+                logger.warning(
+                    "tool_call_resumer: tool %r not in registry", tool_name,
+                )
+                _emit({
+                    "node":      "tool_error",
+                    "node_step": f"Tool {tool_name!r} not registered — cannot dispatch",
+                })
+                return {"error": f"tool {tool_name!r} not registered", "chunks": _chunks}
+
+            # Step: tool dispatch
+            _emit({
+                "node":      "tool_call",
+                "node_step": f"Calling tool: {tool_name}",
+            })
+            try:
+                result = await self._tool_registry[tool_name](tool_args)
+            except Exception as exc:
+                logger.exception("Tool %s execution failed: %s", tool_name, exc)
+                await self._writeback(
+                    original_query,
+                    f"[HITL APPROVED — tool {tool_name} FAILED] {exc}",
+                    session_id,
+                )
+                _emit({
+                    "node":      "tool_error",
+                    "node_step": f"Tool {tool_name} FAILED: {exc}",
+                })
+                return {"tool": tool_name, "error": str(exc), "chunks": _chunks}
+
+            result_text = str(result)[:1500]
             await self._writeback(
                 original_query,
-                f"[HITL APPROVED — tool {tool_name} FAILED] {exc}",
+                f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
                 session_id,
             )
-            _chunks.append({
-                "node":      "tool_error",
-                "node_step": f"Tool {tool_name} FAILED: {exc}",
+            # Step: tool returned
+            _emit({
+                "node":        "tool_result",
+                "node_step":   f"Inline: {tool_name}",
+                "node_result": {
+                    "tool":   tool_name,
+                    "args":   tool_args,
+                    "result": result_text[:300],
+                },
             })
-            return {"tool": tool_name, "error": str(exc), "chunks": _chunks}
-
-        result_text = str(result)[:1500]
-        await self._writeback(
-            original_query,
-            f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
-            session_id,
-        )
-        # Step: tool returned
-        _chunks.append({
-            "node":        "tool_result",
-            "node_step":   f"Inline: {tool_name}",
-            "node_result": {
-                "tool":   tool_name,
-                "args":   tool_args,
-                "result": result_text[:300],
-            },
-        })
-        return {
-            "tool":        tool_name,
-            "result":      result_text,
-            "tool_result": result_text,
-            "chunks":      _chunks,
-        }
+            return {
+                "tool":        tool_name,
+                "result":      result_text,
+                "tool_result": result_text,
+                "chunks":      _chunks,
+            }
+        finally:
+            # Signal end-of-stream so any /hitl/{id}/stream subscriber
+            # exits the async iterator cleanly. Idempotent if no one
+            # subscribed.
+            if _interrupt_id:
+                try:
+                    _chunk_queue.complete(_interrupt_id)
+                except Exception:
+                    pass
 
     # ────────────────────────────────────────────────────────────────
     # Multi-mode HITL (USER_CHOICE / CLARIFICATION)
@@ -613,17 +664,59 @@ class HitlExecutor:
         # nested HITL, post-action steps).
         _chunk_log: list[dict] = []
 
+        # Push each chunk into the live SSE queue so a subscribed frontend
+        # sees progress in real time (in addition to the final JSON response).
+        from hitl_core.chunk_queue import get_chunk_queue_registry
+        _chunk_queue = get_chunk_queue_registry()
+        _interrupt_id = getattr(entry, "interrupt_id", None) or state.get("interrupt_id", "")
+
         async def _capture_chunk(ch: dict) -> None:
             try:
-                _chunk_log.append(dict(ch))
+                ch_dict = dict(ch)
+                _chunk_log.append(ch_dict)
+                # Push to live queue for SSE subscribers (non-blocking)
+                if _interrupt_id:
+                    _chunk_queue.push(_interrupt_id, ch_dict)
             except Exception:
                 pass
 
-        result = await self.execute_query(
-            query=augmented, session_id=session_id,
-            env_context=_resume_env,
-            on_chunk=_capture_chunk,
-        )
+        # Wrap execute_query: even on exception, surface captured chunks
+        # so the frontend sees progressive trace + a clear error reason.
+        try:
+            result = await self.execute_query(
+                query=augmented, session_id=session_id,
+                env_context=_resume_env,
+                on_chunk=_capture_chunk,
+            )
+        except Exception as _eq_exc:
+            # Build a synthetic result that still carries the chunks accumulated
+            # up to the failure. Frontend renders chunks + an error message
+            # instead of going silent.
+            logger.warning(
+                "agent_loop_resumer: execute_query failed (%s) — surfacing %d "
+                "chunks captured before failure",
+                _eq_exc, len(_chunk_log),
+            )
+            _err_text = f"[Resume failed: {_eq_exc}]"
+            # Persist the partial trace as a memory write so it isn't lost
+            try:
+                await self._writeback(original_query, _err_text, session_id)
+            except Exception:
+                pass
+            if _interrupt_id:
+                _chunk_queue.complete(_interrupt_id)
+            return {
+                "text":       _err_text,
+                "decision":   decision.decision.value,
+                "chunks":     _chunk_log,
+                "error":      str(_eq_exc),
+                "partial":    True,
+            }
+
+        # Signal end-of-stream so SSE subscribers exit
+        if _interrupt_id:
+            _chunk_queue.complete(_interrupt_id)
+
         return {
             "text":       result.get("text", ""),
             "decision":   decision.decision.value,

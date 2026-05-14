@@ -148,7 +148,7 @@ class BatchCoordinator:
             if batch.batch_id in self._waiters:
                 # Re-open of an existing batch — return the existing future
                 return self._waiters[batch.batch_id]
-            fut: asyncio.Future[BatchResolution] = asyncio.get_event_loop().create_future()
+            fut: asyncio.Future[BatchResolution] = asyncio.get_running_loop().create_future()
             self._waiters[batch.batch_id] = fut
             self._collected[batch.batch_id] = {}
 

@@ -424,9 +424,13 @@ concurrency:
 # ── SSE streaming timeouts ────────────────────────────────────────────────────
 streaming:
   # If the SSE chunk queue idles longer than this, the stream is closed.
-  # Lower for snappier disconnect detection; higher for long LLM responses.
+  # Default 300s mirrors the LLM client's read timeout (httpx 300s in
+  # OllamaEngine._chat) — set lower and you'll see SSE stall while the
+  # LLM call is legitimately still in flight (visible to operators as
+  # "⏱ LLM backend timed out" with the request being cancelled). On
+  # smaller models you can safely drop this to 120-180.
   # Override: SSE_STALL_TIMEOUT_SECONDS
-  sse_stall_timeout_seconds: 180.0
+  sse_stall_timeout_seconds: 300.0
   # After the stream ends, wait up to this many seconds for the executor task
   # to drain gracefully before forcing cleanup.
   # Override: SSE_EXEC_DRAIN_TIMEOUT_SECONDS

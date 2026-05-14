@@ -269,7 +269,7 @@ class HitlRouter:
             existing = self._waiters.get(interrupt_id)
             if existing is not None and not existing.done():
                 return existing
-            fut: asyncio.Future[HitlDecision] = asyncio.get_event_loop().create_future()
+            fut: asyncio.Future[HitlDecision] = asyncio.get_running_loop().create_future()
             self._waiters[interrupt_id] = fut
             return fut
 

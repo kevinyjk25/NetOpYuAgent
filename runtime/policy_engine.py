@@ -165,12 +165,19 @@ class PolicyEngine:
                     from_cache=True,
                 )
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
+            # 3.10+: get_event_loop() emits DeprecationWarning when called
+            # outside a running loop. Use get_running_loop() to detect "are
+            # we already inside a loop?" and asyncio.run() to bootstrap one
+            # otherwise — that's the documented replacement pattern.
+            try:
+                _running = asyncio.get_running_loop()
+            except RuntimeError:
+                _running = None
+            if _running is not None:
                 # Inside async context — cannot block. Return cached fallback.
                 # The async path (evaluate_any) should be used instead.
                 return self._fallback(policy_name, query)
-            return loop.run_until_complete(self.evaluate(policy_name, query))
+            return asyncio.run(self.evaluate(policy_name, query))
         except Exception:
             return self._fallback(policy_name, query)
 
@@ -179,10 +186,13 @@ class PolicyEngine:
     ) -> dict[str, PolicyResult]:
         """Synchronous multi-policy evaluation."""
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
+            try:
+                _running = asyncio.get_running_loop()
+            except RuntimeError:
+                _running = None
+            if _running is not None:
                 return {n: self._fallback(n, query) for n in policy_names}
-            return loop.run_until_complete(self.evaluate_any(policy_names, query))
+            return asyncio.run(self.evaluate_any(policy_names, query))
         except Exception:
             return {n: self._fallback(n, query) for n in policy_names}
 
