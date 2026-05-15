@@ -1446,9 +1446,14 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         hitl_core_router = services.get("hitl_core_router")
         if hitl_core_router is not None:
             entries = await hitl_core_router.list_pending(limit=100)
+            # Resolve batch_id for each entry (None if not part of a batch).
+            # Older frontends ignore unknown fields; newer ones can group
+            # cards by batch_id to render a single "Approve all" affordance.
+            from hitl_core.batch import BATCH_ID_KEY
             result = []
             for entry in entries:
                 p = entry.payload
+                _batch_id = p.context_snapshot.get(BATCH_ID_KEY) if p.context_snapshot else None
                 result.append({
                     "interrupt_id":   p.interrupt_id,
                     "thread_id":      p.thread_id,
@@ -1464,6 +1469,11 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     "choices":               [c.model_dump() for c in (p.choices or [])],
                     "clarification_fields":  [f.model_dump() for f in (p.clarification_fields or [])],
                     "editable_param_keys":   list(p.editable_param_keys or []),
+                    # NEW: present when this interrupt is part of a batch
+                    # (multiple destructive calls in one LLM turn). Frontends
+                    # that don't know about batches still render N independent
+                    # cards as before; newer UIs can group on this key.
+                    "batch_id":             _batch_id,
                 })
             # PERF-3: only log at INFO when there's actually something pending,
             # otherwise DEBUG to keep the log clean.
@@ -1570,6 +1580,48 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         req.operator_id = (await _identity()).operator_id
         return await _submit_hitl_decision(
             interrupt_id, "edit", req, services
+        )
+
+    # ── Batch HITL endpoints ──────────────────────────────────────
+    # When the LLM emits multiple destructive [TOOL:] calls in one turn
+    # (e.g. push_config to 2+ devices), the executor raises a HitlBatch
+    # so children appear together. These endpoints let operators act on
+    # the whole group at once instead of clicking through N cards.
+    # Single-decision endpoints (/hitl/{id}/approve etc) still work on
+    # individual children — these batch ones are a convenience layer.
+
+    @app.get("/hitl/batch/{batch_id}")
+    async def get_hitl_batch(batch_id: str) -> JSONResponse:
+        """Return the batch envelope + all child payloads + decision counts."""
+        hitl_core_router = services.get("hitl_core_router")
+        if hitl_core_router is None:
+            raise HTTPException(404, "hitl_core not configured")
+        snapshot = await hitl_core_router.load_batch(batch_id)
+        if snapshot is None:
+            raise HTTPException(404, f"Batch {batch_id!r} not found")
+        return JSONResponse(content={
+            "batch":         snapshot.batch.model_dump(),
+            "children":      [c.model_dump() for c in snapshot.children],
+            "decided_count": snapshot.decided_count,
+            "pending_count": snapshot.pending_count,
+        })
+
+    @app.post("/hitl/batch/{batch_id}/approve_all")
+    async def approve_batch_all(
+        batch_id: str, req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        """Approve every still-pending child of a batch in one call."""
+        return await _batch_decision_fanout(
+            batch_id, "approve", req, services, _identity
+        )
+
+    @app.post("/hitl/batch/{batch_id}/reject_all")
+    async def reject_batch_all(
+        batch_id: str, req: HitlDecisionRequest,
+    ) -> JSONResponse:
+        """Reject every still-pending child of a batch in one call."""
+        return await _batch_decision_fanout(
+            batch_id, "reject", req, services, _identity
         )
 
     @app.post("/hitl/{interrupt_id}/choose")
@@ -2146,6 +2198,69 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+async def _batch_decision_fanout(
+    batch_id: str,
+    decision_kind: str,                  # "approve" | "reject"
+    req: "HitlDecisionRequest",
+    services: dict,
+    _identity_fn,                        # closure from caller
+) -> JSONResponse:
+    """Common implementation for POST /hitl/batch/{id}/{approve_all,reject_all}.
+
+    Loads the batch, builds one HitlDecision per still-pending child,
+    fans out through router.deliver_batch which validates each row and
+    invokes the child's resumer. Returns the deliver_batch result dict
+    (results + errors) so the caller can show per-child outcomes.
+
+    Rerun-safe: already-decided children are skipped so retrying after
+    a partial network failure won't double-trigger anything.
+    """
+    hitl_core_router = services.get("hitl_core_router")
+    if hitl_core_router is None:
+        raise HTTPException(404, "hitl_core not configured")
+
+    snapshot = await hitl_core_router.load_batch(batch_id)
+    if snapshot is None:
+        raise HTTPException(404, f"Batch {batch_id!r} not found")
+
+    op_id = (await _identity_fn()).operator_id
+    set_current_operator(op_id)
+
+    from hitl_core.schema import (
+        BatchSubmission, HitlDecision, DecisionKind,
+    )
+    kind = (
+        DecisionKind.APPROVE if decision_kind == "approve" else DecisionKind.REJECT
+    )
+
+    decisions = []
+    for child in snapshot.children:
+        # Skip already-decided children — operator may have approved a
+        # subset individually before clicking 'approve all'.
+        if child.decision is not None:
+            continue
+        decisions.append(HitlDecision(
+            interrupt_id=child.interrupt_id,
+            decision=kind,
+            operator_id=op_id,
+            comment=req.comment,
+        ))
+
+    if not decisions:
+        return JSONResponse(content={
+            "batch_id":   batch_id,
+            "applied":    0,
+            "message":    "all children already decided",
+        })
+
+    submission = BatchSubmission(
+        batch_id=batch_id, operator_id=op_id,
+        comment=req.comment, decisions=decisions,
+    )
+    result = await hitl_core_router.deliver_batch(submission)
+    return JSONResponse(content=result)
+
 
 async def _submit_hitl_decision(
     interrupt_id: str,

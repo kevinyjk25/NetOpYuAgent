@@ -997,6 +997,36 @@ class AgentRuntimeLoop:
                         context_str += "\n\n" + detail
                         logger.debug("SkillCatalog: loaded detail for %s", skill_id)
 
+            # P1+: detect ALIAS directives. When the LLM discovers that the
+            # user's term doesn't match the real entity name (e.g. user said
+            # "core-01" but the actual device is "sw-acc-01"), it can emit
+            # `[ALIAS: user_term = system_term]` so the correction survives
+            # to subsequent turns. Without this, the LLM forgets in turn N+1
+            # and starts re-resolving from scratch, often regenerating bad
+            # configs against the user's wrong term.
+            #
+            # Stored as confirmed_facts entries; format kept stable so the
+            # next turn's prompt builder (see _format_confirmed_facts) can
+            # surface them prominently right after the user query.
+            _alias_re = re.compile(
+                r"\[ALIAS\s*:\s*([^=\]]+?)\s*=\s*([^\]]+?)\s*\]"
+            )
+            for _m in _alias_re.finditer(llm_response):
+                _user_term, _sys_term = _m.group(1).strip(), _m.group(2).strip()
+                # Skip degenerate / identical aliases
+                if not _user_term or not _sys_term or _user_term == _sys_term:
+                    continue
+                _alias_fact = f"ENTITY_ALIAS: '{_user_term}' actually refers to '{_sys_term}'"
+                # Dedup: if we've already recorded the same alias, skip
+                if not any(
+                    f == _alias_fact for f in state.confirmed_facts
+                ):
+                    state.confirmed_facts.append(_alias_fact)
+                    logger.info(
+                        "ALIAS recorded (turn=%d): %r → %r",
+                        state.turns, _user_term, _sys_term,
+                    )
+
             # Execute tool calls — one per turn only
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
@@ -1543,12 +1573,62 @@ class AgentRuntimeLoop:
                             except Exception as _je:
                                 logger.debug("journal.record_skill_load failed: %s", _je)
 
+            # P1+: ALIAS directive detection (mirror of run() path).
+            # See run() for full rationale; in short, when the LLM corrects
+            # a user-supplied entity name (e.g. "core-01" was actually meant
+            # to mean "sw-acc-01"), an [ALIAS: user = actual] line in the
+            # LLM response gets folded into confirmed_facts so the next
+            # turn sees the correction surfaced prominently in its prompt.
+            _alias_re_s = re.compile(
+                r"\[ALIAS\s*:\s*([^=\]]+?)\s*=\s*([^\]]+?)\s*\]"
+            )
+            for _m in _alias_re_s.finditer(llm_response):
+                _user_term, _sys_term = _m.group(1).strip(), _m.group(2).strip()
+                if not _user_term or not _sys_term or _user_term == _sys_term:
+                    continue
+                _alias_fact = f"ENTITY_ALIAS: '{_user_term}' actually refers to '{_sys_term}'"
+                if not any(f == _alias_fact for f in state.confirmed_facts):
+                    state.confirmed_facts.append(_alias_fact)
+                    logger.info(
+                        "ALIAS recorded (turn=%d, stream): %r → %r",
+                        state.turns, _user_term, _sys_term,
+                    )
+                    yield {
+                        "node":      "alias_recorded",
+                        "node_step": f"Recorded alias: {_user_term!r} → {_sys_term!r}",
+                    }
+
             # ── Single tool call enforcement ──────────────────────────
             # _parse_tool_call() returns only the FIRST [TOOL:] found.
-            # Multiple calls in one response are a model error — execute
-            # only the first so we feed back real data before the next call.
-            _single = self._parse_tool_call(llm_response)
-            tool_calls = [_single] if _single else []
+            # Multiple calls in one response are usually a model error —
+            # execute only the first so we feed back real data before the
+            # next call.
+            #
+            # EXCEPTION: when the LLM uses [TOOL_BATCH:name] to indicate a
+            # multi-target destructive batch, _parse_tool_calls() expands
+            # the array into N (name, args_i) tuples that all share the
+            # same tool name. In that case we keep ALL of them so the
+            # stop_hitl path below detects them as sibling destructive
+            # calls and raises a single HITL batch (Path A).
+            _all_parsed = self._parse_tool_calls(llm_response)
+            if (
+                len(_all_parsed) >= 2
+                and all(_n == _all_parsed[0][0] for _n, _ in _all_parsed)
+                and _all_parsed[0][0] in self._cfg.hitl_tool_names
+            ):
+                # Looks like a TOOL_BATCH expansion (or a same-name multi
+                # [TOOL:] burst): all destructive, all same name. Keep all.
+                tool_calls = _all_parsed
+                logger.info(
+                    "stream: multi-call destructive batch detected (%d %s calls) — "
+                    "passing through for HITL batch handling",
+                    len(tool_calls), tool_calls[0][0],
+                )
+            elif _all_parsed:
+                # Standard single-call path: take only the first.
+                tool_calls = [_all_parsed[0]]
+            else:
+                tool_calls = []
             new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
 
             # Repeat-tool-call recovery: if the LLM requested a tool call we've
@@ -1687,6 +1767,190 @@ class AgentRuntimeLoop:
                     _editable_keys = list(
                         self._cfg.editable_hitl_tools.get(tool_name, [])
                     )
+                    # ── Batch detection ───────────────────────────────
+                    # Path A: LLM already emitted multiple [TOOL:] of the
+                    # SAME destructive name this turn (the textbook case
+                    # after the prompt's "multi-target batches" example).
+                    # Path B: LLM emitted ONLY ONE [TOOL:] this turn but
+                    # its surrounding prose names multiple devices that
+                    # are clearly the intended targets (e.g. the analysis
+                    # text says "为 sw-core-01 和 sw-core-02 应用以下配置"
+                    # but the [TOOL:] block only carries sw-core-01).
+                    # In Path B we DON'T stop_hitl yet; we nudge the LLM
+                    # to re-emit ONE response that contains [TOOL:] lines
+                    # for every target. Otherwise the operator only sees
+                    # the first target and has to start a fresh chat turn
+                    # for each remaining one.
+                    _all_calls = self._parse_tool_calls(llm_response)
+                    _siblings  = [
+                        (n, a) for (n, a) in _all_calls
+                        if n == tool_name and a != tool_args and n in self._cfg.hitl_tool_names
+                    ]
+                    _batch_calls = None
+                    if _siblings:
+                        # Path A — Build the batch list: current + all distinct
+                        # siblings, preserving order. Dedup by JSON-canonical
+                        # key so two identical args don't both show.
+                        _seen_keys = {_call_key(tool_name, tool_args)}
+                        _batch_calls = [(tool_name, tool_args)]
+                        for (n, a) in _siblings:
+                            k = _call_key(n, a)
+                            if k not in _seen_keys:
+                                _seen_keys.add(k)
+                                _batch_calls.append((n, a))
+                        logger.info(
+                            "stream: detected batch of %d %s calls in one turn (path A) — "
+                            "executor will raise a HITL batch",
+                            len(_batch_calls), tool_name,
+                        )
+                    else:
+                        # Path B v2 — silent fabrication.
+                        #
+                        # Real-world testing (sessions ap-01/ap-02 + sw-core-01/02)
+                        # showed that qwen3.5:27b consistently emits a SINGLE
+                        # [TOOL:] even when prose enumerates multiple targets
+                        # for the SAME logical operation ("我将为 ap-01 和
+                        # ap-02 下发修复配置"). Prompt-level teaching (worked
+                        # examples, [TOOL_BATCH:] directive, GOOD/BAD pairs)
+                        # has been tried and the LLM keeps reverting to
+                        # the "one tool per turn" pattern it was trained on.
+                        #
+                        # Strategy: when the LLM's prose names ≥2 distinct
+                        # device-id patterns AND only one [TOOL:] was emitted
+                        # AND the emitted device is among the named ones,
+                        # silently fabricate N-1 sibling tool calls by
+                        # COPYING the LLM's args dict and only swapping the
+                        # device_id field. Mark each fabricated call's
+                        # reason field so operators see this is auto-derived.
+                        #
+                        # Operator safety: every fabricated call still goes
+                        # through HITL approval — the operator reviews each
+                        # card and can edit args or reject. Worst case is
+                        # an extra card to reject; best case (and common
+                        # case in our tests) is "same fix applied to N
+                        # identical devices", which the operator wants
+                        # batched anyway.
+                        #
+                        # Limits:
+                        #  * Only fires for tools with a device_id-like
+                        #    parameter (so fabrication is unambiguous).
+                        #  * Cap at 5 fabricated siblings to prevent
+                        #    runaway batches from prose typos.
+                        #  * Skip if any fabricated device_id would
+                        #    collide with the current one (after
+                        #    case-normalization).
+                        _current_device = str(
+                            tool_args.get("device_id")
+                            or tool_args.get("device")
+                            or tool_args.get("target")
+                            or ""
+                        ).strip()
+                        _device_key = (
+                            "device_id" if "device_id" in tool_args
+                            else "device" if "device" in tool_args
+                            else "target" if "target" in tool_args
+                            else None
+                        )
+                        if _current_device and _device_key:
+                            # Strip [TOOL:] blocks + [ALIAS:] blocks from
+                            # prose so we only match entity names in
+                            # narrative text.
+                            _prose = re.sub(
+                                r"\[TOOL:\w+\]\s*\{[^}]*\}",
+                                "",
+                                llm_response,
+                                flags=re.DOTALL,
+                            )
+                            _prose = re.sub(
+                                r"\[TOOL_BATCH:\w+\]\s*\[.*?\]",
+                                "",
+                                _prose,
+                                flags=re.DOTALL,
+                            )
+                            _prose = re.sub(
+                                r"\[ALIAS\s*:\s*[^=\]]+?\s*=\s*[^\]]+?\s*\]",
+                                "",
+                                _prose,
+                            )
+                            _DEV_RE = re.compile(
+                                r"(?<![a-z0-9])"
+                                r"(?:sw|ap|router|switch|core)[-_]?[a-z0-9]*[-_]?\d+"
+                                r"(?![a-z0-9])",
+                                re.IGNORECASE,
+                            )
+                            _mentioned: list[str] = []
+                            _seen_dev: set[str] = set()
+                            for _m in _DEV_RE.finditer(_prose):
+                                _id = _m.group(0)
+                                _id_lc = _id.lower()
+                                if _id_lc not in _seen_dev:
+                                    _seen_dev.add(_id_lc)
+                                    _mentioned.append(_id)
+                            # Filter out aliases already recorded so we
+                            # don't double-count "core-01" + "sw-acc-01"
+                            _alias_user_terms = set()
+                            for _f in (state.confirmed_facts or []):
+                                if _f.startswith("ENTITY_ALIAS: "):
+                                    _mm = re.match(
+                                        r"ENTITY_ALIAS:\s*'([^']+)'\s*actually refers to\s*'([^']+)'",
+                                        _f,
+                                    )
+                                    if _mm:
+                                        _alias_user_terms.add(_mm.group(1).lower())
+                            if _alias_user_terms:
+                                _mentioned = [
+                                    d for d in _mentioned
+                                    if d.lower() not in _alias_user_terms
+                                ]
+                            # Only fabricate when current device is among
+                            # the prose-mentioned set and there are 2-5
+                            # distinct targets total.
+                            _other_devices = [
+                                d for d in _mentioned
+                                if d.lower() != _current_device.lower()
+                            ]
+                            if (
+                                _current_device.lower() in {d.lower() for d in _mentioned}
+                                and 1 <= len(_other_devices) <= 4   # 2-5 total
+                            ):
+                                import copy as _copy
+                                _fabricated = []
+                                for _other in _other_devices:
+                                    _new_args = _copy.deepcopy(tool_args)
+                                    _new_args[_device_key] = _other
+                                    # Mark the fabricated call so operators
+                                    # can tell it's auto-derived in the HITL
+                                    # card. Preserve original reason if any.
+                                    _orig_reason = str(_new_args.get("reason", "")).strip()
+                                    _new_args["reason"] = (
+                                        f"[auto-derived from {_current_device} — "
+                                        f"verify before approving] "
+                                        f"{_orig_reason}"
+                                    ).strip()
+                                    _fabricated.append((tool_name, _new_args))
+                                if _fabricated:
+                                    _batch_calls = [(tool_name, tool_args)] + _fabricated
+                                    logger.info(
+                                        "stream: prose mentions %d devices %r — "
+                                        "fabricating %d sibling %s call(s) for batch HITL "
+                                        "(path B fabricate)",
+                                        len(_mentioned), _mentioned,
+                                        len(_fabricated), tool_name,
+                                    )
+                    # tool calls entirely and falls back to advisory prose
+                    # (suggesting backups, asking for confirmation, etc),
+                    # which means NEITHER the original single card NOR a
+                    # batch ever appears. Letting the single [TOOL:] flow
+                    # through to stop_hitl preserves the original card so
+                    # at least one device can be approved this turn; the
+                    # LLM will propose remaining devices in a subsequent
+                    # turn once the first approval completes. The prompt's
+                    # multi-target EXCEPTION clause + the worked example in
+                    # llm_engine.py still give the LLM the option to emit
+                    # multiple [TOOL:] up front (Path A) when it's
+                    # confident — but we no longer punish it for emitting
+                    # just one.
+
                     yield {
                         "message": (
                             f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
@@ -1702,6 +1966,10 @@ class AgentRuntimeLoop:
                         # the operator may edit these specific param keys.
                         "hitl_kind":            "edit" if _editable_keys else None,
                         "editable_param_keys":  _editable_keys,
+                        # NEW: list of (name, args) pairs when the LLM
+                        # emitted multiple same-name destructive calls
+                        # in one response. Absent / None when single.
+                        "batch_calls":          _batch_calls,
                     }
                     return
 
@@ -2006,6 +2274,15 @@ class AgentRuntimeLoop:
         """
         Parse [TOOL:name] {...} directives from LLM response.
 
+        Also handles [TOOL_BATCH:name] [{args1}, {args2}, ...] for the
+        multi-target destructive batch protocol — see prompt's "DESTRUCTIVE
+        OPERATIONS — multi-target batches" section. The batch directive
+        gets expanded to N (name, args_i) tuples that downstream code
+        treats identically to N separate [TOOL:] calls, which means the
+        existing Path-A batch HITL detector (same-name siblings in one
+        turn) fires automatically and raises a single HITL batch of N
+        cards.
+
         Handles:
           - Thinking model output: strips <think>...</think> first
           - Nested JSON values (uses brace-depth counter not [^}]* regex)
@@ -2013,6 +2290,7 @@ class AgentRuntimeLoop:
           - Whitespace variants between [TOOL:name] and {
           - Malformed JSON: falls back to empty args dict
           - Multiple tool calls in one response (takes first only if dedup active)
+          - [TOOL_BATCH:name] expansion (new)
         """
         import json as _json
 
@@ -2035,7 +2313,90 @@ class AgentRuntimeLoop:
             text,
         )
 
-        calls = []
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        # ── Step 2.6: expand [TOOL_BATCH:name] [...] before the
+        # standard [TOOL:] scan. The batch directive carries a JSON
+        # array of args dicts; each entry becomes its own (name, args)
+        # tuple so the downstream same-name sibling detector treats it
+        # as a Path-A batch automatically.
+        #
+        # Syntax:
+        #     [TOOL_BATCH:edit_device_config] [
+        #       {"device_id":"ap-01","config_lines":[...]},
+        #       {"device_id":"ap-02","config_lines":[...]}
+        #     ]
+        #
+        # Robustness: same brace-depth-aware scan as single-call form,
+        # but tracking '[' / ']' instead of '{' / '}'. Mismatched JSON
+        # falls back to an empty list (skipping the batch entirely
+        # rather than producing wrong cards).
+        for bm in re.finditer(r"\[TOOL_BATCH:(\w+)\]\s*(\[)?", text):
+            tool_name = bm.group(1)
+            if not bm.group(2):
+                # No opening bracket — degenerate batch directive, skip.
+                continue
+            start = bm.start(2)
+            depth = 0
+            end = start
+            in_str = False
+            escape = False
+            for i, ch in enumerate(text[start:], start):
+                if escape:
+                    escape = False
+                    continue
+                if ch == '\\' and in_str:
+                    escape = True
+                    continue
+                if ch == '"' and not escape:
+                    in_str = not in_str
+                    continue
+                if in_str:
+                    continue
+                if ch == '[':
+                    depth += 1
+                elif ch == ']':
+                    depth -= 1
+                    if depth == 0:
+                        end = i + 1
+                        break
+            raw_arr = text[start:end]
+            try:
+                arr = _json.loads(raw_arr)
+            except Exception:
+                logger.warning(
+                    "TOOL_BATCH:%s: failed to parse JSON array (%d chars), "
+                    "skipping batch directive", tool_name, len(raw_arr),
+                )
+                continue
+            if not isinstance(arr, list):
+                logger.warning(
+                    "TOOL_BATCH:%s: expected JSON array, got %s — skipping",
+                    tool_name, type(arr).__name__,
+                )
+                continue
+            for entry in arr:
+                if not isinstance(entry, dict):
+                    logger.warning(
+                        "TOOL_BATCH:%s: array entry is %s, expected dict — skipping entry",
+                        tool_name, type(entry).__name__,
+                    )
+                    continue
+                calls.append((tool_name, entry))
+            logger.info(
+                "TOOL_BATCH:%s: expanded to %d call(s)",
+                tool_name, len([e for e in arr if isinstance(e, dict)]),
+            )
+
+        # Strip [TOOL_BATCH:...] [...] blocks from text so the standard
+        # [TOOL:] scan below doesn't double-count anything inside them.
+        text = re.sub(
+            r"\[TOOL_BATCH:\w+\]\s*\[.*?\](?=\s|$)",
+            "",
+            text,
+            flags=re.DOTALL,
+        )
+
         # Match [TOOL:toolname] then optional whitespace then optional JSON object
         for m in re.finditer(r"\[TOOL:(\w+)\]\s*(\{)?", text):
             tool_name = m.group(1)

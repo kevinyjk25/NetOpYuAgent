@@ -304,8 +304,31 @@ class HitlExecutor:
                 }
 
             # Single-tool destructive HITL — stream wants approval
-            # before invoking a HITL-gated tool
+            # before invoking a HITL-gated tool. If the chunk carries a
+            # `batch_calls` list (LLM emitted multiple same-name
+            # destructive calls in one turn — e.g. push_config to N
+            # devices), raise a batch interrupt so all N children appear
+            # at once instead of sequentially after each approve.
             if chunk.get("stop_hitl") and chunk.get("tool_name"):
+                _batch_calls = chunk.get("batch_calls")
+                if _batch_calls and len(_batch_calls) > 1:
+                    batch_id = await self._raise_tool_hitl_batch(
+                        tool_name=chunk["tool_name"],
+                        calls=_batch_calls,
+                        query=query, session_id=session_id,
+                        confirmed_facts=confirmed_facts,
+                        chunk=chunk,
+                    )
+                    # The batch is the "interrupt id" surfaced to caller —
+                    # GET /hitl/batch/{id} lists children for the UI.
+                    return {
+                        "text":          full_text,
+                        "interrupted":   True,
+                        "interrupt_id":  batch_id,
+                        "batch":         True,
+                        "decisions":     decisions,
+                    }
+
                 interrupt_id = await self._raise_tool_hitl(
                     tool_name=chunk["tool_name"],
                     tool_args=chunk.get("tool_args") or {},
@@ -395,6 +418,110 @@ class HitlExecutor:
             payload.interrupt_id[:12], tool_name, editable_keys,
         )
         return payload.interrupt_id
+
+    # ────────────────────────────────────────────────────────────────
+    # Batch tool HITL — same shape as _raise_tool_hitl but for N siblings
+    # ────────────────────────────────────────────────────────────────
+
+    async def _raise_tool_hitl_batch(
+        self,
+        *,
+        tool_name: str,
+        calls: list[tuple[str, dict[str, Any]]],
+        query: str,
+        session_id: str,
+        confirmed_facts: list[str],
+        chunk: dict,
+    ) -> str:
+        """Raise a batch of N destructive-tool HITL interrupts that share
+        a single batch_id, so the UI shows N pending cards at once and the
+        operator can approve/reject each (or use POST /hitl/batch/{id}/...
+        to act on the whole group).
+
+        Same per-child shape as _raise_tool_hitl — each child has a
+        ResumeHandle pointing at tool_call_resumer with that child's
+        specific args. On approval, each child runs independently;
+        tool_call_resumer's existing chunk_queue plumbing streams trace
+        per child.
+
+        Returns the batch_id (not an interrupt_id) so the caller knows
+        to surface the batch endpoints instead of single-interrupt ones.
+        """
+        from hitl_core.schema import (
+            HitlBatch, BatchPolicy, BatchWaitMode, ResumeHandle,
+        )
+
+        # First materialise all child CheckpointEntries
+        child_entries: list[CheckpointEntry] = []
+        editable_table = self._cfg.editable_hitl_tools if self._cfg else {}
+        for (n, a) in calls:
+            _editable = list(editable_table.get(n, []))
+            if not _editable:
+                _editable = _derive_editable_keys(n, a)
+            _target = str(a.get("device_id") or a.get("target") or "-")
+            _intent = f"Agent proposes calling `{n}` on `{_target}` (batch)"
+
+            child_payload = HitlPayload(
+                thread_id=session_id,
+                context_id=session_id,
+                user_query=query,
+                trigger_kind=TriggerKind.DESTRUCTIVE,
+                risk_level=RiskLevel.HIGH,
+                intent_summary=_intent,
+                confidence_score=float(chunk.get("confidence", 0.9)),
+                proposed_action=ProposedAction(
+                    action_type=f"tool_call:{n}",
+                    target=_target,
+                    parameters=dict(a),
+                    reversible=False,
+                    risk_level=RiskLevel.HIGH,
+                ),
+                editable_param_keys=_editable,
+            )
+            child_entries.append(CheckpointEntry(
+                interrupt_id=child_payload.interrupt_id,
+                payload=child_payload,
+                resume_handle=ResumeHandle(
+                    resumer_name="tool_call_resumer",
+                    state={
+                        "tool_name":       n,
+                        "tool_args":       a,
+                        "session_id":      session_id,
+                        "original_query":  query,
+                        "confirmed_facts": confirmed_facts,
+                    },
+                ),
+            ))
+
+        # Build the batch wrapper. BEST_EFFORT lets individual children
+        # succeed/fail independently — better fit for IT-ops where one
+        # device may be unreachable but the others should still go.
+        # ALL means the producer-side future resolves only after every
+        # child has a decision (approve/reject/timeout), which is what
+        # the agent loop needs to assemble a complete batch report.
+        batch = HitlBatch(
+            interrupt_ids=[e.interrupt_id for e in child_entries],
+            policy=BatchPolicy.BEST_EFFORT,
+            wait_mode=BatchWaitMode.ALL,
+        )
+
+        # Stamp batch_id onto each child BEFORE persisting (so the store
+        # and the UI can look up siblings via context_snapshot["batch_id"]).
+        from hitl_core.batch import BATCH_ID_KEY
+        for e in child_entries:
+            e.payload.context_snapshot[BATCH_ID_KEY] = batch.batch_id
+
+        # Persist children first
+        for e in child_entries:
+            await self._router.register_payload(e)
+
+        # Open the batch via the coordinator
+        await self._router.batch.open_batch(batch)
+        logger.info(
+            "Tool HITL batch raised: batch_id=%s tool=%s children=%d",
+            batch.batch_id[:12], tool_name, len(child_entries),
+        )
+        return batch.batch_id
 
     async def _tool_call_resumer(
         self, decision: HitlDecision, entry: CheckpointEntry,

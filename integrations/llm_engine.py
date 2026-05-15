@@ -30,7 +30,7 @@ This module provides two integration points:
     loop._call_llm = llm_engine.call  # monkey-patch OR subclass
 
 2. Replace hitl/graph.py intent_classifier_node via:
-    from integrations.llm_engine import LLMEngine
+    from integrations.clients.llm_engine import LLMEngine
     engine = LLMEngine.from_config(cfg)
     # Use engine.classify_intent(query) in intent_classifier_node
 
@@ -78,6 +78,48 @@ class IntentResult:
 # Base LLM engine
 # ---------------------------------------------------------------------------
 
+
+def _strip_stored_result_section(prompt: str, *signals: str) -> str:
+    """Remove read_stored_result instruction blocks when there's no [STORED:]
+    reference in any of the provided signal strings.
+
+    Activation rule:
+      - Scan every signal string for the literal `[STORED:` marker.
+      - If absent everywhere, strip the instruction blocks so the LLM can't
+        misuse the tool with a hallucinated ref_id.
+
+    Idempotent and safe when the blocks aren't present.
+    """
+    import re as _re
+    haystack = "\n".join(s for s in signals if isinstance(s, str))
+    if "[STORED:" in haystack:
+        return prompt   # blocks stay relevant
+
+    # SLIM-style "STRICT" block (multi-line, ends at blank line or next ALL-CAPS heading)
+    prompt = _re.sub(
+        r"\n*read_stored_result usage \(STRICT\):.*?(?=\n\n[A-Z]|\n\n\{|\Z)",
+        "\n",
+        prompt, count=1, flags=_re.DOTALL,
+    )
+
+    # PAGINATED READING block
+    prompt = _re.sub(
+        r"\n*PAGINATED READING[\s\S]*?aggregating ALL findings[^\n]*\.",
+        "",
+        prompt, count=1,
+    )
+
+    # Full-template numbered line that mentions it
+    prompt = _re.sub(
+        r"\n6\. read_stored_result usage[^\n]*",
+        "",
+        prompt, count=1,
+    )
+
+    # Collapse triple blank lines that may result
+    prompt = _re.sub(r"\n\n\n+", "\n\n", prompt)
+    return prompt
+
 class LLMEngine:
     """
     Unified LLM interface for the Agent Runtime Loop and HITL graph.
@@ -92,13 +134,26 @@ class LLMEngine:
 
 TOOL CALL FORMAT: [TOOL:name] {{"arg": "value"}}
 Rules: one tool per response, never repeat a call, end with analysis (no [TOOL:] line) when you have enough info.
+MULTI-TARGET DESTRUCTIVE BATCH: when the SAME destructive tool needs to run on MULTIPLE TARGETS (e.g. "下发到 ap-01 和 ap-02"), use `[TOOL_BATCH:tool_name] [<args_dict_1>, <args_dict_2>, ...]` — a JSON array of args dicts, one per target. The system expands to N HITL cards under one batch_id. Example:
+  [TOOL_BATCH:edit_device_config] [{{"device_id": "ap-01", "config_lines": [...], "reason": "..."}}, {{"device_id": "ap-02", "config_lines": [...], "reason": "..."}}]
 Destructive tools (⚠HITL) — propose with concrete args; the operator will review before execution.
-Large results show as [STORED:tool:ref_id] — read with [TOOL:read_stored_result] {{"ref_id": "..."}}.
+ENTITY ALIAS: if the user used the wrong entity name and you found the real one (via list_devices etc), emit `[ALIAS: user_term = real_term]` so the correction survives to subsequent turns. Then USE THE REAL NAME in all tool calls.
 
-PAGINATED READING — when paging through a stored result via read_stored_result:
+read_stored_result usage (STRICT):
+- ONLY call [TOOL:read_stored_result] when a previous tool output literally contains a `[STORED:name:ref_id]` label.
+- ref_id is the id INSIDE that label (e.g. `6ac5ade7` or `netflow_dump:6ac5ade7`) — NEVER a device name, hostname, or query string.
+- If a tool result is already shown inline (no [STORED:] label), DO NOT call read_stored_result on it.
+
+PAGINATED READING — only relevant after a [STORED:] label appears:
+- Use length=4000 (or higher) on every call; default reads of 100 chars waste turns.
+- The page response includes the line "Next offset: N" (or "EOF") — use that EXACT N as the offset of your NEXT call. NEVER restart from offset=0 once you have already read a page.
 - After EACH page, write 2-3 sentences of key findings BEFORE calling the next page.
+- A summary line `[PAGED-SUMMARY ref_id=... pages_read=N bytes_covered=0-M has_more=True/False]` in the context tells you what you have already read. Trust it; do not re-read pages.
 - Older pages are dropped from context to save tokens; only your written findings survive across pages.
-- When Has more: False, write the complete analysis aggregating ALL findings you wrote earlier (visible via memory recall).
+- When Has more: False, write the complete analysis aggregating ALL findings you wrote earlier.
+- CRITICAL: If a page says "Has more: True", you MUST continue paging (using Next offset) until "Has more: False". Do NOT pivot to other tools, SKILL_LOAD, or final analysis while data remains unread.
+- Example first call:  [TOOL:read_stored_result] {{"ref_id": "abc123", "offset": 0, "length": 4000}}
+- Example next call:   [TOOL:read_stored_result] {{"ref_id": "abc123", "offset": 4000, "length": 4000}}
 
 {extra_tools_section}
 
@@ -113,12 +168,12 @@ TOOL CALLING FORMAT — use EXACTLY this syntax on its own line:
 [TOOL:tool_name] {{"arg1": "value1", "arg2": "value2"}}
 
 STRICT RULES — follow exactly:
-1. Call AT MOST ONE tool per response — never list multiple [TOOL:] lines
+1. Call AT MOST ONE [TOOL:name] per response — never list multiple [TOOL:] lines. For multi-target destructive operations, use ONE [TOOL_BATCH:name] directive instead (see "DESTRUCTIVE OPERATIONS — multi-target batches" below).
 2. NEVER repeat a tool call you have already made this session
 3. When tool results appear in the context below, DO NOT call that tool again
 4. When you have enough information to answer, write your analysis WITHOUT any [TOOL:...] line
 5. Keep responses concise — this is a production operations environment
-6. Large results are shown as [STORED:tool:ref_id] — use [TOOL:read_stored_result] {{"ref_id": "..."}} to read pages
+6. read_stored_result usage (STRICT): call ONLY when a prior tool output contains a literal `[STORED:name:ref_id]` label. The ref_id is that label's id (e.g. `6ac5ade7`), NEVER a device name or query string. If a tool result is shown inline, do NOT call read_stored_result on it.
 
 DESTRUCTIVE OPERATIONS — for tools marked ⚠ HITL (edit_device_config, push_config, restart_service, rollback_deploy, drain_node, failover, delete_resource):
 - DO NOT ask the user "are you sure?" or "do you approve?" in plain text
@@ -128,11 +183,32 @@ DESTRUCTIVE OPERATIONS — for tools marked ⚠ HITL (edit_device_config, push_c
 - The operator reviews YOUR proposed parameters in that card; they can approve, reject, or edit the parameters before the tool actually runs
 - Your job is to PROPOSE THE COMPLETE FIX, not to ask permission. If you don't propose a concrete fix, the operator has nothing to review.
 
+DESTRUCTIVE OPERATIONS — multi-target batches (use [TOOL_BATCH:] directive):
+- When the SAME destructive tool needs to run on MULTIPLE TARGETS as one logical step (e.g. user said "fix both ap-01 and ap-02", "下发到这两个设备", "push this ACL to all 3 access switches"), use the [TOOL_BATCH:name] directive instead of emitting one [TOOL:] per target.
+- Syntax: `[TOOL_BATCH:tool_name] <JSON array of args dicts>` on its own line.
+- Each element in the array is one args dict, just like a normal [TOOL:] would carry. The system expands the batch into N independent HITL approval cards under ONE batch_id, so the operator reviews all N targets together and can approve them as a group.
+- This is the ONLY way to surface a multi-target destructive operation in one HITL round. If you emit only ONE [TOOL:] and describe the other targets in prose, the second target will NEVER appear — the system will not infer it from text.
+- DO NOT mix [TOOL_BATCH:] with [TOOL:] of the same name in the same response. Pick ONE: either single-target [TOOL:] or multi-target [TOOL_BATCH:].
+- Single-target destructive operations still use plain [TOOL:name] as before — [TOOL_BATCH:] is only for multi-target.
+
+WORKED EXAMPLE — operator says "fix both ap-01 and ap-02":
+[TOOL_BATCH:edit_device_config] [
+  {"device_id": "ap-01", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-01"},
+  {"device_id": "ap-02", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-02"}
+]
+
 TOOLS vs SKILLS — critical distinction:
 - TOOLS (callable with [TOOL:name]): executable functions. Call them directly.
-- SKILLS listed in "Available skills" without a matching TOOL: procedural guides only — use [SKILL_LOAD:skill_id] to read steps, then call the tools it describes.
+- SKILLS listed in "Available skills" without a matching TOOL: procedural guides only — use the directive `[SKILL_LOAD:skill_id]` exactly. IMPORTANT: SKILL_LOAD is its OWN top-level directive — NEVER prefix it with TOOL: (write `[SKILL_LOAD:netflow_analysis]`, NOT `[TOOL:SKILL_LOAD:netflow_analysis]`).
 - If a name appears in BOTH the tool list AND the skills list (e.g. get_device_config, validate_device_config, list_devices), it IS a real callable tool — use [TOOL:name] directly. SKILL_LOAD is NOT needed.
 - Only use [SKILL_LOAD:skill_id] for skills that have no corresponding [TOOL:] entry in the AVAILABLE TOOLS list above.
+
+ENTITY ALIAS CORRECTIONS — when the user's term doesn't match a real entity:
+- If the user mentions an entity name that doesn't exist in the system but you find the REAL matching name (e.g. user said "core-01" but list_devices returned "sw-acc-01" / "sw-acc-02" instead), EMIT an `[ALIAS:...]` directive so the correction sticks across turns.
+- Syntax: `[ALIAS: user_term = real_term]` on its own line (e.g. `[ALIAS: core-01 = sw-acc-01]`).
+- One directive per correction. Multiple aliases are fine — emit multiple lines.
+- These are folded into the session's confirmed_facts and surfaced in the next turn's prompt under "ENTITY ALIASES". Once recorded, USE THE REAL NAME in subsequent tool calls — do NOT keep re-resolving the same correction every turn.
+- Only emit [ALIAS:...] when you're CONFIDENT about the mapping (e.g. you queried list_devices and there's no ambiguity). For unclear cases, ask the user instead.
 
 INVENTORY QUERIES — when asked what devices exist:
 - Use [TOOL:list_devices] {{}} to get ALL devices in one call
@@ -515,15 +591,31 @@ Return format:
         # ── Confirmed facts (+ tool ledger + prior analysis) ───────────────────────
         facts_section = ""
         if confirmed_facts:
-            tool_exec_lines, prev_analysis_lines, semantic_facts = [], [], []
+            tool_exec_lines, prev_analysis_lines = [], []
+            alias_lines, semantic_facts = [], []
             for _f in confirmed_facts:
                 if _f.startswith("TOOL_EXEC: "):
                     tool_exec_lines.append(_f[len("TOOL_EXEC: "):])
                 elif _f.startswith("PREV_ANALYSIS: "):
                     prev_analysis_lines.append(_f[len("PREV_ANALYSIS: "):])
+                elif _f.startswith("ENTITY_ALIAS: "):
+                    # User said one term, system has a different real name.
+                    # Carry this prominently to every turn so the LLM stops
+                    # re-rediscovering the same correction.
+                    alias_lines.append(_f[len("ENTITY_ALIAS: "):])
                 else:
                     semantic_facts.append(_f)
             _parts = []
+            # Aliases first — strongest priority since they fix entity
+            # resolution at the foundation. If the LLM keeps tool-call'ing
+            # the user's wrong term, every downstream observation will
+            # also be wrong, so this must be unmissable.
+            if alias_lines:
+                _parts.append(
+                    "ENTITY ALIASES (the user's terms map to these real "
+                    "system names — USE THE REAL NAMES in all tool calls):\n"
+                    + "\n".join(f"  ⚠ {l}" for l in alias_lines[-10:])
+                )
             if tool_exec_lines:
                 # Filter: show stored-data entries (with ref=) and skip per-page reads
                 _filtered = [
@@ -567,6 +659,16 @@ Return format:
         )
         if context:
             system += f"\n\nContext:\n{context}"
+
+        # Suppress read_stored_result instruction block when no [STORED:] is in
+        # any context the LLM can see (prevents misuse with hallucinated ref_id).
+        try:
+            system = _strip_stored_result_section(
+                system, context or "", facts_section or "", extra_tools_section or "",
+            )
+        except Exception as _ssrs_exc:
+            logger.debug("_strip_stored_result_section failed: %s", _ssrs_exc)
+
         return system
 
     @staticmethod
@@ -1143,7 +1245,7 @@ def patch_runtime_loop(loop: Any, engine: LLMEngine) -> None:
     Monkey-patch an existing AgentRuntimeLoop instance to use a real LLM engine.
 
     Usage:
-        from integrations.llm_engine import LLMEngine, patch_runtime_loop
+        from integrations.clients.llm_engine import LLMEngine, patch_runtime_loop
         engine = LLMEngine.from_config({"backend": "ollama", "model": "mistral"})
         patch_runtime_loop(services["runtime_loop"], engine)
     """
