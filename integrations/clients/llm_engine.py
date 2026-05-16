@@ -921,9 +921,15 @@ class OllamaEngine(LLMEngine):
         raw = await self._chat(messages)
         result = self._strip_think(raw)
 
+        # Consistent detection: use the directive parser's tolerance so
+        # trace and log entries match what the parser will actually see.
+        # A substring check misses variants like `[TOOL: name]` (space
+        # after colon) that the parser correctly recognizes.
+        from runtime.directive_parser import has_any_tool_directive as _has_tool_directive
+        _has_tool = _has_tool_directive(result)
+
         if _detail in ("compact", "full"):
             _resp_log = result if _detail == "full" else (result[:400] + (" …" if len(result) > 400 else ""))
-            _has_tool = "[TOOL:" in result
             logger.info(
                 "LLM◀ TURN %d  chars=%d  tool_call=%s\n%s\n[RESPONSE]\n%s\n%s",
                 turns, len(result), _has_tool, _sep, _resp_log, _sep,
@@ -931,7 +937,7 @@ class OllamaEngine(LLMEngine):
         else:
             logger.info(
                 "LLM◀ turn=%d response_chars=%d has_tool_call=%s",
-                turns, len(result), "[TOOL:" in result,
+                turns, len(result), _has_tool,
             )
         if logger.isEnabledFor(logging.DEBUG):
             logger.debug(
@@ -950,7 +956,7 @@ class OllamaEngine(LLMEngine):
                 "context_chars":  len(context),
                 "user_chars":     len(query),
                 "response_chars": len(result),
-                "has_tool_call":  "[TOOL:" in result,
+                "has_tool_call":  _has_tool,
                 "system_preview": system[:300],
                 "response_preview": result[:300],
             })
@@ -1330,12 +1336,27 @@ def patch_hitl_graph(engine: LLMEngine, tool_registry: dict | None = None) -> No
     Patches: intent_classifier_node, risk_assessor_node, planner_node.
     Optionally injects tool_registry into executor_node.
 
-    Call BEFORE build_hitl_graph().
+    LEGACY-ONLY: This function targets the LangGraph-based legacy HITL
+    backend. The core HITL backend (HITL_BACKEND=core) does not need it —
+    main.py only calls patch_hitl_graph from the legacy branch.
+
+    If the legacy package is not installed (the default in this build),
+    raise a clear error instead of an ImportError on `hitl.graph`. Callers
+    in core mode should not invoke this; if they do (e.g. defensive
+    re-patching after a tool registry refresh), the call site already
+    wraps it in try/except.
     """
+    try:
+        import hitl.graph as _graph    # noqa: F401  (legacy package, may be absent)
+    except ImportError as e:
+        raise NotImplementedError(
+            "patch_hitl_graph requires the legacy `hitl.graph` package, "
+            "which is not part of this build. Use HITL_BACKEND=core, which "
+            "does not need this patch. (underlying ImportError: %s)" % e
+        ) from e
     import re as _re
     import json as _json
-    import hitl.graph as _graph
-    from hitl.schemas import RiskLevel
+    from hitl_core.schema import RiskLevel
 
     # ── intent classifier ─────────────────────────────────────────────
     async def _intent(state: dict) -> dict:

@@ -24,9 +24,12 @@ from ..schemas import (
 )
 
 if TYPE_CHECKING:
-    from hitl.decision import HitlDecisionRouter
-    from hitl.review import HitlReviewService
-    from hitl.schemas import HitlDecision, HitlPayload
+    from hitl_core.router import HitlRouter as HitlDecisionRouter  # type: ignore[assignment]
+    # Legacy `hitl/review.py` no longer exists; review SLA lives in
+    # hitl_core/router.py + audit.py now. This bridge keeps the name for
+    # backwards-compatible call sites; concrete type is `Any`.
+    HitlReviewService = object
+    from hitl_core.schema import HitlDecision, HitlPayload
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +110,7 @@ class HitlTaskBridge:
         Called after the operator submits a decision.
         Re-queues (approve/edit) or cancels (reject/timeout) the task.
         """
-        from hitl.schemas import DecisionKind
+        from hitl_core.schema import DecisionKind
 
         if decision.decision in (DecisionKind.APPROVE, DecisionKind.EDIT):
             task.state = TaskState.PENDING

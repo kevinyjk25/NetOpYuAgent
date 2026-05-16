@@ -26,6 +26,7 @@ from typing import Any, AsyncIterator, Optional, TYPE_CHECKING
 
 from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolResultStore
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
+from .directive_parser import has_any_tool_directive as _has_any_tool_directive
 
 
 def _truncation_cfg():
@@ -1520,7 +1521,13 @@ class AgentRuntimeLoop:
                 "system_chars":     _trace.get("system_chars", len(context_str)),
                 "context_chars":    _trace.get("context_chars", len(context_str)),
                 "response_chars":   _trace.get("response_chars", len(llm_response)),
-                "has_tool_call":    "[TOOL:" in llm_response,
+                # Use the centralized parser's tolerance: a substring check
+                # like `"[TOOL:" in llm_response` would miss `[TOOL: name]`
+                # (note the space after colon) which the parser accepts.
+                # Keeping these in sync prevents the trace from telling the
+                # frontend "no tool call" while the parser actually fires
+                # one downstream.
+                "has_tool_call":    _has_any_tool_directive(llm_response),
                 "system_preview":   _trace.get("system_preview", context_str[:_resp_preview_cap]),
                 "response_preview": _trace.get("response_preview", llm_response[:_resp_preview_cap]),
             }
@@ -2227,11 +2234,15 @@ class AgentRuntimeLoop:
                                               getattr(state, "_tool_outputs_raw", {}))
                 # extend() on FactsLedger routes by prefix; on plain list it's native
                 state.confirmed_facts.extend(_ledger)
-                # Capture final synthesis response (not intermediate page-reading turns)
+                # Capture final synthesis response (not intermediate page-reading turns).
+                # Use the directive parser's tolerance so a `[TOOL: name]` (space
+                # after colon) doesn't slip through as "synthesis" and pollute
+                # the next turn's PREV_ANALYSIS. Also covers [TOOL_BATCH:] which
+                # the old substring check ignored entirely.
                 _resp_clean = llm_response.strip()
                 _is_synthesis = (
                     len(_resp_clean) > 150
-                    and "[TOOL:" not in _resp_clean
+                    and not _has_any_tool_directive(_resp_clean)
                     and "[SKILL_LOAD:" not in _resp_clean
                     and state.turns > 1
                 )
@@ -2337,7 +2348,7 @@ class AgentRuntimeLoop:
         # but tracking '[' / ']' instead of '{' / '}'. Mismatched JSON
         # falls back to an empty list (skipping the batch entirely
         # rather than producing wrong cards).
-        from runtime.directive_parser import find_tool_batch_directives
+        from runtime.directive_parser import find_tool_batch_directives, find_balanced_end
         for batch_d in find_tool_batch_directives(text):
             tool_name = batch_d.name
             if not batch_d.has_args_open:
@@ -2353,29 +2364,15 @@ class AgentRuntimeLoop:
             if _scan_from >= len(text):
                 continue
             start = _scan_from
-            depth = 0
-            end = start
-            in_str = False
-            escape = False
-            for i, ch in enumerate(text[start:], start):
-                if escape:
-                    escape = False
-                    continue
-                if ch == '\\' and in_str:
-                    escape = True
-                    continue
-                if ch == '"' and not escape:
-                    in_str = not in_str
-                    continue
-                if in_str:
-                    continue
-                if ch == '[':
-                    depth += 1
-                elif ch == ']':
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
+            # Use the shared brace-balanced scanner from directive_parser
+            # (identical algorithm — was duplicated inline here before).
+            end = find_balanced_end(text, start, '[', ']')
+            if end == -1:
+                logger.warning(
+                    "TOOL_BATCH:%s: unbalanced '[...]' args block, skipping",
+                    tool_name,
+                )
+                continue
             raw_arr = text[start:end]
             try:
                 arr = _json.loads(raw_arr)
@@ -2432,29 +2429,14 @@ class AgentRuntimeLoop:
                 # malformed (had open-brace signal but no actual brace?)
                 calls.append((tool_name, {}))
                 continue
-            depth = 0
-            end   = start
-            in_str = False
-            escape = False
-            for i, ch in enumerate(text[start:], start):
-                if escape:
-                    escape = False
-                    continue
-                if ch == '\\' and in_str:
-                    escape = True
-                    continue
-                if ch == '"' and not escape:
-                    in_str = not in_str
-                    continue
-                if in_str:
-                    continue
-                if ch == '{':
-                    depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
+            # Use the shared brace-balanced scanner from directive_parser.
+            end = find_balanced_end(text, start, '{', '}')
+            if end == -1:
+                # Unbalanced — try the partial-JSON recovery path below;
+                # leaving end pointing at len(text) lets _json.loads see
+                # the whole rest of the string and likely fail, which is
+                # the same outcome as before.
+                end = len(text)
 
             raw_json = text[start:end]
             try:

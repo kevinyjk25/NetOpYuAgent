@@ -161,45 +161,19 @@ async def build_services() -> dict[str, Any]:
                     len(hitl_core_pipeline._steps))
 
     else:
-        # Legacy path — hitl/* + LangGraph
-        from hitl import (
-            HitlAuditService, HitlDecisionRouter, HitlReviewService,
-            HitlTimeoutWatchdog, ReviewChannelConfig, build_hitl_graph,
+        # Legacy LangGraph backend (HITL_BACKEND != "core") has been retired
+        # in this build. The `hitl/` package was a thin schema stub and the
+        # implementation modules (hitl/graph.py, hitl/router.py, hitl/review.py,
+        # hitl/triggers.py, etc.) were never packaged here. Attempting to
+        # construct it would explode with an opaque ImportError on
+        # `from hitl import HitlAuditService`. Fail explicitly instead so
+        # operators understand the choice.
+        raise NotImplementedError(
+            "HITL_BACKEND=%r requires the legacy LangGraph hitl/* package, "
+            "which is not part of this build. Set HITL_BACKEND=core (the "
+            "default) to use the in-house HITL pipeline at hitl_core/."
+            % _hitl_backend
         )
-        from hitl.triggers import HitlConfig
-        import dataclasses as _dc
-
-        _hitl_tool_names = tuple(cfg.tools.hitl_tool_names)
-        _hitl_fields     = {f.name for f in _dc.fields(HitlConfig)}
-        _hitl_kwargs: dict = {
-            "confidence_threshold": cfg.hitl.confidence_threshold,
-            "max_auto_host_count":  cfg.hitl.max_auto_host_count,
-        }
-        if "tool_call_hitl_tools" in _hitl_fields and _hitl_tool_names:
-            _hitl_kwargs["tool_call_hitl_tools"] = _hitl_tool_names
-
-        hitl_config    = HitlConfig(**_hitl_kwargs)
-        review_config  = ReviewChannelConfig(
-            slack_webhook_url     = cfg.hitl.slack_webhook_url,
-            pagerduty_routing_key = cfg.hitl.pagerduty_routing_key,
-            enable_sse            = True,
-        )
-        hitl_audit     = HitlAuditService.sqlite("data/hitl_audit.db")
-        review_service = HitlReviewService.from_config(review_config)
-        hitl_graph     = build_hitl_graph(hitl_config)
-        hitl_router    = HitlDecisionRouter(graph=hitl_graph, audit=hitl_audit)
-        hitl_watchdog  = HitlTimeoutWatchdog(router=hitl_router, poll_interval=60.0)
-        services.update(dict(
-            hitl_audit=hitl_audit, review_service=review_service,
-            hitl_router=hitl_router, hitl_watchdog=hitl_watchdog,
-            hitl_config=hitl_config,
-        ))
-        # Stub the new-path objects so backend.py doesn't break either way
-        services.update(dict(
-            hitl_core_router=None, hitl_core_pipeline=None,
-            hitl_core_store=None,  hitl_core_audit=None,
-        ))
-        logger.info("HITL module ready (backend=langgraph)")
 
     # ── 3. Registry ──────────────────────────────────────────────────────────
     from registry import create_registry, RegistryConfig as RegCfg
@@ -242,17 +216,14 @@ async def build_services() -> dict[str, Any]:
         services["executor"] = None
         logger.info("A2A executor (core) — deferred to after LLM + tool wiring")
     else:
-        from hitl import ITOpsHitlAgentExecutor
-        executor = ITOpsHitlAgentExecutor(
-            hitl_router    = hitl_router,
-            review_service = review_service,
-            audit_service  = hitl_audit,
-            hitl_config    = hitl_config,
-            memory_router  = memory_router,
-            task_system    = task_system,
+        # Unreachable: the earlier section-2 else-branch already raises
+        # NotImplementedError for non-core backends, so we never get here.
+        # Kept as a defense-in-depth guard in case someone refactors the
+        # earlier branch without realising this depends on it.
+        raise NotImplementedError(
+            "Legacy `hitl.ITOpsHitlAgentExecutor` not packaged in this build; "
+            "see the section-2 HITL_BACKEND guard above."
         )
-        services["executor"] = executor
-        logger.info("A2A executor ready (langgraph)")
 
     # ── 6. Integrations ──────────────────────────────────────────────────────
     try:
@@ -1124,15 +1095,23 @@ async def lifespan(app: FastAPI):
     # backend. In core mode, /hitl/* endpoints are served by webui/backend
     # (which speaks to hitl_core.HitlRouter directly via services).
     if _services.get("hitl_router") is not None:
-        from hitl.router import create_hitl_router
-        from hitl.review import get_sse_channel
-        hitl_api = create_hitl_router(
-            decision_router = _services["hitl_router"],
-            audit           = _services["hitl_audit"],
-            sse_channel     = get_sse_channel(),
-        )
-        app.include_router(hitl_api, prefix="/hitl")
-        logger.info("Legacy /hitl/* router mounted (langgraph backend)")
+        try:
+            from hitl.router import create_hitl_router
+            from hitl.review import get_sse_channel
+        except ImportError as e:
+            logger.warning(
+                "Legacy /hitl/* router not mountable: hitl.router/review "
+                "modules not packaged in this build (%s). Falling back to "
+                "core backend endpoints in webui/backend.", e,
+            )
+        else:
+            hitl_api = create_hitl_router(
+                decision_router = _services["hitl_router"],
+                audit           = _services["hitl_audit"],
+                sse_channel     = get_sse_channel(),
+            )
+            app.include_router(hitl_api, prefix="/hitl")
+            logger.info("Legacy /hitl/* router mounted (langgraph backend)")
     else:
         logger.info("Legacy /hitl/* router skipped (core backend; webui/backend handles HITL endpoints)")
 

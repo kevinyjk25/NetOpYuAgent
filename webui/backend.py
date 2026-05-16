@@ -1509,7 +1509,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         if not hitl_router:
             logger.warning("/hitl/pending: no HITL router available")
             return JSONResponse(content=[])
-        from hitl.schemas import InterruptState
+        # Legacy path — use the canonical schema. The legacy `hitl/` package
+        # only ever had `schemas.py` as a stub and is being deleted as part of
+        # the dedup pass. All HITL types now live in `hitl_core/schema.py`.
+        from hitl_core.schema import InterruptState
         store_size = len(hitl_router._payload_store)
         logger.info(
             "/hitl/pending: store_size=%d ids=%s",
@@ -2489,7 +2492,7 @@ async def _submit_hitl_decision(
         if payload is None:
             raise HTTPException(status_code=404, detail=f"Interrupt {interrupt_id!r} not found")
 
-        from hitl.schemas import HitlDecision
+        from hitl_core.schema import HitlDecision
         decision = HitlDecision(
             interrupt_id=interrupt_id,
             thread_id=payload.thread_id,

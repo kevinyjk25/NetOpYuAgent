@@ -184,13 +184,27 @@ def find_tool_batch_directives(text: str) -> list[ToolBatchDirective]:
 # proper balance-aware scan instead, identical in spirit to the one in
 # runtime/loop.py:_parse_tool_calls.
 # ---------------------------------------------------------------------------
-def _find_balanced_end(text: str, open_pos: int, open_ch: str, close_ch: str) -> int:
+def find_balanced_end(text: str, open_pos: int, open_ch: str, close_ch: str) -> int:
     """Given `text[open_pos] == open_ch`, return the index AFTER the matching
     `close_ch`. Tracks string state (so braces inside JSON strings don't
-    decrement depth) and handles \\-escaping. Returns -1 if unbalanced.
+    decrement depth) and handles ``\\``-escaping. Returns -1 if unbalanced.
+
+    Public utility shared between this module (for stripping directives) and
+    runtime/loop.py (for extracting the JSON args block of a parsed
+    [TOOL:name] or [TOOL_BATCH:name] directive).
 
     Used to find the end of `[TOOL:name] {...}` or `[TOOL_BATCH:name] [...]`
     blocks for accurate stripping.
+
+    Examples:
+        >>> find_balanced_end('{"a": {"b": 1}}', 0, '{', '}')
+        15
+        >>> find_balanced_end('[1, [2, 3], 4]', 0, '[', ']')
+        14
+        >>> find_balanced_end('{"x":"}"}', 0, '{', '}')   # close inside string
+        9
+        >>> find_balanced_end('{ unclosed', 0, '{', '}')
+        -1
     """
     if open_pos >= len(text) or text[open_pos] != open_ch:
         return -1
@@ -217,6 +231,13 @@ def _find_balanced_end(text: str, open_pos: int, open_ch: str, close_ch: str) ->
             if depth == 0:
                 return i + 1
     return -1
+
+
+# Backwards-compat alias: internal _strip_directive_with_args still calls
+# _find_balanced_end. Removing the alias would force a same-module rename;
+# keeping it lets external callers use the public name without breaking the
+# internal call sites.
+_find_balanced_end = find_balanced_end
 
 
 def _strip_directive_with_args(
