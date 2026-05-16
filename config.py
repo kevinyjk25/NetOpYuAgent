@@ -81,9 +81,43 @@ class ServerConfig:
     host: str; port: int; reload: bool; a2a_base_url: str
 
 @dataclass
+class LLMCapabilities:
+    """Per-model behaviour declarations.
+
+    These exist because different LLMs implement different in-band conventions
+    even within the same family (qwen3 → qwen3.5 → qwen3.6 each tweak the
+    thinking tag name and tool-call compliance). Previously the engine
+    hardcoded the set `{"qwen3", "deepseek-r1", ...}` and a `<think>` regex,
+    which silently broke when a new minor version of the same family changed
+    the format. Now every model-specific behaviour is declared in config.
+
+    All fields are optional; sensible defaults match the qwen3.5 baseline.
+    """
+    # Tag name for chain-of-thought blocks (stripped before tool parsing /
+    # response display). Empty / "none" / "off" → no stripping.
+    # Examples: "think" (qwen3, deepseek-r1), "reasoning" (some new models)
+    thinking_tag: str = "think"
+
+    # Format compliance band — how reliably the model follows
+    # [TOOL:name] {{"k":"v"}} syntax. Drives retry policy + temp shading.
+    #   "high":   trust output, no retries, temp as-configured
+    #   "medium": one retry on parse failure with stricter prompt addendum
+    #   "low":    two retries + temperature drop to 0.0 on retry
+    format_compliance: str = "high"
+
+    # Soft context budget — engine warns when system+context approaches this
+    max_context_chars: int = 32_000
+
+    # Reserved for Tier 1 C — switch to Ollama native tools API instead of
+    # the [TOOL:] in-band protocol. Off by default until that path is built.
+    supports_native_tools: bool = False
+
+
+@dataclass
 class LLMConfig:
     backend: str; model: str; base_url: str
     temperature: float; max_tokens: int; log_detail: str
+    capabilities: LLMCapabilities = field(default_factory=LLMCapabilities)
 
 @dataclass
 class MCPConfig:
@@ -765,6 +799,23 @@ def _load_meta_tools_config(m: dict) -> "MetaToolsConfig":
     )
 
 
+
+def _load_llm_capabilities(c: dict) -> LLMCapabilities:
+    """Build LLMCapabilities from a yaml dict + env overrides.
+
+    Env overrides let operators flip capabilities at deploy time without
+    editing the file:
+      LLM_THINKING_TAG=none python main.py  # disable think-tag stripping
+      LLM_FORMAT_COMPLIANCE=low ...         # enable aggressive retries
+    """
+    return LLMCapabilities(
+        thinking_tag         = _env_str ("LLM_THINKING_TAG",         c.get("thinking_tag",         "think")),
+        format_compliance    = _env_str ("LLM_FORMAT_COMPLIANCE",    c.get("format_compliance",    "high")),
+        max_context_chars    = _env_int ("LLM_MAX_CONTEXT_CHARS",    c.get("max_context_chars",    32000)),
+        supports_native_tools= _env_bool("LLM_SUPPORTS_NATIVE_TOOLS",c.get("supports_native_tools",False)),
+    )
+
+
 def _load_pagination_config(p: dict) -> "PaginationConfig":
     return PaginationConfig(
         findings_nudge_enabled    = _env_bool("PAGINATION_FINDINGS_NUDGE",        p.get("findings_nudge_enabled",     True)),
@@ -958,6 +1009,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             temperature = _env_float("LLM_TEMPERATURE", l.get("temperature", 0.1)),
             max_tokens  = _env_int  ("LLM_MAX_TOKENS",  l.get("max_tokens",  2048)),
             log_detail  = _env_str  ("LLM_LOG_DETAIL",  l.get("log_detail",  "off")),
+            capabilities = _load_llm_capabilities(l.get("capabilities", {}) or {}),
         ),
         tools=ToolsConfig(
             mcp=MCPConfig(

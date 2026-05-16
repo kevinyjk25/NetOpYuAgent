@@ -304,8 +304,31 @@ class HitlExecutor:
                 }
 
             # Single-tool destructive HITL — stream wants approval
-            # before invoking a HITL-gated tool
+            # before invoking a HITL-gated tool. If the chunk carries a
+            # `batch_calls` list (LLM emitted multiple same-name
+            # destructive calls in one turn — e.g. push_config to N
+            # devices), raise a batch interrupt so all N children appear
+            # at once instead of sequentially after each approve.
             if chunk.get("stop_hitl") and chunk.get("tool_name"):
+                _batch_calls = chunk.get("batch_calls")
+                if _batch_calls and len(_batch_calls) > 1:
+                    batch_id = await self._raise_tool_hitl_batch(
+                        tool_name=chunk["tool_name"],
+                        calls=_batch_calls,
+                        query=query, session_id=session_id,
+                        confirmed_facts=confirmed_facts,
+                        chunk=chunk,
+                    )
+                    # The batch is the "interrupt id" surfaced to caller —
+                    # GET /hitl/batch/{id} lists children for the UI.
+                    return {
+                        "text":          full_text,
+                        "interrupted":   True,
+                        "interrupt_id":  batch_id,
+                        "batch":         True,
+                        "decisions":     decisions,
+                    }
+
                 interrupt_id = await self._raise_tool_hitl(
                     tool_name=chunk["tool_name"],
                     tool_args=chunk.get("tool_args") or {},
@@ -396,6 +419,378 @@ class HitlExecutor:
         )
         return payload.interrupt_id
 
+    # ────────────────────────────────────────────────────────────────
+    # Batch tool HITL — same shape as _raise_tool_hitl but for N siblings
+    # ────────────────────────────────────────────────────────────────
+
+    async def _raise_tool_hitl_batch(
+        self,
+        *,
+        tool_name: str,
+        calls: list[tuple[str, dict[str, Any]]],
+        query: str,
+        session_id: str,
+        confirmed_facts: list[str],
+        chunk: dict,
+    ) -> str:
+        """Raise a batch of N destructive-tool HITL interrupts that share
+        a single batch_id, so the UI shows N pending cards at once and the
+        operator can approve/reject each (or use POST /hitl/batch/{id}/...
+        to act on the whole group).
+
+        Same per-child shape as _raise_tool_hitl — each child has a
+        ResumeHandle pointing at tool_call_resumer with that child's
+        specific args. On approval, each child runs independently;
+        tool_call_resumer's existing chunk_queue plumbing streams trace
+        per child.
+
+        Returns the batch_id (not an interrupt_id) so the caller knows
+        to surface the batch endpoints instead of single-interrupt ones.
+        """
+        from hitl_core.schema import (
+            HitlBatch, BatchPolicy, BatchWaitMode, ResumeHandle,
+        )
+
+        # First materialise all child CheckpointEntries.
+        #
+        # editable_keys per child is auto-derived from the tool name + args
+        # using the same _derive_editable_keys helper that the singular
+        # _raise_tool_hitl uses. Earlier versions of this method referenced
+        # a `self._cfg.editable_hitl_tools` attribute that HitlExecutor
+        # doesn't actually carry — that path raised AttributeError on every
+        # batch HITL ('HitlExecutor' object has no attribute '_cfg'),
+        # which silently broke multi-target destructive ops.
+        child_entries: list[CheckpointEntry] = []
+        for (n, a) in calls:
+            _editable = _derive_editable_keys(n, a)
+            _target = str(a.get("device_id") or a.get("target") or "-")
+            _intent = f"Agent proposes calling `{n}` on `{_target}` (batch)"
+
+            child_payload = HitlPayload(
+                thread_id=session_id,
+                context_id=session_id,
+                user_query=query,
+                trigger_kind=TriggerKind.DESTRUCTIVE,
+                risk_level=RiskLevel.HIGH,
+                intent_summary=_intent,
+                confidence_score=float(chunk.get("confidence", 0.9)),
+                proposed_action=ProposedAction(
+                    action_type=f"tool_call:{n}",
+                    target=_target,
+                    parameters=dict(a),
+                    reversible=False,
+                    risk_level=RiskLevel.HIGH,
+                ),
+                editable_param_keys=_editable,
+            )
+            child_entries.append(CheckpointEntry(
+                interrupt_id=child_payload.interrupt_id,
+                payload=child_payload,
+                resume_handle=ResumeHandle(
+                    resumer_name="tool_call_resumer",
+                    state={
+                        "tool_name":       n,
+                        "tool_args":       a,
+                        "session_id":      session_id,
+                        "original_query":  query,
+                        "confirmed_facts": confirmed_facts,
+                    },
+                ),
+            ))
+
+        # Build the batch wrapper. BEST_EFFORT lets individual children
+        # succeed/fail independently — better fit for IT-ops where one
+        # device may be unreachable but the others should still go.
+        # ALL means the producer-side future resolves only after every
+        # child has a decision (approve/reject/timeout), which is what
+        # the agent loop needs to assemble a complete batch report.
+        batch = HitlBatch(
+            interrupt_ids=[e.interrupt_id for e in child_entries],
+            policy=BatchPolicy.BEST_EFFORT,
+            wait_mode=BatchWaitMode.ALL,
+        )
+
+        # Stamp batch_id onto each child BEFORE persisting (so the store
+        # and the UI can look up siblings via context_snapshot["batch_id"]).
+        from hitl_core.batch import BATCH_ID_KEY
+        for e in child_entries:
+            e.payload.context_snapshot[BATCH_ID_KEY] = batch.batch_id
+
+        # Persist children first
+        for e in child_entries:
+            await self._router.register_payload(e)
+
+        # Open the batch via the coordinator and CAPTURE the future.
+        # Earlier versions threw the future away — the design is that
+        # the producer awaits it to receive a BatchResolution once
+        # wait_mode is satisfied. The router's batch path correctly
+        # short-circuits to `return None` for each child decision (so
+        # the singular tool_call_resumer never runs), expecting THIS
+        # task to be on the other end of the future executing tools.
+        # Without it, batch HITL approve → silent no-op (visible in
+        # the UI as "approved action is executing" forever).
+        batch_future = await self._router.batch.open_batch(batch)
+        logger.info(
+            "Tool HITL batch raised: batch_id=%s tool=%s children=%d",
+            batch.batch_id[:12], tool_name, len(child_entries),
+        )
+
+        # Per-child (tool_name, args) snapshot so the background runner
+        # can dispatch each tool after batch resolves. We can't read
+        # them off the resolution's HitlDecision alone — those carry
+        # parameter_patch (operator edits) but not the original args.
+        _child_tool_specs: dict[str, tuple[str, dict, str]] = {
+            e.interrupt_id: (
+                e.resume_handle.state["tool_name"],
+                dict(e.resume_handle.state["tool_args"]),
+                e.resume_handle.state.get("session_id", ""),
+            )
+            for e in child_entries
+        }
+
+        # Background runner: awaits batch resolution, then dispatches
+        # each approved child through the tool registry. Emits chunks
+        # via chunk_queue so any /hitl/{id}/stream subscribed before
+        # approval sees execution progress.
+        #
+        # Why a task rather than awaiting inline: matches the singular
+        # HITL flow — execute_query returns the interrupt_id immediately
+        # and the agent loop is free to terminate; tool execution runs
+        # asynchronously after operator decisions arrive (potentially
+        # minutes later). Inline await would block the producer for
+        # the full HITL lifetime.
+        import asyncio as _asyncio
+        async def _batch_execute_after_resolution() -> None:
+            try:
+                resolution = await batch_future
+            except Exception as exc:
+                logger.exception(
+                    "batch_execute: future await failed for %s: %s",
+                    batch.batch_id[:12], exc,
+                )
+                return
+
+            from hitl_core.chunk_queue import get_chunk_queue_registry
+            from hitl_core.schema import DecisionKind
+            _cq = get_chunk_queue_registry()
+
+            logger.info(
+                "batch_execute: batch=%s resolved — all_approved=%s rejected=%s",
+                batch.batch_id[:12], resolution.all_approved, resolution.rejected,
+            )
+
+            # Memory writebacks run concurrently with subsequent tool
+            # dispatches — previously they were awaited inline, which
+            # serialized every child's execution behind a 30-60s LLM
+            # fact-extraction call (LLM queue contended with HITL
+            # classifiers). We collect tasks here and gather at the end.
+            _pending_writebacks: list = []
+
+            def _schedule_writeback(user_q: str, asst_t: str, sid: str) -> None:
+                """Schedule writeback as a background task with low
+                importance (0.4) — chunk persisted, no LLM distillation."""
+                try:
+                    _pending_writebacks.append(
+                        _asyncio.create_task(
+                            self._writeback(user_q, asst_t, sid, importance=0.4)
+                        )
+                    )
+                except Exception:
+                    # If create_task fails (e.g. no running loop), fall
+                    # back to silent skip — memory write is best-effort.
+                    pass
+
+            # Iterate in submission order (BatchResolution.decisions
+            # preserves it via batch.interrupt_ids).
+            for child_decision in resolution.decisions:
+                iid = child_decision.interrupt_id
+                spec = _child_tool_specs.get(iid)
+                if spec is None:
+                    logger.warning(
+                        "batch_execute: no spec for child %s — skipping", iid[:12],
+                    )
+                    continue
+                child_tool, child_args, child_sid = spec
+
+                # Skip rejected children
+                if child_decision.decision == DecisionKind.REJECT:
+                    msg = f"[BATCH REJECTED — {child_tool} on {child_args.get('device_id','-')}]"
+                    logger.info(
+                        "batch_execute: child %s rejected — skipping tool",
+                        iid[:12],
+                    )
+                    try:
+                        _cq.push(iid, {
+                            "node": "hitl_reject",
+                            "node_step": f"Operator rejected: {child_tool}",
+                        })
+                    except Exception:
+                        pass
+                    _schedule_writeback(query, msg, child_sid)
+                    continue
+
+                # Merge operator edit (if any)
+                if (child_decision.decision == DecisionKind.EDIT
+                        and child_decision.parameter_patch):
+                    child_args.update(child_decision.parameter_patch)
+                    try:
+                        _cq.push(iid, {
+                            "node": "hitl_edit",
+                            "node_step": (
+                                f"Operator edited args: "
+                                f"{list(child_decision.parameter_patch.keys())}"
+                            ),
+                        })
+                    except Exception:
+                        pass
+
+                # Tool dispatch
+                try:
+                    _cq.push(iid, {
+                        "node": "tool_call",
+                        "node_step": f"Calling tool: {child_tool}",
+                    })
+                except Exception:
+                    pass
+
+                if child_tool not in self._tool_registry:
+                    logger.warning(
+                        "batch_execute: tool %r not in registry — skipping",
+                        child_tool,
+                    )
+                    try:
+                        _cq.push(iid, {
+                            "node": "tool_error",
+                            "node_step": f"Tool {child_tool!r} not registered",
+                        })
+                    finally:
+                        _cq.complete(iid)
+                    continue
+
+                try:
+                    logger.info(
+                        "batch_execute: dispatching %s on %s (iid=%s)",
+                        child_tool, child_args.get("device_id", "-"), iid[:12],
+                    )
+                    result = await self._tool_registry[child_tool](child_args)
+                    result_text = str(result)[:1500]
+                    logger.info(
+                        "batch_execute: %s on %s returned %d chars (iid=%s)",
+                        child_tool, child_args.get("device_id", "-"),
+                        len(result_text), iid[:12],
+                    )
+                except Exception as exc:
+                    logger.exception(
+                        "batch_execute: tool %s on %s failed: %s",
+                        child_tool, child_args.get("device_id", "-"), exc,
+                    )
+                    try:
+                        _cq.push(iid, {
+                            "node": "tool_error",
+                            "node_step": f"Tool {child_tool} FAILED: {exc}",
+                        })
+                        # Emit batch_member_result for failure so chat UI
+                        # gets a visible error bubble (parallel to success
+                        # path). Frontend's openHitlStream picks this up.
+                        _cq.push(iid, {
+                            "type": "batch_member_result",
+                            "tool":   child_tool,
+                            "target": child_args.get("device_id", "-"),
+                            "args":   child_args,
+                            "error":  str(exc),
+                            "batch_id": batch.batch_id,
+                        })
+                    finally:
+                        _cq.complete(iid)
+                    _schedule_writeback(
+                        query,
+                        f"[BATCH FAILED — {child_tool} on "
+                        f"{child_args.get('device_id', '-')}] {exc}",
+                        child_sid,
+                    )
+                    continue
+
+                # Success — emit tool_result + complete the per-child stream.
+                # CRITICAL: do NOT include node_step on this chunk. The
+                # frontend dispatchChunk checks `if (c.node_step)` FIRST
+                # and returns early, so a chunk that carries both fields
+                # never reaches the `if (c.node_result)` branch — that's
+                # the one that populates the Results tab via addToolResult.
+                # Originally we packed them together which silently sent
+                # tool results into the step trace and away from Results.
+                # Match runtime/loop.py's pattern: emit tool_call (with
+                # node_step) and tool_result (with only node_result) as
+                # two separate chunks.
+                try:
+                    _cq.push(iid, {
+                        "node_result": {
+                            "tool": child_tool,
+                            "args": child_args,
+                            "result": result_text[:300],
+                            "raw":    result_text,
+                        },
+                    })
+                    # Additionally emit a `batch_member_result` chunk so the
+                    # frontend's openHitlStream handler can render a chat
+                    # bubble with the outcome. Without this, the only visible
+                    # change after approve is in the Results tab (which the
+                    # operator may not be looking at) and the Flow event log
+                    # — chat itself stays empty, so the UX feels broken even
+                    # though everything else worked. dispatchChunk doesn't
+                    # currently produce chat bubbles for arbitrary chunks
+                    # (only via streaming tokens during chat/stream), so we
+                    # need a dedicated chunk type the SSE handler can pick up.
+                    _cq.push(iid, {
+                        "type": "batch_member_result",
+                        "tool":   child_tool,
+                        "target": child_args.get("device_id", "-"),
+                        "args":   child_args,
+                        "result": result_text,
+                        "batch_id": batch.batch_id,
+                    })
+                except Exception:
+                    pass
+                finally:
+                    try:
+                        _cq.complete(iid)
+                    except Exception:
+                        pass
+
+                _schedule_writeback(
+                    query,
+                    f"[BATCH COMPLETED — {child_tool} on "
+                    f"{child_args.get('device_id', '-')}] {result_text}",
+                    child_sid,
+                )
+
+            # Wait for any background writebacks to settle so the
+            # 'completed' log accurately reflects all-done state. These
+            # are wrapped in shield-style return_exceptions=True so a
+            # writeback failure can't tank the whole batch finalizer.
+            if _pending_writebacks:
+                try:
+                    await _asyncio.gather(*_pending_writebacks, return_exceptions=True)
+                except Exception as _gather_exc:
+                    logger.debug(
+                        "batch_execute: writeback gather hit %s — ignoring",
+                        _gather_exc,
+                    )
+
+            logger.info(
+                "batch_execute: batch=%s completed (%d children processed)",
+                batch.batch_id[:12], len(resolution.decisions),
+            )
+
+        # Fire the background task. We don't keep a reference because
+        # the task lifetime is bounded by the batch future — once
+        # resolved (or future-failed), the task exits.
+        _asyncio.create_task(
+            _batch_execute_after_resolution(),
+            name=f"batch_exec_{batch.batch_id[:8]}",
+        )
+
+        return batch.batch_id
+
     async def _tool_call_resumer(
         self, decision: HitlDecision, entry: CheckpointEntry,
     ) -> dict[str, Any]:
@@ -404,6 +799,14 @@ class HitlExecutor:
         tool_args, invokes the tool, persists the result, and returns
         a list of chunks describing what happened so the calling
         endpoint can paint thinking-trace steps in the UI.
+
+        Streams the same chunks through the global ChunkQueueRegistry
+        as they are produced, so any frontend that already subscribed
+        via GET /hitl/{interrupt_id}/stream sees progress in real time
+        (parity with _agent_loop_resumer). Without this, the operator
+        clicks approve and the trace freezes until the tool returns —
+        which for slow tools (e.g. restart_service over real SSH) can
+        be tens of seconds with no UI feedback.
         """
         state = entry.resume_handle.state
         tool_name = state.get("tool_name")
@@ -412,74 +815,117 @@ class HitlExecutor:
         original_query = state.get("original_query", "")
         _chunks: list[dict] = []
 
-        if decision.decision == DecisionKind.REJECT:
-            await self._writeback(
-                original_query,
-                f"[HITL REJECTED — operator declined tool call `{tool_name}`]",
-                session_id,
-            )
-            return {"tool": tool_name, "decision": "reject", "chunks": _chunks}
+        # Live SSE plumbing: identical pattern to _agent_loop_resumer.
+        # When the frontend subscribes via /hitl/{id}/stream the queue
+        # auto-creates the stream on first push (see chunk_queue.push's
+        # _ensure_sync), so we don't need to pre-register here.
+        from hitl_core.chunk_queue import get_chunk_queue_registry
+        _chunk_queue = get_chunk_queue_registry()
+        _interrupt_id = entry.interrupt_id or state.get("interrupt_id", "")
 
-        # APPROVE or EDIT — merge patch and invoke
-        if decision.decision == DecisionKind.EDIT and decision.parameter_patch:
-            tool_args.update(decision.parameter_patch)
-            logger.info(
-                "Tool HITL: applying operator edit — patch_keys=%s",
-                list(decision.parameter_patch.keys()),
-            )
-            _chunks.append({
-                "node":        "hitl_edit",
-                "node_step":   f"Operator edited args: {list(decision.parameter_patch.keys())}",
-            })
+        def _emit(chunk: dict) -> None:
+            """Append to the sync result list AND push to the live queue.
+            Wrapped in a try so a queue-push hiccup never blocks the tool
+            execution path."""
+            _chunks.append(chunk)
+            if _interrupt_id:
+                try:
+                    _chunk_queue.push(_interrupt_id, chunk)
+                except Exception:
+                    # Don't let a streaming hiccup block the tool path;
+                    # the synchronous return value still carries the
+                    # chunk list as a fallback.
+                    pass
 
-        if tool_name not in self._tool_registry:
-            logger.warning(
-                "tool_call_resumer: tool %r not in registry", tool_name,
-            )
-            return {"error": f"tool {tool_name!r} not registered", "chunks": _chunks}
-
-        # Step: tool dispatch
-        _chunks.append({
-            "node":      "tool_call",
-            "node_step": f"Calling tool: {tool_name}",
-        })
+        # We complete() the stream on every exit path below — package it
+        # as a finally so even bare returns / unexpected exceptions still
+        # signal end-of-stream to subscribers.
         try:
-            result = await self._tool_registry[tool_name](tool_args)
-        except Exception as exc:
-            logger.exception("Tool %s execution failed: %s", tool_name, exc)
+            if decision.decision == DecisionKind.REJECT:
+                _emit({
+                    "node":      "hitl_reject",
+                    "node_step": f"Operator rejected tool call: {tool_name}",
+                })
+                await self._writeback(
+                    original_query,
+                    f"[HITL REJECTED — operator declined tool call `{tool_name}`]",
+                    session_id,
+                )
+                return {"tool": tool_name, "decision": "reject", "chunks": _chunks}
+
+            # APPROVE or EDIT — merge patch and invoke
+            if decision.decision == DecisionKind.EDIT and decision.parameter_patch:
+                tool_args.update(decision.parameter_patch)
+                logger.info(
+                    "Tool HITL: applying operator edit — patch_keys=%s",
+                    list(decision.parameter_patch.keys()),
+                )
+                _emit({
+                    "node":        "hitl_edit",
+                    "node_step":   f"Operator edited args: {list(decision.parameter_patch.keys())}",
+                })
+
+            if tool_name not in self._tool_registry:
+                logger.warning(
+                    "tool_call_resumer: tool %r not in registry", tool_name,
+                )
+                _emit({
+                    "node":      "tool_error",
+                    "node_step": f"Tool {tool_name!r} not registered — cannot dispatch",
+                })
+                return {"error": f"tool {tool_name!r} not registered", "chunks": _chunks}
+
+            # Step: tool dispatch
+            _emit({
+                "node":      "tool_call",
+                "node_step": f"Calling tool: {tool_name}",
+            })
+            try:
+                result = await self._tool_registry[tool_name](tool_args)
+            except Exception as exc:
+                logger.exception("Tool %s execution failed: %s", tool_name, exc)
+                await self._writeback(
+                    original_query,
+                    f"[HITL APPROVED — tool {tool_name} FAILED] {exc}",
+                    session_id,
+                )
+                _emit({
+                    "node":      "tool_error",
+                    "node_step": f"Tool {tool_name} FAILED: {exc}",
+                })
+                return {"tool": tool_name, "error": str(exc), "chunks": _chunks}
+
+            result_text = str(result)[:1500]
             await self._writeback(
                 original_query,
-                f"[HITL APPROVED — tool {tool_name} FAILED] {exc}",
+                f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
                 session_id,
             )
-            _chunks.append({
-                "node":      "tool_error",
-                "node_step": f"Tool {tool_name} FAILED: {exc}",
+            # Step: tool returned
+            _emit({
+                "node":        "tool_result",
+                "node_step":   f"Inline: {tool_name}",
+                "node_result": {
+                    "tool":   tool_name,
+                    "args":   tool_args,
+                    "result": result_text[:300],
+                },
             })
-            return {"tool": tool_name, "error": str(exc), "chunks": _chunks}
-
-        result_text = str(result)[:1500]
-        await self._writeback(
-            original_query,
-            f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
-            session_id,
-        )
-        # Step: tool returned
-        _chunks.append({
-            "node":        "tool_result",
-            "node_step":   f"Inline: {tool_name}",
-            "node_result": {
-                "tool":   tool_name,
-                "args":   tool_args,
-                "result": result_text[:300],
-            },
-        })
-        return {
-            "tool":        tool_name,
-            "result":      result_text,
-            "tool_result": result_text,
-            "chunks":      _chunks,
-        }
+            return {
+                "tool":        tool_name,
+                "result":      result_text,
+                "tool_result": result_text,
+                "chunks":      _chunks,
+            }
+        finally:
+            # Signal end-of-stream so any /hitl/{id}/stream subscriber
+            # exits the async iterator cleanly. Idempotent if no one
+            # subscribed.
+            if _interrupt_id:
+                try:
+                    _chunk_queue.complete(_interrupt_id)
+                except Exception:
+                    pass
 
     # ────────────────────────────────────────────────────────────────
     # Multi-mode HITL (USER_CHOICE / CLARIFICATION)
@@ -845,9 +1291,26 @@ class HitlExecutor:
 
     async def _writeback(
         self, user_text: str, assistant_text: str, session_id: str,
+        importance: float = 0.7,
     ) -> None:
         """Persist a turn to memory. Failures are logged but never
-        block the protocol layer's response."""
+        block the protocol layer's response.
+
+        `importance` drives the memory layer's fanout:
+          < 0.30 → skipped entirely
+          0.30–0.49 → long-term chunk only (no LLM fact distillation)
+          0.50–0.74 → chunk + LLM-driven fact distillation (slow)
+          ≥ 0.75 → distill + user-profile update (slowest)
+
+        Default is 0.7 to match the original behaviour (full distillation
+        on regular HITL flows). Batch executions should pass 0.4 to skip
+        the LLM-bound distillation pass, which would otherwise serialize
+        N tool executions against an Ollama LLM queue already contended
+        for by approval-path classifiers (SkillEvolver, etc.). That's a
+        real bug we hit: a 2-child batch took 117s end-to-end because
+        each writeback triggered a 30s LLM timeout, blocking the next
+        child's tool dispatch.
+        """
         if self._memory is None or not session_id:
             return
         try:
@@ -856,7 +1319,7 @@ class HitlExecutor:
                 user_text=user_text,
                 assistant_text=assistant_text,
                 tool_calls=[],
-                importance=0.7,
+                importance=importance,
             )
         except Exception as exc:
             logger.debug("memory writeback skipped: %s", exc)

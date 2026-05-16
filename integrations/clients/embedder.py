@@ -67,11 +67,25 @@ class OpenAIEmbedder:
         self.model    = model
         self.DIM      = dim
         self._api_key = os.getenv(api_key_env, "")
+        # Lazy-init client. Building it on first use lets us defer the
+        # `from openai import AsyncOpenAI` import (the library isn't always
+        # installed) until we know an OpenAI call is actually happening.
+        # Reusing one AsyncOpenAI instance across calls keeps the HTTP
+        # connection pool warm; the previous implementation created a fresh
+        # client per embed(), leaking file descriptors and adding ~50ms
+        # connection setup per request.
+        self._client = None
+
+    def _get_client(self):
+        if self._client is None:
+            from openai import AsyncOpenAI
+            self._client = AsyncOpenAI(api_key=self._api_key)
+        return self._client
 
     async def embed(self, text: str) -> list[float]:
         try:
-            from openai import AsyncOpenAI
-            resp = await AsyncOpenAI(api_key=self._api_key).embeddings.create(
+            client = self._get_client()
+            resp = await client.embeddings.create(
                 model=self.model, input=text
             )
             vec  = resp.data[0].embedding

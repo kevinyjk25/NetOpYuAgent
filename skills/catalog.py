@@ -158,7 +158,9 @@ class SkillCatalogService:
                 continue
             if strict:
                 # Secondary check: any [TOOL:xxx] in skill detail not in registry
-                tool_refs = _re.findall(r"\[TOOL:(\w+)\]", skill.detail.description or "")
+                # Use centralized parser for whitespace tolerance
+                from runtime.directive_parser import find_tool_names as _ftn
+                tool_refs = _ftn(skill.detail.description or "")
                 for ref in tool_refs:
                     if ref not in tool_registry:
                         to_remove.append(skill_id)

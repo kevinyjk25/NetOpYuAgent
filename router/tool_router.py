@@ -27,9 +27,9 @@ The resulting registry dict is passed directly to:
 Usage
 -----
     # Build and wire in main.py
-    from integrations.tool_router import ToolRouter
-    from integrations.mcp_client import MCPClient
-    from integrations.openapi_client import OpenAPIClient
+    from integrations.router.tool_router import ToolRouter
+    from integrations.clients.mcp_client import MCPClient
+    from integrations.clients.openapi_client import OpenAPIClient
 
     mcp = MCPClient.from_config(NETOPS_MCP_CONFIG)
     await mcp.connect_all()
@@ -313,8 +313,27 @@ class ToolRouter:
                 success = True
                 raw     = str(result)
 
-                # Route large results through ToolResultStore
-                if self._tool_store is not None:
+                # Route large results through ToolResultStore.
+                #
+                # EXCEPTIONS — never re-store:
+                #   1. read_stored_result / process_stored_chunks: their job IS
+                #      to read a previously-stored result. Re-storing the page
+                #      they return defeats pagination — the LLM would get a
+                #      new STORED label pointing to a page wrapper instead of
+                #      the actual content.
+                #   2. Any output that already starts with "[STORED:" (the
+                #      callable returned a reference, not raw data).
+                #   3. Any output starting with "# Stored result ref_id=" (the
+                #      read_stored_result page header — extra defense if a
+                #      tool wasn't on the exclusion list).
+                _SKIP_AUTO_STORE = {"read_stored_result", "process_stored_chunks"}
+                _already_a_ref = (
+                    raw.startswith("[STORED:")
+                    or raw.startswith("# Stored result ref_id=")
+                )
+                if (self._tool_store is not None
+                        and tool_name not in _SKIP_AUTO_STORE
+                        and not _already_a_ref):
                     stored = self._tool_store.store(tool_name, raw)
                     return stored
                 return raw

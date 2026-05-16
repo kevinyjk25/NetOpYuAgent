@@ -122,15 +122,26 @@ If nothing new and no contradictions: {"new_facts": [], "contradictions": []}
 
 
 def _strip_thinking_blocks(raw: str) -> str:
-    """Remove <think>...</think> reasoning blocks emitted by thinking models
-    (qwen3-thinking, deepseek-r1, etc.). Even when the LLM engine is supposed
-    to suppress them, residual tags can leak through and break JSON parsing."""
+    """Remove reasoning-tag blocks emitted by thinking models.
+
+    Reads the tag name from env var LLM_THINKING_TAG (default "think"),
+    matching the convention set by LLMCapabilities. Different model
+    families use different tag names — qwen3.x/deepseek-r1 use <think>,
+    some newer models use <reasoning>. Set LLM_THINKING_TAG=none / off
+    / "" to disable stripping entirely (non-thinking models).
+
+    Even when the LLM engine is supposed to suppress these blocks,
+    residual tags can leak through small-model output and break JSON
+    parsing — so this is a belt-and-suspenders sanitizer.
+    """
     if not raw:
         return raw
-    # Multi-line, case-insensitive, also tolerate <Think> / </THINK> variants
-    cleaned = re.sub(
-        r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE
-    )
+    import os
+    tag = (os.environ.get("LLM_THINKING_TAG", "think") or "think").strip().lower()
+    if tag in ("", "none", "off", "false", "no"):
+        return raw.strip()
+    pat = rf"<{re.escape(tag)}>.*?</{re.escape(tag)}>"
+    cleaned = re.sub(pat, "", raw, flags=re.DOTALL | re.IGNORECASE)
     return cleaned.strip()
 
 

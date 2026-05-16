@@ -330,11 +330,25 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
     # ── Serve index.html ───────────────────────────────────────────────
+    # No-cache headers: index.html changes often during dev sessions, and
+    # browsers cache it aggressively (memory cache lasts the whole tab
+    # session, disk cache 24h+). After backend updates, operators were
+    # debugging against stale HTML — we shipped a fix but their browser
+    # never loaded it. These headers tell the browser to re-fetch every
+    # time. The cost is one round-trip per page load — trivial since this
+    # is a single-operator dev UI.
     @app.get("/", response_class=HTMLResponse)
     async def serve_index():
         index = _STATIC_DIR / "index.html"
         if index.exists():
-            return HTMLResponse(content=index.read_text(encoding="utf-8"))
+            return HTMLResponse(
+                content=index.read_text(encoding="utf-8"),
+                headers={
+                    "Cache-Control": "no-cache, no-store, must-revalidate",
+                    "Pragma":        "no-cache",
+                    "Expires":       "0",
+                },
+            )
         return HTMLResponse(content="<h1>IT Ops Agent WebUI</h1><p>Static files not found.</p>")
 
     # ==================================================================
@@ -644,7 +658,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                     )
                 else:
                     import re as _re
-                    tc = [{"tool": m} for m in _re.findall(r"\[TOOL:(\w+)\]", full_text)]
+                    # Use centralized parser for whitespace tolerance
+                    from runtime.directive_parser import find_tool_names as _ftn
+                    tc = [{"tool": m} for m in _ftn(full_text)]
 
                     if dtm:
                         # v4 path: DTM.after_turn() handles Track A (FTS5 + daily
@@ -2326,6 +2342,43 @@ async def _submit_hitl_decision(
             (list(_raw_result.keys())[:10] if isinstance(_raw_result, dict)
              else None),
         )
+
+        # Detect: was this interrupt a batch member? If yes, the router
+        # returns None synchronously (the BatchCoordinator owns resumption
+        # — see hitl_core/router.py:_dispatch path 0). The tool execution
+        # happens AFTER the LAST batch sibling is approved, in a
+        # background task spawned by _raise_tool_hitl_batch. The frontend
+        # must (a) NOT close its SSE stream yet, (b) keep showing
+        # "executing" state, and (c) consume tool_call/tool_result chunks
+        # as they arrive over /hitl/{id}/stream.
+        #
+        # We signal this with `batch_pending` in the response so the
+        # frontend can branch on it. Also include the sibling list so
+        # the UI can show "waiting for 1/2 more approvals" if applicable.
+        _batch_pending_info = None
+        try:
+            entry = await hitl_core_router.load(interrupt_id)
+            if entry and entry.payload.context_snapshot:
+                from hitl_core.batch import BATCH_ID_KEY
+                _bid = entry.payload.context_snapshot.get(BATCH_ID_KEY)
+                if _bid:
+                    _batch_pending_info = {
+                        "batch_id": _bid,
+                        "interrupt_id": interrupt_id,
+                        "message": (
+                            "Decision recorded. Tool execution will run "
+                            "asynchronously once all batch siblings have "
+                            "been decided. Watch the live stream for results."
+                        ),
+                    }
+                    logger.info(
+                        "_submit_hitl_decision: batch member detected — "
+                        "batch_id=%s, signalling batch_pending to UI",
+                        _bid[:12],
+                    )
+        except Exception as exc:
+            logger.debug("batch_pending detection failed: %s", exc)
+
         if isinstance(_raw_result, dict):
             _tool_result_str = (
                 _raw_result.get("tool_result")
@@ -2348,6 +2401,10 @@ async def _submit_hitl_decision(
             # by introspecting the resume_handle if needed.
             "tool_name":        "",
         }
+        # Surface batch_pending state to frontend so it knows to keep
+        # the SSE stream open and not declare the turn "done".
+        if _batch_pending_info is not None:
+            result_dict["batch_pending"] = _batch_pending_info
         # The resumer can return additional thinking-trace chunks (sub-loop
         # steps that ran AFTER operator approval — TURN N, Tool Call,
         # nested HITL, etc). Surface them so the UI can replay them into
@@ -2566,12 +2623,27 @@ async def _submit_hitl_decision(
                 session_id, get_current_operator(),
                 len(assistant_text), assistant_text[:120],
             )
+            # For BATCH members: don't run LLM-bound fact extraction on
+            # every sibling approval. The batch executor will write a
+            # proper summary once tools complete. importance=0.4 means
+            # the chunk is stored but no LLM distillation runs — fact
+            # extraction takes 30s per call (Ollama serialized), so on
+            # a 2-child batch this added 60s+ of operator wait time
+            # AFTER each approve click. The actual tool execution
+            # happens in the batch executor's background task.
+            _is_batch_member = _batch_pending_info is not None
+            if _is_batch_member:
+                _writeback_importance = 0.4
+            else:
+                _writeback_importance = (
+                    0.7 if _decision in ("approve", "choose", "answer") else 0.5
+                )
             new_facts = await _memory.after_turn(
                 session_id      = session_id,
                 user_text       = _user_query,
                 assistant_text  = assistant_text,
                 tool_calls      = [{"tool": _tool_name}] if _tool_name else [],
-                importance      = 0.7 if _decision in ("approve", "choose", "answer") else 0.5,
+                importance      = _writeback_importance,
             )
             result_dict["memory_write"] = {"session_id": session_id, "ok": True}
             logger.info(
@@ -2605,7 +2677,23 @@ async def _submit_hitl_decision(
     # executed, ask SkillEvolver whether the request+solution forms a
     # reusable pattern worth canonicalizing. Surfaces in thinking trace
     # via result_dict["skill_evolved"].
-    if _decision in ("approve", "choose", "answer") and _tool_name and _tool_name != "agent_loop":
+    #
+    # SKIP for BATCH members: SkillEvolver is an LLM call (8s+ on local
+    # Ollama) that blocks the POST response. For an N-target batch the
+    # operator clicks approve N times — running SkillEvolver N times
+    # for the SAME logical request is wasteful AND each invocation
+    # delays its member's POST visible response by another LLM
+    # round-trip. The skill (if any) should fire once after the whole
+    # batch resolves — TODO: wire it into the batch executor finalizer.
+    # For now, skipping batch members entirely is the right move:
+    # singular-HITL approves still get skill evolution; batch members
+    # don't, but the request is logged so we can pattern-mine later.
+    _is_batch_member_for_evolver = _batch_pending_info is not None
+    if (
+        _decision in ("approve", "choose", "answer")
+        and _tool_name and _tool_name != "agent_loop"
+        and not _is_batch_member_for_evolver
+    ):
         _evolver = services.get("skill_evolver")
         if _evolver is not None:
             try:
@@ -2630,6 +2718,11 @@ async def _submit_hitl_decision(
                     )
             except Exception as _e:
                 logger.debug("Post-HITL skill evolver skipped: %s", _e)
+    elif _is_batch_member_for_evolver:
+        logger.debug(
+            "_submit_hitl_decision: skipping SkillEvolver for batch member "
+            "(would block POST; batch executor will handle the request as a whole)"
+        )
 
     # Diagnostic: log exactly what we send back to the frontend so we can
     # tell whether the issue is server-side (we never sent it) or client-side

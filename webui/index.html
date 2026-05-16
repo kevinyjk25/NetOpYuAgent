@@ -2594,6 +2594,35 @@ function openHitlStream(interruptId) {
           es.close();
           return;
         }
+        // Batch-only synthetic chunk: a tool execution finished for ONE
+        // batch sibling. Render a chat bubble + Results card here rather
+        // than relying solely on the node_result chunk + addToolResult,
+        // because dispatchChunk has no path to produce a chat bubble
+        // from server-side chunks (chat bubbles normally come from
+        // streaming tokens during /chat/stream, which has long ended by
+        // the time batch_execute runs).
+        if (chunk.type === 'batch_member_result') {
+          const tool   = chunk.tool   || 'tool';
+          const target = chunk.target || '-';
+          const bid    = (chunk.batch_id || '').slice(0, 8);
+          if (chunk.error) {
+            addMessage('agent',
+              `**✗ Batch execution failed — \`${tool}\` on \`${target}\`** (batch \`${bid}…\`)\n\n` +
+              `**Error:**\n\`\`\`\n${String(chunk.error).slice(0, 2000)}\n\`\`\``,
+              'agent');
+          } else {
+            const result = String(chunk.result || '').slice(0, 4000);
+            addMessage('agent',
+              `**✓ Batch executed — \`${tool}\` on \`${target}\`** (batch \`${bid}…\`)\n\n` +
+              '**Tool output:**\n```\n' + result + '\n```',
+              'agent');
+          }
+          // Stay on whichever tab the user is looking at — don't yank
+          // them into Results just because a sibling finished.
+          // (The node_result chunk that arrives separately already
+          // populates Results via addToolResult.)
+          return;
+        }
         // Route through the SAME dispatcher as chat/stream so node_result
         // chunks populate Results/Cache tabs, tokens accumulate, llm_trace
         // shows turn cards, etc. Without this we lose tool results, store
@@ -2638,9 +2667,30 @@ async function hitlDecExtra(id, dec, extras) {
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(body),
     });
-    // Close the stream once the final response arrives
-    try { stopStream(); } catch(_) {}
     const data = await res.json().catch(()=>({}));
+    // For batch members: the backend returns synchronously with
+    // batch_pending=true because tool execution runs in a background
+    // task AFTER the last sibling is approved. We must keep the SSE
+    // open so tool_call/tool_result chunks streamed by the batch
+    // executor reach the UI. Without this, the stream closes here
+    // and the Results tab stays empty until manual refresh.
+    const isBatchPending = !!(data && data.batch_pending);
+    if (!isBatchPending) {
+      // Close the stream once the final response arrives (singular path)
+      try { stopStream(); } catch(_) {}
+    } else {
+      // Batch path: stream stays open. Schedule a safety-net close
+      // after a generous window so we don't leak EventSource forever
+      // if the batch executor crashes silently. Frontend keeps showing
+      // "executing" state until then.
+      const _bid = (data.batch_pending && data.batch_pending.batch_id) || '';
+      console.log(`hitl: batch member ${id.slice(0,10)}… approved — batch=${_bid.slice(0,8)}, keeping SSE open for executor chunks`);
+      addStep('progress', '⏸ Batch pending', '',
+              `Waiting for sibling decisions + tool execution (batch ${_bid.slice(0,8)}…)`);
+      setTimeout(() => {
+        try { stopStream(); } catch(_) {}
+      }, 5 * 60 * 1000);   // 5min safety net
+    }
     if (data.error) {
       addMessage('agent', `HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nError: ${data.error}`, 'system');
     } else {
@@ -2660,6 +2710,15 @@ async function hitlDecExtra(id, dec, extras) {
       // declare the turn done — refreshHitl will pick up the new card.
       if (data.nested_hitl && data.nested_hitl.interrupted) {
         addStep('progress', '⏸ Nested HITL', '', `awaiting: ${(data.nested_hitl.interrupt_id||'').slice(0,12)}`);
+      } else if (isBatchPending) {
+        // Don't declare "done" — the tool execution chunks are still on
+        // the way via the kept-open SSE. The Results tab will populate
+        // as tool_result chunks arrive.
+        addMessage('agent',
+          `**⏳ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n` +
+          `Decision recorded. Tool execution will run once all batch siblings ` +
+          `are decided — results will appear in the Results tab.`,
+          'agent');
       } else {
         addMessage('agent', `**✓ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n${data.synthesis || data.tool_result || 'Decision recorded'}`, 'agent');
       }
@@ -2700,11 +2759,40 @@ async function hitlDec(id,dec) {
     btn.style.opacity = '0.5';
   });
   try {
+    // Open the per-interrupt SSE stream BEFORE the POST so we catch
+    // post-approval chunks emitted by the resumer (TURN N, Tool Call,
+    // nested HITL). For BATCH HITL members specifically, this is
+    // critical: the POST returns synchronously (the BatchCoordinator
+    // owns resumption — see hitl_core/router.py path 0), but the
+    // actual tool execution happens later in a background task spawned
+    // by _raise_tool_hitl_batch. The background task pushes
+    // tool_call/tool_result chunks to chunk_queue under THIS interrupt_id.
+    // Without an open SSE here, those chunks land in chunk_queue
+    // history but the Results tab stays empty.
+    const stopStream = openHitlStream(id);
     const res=await fetch(`${BASE}/hitl/${id}/${dec}`,{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({operator_id:'webui-operator',comment:`${dec} via Console`})});
     const data=await res.json().catch(()=>({}));
     const outcome=data.outcome||data.decision||dec;
+
+    // Batch-pending detection: the backend signals when this interrupt
+    // was a batch member, in which case the SSE must stay open until
+    // the background tool execution finishes and pushes results.
+    // For singular HITL, close the stream immediately — chunks (if any)
+    // already arrived in the POST response's sub_chunks.
+    const isBatchPending = !!(data && data.batch_pending);
+    if (!isBatchPending) {
+      try { stopStream(); } catch(_) {}
+    } else {
+      const _bid = (data.batch_pending && data.batch_pending.batch_id) || '';
+      console.log(`hitlDec: batch member ${id.slice(0,10)}… approved — batch=${_bid.slice(0,8)}, keeping SSE open for executor chunks`);
+      addStep('progress', '⏸ Batch pending', '',
+              `Waiting for sibling decisions + tool execution (batch ${_bid.slice(0,8)}…)`);
+      // Safety net: close SSE after 5min if tool execution stalls,
+      // so we don't leak EventSource forever.
+      setTimeout(() => { try { stopStream(); } catch(_) {} }, 5 * 60 * 1000);
+    }
 
     // Replay any sub-stream chunks captured by the resumer back into the
     // thinking trace so the post-approval steps (TURN N, Tool Call,
@@ -2807,6 +2895,17 @@ Error: ${data.error}`,'system');
       // No tool_result returned — render synthesis as markdown if present.
       if (data.synthesis) {
         addMessage('agent', data.synthesis, 'agent');
+      } else if (isBatchPending) {
+        // Batch path: tool execution still pending. Don't claim "approved"
+        // — be honest about the wait state. Results will populate via the
+        // SSE stream that's still open.
+        const _bid = (data.batch_pending && data.batch_pending.batch_id) || '';
+        addMessage('agent',
+          `**⏳ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n` +
+          `Decision recorded. Tool execution runs after all batch siblings ` +
+          `are decided. Results will appear in the Results tab as they arrive ` +
+          `(batch \`${_bid.slice(0,8)}…\`).`,
+          'agent');
       } else {
         addMessage('agent',
           `**✓ HITL approved** — \`${id.slice(0,10)}…\`\n\nThe approved action is executing. Check the Results tab when complete.`,

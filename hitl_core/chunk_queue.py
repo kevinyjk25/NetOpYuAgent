@@ -133,13 +133,25 @@ class HitlChunkQueueRegistry:
         is preserved in `history` for replay on subscribe()."""
         s = self._ensure_sync(interrupt_id)
         s.push(chunk)
+        # Debug log: helps trace whether the issue is push-side (no chunk
+        # pushed) or deliver-side (chunk pushed but subscriber didn't get
+        # it). Includes subscriber count so we can tell if the stream is
+        # going to a live SSE or just into history for later replay.
+        _kind = chunk.get("node") or chunk.get("type") or chunk.get("node_step", "?")[:30]
+        logger.info(
+            "ChunkQueue[%s]: push kind=%s subscribers=%d history_len=%d",
+            interrupt_id[:12], _kind, s.subscriber_count, len(s.history),
+        )
 
     def complete(self, interrupt_id: str) -> None:
         """Mark end-of-stream so subscribers exit."""
         s = self._streams.get(interrupt_id)
         if s is not None:
             s.complete()
-            logger.debug("ChunkQueue: completed stream for %s", interrupt_id)
+            logger.info(
+                "ChunkQueue[%s]: completed stream (history_len=%d subscribers=%d)",
+                interrupt_id[:12], len(s.history), s.subscriber_count,
+            )
 
     async def subscribe(
         self,

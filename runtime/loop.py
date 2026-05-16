@@ -984,9 +984,11 @@ class AgentRuntimeLoop:
             state.record_response(llm_response)
             chunks.append(llm_response)
 
-            # P1: detect SKILL_LOAD directives and expand detail on demand
+            # P1: detect SKILL_LOAD directives and expand detail on demand.
+            # Use centralized parser for whitespace tolerance.
             _skill_loads_this_turn_r: set[str] = set()
-            for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+            from runtime.directive_parser import find_skill_load_names
+            for skill_id in find_skill_load_names(llm_response):
                 if skill_id in _skill_loads_this_turn_r:
                     continue
                 _skill_loads_this_turn_r.add(skill_id)
@@ -1523,14 +1525,27 @@ class AgentRuntimeLoop:
                 "response_preview": _trace.get("response_preview", llm_response[:_resp_preview_cap]),
             }
 
-            # ── Stream tokens to user — strip [TOOL:...] lines ──────────
-            # The raw LLM response may contain [TOOL:name] {...} directives.
-            # These are execution instructions, not prose — never show them
-            # to the user.  Strip any line that starts with [TOOL: before
-            # yielding tokens.
+            # ── Stream tokens to user — strip [TOOL:...] AND [TOOL_BATCH:...] ──
+            # The raw LLM response may contain [TOOL:name] {...} or
+            # [TOOL_BATCH:name] [...] directives. These are execution
+            # instructions, not prose — never show them to the user.
+            # We use the centralized strippers from directive_parser so
+            # tolerance matches the parser (handles `[TOOL: name]` etc).
+            # Also strip multi-line TOOL_BATCH blocks: the LLM commonly
+            # formats them across several lines, so a per-line regex
+            # would only catch the opener and leak the args array.
+            from runtime.directive_parser import (
+                strip_tool_directives as _strip_tools,
+                strip_tool_batch_directives as _strip_batch,
+            )
+            _visible = _strip_batch(_strip_tools(llm_response)).strip()
+            # Also drop any per-line residue (e.g. a bare "[TOOL:foo]"
+            # with no args dict that the multi-strippers skipped because
+            # the open-brace lookahead didn't fire).
             _visible_lines = [
-                ln for ln in llm_response.splitlines()
-                if not re.match(r'\s*\[TOOL:\w+\]', ln)
+                ln for ln in _visible.splitlines()
+                if not re.match(r'\s*\[\s*TOOL(?:_BATCH)?\s*:\s*\w+\s*\]\s*$',
+                                ln, re.IGNORECASE)
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
@@ -1544,7 +1559,8 @@ class AgentRuntimeLoop:
             # the tool result will be injected in the next turn's context and
             # the LLM will produce a proper prose answer then.
             _skill_loads_this_turn: set[str] = set()
-            for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+            from runtime.directive_parser import find_skill_load_names
+            for skill_id in find_skill_load_names(llm_response):
                 if skill_id in _skill_loads_this_turn:
                     continue   # deduplicate within a single response
                 _skill_loads_this_turn.add(skill_id)
@@ -1855,18 +1871,13 @@ class AgentRuntimeLoop:
                             # Strip [TOOL:] blocks + [ALIAS:] blocks from
                             # prose so we only match entity names in
                             # narrative text.
-                            _prose = re.sub(
-                                r"\[TOOL:\w+\]\s*\{[^}]*\}",
-                                "",
-                                llm_response,
-                                flags=re.DOTALL,
+                            # Use centralized parser to strip directives
+                            # consistently (tolerates whitespace variants).
+                            from runtime.directive_parser import (
+                                strip_tool_directives as _stt,
+                                strip_tool_batch_directives as _stb,
                             )
-                            _prose = re.sub(
-                                r"\[TOOL_BATCH:\w+\]\s*\[.*?\]",
-                                "",
-                                _prose,
-                                flags=re.DOTALL,
-                            )
+                            _prose = _stb(_stt(llm_response))
                             _prose = re.sub(
                                 r"\[ALIAS\s*:\s*[^=\]]+?\s*=\s*[^\]]+?\s*\]",
                                 "",
@@ -2093,7 +2104,8 @@ class AgentRuntimeLoop:
                 # "Tool-call-only" = response is short and contains only
                 # the [TOOL:] line plus optional minor framing
                 _resp_clean = (llm_response or "").strip()
-                _resp_no_tool = re.sub(r"\[TOOL:[^\]]+\][^\n]*", "", _resp_clean).strip()
+                from runtime.directive_parser import strip_tool_directives as _strip_t
+                _resp_no_tool = _strip_t(_resp_clean).strip()
                 _is_findings_empty = len(_resp_no_tool) < _min_chars
 
                 if _last_call_was_paged_read and _is_findings_empty:
@@ -2301,17 +2313,11 @@ class AgentRuntimeLoop:
         text = re.sub(r"```[a-z]*\n?", "", text)
         text = re.sub(r"\n?```", "", text)
 
-        # Step 2.5: tolerate common LLM mistake — [TOOL:SKILL_LOAD:X] is invalid
-        # syntax (SKILL_LOAD is its own top-level directive, NOT a tool name).
-        # Rewrite to the correct [SKILL_LOAD:X] form so the rest of the loop
-        # can find it via _skill_loads_in() without firing a false "skill-only
-        # called as tool" warning. The system prompt explicitly forbids this
-        # pattern, but tolerance reduces user-visible noise.
-        text = re.sub(
-            r"\[TOOL:SKILL_LOAD:(\w+)\]",
-            r"[SKILL_LOAD:\1]",
-            text,
-        )
+        # Step 2.5: tolerate small-model directive variants via the
+        # central normalizer (currently fixes the [TOOL:SKILL_LOAD:X]
+        # mistake; future tweaks live in runtime/directive_parser.py).
+        from runtime.directive_parser import normalize_directives
+        text = normalize_directives(text)
 
         calls: list[tuple[str, dict[str, Any]]] = []
 
@@ -2331,12 +2337,22 @@ class AgentRuntimeLoop:
         # but tracking '[' / ']' instead of '{' / '}'. Mismatched JSON
         # falls back to an empty list (skipping the batch entirely
         # rather than producing wrong cards).
-        for bm in re.finditer(r"\[TOOL_BATCH:(\w+)\]\s*(\[)?", text):
-            tool_name = bm.group(1)
-            if not bm.group(2):
+        from runtime.directive_parser import find_tool_batch_directives
+        for batch_d in find_tool_batch_directives(text):
+            tool_name = batch_d.name
+            if not batch_d.has_args_open:
                 # No opening bracket — degenerate batch directive, skip.
                 continue
-            start = bm.start(2)
+            # Find the '[' position — it's the first '[' after batch_d.end-1
+            # since the parser captures the args_open group via lookahead.
+            _scan_from = batch_d.end - 1   # end is exclusive; args_open is the last char
+            # Locate the actual '[' (may have been swallowed by whitespace
+            # between bracket and args; re-scan to be safe).
+            while _scan_from < len(text) and text[_scan_from] != '[':
+                _scan_from += 1
+            if _scan_from >= len(text):
+                continue
+            start = _scan_from
             depth = 0
             end = start
             in_str = False
@@ -2390,23 +2406,32 @@ class AgentRuntimeLoop:
 
         # Strip [TOOL_BATCH:...] [...] blocks from text so the standard
         # [TOOL:] scan below doesn't double-count anything inside them.
-        text = re.sub(
-            r"\[TOOL_BATCH:\w+\]\s*\[.*?\](?=\s|$)",
-            "",
-            text,
-            flags=re.DOTALL,
-        )
+        # Uses centralized parser to tolerate whitespace variants.
+        from runtime.directive_parser import strip_tool_batch_directives
+        text = strip_tool_batch_directives(text)
 
-        # Match [TOOL:toolname] then optional whitespace then optional JSON object
-        for m in re.finditer(r"\[TOOL:(\w+)\]\s*(\{)?", text):
-            tool_name = m.group(1)
-            if not m.group(2):
+        # Match [TOOL:toolname] then optional whitespace then optional JSON object.
+        # Uses centralized parser (tolerates `[TOOL: name]`, `[ tool : name ]`,
+        # `[tool:name]`, etc.). The brace-depth scan below stays here because
+        # regex cannot balance-match nested JSON reliably.
+        from runtime.directive_parser import find_tool_directives
+        for d in find_tool_directives(text):
+            tool_name = d.name
+            if not d.has_args_open:
                 # No opening brace — no args
                 calls.append((tool_name, {}))
                 continue
 
-            # Extract balanced JSON object starting at the {
-            start = m.start(2)
+            # Find the '{' position. d.end is just past the closing ']';
+            # the '{' captured by the parser is somewhere between then
+            # and the next non-whitespace char. Scan defensively.
+            start = d.end - 1
+            while start < len(text) and text[start] != '{':
+                start += 1
+            if start >= len(text):
+                # malformed (had open-brace signal but no actual brace?)
+                calls.append((tool_name, {}))
+                continue
             depth = 0
             end   = start
             in_str = False
@@ -2472,11 +2497,48 @@ class AgentRuntimeLoop:
                 return str(result)
             except Exception as exc:
                 return f"[Tool error: {exc}]"
-        return f"[Tool {tool_name!r} not registered — args={args}]"
+
+        # Tool not found — return a LLM-actionable error with fuzzy-match
+        # suggestions so the next turn can self-correct typos / synonyms
+        # without operator help.
+        #
+        # Typical cases that hit this path:
+        #   - Singular/plural error: list_device vs list_devices
+        #   - Synonym guess: get_devices vs list_devices
+        #   - Tier-1 ↔ Tier-2 mistake: prometheus vs prometheus_query
+        #   - Underscore-vs-camelCase: listDevices vs list_devices
+        #
+        # difflib.get_close_matches uses SequenceMatcher; cutoff 0.6 is
+        # tuned to suggest helpful matches without firing on totally
+        # unrelated names (which would just confuse the model further).
+        import difflib
+        candidates = sorted(registry.keys())
+        suggestions = difflib.get_close_matches(
+            tool_name, candidates, n=3, cutoff=0.6,
+        )
+        # Fallback for transposition / case mismatches that the ratio
+        # check misses: case-insensitive substring match.
+        if not suggestions:
+            lower = tool_name.lower()
+            suggestions = [c for c in candidates
+                           if lower in c.lower() or c.lower() in lower][:3]
+
+        if suggestions:
+            return (
+                f"[Tool {tool_name!r} not registered — args={args}]. "
+                f"Did you mean one of: {', '.join(suggestions)}? "
+                f"Use [TOOL:list_tools] to search the full registry."
+            )
+        return (
+            f"[Tool {tool_name!r} not registered — args={args}]. "
+            f"No similar tools found in the {len(candidates)}-tool registry. "
+            f"Use [TOOL:list_tools] to see what's available."
+        )
 
     @staticmethod
     def _skill_loads_in(response: str) -> set:
-        return set(re.findall(r"\[SKILL_LOAD:(\w+)\]", response))
+        from runtime.directive_parser import find_skill_load_names
+        return set(find_skill_load_names(response))
 
     @staticmethod
     def _is_complete(response: str, tool_calls: list) -> bool:
@@ -2486,9 +2548,10 @@ class AgentRuntimeLoop:
         # asked for skill detail and is waiting for it — keep the loop running
         # so next turn can read the loaded detail. Only mark complete if the
         # model produced real prose + tool calls alongside the SKILL_LOAD.
-        skill_loads = re.findall(r"\[SKILL_LOAD:\w+\]", response)
+        from runtime.directive_parser import find_skill_load_names, strip_skill_load_directives
+        skill_loads = find_skill_load_names(response)
         if skill_loads:
-            stripped = re.sub(r"\[SKILL_LOAD:\w+\]", "", response).strip()
+            stripped = strip_skill_load_directives(response).strip()
             if len(stripped) == 0 and len(tool_calls) == 0:
                 # Pure SKILL_LOAD — keep looping so next turn sees the detail
                 return False

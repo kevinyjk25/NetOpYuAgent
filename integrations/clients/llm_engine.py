@@ -134,7 +134,10 @@ class LLMEngine:
 
 TOOL CALL FORMAT: [TOOL:name] {{"arg": "value"}}
 Rules: one tool per response, never repeat a call, end with analysis (no [TOOL:] line) when you have enough info.
+MULTI-TARGET DESTRUCTIVE BATCH: when the SAME destructive tool needs to run on MULTIPLE TARGETS (e.g. "下发到 ap-01 和 ap-02"), use `[TOOL_BATCH:tool_name] [<args_dict_1>, <args_dict_2>, ...]` — a JSON array of args dicts, one per target. The system expands to N HITL cards under one batch_id. Example:
+  [TOOL_BATCH:edit_device_config] [{{"device_id": "ap-01", "config_lines": [...], "reason": "..."}}, {{"device_id": "ap-02", "config_lines": [...], "reason": "..."}}]
 Destructive tools (⚠HITL) — propose with concrete args; the operator will review before execution.
+ENTITY ALIAS: if the user used the wrong entity name and you found the real one (via list_devices etc), emit `[ALIAS: user_term = real_term]` so the correction survives to subsequent turns. Then USE THE REAL NAME in all tool calls.
 
 read_stored_result usage (STRICT):
 - ONLY call [TOOL:read_stored_result] when a previous tool output literally contains a `[STORED:name:ref_id]` label.
@@ -165,7 +168,7 @@ TOOL CALLING FORMAT — use EXACTLY this syntax on its own line:
 [TOOL:tool_name] {{"arg1": "value1", "arg2": "value2"}}
 
 STRICT RULES — follow exactly:
-1. Call AT MOST ONE tool per response — never list multiple [TOOL:] lines
+1. Call AT MOST ONE [TOOL:name] per response — never list multiple [TOOL:] lines. For multi-target destructive operations, use ONE [TOOL_BATCH:name] directive instead (see "DESTRUCTIVE OPERATIONS — multi-target batches" below).
 2. NEVER repeat a tool call you have already made this session
 3. When tool results appear in the context below, DO NOT call that tool again
 4. When you have enough information to answer, write your analysis WITHOUT any [TOOL:...] line
@@ -180,11 +183,32 @@ DESTRUCTIVE OPERATIONS — for tools marked ⚠ HITL (edit_device_config, push_c
 - The operator reviews YOUR proposed parameters in that card; they can approve, reject, or edit the parameters before the tool actually runs
 - Your job is to PROPOSE THE COMPLETE FIX, not to ask permission. If you don't propose a concrete fix, the operator has nothing to review.
 
+DESTRUCTIVE OPERATIONS — multi-target batches (use [TOOL_BATCH:] directive):
+- When the SAME destructive tool needs to run on MULTIPLE TARGETS as one logical step (e.g. user said "fix both ap-01 and ap-02", "下发到这两个设备", "push this ACL to all 3 access switches"), use the [TOOL_BATCH:name] directive instead of emitting one [TOOL:] per target.
+- Syntax: `[TOOL_BATCH:tool_name] <JSON array of args dicts>` on its own line.
+- Each element in the array is one args dict, just like a normal [TOOL:] would carry. The system expands the batch into N independent HITL approval cards under ONE batch_id, so the operator reviews all N targets together and can approve them as a group.
+- This is the ONLY way to surface a multi-target destructive operation in one HITL round. If you emit only ONE [TOOL:] and describe the other targets in prose, the second target will NEVER appear — the system will not infer it from text.
+- DO NOT mix [TOOL_BATCH:] with [TOOL:] of the same name in the same response. Pick ONE: either single-target [TOOL:] or multi-target [TOOL_BATCH:].
+- Single-target destructive operations still use plain [TOOL:name] as before — [TOOL_BATCH:] is only for multi-target.
+
+WORKED EXAMPLE — operator says "fix both ap-01 and ap-02":
+[TOOL_BATCH:edit_device_config] [
+  {{"device_id": "ap-01", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-01"}},
+  {{"device_id": "ap-02", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-02"}}
+]
+
 TOOLS vs SKILLS — critical distinction:
 - TOOLS (callable with [TOOL:name]): executable functions. Call them directly.
 - SKILLS listed in "Available skills" without a matching TOOL: procedural guides only — use the directive `[SKILL_LOAD:skill_id]` exactly. IMPORTANT: SKILL_LOAD is its OWN top-level directive — NEVER prefix it with TOOL: (write `[SKILL_LOAD:netflow_analysis]`, NOT `[TOOL:SKILL_LOAD:netflow_analysis]`).
 - If a name appears in BOTH the tool list AND the skills list (e.g. get_device_config, validate_device_config, list_devices), it IS a real callable tool — use [TOOL:name] directly. SKILL_LOAD is NOT needed.
 - Only use [SKILL_LOAD:skill_id] for skills that have no corresponding [TOOL:] entry in the AVAILABLE TOOLS list above.
+
+ENTITY ALIAS CORRECTIONS — when the user's term doesn't match a real entity:
+- If the user mentions an entity name that doesn't exist in the system but you find the REAL matching name (e.g. user said "core-01" but list_devices returned "sw-acc-01" / "sw-acc-02" instead), EMIT an `[ALIAS:...]` directive so the correction sticks across turns.
+- Syntax: `[ALIAS: user_term = real_term]` on its own line (e.g. `[ALIAS: core-01 = sw-acc-01]`).
+- One directive per correction. Multiple aliases are fine — emit multiple lines.
+- These are folded into the session's confirmed_facts and surfaced in the next turn's prompt under "ENTITY ALIASES". Once recorded, USE THE REAL NAME in subsequent tool calls — do NOT keep re-resolving the same correction every turn.
+- Only emit [ALIAS:...] when you're CONFIDENT about the mapping (e.g. you queried list_devices and there's no ambiguity). For unclear cases, ask the user instead.
 
 INVENTORY QUERIES — when asked what devices exist:
 - Use [TOOL:list_devices] {{}} to get ALL devices in one call
@@ -283,10 +307,15 @@ Return format:
 {"intent_type": "...", "confidence": 0.0-1.0, "intent_summary": "one sentence description"}"""
 
     def __init__(self, model: str, temperature: float = 0.1,
-                 max_tokens: int = 2048) -> None:
+                 max_tokens: int = 2048,
+                 capabilities: "LLMCapabilitiesProto | None" = None) -> None:
         self.model       = model
         self.temperature = temperature
         self.max_tokens  = max_tokens
+        # Per-model behaviour (thinking_tag, format_compliance, etc.).
+        # If None, callers get default qwen3.5-compatible behaviour via
+        # the legacy substring detection paths.
+        self.capabilities = capabilities
         # Retrieval framework attachments (optional, set via attach_retrieval()).
         # When None, _build_system_prompt falls back to legacy full-catalog dump.
         self._tool_retriever:     Any = None
@@ -323,17 +352,20 @@ Return format:
             return OllamaEngine(
                 model=model, temperature=temp, max_tokens=max_tok,
                 base_url=cfg.get("base_url", "http://localhost:11434"),
+                capabilities=cfg.get("capabilities"),
             )
         if backend == "openai":
             return OpenAIEngine(
                 model=model, temperature=temp, max_tokens=max_tok,
                 api_key_env=cfg.get("api_key_env", "OPENAI_API_KEY"),
                 base_url=cfg.get("base_url"),
+                capabilities=cfg.get("capabilities"),
             )
         if backend == "anthropic":
             return AnthropicEngine(
                 model=model, temperature=temp, max_tokens=max_tok,
                 api_key_env=cfg.get("api_key_env", "ANTHROPIC_API_KEY"),
+                capabilities=cfg.get("capabilities"),
             )
         # Default: mock
         return MockEngine(model=model, temperature=temp, max_tokens=max_tok)
@@ -567,15 +599,31 @@ Return format:
         # ── Confirmed facts (+ tool ledger + prior analysis) ───────────────────────
         facts_section = ""
         if confirmed_facts:
-            tool_exec_lines, prev_analysis_lines, semantic_facts = [], [], []
+            tool_exec_lines, prev_analysis_lines = [], []
+            alias_lines, semantic_facts = [], []
             for _f in confirmed_facts:
                 if _f.startswith("TOOL_EXEC: "):
                     tool_exec_lines.append(_f[len("TOOL_EXEC: "):])
                 elif _f.startswith("PREV_ANALYSIS: "):
                     prev_analysis_lines.append(_f[len("PREV_ANALYSIS: "):])
+                elif _f.startswith("ENTITY_ALIAS: "):
+                    # User said one term, system has a different real name.
+                    # Carry this prominently to every turn so the LLM stops
+                    # re-rediscovering the same correction.
+                    alias_lines.append(_f[len("ENTITY_ALIAS: "):])
                 else:
                     semantic_facts.append(_f)
             _parts = []
+            # Aliases first — strongest priority since they fix entity
+            # resolution at the foundation. If the LLM keeps tool-call'ing
+            # the user's wrong term, every downstream observation will
+            # also be wrong, so this must be unmissable.
+            if alias_lines:
+                _parts.append(
+                    "ENTITY ALIASES (the user's terms map to these real "
+                    "system names — USE THE REAL NAMES in all tool calls):\n"
+                    + "\n".join(f"  ⚠ {l}" for l in alias_lines[-10:])
+                )
             if tool_exec_lines:
                 # Filter: show stored-data entries (with ref=) and skip per-page reads
                 _filtered = [
@@ -681,19 +729,45 @@ class OllamaEngine(LLMEngine):
 
     def __init__(self, model: str, temperature: float, max_tokens: int,
                  base_url: str = "http://localhost:11434",
-                 think: bool = False) -> None:
-        super().__init__(model, temperature, max_tokens)
+                 think: bool = False,
+                 capabilities: "LLMCapabilitiesProto | None" = None) -> None:
+        super().__init__(model, temperature, max_tokens, capabilities=capabilities)
         self._base_url = base_url.rstrip("/")
         self._think    = think   # passed as think= to Ollama API for thinking models
 
     @property
     def _is_thinking_model(self) -> bool:
+        # Capability-driven (config) takes precedence.
+        cap = self.capabilities
+        if cap is not None:
+            tag = (getattr(cap, "thinking_tag", "") or "").strip().lower()
+            # Explicit "off"/"none"/"" means non-thinking model — regardless
+            # of what the model NAME suggests.
+            if tag in ("", "none", "off", "false", "no"):
+                return False
+            return True
+        # Legacy fallback: substring match against the historical set.
+        # Kept so callers that instantiate OllamaEngine without going
+        # through from_config (e.g. tests) keep working.
         return any(k in self.model.lower() for k in self.THINKING_MODELS)
 
     def _strip_think(self, text: str) -> str:
-        """Strip <think>...</think> reasoning blocks from model output."""
+        """Strip the configured reasoning tag block from model output.
+
+        Tag defaults to "think" (qwen3.x, deepseek-r1). New models may use
+        "reasoning" or something else — set llm.capabilities.thinking_tag
+        in config.yaml. If the tag is set to "none"/"off"/empty, no
+        stripping happens (non-thinking models).
+        """
         import re
-        cleaned = re.sub(r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE)
+        cap = self.capabilities
+        tag = (getattr(cap, "thinking_tag", "think") if cap else "think") or "think"
+        tag = tag.strip().lower()
+        if tag in ("", "none", "off", "false", "no"):
+            return text.strip()
+        # Escape the tag in case it contains regex metachars (defensive)
+        pat = rf"<{re.escape(tag)}>.*?</{re.escape(tag)}>"
+        cleaned = re.sub(pat, "", text, flags=re.DOTALL | re.IGNORECASE)
         return cleaned.strip()
 
     async def call(self, query: str, context: str,
@@ -1000,8 +1074,9 @@ class OpenAIEngine(LLMEngine):
 
     def __init__(self, model: str, temperature: float, max_tokens: int,
                  api_key_env: str = "OPENAI_API_KEY",
-                 base_url: Optional[str] = None) -> None:
-        super().__init__(model, temperature, max_tokens)
+                 base_url: Optional[str] = None,
+                 capabilities: "LLMCapabilitiesProto | None" = None) -> None:
+        super().__init__(model, temperature, max_tokens, capabilities=capabilities)
         self._api_key  = os.getenv(api_key_env, "")
         self._base_url = base_url
 
@@ -1063,8 +1138,9 @@ class AnthropicEngine(LLMEngine):
     """Claude API engine (claude-sonnet-4-6, claude-haiku-4-5)."""
 
     def __init__(self, model: str, temperature: float, max_tokens: int,
-                 api_key_env: str = "ANTHROPIC_API_KEY") -> None:
-        super().__init__(model, temperature, max_tokens)
+                 api_key_env: str = "ANTHROPIC_API_KEY",
+                 capabilities: "LLMCapabilitiesProto | None" = None) -> None:
+        super().__init__(model, temperature, max_tokens, capabilities=capabilities)
         self._api_key = os.getenv(api_key_env, "")
 
     async def call(self, query: str, context: str,

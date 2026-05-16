@@ -261,16 +261,76 @@ class ToolRouter:
                     if _schema is not None:
                         _vresult = validate_and_coerce(_schema, args)
                         if not _vresult.ok:
+                            # Build an LLM-actionable error. The model sees
+                            # this string as the tool result; its next turn
+                            # should produce a corrected [TOOL:] call.
+                            #
+                            # We add THREE pieces of help beyond the raw
+                            # validator errors:
+                            #   1. Echo the WRONG args back (so the model
+                            #      can compare side-by-side)
+                            #   2. For each unknown arg name, suggest a
+                            #      close-matching schema field name
+                            #      (handles typos like 'devic_id' vs 'device_id')
+                            #   3. For each enum-typed field, list the
+                            #      valid values when the LLM picked an
+                            #      invalid one
+                            import difflib as _diff
+                            import json as _json
                             _err_lines = [
-                                f"[ToolRouter] Schema validation failed for tool {tool_name!r}:",
-                                *(f"  - {e}" for e in _vresult.errors),
+                                f"[ToolRouter] Schema validation FAILED for tool {tool_name!r}.",
+                                f"YOUR ARGS:  {_json.dumps(args, ensure_ascii=False)[:300]}",
+                                f"PROBLEMS:",
                             ]
+                            _err_lines.extend(f"  - {e}" for e in _vresult.errors)
+
+                            # Detect unknown arg names → suggest close-by schema fields
+                            _schema_field_names = list(_schema.fields.keys())
+                            _unknown_args = [
+                                k for k in args.keys() if k not in _schema_field_names
+                            ]
+                            if _unknown_args and _schema_field_names:
+                                _suggest_lines = []
+                                for unk in _unknown_args:
+                                    near = _diff.get_close_matches(
+                                        unk, _schema_field_names, n=2, cutoff=0.5,
+                                    )
+                                    if near:
+                                        _suggest_lines.append(
+                                            f"  - Unknown arg {unk!r} — did you mean: {', '.join(near)}?"
+                                        )
+                                if _suggest_lines:
+                                    _err_lines.append("ARG NAME SUGGESTIONS:")
+                                    _err_lines.extend(_suggest_lines)
+
+                            # Detect invalid enum values → list valid choices
+                            _enum_lines = []
+                            for fname, fspec in _schema.fields.items():
+                                if getattr(fspec, "enum", None):
+                                    given = args.get(fname)
+                                    if given is not None and given not in fspec.enum:
+                                        _enum_lines.append(
+                                            f"  - {fname}={given!r} is not valid. "
+                                            f"Choose one of: {fspec.enum}"
+                                        )
+                            if _enum_lines:
+                                _err_lines.append("ENUM CONSTRAINTS:")
+                                _err_lines.extend(_enum_lines)
+
                             if _vresult.warnings:
-                                _err_lines.append("Warnings (coercion attempts):")
+                                _err_lines.append("COERCION WARNINGS:")
                                 _err_lines.extend(f"  - {w}" for w in _vresult.warnings)
+
                             # Show the schema so the LLM can self-correct
                             from schema import render_args_for_prompt
-                            _err_lines.append(f"Expected: {render_args_for_prompt(_schema, 'compact')}")
+                            _err_lines.append(
+                                f"EXPECTED SCHEMA: {render_args_for_prompt(_schema, 'compact')}"
+                            )
+                            _err_lines.append(
+                                f"NEXT STEP: emit a corrected [TOOL:{tool_name}] call "
+                                f"with the right field names and values. Do NOT call "
+                                f"this tool with the same args again."
+                            )
                             return "\n".join(_err_lines)
                         # Success — replace args with coerced version
                         if _vresult.warnings:

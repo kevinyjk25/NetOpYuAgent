@@ -193,8 +193,8 @@ DESTRUCTIVE OPERATIONS — multi-target batches (use [TOOL_BATCH:] directive):
 
 WORKED EXAMPLE — operator says "fix both ap-01 and ap-02":
 [TOOL_BATCH:edit_device_config] [
-  {"device_id": "ap-01", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-01"},
-  {"device_id": "ap-02", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-02"}
+  {{"device_id": "ap-01", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-01"}},
+  {{"device_id": "ap-02", "config_lines": ["no radius-server timeout 4", "radius-server timeout 3", "interface GigabitEthernet0", "ip access-group MGMT in"], "reason": "Fix RADIUS timeout and apply MGMT ACL on ap-02"}}
 ]
 
 TOOLS vs SKILLS — critical distinction:

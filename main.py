@@ -266,16 +266,36 @@ async def build_services() -> dict[str, Any]:
         tool_store = ToolResultStore()
         services["tool_store"] = tool_store
 
-        # 6a. LLM engine — always real (both modes)
+        # 6a. LLM engine — always real (both modes).
+        # `capabilities` plumbs through per-model behaviour (thinking_tag,
+        # format_compliance, etc.) so the engine doesn't have to guess from
+        # the model NAME via string matching.
         llm_engine = LLMEngine.from_config({
-            "backend":     cfg.llm.backend,
-            "model":       cfg.llm.model,
-            "base_url":    cfg.llm.base_url,
-            "temperature": cfg.llm.temperature,
-            "max_tokens":  cfg.llm.max_tokens,
+            "backend":      cfg.llm.backend,
+            "model":        cfg.llm.model,
+            "base_url":     cfg.llm.base_url,
+            "temperature":  cfg.llm.temperature,
+            "max_tokens":   cfg.llm.max_tokens,
+            "capabilities": cfg.llm.capabilities,
         })
         services["llm_engine"] = llm_engine  # patch_hitl_graph called after tool registry is built
         logger.info("LLM engine: %s/%s", cfg.llm.backend, cfg.llm.model)
+        logger.info("LLM capabilities: thinking_tag=%r format_compliance=%s "
+                    "max_context=%d native_tools=%s",
+                    cfg.llm.capabilities.thinking_tag,
+                    cfg.llm.capabilities.format_compliance,
+                    cfg.llm.capabilities.max_context_chars,
+                    cfg.llm.capabilities.supports_native_tools)
+
+        # Export capabilities as env vars so module-independent helpers
+        # (agent_memory.fact_extractor, agent_memory.user_model, etc.) can
+        # consume them without importing config — preserves the module
+        # independence contract while still giving them the right values.
+        # Only sets if the env var isn't already set (operator's manual
+        # override on the command line still wins).
+        import os as _cap_os
+        _cap_os.environ.setdefault("LLM_THINKING_TAG", cfg.llm.capabilities.thinking_tag or "")
+        _cap_os.environ.setdefault("LLM_FORMAT_COMPLIANCE", cfg.llm.capabilities.format_compliance)
 
         # Wire the LLM into the memory module so fact extraction works for
         # any language (default rule-based extractor is English-only regex).

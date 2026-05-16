@@ -35,6 +35,31 @@ llm:
   max_tokens:  4096
   log_detail:  "off"   # off | compact | full
 
+  # Per-model behaviour declarations. Set these per-model — they replace
+  # the old hardcoded THINKING_MODELS set. Override via env vars like
+  # LLM_THINKING_TAG, LLM_FORMAT_COMPLIANCE.
+  capabilities:
+    # Chain-of-thought tag to strip before tool parsing / response display.
+    # Common values: "think" (qwen3/qwen3.5/deepseek-r1), "reasoning" (some
+    # newer models). Set to "none" / "off" / empty to disable stripping
+    # (e.g. for non-thinking models like qwen2.5, mistral, llama3).
+    thinking_tag: "think"
+
+    # How reliably this model follows the [TOOL:name] {"k":"v"} syntax.
+    #   high:   trust output, no retries on parse failure
+    #   medium: one retry with stricter prompt addendum on parse failure
+    #   low:    two retries + temperature drop to 0.0 on retry
+    # Drop to "medium" or "low" if you observe parse failures with a new model.
+    format_compliance: "high"
+
+    # Soft context budget. The engine logs a warning if system+user exceeds
+    # this; useful as an early signal that pagination/compaction is needed.
+    max_context_chars: 32000
+
+    # Reserved for Tier-1-C migration to Ollama native tools API. Keep off
+    # until that path is built — the [TOOL:] in-band protocol still runs.
+    supports_native_tools: false
+
 
 # ── Embeddings ───────────────────────────────────────────────
 # Used by BOTH modes — always real.
