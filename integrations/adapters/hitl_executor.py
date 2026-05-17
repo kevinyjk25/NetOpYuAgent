@@ -836,7 +836,7 @@ class HitlExecutor:
             _chunks.append(chunk)
             if _interrupt_id:
                 try:
-                    _chunk_queue.push(_interrupt_id, chunk)
+                    _chunk_queue.push(_interrupt_id, chunk, session_id=session_id)
                 except Exception:
                     # Don't let a streaming hiccup block the tool path;
                     # the synchronous return value still carries the
@@ -1075,9 +1075,11 @@ class HitlExecutor:
             try:
                 ch_dict = dict(ch)
                 _chunk_log.append(ch_dict)
-                # Push to live queue for SSE subscribers (non-blocking)
+                # Push to live queue for SSE subscribers (non-blocking).
+                # session_id is forwarded so a subsequent chat_stream on
+                # the same session can close stale streams (audit fix D).
                 if _interrupt_id:
-                    _chunk_queue.push(_interrupt_id, ch_dict)
+                    _chunk_queue.push(_interrupt_id, ch_dict, session_id=session_id)
             except Exception:
                 pass
 

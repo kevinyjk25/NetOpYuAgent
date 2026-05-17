@@ -1148,6 +1148,16 @@ async def lifespan(app: FastAPI):
     except Exception as _jc_exc:
         logger.warning("SkillJournalConsumer start failed: %s", _jc_exc)
 
+    # Start HITL chunk-queue idle watchdog — auto-completes streams that
+    # have gone silent for > idle_timeout seconds. Prevents a hung HITL
+    # resumer from leaking stale chunks into a subsequent chat_stream
+    # turn on the same session.  See AUDIT_REPORT issue D.
+    try:
+        from hitl_core.chunk_queue import get_chunk_queue_registry
+        get_chunk_queue_registry().start_idle_watchdog()
+    except Exception as _cq_exc:
+        logger.warning("ChunkQueue idle watchdog start failed: %s", _cq_exc)
+
     yield
 
     # Stop SkillJournalConsumer before other teardown

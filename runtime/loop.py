@@ -2172,6 +2172,73 @@ class AgentRuntimeLoop:
                         "node_step": "Premature-pivot nudge injected",
                         "node": "runtime_loop",
                     }
+
+                # UNREAD STORED nudge — fires when the previous tool returned
+                # a [STORED:...] reference (large result spilled to disk) and
+                # the LLM did NOT call read_stored_result this turn.
+                #
+                # Symptom observed in the wild: qwen3.5:27b sees a
+                # `[STORED:prometheus:<ref>]` response, ignores the ref_id,
+                # and re-issues the SAME query tool with slightly different
+                # args hoping for inline data. dedup_key catches identical
+                # args but not "args with one field tweaked", so the loop
+                # spirals (Turn 2/3/4 all firing prometheus_query, never
+                # synthesising).
+                #
+                # Distinct from `_premature_pivot`:
+                #   _premature_pivot: previous call WAS read_stored_result, and
+                #                     "Has more: True" — abandoned mid-read.
+                #   _unread_stored:   previous call returned STORED ref the LLM
+                #                     hasn't yet read at all, regardless of
+                #                     "Has more" status.
+                _unread_stored = False
+                try:
+                    # Look at the most recent tool output. If it's a STORED
+                    # reference AND this turn's new_tool_calls didn't include
+                    # read_stored_result, we have an unread STORED.
+                    if tool_outputs and new_tool_calls:
+                        _last_out = list(tool_outputs.values())[-1]
+                        _last_out_s = str(_last_out)
+                        _last_was_stored = (
+                            _last_out_s.startswith("[STORED:")
+                            or "[STORED:" in _last_out_s[:80]   # tolerate header prefix
+                        )
+                        _this_turn_reads = any(
+                            n == "read_stored_result" for (n, _) in new_tool_calls
+                        )
+                        _unread_stored = (
+                            _last_was_stored
+                            and not _this_turn_reads
+                            and not getattr(state, "_unread_stored_nudged", False)
+                        )
+                except Exception:
+                    _unread_stored = False
+
+                if _unread_stored and _enabled:
+                    # Pull the ref_id out of the [STORED:tool_name:ref_id]
+                    # label so the nudge can include the exact id the LLM
+                    # should pass back. Falls back to placeholder if parse
+                    # fails — nudge still useful as a directive.
+                    import re as _re_local
+                    _ref_match = _re_local.search(
+                        r"\[STORED:[^:]+:([A-Za-z0-9_-]+)\]", _last_out_s
+                    )
+                    _ref_id = _ref_match.group(1) if _ref_match else "<the ref_id from the [STORED:] label>"
+                    _unread_nudge = (
+                        f"_NUDGE: The previous tool returned a stored reference "
+                        f"`[STORED:...:{_ref_id}]` — the actual data is on disk, "
+                        f"not in this prompt. To analyse it you MUST call: "
+                        f'[TOOL:read_stored_result] {{"ref_id":"{_ref_id}","offset":0}}'
+                        f" — DO NOT re-issue the original tool with tweaked args "
+                        f"hoping for inline data; that will just produce another "
+                        f"STORED reference."
+                    )
+                    state.confirmed_facts.append(_unread_nudge)
+                    state._unread_stored_nudged = True
+                    yield {
+                        "node_step": "Unread-STORED nudge injected",
+                        "node": "runtime_loop",
+                    }
             except Exception:
                 # Defence-in-depth — never let nudge logic crash the turn
                 pass

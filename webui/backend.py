@@ -393,6 +393,25 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         task_id     = "task-" + _uuid.uuid4().hex[:12]
         context_id  = session_id
 
+        # Close any HITL sub-streams still live from a PRIOR turn on this
+        # same session. Without this, the SSE history of a long-running
+        # HITL resumer (e.g. agent_loop_resumer that hung mid-execution)
+        # can leak chunks into the UI of THIS new turn — operators see
+        # stale "HITL approve" / "Skills matched" / Turn-N traces mixed
+        # into their fresh query.  See AUDIT_REPORT issue D.
+        try:
+            from hitl_core.chunk_queue import get_chunk_queue_registry
+            _closed = await get_chunk_queue_registry().close_session_streams(session_id)
+            if _closed:
+                logger.info(
+                    "chat_stream: closed %d stale HITL stream(s) for session=%s "
+                    "before starting new turn",
+                    _closed, session_id[:12],
+                )
+        except Exception as _close_exc:
+            # Never let lifecycle hygiene block the actual chat — log and continue
+            logger.debug("chat_stream: close_session_streams skipped: %s", _close_exc)
+
         executor    = services.get("executor")
         loop        = services["runtime_loop"]
         # New unified memory backend (agent_memory.MemoryManager via adapter).

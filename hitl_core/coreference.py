@@ -79,6 +79,28 @@ _PRONOUN_RE = re.compile(
 )
 
 
+def _strip_hitl_templates(query: str) -> str:
+    """Strip HITL augmentation markers from a query so they don't leak
+    pronouns/keywords into coreference detection.
+
+    When the agent_loop_resumer re-runs after a HITL choose/clarification,
+    it augments the original query with marker blocks like
+    `[OPERATOR DISAMBIGUATION] ... proceed using ...` or
+    `[RESOLVED FROM CONTEXT] target_device = ap-02`. These template texts
+    contain pronoun-like words ("proceed", "this", "it") and entity
+    mentions that trick the heuristic into firing on a fresh query.
+
+    Strip everything from the first `[OPERATOR ...]` / `[RESOLVED ...]`
+    onward so only the operator's original wording is examined.
+    """
+    if not query:
+        return ""
+    # Match the start of any HITL augmentation block.
+    # Greedy from first \n\n[ATTRIBUTE_IN_CAPS] onward.
+    m = re.search(r"\n\n\[(?:OPERATOR|RESOLVED) [A-Z\- ]+\]", query)
+    return query[:m.start()] if m else query
+
+
 def _query_looks_like_coreference(query: str) -> bool:
     """Heuristic: should we attempt to resolve a focus entity for this
     query? Only when the query CONTAINS a pronoun or elliptical marker,
@@ -93,8 +115,12 @@ def _query_looks_like_coreference(query: str) -> bool:
     the LLM can infer from recall, which is its baseline. A false-positive
     binding can corrupt a fresh user query (the bug we're fixing here)
     so we err on the side of NOT binding when ambiguous.
+
+    HITL-template markers ([OPERATOR DISAMBIGUATION], [RESOLVED FROM
+    CONTEXT], etc) are stripped before the check so their boilerplate
+    text ("proceed using context ...") doesn't trigger detection.
     """
-    q = (query or "").strip()
+    q = _strip_hitl_templates(query or "").strip()
     if not q:
         return False
     if _PRONOUN_RE.search(q):
@@ -206,13 +232,36 @@ class Coreferencer:
         if not _query_looks_like_coreference(query or ""):
             return CoreferenceResult(entity=None, source="")
 
+        # Collect ALL distinct entities mentioned anywhere in context.
+        # Last-mention wins as before, but we also need the SET to detect
+        # ambiguity: when the recall surface mentions multiple devices
+        # (e.g. ap-01 AND ap-02 from a prior batch) AND the query is a
+        # bare continuation cue ('请继续') that doesn't name one, we
+        # can't be sure which the operator means → don't bind. Returning
+        # entity=None lets the LLM pick from full recall context, which
+        # is the safer behaviour than committing to a guess.
+        all_mentions: list[str] = []
         last_mention: Optional[str] = None
         last_evidence = ""
         for pat in self._entity_patterns:
             for m in pat.finditer(ctx):
+                all_mentions.append(m.group(0))
                 last_mention = m.group(0)
                 last_evidence = ctx[max(0, m.start()-20):m.end()+20]
+
         if last_mention:
+            distinct = {e.lower() for e in all_mentions}
+            # Continuation cue (≤ 6 chars, like '请继续' / '继续' / '继续呢')
+            # with multiple candidate entities → ambiguous, don't bind.
+            stripped_q = _strip_hitl_templates(query or "").strip()
+            is_bare_continuation = len(stripped_q) <= 6 and len(distinct) >= 2
+            if is_bare_continuation:
+                logger.debug(
+                    "coref: bare continuation %r matches %d entities %s — "
+                    "not binding (ambiguous)", stripped_q, len(distinct),
+                    sorted(distinct),
+                )
+                return CoreferenceResult(entity=None, source="ambiguous")
             return CoreferenceResult(
                 entity=last_mention,
                 source="free_mention",
