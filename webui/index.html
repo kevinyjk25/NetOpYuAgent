@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Cache-busting: every page-load fetches fresh JS, prevents stale UI -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>IT Ops Agent — Console</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
 <!-- Markdown + mermaid rendering for agent responses -->
@@ -905,6 +909,11 @@ Type a query below. The agent will:
 
 <script>
 
+// UI build marker: bump when shipping a frontend change so we can verify
+// the browser isn't serving a cached version. Check via Console:
+//   > console.log(UI_BUILD)
+const UI_BUILD = '2026-05-17-ux-fix-v3 (placeholder + heartbeat + bubble update)';
+console.log('[UI_BUILD]', UI_BUILD);
 
 
 // ── Session history navigation ────────────────────────────────────────────
@@ -1649,6 +1658,7 @@ function addMessage(role, content, cls='') {
   msgs.appendChild(wrap);
   if (role === 'agent') _renderMermaidIn(wrap);
   msgs.scrollTop = msgs.scrollHeight;
+  return wrap;
 }
 
 function addThinking() {
@@ -2065,6 +2075,49 @@ function dispatchChunk(c, query, sid) {
       streamState.paused = true;   // reuse the paused flag so finalizeStream() doesn't overwrite
       const lbl = document.getElementById(streamState.sid + '-label');
       if (lbl) lbl.textContent = '⏱ LLM backend timed out — request cancelled';
+    }
+    return;
+  }
+  if (c.type==='progress') {
+    // Heartbeat emitted by the agent_loop_resumer every N tool calls.
+    // Surfaces "agent is alive, here's what it's done so far" while a
+    // long HITL resume runs (e.g. 23 read_stored_result pages through a
+    // big netflow_dump). Without this the operator sees the chat go
+    // silent for minutes and can't tell whether the agent crashed or
+    // is still working.
+    const tc = c.tool_calls || 0;
+    const turns = c.turns || 0;
+    const el = (typeof c.elapsed_s === 'number') ? `${c.elapsed_s.toFixed(0)}s` : '';
+    const summary = `${tc} tool calls · ${turns} turns · ${el}`;
+    addStep('progress', '⏳ Agent working', summary, c.message || '');
+    flowEvent('hitl', `⏳ Working (${tc} tools)`, summary, '');
+
+    // ALSO update the in-chat HITL placeholder bubble so the operator
+    // sees progress without switching tabs. dispatchChunk has no direct
+    // access to the interrupt id, so c.interrupt_id (set server-side in
+    // _capture_chunk OR force-stamped client-side in openHitlStream) is
+    // the anchor. If we can find a registered placeholder for it,
+    // rewrite the bubble body in place.
+    const iid = c.interrupt_id || '';
+    const el2 = iid ? _hitlPlaceholders.get(iid) : null;
+    console.log('[progress]', {
+      iid: iid.slice(0, 10),
+      tc, turns, phase: c.phase,
+      placeholder_registered: !!el2,
+      map_size: _hitlPlaceholders.size,
+      map_keys: Array.from(_hitlPlaceholders.keys()).map(k => k.slice(0, 10)),
+    });
+    if (el2) {
+      const bubble = el2.querySelector('.bubble');
+      if (bubble) {
+        bubble.innerHTML = _renderMarkdown(
+          `**⏳ HITL — working** \`${iid.slice(0, 10)}…\`\n\n` +
+          `**${tc}** tool calls · **${turns}** turns · **${el}** elapsed\n\n` +
+          `${c.message || 'Agent is processing your request...'}`
+        );
+      } else {
+        console.warn('[progress] placeholder element has no .bubble child', el2);
+      }
     }
     return;
   }
@@ -2627,6 +2680,13 @@ function openHitlStream(interruptId) {
         // chunks populate Results/Cache tabs, tokens accumulate, llm_trace
         // shows turn cards, etc. Without this we lose tool results, store
         // labels, and turn-by-turn LLM output.
+        // Force-stamp interrupt_id from the URL we opened — server-side
+        // value may be missing on some chunks (e.g. nested resume chunks
+        // that don't propagate it). The frontend placeholder dispatcher
+        // needs this to find the right bubble.
+        if (!chunk.interrupt_id) {
+          chunk.interrupt_id = interruptId;
+        }
         try {
           dispatchChunk(chunk, '(hitl resume)', (typeof getSession === 'function' ? getSession() : ''));
         } catch (e) {
@@ -2654,6 +2714,26 @@ async function hitlDecExtra(id, dec, extras) {
     btn.disabled = true;
     btn.style.opacity = '0.5';
   });
+
+  // UX: insert an immediate placeholder so the operator gets feedback the
+  // moment they click — without it, the chat is silent for the full
+  // resumer duration (which can be 60s+ on slow local LLMs running
+  // multi-tool chains). The placeholder gets replaced when the final
+  // response arrives below; meanwhile `progress` chunks streamed via
+  // openHitlStream update the in-progress indicator.
+  let _placeholderEl = null;
+  try {
+    _placeholderEl = addMessage('agent',
+      `**⏳ HITL ${dec}** — \`${id.slice(0, 10)}…\`\n\n` +
+      `Working on it... (live progress will appear in the steps panel)`,
+      'agent');
+    // Register so the progress chunk dispatcher can find this bubble and
+    // update its body in-place (see dispatchChunk 'progress' handler).
+    if (_placeholderEl) {
+      _hitlPlaceholders.set(id, _placeholderEl);
+    }
+  } catch (_) { /* addMessage may not return an element; non-fatal */ }
+
   try {
     const body = Object.assign(
       { operator_id: 'webui-operator', comment: `${dec} via Console` },
@@ -2733,6 +2813,7 @@ async function hitlDecExtra(id, dec, extras) {
     alert('Submit failed: ' + (e.message||e));
   } finally {
     _hitlInFlight.delete(id);
+    _hitlPlaceholders.delete(id);
   }
 }
 
@@ -2740,6 +2821,13 @@ async function hitlDecExtra(id, dec, extras) {
 // already resolved" errors when polling re-renders a card whose decision
 // is already being processed. Cleared in hitlDec/hitlDecExtra finally.
 const _hitlInFlight = new Set();
+
+// Map interrupt_id → placeholder bubble element. The bubble is created in
+// hitlDecExtra the moment the operator clicks (so they get instant
+// feedback) and progress chunks from the agent_loop_resumer find it here
+// to update its body in-place — turning the static "Working on it..." into
+// a live "5 tool calls, 30s elapsed" indicator.
+const _hitlPlaceholders = new Map();
 
 async function hitlDec(id,dec) {
   // Guard: don't fire a second decision while one is in flight for the

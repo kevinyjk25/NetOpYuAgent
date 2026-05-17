@@ -298,7 +298,14 @@ def make_read_stored_result_tool(tool_store):
     async def read_stored_result(args: dict[str, Any]) -> str:
         ref_id = args.get("ref_id", "")
         offset = int(args.get("offset", 0))
-        length = int(args.get("length", 2000))
+        # Default length raised from 2000 to 8000 chars (~2K tokens) so a
+        # typical netflow_dump or syslog page-through completes in 5-7 pages
+        # instead of 25+. LLM is still free to override with smaller value
+        # for sampling, but the default favours fewer turns over fewer tokens
+        # per turn — turns are the bottleneck on slow local models.
+        # Hard cap at 16000 to keep one page under typical 4K-token budgets.
+        length = int(args.get("length", 8000))
+        length = max(256, min(length, 16000))
 
         if not ref_id:
             return "[Error: ref_id is required]"

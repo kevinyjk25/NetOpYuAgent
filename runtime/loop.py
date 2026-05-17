@@ -2224,14 +2224,29 @@ class AgentRuntimeLoop:
                         r"\[STORED:[^:]+:([A-Za-z0-9_-]+)\]", _last_out_s
                     )
                     _ref_id = _ref_match.group(1) if _ref_match else "<the ref_id from the [STORED:] label>"
+                    # Two-option nudge: page-read for quick samples, OR
+                    # process_stored_chunks for whole-file analysis. The
+                    # second option exists precisely to avoid the 23-page
+                    # death-march we saw operators experience while the
+                    # agent paged through a netflow_dump. process_stored_chunks
+                    # runs filter/count/extract/summarise across the entire
+                    # stored result in a single call.
                     _unread_nudge = (
                         f"_NUDGE: The previous tool returned a stored reference "
                         f"`[STORED:...:{_ref_id}]` — the actual data is on disk, "
-                        f"not in this prompt. To analyse it you MUST call: "
-                        f'[TOOL:read_stored_result] {{"ref_id":"{_ref_id}","offset":0}}'
-                        f" — DO NOT re-issue the original tool with tweaked args "
-                        f"hoping for inline data; that will just produce another "
-                        f"STORED reference."
+                        f"not in this prompt. To analyse it choose ONE of:\n"
+                        f"  (A) For whole-file analysis (anomaly detection, "
+                        f"filtering, counting, extracting patterns) use ONE call:\n"
+                        f'      [TOOL:process_stored_chunks] {{"ref_id":"{_ref_id}","operation":"summarise"}}\n'
+                        f"      Other operations: filter / reject / extract / count / passthrough.\n"
+                        f"      This is the RIGHT tool when you want findings about "
+                        f"the entire dataset — it handles all pages for you.\n"
+                        f"  (B) For sampling just the first few KB (a quick look):\n"
+                        f'      [TOOL:read_stored_result] {{"ref_id":"{_ref_id}","offset":0,"length":8000}}\n'
+                        f"      Use `length` ≥ 8000 to minimise paging. Do NOT page "
+                        f"through 25 × 2KB chunks — that wastes turns.\n"
+                        f"DO NOT re-issue the original tool with tweaked args; "
+                        f"that will just produce another STORED reference."
                     )
                     state.confirmed_facts.append(_unread_nudge)
                     state._unread_stored_nudged = True

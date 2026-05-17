@@ -1071,17 +1071,161 @@ class HitlExecutor:
         _chunk_queue = get_chunk_queue_registry()
         _interrupt_id = getattr(entry, "interrupt_id", None) or state.get("interrupt_id", "")
 
+        # Progress heartbeat counters: track tool calls + turns so we can
+        # inject explicit `progress` chunks every few tool calls. Without
+        # this the UI sits silent during a long agent_loop_resumer run
+        # (e.g. 24 chained read_stored_result pages) — chunks DO arrive
+        # (tool_call, runtime_tool_result) but they look like internal
+        # plumbing to operators, not "we're at step 12 of N".
+        _progress_state = {
+            "tool_calls":          0,
+            "turns":               0,
+            "last_progress_emit":  0,   # tool_calls at last emit
+            "started_at":          __import__("time").monotonic(),
+        }
+        # Emit a progress chunk on EVERY tool call AND every LLM turn so
+        # the UI stays alive even when a single tool call takes 60-90s
+        # (typical for slow local LLMs). Setting INTERVAL=1 ensures the
+        # operator sees motion no matter what the resumer does next.
+        _PROGRESS_INTERVAL = 1
+
         async def _capture_chunk(ch: dict) -> None:
             try:
                 ch_dict = dict(ch)
                 _chunk_log.append(ch_dict)
-                # Push to live queue for SSE subscribers (non-blocking).
+
+                # Heartbeat: count tool calls (chunks with kind="tool_call"
+                # or node=="runtime_tool_result" indicate a tool just ran)
+                _kind = (
+                    ch_dict.get("kind")
+                    or ch_dict.get("type")
+                    or ch_dict.get("node")
+                    or ""
+                )
+                _step = ch_dict.get("node_step", "") or ""
+                _tool_just_ran = (
+                    _kind == "runtime_tool_result" or _step.startswith("TOOL◀")
+                )
+                _turn_started = _step.startswith("Turn ")
+                if _tool_just_ran:
+                    _progress_state["tool_calls"] += 1
+                if _turn_started:
+                    _progress_state["turns"] += 1
+
+                # Emit a synthetic `progress` chunk on EITHER a tool
+                # completion OR a new LLM turn. With INTERVAL=1 (every
+                # tool call) plus turn-start triggers, the UI gets a
+                # heartbeat at every meaningful agent state change:
+                #   - "Turn 3 — calling LLM..." (turn-start)
+                #   - "Tool call 5 complete — read_stored_result" (tool-end)
+                # Operators see continuous motion instead of long silences.
+                _should_emit = False
+                _tcalls = _progress_state["tool_calls"]
+                if _tool_just_ran and _tcalls - _progress_state["last_progress_emit"] >= _PROGRESS_INTERVAL:
+                    _progress_state["last_progress_emit"] = _tcalls
+                    _should_emit = True
+                elif _turn_started:
+                    _should_emit = True
+
+                if _should_emit:
+                    import time as _t
+                    _elapsed = _t.monotonic() - _progress_state["started_at"]
+                    # Try to surface the actual tool name in the message
+                    # so operators see "Tool call 5 — read_stored_result"
+                    # not just "5 tool calls"
+                    _last_tool = (
+                        ch_dict.get("tool")
+                        or ch_dict.get("tool_name")
+                        or ""
+                    )
+                    if _turn_started:
+                        _msg = (
+                            f"Turn {_progress_state['turns']} — LLM thinking "
+                            f"({_tcalls} tools used, {_elapsed:.0f}s elapsed)"
+                        )
+                    else:
+                        _msg = (
+                            f"Tool call {_tcalls} complete"
+                            + (f" — {_last_tool}" if _last_tool else "")
+                            + f" ({_progress_state['turns']} turns, {_elapsed:.0f}s elapsed)"
+                        )
+                    _progress_chunk = {
+                        "type":          "progress",
+                        "tool_calls":    _tcalls,
+                        "turns":         _progress_state["turns"],
+                        "elapsed_s":     round(_elapsed, 1),
+                        "last_tool":     _last_tool,
+                        "phase":         ("turn_start" if _turn_started else "tool_end"),
+                        "message":       _msg,
+                        "interrupt_id":  _interrupt_id,
+                    }
+                    _chunk_log.append(_progress_chunk)
+                    if _interrupt_id:
+                        _chunk_queue.push(_interrupt_id, _progress_chunk, session_id=session_id)
+                    # Stamp heartbeat clock so the wall-clock heartbeat
+                    # loop doesn't duplicate-emit right after this.
+                    try:
+                        _heartbeat_state["last_emit_at"] = __import__("time").monotonic()
+                    except Exception:
+                        pass
+
+                # Push the original chunk to the live queue for SSE subscribers.
                 # session_id is forwarded so a subsequent chat_stream on
                 # the same session can close stale streams (audit fix D).
                 if _interrupt_id:
                     _chunk_queue.push(_interrupt_id, ch_dict, session_id=session_id)
             except Exception:
                 pass
+
+        # Wall-clock heartbeat: if LLM thinking on a slow local model takes
+        # 60-120s, the event-driven progress emit (tied to tool completion
+        # or turn start) is silent during that whole window. A separate
+        # async task emits a "still thinking" progress chunk every
+        # HEARTBEAT_INTERVAL seconds so the UI stays alive regardless.
+        _HEARTBEAT_INTERVAL = 10.0   # seconds
+        _heartbeat_state = {"last_emit_at": _progress_state["started_at"]}
+
+        async def _heartbeat_loop():
+            import time as _t
+            try:
+                while True:
+                    await asyncio.sleep(_HEARTBEAT_INTERVAL)
+                    _now = _t.monotonic()
+                    # Only fire if no event-driven progress fired recently
+                    # (otherwise we'd duplicate; check via _capture_chunk's
+                    # progress_state.last_progress_emit isn't time-based,
+                    # so fall back to our own _heartbeat_state.last_emit_at,
+                    # which IS updated whenever ANY progress emits).
+                    if _now - _heartbeat_state["last_emit_at"] < _HEARTBEAT_INTERVAL * 0.8:
+                        # Something else emitted recently; skip
+                        continue
+                    _elapsed = _now - _progress_state["started_at"]
+                    _hb_chunk = {
+                        "type":         "progress",
+                        "tool_calls":   _progress_state["tool_calls"],
+                        "turns":        _progress_state["turns"],
+                        "elapsed_s":    round(_elapsed, 1),
+                        "phase":        "heartbeat",
+                        "message":      (
+                            f"Still working — {_progress_state['tool_calls']} tools, "
+                            f"{_progress_state['turns']} turns, {_elapsed:.0f}s elapsed "
+                            f"(LLM may be thinking on a long prompt)"
+                        ),
+                        "interrupt_id": _interrupt_id,
+                    }
+                    _chunk_log.append(_hb_chunk)
+                    if _interrupt_id:
+                        _chunk_queue.push(
+                            _interrupt_id, _hb_chunk, session_id=session_id,
+                        )
+                    _heartbeat_state["last_emit_at"] = _now
+            except asyncio.CancelledError:
+                # Normal — heartbeat is cancelled when execute_query returns
+                raise
+
+        _heartbeat_task = asyncio.create_task(
+            _heartbeat_loop(), name="hitl_resumer_heartbeat",
+        )
 
         # Wrap execute_query: even on exception, surface captured chunks
         # so the frontend sees progressive trace + a clear error reason.
@@ -1108,6 +1252,12 @@ class HitlExecutor:
                 pass
             if _interrupt_id:
                 _chunk_queue.complete(_interrupt_id)
+            # Cancel the heartbeat task on the error path too
+            _heartbeat_task.cancel()
+            try:
+                await _heartbeat_task
+            except (asyncio.CancelledError, Exception):
+                pass
             return {
                 "text":       _err_text,
                 "decision":   decision.decision.value,
@@ -1119,6 +1269,15 @@ class HitlExecutor:
         # Signal end-of-stream so SSE subscribers exit
         if _interrupt_id:
             _chunk_queue.complete(_interrupt_id)
+
+        # Cancel the wall-clock heartbeat task on the success path.
+        # asyncio.gather wouldn't help here because heartbeat is intended
+        # to outlive execute_query if it stalled — we explicitly cancel.
+        _heartbeat_task.cancel()
+        try:
+            await _heartbeat_task
+        except (asyncio.CancelledError, Exception):
+            pass
 
         return {
             "text":       result.get("text", ""),

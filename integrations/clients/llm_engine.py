@@ -896,7 +896,7 @@ class OllamaEngine(LLMEngine):
         # Set before starting:  export LLM_LOG_DETAIL=compact
         # Or switch live:       export LLM_LOG_DETAIL=full  (takes effect next call)
         import os as _os
-        _detail = _os.getenv("LLM_LOG_DETAIL", "full").lower()
+        _detail = _os.getenv("LLM_LOG_DETAIL", "compact").lower()
         _sep    = "─" * 72
 
         if _detail in ("compact", "full"):
