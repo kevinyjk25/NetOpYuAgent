@@ -26,7 +26,10 @@ from typing import Any, AsyncIterator, Optional, TYPE_CHECKING
 
 from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolResultStore
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
-from .directive_parser import has_any_tool_directive as _has_any_tool_directive
+from .directive_parser import (
+    has_any_tool_directive as _has_any_tool_directive,
+    has_skill_load as _has_skill_load,
+)
 
 
 def _truncation_cfg():
@@ -2237,13 +2240,13 @@ class AgentRuntimeLoop:
                 # Capture final synthesis response (not intermediate page-reading turns).
                 # Use the directive parser's tolerance so a `[TOOL: name]` (space
                 # after colon) doesn't slip through as "synthesis" and pollute
-                # the next turn's PREV_ANALYSIS. Also covers [TOOL_BATCH:] which
-                # the old substring check ignored entirely.
+                # the next turn's PREV_ANALYSIS. Also covers [TOOL_BATCH:] and
+                # [SKILL_LOAD:] variants the old substring check ignored.
                 _resp_clean = llm_response.strip()
                 _is_synthesis = (
                     len(_resp_clean) > 150
                     and not _has_any_tool_directive(_resp_clean)
-                    and "[SKILL_LOAD:" not in _resp_clean
+                    and not _has_skill_load(_resp_clean)
                     and state.turns > 1
                 )
                 if _is_synthesis:

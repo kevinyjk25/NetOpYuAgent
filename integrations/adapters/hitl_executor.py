@@ -414,8 +414,8 @@ class HitlExecutor:
         )
         await self._router.register_payload(entry)
         logger.info(
-            "Tool HITL raised: id=%s tool=%s editable=%s",
-            payload.interrupt_id[:12], tool_name, editable_keys,
+            "Tool HITL raised: id=%s tool=%s target=%s editable=%s",
+            payload.interrupt_id[:12], tool_name, _target, editable_keys,
         )
         return payload.interrupt_id
 
@@ -530,9 +530,15 @@ class HitlExecutor:
         # Without it, batch HITL approve → silent no-op (visible in
         # the UI as "approved action is executing" forever).
         batch_future = await self._router.batch.open_batch(batch)
+        # Collect child targets for logging — operators want to see at a
+        # glance which devices were batched without spelunking the audit log.
+        _targets = [
+            str(a.get("device_id") or a.get("target") or "-")
+            for (_, a) in calls
+        ]
         logger.info(
-            "Tool HITL batch raised: batch_id=%s tool=%s children=%d",
-            batch.batch_id[:12], tool_name, len(child_entries),
+            "Tool HITL batch raised: batch_id=%s tool=%s children=%d targets=%s",
+            batch.batch_id[:12], tool_name, len(child_entries), _targets,
         )
 
         # Per-child (tool_name, args) snapshot so the background runner
