@@ -88,7 +88,13 @@ _DDL = [
 ]
 
 _FTS5_RESERVED = re.compile(r'\b(AND|OR|NOT|NEAR|COLUMN|ROW|MATCH)\b', re.IGNORECASE)
-_FTS5_SPECIAL  = re.compile(r'["\'\(\)\*\+\-\:\^\.\/ ]+')
+# Strip every byte FTS5 treats as a query operator. Missing ANY of these
+# causes "syntax error near …" warnings in the recall path the moment a
+# user query or LLM-emitted recall query contains them (e.g. markdown
+# backticks around device names, pipes from shell-like syntax, tildes
+# from version specs). The list mirrors long_term_store / mid_term_store
+# so all three stores accept the same character set.
+_FTS5_SPECIAL  = re.compile(r'''[\"\'\(\)\[\]\{\}\<\>\*\+\-\:\^\.\/\?\,\;\=\!\@\#\$\%\&\`\|\~\\\ ]+''')
 
 DEPRECATE_THRESHOLD = 0.3   # success_rate 低于此值自动标记为 deprecated
 EMA_ALPHA           = 0.2   # 成功率指数移动平均平滑系数

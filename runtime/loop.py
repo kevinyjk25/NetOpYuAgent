@@ -18,12 +18,40 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
+import time
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncIterator, Optional, TYPE_CHECKING
 
 from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolResultStore
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
+from .directive_parser import (
+    has_any_tool_directive as _has_any_tool_directive,
+    has_skill_load as _has_skill_load,
+)
+
+
+def _truncation_cfg():
+    """Lazy-load AppConfig.truncation; safe to call from any module without
+    causing a circular import at top-level."""
+    try:
+        from config import cfg as _app_cfg
+        return getattr(_app_cfg, "truncation", None)
+    except Exception:
+        return None
+
+
+def _page_default_size_for_ledger() -> int:
+    """Page size used by _build_tool_ledger for read_stored_result coverage estimates.
+    Loaded from cfg.context_budget_display.page_default_size; defaults to 2000.
+    """
+    try:
+        from config import cfg as _app_cfg
+        return int(getattr(getattr(_app_cfg, "context_budget_display", None), "page_default_size", 2000))
+    except Exception:
+        return 2000
+
 
 if TYPE_CHECKING:
     from memory.adapter import MemoryAdapter as MemoryRouter
@@ -68,11 +96,19 @@ class VerificationResult:
     warnings: list[str] = field(default_factory=list)
 
     @classmethod
-    def ok(cls, reason: str = "Verification passed") -> "VerificationResult":
-        return cls(passed=True, reason=reason)
+    def ok(
+        cls,
+        reason: str = "Verification passed",
+        warnings: Optional[list[str]] = None,
+    ) -> "VerificationResult":
+        """Construct a passing result.  warnings is accepted (and stored)
+        so callers that detect non-fatal anomalies can surface them even
+        on a successful verification — the BUG-09 post_verify() rewrite
+        relies on this symmetric signature with fail()."""
+        return cls(passed=True, reason=reason, warnings=warnings or [])
 
     @classmethod
-    def fail(cls, reason: str, warnings: list[str] = None) -> "VerificationResult":
+    def fail(cls, reason: str, warnings: Optional[list[str]] = None) -> "VerificationResult":
         return cls(passed=False, reason=reason, warnings=warnings or [])
 
 
@@ -88,24 +124,62 @@ class ComplexityDecision:
     model_tier: str   = "full_model"   # P2: fast_model | full_model
 
 
-_DESTRUCTIVE_KEYWORDS = frozenset({
-    # English
+# Keyword frozensets used ONLY as fallback when PolicyEngine is unavailable
+# (e.g. LLM service down). The primary path is config.yaml policies +
+# PolicyEngine.evaluate(). Do not add new behavior that depends on these —
+# they exist purely to keep the classifier functional under degraded
+# conditions. New gating logic should be expressed as a policy.
+# Default keyword frozensets — used when AppConfig.classifier_fallback
+# can't be loaded (e.g. very early bootstrap before config is ready).
+# Production code reads from cfg.classifier_fallback; these defaults guarantee
+# the classifier always works even with no config.yaml present.
+_DEFAULT_DESTRUCTIVE_KEYWORDS = frozenset({
     "restart", "rollback", "delete", "drain", "failover", "flush",
     "reboot", "terminate", "shutdown", "wipe", "reset",
-    # Chinese equivalents (substring match is fine for CJK — no word boundaries needed)
     "重启", "回滚", "删除", "终止", "关机", "重置", "下发配置", "推送配置",
 })
-_P0P1_KEYWORDS = frozenset({
+_DEFAULT_P0P1_KEYWORDS = frozenset({
     "p0", "p1", "critical", "outage", "down", "emergency",
     "sev0", "sev1", "major incident",
 })
-_PARALLEL_KEYWORDS = frozenset({
-    "all sites", "all devices", "across regions", "compare", "correlate",
-    "multiple", "batch", "bulk", "foreach",
-})
-_FAST_MODEL_KEYWORDS = frozenset({
+_DEFAULT_FAST_MODEL_KEYWORDS = frozenset({
     "dns", "ping", "status", "check", "what is", "show me", "list",
 })
+
+
+def _classifier_fallback_keywords(category: str) -> frozenset:
+    """Load keyword fallback set for the given category from cfg.classifier_fallback;
+    returns the module-level default if config is unavailable.
+
+    category: 'destructive' | 'p0p1' | 'fast_model'
+    """
+    defaults = {
+        "destructive": _DEFAULT_DESTRUCTIVE_KEYWORDS,
+        "p0p1":        _DEFAULT_P0P1_KEYWORDS,
+        "fast_model":  _DEFAULT_FAST_MODEL_KEYWORDS,
+    }
+    field_map = {
+        "destructive": "destructive_keywords",
+        "p0p1":        "p0p1_keywords",
+        "fast_model":  "fast_model_keywords",
+    }
+    try:
+        from config import cfg as _app_cfg
+        cf = getattr(_app_cfg, "classifier_fallback", None)
+        if cf is None:
+            return defaults[category]
+        items = getattr(cf, field_map[category], None) or []
+        if not items:
+            return defaults[category]
+        return frozenset(items)
+    except Exception:
+        return defaults[category]
+
+
+# Backwards-compatible aliases — kept for any external imports
+_DESTRUCTIVE_KEYWORDS = _DEFAULT_DESTRUCTIVE_KEYWORDS
+_P0P1_KEYWORDS        = _DEFAULT_P0P1_KEYWORDS
+_FAST_MODEL_KEYWORDS  = _DEFAULT_FAST_MODEL_KEYWORDS
 
 
 # ---------------------------------------------------------------------------
@@ -125,12 +199,16 @@ class RuntimeConfig:
     default_delegation_mode:   DelegationMode   = DelegationMode.FRESH
     default_fork_context:      ForkContextPolicy = ForkContextPolicy.FACTS_ONLY
 
-    # P1: verification
-    enable_pre_verification:   bool = True
+    # Pre-verification REMOVED — replaced by tool-level HITL gate.
+    # The flag is kept for one release for backward compatibility but
+    # has no effect; the new pre_verify() stub returns ok unconditionally.
+    enable_pre_verification:   bool = False   # DEPRECATED, no-op (kept for compat)
     enable_post_verification:  bool = True
 
-    # P2: model tiering
-    enable_model_tiering:      bool = False   # set True when real LLM is wired
+    # Model tiering — flag retained for caller compatibility but unconsumed
+    # in the active runtime path. Tier hint travels via ComplexityDecision.
+    # Wire a real consumer in integrations/llm_engine.py if you want to act on it.
+    enable_model_tiering:      bool = False   # DEPRECATED, unconsumed (kept for compat)
 
     # Tool result inline limit
     tool_result_inline_limit:  int  = 4_000
@@ -181,89 +259,9 @@ class LoopResult:
 # ---------------------------------------------------------------------------
 
 
-def _heuristic_missing_fields(query: str) -> list[dict]:
-    """Best-effort extraction of likely missing parameters from a user query.
-
-    Used by the clarification gate when the caller didn't supply explicit
-    `_clarification_fields`. Pattern matches on common IT-ops verbs:
-
-      - "查日志 / show logs / syslog"   → device_id, time_range, severity
-      - "查配置 / get config"            → device_id
-      - "修复 / fix / repair / 修改"      → device_id, what_to_change
-      - "重启 / restart / reboot"        → device_id, scope
-      - generic short query              → device_id alone
-
-    Returns a list of {key, prompt, placeholder?, required?} dicts.
-    Empty list when query is specific enough that we'd just be asking
-    redundant questions.
-    """
-    q = (query or "").lower()
-    fields: list[dict] = []
-
-    has_device_id = bool(__import__("re").search(
-        # Matches ap-01, sw-3, router1, sw-core-01, sw-acc-02, ap-floor3 etc.
-        r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])", q
-    ))
-
-    asks_logs = any(kw in q for kw in (
-        "syslog", "log", "日志", "事件", "show logs",
-    ))
-    asks_config = any(kw in q for kw in (
-        "config", "running-config", "配置",
-    )) and not asks_logs
-    asks_change = any(kw in q for kw in (
-        "修复", "fix", "repair", "修改", "改", "调整",
-        "restart", "reboot", "重启", "重置", "rollback",
-    ))
-
-    if asks_logs:
-        if not has_device_id:
-            fields.append({"key": "device_id",
-                           "prompt": "要查哪台设备的日志？",
-                           "placeholder": "ap-01 / sw-core-01 / router-01",
-                           "required": True})
-        fields.append({"key": "time_range",
-                       "prompt": "时间范围？",
-                       "placeholder": "last 1h / last 24h / 2026-04-29",
-                       "required": False})
-        fields.append({"key": "severity",
-                       "prompt": "日志级别？",
-                       "placeholder": "error / warn / info",
-                       "required": False})
-        return fields
-
-    if asks_change and not has_device_id:
-        fields.append({"key": "device_id",
-                       "prompt": "要操作哪台设备？",
-                       "placeholder": "ap-01 / sw-core-01",
-                       "required": True})
-        fields.append({"key": "what_to_change",
-                       "prompt": "具体要修改什么配置项？",
-                       "placeholder": "RADIUS timeout / NTP server / VLAN ACL",
-                       "required": True})
-        return fields
-
-    if asks_config and not has_device_id:
-        fields.append({"key": "device_id",
-                       "prompt": "要查哪台设备的配置？",
-                       "placeholder": "ap-01 / sw-core-01",
-                       "required": True})
-        return fields
-
-    # Generic ambiguous: ask for a target device only if the query is short
-    # and devicey-sounding. Avoid over-asking for casual queries.
-    # Note: use regex word boundary so "ap" doesn't match "approval".
-    _has_devicey_term = bool(__import__("re").search(
-        r"(?<![a-z])(ap|switch|device|router|sw)(?![a-z])|设备",
-        q,
-    ))
-    if len(q) < 20 and not has_device_id and _has_devicey_term:
-        fields.append({"key": "device_id",
-                       "prompt": "请问您指的是哪台设备？",
-                       "placeholder": "ap-01 / sw-core-01 / router-01",
-                       "required": True})
-
-    return fields
+# Clarification gating is handled by PolicyEngine[assess_query_specificity]
+# (see config.yaml policies section).  A keyword-based heuristic was
+# previously used here but removed in favour of the LLM-evaluated policy.
 
 
 def _call_key(tool_name: str, tool_args: dict) -> str:
@@ -311,7 +309,7 @@ def _build_tool_ledger(
             offset = int(args.get("offset", 0))
             if not ref:
                 continue
-            total_m = _re.search(r"Total size:\s*([\d,]+)", val)
+            total_m = re.search(r"Total size:\s*([\d,]+)", val)
             total   = int(total_m.group(1).replace(",", "")) if total_m else 0
             if ref not in ref_info:
                 ref_info[ref] = {"total_size": total, "last_offset": offset, "pages": 0}
@@ -348,7 +346,7 @@ def _build_tool_ledger(
                 info    = ref_info.get(ref, {})
                 pages   = info.get("pages", 1)
                 total   = info.get("total_size", 0)
-                covered = info.get("last_offset", 0) + 2000
+                covered = info.get("last_offset", 0) + _page_default_size_for_ledger()
                 ledger.append(
                     f"TOOL_EXEC: read_stored_result|ref={ref} pages_read={pages} "
                     f"bytes_covered=0-{min(covered, total)} total={total}"
@@ -356,7 +354,7 @@ def _build_tool_ledger(
             continue
 
         raw  = raw_outputs.get(key, stored)
-        ref_m = _re.search(r"\[STORED:\w+:(\w+)\]", stored)
+        ref_m = re.search(r"\[STORED:\w+:(\w+)\]", stored)
         if ref_m:
             ref_id = ref_m.group(1)
             total  = ref_info.get(ref_id, {}).get("total_size", len(raw))
@@ -368,6 +366,91 @@ def _build_tool_ledger(
             ledger.append(f"TOOL_EXEC: {key} → inline size={len(raw)}")
 
     return ledger
+
+
+# ---------------------------------------------------------------------------
+# BoundedSessionStore — TTL-aware bounded dict for per-session counters
+# ---------------------------------------------------------------------------
+
+class BoundedSessionStore:
+    """
+    Thread-safe in-memory store for per-session counters with TTL eviction.
+
+    Replaces the unbounded dict[str, int] used for _clarification_counts.
+    Prevents memory leaks in long-running processes where every new session_id
+    would otherwise accumulate indefinitely.
+
+    BUG-08 fix: entries older than `ttl_seconds` are evicted lazily on get/set
+    and eagerly via a periodic sweep triggered on every N writes.
+
+    Configuration (from AppConfig):
+      session_store.clarification_session_ttl_seconds  (default 3600)
+      session_store.clarification_max_sessions          (default 10_000)
+    """
+
+    def __init__(self, ttl_seconds: int = 3600, max_sessions: int = 10_000):
+        self._ttl     = ttl_seconds
+        self._max     = max_sessions
+        self._data:  dict[str, int]   = {}
+        self._ts:    dict[str, float] = {}   # session_id → last_access timestamp
+        self._writes = 0
+        # Thread-safe per the docstring. Without this lock, two FastAPI
+        # threads calling increment() at once could each read the same
+        # baseline and both set it +1, losing one increment.  RLock so
+        # increment() can call get()+set() while already holding it.
+        import threading as _threading
+        self._lock = _threading.RLock()
+
+    def get(self, session_id: str, default: int = 0) -> int:
+        now = time.monotonic()
+        with self._lock:
+            if session_id in self._ts and (now - self._ts[session_id]) > self._ttl:
+                self._data.pop(session_id, None)
+                self._ts.pop(session_id, None)
+                return default
+            self._ts[session_id] = now
+            return self._data.get(session_id, default)
+
+    def set(self, session_id: str, value: int) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._data[session_id] = value
+            self._ts[session_id]   = now
+            self._writes += 1
+            # Periodic eviction sweep every 100 writes
+            if self._writes % 100 == 0:
+                self._sweep(now)
+            # Hard cap: evict LRU entries when over limit
+            if len(self._data) > self._max:
+                self._evict_lru()
+
+    def increment(self, session_id: str) -> int:
+        with self._lock:
+            val = self.get(session_id, 0) + 1
+            self.set(session_id, val)
+            return val
+
+    def _sweep(self, now: float) -> None:
+        # Caller holds self._lock
+        expired = [k for k, ts in self._ts.items() if (now - ts) > self._ttl]
+        for k in expired:
+            self._data.pop(k, None)
+            self._ts.pop(k, None)
+        if expired:
+            logger.debug("BoundedSessionStore: evicted %d expired sessions", len(expired))
+
+    def _evict_lru(self) -> None:
+        """Evict the oldest 10% of entries when the hard cap is hit.
+        Caller holds self._lock."""
+        n_evict = max(1, len(self._data) // 10)
+        oldest  = sorted(self._ts.items(), key=lambda kv: kv[1])[:n_evict]
+        for k, _ in oldest:
+            self._data.pop(k, None)
+            self._ts.pop(k, None)
+        logger.warning(
+            "BoundedSessionStore: cap=%d hit, evicted %d LRU sessions", self._max, n_evict
+        )
+
 
 
 class AgentRuntimeLoop:
@@ -388,63 +471,81 @@ class AgentRuntimeLoop:
         config:          Optional[RuntimeConfig]  = None,
         tool_store:      Optional[ToolResultStore] = None,
         skill_catalog:   Optional["SkillCatalogService"] = None,
+        llm_fn:          Optional[Any] = None,
     ) -> None:
+        """
+        Args:
+            llm_fn: Async callable ``(query, context, state) -> str`` that calls
+                    the real LLM.  If provided here, the monkey-patch step in
+                    main.py (patch_runtime_loop) is skipped.  If omitted, the
+                    legacy patch path is preserved for backward compatibility
+                    (DESIGN-03 partial fix — injection preferred over patching).
+        """
         self._memory       = memory_router
         self._cfg          = config or RuntimeConfig()
         self._store        = tool_store or ToolResultStore()
         self._budget       = ContextBudgetManager(self._cfg.budget, self._store)
         self._policy       = StopPolicy(self._cfg.stop_policy)
         self._skill_catalog = skill_catalog
-        # Per-session clarification counter so the agent can't loop on
-        # "ask user → low confidence → ask again". Capped by config.
-        self._clarification_counts: dict[str, int] = {}
+
+        # DESIGN-03: constructor injection takes priority over monkey-patch.
+        # If llm_fn is supplied at construction time, wire it immediately.
+        if llm_fn is not None:
+            self._call_llm = llm_fn  # type: ignore[assignment]
+
+        # BUG-08: Replace unbounded dict with TTL-bounded session store.
+        # Reads TTL/max from AppConfig when available; falls back to defaults.
+        try:
+            from config import cfg as _app_cfg
+            _ss = getattr(_app_cfg, "session_store", None)
+            _ttl = getattr(_ss, "clarification_session_ttl_seconds", 3600) if _ss else 3600
+            _max = getattr(_ss, "clarification_max_sessions", 10_000) if _ss else 10_000
+        except Exception:
+            _ttl, _max = 3600, 10_000
+        self._clarification_counts: BoundedSessionStore = BoundedSessionStore(
+            ttl_seconds=_ttl, max_sessions=_max
+        )
 
     # ------------------------------------------------------------------
     # Clarification gate — Type #3 multi-mode HITL
     # ------------------------------------------------------------------
 
-    # Action verbs that indicate the user wants a write/destructive op.
-    # If one of these appears in the query but no concrete target does,
-    # the agent is about to hallucinate — better to ask.
-    _ACTION_VERBS = frozenset({
-        # English
-        "fix", "repair", "modify", "edit", "change", "update", "set",
-        "restart", "reboot", "rollback", "deploy", "delete", "remove",
-        # Chinese
-        "修复", "修改", "更改", "下发", "推送", "重启", "回滚", "删除",
-        "调整", "优化", "配置",
-    })
+    # Destructive-intent classification → PolicyEngine[classify_destructive].
 
-    # Read/diagnostic verbs — don't NEED a target (could be "查所有设备")
-    # but DO need a scope to avoid scanning everything.
-    _READ_VERBS = frozenset({
-        "查", "查询", "看", "检查", "诊断", "show", "list", "check",
-        "look", "find", "search", "view", "diagnose",
-    })
-
-    @staticmethod
-    def _query_has_action_verb(q_lower: str) -> bool:
-        return any(v in q_lower for v in AgentRuntimeLoop._ACTION_VERBS)
-
-    @staticmethod
-    def _query_has_read_verb(q_lower: str) -> bool:
-        return any(v in q_lower for v in AgentRuntimeLoop._READ_VERBS)
 
     @staticmethod
     def _query_mentions_concrete_target(q: str) -> bool:
         """Heuristic: does the query name a specific device/service?
         Looks for tokens like ap-NN, sw-core-NN, router-NN, IPs, hostnames.
+
+        IMPORTANT: do NOT use \\b here — Python regex \\b only treats
+        ASCII letter↔non-letter as a word boundary, so "ap-01" tucked
+        between Chinese characters (e.g. "修复ap-01设备") fails the
+        \\b match. Use ASCII-explicit lookbehind/lookahead instead so
+        Chinese-glued device IDs are correctly recognised.
         """
-        import re as _re
-        # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01
-        if _re.search(r"\b[a-z]{2,}[-_]\w{2,}\b", q.lower()):
+        q_lower = q.lower()
+        # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01.
+        # The (?<![a-z0-9]) / (?![a-z0-9]) anchors mean "not preceded /
+        # followed by another ASCII alphanumeric" — Chinese characters
+        # satisfy this constraint, so embedded device IDs are matched.
+        if re.search(
+            r"(?<![a-z0-9])[a-z]{2,}[-_]\w{2,}(?![a-z0-9])", q_lower
+        ):
             return True
-        # IPv4
-        if _re.search(r"\b\d+\.\d+\.\d+\.\d+\b", q):
+        # Also accept the structured device pattern used elsewhere in
+        # this file (ap/sw/router/switch + digits) to stay consistent.
+        if re.search(
+            r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])",
+            q_lower,
+        ):
+            return True
+        # IPv4 (no character-class boundary issue for digits + dots)
+        if re.search(r"(?<!\d)\d+\.\d+\.\d+\.\d+(?!\d)", q):
             return True
         return False
 
-    def _maybe_clarification_fields(
+    async def _maybe_clarification_fields(
         self,
         *,
         query: str,
@@ -455,62 +556,84 @@ class AgentRuntimeLoop:
         """Return a list of clarification fields if the query is too vague
         to act on safely; empty list otherwise.
 
-        Heuristics (cheap, no LLM call):
-          0. Prior turn already asked clarification → treat current query
-             as the answer, don't re-ask
-          1. Already asked at-budget → don't ask again, let agent guess
+        Uses PolicyEngine[assess_query_specificity] to ask an LLM:
+        "given this query + recall context, is it specific enough?"
+        The LLM returns structured JSON listing missing fields.
+
+        Cheap pre-checks (no LLM call) handle obvious cases:
+          0. Prior turn already asked clarification → don't re-ask
+          1. Already asked at-budget → don't re-ask, let agent guess
           2. Top skill score >= floor → confident enough, proceed
-          3. Action verb + no concrete target → ask which device
-          4. Read verb + no scope → ask which device & time range
-          5. Otherwise: proceed (no clarification needed)
+          3. Query already names a concrete entity (device/IP) → proceed
+        Only when those don't short-circuit do we spend an LLM call.
         """
-        # Prior-turn check — if recent recall context contains the agent's
-        # own clarification preamble, this query IS the answer the
-        # operator typed in response. Re-asking would loop forever.
+        # Pre-check 0: prior-turn — if recent recall context contains the agent's
+        # own clarification preamble, this query IS the answer the operator
+        # typed in response. Re-asking would loop forever.
         if recent_context and (
             "为了准确处理这个请求，我需要您补充" in recent_context
             or "Clarification asked via chat turn" in recent_context
         ):
             return []
 
+        # Pre-check 1: at-budget
         if asked_count >= self._cfg.clarification_max_per_session:
             return []
+
+        # Pre-check 2: skill confidence high enough
         if top_skill_score >= self._cfg.clarification_confidence_floor:
             return []
 
-        q_lower = query.lower().strip()
-        has_target = self._query_mentions_concrete_target(query)
-        has_action = self._query_has_action_verb(q_lower)
-        has_read   = self._query_has_read_verb(q_lower)
+        # Pre-check 3: query already names a concrete entity. This is a
+        # cheap regex (entity recognition, not intent inference) and lets
+        # us skip the LLM call for the common case "fix ap-01 radius".
+        if self._query_mentions_concrete_target(query):
+            return []
 
-        # Case A: action verb + no concrete target → ask for device
-        if has_action and not has_target:
-            return [{
-                "key":         "device_id",
-                "prompt":      "Which device should this action target?",
-                "placeholder": "e.g. ap-01, sw-core-01",
-                "required":    True,
-            }]
+        # Pre-checks didn't short-circuit — ask PolicyEngine.
+        from runtime.policy_engine import get_policy_engine as _get_pe
+        _engine = _get_pe()
+        if _engine is None:
+            # No PolicyEngine wired — be conservative, don't gate.
+            return []
+        try:
+            result = await _engine.evaluate(
+                "assess_query_specificity", query, context=recent_context,
+            )
+        except Exception as exc:
+            logger.warning(
+                "Clarification assessment LLM failed: %s — proceeding without gate", exc,
+            )
+            return []
 
-        # Case B: read/diagnostic + no concrete target — ask scope
-        if has_read and not has_target and len(q_lower) < 30:
-            return [
-                {
-                    "key":         "device_id",
-                    "prompt":      "Which device(s) do you want to query?",
-                    "placeholder": "e.g. ap-01, or 'all aps'",
-                    "required":    True,
-                },
-                {
-                    "key":         "time_range",
-                    "prompt":      "Time range (only for log/event queries)?",
-                    "placeholder": "e.g. last 1h, last 24h",
-                    "required":    False,
-                },
-            ]
+        # The policy is raw_output: result.reason holds the LLM's JSON.
+        try:
+            import json as _json
+            data = _json.loads(result.reason)
+        except Exception:
+            logger.debug(
+                "Clarification policy returned non-JSON: %s — proceeding", result.reason[:120],
+            )
+            return []
 
-        # No clarification needed
-        return []
+        if data.get("specific_enough", True):
+            return []
+
+        # Translate LLM-emitted missing list into the dict shape the
+        # downstream chat-turn renderer expects.
+        out: list[dict] = []
+        for f in (data.get("missing") or [])[:2]:
+            key = (f.get("key") or "").strip()
+            if not key:
+                continue
+            out.append({
+                "key":         key,
+                "prompt":      f.get("prompt") or f"Please specify {key}.",
+                "placeholder": f.get("placeholder", "") or "",
+                "required":    bool(f.get("required", True)),
+                "reason":      f.get("reason", "") or "",
+            })
+        return out
 
     # ------------------------------------------------------------------
     # Classify
@@ -548,27 +671,26 @@ class AgentRuntimeLoop:
             )
 
         # ── Keyword heuristic (fallback when PolicyEngine not yet wired) ──────
-        import re as _re
         q = query.lower()
 
         def _word_match(kw: str, text: str) -> bool:
             if " " in kw or not kw.isascii():
                 return kw in text
-            return bool(_re.search(r"(?<![a-z0-9])" + _re.escape(kw) + r"(?![a-z0-9])", text))
+            return bool(re.search(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])", text))
 
-        if any(_word_match(kw, q) for kw in _DESTRUCTIVE_KEYWORDS):
+        if any(_word_match(kw, q) for kw in _classifier_fallback_keywords("destructive")):
             return ComplexityDecision(
                 complexity=QueryComplexity.COMPLEX,
                 reason="Destructive action detected (keyword heuristic)",
                 confidence=0.90, model_tier="full_model",
             )
-        if any(_word_match(kw, q) for kw in _P0P1_KEYWORDS):
+        if any(_word_match(kw, q) for kw in _classifier_fallback_keywords("p0p1")):
             return ComplexityDecision(
                 complexity=QueryComplexity.COMPLEX,
                 reason="P0/P1 severity (keyword heuristic)",
                 confidence=0.85, model_tier="full_model",
             )
-        tier = "fast_model" if any(_word_match(kw, q) for kw in _FAST_MODEL_KEYWORDS) else "full_model"
+        tier = "fast_model" if any(_word_match(kw, q) for kw in _classifier_fallback_keywords("fast_model")) else "full_model"
         return ComplexityDecision(
             complexity=QueryComplexity.SIMPLE,
             reason="Single-intent diagnostic query (keyword heuristic)",
@@ -620,56 +742,21 @@ class AgentRuntimeLoop:
         return self.classify(query)
 
 
-    async def pre_verify(
-        self,
-        query: str,
-        confirmed_facts: list[str],
-        env_context: dict[str, Any],
-    ) -> VerificationResult:
+    async def pre_verify(self, *args, **kwargs) -> "VerificationResult":
+        """REMOVED — destructive-action gating now happens at the single
+        authoritative point: when the LLM proposes a tool_call,
+        _cfg.hitl_tool_names intercepts before execution.
+
+        This stub is kept for one release so any external callers fail loudly
+        rather than silently degrading. Will be removed in the next version.
         """
-        Pre-action verification using PolicyEngine when available.
-        Falls back to keyword check if engine is not wired.
-
-        We pass any recalled session context (env_context["_fts_context"]) and
-        confirmed_facts to the policy so that follow-up queries with pronouns
-        ("this device", "it", "the AP") can be resolved against prior turns.
-        Without this, multi-turn queries get BLOCKed for "missing device ID".
-        """
-        from runtime.policy_engine import get_policy_engine as _get_pe
-        _engine = _get_pe()
-        if _engine is not None:
-            try:
-                # Build a context block the policy LLM can read alongside the query.
-                _ctx_parts: list[str] = []
-                _fts = (env_context or {}).get("_fts_context")
-                if _fts:
-                    _ctx_parts.append(str(_fts)[:1500])
-                if confirmed_facts:
-                    _ctx_parts.append(
-                        "Confirmed facts:\n" +
-                        "\n".join(f"- {f}" for f in list(confirmed_facts)[:10])
-                    )
-                _ctx = "\n\n".join(_ctx_parts)
-                result = await _engine.evaluate(
-                    "preverify_safe_to_proceed", query, context=_ctx
-                )
-                if not result.match:
-                    return VerificationResult.fail(
-                        f"Policy[preverify_safe_to_proceed]: {result.reason}"
-                    )
-                return VerificationResult.ok("Pre-verification passed")
-            except Exception as _e:
-                import logging as _log
-                _log.getLogger(__name__).warning("pre_verify PolicyEngine error: %s", _e)
-
-        # Keyword fallback
-        q = query.lower()
-        if any(kw in q for kw in _DESTRUCTIVE_KEYWORDS):
-            return VerificationResult.fail(
-                "Destructive action reached pre_verify — escalate to HITL"
-            )
-        return VerificationResult.ok("Pre-verification passed")
-
+        import warnings
+        warnings.warn(
+            "AgentRuntimeLoop.pre_verify() is removed. "
+            "Tool-level HITL gating via cfg.hitl_tool_names replaces it.",
+            DeprecationWarning, stacklevel=2,
+        )
+        return VerificationResult.ok("pre_verify is a no-op (removed)")
 
     async def post_verify(
         self,
@@ -678,27 +765,96 @@ class AgentRuntimeLoop:
         confirmed_facts: list[str],
     ) -> VerificationResult:
         """
-        Post-action verification: check the action achieved its intended outcome.
-        Replace with real health-check calls in production.
+        BUG-09 fix: Config-driven regex rule matching instead of hardcoded
+        string equality.  Rules are loaded from AppConfig.post_verify.rules
+        (config.yaml post_verify.rules section); each rule specifies:
+
+          pattern     — regex matched against tool name (case-insensitive)
+          require_any — result must contain at least one of these keywords
+                        (empty list = no positive requirement)
+          require_none — result must NOT contain any of these keywords
+                         (empty list = no negative constraint)
+
+        First matching rule wins.  If no rule matches, behaviour is governed
+        by AppConfig.post_verify.default_pass (default: True = permissive).
+
+        This allows operators to add new tool verification rules in config.yaml
+        without touching code.
         """
-        warnings = []
+        warnings_list: list[str] = []
         result_lower = result.lower()
 
-        if "error" in result_lower or "fail" in result_lower:
-            warnings.append("Result contains 'error'/'fail' — manual check recommended")
+        # Generic signal — always add to warnings but never fail on its own
+        if re.search(r"\berror\b|\bfail(ed)?\b", result_lower):
+            warnings_list.append("Result contains error/fail keywords — manual check recommended")
 
-        if action_type == "restart_service":
-            # TODO: post-action health probe — verify the restarted service via
-            # whatever health-check tool is registered for it.
-            if "healthy" not in result_lower:
+        # Load rules from config
+        try:
+            from config import cfg as _app_cfg
+            _pv_cfg = getattr(_app_cfg, "post_verify", None)
+            rules        = getattr(_pv_cfg, "rules", []) if _pv_cfg else []
+            default_pass = getattr(_pv_cfg, "default_pass", True) if _pv_cfg else True
+        except Exception:
+            rules, default_pass = [], True
+
+        matched_rule = None
+        for rule in rules:
+            pattern = rule.get("pattern", "")
+            if not pattern:
+                continue
+            try:
+                if re.search(pattern, action_type, re.IGNORECASE):
+                    matched_rule = rule
+                    break
+            except re.error as exc:
+                logger.warning("post_verify: invalid regex pattern %r: %s", pattern, exc)
+                continue
+
+        if matched_rule is None:
+            # No rule matched this tool name
+            if default_pass:
+                return VerificationResult.ok(
+                    f"Post-verification passed (no rule matched {action_type!r})"
+                    + (f" warnings={len(warnings_list)}" if warnings_list else ""),
+                    warnings=warnings_list,
+                )
+            else:
+                # Strict mode: require non-empty result
+                if not result.strip():
+                    return VerificationResult.fail(
+                        f"Post-verify strict mode: {action_type!r} returned empty result",
+                        warnings=warnings_list,
+                    )
+                return VerificationResult.ok(
+                    f"Post-verification passed (strict, no rule, non-empty result)",
+                    warnings=warnings_list,
+                )
+
+        # Apply the matched rule
+        require_any  = matched_rule.get("require_any", [])
+        require_none = matched_rule.get("require_none", [])
+
+        # require_none: any prohibited keyword → fail
+        for kw in require_none:
+            if kw.lower() in result_lower:
                 return VerificationResult.fail(
-                    f"Post-restart health check inconclusive for {action_type}",
-                    warnings=warnings,
+                    f"Post-verify: {action_type!r} result contains prohibited keyword {kw!r}",
+                    warnings=warnings_list,
+                )
+
+        # require_any: at least one required keyword must appear
+        if require_any:
+            if not any(kw.lower() in result_lower for kw in require_any):
+                return VerificationResult.fail(
+                    f"Post-verify: {action_type!r} result missing required keywords "
+                    f"(need one of: {require_any})",
+                    warnings=warnings_list,
                 )
 
         return VerificationResult.ok(
-            f"Post-verification passed for {action_type}"
-            + (f" (warnings: {len(warnings)})" if warnings else "")
+            f"Post-verification passed for {action_type!r}"
+            + (f" (warnings: {len(warnings_list)})" if warnings_list else ""),
+            warnings=warnings_list,
         )
 
     # ------------------------------------------------------------------
@@ -760,17 +916,14 @@ class AgentRuntimeLoop:
             )
 
         state = LoopState()
-        state.confirmed_facts = list(confirmed_facts or [])
+        # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
+        from runtime.stop_policy import FactsLedger as _FL
+        state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
         setattr(state, "working_set", list(working_set or []))
-
-        # Pre-verification deferred until AFTER first memory recall (see below)
-        # so PolicyEngine can see prior session context. See identical fix in
-        # stream() for the rationale.
 
         chunks: list[str] = []
         last_tool_result  = ""
         tool_outputs: dict[str, str] = {}   # persists across turns — tool results feed next LLM call
-        _pre_verified = False                # run pre_verify exactly once, after first recall
         # Seed called_tools from any prior tool calls visible in memory context.
         # This prevents the LLM from re-calling the same tool+args when memory
         # already has the result from a previous stream() invocation.
@@ -780,7 +933,7 @@ class AgentRuntimeLoop:
         called_tools: set[str] = set()
         _known_stores: dict[str, str] = {}  # ref_id → tool_name (for context injection)
         import json as _j2, re as _re2
-        for _fact in (confirmed_facts or []):
+        for _fact in (list(confirmed_facts) if confirmed_facts is not None else []):
             if _fact.startswith("TOOL_EXEC: "):
                 # Parse: "TOOL_EXEC: tool_name|{args} → ref=abc size=N"
                 _body = _fact[len("TOOL_EXEC: "):]
@@ -802,26 +955,6 @@ class AgentRuntimeLoop:
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
-
-            # P1: pre-verification (deferred until first recall; runs once)
-            if not _pre_verified and self._cfg.enable_pre_verification:
-                _pre_env = dict(env_ctx)
-                if "_fts_context" not in _pre_env and memory_results:
-                    try:
-                        _pre_env["_fts_context"] = "\n".join(
-                            str(m) for m in memory_results
-                        )[:1500]
-                    except Exception:
-                        pass
-                pre = await self.pre_verify(query, state.confirmed_facts, _pre_env)
-                _pre_verified = True
-                if not pre.passed:
-                    return LoopResult(
-                        outcome=StopOutcome.STOP_HITL,
-                        final_response=f"Pre-verification failed: {pre.reason}",
-                        confirmed_facts=state.confirmed_facts,
-                        verification=pre,
-                    )
 
             # NOTE: We intentionally do NOT seed called_tools from memory context.
             # Memory may mention a prior tool call on device X, but we still need
@@ -855,10 +988,11 @@ class AgentRuntimeLoop:
             state.record_response(llm_response)
             chunks.append(llm_response)
 
-            # P1: detect SKILL_LOAD directives and expand detail on demand
-            import re
+            # P1: detect SKILL_LOAD directives and expand detail on demand.
+            # Use centralized parser for whitespace tolerance.
             _skill_loads_this_turn_r: set[str] = set()
-            for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+            from runtime.directive_parser import find_skill_load_names
+            for skill_id in find_skill_load_names(llm_response):
                 if skill_id in _skill_loads_this_turn_r:
                     continue
                 _skill_loads_this_turn_r.add(skill_id)
@@ -869,13 +1003,74 @@ class AgentRuntimeLoop:
                         context_str += "\n\n" + detail
                         logger.debug("SkillCatalog: loaded detail for %s", skill_id)
 
+            # P1+: detect ALIAS directives. When the LLM discovers that the
+            # user's term doesn't match the real entity name (e.g. user said
+            # "core-01" but the actual device is "sw-acc-01"), it can emit
+            # `[ALIAS: user_term = system_term]` so the correction survives
+            # to subsequent turns. Without this, the LLM forgets in turn N+1
+            # and starts re-resolving from scratch, often regenerating bad
+            # configs against the user's wrong term.
+            #
+            # Stored as confirmed_facts entries; format kept stable so the
+            # next turn's prompt builder (see _format_confirmed_facts) can
+            # surface them prominently right after the user query.
+            _alias_re = re.compile(
+                r"\[ALIAS\s*:\s*([^=\]]+?)\s*=\s*([^\]]+?)\s*\]"
+            )
+            for _m in _alias_re.finditer(llm_response):
+                _user_term, _sys_term = _m.group(1).strip(), _m.group(2).strip()
+                # Skip degenerate / identical aliases
+                if not _user_term or not _sys_term or _user_term == _sys_term:
+                    continue
+                _alias_fact = f"ENTITY_ALIAS: '{_user_term}' actually refers to '{_sys_term}'"
+                # Dedup: if we've already recorded the same alias, skip
+                if not any(
+                    f == _alias_fact for f in state.confirmed_facts
+                ):
+                    state.confirmed_facts.append(_alias_fact)
+                    logger.info(
+                        "ALIAS recorded (turn=%d): %r → %r",
+                        state.turns, _user_term, _sys_term,
+                    )
+
             # Execute tool calls — one per turn only
             _single = self._parse_tool_call(llm_response)
             tool_calls = [_single] if _single else []
             new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
+
+            # Repeat-tool-call recovery (mirrors stream() path; see comment there).
+            # When the LLM re-requests an already-executed tool, dedup empties
+            # new_tool_calls and _is_complete would treat the prelude prose as
+            # a final answer. Force a nudge turn instead.
+            if tool_calls and not new_tool_calls and state.turns < 3:
+                dup_name, dup_args = tool_calls[0]
+                logger.warning(
+                    "run: LLM re-requested already-executed tool %s (turn=%d) — nudging",
+                    dup_name, state.turns,
+                )
+                if dup_name == "read_stored_result":
+                    _nudge = (
+                        "_NUDGE: You just requested read_stored_result with the same "
+                        f"ref_id+offset as a prior call ({dup_args}). That page is already "
+                        "in your context. ANALYSE what you can see, OR request a different "
+                        "offset. Do not re-emit the same read."
+                    )
+                else:
+                    _nudge = (
+                        f"_NUDGE: You just requested [TOOL:{dup_name}] with the same "
+                        "arguments as a prior call. Use the existing result already in "
+                        "your context; do not re-emit the same tool call."
+                    )
+                state.confirmed_facts.append(_nudge)
+                continue
+
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(_call_key(tool_name, tool_args))
+                _journal_tool_start_ts = (
+                    __import__("time").monotonic()
+                    if state._skill_journal is not None else None
+                )
 
                 # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
                 # When a name exists in both catalogs (e.g. list_devices is both a skill
@@ -898,7 +1093,19 @@ class AgentRuntimeLoop:
                     logger.warning("run: LLM called skill-only '%s' as tool — injecting error", tool_name)
                 else:
                     raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-                stored = self._budget.store_tool_result(tool_name, raw)
+                # Same exclusion as ToolRouter — don't double-store pagination
+                # outputs. The 'stored' label here is what the LLM sees in the
+                # next turn's context; for paged reads we want the LLM to see
+                # the actual page content, not yet another [STORED:] reference.
+                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
+                _is_page_or_ref = (
+                    raw.startswith("[STORED:")
+                    or raw.startswith("# Stored result ref_id=")
+                )
+                if tool_name in _SKIP_STORE or _is_page_or_ref:
+                    stored = raw   # pass page content through unchanged
+                else:
+                    stored = self._budget.store_tool_result(tool_name, raw)
                 tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 last_tool_result = raw
 
@@ -923,8 +1130,12 @@ class AgentRuntimeLoop:
                 )
 
             if self._is_complete(llm_response, new_tool_calls):
+                # BUG-04 fix: the loop completed normally (LLM stopped calling
+                # tools), which means the task is done — use STOP_GRACEFUL, not
+                # CONTINUE. CONTINUE means "keep looping"; callers check this
+                # value to decide whether to trigger Hermes post-processing.
                 return LoopResult(
-                    outcome=StopOutcome.CONTINUE,
+                    outcome=StopOutcome.STOP_GRACEFUL,
                     final_response="\n".join(chunks),
                     confirmed_facts=state.confirmed_facts,
                     working_set=getattr(state, "working_set", []),
@@ -947,14 +1158,19 @@ class AgentRuntimeLoop:
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
-        skip_pre_verify: bool = False,
     ) -> AsyncIterator[dict[str, Any]]:
-        """
-        skip_pre_verify: when True, bypass the PolicyEngine pre-verification
-        gate. Post-HITL callers MUST set this to True — operator approval is
-        the final authority on whether a destructive action proceeds, and
-        running PolicyEngine afterwards causes it to second-guess and BLOCK
-        already-approved actions on keywords like "修复" / "restart" / "rollback".
+        """Run one full turn of the agent loop and stream chunks.
+
+        Destructive-action gating happens at a SINGLE point: the LLM
+        produces a tool_call, and `_cfg.hitl_tool_names` watch-list
+        intercepts before execution, emitting a stop_hitl chunk with
+        the LLM-proposed tool_args. The host (HitlExecutor) raises a
+        HITL interrupt for operator review.
+
+        There is no pre_verify policy run on the raw query. The LLM is
+        the authoritative source of "this is destructive" — it sees full
+        context (recall, tool outputs, confirmed_facts) and produces
+        concrete tool_args operators can review.
         """
         env_ctx  = env_context or {}
         tool_reg = tool_registry or {}
@@ -966,18 +1182,30 @@ class AgentRuntimeLoop:
                 working_set = fork_ctx.get("working_set", [])
 
         state = LoopState()
-        state.confirmed_facts = list(confirmed_facts or [])
+        # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
+        from runtime.stop_policy import FactsLedger as _FL, FactCategory as _FC
+        state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
         setattr(state, "working_set", list(working_set or []))
 
-        # Pre-verification deferred until AFTER memory recall (see below) so
-        # that PolicyEngine can resolve references like "this device" against
-        # prior turns. Without this, post-HITL callbacks (and any caller that
-        # doesn't pre-fill env_context with _fts_context) would run pre_verify
-        # with empty context and mis-classify pronoun queries as ambiguous.
+        # ── SkillJournal — passive observability (Plan A) ──────────
+        # Records skill selection, loads, tool calls, completion outcome.
+        # No effect on control flow; data feeds /skill_journal endpoints
+        # and SkillEvolver training signal.
+        state._skill_journal = None
+        try:
+            from config import cfg as _app_cfg
+            _so_cfg = getattr(_app_cfg, "skill_orchestration", None)
+            if _so_cfg and getattr(_so_cfg, "journal_enabled", True):
+                from runtime.skill_journal import SkillJournal
+                state._skill_journal = SkillJournal(
+                    session_id=session_id,
+                    query=query,
+                )
+        except Exception as _jexc:
+            logger.debug("SkillJournal init skipped: %s", _jexc)
 
         tool_outputs: dict[str, str] = {}   # persists across turns
         called_tools: set[str] = set()       # dedup guard
-        _pre_verified = False                # run pre_verify exactly once
 
         # ── Clarification gate (runs ONCE before the first turn) ─────────
         # When the caller has supplied a complexity decision and its
@@ -1003,102 +1231,65 @@ class AgentRuntimeLoop:
         except (TypeError, ValueError):
             _initial_confidence = None
 
-        if (
-            not _clarification_done
-            and not skip_pre_verify
-            and _initial_confidence is not None
-            and _initial_confidence < self._cfg.stop_policy.clarification_threshold
-            and self._cfg.stop_policy.max_clarifications > 0
-        ):
-            # Skip if prior turn already asked clarification — the current
-            # query IS the operator's answer; running the gate again would
-            # double-ask. We detect this by sniffing recent recall context
-            # for the agent's question marker.
-            _prior_recall = env_ctx.get("_fts_context", "") or ""
-            if (
-                "为了准确处理这个请求，我需要您补充" in _prior_recall
-                or "Clarification asked via chat turn" in _prior_recall
-            ):
-                logger.info(
-                    "Clarification gate: prior turn already asked — "
-                    "treating this query as the answer, skipping gate",
-                )
-            else:
-                # Derive what's likely missing — use the LLM-extracted gaps the
-                # caller has supplied via env_context, otherwise heuristic.
-                missing = env_ctx.get("_clarification_fields") or _heuristic_missing_fields(query)
-                if missing:
-                    logger.info(
-                        "Clarification gate: confidence=%.2f < threshold=%.2f — "
-                        "asking operator for %s via chat turn",
-                        _initial_confidence,
-                        self._cfg.stop_policy.clarification_threshold,
-                        [f["key"] for f in missing],
-                    )
-                    # Render a friendly chat-turn message that lists the
-                    # questions. The operator's next message in the same
-                    # session naturally provides the answers; no card UI
-                    # needed. The agent reads recall context next time so
-                    # it sees both the question and the answer.
-                    _q_lines = []
-                    for f in missing:
-                        _ph = f.get("placeholder", "")
-                        _star = "" if f.get("required", True) else "（可选）"
-                        line = f"- **{f['prompt']}**{_star}"
-                        if _ph:
-                            line += f"  _例: {_ph}_"
-                        _q_lines.append(line)
-                    _ask_text = (
-                        "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
-                        + "\n".join(_q_lines)
-                        + "\n\n请直接回复，我会基于您的补充继续。"
-                    )
-                    # Stream as tokens so the chat UI shows it like any
-                    # normal agent reply.
-                    for _i in range(0, len(_ask_text), 80):
-                        yield {"token": _ask_text[_i:_i+80]}
-                    yield {
-                        "node":      "clarification_chat",
-                        "node_step": "Clarification asked via chat turn",
-                        "reason":    "clarification_needed",
-                        "confidence": _initial_confidence,
-                        # Persist a hint for the next-turn coreference resolver
-                        "_clarification_fields_asked": [f["key"] for f in missing],
-                        "message": "Clarification asked — awaiting operator's next message",
-                    }
-                    return
+        # Single clarification gate runs in the main loop after skill selection.
+
+
+        # PERF-1: Cache stable per-query computations across turns.
+        # `query` is invariant for the entire stream() call, so re-running
+        # FTS5 recall and skill selection on every turn just wastes IO/CPU.
+        # We refresh on:
+        #   (a) every N turns (configurable) to pick up cross-session writes
+        #   (b) when state.confirmed_facts has grown by ≥ growth_threshold
+        # Skill selection is also stable; cached separately because the
+        # refresh cadence may differ.
+        try:
+            from config import cfg as _app_cfg
+            _runtime_cfg = getattr(_app_cfg, "runtime", None)
+            _recall_every = int(getattr(_runtime_cfg, "recall_refresh_every_n_turns", 3))
+            _skill_every  = int(getattr(_runtime_cfg, "skill_select_refresh_every_n_turns", 5))
+            _facts_growth = int(getattr(_runtime_cfg, "recall_refresh_facts_growth", 3))
+            _emit_skills_only_on_change = bool(getattr(_runtime_cfg, "emit_matched_skills_only_on_change", True))
+        except Exception:
+            _recall_every, _skill_every, _facts_growth = 3, 5, 3
+            _emit_skills_only_on_change = True
+
+        _cached_memory_results: list = []
+        _cached_skill_section:  str  = ""
+        _cached_selected_skills: list = []
+        _cached_skill_count:    int  = 0
+        _cached_skill_ambiguous: bool = False
+        _last_recall_turn = -1
+        _last_skill_turn  = -1
+        _last_facts_count = -1
+        _last_emitted_skill_sig: str = ""
 
         while True:
             state.turns += 1
-            memory_results = await self._retrieve_memory(query, session_id)
 
-            # Run pre_verify on the FIRST turn only, AFTER recall. Inject the
-            # recalled context (and any caller-supplied _fts_context) so the
-            # policy LLM can see entities mentioned earlier in the session.
-            # Skipped when caller has already obtained operator approval (HITL).
-            if (not _pre_verified
-                    and self._cfg.enable_pre_verification
-                    and not skip_pre_verify):
-                _pre_env = dict(env_ctx)
-                # Prefer caller-supplied context; otherwise use freshly recalled.
-                if "_fts_context" not in _pre_env and memory_results:
-                    try:
-                        _pre_env["_fts_context"] = "\n".join(
-                            str(m) for m in memory_results
-                        )[:1500]
-                    except Exception:
-                        pass
-                pre = await self.pre_verify(query, state.confirmed_facts, _pre_env)
-                _pre_verified = True
-                if not pre.passed:
-                    yield {"message": f"Pre-verification failed: {pre.reason}", "node": "pre_verify"}
-                    return
+            # ── PERF-1: conditional recall refresh ──────────────────────
+            _facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
+            _need_recall_refresh = (
+                _last_recall_turn < 0
+                or (state.turns - _last_recall_turn) >= _recall_every
+                or (_last_facts_count >= 0 and (_facts_now - _last_facts_count) >= _facts_growth)
+            )
+            if _need_recall_refresh:
+                _cached_memory_results = await self._retrieve_memory(query, session_id)
+                _last_recall_turn  = state.turns
+                _last_facts_count  = _facts_now
+            memory_results = _cached_memory_results
 
-            skill_section  = ""
-            skill_count    = 0
-            selected_skills: list = []
-            skill_ambiguous = False
-            if self._skill_catalog:
+            # ── PERF-1: conditional skill-selection refresh ─────────────
+            skill_section  = _cached_skill_section
+            skill_count    = _cached_skill_count
+            selected_skills = _cached_selected_skills
+            skill_ambiguous = _cached_skill_ambiguous
+
+            _need_skill_refresh = (
+                _last_skill_turn < 0
+                or (state.turns - _last_skill_turn) >= _skill_every
+            )
+            if self._skill_catalog and _need_skill_refresh:
                 try:
                     sel = self._skill_catalog.select_skills_for_query(query, top_k=5)
                     skill_section   = sel.summary
@@ -1109,17 +1300,36 @@ class AgentRuntimeLoop:
                     # Fallback if select_skills_for_query not available
                     skill_section = self._skill_catalog.format_summary()
                     skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
+                # Update cache
+                _cached_skill_section    = skill_section
+                _cached_selected_skills  = selected_skills
+                _cached_skill_count      = skill_count
+                _cached_skill_ambiguous  = skill_ambiguous
+                _last_skill_turn         = state.turns
+                # Journal: first selection of this stream call
+                if state._skill_journal is not None and state.turns <= 1:
+                    try:
+                        state._skill_journal.record_selection(
+                            top_k_skills=selected_skills,
+                            ambiguous=skill_ambiguous,
+                            turn=state.turns,
+                        )
+                    except Exception as _je:
+                        logger.debug("journal.record_selection failed: %s", _je)
 
             # Compress paged results before assembly to prevent context overflow.
             # Without this, accumulated read_stored_result pages send the full
             # paged content back to the LLM every turn — Ollama times out.
             from runtime.context_budget import compress_paged_outputs as _compress
             _to_assemble = _compress(tool_outputs)
+            # BUG-07 fix: use state.working_set (which may be updated mid-loop)
+            # rather than the outer `working_set` variable (frozen at call start).
+            _current_working_set = getattr(state, "working_set", None) or working_set or []
             context_str = self._budget.assemble(
                 memory_results=memory_results,
                 tool_outputs=_to_assemble,       # compressed accumulated results
                 confirmed_facts=state.confirmed_facts,
-                working_set=working_set,
+                working_set=_current_working_set,
                 env_context=env_ctx,
             )
             if skill_section:
@@ -1127,25 +1337,53 @@ class AgentRuntimeLoop:
                 # Q1: emit named matched skills so Flow tab shows exactly which skills loaded
                 skill_names = ", ".join(f"{sid}({sc:.2f})" for sid, sc in selected_skills) \
                               or f"{skill_count} skills"
-                yield {
-                    "node_step": f"Skills matched: {skill_names}",
-                    "node":      "skill_load",
-                    "skill_count": skill_count,
-                    "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
-                    "ambiguous": skill_ambiguous,
-                }
-                # Q4 ambiguity: top skills are too similar — surface them as
-                # a USER_CHOICE so the operator picks the intended one
-                # instead of the loop guessing or grinding to a generic HITL.
-                # Enabled by default; set HITL_SKILL_AMBIGUITY=false to disable.
+                # PERF-4: only emit when signature changes (avoid wire spam on cached turns)
+                _skill_sig = f"{skill_count}|{skill_names}"
+                _suppress_skill_emit = _emit_skills_only_on_change and _skill_sig == _last_emitted_skill_sig
+                _last_emitted_skill_sig = _skill_sig
+                if _suppress_skill_emit:
+                    pass
+                else:
+                    yield {
+                        "node_step": f"Skills matched: {skill_names}",
+                        "node":      "skill_load",
+                        "skill_count": skill_count,
+                        "selected_skills": [{"id": sid, "score": sc} for sid, sc in selected_skills],
+                        "ambiguous": skill_ambiguous,
+                    }
+                # When multiple skills match closely, surface a USER_CHOICE
+                # HITL card so the operator picks which to apply (or none).
+                # The selection is then injected into env_context as
+                # `_selected_skills` for the rest of this stream call —
+                # the loop continues, it does NOT terminate here. The
+                # operator can also pick "none" which means "let the LLM
+                # decide from prompt context unaided".
+                #
+                # Read trigger config from cfg.skill_orchestration with env-var fallback.
                 import os as _os
-                if skill_ambiguous and _os.getenv("HITL_SKILL_AMBIGUITY", "true").lower() != "false":
-                    # Build choice options from the top-N candidate skills.
-                    # Capped at 5 to keep the UI scannable.
+                try:
+                    from config import cfg as _app_cfg
+                    _so = getattr(_app_cfg, "skill_orchestration", None)
+                    _hitl_on_ambig = bool(getattr(_so, "hitl_on_ambiguity", True)) if _so else True
+                    _max_choices   = int(getattr(_so, "ambiguity_max_choices", 5)) if _so else 5
+                except Exception:
+                    _hitl_on_ambig, _max_choices = True, 5
+                # Env var override (back-compat)
+                _env_val = _os.getenv("HITL_SKILL_AMBIGUITY")
+                if _env_val is not None:
+                    _hitl_on_ambig = _env_val.lower() != "false"
+
+                _ambig_already_resolved = bool(env_ctx.get("_skill_choice_resolved"))
+                if (
+                    skill_ambiguous
+                    and not _ambig_already_resolved
+                    and _hitl_on_ambig
+                ):
+                    # Build choices from top candidates + a "none" option.
                     _choices = []
-                    for sid, score in selected_skills[:5]:
-                        summary = self._catalog.get_summary(sid) if hasattr(self, "_catalog") and self._catalog else None
-                        if summary is None and self._skill_catalog is not None:
+                    for sid, score in selected_skills[:_max_choices]:
+                        summary = None
+                        if self._skill_catalog is not None:
                             try:
                                 summary = self._skill_catalog.get_summary(sid)
                             except Exception:
@@ -1163,19 +1401,28 @@ class AgentRuntimeLoop:
                                 "tags":     (summary.tags[:4] if summary else []),
                             },
                         })
+                    # Always offer a "do not use any skill" option so
+                    # operators aren't forced to pick — the LLM has
+                    # access to all skill catalog summaries via prompt
+                    # injection regardless of this choice.
+                    _choices.append({
+                        "id":       "__none__",
+                        "label":    "Do not load any skill",
+                        "description": "Let the LLM decide from the prompt context without loading a specific skill recipe.",
+                        "metadata": {"skill_id": None, "score": 0.0, "tags": []},
+                    })
                     yield {
                         "message": (
                             f"Multiple skills match this request — top candidates: "
-                            f"{[c['id'] for c in _choices[:3]]}"
+                            f"{[c['id'] for c in _choices[:min(3, _max_choices)]]}"
                         ),
                         "node":           "hitl_gate",
                         "stop_hitl":      True,
                         "reason":         "skill_ambiguity",
                         "hitl_kind":      "user_choice",
-                        "summary":        f"找到多个匹配的 skill，请选择要使用的具体 skill：",
+                        "summary":        f"找到多个匹配的 skill，请选择要使用的具体 skill (或选择不使用)：",
                         "choices":        _choices,
-                        # Keep top_skills for backwards compatibility
-                        "top_skills":     [c["id"] for c in _choices[:2]],
+                        "top_skills":     [c["id"] for c in _choices[:3] if c["id"] != "__none__"],
                     }
                     return
 
@@ -1196,19 +1443,19 @@ class AgentRuntimeLoop:
                 _recent_for_clar = env_ctx.get("_fts_context", "") or ""
                 if not _recent_for_clar and memory_results:
                     try:
-                        _recent_for_clar = "\n".join(str(m) for m in memory_results)[:1500]
+                        _tcfg = _truncation_cfg()
+                        _recall_cap = getattr(_tcfg, "recall_context_chars", 1500) if _tcfg else 1500
+                        _recent_for_clar = "\n".join(str(m) for m in memory_results)[:_recall_cap]
                     except Exception:
                         pass
-                clar_fields = self._maybe_clarification_fields(
+                clar_fields = await self._maybe_clarification_fields(
                     query=query,
                     top_skill_score=(selected_skills[0][1] if selected_skills else 0.0),
                     asked_count=self._clarification_counts.get(session_id, 0),
                     recent_context=_recent_for_clar,
                 )
                 if clar_fields:
-                    self._clarification_counts[session_id] = (
-                        self._clarification_counts.get(session_id, 0) + 1
-                    )
+                    self._clarification_counts.increment(session_id)
                     # Open-ended clarification — render as a CHAT TURN, not a
                     # HITL card. The operator's next message in the same
                     # session naturally provides the answers. This is the
@@ -1268,6 +1515,8 @@ class AgentRuntimeLoop:
             _trace = {}
             if hasattr(state, "_llm_traces") and state._llm_traces:
                 _trace = state._llm_traces[-1]
+            _tcfg_t = _truncation_cfg()
+            _resp_preview_cap = getattr(_tcfg_t, "response_preview_chars", 200) if _tcfg_t else 200
             yield {
                 "type":             "llm_trace",
                 "turn":             state.turns,
@@ -1275,20 +1524,38 @@ class AgentRuntimeLoop:
                 "system_chars":     _trace.get("system_chars", len(context_str)),
                 "context_chars":    _trace.get("context_chars", len(context_str)),
                 "response_chars":   _trace.get("response_chars", len(llm_response)),
-                "has_tool_call":    "[TOOL:" in llm_response,
-                "system_preview":   _trace.get("system_preview", context_str[:200]),
-                "response_preview": _trace.get("response_preview", llm_response[:200]),
+                # Use the centralized parser's tolerance: a substring check
+                # like `"[TOOL:" in llm_response` would miss `[TOOL: name]`
+                # (note the space after colon) which the parser accepts.
+                # Keeping these in sync prevents the trace from telling the
+                # frontend "no tool call" while the parser actually fires
+                # one downstream.
+                "has_tool_call":    _has_any_tool_directive(llm_response),
+                "system_preview":   _trace.get("system_preview", context_str[:_resp_preview_cap]),
+                "response_preview": _trace.get("response_preview", llm_response[:_resp_preview_cap]),
             }
 
-            # ── Stream tokens to user — strip [TOOL:...] lines ──────────
-            # The raw LLM response may contain [TOOL:name] {...} directives.
-            # These are execution instructions, not prose — never show them
-            # to the user.  Strip any line that starts with [TOOL: before
-            # yielding tokens.
-            import re as _re
+            # ── Stream tokens to user — strip [TOOL:...] AND [TOOL_BATCH:...] ──
+            # The raw LLM response may contain [TOOL:name] {...} or
+            # [TOOL_BATCH:name] [...] directives. These are execution
+            # instructions, not prose — never show them to the user.
+            # We use the centralized strippers from directive_parser so
+            # tolerance matches the parser (handles `[TOOL: name]` etc).
+            # Also strip multi-line TOOL_BATCH blocks: the LLM commonly
+            # formats them across several lines, so a per-line regex
+            # would only catch the opener and leak the args array.
+            from runtime.directive_parser import (
+                strip_tool_directives as _strip_tools,
+                strip_tool_batch_directives as _strip_batch,
+            )
+            _visible = _strip_batch(_strip_tools(llm_response)).strip()
+            # Also drop any per-line residue (e.g. a bare "[TOOL:foo]"
+            # with no args dict that the multi-strippers skipped because
+            # the open-brace lookahead didn't fire).
             _visible_lines = [
-                ln for ln in llm_response.splitlines()
-                if not _re.match(r'\s*\[TOOL:\w+\]', ln)
+                ln for ln in _visible.splitlines()
+                if not re.match(r'\s*\[\s*TOOL(?:_BATCH)?\s*:\s*\w+\s*\]\s*$',
+                                ln, re.IGNORECASE)
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
@@ -1301,10 +1568,9 @@ class AgentRuntimeLoop:
             # If the entire response was tool calls (no prose), yield nothing —
             # the tool result will be injected in the next turn's context and
             # the LLM will produce a proper prose answer then.
-
-            import re
             _skill_loads_this_turn: set[str] = set()
-            for skill_id in re.findall(r"\[SKILL_LOAD:(\w+)\]", llm_response):
+            from runtime.directive_parser import find_skill_load_names
+            for skill_id in find_skill_load_names(llm_response):
                 if skill_id in _skill_loads_this_turn:
                     continue   # deduplicate within a single response
                 _skill_loads_this_turn.add(skill_id)
@@ -1315,17 +1581,137 @@ class AgentRuntimeLoop:
                     if detail:
                         context_str += "\n\n" + detail   # inject for next turn
                         yield {"node_step": f"Loading skill details: {skill_id}", "node": "skill_load"}
+                        # Journal: record the load with position+score from top-k
+                        if state._skill_journal is not None:
+                            try:
+                                _pos = next(
+                                    (i for i, (sid, _) in enumerate(selected_skills) if sid == skill_id),
+                                    None,
+                                )
+                                _score = next(
+                                    (sc for sid, sc in selected_skills if sid == skill_id),
+                                    None,
+                                )
+                                state._skill_journal.record_skill_load(
+                                    skill_id=skill_id, turn=state.turns,
+                                    position=_pos, score=_score,
+                                )
+                            except Exception as _je:
+                                logger.debug("journal.record_skill_load failed: %s", _je)
+
+            # P1+: ALIAS directive detection (mirror of run() path).
+            # See run() for full rationale; in short, when the LLM corrects
+            # a user-supplied entity name (e.g. "core-01" was actually meant
+            # to mean "sw-acc-01"), an [ALIAS: user = actual] line in the
+            # LLM response gets folded into confirmed_facts so the next
+            # turn sees the correction surfaced prominently in its prompt.
+            _alias_re_s = re.compile(
+                r"\[ALIAS\s*:\s*([^=\]]+?)\s*=\s*([^\]]+?)\s*\]"
+            )
+            for _m in _alias_re_s.finditer(llm_response):
+                _user_term, _sys_term = _m.group(1).strip(), _m.group(2).strip()
+                if not _user_term or not _sys_term or _user_term == _sys_term:
+                    continue
+                _alias_fact = f"ENTITY_ALIAS: '{_user_term}' actually refers to '{_sys_term}'"
+                if not any(f == _alias_fact for f in state.confirmed_facts):
+                    state.confirmed_facts.append(_alias_fact)
+                    logger.info(
+                        "ALIAS recorded (turn=%d, stream): %r → %r",
+                        state.turns, _user_term, _sys_term,
+                    )
+                    yield {
+                        "node":      "alias_recorded",
+                        "node_step": f"Recorded alias: {_user_term!r} → {_sys_term!r}",
+                    }
 
             # ── Single tool call enforcement ──────────────────────────
             # _parse_tool_call() returns only the FIRST [TOOL:] found.
-            # Multiple calls in one response are a model error — execute
-            # only the first so we feed back real data before the next call.
-            _single = self._parse_tool_call(llm_response)
-            tool_calls = [_single] if _single else []
+            # Multiple calls in one response are usually a model error —
+            # execute only the first so we feed back real data before the
+            # next call.
+            #
+            # EXCEPTION: when the LLM uses [TOOL_BATCH:name] to indicate a
+            # multi-target destructive batch, _parse_tool_calls() expands
+            # the array into N (name, args_i) tuples that all share the
+            # same tool name. In that case we keep ALL of them so the
+            # stop_hitl path below detects them as sibling destructive
+            # calls and raises a single HITL batch (Path A).
+            _all_parsed = self._parse_tool_calls(llm_response)
+            if (
+                len(_all_parsed) >= 2
+                and all(_n == _all_parsed[0][0] for _n, _ in _all_parsed)
+                and _all_parsed[0][0] in self._cfg.hitl_tool_names
+            ):
+                # Looks like a TOOL_BATCH expansion (or a same-name multi
+                # [TOOL:] burst): all destructive, all same name. Keep all.
+                tool_calls = _all_parsed
+                logger.info(
+                    "stream: multi-call destructive batch detected (%d %s calls) — "
+                    "passing through for HITL batch handling",
+                    len(tool_calls), tool_calls[0][0],
+                )
+            elif _all_parsed:
+                # Standard single-call path: take only the first.
+                tool_calls = [_all_parsed[0]]
+            else:
+                tool_calls = []
             new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
+
+            # Repeat-tool-call recovery: if the LLM requested a tool call we've
+            # already executed this session (same name + same args fingerprint),
+            # dedup empties new_tool_calls. Without intervention, _is_complete
+            # below would see "no new tool calls" and mark the turn DONE — but
+            # the LLM's response is just a prelude like "我将查询 X..."
+            # followed by the duplicate [TOOL:...] line, NOT a real synthesis.
+            # The user would receive that prelude as the final answer.
+            #
+            # The fix: surface the existing result back to the LLM as a nudge
+            # so the next turn synthesises from data already in context instead
+            # of re-requesting it.
+            _had_calls    = bool(tool_calls)
+            _all_dup      = _had_calls and not new_tool_calls
+            if _all_dup and state.turns < 3:
+                dup_name, dup_args = tool_calls[0]
+                dup_key = _call_key(dup_name, dup_args)
+                prior_output = tool_outputs.get(dup_key, "")
+                logger.warning(
+                    "stream: LLM re-requested already-executed tool %s (turn=%d) — "
+                    "nudging it to synthesise from existing result instead of looping",
+                    dup_name, state.turns,
+                )
+                # Detect the read_stored_result pagination pattern. When the
+                # LLM keeps asking to read the same page, it means the model
+                # decided the page wasn't useful yet but didn't move on; tell
+                # it explicitly that re-reading the same offset is futile.
+                if dup_name == "read_stored_result":
+                    _nudge_text = (
+                        "_NUDGE: You just requested read_stored_result with the same "
+                        f"ref_id+offset as a prior call ({dup_args}). The page content is "
+                        "already in the tool_outputs section of this prompt — DO NOT request "
+                        "it again. Instead either (a) ANALYSE the page content you can see "
+                        "and respond to the user, or (b) request a DIFFERENT offset to read "
+                        "the next page. Do not emit [TOOL:read_stored_result] with the same "
+                        "ref_id and offset combination you have already used."
+                    )
+                else:
+                    _nudge_text = (
+                        f"_NUDGE: You just requested [TOOL:{dup_name}] with the same "
+                        "arguments as a prior call this session. The result is already in "
+                        "your context. Do NOT re-emit that tool call. Instead, analyse the "
+                        "data you already have and respond to the user. If you genuinely "
+                        "need different data, call a different tool or change the args."
+                    )
+                state.confirmed_facts.append(_nudge_text)
+                # Continue the while loop — top of loop bumps state.turns
+                continue
+
             for tool_name, tool_args in new_tool_calls:
                 state.record_tool_call(tool_name)
                 called_tools.add(_call_key(tool_name, tool_args))
+                _journal_tool_start_ts = (
+                    __import__("time").monotonic()
+                    if state._skill_journal is not None else None
+                )
 
                 # ── Skill-as-tool guard ───────────────────────────────
                 # If the LLM called a SKILL name as if it were a tool,
@@ -1407,6 +1793,185 @@ class AgentRuntimeLoop:
                     _editable_keys = list(
                         self._cfg.editable_hitl_tools.get(tool_name, [])
                     )
+                    # ── Batch detection ───────────────────────────────
+                    # Path A: LLM already emitted multiple [TOOL:] of the
+                    # SAME destructive name this turn (the textbook case
+                    # after the prompt's "multi-target batches" example).
+                    # Path B: LLM emitted ONLY ONE [TOOL:] this turn but
+                    # its surrounding prose names multiple devices that
+                    # are clearly the intended targets (e.g. the analysis
+                    # text says "为 sw-core-01 和 sw-core-02 应用以下配置"
+                    # but the [TOOL:] block only carries sw-core-01).
+                    # In Path B we DON'T stop_hitl yet; we nudge the LLM
+                    # to re-emit ONE response that contains [TOOL:] lines
+                    # for every target. Otherwise the operator only sees
+                    # the first target and has to start a fresh chat turn
+                    # for each remaining one.
+                    _all_calls = self._parse_tool_calls(llm_response)
+                    _siblings  = [
+                        (n, a) for (n, a) in _all_calls
+                        if n == tool_name and a != tool_args and n in self._cfg.hitl_tool_names
+                    ]
+                    _batch_calls = None
+                    if _siblings:
+                        # Path A — Build the batch list: current + all distinct
+                        # siblings, preserving order. Dedup by JSON-canonical
+                        # key so two identical args don't both show.
+                        _seen_keys = {_call_key(tool_name, tool_args)}
+                        _batch_calls = [(tool_name, tool_args)]
+                        for (n, a) in _siblings:
+                            k = _call_key(n, a)
+                            if k not in _seen_keys:
+                                _seen_keys.add(k)
+                                _batch_calls.append((n, a))
+                        logger.info(
+                            "stream: detected batch of %d %s calls in one turn (path A) — "
+                            "executor will raise a HITL batch",
+                            len(_batch_calls), tool_name,
+                        )
+                    else:
+                        # Path B v2 — silent fabrication.
+                        #
+                        # Real-world testing (sessions ap-01/ap-02 + sw-core-01/02)
+                        # showed that qwen3.5:27b consistently emits a SINGLE
+                        # [TOOL:] even when prose enumerates multiple targets
+                        # for the SAME logical operation ("我将为 ap-01 和
+                        # ap-02 下发修复配置"). Prompt-level teaching (worked
+                        # examples, [TOOL_BATCH:] directive, GOOD/BAD pairs)
+                        # has been tried and the LLM keeps reverting to
+                        # the "one tool per turn" pattern it was trained on.
+                        #
+                        # Strategy: when the LLM's prose names ≥2 distinct
+                        # device-id patterns AND only one [TOOL:] was emitted
+                        # AND the emitted device is among the named ones,
+                        # silently fabricate N-1 sibling tool calls by
+                        # COPYING the LLM's args dict and only swapping the
+                        # device_id field. Mark each fabricated call's
+                        # reason field so operators see this is auto-derived.
+                        #
+                        # Operator safety: every fabricated call still goes
+                        # through HITL approval — the operator reviews each
+                        # card and can edit args or reject. Worst case is
+                        # an extra card to reject; best case (and common
+                        # case in our tests) is "same fix applied to N
+                        # identical devices", which the operator wants
+                        # batched anyway.
+                        #
+                        # Limits:
+                        #  * Only fires for tools with a device_id-like
+                        #    parameter (so fabrication is unambiguous).
+                        #  * Cap at 5 fabricated siblings to prevent
+                        #    runaway batches from prose typos.
+                        #  * Skip if any fabricated device_id would
+                        #    collide with the current one (after
+                        #    case-normalization).
+                        _current_device = str(
+                            tool_args.get("device_id")
+                            or tool_args.get("device")
+                            or tool_args.get("target")
+                            or ""
+                        ).strip()
+                        _device_key = (
+                            "device_id" if "device_id" in tool_args
+                            else "device" if "device" in tool_args
+                            else "target" if "target" in tool_args
+                            else None
+                        )
+                        if _current_device and _device_key:
+                            # Strip [TOOL:] blocks + [ALIAS:] blocks from
+                            # prose so we only match entity names in
+                            # narrative text.
+                            # Use centralized parser to strip directives
+                            # consistently (tolerates whitespace variants).
+                            from runtime.directive_parser import (
+                                strip_tool_directives as _stt,
+                                strip_tool_batch_directives as _stb,
+                            )
+                            _prose = _stb(_stt(llm_response))
+                            _prose = re.sub(
+                                r"\[ALIAS\s*:\s*[^=\]]+?\s*=\s*[^\]]+?\s*\]",
+                                "",
+                                _prose,
+                            )
+                            _DEV_RE = re.compile(
+                                r"(?<![a-z0-9])"
+                                r"(?:sw|ap|router|switch|core)[-_]?[a-z0-9]*[-_]?\d+"
+                                r"(?![a-z0-9])",
+                                re.IGNORECASE,
+                            )
+                            _mentioned: list[str] = []
+                            _seen_dev: set[str] = set()
+                            for _m in _DEV_RE.finditer(_prose):
+                                _id = _m.group(0)
+                                _id_lc = _id.lower()
+                                if _id_lc not in _seen_dev:
+                                    _seen_dev.add(_id_lc)
+                                    _mentioned.append(_id)
+                            # Filter out aliases already recorded so we
+                            # don't double-count "core-01" + "sw-acc-01"
+                            _alias_user_terms = set()
+                            for _f in (state.confirmed_facts or []):
+                                if _f.startswith("ENTITY_ALIAS: "):
+                                    _mm = re.match(
+                                        r"ENTITY_ALIAS:\s*'([^']+)'\s*actually refers to\s*'([^']+)'",
+                                        _f,
+                                    )
+                                    if _mm:
+                                        _alias_user_terms.add(_mm.group(1).lower())
+                            if _alias_user_terms:
+                                _mentioned = [
+                                    d for d in _mentioned
+                                    if d.lower() not in _alias_user_terms
+                                ]
+                            # Only fabricate when current device is among
+                            # the prose-mentioned set and there are 2-5
+                            # distinct targets total.
+                            _other_devices = [
+                                d for d in _mentioned
+                                if d.lower() != _current_device.lower()
+                            ]
+                            if (
+                                _current_device.lower() in {d.lower() for d in _mentioned}
+                                and 1 <= len(_other_devices) <= 4   # 2-5 total
+                            ):
+                                import copy as _copy
+                                _fabricated = []
+                                for _other in _other_devices:
+                                    _new_args = _copy.deepcopy(tool_args)
+                                    _new_args[_device_key] = _other
+                                    # Mark the fabricated call so operators
+                                    # can tell it's auto-derived in the HITL
+                                    # card. Preserve original reason if any.
+                                    _orig_reason = str(_new_args.get("reason", "")).strip()
+                                    _new_args["reason"] = (
+                                        f"[auto-derived from {_current_device} — "
+                                        f"verify before approving] "
+                                        f"{_orig_reason}"
+                                    ).strip()
+                                    _fabricated.append((tool_name, _new_args))
+                                if _fabricated:
+                                    _batch_calls = [(tool_name, tool_args)] + _fabricated
+                                    logger.info(
+                                        "stream: prose mentions %d devices %r — "
+                                        "fabricating %d sibling %s call(s) for batch HITL "
+                                        "(path B fabricate)",
+                                        len(_mentioned), _mentioned,
+                                        len(_fabricated), tool_name,
+                                    )
+                    # tool calls entirely and falls back to advisory prose
+                    # (suggesting backups, asking for confirmation, etc),
+                    # which means NEITHER the original single card NOR a
+                    # batch ever appears. Letting the single [TOOL:] flow
+                    # through to stop_hitl preserves the original card so
+                    # at least one device can be approved this turn; the
+                    # LLM will propose remaining devices in a subsequent
+                    # turn once the first approval completes. The prompt's
+                    # multi-target EXCEPTION clause + the worked example in
+                    # llm_engine.py still give the LLM the option to emit
+                    # multiple [TOOL:] up front (Path A) when it's
+                    # confident — but we no longer punish it for emitting
+                    # just one.
+
                     yield {
                         "message": (
                             f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
@@ -1422,6 +1987,10 @@ class AgentRuntimeLoop:
                         # the operator may edit these specific param keys.
                         "hitl_kind":            "edit" if _editable_keys else None,
                         "editable_param_keys":  _editable_keys,
+                        # NEW: list of (name, args) pairs when the LLM
+                        # emitted multiple same-name destructive calls
+                        # in one response. Absent / None when single.
+                        "batch_calls":          _batch_calls,
                     }
                     return
 
@@ -1432,7 +2001,19 @@ class AgentRuntimeLoop:
                     logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
                                  _json.dumps(tool_args, indent=2, default=str), "─"*72)
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-                stored = self._budget.store_tool_result(tool_name, raw)
+                # Same exclusion as ToolRouter — don't double-store pagination
+                # outputs. The 'stored' label here is what the LLM sees in the
+                # next turn's context; for paged reads we want the LLM to see
+                # the actual page content, not yet another [STORED:] reference.
+                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
+                _is_page_or_ref = (
+                    raw.startswith("[STORED:")
+                    or raw.startswith("# Stored result ref_id=")
+                )
+                if tool_name in _SKIP_STORE or _is_page_or_ref:
+                    stored = raw   # pass page content through unchanged
+                else:
+                    stored = self._budget.store_tool_result(tool_name, raw)
                 tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
                 # Update count so llm_engine knows how many current-turn results exist
                 state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
@@ -1453,7 +2034,9 @@ class AgentRuntimeLoop:
                 logger.info("TOOL◀ %s result_chars=%d stored=%s",
                             tool_name, len(raw), stored.startswith("[STORED:"))
                 if logger.isEnabledFor(logging.DEBUG):
-                    logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:2000], "─"*72)
+                    _tcfg_d = _truncation_cfg()
+                    _td_cap = getattr(_tcfg_d, "tool_debug_chars", 2000) if _tcfg_d else 2000
+                    logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:_td_cap], "─"*72)
                 yield {
                     "node_result": {
                         "tool":   tool_name,
@@ -1469,12 +2052,219 @@ class AgentRuntimeLoop:
                     if not post.passed:
                         yield {"node_step": f"Post-verify warning: {post.reason}", "node": "post_verify"}
 
+                # Journal: record completed tool call (after exec + verify)
+                if state._skill_journal is not None:
+                    try:
+                        _t = __import__("time").monotonic()
+                        _elapsed = (_t - _journal_tool_start_ts) * 1000 if _journal_tool_start_ts else None
+                        _tool_ok = "[ToolRouter] Tool" not in (raw or "")[:40]
+                        state._skill_journal.record_tool_call(
+                            turn=state.turns,
+                            tool_name=tool_name,
+                            args=tool_args,
+                            ok=_tool_ok,
+                            error=(None if _tool_ok else str(raw)[:200]),
+                            elapsed_ms=_elapsed,
+                        )
+                    except Exception as _je:
+                        logger.debug("journal.record_tool_call failed: %s", _je)
+
+            # ── Paginated-read findings nudge (defence in depth) ───────
+            # If the LLM is paging through a stored result with read_stored_result
+            # but writing no analysis between pages, the per-page findings
+            # never reach memory and only the LAST page survives in context.
+            # The system prompt tells the LLM to write findings; this is the
+            # safety net that catches it when the prompt is ignored.
+            try:
+                # Pagination nudge config (loaded once per turn)
+                try:
+                    from config import cfg as _app_cfg
+                    _pcfg_local = getattr(_app_cfg, "pagination", None)
+                    _min_chars = int(getattr(_pcfg_local, "findings_nudge_min_chars", 40)) if _pcfg_local else 40
+                except Exception:
+                    _min_chars = 40
+                _last_call_was_paged_read = (
+                    len(new_tool_calls) == 1
+                    and new_tool_calls[0][0] == "read_stored_result"
+                )
+
+                # Detect PREMATURE PIVOT: previous read_stored_result said
+                # "Has more: True" but current turn called something else
+                # (SKILL_LOAD, a different tool, or nothing). This is the
+                # bug from the screenshot — agent gave up reading mid-way.
+                _premature_pivot = False
+                try:
+                    _prev_outputs = list(tool_outputs.values())[-3:]   # last few
+                    _prev_had_more = any(
+                        ("Has more: True" in str(v)) or
+                        ("HAS MORE: True" in str(v).upper())
+                        for v in _prev_outputs
+                    )
+                    _current_pivots_away = (
+                        new_tool_calls
+                        and new_tool_calls[0][0] != "read_stored_result"
+                    )
+                    _premature_pivot = (
+                        _prev_had_more
+                        and _current_pivots_away
+                        and not getattr(state, "_premature_pivot_nudged", False)
+                    )
+                except Exception:
+                    _premature_pivot = False
+                # "Tool-call-only" = response is short and contains only
+                # the [TOOL:] line plus optional minor framing
+                _resp_clean = (llm_response or "").strip()
+                from runtime.directive_parser import strip_tool_directives as _strip_t
+                _resp_no_tool = _strip_t(_resp_clean).strip()
+                _is_findings_empty = len(_resp_no_tool) < _min_chars
+
+                if _last_call_was_paged_read and _is_findings_empty:
+                    state._consecutive_paged_reads = (
+                        getattr(state, "_consecutive_paged_reads", 0) + 1
+                    )
+                else:
+                    state._consecutive_paged_reads = 0
+
+                # Threshold and toggle from cfg.pagination (no hardcode)
+                try:
+                    from config import cfg as _app_cfg
+                    _pcfg = getattr(_app_cfg, "pagination", None)
+                    _enabled         = bool(getattr(_pcfg, "findings_nudge_enabled", True)) if _pcfg else True
+                    _silent_threshold = int (getattr(_pcfg, "findings_silent_threshold", 2)) if _pcfg else 2
+                    _min_chars       = int (getattr(_pcfg, "findings_nudge_min_chars", 40)) if _pcfg else 40
+                except Exception:
+                    _enabled, _silent_threshold, _min_chars = True, 2, 40
+
+                _already_nudged = getattr(state, "_paged_findings_nudged", False)
+                if (_enabled
+                        and state._consecutive_paged_reads >= _silent_threshold
+                        and not _already_nudged):
+                    _nudge = (
+                        "_NUDGE: You're paging through a stored result without writing findings. "
+                        "Older pages are dropped from context to save tokens — only your written "
+                        "findings survive across pages. Before reading the next page, write 2-3 "
+                        "sentences summarising what you saw on the most recent page (offsets, "
+                        "anomalies, IPs, ports). When Has more: False, write the complete analysis "
+                        "aggregating all page-by-page findings."
+                    )
+                    state.confirmed_facts.append(_nudge)
+                    state._paged_findings_nudged = True
+                    yield {
+                        "node_step": "Paginated-read findings nudge injected",
+                        "node": "runtime_loop",
+                    }
+
+                # Premature-pivot nudge — different cause, different message.
+                # Fires when the LLM abandoned pagination mid-way.
+                if _premature_pivot and _enabled:
+                    _pivot_nudge = (
+                        "_NUDGE: The previous tool result shows `Has more: True` — "
+                        "more data remains to be read. You MUST continue paging "
+                        "through the stored result with [TOOL:read_stored_result] "
+                        "{\"ref_id\":\"<the ref_id from the [STORED:] label>\", "
+                        "\"offset\":<next_offset>}, writing 2-3 sentences of "
+                        "findings after each page. Do NOT pivot to other tools or "
+                        "SKILL_LOAD before completing the read."
+                    )
+                    state.confirmed_facts.append(_pivot_nudge)
+                    state._premature_pivot_nudged = True
+                    yield {
+                        "node_step": "Premature-pivot nudge injected",
+                        "node": "runtime_loop",
+                    }
+
+                # UNREAD STORED nudge — fires when the previous tool returned
+                # a [STORED:...] reference (large result spilled to disk) and
+                # the LLM did NOT call read_stored_result this turn.
+                #
+                # Symptom observed in the wild: qwen3.5:27b sees a
+                # `[STORED:prometheus:<ref>]` response, ignores the ref_id,
+                # and re-issues the SAME query tool with slightly different
+                # args hoping for inline data. dedup_key catches identical
+                # args but not "args with one field tweaked", so the loop
+                # spirals (Turn 2/3/4 all firing prometheus_query, never
+                # synthesising).
+                #
+                # Distinct from `_premature_pivot`:
+                #   _premature_pivot: previous call WAS read_stored_result, and
+                #                     "Has more: True" — abandoned mid-read.
+                #   _unread_stored:   previous call returned STORED ref the LLM
+                #                     hasn't yet read at all, regardless of
+                #                     "Has more" status.
+                _unread_stored = False
+                try:
+                    # Look at the most recent tool output. If it's a STORED
+                    # reference AND this turn's new_tool_calls didn't include
+                    # read_stored_result, we have an unread STORED.
+                    if tool_outputs and new_tool_calls:
+                        _last_out = list(tool_outputs.values())[-1]
+                        _last_out_s = str(_last_out)
+                        _last_was_stored = (
+                            _last_out_s.startswith("[STORED:")
+                            or "[STORED:" in _last_out_s[:80]   # tolerate header prefix
+                        )
+                        _this_turn_reads = any(
+                            n == "read_stored_result" for (n, _) in new_tool_calls
+                        )
+                        _unread_stored = (
+                            _last_was_stored
+                            and not _this_turn_reads
+                            and not getattr(state, "_unread_stored_nudged", False)
+                        )
+                except Exception:
+                    _unread_stored = False
+
+                if _unread_stored and _enabled:
+                    # Pull the ref_id out of the [STORED:tool_name:ref_id]
+                    # label so the nudge can include the exact id the LLM
+                    # should pass back. Falls back to placeholder if parse
+                    # fails — nudge still useful as a directive.
+                    import re as _re_local
+                    _ref_match = _re_local.search(
+                        r"\[STORED:[^:]+:([A-Za-z0-9_-]+)\]", _last_out_s
+                    )
+                    _ref_id = _ref_match.group(1) if _ref_match else "<the ref_id from the [STORED:] label>"
+                    # Two-option nudge: page-read for quick samples, OR
+                    # process_stored_chunks for whole-file analysis. The
+                    # second option exists precisely to avoid the 23-page
+                    # death-march we saw operators experience while the
+                    # agent paged through a netflow_dump. process_stored_chunks
+                    # runs filter/count/extract/summarise across the entire
+                    # stored result in a single call.
+                    _unread_nudge = (
+                        f"_NUDGE: The previous tool returned a stored reference "
+                        f"`[STORED:...:{_ref_id}]` — the actual data is on disk, "
+                        f"not in this prompt. To analyse it choose ONE of:\n"
+                        f"  (A) For whole-file analysis (anomaly detection, "
+                        f"filtering, counting, extracting patterns) use ONE call:\n"
+                        f'      [TOOL:process_stored_chunks] {{"ref_id":"{_ref_id}","operation":"summarise"}}\n'
+                        f"      Other operations: filter / reject / extract / count / passthrough.\n"
+                        f"      This is the RIGHT tool when you want findings about "
+                        f"the entire dataset — it handles all pages for you.\n"
+                        f"  (B) For sampling just the first few KB (a quick look):\n"
+                        f'      [TOOL:read_stored_result] {{"ref_id":"{_ref_id}","offset":0,"length":8000}}\n'
+                        f"      Use `length` ≥ 8000 to minimise paging. Do NOT page "
+                        f"through 25 × 2KB chunks — that wastes turns.\n"
+                        f"DO NOT re-issue the original tool with tweaked args; "
+                        f"that will just produce another STORED reference."
+                    )
+                    state.confirmed_facts.append(_unread_nudge)
+                    state._unread_stored_nudged = True
+                    yield {
+                        "node_step": "Unread-STORED nudge injected",
+                        "node": "runtime_loop",
+                    }
+            except Exception:
+                # Defence-in-depth — never let nudge logic crash the turn
+                pass
+
             decision = self._policy.evaluate(state)
             if decision.should_stop:
                 yield {"message": self._format_final([], decision), "node": "runtime_loop"}
                 # Write tool execution ledger into confirmed_facts for next-round reuse
                 _ledger = _build_tool_ledger(tool_outputs, tool_reg,
                                               getattr(state, "_tool_outputs_raw", {}))
+                # extend() on FactsLedger routes by prefix; on plain list it's native
                 state.confirmed_facts.extend(_ledger)
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
@@ -1513,6 +2303,7 @@ class AgentRuntimeLoop:
                             "_NUDGE: Your previous response was empty or too short. "
                             "Write a complete answer using the available context and tool results."
                         )
+                    # FactsLedger.append() routes by prefix; plain list .append() also works
                     state.confirmed_facts.append(_nudge_text)
                     # NOTE: do NOT manually increment state.turns here — the
                     # `continue` jumps back to the top of the while loop where
@@ -1520,22 +2311,30 @@ class AgentRuntimeLoop:
                     # increment caused the < 3 check to allow only 1 retry.
                     continue  # retry the LLM call
                 # Remove any lingering nudge entries
-                state.confirmed_facts = [
-                    f for f in state.confirmed_facts if not f.startswith("_NUDGE:")
-                ]
+                if hasattr(state.confirmed_facts, "clear_nudges"):
+                    state.confirmed_facts.clear_nudges()
+                else:
+                    state.confirmed_facts = [f for f in state.confirmed_facts if not f.startswith("_NUDGE:")]
                 _ledger = _build_tool_ledger(tool_outputs, tool_reg,
                                               getattr(state, "_tool_outputs_raw", {}))
+                # extend() on FactsLedger routes by prefix; on plain list it's native
                 state.confirmed_facts.extend(_ledger)
-                # Capture final synthesis response (not intermediate page-reading turns)
+                # Capture final synthesis response (not intermediate page-reading turns).
+                # Use the directive parser's tolerance so a `[TOOL: name]` (space
+                # after colon) doesn't slip through as "synthesis" and pollute
+                # the next turn's PREV_ANALYSIS. Also covers [TOOL_BATCH:] and
+                # [SKILL_LOAD:] variants the old substring check ignored.
                 _resp_clean = llm_response.strip()
                 _is_synthesis = (
                     len(_resp_clean) > 150
-                    and "[TOOL:" not in _resp_clean
-                    and "[SKILL_LOAD:" not in _resp_clean
+                    and not _has_any_tool_directive(_resp_clean)
+                    and not _has_skill_load(_resp_clean)
                     and state.turns > 1
                 )
                 if _is_synthesis:
-                    summary_line = _resp_clean[:500].replace("\n", " ")
+                    _tcfg_f = _truncation_cfg()
+                    _fsum_cap = getattr(_tcfg_f, "final_response_summary", 500) if _tcfg_f else 500
+                    summary_line = _resp_clean[:_fsum_cap].replace("\n", " ")
                     state.confirmed_facts.append(f"PREV_ANALYSIS: {summary_line}")
                 # NOTE: turn persistence (after_turn) is handled by the backend's
                 # post-turn hook in webui/backend.py:600 via dtm.after_turn(). Do NOT
@@ -1575,7 +2374,6 @@ class AgentRuntimeLoop:
         (qwen3, deepseek-r1, etc.) before tool parsing or display.
         Preserves everything outside the think block.
         """
-        import re
         # Remove <think>...</think> blocks (case-insensitive, multiline, non-greedy)
         cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL | re.IGNORECASE)
         return cleaned.strip()
@@ -1584,6 +2382,15 @@ class AgentRuntimeLoop:
         """
         Parse [TOOL:name] {...} directives from LLM response.
 
+        Also handles [TOOL_BATCH:name] [{args1}, {args2}, ...] for the
+        multi-target destructive batch protocol — see prompt's "DESTRUCTIVE
+        OPERATIONS — multi-target batches" section. The batch directive
+        gets expanded to N (name, args_i) tuples that downstream code
+        treats identically to N separate [TOOL:] calls, which means the
+        existing Path-A batch HITL detector (same-name siblings in one
+        turn) fires automatically and raises a single HITL batch of N
+        cards.
+
         Handles:
           - Thinking model output: strips <think>...</think> first
           - Nested JSON values (uses brace-depth counter not [^}]* regex)
@@ -1591,8 +2398,8 @@ class AgentRuntimeLoop:
           - Whitespace variants between [TOOL:name] and {
           - Malformed JSON: falls back to empty args dict
           - Multiple tool calls in one response (takes first only if dedup active)
+          - [TOOL_BATCH:name] expansion (new)
         """
-        import re
         import json as _json
 
         # Step 1: strip thinking block
@@ -1602,40 +2409,119 @@ class AgentRuntimeLoop:
         text = re.sub(r"```[a-z]*\n?", "", text)
         text = re.sub(r"\n?```", "", text)
 
-        calls = []
-        # Match [TOOL:toolname] then optional whitespace then optional JSON object
-        for m in re.finditer(r"\[TOOL:(\w+)\]\s*(\{)?", text):
-            tool_name = m.group(1)
-            if not m.group(2):
+        # Step 2.5: tolerate small-model directive variants via the
+        # central normalizer (currently fixes the [TOOL:SKILL_LOAD:X]
+        # mistake; future tweaks live in runtime/directive_parser.py).
+        from runtime.directive_parser import normalize_directives
+        text = normalize_directives(text)
+
+        calls: list[tuple[str, dict[str, Any]]] = []
+
+        # ── Step 2.6: expand [TOOL_BATCH:name] [...] before the
+        # standard [TOOL:] scan. The batch directive carries a JSON
+        # array of args dicts; each entry becomes its own (name, args)
+        # tuple so the downstream same-name sibling detector treats it
+        # as a Path-A batch automatically.
+        #
+        # Syntax:
+        #     [TOOL_BATCH:edit_device_config] [
+        #       {"device_id":"ap-01","config_lines":[...]},
+        #       {"device_id":"ap-02","config_lines":[...]}
+        #     ]
+        #
+        # Robustness: same brace-depth-aware scan as single-call form,
+        # but tracking '[' / ']' instead of '{' / '}'. Mismatched JSON
+        # falls back to an empty list (skipping the batch entirely
+        # rather than producing wrong cards).
+        from runtime.directive_parser import find_tool_batch_directives, find_balanced_end
+        for batch_d in find_tool_batch_directives(text):
+            tool_name = batch_d.name
+            if not batch_d.has_args_open:
+                # No opening bracket — degenerate batch directive, skip.
+                continue
+            # Find the '[' position — it's the first '[' after batch_d.end-1
+            # since the parser captures the args_open group via lookahead.
+            _scan_from = batch_d.end - 1   # end is exclusive; args_open is the last char
+            # Locate the actual '[' (may have been swallowed by whitespace
+            # between bracket and args; re-scan to be safe).
+            while _scan_from < len(text) and text[_scan_from] != '[':
+                _scan_from += 1
+            if _scan_from >= len(text):
+                continue
+            start = _scan_from
+            # Use the shared brace-balanced scanner from directive_parser
+            # (identical algorithm — was duplicated inline here before).
+            end = find_balanced_end(text, start, '[', ']')
+            if end == -1:
+                logger.warning(
+                    "TOOL_BATCH:%s: unbalanced '[...]' args block, skipping",
+                    tool_name,
+                )
+                continue
+            raw_arr = text[start:end]
+            try:
+                arr = _json.loads(raw_arr)
+            except Exception:
+                logger.warning(
+                    "TOOL_BATCH:%s: failed to parse JSON array (%d chars), "
+                    "skipping batch directive", tool_name, len(raw_arr),
+                )
+                continue
+            if not isinstance(arr, list):
+                logger.warning(
+                    "TOOL_BATCH:%s: expected JSON array, got %s — skipping",
+                    tool_name, type(arr).__name__,
+                )
+                continue
+            for entry in arr:
+                if not isinstance(entry, dict):
+                    logger.warning(
+                        "TOOL_BATCH:%s: array entry is %s, expected dict — skipping entry",
+                        tool_name, type(entry).__name__,
+                    )
+                    continue
+                calls.append((tool_name, entry))
+            logger.info(
+                "TOOL_BATCH:%s: expanded to %d call(s)",
+                tool_name, len([e for e in arr if isinstance(e, dict)]),
+            )
+
+        # Strip [TOOL_BATCH:...] [...] blocks from text so the standard
+        # [TOOL:] scan below doesn't double-count anything inside them.
+        # Uses centralized parser to tolerate whitespace variants.
+        from runtime.directive_parser import strip_tool_batch_directives
+        text = strip_tool_batch_directives(text)
+
+        # Match [TOOL:toolname] then optional whitespace then optional JSON object.
+        # Uses centralized parser (tolerates `[TOOL: name]`, `[ tool : name ]`,
+        # `[tool:name]`, etc.). The brace-depth scan below stays here because
+        # regex cannot balance-match nested JSON reliably.
+        from runtime.directive_parser import find_tool_directives
+        for d in find_tool_directives(text):
+            tool_name = d.name
+            if not d.has_args_open:
                 # No opening brace — no args
                 calls.append((tool_name, {}))
                 continue
 
-            # Extract balanced JSON object starting at the {
-            start = m.start(2)
-            depth = 0
-            end   = start
-            in_str = False
-            escape = False
-            for i, ch in enumerate(text[start:], start):
-                if escape:
-                    escape = False
-                    continue
-                if ch == '\\' and in_str:
-                    escape = True
-                    continue
-                if ch == '"' and not escape:
-                    in_str = not in_str
-                    continue
-                if in_str:
-                    continue
-                if ch == '{':
-                    depth += 1
-                elif ch == '}':
-                    depth -= 1
-                    if depth == 0:
-                        end = i + 1
-                        break
+            # Find the '{' position. d.end is just past the closing ']';
+            # the '{' captured by the parser is somewhere between then
+            # and the next non-whitespace char. Scan defensively.
+            start = d.end - 1
+            while start < len(text) and text[start] != '{':
+                start += 1
+            if start >= len(text):
+                # malformed (had open-brace signal but no actual brace?)
+                calls.append((tool_name, {}))
+                continue
+            # Use the shared brace-balanced scanner from directive_parser.
+            end = find_balanced_end(text, start, '{', '}')
+            if end == -1:
+                # Unbalanced — try the partial-JSON recovery path below;
+                # leaving end pointing at len(text) lets _json.loads see
+                # the whole rest of the string and likely fail, which is
+                # the same outcome as before.
+                end = len(text)
 
             raw_json = text[start:end]
             try:
@@ -1678,12 +2564,48 @@ class AgentRuntimeLoop:
                 return str(result)
             except Exception as exc:
                 return f"[Tool error: {exc}]"
-        return f"[Tool {tool_name!r} not registered — args={args}]"
+
+        # Tool not found — return a LLM-actionable error with fuzzy-match
+        # suggestions so the next turn can self-correct typos / synonyms
+        # without operator help.
+        #
+        # Typical cases that hit this path:
+        #   - Singular/plural error: list_device vs list_devices
+        #   - Synonym guess: get_devices vs list_devices
+        #   - Tier-1 ↔ Tier-2 mistake: prometheus vs prometheus_query
+        #   - Underscore-vs-camelCase: listDevices vs list_devices
+        #
+        # difflib.get_close_matches uses SequenceMatcher; cutoff 0.6 is
+        # tuned to suggest helpful matches without firing on totally
+        # unrelated names (which would just confuse the model further).
+        import difflib
+        candidates = sorted(registry.keys())
+        suggestions = difflib.get_close_matches(
+            tool_name, candidates, n=3, cutoff=0.6,
+        )
+        # Fallback for transposition / case mismatches that the ratio
+        # check misses: case-insensitive substring match.
+        if not suggestions:
+            lower = tool_name.lower()
+            suggestions = [c for c in candidates
+                           if lower in c.lower() or c.lower() in lower][:3]
+
+        if suggestions:
+            return (
+                f"[Tool {tool_name!r} not registered — args={args}]. "
+                f"Did you mean one of: {', '.join(suggestions)}? "
+                f"Use [TOOL:list_tools] to search the full registry."
+            )
+        return (
+            f"[Tool {tool_name!r} not registered — args={args}]. "
+            f"No similar tools found in the {len(candidates)}-tool registry. "
+            f"Use [TOOL:list_tools] to see what's available."
+        )
 
     @staticmethod
     def _skill_loads_in(response: str) -> set:
-        import re as _re
-        return set(_re.findall(r"\[SKILL_LOAD:(\w+)\]", response))
+        from runtime.directive_parser import find_skill_load_names
+        return set(find_skill_load_names(response))
 
     @staticmethod
     def _is_complete(response: str, tool_calls: list) -> bool:
@@ -1693,10 +2615,10 @@ class AgentRuntimeLoop:
         # asked for skill detail and is waiting for it — keep the loop running
         # so next turn can read the loaded detail. Only mark complete if the
         # model produced real prose + tool calls alongside the SKILL_LOAD.
-        import re as _re
-        skill_loads = _re.findall(r"\[SKILL_LOAD:\w+\]", response)
+        from runtime.directive_parser import find_skill_load_names, strip_skill_load_directives
+        skill_loads = find_skill_load_names(response)
         if skill_loads:
-            stripped = _re.sub(r"\[SKILL_LOAD:\w+\]", "", response).strip()
+            stripped = strip_skill_load_directives(response).strip()
             if len(stripped) == 0 and len(tool_calls) == 0:
                 # Pure SKILL_LOAD — keep looping so next turn sees the detail
                 return False

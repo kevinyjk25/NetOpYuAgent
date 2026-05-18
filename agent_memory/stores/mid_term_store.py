@@ -60,10 +60,20 @@ _DDL = [
          INSERT INTO mtf_fts(mtf_fts, rowid, fact_id, user_id, session_id, fact)
          VALUES ('delete', old.rowid, old.fact_id, old.user_id, old.session_id, old.fact);
        END""",
+    # BUG-05 fix: UPDATE trigger — keeps FTS5 index in sync when update_fact()
+    # changes a fact's text.  Without this, FTS5 returns the pre-update text
+    # forever because content tables are not automatically re-indexed on UPDATE.
+    # The trigger deletes the old FTS row first, then inserts the new one.
+    """CREATE TRIGGER IF NOT EXISTS mtf_fts_au AFTER UPDATE OF fact ON mid_term_facts BEGIN
+         INSERT INTO mtf_fts(mtf_fts, rowid, fact_id, user_id, session_id, fact)
+         VALUES ('delete', old.rowid, old.fact_id, old.user_id, old.session_id, old.fact);
+         INSERT INTO mtf_fts(rowid, fact_id, user_id, session_id, fact)
+         VALUES (new.rowid, new.fact_id, new.user_id, new.session_id, new.fact);
+       END""",
 ]
 
 _FTS5_RESERVED = re.compile(r'\b(AND|OR|NOT|NEAR|COLUMN|ROW|MATCH)\b', re.IGNORECASE)
-_FTS5_SPECIAL  = re.compile(r'["\'\(\)\*\+\-\:\^\.\/ ]+')
+_FTS5_SPECIAL  = re.compile(r'''[\"\'\(\)\[\]\{\}\<\>\*\+\-\:\^\.\/\?\,\;\=\!\@\#\$\%\&\`\|\~\\\ ]+''')
 
 DEFAULT_FACT_TTL_DAYS = 30   # facts expire after 30 days by default
 CONFIDENCE_DECAY_ALPHA = 0.7  # each contradicting update: conf *= 0.7

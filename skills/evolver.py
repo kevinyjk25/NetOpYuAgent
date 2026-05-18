@@ -82,6 +82,23 @@ logger = logging.getLogger(__name__)
 # Skill version model
 # ---------------------------------------------------------------------------
 
+
+
+def _trunc_cfg():
+    """Lazy load AppConfig.truncation; returns None if config not yet loaded."""
+    try:
+        from config import cfg as _app_cfg
+        return getattr(_app_cfg, "truncation", None)
+    except Exception:
+        return None
+
+
+def _trunc(value: str, key: str, default: int) -> str:
+    """Truncate value to cfg.truncation.<key> chars, or default if config missing."""
+    cfg = _trunc_cfg()
+    n = int(getattr(cfg, key, default)) if cfg else default
+    return value[:n] if isinstance(value, str) else value
+
 class SkillChangeReason(str, Enum):
     AUTO_CREATED    = "auto_created"      # LLM created after task completion
     FEEDBACK_PATCH  = "feedback_patch"    # user feedback improved a step
@@ -415,8 +432,8 @@ class SkillEvolver:
 
         # Ask LLM to patch the skill
         user_content = (
-            f"Current skill:\n{current_detail[:2000]}\n\n"
-            f"Operator feedback: {feedback[:500]}\n"
+            f"Current skill:\n{_trunc(current_detail, 'skill_detail_chars', 2000)}\n\n"
+            f"Operator feedback: {_trunc(feedback, 'operator_feedback_chars', 500)}\n"
             f"Was the skill successful overall? {'yes' if success else 'no'}\n"
             f"Specific step with issues: {problem_step or 'not specified'}"
         )
@@ -573,7 +590,7 @@ class SkillEvolver:
             f"Solution steps taken:\n{steps_text}\n"
             f"Tools that proved effective: {', '.join(tools_used[:6])}\n"
             f"Key observations:\n{obs_text}\n"
-            f"Operator preferences: {operator_prefs[:200] or 'not specified'}"
+            f"Operator preferences: {(_trunc(operator_prefs, 'operator_prefs_chars', 200) or 'not specified')}"
         )
         raw = await self._call_llm(_SKILL_WRITE_SYSTEM, user_content)
         # Strip any accidental code fences from the markdown
@@ -685,7 +702,7 @@ class SkillEvolver:
             f"Steps taken:\n{steps_text}\n"
             f"Tools used: {', '.join(tools_used[:6])}\n"
             f"Key observations:\n{obs_text}\n"
-            f"Operator preferences: {operator_prefs[:200] or 'not specified'}\n\n"
+            f"Operator preferences: {(_trunc(operator_prefs, 'operator_prefs_chars', 200) or 'not specified')}\n\n"
             f"Merge instructions:\n"
             f"  - KEEP everything in the existing skill that still applies.\n"
             f"  - ADD any new steps / tools / observations that genuinely "
@@ -773,7 +790,7 @@ class SkillEvolver:
             content=proposal.markdown_content,
             reason=SkillChangeReason.AUTO_CREATED,
             author="agent",
-            diff_summary=f"Auto-created from task: {proposal.rationale[:100]}",
+            diff_summary=f"Auto-created from task: {_trunc(proposal.rationale, 'rationale_chars', 100)}",
             quality_score=proposal.reuse_potential,
         )
         self._versions[proposal.skill_id] = [v]
@@ -899,115 +916,45 @@ class SkillEvolver:
         return defn
 
     async def _call_llm(self, system: str, user: str) -> str:
-        """Call LLM with system+user separation.
-
-        Returns the cleaned response. Two response shapes are valid:
-          - JSON (starts with '[' or '{') for eligibility / similarity checks
-          - Markdown (starts with '#' or any text) for skill content writing
-
-        Only falls back to stub when llm_fn is missing OR the LLM throws.
-        Empty-ish responses also fall back. Non-JSON/non-markdown responses
-        are now PASSED THROUGH (the caller decides how to handle them) —
-        previously these triggered a stub fallback that overwrote real LLM
-        output with hardcoded boilerplate.
         """
-        import re as _re
-        if self._llm_fn is None:
-            logger.debug("SkillEvolver: no llm_fn configured — using stub")
-            return await self._stub_llm(system + "\n\n" + user)
+        DESIGN-04 fix: wraps all LLM calls in asyncio.wait_for() so a hung
+        Ollama/OpenAI backend cannot block the Hermes pipeline indefinitely.
+
+        Timeout is read from AppConfig.hermes.skill_evolver_llm_timeout_seconds
+        (default 30s, configurable in config.yaml).  On timeout, returns an
+        empty string so callers can gracefully skip the current Hermes step.
+        """
+        # Load timeout from config (read once per call; cheap dict lookup)
         try:
-            raw = await self._llm_fn(system, user)
-            if not raw:
-                logger.warning("SkillEvolver: llm_fn returned empty — falling back to stub")
-                return await self._stub_llm(system + "\n\n" + user)
-            # Strip <think>...</think> blocks (qwen3-thinking, deepseek-r1, etc.)
-            raw = _re.sub(r"<think>.*?</think>", "", raw, flags=_re.DOTALL | _re.IGNORECASE).strip()
-            # Strip markdown fences that some models wrap output in
-            raw = _re.sub(r"^```(?:json|markdown)?\s*\n?", "", raw)
-            raw = _re.sub(r"\n?\s*```\s*$", "", raw).strip()
-            if not raw:
-                logger.warning("SkillEvolver: response was empty after cleanup — using stub")
-                return await self._stub_llm(system + "\n\n" + user)
-            # Heuristic: for JSON-expecting prompts (eligibility / similarity),
-            # the system prompt contains the keyword "JSON object". When the
-            # model returned non-JSON text in that case, fall back to stub so
-            # downstream json.loads doesn't crash.
-            wants_json = "JSON object" in system or "JSON array" in system
-            if wants_json and raw.lstrip()[:1] not in ("[", "{"):
-                logger.warning(
-                    "SkillEvolver: expected JSON but got %r... — falling back to stub",
-                    raw[:80],
-                )
-                return await self._stub_llm(system + "\n\n" + user)
-            # For markdown-writing prompts, accept anything non-empty.
-            return raw
-        except Exception as exc:
-            logger.warning("SkillEvolver: llm_fn failed (%s) — using stub", exc)
+            from config import cfg as _app_cfg
+            _hermes = getattr(_app_cfg, "hermes", None)
+            timeout = float(getattr(_hermes, "skill_evolver_llm_timeout_seconds", 30.0))
+        except Exception:
+            timeout = 30.0
+
+        if self._llm_fn is None:
             return await self._stub_llm(system + "\n\n" + user)
 
-    @staticmethod
-    def _generate_skill_id(task_description: str) -> str:
-        """Generate a stable snake_case skill_id from a task description.
-
-        Handles three input shapes:
-          1. JSON body with explicit 'skill_id' or 'name' field — use them
-             directly. Avoids ids like 'skill_id_xxx_name_description' that
-             would otherwise be assembled from JSON key tokens.
-          2. English-heavy prose — top 4 non-stopword tokens.
-          3. Pure CJK / no usable tokens — md5 hash of the description so
-             same input → same id (deterministic, no timestamp collisions).
-        """
-        import hashlib as _h
-
-        # 1. JSON-shaped input: respect explicit skill_id / name fields,
-        #    don't infer from surrounding JSON keys.
-        stripped = task_description.strip()
-        if stripped.startswith("{") and stripped.endswith("}"):
+        try:
+            coro = self._llm_fn(system, user)
+            raw  = await asyncio.wait_for(coro, timeout=timeout)
+            return (raw or "").strip()
+        except asyncio.TimeoutError:
+            logger.warning(
+                "SkillEvolver._call_llm: timed out after %.1fs (system=%s…)",
+                timeout, system[:80],
+            )
+            return ""
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            logger.warning("SkillEvolver._call_llm failed: %s", exc)
             try:
-                data = json.loads(stripped)
-                if isinstance(data, dict):
-                    explicit = data.get("skill_id") or data.get("id") or data.get("name")
-                    if explicit and isinstance(explicit, str):
-                        # Sanitise to snake_case ASCII; if all CJK, fall through to hash
-                        cleaned = re.sub(r"[^a-z0-9_]+", "_", explicit.lower()).strip("_")
-                        if cleaned and len(cleaned) >= 3:
-                            return cleaned[:50]
-            except (json.JSONDecodeError, ValueError):
-                pass
+                return await self._stub_llm(system + "\n\n" + user)
+            except Exception:
+                return ""
 
-        # 2. ASCII-ish technical tokens — domain proper nouns survive even
-        #    when the surrounding prose is non-Latin. Filter out generic
-        #    JSON-structure words and meta-keywords that pollute output.
-        ascii_tokens = re.findall(r"[a-z][a-z0-9_\-]{2,}", task_description.lower())
-        stop = {
-            # English filler
-            "the","a","an","for","to","of","in","on","with","and","or",
-            "is","are","skill","task","check","do","please",
-            # JSON / schema metadata that creeps in when users paste JSON bodies
-            "skill_id","id","name","description","version","category",
-            "priority","steps","step_id","action","tools","input_params",
-            "tags","risk","hitl","string","integer","boolean","array",
-        }
-        key_words = [w.replace("-", "_") for w in ascii_tokens if w not in stop][:4]
-        if key_words:
-            return "_".join(key_words)
 
-        # 3. No usable ASCII tokens — use a stable hash so the same task
-        #    hashes to the same id (deterministic, no timestamp collisions).
-        digest = _h.md5(task_description.encode("utf-8", "replace")).hexdigest()[:8]
-        return f"skill_{digest}"
-
-    @staticmethod
-    def _parse_json_response(raw: str) -> dict:
-        text = re.sub(r"^```json?\s*", "", raw.strip())
-        text = re.sub(r"\s*```$", "", text)
-        return json.loads(text)
-
-    # ------------------------------------------------------------------
-    # LLM stub
-    # ------------------------------------------------------------------
-
-    @staticmethod
     async def _stub_llm(text: str) -> str:
         await asyncio.sleep(0)
         p = text.lower()

@@ -459,8 +459,17 @@ class UserModelEngine:
             return _stub_llm(user)
         try:
             raw = self._llm_fn(system, user)
-            # Strip <think> blocks from reasoning models
-            raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+            # Strip reasoning-tag blocks from thinking models. Tag name is
+            # configurable via env var LLM_THINKING_TAG (default "think"),
+            # matching LLMCapabilities.thinking_tag. Set to "none"/empty to
+            # disable for non-thinking models.
+            import os as _os
+            _tt = (_os.environ.get("LLM_THINKING_TAG", "think") or "think").strip().lower()
+            if _tt not in ("", "none", "off", "false", "no"):
+                _pat = rf"<{re.escape(_tt)}>.*?</{re.escape(_tt)}>"
+                raw = re.sub(_pat, "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+            else:
+                raw = raw.strip()
             return raw if raw else _stub_llm(user)
         except Exception as e:
             logger.warning("UserModelEngine llm_fn failed (%s), using heuristics", e)

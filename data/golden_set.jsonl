@@ -1,0 +1,25 @@
+# Starter golden set for retrieval evaluation.
+# Format: JSONL — one EvalCase per line.
+# Fields per case:
+#   query         : string — the user query
+#   expected_ids  : list of accepted answer ids (any match in top-k = hit)
+#   kind          : "skill" | "tool" (default "skill")
+#   language      : "en" | "zh" | "mixed" (default "en")
+#   tags          : optional list (e.g. ["paraphrase", "negation", "technical"])
+#   notes         : human-readable annotation
+#
+# Lines beginning with '#' are ignored.
+#
+# Operators: edit/extend this file. After changes run
+#   python -m evaluation.cli --backend hybrid --golden data/golden_set.jsonl
+# to see how each retrieval backend performs against it.
+{"query": "check netflow anomalies on ap-01", "expected_ids": ["netflow_analysis"], "kind": "skill", "language": "en", "tags": ["technical"], "notes": "Basic English direct match"}
+{"query": "show me top traffic talkers", "expected_ids": ["netflow_analysis"], "kind": "skill", "language": "en", "tags": ["paraphrase"], "notes": "Paraphrase of netflow analysis"}
+{"query": "检查 ap-01 的网络流量是否异常", "expected_ids": ["netflow_analysis"], "kind": "skill", "language": "zh", "tags": ["paraphrase", "technical"], "notes": "Chinese paraphrase — tests cross-lingual retrieval"}
+{"query": "restart the auth service", "expected_ids": ["restart_service", "service_health"], "kind": "skill", "language": "en", "tags": ["operational"], "notes": "Action-oriented; either skill acceptable"}
+{"query": "is the database service healthy", "expected_ids": ["service_health"], "kind": "skill", "language": "en", "tags": ["health"], "notes": "Health check query"}
+{"query": "看一下数据库服务现在的状态", "expected_ids": ["service_health"], "kind": "skill", "language": "zh", "tags": ["paraphrase", "health"], "notes": "Chinese paraphrase of health check"}
+{"query": "search syslog for errors yesterday", "expected_ids": ["syslog_search"], "kind": "skill", "language": "en", "tags": ["log"], "notes": "Log search request"}
+{"query": "我要回滚刚才的配置", "expected_ids": ["rollback_service"], "kind": "skill", "language": "zh", "tags": ["operational"], "notes": "Rollback request in Chinese"}
+{"query": "I read a large stored result, how do I page through it", "expected_ids": ["read_stored_result"], "kind": "skill", "language": "en", "tags": ["meta"], "notes": "Tests skill for handling [STORED:...] refs"}
+{"query": "diagnose unusual login failures", "expected_ids": ["service_health", "syslog_search"], "kind": "skill", "language": "en", "tags": ["diagnostic"], "notes": "Ambiguous — multiple skills could apply"}

@@ -35,6 +35,31 @@ llm:
   max_tokens:  4096
   log_detail:  "off"   # off | compact | full
 
+  # Per-model behaviour declarations. Set these per-model — they replace
+  # the old hardcoded THINKING_MODELS set. Override via env vars like
+  # LLM_THINKING_TAG, LLM_FORMAT_COMPLIANCE.
+  capabilities:
+    # Chain-of-thought tag to strip before tool parsing / response display.
+    # Common values: "think" (qwen3/qwen3.5/deepseek-r1), "reasoning" (some
+    # newer models). Set to "none" / "off" / empty to disable stripping
+    # (e.g. for non-thinking models like qwen2.5, mistral, llama3).
+    thinking_tag: "think"
+
+    # How reliably this model follows the [TOOL:name] {"k":"v"} syntax.
+    #   high:   trust output, no retries on parse failure
+    #   medium: one retry with stricter prompt addendum on parse failure
+    #   low:    two retries + temperature drop to 0.0 on retry
+    # Drop to "medium" or "low" if you observe parse failures with a new model.
+    format_compliance: "high"
+
+    # Soft context budget. The engine logs a warning if system+user exceeds
+    # this; useful as an early signal that pagination/compaction is needed.
+    max_context_chars: 32000
+
+    # Reserved for Tier-1-C migration to Ollama native tools API. Keep off
+    # until that path is built — the [TOOL:] in-band protocol still runs.
+    supports_native_tools: false
+
 
 # ── Embeddings ───────────────────────────────────────────────
 # Used by BOTH modes — always real.
@@ -57,7 +82,18 @@ tools:
     base_url:    ""
     auth_type:   "bearer"
     token_env:   "NETOPS_API_TOKEN"
-  hitl_tool_names: ""
+  # HITL tool watch-list — when the LLM proposes calling one of these
+  # tools, the runtime loop pauses BEFORE execution and surfaces the
+  # proposed args (config_lines, etc.) for operator approval/edit.
+  # Comma-separated string OR list. Override via HITL_TOOL_NAMES env var.
+  hitl_tool_names:
+    - edit_device_config
+    - push_config
+    - restart_service
+    - rollback_deploy
+    - drain_node
+    - failover
+    - delete_resource
 
 
 # ── Pragmatic mode — real network device access ───────────────
@@ -154,6 +190,10 @@ memory:
   redis_url:   ""          # e.g. "redis://localhost:6379" — leave blank for in-memory stub
   postgres_dsn: ""
   chroma_path: "./chroma_db"
+  # Auto-consolidate: every N turns per session, merge old chunks into
+  # LLM-summarised rollups so long-session FTS5/embedding search stays
+  # fast. 0 disables. Background task — never blocks after_turn.
+  auto_consolidate_turns: 30
   dtm:
     compaction_turns:         5    # flush daily .md after 5 turns (raise to 20+ in prod)
     nudge_turns:              5    # deep Hermes review every 5 turns
@@ -309,18 +349,436 @@ policies:
         - The action could affect many systems if the broadest interpretation is taken
       Return false if the query has a clear, specific, unambiguous intent.
 
-  # ── Pre-verification policies ─────────────────────────────────
-
-  - name: preverify_safe_to_proceed
-    description: Pre-verification — check query is safe to hand to the runtime loop
-    confidence: 0.85
+  - name: assess_query_specificity
+    description: |
+      Decides whether a query has enough specificity to act on, OR what's missing.
+      Replaces hard-coded keyword/verb matching for clarification gating.
+      Uses recall context to recognize references resolved from prior turns.
+    confidence: 0.80
+    raw_output: true   # returns structured JSON, parsed by caller
     prompt: |
-      You verify that a network operations query is safe to pass to the automated
-      runtime loop without human review first.
-      Return true (safe to proceed) if:
-        - The query is a read-only diagnostic (search, check, list, analyse, compare)
-        - The query is a formatting or summarisation request
-        - The query does not modify any device or service configuration
-      Return false (block — escalate) if:
-        - A destructive action somehow reached this stage without HITL approval
-        - The query appears malformed or adversarial
+      You assess whether a network operations query is specific enough to act on
+      RIGHT NOW, given any recall context from prior session turns.
+
+      Return ONLY a JSON object with this exact shape:
+        {
+          "specific_enough": <bool>,
+          "missing": [
+            {"key": "<field>", "prompt": "<question to ask>", "reason": "<why missing>"}
+          ]
+        }
+
+      Rules:
+        - If the query (or recall context) names a concrete target (device, service,
+          IP, hostname, ticket id, etc.), `specific_enough` is true.
+        - If the query is purely diagnostic/read-only AND no target is needed
+          (e.g. "list all sites", "what alerts are active"), it's specific enough.
+        - If the query implies an action but lacks a target, the missing field
+          is "device_id" (or "service" / "target" as appropriate).
+        - If the query mentions a target but the action is too vague to map to a
+          tool ("fix everything", "check the network"), missing field describes
+          what concretely needs clarification.
+        - Return AT MOST 2 missing fields. Don't invent fields.
+
+      Examples:
+
+      Query: "fix ap-01 radius config"
+      Context: ""
+      → {"specific_enough": true, "missing": []}
+
+      Query: "fix the radius issue"
+      Context: ""
+      → {"specific_enough": false, "missing": [{"key":"device_id","prompt":"Which device?","reason":"action verb 'fix' has no target"}]}
+
+      Query: "fix the radius issue"
+      Context: "Recent: User asked about ap-02 RADIUS timeout"
+      → {"specific_enough": true, "missing": []}
+
+      Query: "list all aps at site-a"
+      Context: ""
+      → {"specific_enough": true, "missing": []}
+
+      Query: "check it"
+      Context: ""
+      → {"specific_enough": false, "missing": [{"key":"target","prompt":"Check what?","reason":"pronoun 'it' has no antecedent"}]}
+
+# ── Hermes learning pipeline ──────────────────────────────────────────────────
+hermes:
+  # Timeout (seconds) for each individual LLM call inside SkillEvolver.
+  # Prevents Ollama hangs from blocking the post-turn cleanup indefinitely.
+  # Override: HERMES_SKILL_EVOLVER_TIMEOUT
+  skill_evolver_llm_timeout_seconds: 30.0
+  skill_evolver_enabled: true
+  skill_min_complexity_score: 0.6
+  skill_max_similar_distance: 0.3
+  reflection_enabled: true
+  consolidation_enabled: true
+
+
+# ── Post-action verification rules ───────────────────────────────────────────
+# Each rule maps a tool-name regex to health-check keywords.
+# First matching rule wins. Set default_pass: false for strict mode.
+post_verify:
+  default_pass: true
+  rules:
+    - pattern: "restart.*service|service.*restart"
+      require_any: ["healthy", "running", "active", "started", "ok"]
+      require_none: ["error", "failed", "crash"]
+    - pattern: "push.*config|config.*push|edit.*config|config.*edit"
+      require_any: []
+      require_none: ["syntax error", "invalid", "rejected"]
+    - pattern: "rollback|failover|drain"
+      require_any: []
+      require_none: ["error", "failed", "timeout"]
+
+
+# ── Session store (per-session in-memory counters) ───────────────────────────
+session_store:
+  # Evict clarification counters for sessions older than this many seconds.
+  # Override: SESSION_CLARIF_TTL_SECONDS
+  clarification_session_ttl_seconds: 3600
+  clarification_max_sessions: 10000
+
+
+# ── Concurrency tuning ────────────────────────────────────────────────────────
+concurrency:
+  # Poll interval for HITL pipeline _run_steps waiter detection (milliseconds).
+  # Lower = faster HITL response, higher CPU. Override: HITL_PIPELINE_POLL_INTERVAL_MS
+  hitl_pipeline_poll_interval_ms: 50
+  # Enable asyncio.Lock around round-robin cursor to prevent race conditions.
+  # Override: REGISTRY_RR_LOCK_ENABLED
+  registry_rr_lock_enabled: true
+
+
+# ── SSE streaming timeouts ────────────────────────────────────────────────────
+streaming:
+  # If the SSE chunk queue idles longer than this, the stream is closed.
+  # Default 300s mirrors the LLM client's read timeout (httpx 300s in
+  # OllamaEngine._chat) — set lower and you'll see SSE stall while the
+  # LLM call is legitimately still in flight (visible to operators as
+  # "⏱ LLM backend timed out" with the request being cancelled). On
+  # smaller models you can safely drop this to 120-180.
+  # Override: SSE_STALL_TIMEOUT_SECONDS
+  sse_stall_timeout_seconds: 300.0
+  # After the stream ends, wait up to this many seconds for the executor task
+  # to drain gracefully before forcing cleanup.
+  # Override: SSE_EXEC_DRAIN_TIMEOUT_SECONDS
+  exec_task_drain_timeout_seconds: 5.0
+  # Maximum chunks queued before producers block (back-pressure).
+  chunk_queue_maxsize: 1000
+
+
+# ── Prose truncation caps ─────────────────────────────────────────────────────
+# These are character-count limits applied to prose snippets passed to LLMs
+# or stored as cross-turn context. Independent of token budgets.
+truncation:
+  recall_context_chars:    1500   # _fts_context truncation in clarification gate
+  confirmed_facts_preview: 10     # max facts shown in pre-verify summary
+  skill_detail_chars:      2000   # current_detail in evolver feedback patches
+  operator_feedback_chars:  500
+  operator_prefs_chars:     200
+  rationale_chars:          100   # diff_summary in skill creation
+  response_preview_chars:   200   # llm_trace previews in Flow tab
+  tool_debug_chars:        2000   # TOOL RESULT debug log entries
+  final_response_summary:   500   # PREV_ANALYSIS summary line truncation
+  log_redaction_preview:    120   # warning log message preview length
+
+
+# ── Context budget display caps (per-tool result preview in prompt) ──────────
+# These control how much of each tool's output the LLM sees in-context.
+# The full output is always available via read_stored_result; these caps
+# prevent the prompt from blowing up when many tools have large results.
+context_budget_display:
+  paged_result_limit:   1200   # read_stored_result page display cap
+  normal_result_limit:   600   # other tools' inline display cap
+  latest_result_bonus:   600   # extra chars for the most recent tool result
+  stored_lines_preview:    3   # number of [STORED:]/Preview lines to show
+  fallback_preview:      200   # bytes shown when [STORED:] preview fails to parse
+  page_default_size:    2000   # bytes per read_stored_result page (offset advance)
+  working_set_show:        10   # max device refs shown in the working_set context section
+
+
+
+# ── Classifier keyword fallback ───────────────────────────────────────────────
+# These lists are used by AgentRuntimeLoop.classify() ONLY when the PolicyEngine
+# LLM is unavailable (degraded mode). Operators can extend or replace them
+# without touching runtime code. Each value is matched as a whole word
+# (\b…\b) for ASCII; substring match for CJK.
+classifier_fallback:
+  destructive_keywords:
+    - restart
+    - rollback
+    - delete
+    - drain
+    - failover
+    - flush
+    - reboot
+    - terminate
+    - shutdown
+    - wipe
+    - reset
+    - 重启
+    - 回滚
+    - 删除
+    - 终止
+    - 关机
+    - 重置
+    - 下发配置
+    - 推送配置
+  p0p1_keywords:
+    - p0
+    - p1
+    - critical
+    - outage
+    - down
+    - emergency
+    - sev0
+    - sev1
+    - major incident
+  fast_model_keywords:
+    - dns
+    - ping
+    - status
+    - check
+    - what is
+    - show me
+    - list
+
+
+
+# ── Runtime per-turn refresh cadence (PERF tuning) ───────────────────────────
+# These knobs control how often stream() re-runs query-stable computations
+# (memory recall, skill selection). Higher values = less work per turn but
+# slower to react to mid-conversation changes. Tune based on workload.
+#
+# These fields belong logically under `runtime:` but are repeated here as a
+# top-level note for visibility. The loader reads from runtime.* if you put
+# them inside the `runtime:` block in your config.
+
+# runtime:
+#   recall_refresh_every_n_turns:        3     # default: refresh memory every 3 turns
+#   skill_select_refresh_every_n_turns:  5     # default: refresh skill selection every 5 turns
+#   recall_refresh_facts_growth:         3     # also refresh when ≥3 new facts arrive
+#   emit_matched_skills_only_on_change:  true  # don't re-emit unchanged skill SSE events
+
+
+
+# ── WebUI frontend tuning ─────────────────────────────────────────────────────
+webui:
+  # How often the WebUI polls /hitl/pending (ms). Lower = snappier HITL response,
+  # higher = less load on the backend during quiet periods.
+  # Override: WEBUI_HITL_POLL_INTERVAL_MS
+  hitl_poll_interval_ms: 3000
+  # How often the WebUI refreshes system status / wiring (ms).
+  # Override: WEBUI_STATS_POLL_INTERVAL_MS
+  stats_poll_interval_ms: 20000
+  # When true, every /hitl/pending poll logs at INFO (verbose).
+  # Default false: only log at INFO when there's actually something pending.
+  # Override: WEBUI_HITL_PENDING_LOG_INFO
+  hitl_pending_log_at_info: false
+
+
+# ── Retrieval (tool/skill top-K) ──────────────────────────────────────────────
+# Replaces full-catalog dump with semantic top-K retrieval at prompt-build time.
+# Drops prompt size 30-50% on systems with >10 tools/skills.
+retrieval:
+  # Engine: hybrid | bm25 | embedding | keyword
+  # hybrid    = BM25 + embedding fusion (recommended default)
+  # bm25      = lexical only, no embedder needed
+  # embedding = vector only, requires embeddings backend
+  # keyword   = legacy word-overlap (fallback / tests)
+  backend: "hybrid"
+
+  # Top-K caps for prompt injection
+  tool_top_k:   5      # tools matched to query injected into prompt
+  skill_top_k:  3      # skills matched to query (replaces format_summary)
+
+  # Hybrid fusion knobs
+  hybrid:
+    bm25_weight:   0.5
+    embed_weight:  0.5
+    fusion:       "weighted_sum"   # weighted_sum | rrf
+    rrf_k:         60               # only used when fusion=rrf
+    oversample:    4                # each component fetches K*oversample candidates
+
+  # Always-injected tools (HITL safety net)
+  # These tools are ALWAYS in the prompt regardless of query, because the
+  # operator-approval gate triggers ONLY when the LLM emits the call.
+  # The set comes from cfg.tools.hitl_tool_names by default; this knob
+  # lets you add framework-level tools (e.g. "agent_loop", "sub_agent").
+  always_inject_extra_tools: []
+
+  # Reduce TOOL_CALL_SYSTEM size after turn 1 (the LLM has learnt the format).
+  # Saves ~3000 chars / 750 tokens on every turn after the first.
+  shorten_tool_system_after_turn: 1
+
+  # LRU + TTL cache around the retriever. Same query within ttl_seconds
+  # returns the cached result without re-running BM25/embedding. Typical
+  # hit rate 70-90% in production multi-turn conversations.
+  cache:
+    enabled:     true
+    max_entries: 1024
+    ttl_seconds: 600.0    # 10 minutes; lower for frequently-changing catalogs
+
+  # Max in-flight embed() calls during async startup indexing.
+  # Higher = faster startup, higher load on Ollama/OpenAI.
+  embed_index_concurrency: 8
+
+  # LLM-as-judge re-ranking (only used when retrieval.backend = "llm_judge").
+  # Two-stage: hybrid first stage → LLM scores top-N candidates → fusion.
+  # Best for cross-lingual or paraphrase-heavy queries where BM25+embedding
+  # alone miss. Adds 200-2000ms per retrieve call — pair with cache.
+  llm_judge:
+    first_stage_top_k: 15      # candidates forwarded to the judge
+    timeout_seconds:   10.0    # judge call timeout (falls back to first-stage on timeout)
+    fusion_alpha:       0.3    # 0.0 = pure judge, 1.0 = pure first stage
+    max_text_chars:    200     # candidate description truncation in judge prompt
+
+
+# ── Meta tools ────────────────────────────────────────────────────────────────
+meta_tools:
+  # Built-in meta tools to register at startup (in addition to any
+  # custom ones registered programmatically via get_meta_tool_registry()).
+  builtin:
+    list_tools:    true     # discover tools matching a query
+    list_skills:   true     # discover skills matching a query
+    tool_details:  true     # full info for one named tool
+
+
+# ── Retrieval cache + concurrency knobs ───────────────────────────────────────
+# Append these to the existing `retrieval:` section in production config.
+# Documented separately for visibility.
+
+# retrieval:
+#   embed_index_concurrency: 8       # max in-flight embed() during startup
+#   cache:
+#     enabled: true                  # LRU+TTL cache wrapping the retriever
+#     max_entries: 1024              # ~10KB per entry, 1024 ≈ 10MB overhead
+#     ttl_seconds: 600               # 10 min — long enough for one operator session
+
+
+# ── LLM-judge retriever (two-stage rerank) ────────────────────────────────────
+# To enable: set retrieval.backend = "llm_judge". Then the configured
+# `hybrid` / `bm25` retriever provides first_stage_top_k candidates and an
+# LLM reranks them. Pair with cache.enabled = true to amortise LLM cost.
+#
+# retrieval:
+#   backend: "llm_judge"
+#   llm_judge:
+#     first_stage_top_k: 15           # pool size for LLM rerank
+#     timeout_seconds:    10.0        # falls back to first stage on timeout
+#     fusion_alpha:        0.3        # final = alpha*base + (1-alpha)*llm
+#     max_text_chars:     200         # truncation of item text in the prompt
+
+
+# ── Pagination findings safety net ───────────────────────────────────────────
+# Catches the case where an LLM pages through a stored result via
+# read_stored_result without writing analysis between pages. Older pages
+# get dropped from context to save tokens, so without intermediate findings
+# the final answer would only reflect the last page.
+pagination:
+  findings_nudge_enabled:    true   # set false to disable Layer 2 entirely
+  findings_silent_threshold: 2      # nudge after this many silent paged reads
+  findings_nudge_min_chars:  40     # response below this = "no findings written"
+
+# ── Schema validation ────────────────────────────────────────────────────────
+# When true, every tool call has its args validated and coerced via the schema
+# framework BEFORE dispatch. Catches LLM shape mistakes like list-as-dict,
+# string-as-int, missing required fields. Returns structured error to LLM
+# so it can self-correct on the next turn.
+# Override: TOOLS_SCHEMA_VALIDATION
+# tools:
+#   schema_validation_enabled: true
+
+
+# ── Skill orchestration ──────────────────────────────────────────────────────
+# Controls skill selection, ambiguity-triggered HITL, and observability
+# (SkillJournal). All knobs are optional — defaults are production-safe.
+skill_orchestration:
+  # Ambiguity HITL — automatically pause and ask the operator which skill
+  # to use when top-2 are too close to call.
+  hitl_on_ambiguity:        true   # off → LLM picks unaided
+  ambiguity_floor:          0.40   # min score for top-1 to count as "real match"
+  ambiguity_gap_threshold:  0.08   # max gap between top-1 and top-2 to fire HITL
+                                    # lower = stricter trigger; higher = looser
+  ambiguity_max_choices:    5
+
+  # SkillJournal — passive observability, no control-flow effect.
+  journal_enabled:          true
+  journal_max_entries:      200
+  journal_persist_path:     ""     # set e.g. "data/skill_journal.jsonl" to persist
+  journal_api_enabled:      true   # exposes /webui/skill_journal/* endpoints
+
+# ── Skill scoring weights (legacy path) and evolver feedback ──
+# Append these to the existing `skill_orchestration:` block.
+#
+# skill_orchestration:
+#   scoring:
+#     # Multi-field weighted scorer (kicks in only when no Retriever is attached).
+#     # Production path uses cfg.retrieval — these weights are the fallback.
+#     purpose_weight:     0.40   # most diagnostic field (raise for tighter match)
+#     description_weight: 0.20
+#     tags_weight:        0.20   # raise if you have a rich tag taxonomy
+#     params_weight:      0.10
+#     name_id_weight:     0.10   # tiebreaker
+#
+#   # SkillEvolver auto-feedback from SkillJournal observations
+#   evolver_feedback_enabled:    true
+#   evolver_feedback_interval_s: 300   # seconds between scans
+#   evolver_feedback_min_uses:   3     # need ≥N observations before feedback
+#   evolver_dormant_threshold:   0.6   # dormant/use ratio above this triggers patch
+
+# ── Cross-module联动 ─────────────────────────────────────────────────────
+# Framework principle: independent modules, explicit opt-in联动 via config.
+# Every feature here must be safe to disable by toggling `enabled: false`.
+cross_module:
+  # SkillJournal observations → MemoryFacts (Tier 1 #1)
+  # When on, dormant/successful skill patterns become "lesson" facts in
+  # mid-term memory, available for recall on similar future queries.
+  journal_to_facts:
+    enabled:            false
+    interval_s:         600       # scan period (seconds)
+    min_observations:   3         # min journal entries before promoting
+    dormant_threshold:  0.6
+    success_threshold:  0.9
+    fact_ttl_days:      14.0
+    max_facts_per_scan: 10
+
+  # Fact-conflict detection + reconciliation on insert (Tier 1 #2)
+  # When on, MemoryAdapter.add_fact() runs through FactConflictDetector
+  # before writing — finds similar existing facts, applies heuristic or LLM
+  # classification, and may skip / demote based on verdict.
+  fact_conflict_detection:
+    enabled:                false
+    similarity_threshold:   0.70
+    equivalence_threshold:  0.85
+    llm_reconcile_enabled:  false     # set true once you trust the LLM judge
+    llm_timeout_s:          8.0
+    top_k_candidates:       5
+    confidence_boost:       0.05
+    contradiction_demote:   0.4
+
+# ── Context budget strategy (Tier 2 #3) ──────────────────────────────────
+# Switch between legacy (length-based, runtime/context_budget.py) and
+# priority (runtime/context_budget_v2.py).
+context_budget:
+  strategy: "legacy"               # "legacy" | "priority"
+  # Below applies only when strategy="priority":
+  total_chars:              64000  # ~16k tokens
+  section_system_core:       4000  # P0 — never trimmed
+  section_user_profile:       500  # P0
+  section_recent_turns:     20000  # P1
+  section_tool_results:     30000  # P1
+  section_retrieved_memory: 10000  # P2
+  section_skills:            5000  # P2
+  section_older_summary:     5000  # P3 — trimmed first
+
+# ── Evaluation harness (Tier 2 #4) ───────────────────────────────────────
+# Optional retrieval-quality bench. Independent of runtime; never runs in
+# the hot path unless bench_on_startup=true.
+evaluation:
+  golden_set_path:  ""             # e.g. "data/golden_set.jsonl"
+  bench_on_startup: false
+  bench_top_k:      5
+  report_path:      ""             # JSONL output, empty = stdout-only
+  fail_below_mrr:   0.0            # >0 → startup raises if MRR drops

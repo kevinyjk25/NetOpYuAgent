@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Optional, Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +95,18 @@ class SkillCatalogService:
 
     def __init__(self) -> None:
         self._skills: dict[str, Skill] = {}
+        # Optional Retriever for upgraded scoring (BM25 + embedding fusion).
+        # When None, falls back to the legacy keyword overlap path.
+        self._retriever = None
+
+    def attach_retriever(self, retriever) -> None:
+        """Attach a retrieval/.Retriever instance for upgraded scoring.
+
+        The retriever must be already indexed with this catalog's skills
+        (use retrieval.build_skill_retriever / skills_to_corpus).
+        Calling attach_retriever(None) reverts to legacy keyword scoring.
+        """
+        self._retriever = retriever
 
     def register(self, skill: Skill) -> None:
         self._skills[skill.summary.skill_id] = skill
@@ -146,7 +158,9 @@ class SkillCatalogService:
                 continue
             if strict:
                 # Secondary check: any [TOOL:xxx] in skill detail not in registry
-                tool_refs = _re.findall(r"\[TOOL:(\w+)\]", skill.detail.description or "")
+                # Use centralized parser for whitespace tolerance
+                from runtime.directive_parser import find_tool_names as _ftn
+                tool_refs = _ftn(skill.detail.description or "")
                 for ref in tool_refs:
                     if ref not in tool_registry:
                         to_remove.append(skill_id)
@@ -270,53 +284,200 @@ class SkillCatalogService:
             lines.append("")
         return "\n".join(lines)
 
+    def _legacy_score(
+        self,
+        query_words: set,
+        query:       str,
+    ) -> list[tuple[float, str]]:
+        r"""Legacy multi-field weighted keyword scorer.
+
+        Used when no retriever is attached (or retriever errors). Compared
+        to the original single-concat keyword scorer, this version:
+          - Scores each skill field separately, then takes a weighted sum,
+            so a strong match in `purpose` isn't diluted by unrelated text
+            in `description`.
+          - Tag matches use whole-word boundary on the query too, so
+            short tags like "ap" don't accidentally match "happen".
+          - For CJK queries (where \b\w{3,}\b returns nothing), falls
+            back to per-character substring containment so the scorer
+            doesn't silently return all zeros.
+        """
+        import re as _re
+
+        # Detect "did the regex actually tokenise anything?"
+        # (CJK chars are word-y but the {3,} length filter cuts them all.)
+        weak_token_signal = (len(query_words) == 0 and len(query) > 0)
+
+        # Per-field weights, loaded from cfg.skill_orchestration.scoring.
+        # The defaults match the original hardcoded values; tune via YAML or env
+        # to bias scoring toward particular skill metadata fields.
+        try:
+            from config import cfg as _app_cfg
+            _sc_cfg = getattr(getattr(_app_cfg, "skill_orchestration", None), "scoring", None)
+            W_PURPOSE     = float(getattr(_sc_cfg, "purpose_weight",     0.40)) if _sc_cfg else 0.40
+            W_DESCRIPTION = float(getattr(_sc_cfg, "description_weight", 0.20)) if _sc_cfg else 0.20
+            W_TAGS        = float(getattr(_sc_cfg, "tags_weight",        0.20)) if _sc_cfg else 0.20
+            W_PARAMS      = float(getattr(_sc_cfg, "params_weight",      0.10)) if _sc_cfg else 0.10
+            W_NAME_ID     = float(getattr(_sc_cfg, "name_id_weight",     0.10)) if _sc_cfg else 0.10
+        except Exception:
+            W_PURPOSE, W_DESCRIPTION, W_TAGS, W_PARAMS, W_NAME_ID = 0.40, 0.20, 0.20, 0.10, 0.10
+
+        # Auto-normalise so any weight choice produces scores in roughly [0, 1].
+        # This makes the ambiguity_floor/gap_threshold thresholds reusable
+        # across different weight profiles without manual rescaling.
+        _w_sum = W_PURPOSE + W_DESCRIPTION + W_TAGS + W_PARAMS + W_NAME_ID
+        if _w_sum > 0 and abs(_w_sum - 1.0) > 0.01:
+            W_PURPOSE     /= _w_sum
+            W_DESCRIPTION /= _w_sum
+            W_TAGS        /= _w_sum
+            W_PARAMS      /= _w_sum
+            W_NAME_ID     /= _w_sum
+
+        q_lower = query.lower()
+        scored: list[tuple[float, str]] = []
+
+        for skill_id, skill in self._skills.items():
+            s = skill.summary
+            d = skill.detail
+
+            def field_score(text: str) -> float:
+                t = (text or "").lower()
+                if not t:
+                    return 0.0
+                if weak_token_signal:
+                    # CJK fallback — count overlapping substrings of length 2+
+                    hits = sum(1 for i in range(len(q_lower) - 1)
+                               if q_lower[i:i + 2] in t)
+                    return min(1.0, hits / max(len(q_lower) - 1, 1))
+                # ASCII path — word-set overlap normalised by query size
+                words = set(_re.findall(r"\b\w{2,}\b", t))
+                if not words:
+                    return 0.0
+                return len(query_words & words) / max(len(query_words), 1)
+
+            purpose_s     = field_score(s.purpose)
+            description_s = field_score(d.description)
+            params_s      = field_score(" ".join(d.parameters.keys()))
+            name_id_s     = field_score(f"{s.name} {skill_id.replace('_', ' ')}")
+
+            # Tags — exact whole-word match for ASCII; substring for CJK.
+            if weak_token_signal:
+                tag_hits = sum(1 for t in s.tags if t.lower() in q_lower)
+            else:
+                tag_pattern = _re.compile(
+                    r"\b(" + "|".join(_re.escape(t.lower()) for t in s.tags) + r")\b"
+                ) if s.tags else None
+                tag_hits = len(tag_pattern.findall(q_lower)) if tag_pattern else 0
+            tags_s = tag_hits / max(len(s.tags), 1)
+
+            score = (
+                W_PURPOSE     * purpose_s
+                + W_DESCRIPTION * description_s
+                + W_TAGS        * tags_s
+                + W_PARAMS      * params_s
+                + W_NAME_ID     * name_id_s
+            )
+            scored.append((round(score, 4), skill_id))
+
+        return scored
+
     def select_skills_for_query(
         self,
         query: str,
         top_k: int = 5,
-        ambiguity_threshold: float = 0.15,
+        ambiguity_threshold: Optional[float] = None,
+        ambiguity_floor:     Optional[float] = None,
     ) -> "SkillSelectionResult":
         """
         Score all registered skills against the query and return the top-K.
 
-        Scoring (keyword + tag overlap, no embedding needed):
-          keyword_score = |query_words ∩ skill_words| / |query_words|
-          tag_score     = tags appearing in query / total tags
-          composite     = keyword_score * 0.7 + tag_score * 0.3
+        Scoring strategy:
+          - If a Retriever has been attached via attach_retriever() (the
+            production path), delegate to it. The retriever is typically
+            Hybrid (BM25 + embedding fusion + cache) and gives much better
+            results on CJK queries, paraphrase, and rare-word queries.
+          - Otherwise, use the legacy multi-field weighted keyword scorer
+            (see _legacy_score for details). This path also handles CJK by
+            falling back to per-character substring containment.
 
         Multiple skills can match — the agent receives all of them in the
         prompt (Level 1 summary). Level 2 detail is loaded on demand via
         [SKILL_LOAD:skill_id] if the LLM needs it.
 
-        ambiguous is True when the top-2 scores differ by less than
-        ambiguity_threshold AND both are non-trivial (> 0.05).
-        The caller decides whether to trigger HITL on ambiguity.
+        Ambiguity detection:
+          ambiguous=True when top-1 score >= ambiguity_floor AND the
+          top-2 score gap is below ambiguity_threshold AND at least 2
+          candidates exist. Caller chooses how to react (HITL, auto-pick…).
+
+          When ambiguity_threshold/floor are None, defaults come from
+          cfg.skill_orchestration (ambiguity_gap_threshold / ambiguity_floor).
         """
+        # Load thresholds from config when not explicitly supplied
+        if ambiguity_threshold is None or ambiguity_floor is None:
+            try:
+                from config import cfg as _app_cfg
+                _so_cfg = getattr(_app_cfg, "skill_orchestration", None)
+                if ambiguity_threshold is None:
+                    ambiguity_threshold = float(getattr(_so_cfg, "ambiguity_gap_threshold", 0.08))
+                if ambiguity_floor is None:
+                    ambiguity_floor = float(getattr(_so_cfg, "ambiguity_floor", 0.40))
+            except Exception:
+                if ambiguity_threshold is None:
+                    ambiguity_threshold = 0.08
+                if ambiguity_floor is None:
+                    ambiguity_floor = 0.40
+
         import re as _re
-        query_words = set(_re.findall(r'\b\w{3,}\b', query.lower()))
+        query_words = set(_re.findall(r'\b\w{2,}\b', query.lower()))
 
-        scored: list[tuple[float, str]] = []
-        for skill_id, skill in self._skills.items():
-            s = skill.summary
-            d = skill.detail
-            skill_text = " ".join([
-                skill_id, s.name, s.purpose, d.description,
-                " ".join(s.tags),
-                " ".join(d.parameters.keys()),
-            ]).lower()
-            skill_words = set(_re.findall(r'\b\w{3,}\b', skill_text))
-
-            kw_score  = len(query_words & skill_words) / max(len(query_words), 1)
-            tag_score = sum(1 for t in s.tags if t.lower() in query.lower()) / max(len(s.tags), 1)
-            score     = round(kw_score * 0.7 + tag_score * 0.3, 4)
-            scored.append((score, skill_id))
+        # ── Scoring path A: retriever-driven (preferred when wired) ──
+        if self._retriever is not None:
+            try:
+                # The retriever is already indexed with this catalog.
+                # corpus item dicts include id/text/tags from skills_to_corpus().
+                # Oversample so we have enough candidates for re-weighting below.
+                res = self._retriever.retrieve(
+                    query, top_k=max(top_k * 2, 6),
+                )
+                scored: list[tuple[float, str]] = []
+                seen: set[str] = set()
+                for m in res.matches:
+                    if m.id in self._skills:
+                        # Lightly boost when the retriever reports BM25 strong-match
+                        # (lexical overlap is high-signal for exact skill IDs).
+                        bm25_part = float(m.breakdown.get("bm25", 0.0) or 0.0)
+                        boost = min(0.05, bm25_part * 0.1)
+                        scored.append((round(float(m.score) + boost, 4), m.id))
+                        seen.add(m.id)
+                # Add zero-scored skills not in retrieved set so top_k always
+                # has 5 candidates even if the retriever returned fewer.
+                for sid in self._skills:
+                    if sid not in seen:
+                        scored.append((0.0, sid))
+            except Exception as _exc:
+                logger.warning(
+                    "SkillCatalog: retriever scoring failed (%s) — falling back to keyword",
+                    _exc,
+                )
+                scored = self._legacy_score(query_words, query)
+        else:
+            # ── Scoring path B: legacy keyword (fallback when no retriever) ──
+            scored = self._legacy_score(query_words, query)
 
         scored.sort(reverse=True)
         top = scored[:top_k]
 
+        # ambiguous fires only when:
+        #   1. top score is HIGH ENOUGH to be worth loading (>=
+        #      ambiguity_floor; otherwise nothing's a real match — just
+        #      let the LLM read the catalog summary), AND
+        #   2. top-2 scores are within ambiguity_threshold (real tie).
+        # This prevents weak matches (e.g. top=0.22, second=0.16) from
+        # being flagged as "ambiguous" — when no skill is a strong fit,
+        # the LLM picks from the prompt context without operator help.
         ambiguous = (
             len(top) >= 2
-            and top[0][0] > 0.05
+            and top[0][0] >= ambiguity_floor
             and abs(top[0][0] - top[1][0]) < ambiguity_threshold
         )
 

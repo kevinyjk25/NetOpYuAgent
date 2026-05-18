@@ -44,10 +44,17 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "edit_device_config": {
         "description": "Apply a configuration change to a device. Requires HITL approval.",
-        "parameters":  {"device_id": "Device identifier", "section": "Config section to change", "changes": "Change payload dict", "reason": "Reason for change (audit log)"},
+        "parameters":  {"device_id": "Device identifier", "section": "Config section to change", "changes": "Change payload (object with field-value pairs OR list of IOS lines)", "config_lines": "list of IOS-style config commands (alternative to section+changes)", "reason": "Reason for change (audit log)"},
+        "required":    ["device_id"],
         "returns":     "Confirmation of config push with diff",
         "hitl":        True,
         "tags":        ["config", "write", "destructive"],
+        "example":     {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
+        "examples":    [
+            {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
+            {"device_id": "ap-01", "section": "ntp", "changes": {"servers": ["10.0.0.5"]}, "reason": "add NTP server"},
+            {"device_id": "ap-01", "config_lines": ["radius-server timeout 3"], "reason": "alt format"},
+        ],
     },
     "diff_device_config": {
         "description": "Show uncommitted configuration changes (running vs startup).",
@@ -111,6 +118,42 @@ TOOLS: dict[str, dict[str, Any]] = {
         "returns":     "Restart status with pod counts and health check",
         "hitl":        True,
         "tags":        ["services", "destructive"],
+    },
+
+    "push_config": {
+        "description": "Push a configuration block to a device. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"device_id": "Target device", "config_text": "Raw config to apply", "dry_run": "If true, validate only"},
+        "returns":     "Push status + diff summary",
+        "hitl":        True,
+        "tags":        ["destructive", "config"],
+    },
+    "rollback_deploy": {
+        "description": "Roll back a previous deploy. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"deploy_id": "Deploy identifier", "scope": "Optional scope filter"},
+        "returns":     "Rollback status",
+        "hitl":        True,
+        "tags":        ["destructive", "deploy"],
+    },
+    "drain_node": {
+        "description": "Drain a node — evict workloads. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"node_id": "Node to drain", "grace_period_s": "Grace period seconds (default 60)"},
+        "returns":     "Drain status with evicted workload count",
+        "hitl":        True,
+        "tags":        ["destructive", "node"],
+    },
+    "failover": {
+        "description": "Trigger failover to standby. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"resource_id": "Resource to fail over", "target": "Target replica"},
+        "returns":     "Failover status + new primary",
+        "hitl":        True,
+        "tags":        ["destructive", "ha"],
+    },
+    "delete_resource": {
+        "description": "Delete a resource. DESTRUCTIVE — requires HITL approval.",
+        "parameters":  {"resource_id": "Resource to delete", "force": "Skip dependency check"},
+        "returns":     "Deletion status",
+        "hitl":        True,
+        "tags":        ["destructive", "delete"],
     },
     "rollback_service": {
         "description": "Roll back a service to a previous version. Requires HITL approval.",

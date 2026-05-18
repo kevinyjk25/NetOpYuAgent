@@ -298,7 +298,14 @@ def make_read_stored_result_tool(tool_store):
     async def read_stored_result(args: dict[str, Any]) -> str:
         ref_id = args.get("ref_id", "")
         offset = int(args.get("offset", 0))
-        length = int(args.get("length", 2000))
+        # Default length raised from 2000 to 8000 chars (~2K tokens) so a
+        # typical netflow_dump or syslog page-through completes in 5-7 pages
+        # instead of 25+. LLM is still free to override with smaller value
+        # for sampling, but the default favours fewer turns over fewer tokens
+        # per turn — turns are the bottleneck on slow local models.
+        # Hard cap at 16000 to keep one page under typical 4K-token budgets.
+        length = int(args.get("length", 8000))
+        length = max(256, min(length, 16000))
 
         if not ref_id:
             return "[Error: ref_id is required]"
@@ -820,6 +827,75 @@ async def validate_device_config(args: dict[str, Any]) -> str:
 
 
 
+
+
+def _coerce_changes(raw: Any) -> dict:
+    """Defensive normalisation for the `changes` arg of edit_device_config.
+
+    LLMs produce widely varying shapes for the same intent. Rather than ask
+    each LLM to obey a strict schema (brittle), we accept what they produce
+    and normalise here. Returns a dict that the rest of the function can
+    safely call .get() / .items() on.
+
+    Shape handling:
+      None                    → {}
+      dict                    → returned as-is
+      list of strings         → {"add": [each string]}
+      list of dicts           → keys merged shallowly; lists concatenated
+      list of mixed           → strings → "add"; dicts merged
+      other (str/int/...)     → {"add": [str(raw)]} (last-resort wrap)
+    """
+    if raw is None:
+        return {}
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, list):
+        merged: dict = {}
+        for item in raw:
+            if isinstance(item, str):
+                merged.setdefault("add", []).append(item)
+            elif isinstance(item, dict):
+                for k, v in item.items():
+                    if k in merged and isinstance(merged[k], list) and isinstance(v, list):
+                        merged[k].extend(v)
+                    elif k in merged and isinstance(merged[k], list):
+                        merged[k].append(v)
+                    elif k in merged and isinstance(v, list):
+                        merged[k] = [merged[k], *v]
+                    else:
+                        merged[k] = v
+            else:
+                merged.setdefault("add", []).append(str(item))
+        return merged
+    # Anything else — string, int, etc — wrap so callers don't crash
+    return {"add": [str(raw)]}
+
+
+def _coerce_config_lines(raw: Any) -> list[str]:
+    """Defensive normalisation for the `config_lines` arg.
+
+    Accepts: None, list[str], single str, list of mixed types.
+    Returns a list[str] suitable for line-by-line processing.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        # Single line passed directly — wrap in list
+        return [raw] if raw.strip() else []
+    if isinstance(raw, list):
+        out: list[str] = []
+        for item in raw:
+            if isinstance(item, str):
+                if item.strip():
+                    out.append(item)
+            else:
+                # Last-resort: stringify (catches dicts, ints, ...)
+                out.append(str(item))
+        return out
+    # Anything else
+    return [str(raw)]
+
+
 # ---------------------------------------------------------------------------
 # Tool: edit_device_config  (mock)
 # ---------------------------------------------------------------------------
@@ -840,9 +916,11 @@ async def edit_device_config(args: dict[str, Any]) -> str:
       → converted to IOS commands based on section type
     """
     device_id    = args.get("device_id", "")
-    config_lines = args.get("config_lines") or []
+    config_lines = _coerce_config_lines(args.get("config_lines"))
     section      = args.get("section", "")
-    changes      = args.get("changes", {})
+    # Defensive coercion: LLMs sometimes pass `changes` as a list, dict, or string.
+    # _coerce_changes normalises any of those into the dict shape the logic below assumes.
+    changes      = _coerce_changes(args.get("changes"))
     reason       = args.get("reason", "operator change")
 
     await asyncio.sleep(0.05)
@@ -991,6 +1069,83 @@ async def rollback_service(args: dict[str, Any]) -> str:
     )
 
 
+async def push_config(args: dict[str, Any]) -> str:
+    """Mock: simulate pushing config to a device (HITL-required)."""
+    device_id  = args.get("device_id", "unknown")
+    config_text = args.get("config_text", "")
+    dry_run    = bool(args.get("dry_run", False))
+    await asyncio.sleep(0.1)
+    n_lines = len([l for l in config_text.split("\n") if l.strip()]) or 12
+    mode = "DRY RUN" if dry_run else "APPLIED"
+    return (
+        f"# push_config — {device_id} ({mode})\n"
+        f"# {'─'*60}\n"
+        f"  Config lines processed: {n_lines}\n"
+        f"  Errors: 0  |  Warnings: 0\n"
+        f"# Status: {'Validation complete — no changes written' if dry_run else 'Applied to running-config'}\n"
+        f"# Note: Diff vs startup-config available via diff_device_config"
+    )
+
+
+async def rollback_deploy(args: dict[str, Any]) -> str:
+    """Mock: simulate rolling back a deploy (HITL-required)."""
+    deploy_id = args.get("deploy_id", "unknown")
+    scope     = args.get("scope", "all")
+    await asyncio.sleep(0.1)
+    return (
+        f"# rollback_deploy — {deploy_id} (scope={scope})\n"
+        f"# {'─'*60}\n"
+        f"  Services reverted: 3\n"
+        f"  Pods restarted: 9\n"
+        f"# Status: Rollback complete — running previous stable version\n"
+        f"# Health check: PASS"
+    )
+
+
+async def drain_node(args: dict[str, Any]) -> str:
+    """Mock: simulate draining a node (HITL-required)."""
+    node_id    = args.get("node_id", "unknown")
+    grace_s    = int(args.get("grace_period_s", 60))
+    await asyncio.sleep(0.1)
+    return (
+        f"# drain_node — {node_id} (grace={grace_s}s)\n"
+        f"# {'─'*60}\n"
+        f"  Workloads evicted: 7\n"
+        f"  Pending: 0  |  Failed: 0\n"
+        f"# Status: Node cordoned and drained — non-schedulable\n"
+        f"# Note: Re-enable with `uncordon` after maintenance"
+    )
+
+
+async def failover(args: dict[str, Any]) -> str:
+    """Mock: simulate triggering failover to standby (HITL-required)."""
+    resource = args.get("resource_id", "unknown")
+    target   = args.get("target", "auto-selected-replica")
+    await asyncio.sleep(0.1)
+    return (
+        f"# failover — {resource} → {target}\n"
+        f"# {'─'*60}\n"
+        f"  Pre-failover writes drained: yes\n"
+        f"  Replication lag at failover: 0.2s\n"
+        f"# Status: Failover complete — {target} is now primary\n"
+        f"# Health check: PASS  |  Recommendation: monitor 30 min"
+    )
+
+
+async def delete_resource(args: dict[str, Any]) -> str:
+    """Mock: simulate deleting a resource (HITL-required)."""
+    resource = args.get("resource_id", "unknown")
+    force    = bool(args.get("force", False))
+    await asyncio.sleep(0.1)
+    return (
+        f"# delete_resource — {resource} (force={force})\n"
+        f"# {'─'*60}\n"
+        f"  Dependencies checked: {'skipped (force=True)' if force else '0 dependents found'}\n"
+        f"# Status: Resource deleted\n"
+        f"# Note: Operation is irreversible without backup"
+    )
+
+
 async def diff_device_config(args: dict[str, Any]) -> str:
     """Mock: show what changed in a device config since last known-good state."""
     device_id = args.get("device_id", "")
@@ -1027,6 +1182,11 @@ TOOL_REGISTRY: dict[str, callable] = {
     "restart_service":        restart_service,
     "rollback_service":       rollback_service,
     "diff_device_config":     diff_device_config,
+    "push_config":            push_config,
+    "rollback_deploy":        rollback_deploy,
+    "drain_node":             drain_node,
+    "failover":               failover,
+    "delete_resource":        delete_resource,
     # read_stored_result and process_stored_chunks are injected at runtime (need ToolResultStore ref)
 }
 
@@ -1181,14 +1341,22 @@ TOOL_DESCRIPTIONS = {
         "description": (
             "Push configuration lines to a device (HITL approval required before execution). "
             "Mock mode simulates the config push and returns a result summary. "
-            "Provide config_lines as a list of IOS-style commands."
+            "Provide either config_lines (raw IOS commands) OR section+changes (key/value pairs)."
         ),
         "parameters": {
             "device_id":    "device ID (e.g. 'ap-01', 'sw-core-01')",
             "config_lines": "list of IOS-style config commands to push",
+            "section":      "config section name (e.g. 'radius', 'ntp', 'logging') when using changes",
+            "changes":      "object with field-value pairs, e.g. {timeout: 3, host: '10.0.1.100'}",
             "reason":       "change reason for audit log",
         },
+        "required": ["device_id"],
         "returns_large": False,
         "example": {"device_id": "ap-01", "config_lines": ["radius-server host 10.0.1.100 timeout 3"], "reason": "fix RADIUS timeout"},
+        "examples": [
+            {"device_id": "ap-01", "config_lines": ["radius-server timeout 3"], "reason": "fix RADIUS timeout"},
+            {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
+            {"device_id": "ap-01", "section": "ntp", "changes": {"servers": ["10.0.0.5", "10.0.0.6"]}, "reason": "add NTP backup"},
+        ],
     },
 }

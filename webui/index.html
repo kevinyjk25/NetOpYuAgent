@@ -3,6 +3,10 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Cache-busting: every page-load fetches fresh JS, prevents stale UI -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>IT Ops Agent — Console</title>
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&family=Space+Grotesk:wght@300;400;500;600&display=swap" rel="stylesheet">
 <!-- Markdown + mermaid rendering for agent responses -->
@@ -751,6 +755,7 @@ Type a query below. The agent will:
     <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
     <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
     <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
+    <div class="tab" onclick="switchTab('journal');refreshJournal()" id="tab-btn-journal">Journal</div>
   </div>
 
   <!-- Results tab — all tool calls grouped by turn -->
@@ -850,10 +855,65 @@ Type a query below. The agent will:
     </div>
     <button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-top:8px" onclick="refreshStats()">↻ Refresh</button>
   </div>
+
+  <!-- Journal tab — SkillJournal observability dashboard -->
+  <div class="tab-content" id="tab-journal" style="padding:0">
+    <div style="padding:10px 12px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1">
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
+          Aggregate stats
+          <span id="journal-count" style="color:var(--accent);margin-left:6px;font-family:var(--mono)">—</span>
+        </div>
+        <div style="display:flex;gap:16px;flex-wrap:wrap;font-family:var(--mono);font-size:12px">
+          <div>Outcomes: <span id="journal-outcomes" style="color:var(--accent)">—</span></div>
+          <div>Ambiguous: <span id="journal-ambig-rate" style="color:var(--accent)">—</span></div>
+        </div>
+      </div>
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
+          Per-skill usage
+          <span style="color:var(--dim2);font-size:10px;text-transform:none;font-family:var(--mono)">
+            (⚠ = dormant: loaded but no tool calls)
+          </span>
+        </div>
+        <table style="width:100%;font-family:var(--mono);font-size:11px;border-collapse:collapse">
+          <thead>
+            <tr style="color:var(--dim);text-align:left">
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Skill</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:60px">Uses</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:70px">Dormant</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:80px">Dormant %</th>
+            </tr>
+          </thead>
+          <tbody id="journal-skill-tbody">
+            <tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:flex;align-items:center">
+          Recent activity
+          <button onclick="refreshJournal()" style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:3px;color:var(--dim);font-size:10px;padding:2px 8px;cursor:pointer;font-family:var(--mono)">↻ refresh</button>
+        </div>
+        <div id="journal-recent" style="display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:11px">
+          <div style="color:var(--dim);font-style:italic">Loading…</div>
+        </div>
+      </div>
+
+    </div>
+  </div>
 </div>
 
 <script>
 
+// UI build marker: bump when shipping a frontend change so we can verify
+// the browser isn't serving a cached version. Check via Console:
+//   > console.log(UI_BUILD)
+const UI_BUILD = '2026-05-17-ux-fix-v4 (progress before stop-policy catch-all)';
+console.log('[UI_BUILD]', UI_BUILD);
 
 
 // ── Session history navigation ────────────────────────────────────────────
@@ -1598,6 +1658,7 @@ function addMessage(role, content, cls='') {
   msgs.appendChild(wrap);
   if (role === 'agent') _renderMermaidIn(wrap);
   msgs.scrollTop = msgs.scrollHeight;
+  return wrap;
 }
 
 function addThinking() {
@@ -1696,7 +1757,7 @@ function appendToken(token) {
 
 function finalizeStream() {
   if (!streamState) return;
-  const {sid} = streamState;
+  const {sid, paused} = streamState;
   // Re-render the streamed text as markdown now that the message is complete.
   const bub = document.getElementById(sid+'-bubble');
   if (bub) {
@@ -1712,8 +1773,15 @@ function finalizeStream() {
   const hdr = document.querySelector(`#${sid}-stream .action-header`);
   if (hdr) {
     hdr.classList.remove('open');
-    const lbl = document.getElementById(sid+'-label');
-    if (lbl) lbl.textContent = `${streamState.toolCalls} tool calls · ${streamState.skillLoads} skill loads · ${streamState.hermesEvents} hermes events`;
+    // If the stream was interrupted by stop_hitl, the dispatchChunk
+    // handler set streamState.paused=true and wrote the "Paused for
+    // HITL approval — ..." label. Don't overwrite it with a stale
+    // "0 tool calls" summary — the trace really is interrupted, not
+    // a no-op turn. Post-HITL chunks render in a NEW block.
+    if (!paused) {
+      const lbl = document.getElementById(sid+'-label');
+      if (lbl) lbl.textContent = `${streamState.toolCalls} tool calls · ${streamState.skillLoads} skill loads · ${streamState.hermesEvents} hermes events`;
+    }
   }
   streamState = null;
 }
@@ -1799,9 +1867,12 @@ function dispatchChunk(c, query, sid) {
     return;
   }
   if (c.type==='routing') {
-    addStep('hitl','hitl',`Route: ${c.path}`,c.reason||'','');
-    flowAdd('hitl',`⚡ ${c.path}`,c.reason||'','',{path:c.path});
-    if(c.path==='hitl_executor'){ switchTab('hitl'); refreshHitl(); }
+    // The 'routing' event is now emitted for every query (single path
+    // through hitl_executor) — don't auto-switch to the HITL tab and
+    // don't tag it as a HITL trigger. HITL only fires when an actual
+    // hitl_interrupt event arrives.
+    addStep('classify','route',`→ ${c.path}`,c.reason||'','');
+    flowAdd('classify',`→ ${c.path}`,c.reason||'','',{path:c.path});
     return;
   }
   if (c.type==='task_status') {
@@ -1843,12 +1914,13 @@ function dispatchChunk(c, query, sid) {
       const names  = skills.length
         ? skills.map(s=>`${s.id}(${s.score.toFixed(2)})`).join(', ')
         : step.replace(/Skills matched:\s*/i,'').replace(/Loading skill details:\s*/i,'');
-      const ambig  = c.ambiguous ? '  ⚠ ambiguous — HITL may trigger' : '';
+      // Note: ambiguity is informational only — the LLM decides which
+      // skill to use from the prompt context. HITL is no longer raised
+      // for skill ambiguity (deleted in Phase 7B refactor).
+      const ambig  = c.ambiguous ? '  · ambiguous (LLM will pick)' : '';
       addStep('skill', `Skills matched (${cnt})`, names + ambig, names);
       flowEvent('skill', `📋 Skills matched (${cnt})`, names, ambig||'injected into context');
-      if (c.ambiguous) {
-        flowEvent('hitl', '⚠ Skill ambiguity', 'top skills too similar', 'routing to HITL');
-      }
+      // Removed: flowEvent('hitl', '⚠ Skill ambiguity', ...) — no longer fires.
     } else if (step.includes('Calling tool:')) {
       const tool = step.replace(/Calling tool:\s*/i,'');
       addStep('tool','Tool Call: '+tool,'→ ToolRouter dispatch',
@@ -1892,6 +1964,42 @@ function dispatchChunk(c, query, sid) {
       addToolResult(tool, argsStr, displayText, false, null);
       addStep('inline','Inline: '+tool,'',displayText,{inline:displayText.slice(0,120)});
       flowEvent('tool-result','✓ Inline Result',tool,displayText.slice(0,60));
+    }
+    return;
+  }
+  // progress MUST be matched before the `if (c.message)` catch-all below —
+  // a progress chunk has a c.message field ("Still working — N tools...")
+  // and would otherwise be swallowed by the Stop-Policy branch, which is
+  // why the in-chat placeholder bubble never updated even though the
+  // chunks arrived (right-hand FLOW showed them as "Stop Policy").
+  if (c.type==='progress') {
+    // Heartbeat emitted by the agent_loop_resumer every N tool calls
+    // (+ every LLM turn + every 10s wall-clock). Surfaces "agent is
+    // alive, here's what it's done so far" while a long HITL resume
+    // runs (e.g. 23 read_stored_result pages through a big netflow_dump).
+    const tc = c.tool_calls || 0;
+    const turns = c.turns || 0;
+    const el = (typeof c.elapsed_s === 'number') ? `${c.elapsed_s.toFixed(0)}s` : '';
+    const summary = `${tc} tool calls · ${turns} turns · ${el}`;
+    addStep('progress', '⏳ Agent working', summary, c.message || '');
+    flowEvent('hitl', `⏳ Working (${tc} tools)`, summary, '');
+
+    // ALSO update the in-chat HITL placeholder bubble so the operator
+    // sees progress without switching tabs. c.interrupt_id is set
+    // server-side in _capture_chunk OR force-stamped client-side in
+    // openHitlStream from the URL. If we can find a registered
+    // placeholder for it, rewrite the bubble body in place.
+    const iid = c.interrupt_id || '';
+    const el2 = iid ? _hitlPlaceholders.get(iid) : null;
+    if (el2) {
+      const bubble = el2.querySelector('.bubble');
+      if (bubble) {
+        bubble.innerHTML = _renderMarkdown(
+          `**⏳ HITL — working** \`${iid.slice(0, 10)}…\`\n\n` +
+          `**${tc}** tool calls · **${turns}** turns · **${el}** elapsed\n\n` +
+          `${c.message || 'Agent is processing your request...'}`
+        );
+      }
     }
     return;
   }
@@ -1959,6 +2067,16 @@ function dispatchChunk(c, query, sid) {
     const tool = c.tool_name||'';
     addStep('hitl','🔒 Tool HITL Gate',`'${tool}' requires approval`,c.message||'');
     flowEvent('hitl',`🔒 HITL Gate: ${tool}`,'tool is on watch-list','routing to HITL graph');
+    // Re-label the thinking-trace summary so it's clear this stream
+    // was *interrupted* — not "0 tool calls" (which reads as "did
+    // nothing"). Post-HITL trace continues in a second block after
+    // the operator decides. The `paused` flag stops finalizeStream()
+    // from overwriting our label with a stale tool-count summary.
+    if (streamState && streamState.sid) {
+      streamState.paused = true;
+      const lbl = document.getElementById(streamState.sid + '-label');
+      if (lbl) lbl.textContent = 'Paused for HITL approval — continues after decision';
+    }
     switchTab('hitl');
     refreshHitl(5);
     return;
@@ -1978,6 +2096,22 @@ function dispatchChunk(c, query, sid) {
   if (c.type==='error') {
     addStep('error','Error',c.error,'');
     flowEvent('error','✗ Error',c.error,'');
+    return;
+  }
+  if (c.type==='stall' || c.stalled) {
+    // SSE stream gave up waiting for the LLM backend (default 180s).
+    // Show a clear, actionable message in both the thinking trace and the
+    // right-hand FLOW panel so the operator understands the request was
+    // cancelled rather than thinking the UI silently froze.
+    const msg = c.message || `Backend stalled (>${c.timeout_s||180}s). Request cancelled.`;
+    addStep('error','⏱ Timed out',msg,'');
+    flowEvent('error','⏱ LLM backend timeout',msg,'cancelled — try a smaller prompt or a faster model');
+    // Re-label the streaming-trace summary so the chat shows why nothing arrived
+    if (streamState && streamState.sid) {
+      streamState.paused = true;   // reuse the paused flag so finalizeStream() doesn't overwrite
+      const lbl = document.getElementById(streamState.sid + '-label');
+      if (lbl) lbl.textContent = '⏱ LLM backend timed out — request cancelled';
+    }
     return;
   }
 }
@@ -2483,6 +2617,84 @@ async function hitlSubmitAnswer(id) {
   await hitlDecExtra(id, 'answer', { clarification_answers: answers });
 }
 
+
+function currentSession() { try { return sessionId || ''; } catch(_) { return ''; } }
+
+// Open an SSE on /hitl/<id>/stream to see progressive chunks while the
+// resumer runs. Called in parallel with the POST /hitl/<id>/<decision>.
+// Returns a stop function to close the EventSource on completion.
+function openHitlStream(interruptId) {
+  try {
+    const es = new EventSource(`${BASE}/hitl/${interruptId}/stream`);
+    es.onmessage = (ev) => {
+      try {
+        const chunk = JSON.parse(ev.data);
+        // The /stream endpoint emits a synthetic {type:'done'} when the
+        // resumer completes — that's our cue to close.
+        if (chunk.type === 'done') {
+          es.close();
+          return;
+        }
+        if (chunk.type === 'error') {
+          try { addStep('error', `HITL resume error`, '', chunk.error || ''); } catch(_){}
+          es.close();
+          return;
+        }
+        // Batch-only synthetic chunk: a tool execution finished for ONE
+        // batch sibling. Render a chat bubble + Results card here rather
+        // than relying solely on the node_result chunk + addToolResult,
+        // because dispatchChunk has no path to produce a chat bubble
+        // from server-side chunks (chat bubbles normally come from
+        // streaming tokens during /chat/stream, which has long ended by
+        // the time batch_execute runs).
+        if (chunk.type === 'batch_member_result') {
+          const tool   = chunk.tool   || 'tool';
+          const target = chunk.target || '-';
+          const bid    = (chunk.batch_id || '').slice(0, 8);
+          if (chunk.error) {
+            addMessage('agent',
+              `**✗ Batch execution failed — \`${tool}\` on \`${target}\`** (batch \`${bid}…\`)\n\n` +
+              `**Error:**\n\`\`\`\n${String(chunk.error).slice(0, 2000)}\n\`\`\``,
+              'agent');
+          } else {
+            const result = String(chunk.result || '').slice(0, 4000);
+            addMessage('agent',
+              `**✓ Batch executed — \`${tool}\` on \`${target}\`** (batch \`${bid}…\`)\n\n` +
+              '**Tool output:**\n```\n' + result + '\n```',
+              'agent');
+          }
+          // Stay on whichever tab the user is looking at — don't yank
+          // them into Results just because a sibling finished.
+          // (The node_result chunk that arrives separately already
+          // populates Results via addToolResult.)
+          return;
+        }
+        // Route through the SAME dispatcher as chat/stream so node_result
+        // chunks populate Results/Cache tabs, tokens accumulate, llm_trace
+        // shows turn cards, etc. Without this we lose tool results, store
+        // labels, and turn-by-turn LLM output.
+        // Force-stamp interrupt_id from the URL we opened — server-side
+        // value may be missing on some chunks (e.g. nested resume chunks
+        // that don't propagate it). The frontend placeholder dispatcher
+        // needs this to find the right bubble.
+        if (!chunk.interrupt_id) {
+          chunk.interrupt_id = interruptId;
+        }
+        try {
+          dispatchChunk(chunk, '(hitl resume)', (typeof getSession === 'function' ? getSession() : ''));
+        } catch (e) {
+          console.warn('openHitlStream: dispatchChunk failed:', e);
+        }
+      } catch(_) {}
+    };
+    es.onerror = () => { es.close(); };
+    return () => { try { es.close(); } catch(_){} };
+  } catch (e) {
+    console.warn('openHitlStream failed:', e);
+    return () => {};
+  }
+}
+
 // Shared helper: POST to /hitl/{id}/{decision} with extra body fields
 async function hitlDecExtra(id, dec, extras) {
   // Same guard as hitlDec — stop double-submit producing "already resolved".
@@ -2495,25 +2707,98 @@ async function hitlDecExtra(id, dec, extras) {
     btn.disabled = true;
     btn.style.opacity = '0.5';
   });
+
+  // UX: insert an immediate placeholder so the operator gets feedback the
+  // moment they click — without it, the chat is silent for the full
+  // resumer duration (which can be 60s+ on slow local LLMs running
+  // multi-tool chains). The placeholder gets replaced when the final
+  // response arrives below; meanwhile `progress` chunks streamed via
+  // openHitlStream update the in-progress indicator.
+  let _placeholderEl = null;
+  try {
+    _placeholderEl = addMessage('agent',
+      `**⏳ HITL ${dec}** — \`${id.slice(0, 10)}…\`\n\n` +
+      `Working on it... (live progress will appear in the steps panel)`,
+      'agent');
+    // Register so the progress chunk dispatcher can find this bubble and
+    // update its body in-place (see dispatchChunk 'progress' handler).
+    if (_placeholderEl) {
+      _hitlPlaceholders.set(id, _placeholderEl);
+    }
+  } catch (_) { /* addMessage may not return an element; non-fatal */ }
+
   try {
     const body = Object.assign(
       { operator_id: 'webui-operator', comment: `${dec} via Console` },
       extras || {}
     );
+    // Open live progress stream BEFORE the POST so we see chunks
+    // emitted by the resumer (LLM turns, tool calls) in real time.
+    const stopStream = openHitlStream(id);
     const res = await fetch(`${BASE}/hitl/${id}/${dec}`, {
       method: 'POST',
       headers: {'Content-Type':'application/json'},
       body: JSON.stringify(body),
     });
     const data = await res.json().catch(()=>({}));
+    // For batch members: the backend returns synchronously with
+    // batch_pending=true because tool execution runs in a background
+    // task AFTER the last sibling is approved. We must keep the SSE
+    // open so tool_call/tool_result chunks streamed by the batch
+    // executor reach the UI. Without this, the stream closes here
+    // and the Results tab stays empty until manual refresh.
+    const isBatchPending = !!(data && data.batch_pending);
+    if (!isBatchPending) {
+      // Close the stream once the final response arrives (singular path)
+      try { stopStream(); } catch(_) {}
+    } else {
+      // Batch path: stream stays open. Schedule a safety-net close
+      // after a generous window so we don't leak EventSource forever
+      // if the batch executor crashes silently. Frontend keeps showing
+      // "executing" state until then.
+      const _bid = (data.batch_pending && data.batch_pending.batch_id) || '';
+      console.log(`hitl: batch member ${id.slice(0,10)}… approved — batch=${_bid.slice(0,8)}, keeping SSE open for executor chunks`);
+      addStep('progress', '⏸ Batch pending', '',
+              `Waiting for sibling decisions + tool execution (batch ${_bid.slice(0,8)}…)`);
+      setTimeout(() => {
+        try { stopStream(); } catch(_) {}
+      }, 5 * 60 * 1000);   // 5min safety net
+    }
     if (data.error) {
       addMessage('agent', `HITL ${dec.toUpperCase()}: ${id.slice(0,10)}…\nError: ${data.error}`, 'system');
     } else {
-      addMessage('agent', `**✓ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n${data.synthesis || data.tool_result || 'Decision recorded'}`, 'agent');
+      // Process any sub_chunks the resumer emitted — this is a fallback
+      // in case the live SSE missed any (e.g. browser EventSource lag).
+      // dispatchChunk is idempotent for the cache/results tabs (registerStore
+      // is a Map.set so a duplicate replay won't double-render).
+      if (Array.isArray(data.sub_chunks)) {
+        try {
+          const sid = (typeof getSession === 'function' ? getSession() : '');
+          for (const ch of data.sub_chunks) {
+            try { dispatchChunk(ch, '(hitl resume)', sid); } catch(_) {}
+          }
+        } catch (e) { console.warn('sub_chunks replay failed:', e); }
+      }
+      // If this was a nested HITL (resumer hit ANOTHER interrupt), don't
+      // declare the turn done — refreshHitl will pick up the new card.
+      if (data.nested_hitl && data.nested_hitl.interrupted) {
+        addStep('progress', '⏸ Nested HITL', '', `awaiting: ${(data.nested_hitl.interrupt_id||'').slice(0,12)}`);
+      } else if (isBatchPending) {
+        // Don't declare "done" — the tool execution chunks are still on
+        // the way via the kept-open SSE. The Results tab will populate
+        // as tool_result chunks arrive.
+        addMessage('agent',
+          `**⏳ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n` +
+          `Decision recorded. Tool execution will run once all batch siblings ` +
+          `are decided — results will appear in the Results tab.`,
+          'agent');
+      } else {
+        addMessage('agent', `**✓ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n${data.synthesis || data.tool_result || 'Decision recorded'}`, 'agent');
+      }
       addStep('done', `✅ Post-HITL ${dec} complete`, '', `interrupt: ${id.slice(0,12)}`);
       flowEvent('done', `✅ Post-HITL ${dec} complete`, dec, `interrupt: ${id.slice(0,12)}`);
       setTimeout(loadSessions, 800);
-      switchTab('cache');
+      switchTab('cache');   // 'cache' is the Results tab in this UI
     }
     refreshHitl();
   } catch (e) {
@@ -2521,6 +2806,7 @@ async function hitlDecExtra(id, dec, extras) {
     alert('Submit failed: ' + (e.message||e));
   } finally {
     _hitlInFlight.delete(id);
+    _hitlPlaceholders.delete(id);
   }
 }
 
@@ -2528,6 +2814,13 @@ async function hitlDecExtra(id, dec, extras) {
 // already resolved" errors when polling re-renders a card whose decision
 // is already being processed. Cleared in hitlDec/hitlDecExtra finally.
 const _hitlInFlight = new Set();
+
+// Map interrupt_id → placeholder bubble element. The bubble is created in
+// hitlDecExtra the moment the operator clicks (so they get instant
+// feedback) and progress chunks from the agent_loop_resumer find it here
+// to update its body in-place — turning the static "Working on it..." into
+// a live "5 tool calls, 30s elapsed" indicator.
+const _hitlPlaceholders = new Map();
 
 async function hitlDec(id,dec) {
   // Guard: don't fire a second decision while one is in flight for the
@@ -2547,11 +2840,104 @@ async function hitlDec(id,dec) {
     btn.style.opacity = '0.5';
   });
   try {
+    // Open the per-interrupt SSE stream BEFORE the POST so we catch
+    // post-approval chunks emitted by the resumer (TURN N, Tool Call,
+    // nested HITL). For BATCH HITL members specifically, this is
+    // critical: the POST returns synchronously (the BatchCoordinator
+    // owns resumption — see hitl_core/router.py path 0), but the
+    // actual tool execution happens later in a background task spawned
+    // by _raise_tool_hitl_batch. The background task pushes
+    // tool_call/tool_result chunks to chunk_queue under THIS interrupt_id.
+    // Without an open SSE here, those chunks land in chunk_queue
+    // history but the Results tab stays empty.
+    const stopStream = openHitlStream(id);
     const res=await fetch(`${BASE}/hitl/${id}/${dec}`,{method:'POST',
       headers:{'Content-Type':'application/json'},
       body:JSON.stringify({operator_id:'webui-operator',comment:`${dec} via Console`})});
     const data=await res.json().catch(()=>({}));
     const outcome=data.outcome||data.decision||dec;
+
+    // Batch-pending detection: the backend signals when this interrupt
+    // was a batch member, in which case the SSE must stay open until
+    // the background tool execution finishes and pushes results.
+    // For singular HITL, close the stream immediately — chunks (if any)
+    // already arrived in the POST response's sub_chunks.
+    const isBatchPending = !!(data && data.batch_pending);
+    if (!isBatchPending) {
+      try { stopStream(); } catch(_) {}
+    } else {
+      const _bid = (data.batch_pending && data.batch_pending.batch_id) || '';
+      console.log(`hitlDec: batch member ${id.slice(0,10)}… approved — batch=${_bid.slice(0,8)}, keeping SSE open for executor chunks`);
+      addStep('progress', '⏸ Batch pending', '',
+              `Waiting for sibling decisions + tool execution (batch ${_bid.slice(0,8)}…)`);
+      // Safety net: close SSE after 5min if tool execution stalls,
+      // so we don't leak EventSource forever.
+      setTimeout(() => { try { stopStream(); } catch(_) {} }, 5 * 60 * 1000);
+    }
+
+    // Replay any sub-stream chunks captured by the resumer back into the
+    // thinking trace so the post-approval steps (TURN N, Tool Call,
+    // hitl_edit, tool_result, nested HITL) are visible. Without this the
+    // trace dies at "HITL-WAIT" and operators see nothing of what happened
+    // after they clicked Approve.
+    //
+    // CRITICAL: the original stream's `streamState` was nulled by endStream()
+    // when the SSE flow paused for HITL. addStep() early-returns if
+    // streamState is null, so we MUST rebuild it (via startStream which
+    // creates a fresh "agent ·" thinking block) before replaying chunks.
+    // This produces a SECOND thinking trace block under the agent message,
+    // showing exactly what happened post-approval — a clean visual
+    // separation from the pre-HITL block above.
+    // Replay any sub-stream chunks captured by the resumer back into the
+    // thinking trace so the post-approval steps (TURN N, Tool Call,
+    // hitl_edit, tool_result, nested HITL) are visible. Without this the
+    // trace dies at "HITL-WAIT" and operators see nothing of what happened
+    // after they clicked Approve.
+    //
+    // CRITICAL: the original stream's `streamState` was nulled by endStream()
+    // when the SSE flow paused for HITL. addStep() early-returns if
+    // streamState is null, so we MUST rebuild it (via startStream which
+    // creates a fresh "agent ·" thinking block) before replaying chunks
+    // OR rendering Hermes lifecycle events (FTS5 / curation / skill evolve).
+    // This produces a SECOND thinking trace block under the agent message,
+    // showing exactly what happened post-approval — clean visual separation
+    // from the pre-HITL block above.
+    const _hasSubChunks = Array.isArray(data.sub_chunks) && data.sub_chunks.length;
+    const _hasHermes    = !!(data.memory_write || data.memory_curate || data.skill_evolved);
+
+    // === DIAGNOSTIC === uncomment if Post-HITL trace doesn't appear:
+    console.log('[hitlDec] dec=%s, sub_chunks=%d, hermes=%s, nested=%s',
+                dec, (data.sub_chunks||[]).length, _hasHermes,
+                !!(data.nested_hitl && data.nested_hitl.interrupted));
+    if (_hasSubChunks) {
+      console.log('[hitlDec] sub_chunks sample:', data.sub_chunks.slice(0,3));
+    }
+
+    if (_hasSubChunks || _hasHermes) {
+      // Fresh thinking block — new sid, new badges, new body.
+      startStream();
+      const lbl = document.getElementById(streamState.sid+'-label');
+      if (lbl) lbl.textContent = `Post-HITL trace (${dec})…`;
+      console.log('[hitlDec] startStream done, streamState.sid=%s',
+                  streamState && streamState.sid);
+    }
+    if (_hasSubChunks) {
+      let _replayed = 0;
+      for (const sub of data.sub_chunks) {
+        try { dispatchChunk(sub, '', ''); _replayed++; }
+        catch (e) { console.warn('sub_chunk replay failed:', e, sub); }
+      }
+      console.log('[hitlDec] replayed %d/%d sub_chunks', _replayed, data.sub_chunks.length);
+    }
+    // If the sub-stream raised a NESTED HITL, switch to HITL tab and
+    // refresh /hitl/pending so the operator sees the new approval card.
+    if (data.nested_hitl && data.nested_hitl.interrupted) {
+      const niid = data.nested_hitl.interrupt_id || '';
+      addStep('hitl','HITL Interrupt (nested)',`Awaiting next approval`,
+        `interrupt: ${niid.slice(0,12)}`);
+      switchTab('hitl');
+      refreshHitl(5);
+    }
 
     if (data.error) {
       // Decision failed (already resolved, not found, etc.)
@@ -2590,6 +2976,17 @@ Error: ${data.error}`,'system');
       // No tool_result returned — render synthesis as markdown if present.
       if (data.synthesis) {
         addMessage('agent', data.synthesis, 'agent');
+      } else if (isBatchPending) {
+        // Batch path: tool execution still pending. Don't claim "approved"
+        // — be honest about the wait state. Results will populate via the
+        // SSE stream that's still open.
+        const _bid = (data.batch_pending && data.batch_pending.batch_id) || '';
+        addMessage('agent',
+          `**⏳ HITL ${dec}** — \`${id.slice(0,10)}…\`\n\n` +
+          `Decision recorded. Tool execution runs after all batch siblings ` +
+          `are decided. Results will appear in the Results tab as they arrive ` +
+          `(batch \`${_bid.slice(0,8)}…\`).`,
+          'agent');
       } else {
         addMessage('agent',
           `**✓ HITL approved** — \`${id.slice(0,10)}…\`\n\nThe approved action is executing. Check the Results tab when complete.`,
@@ -2612,10 +3009,23 @@ Outcome: ${outcome}`,'system');
         `memories: ${data.memory_curate.memories_count}\ntypes: ${types||'—'}`);
       flowEvent('curate','🧠 Curation',`${data.memory_curate.memories_count} memories`,types||'');
     }
+    if (data.skill_evolved) {
+      const sid = data.skill_evolved.skill_id || '';
+      const name = data.skill_evolved.name || sid;
+      addStep('evolve',`Skill Auto-Created: ${name}`,'registered in catalog',
+        `skill_id: ${sid}`);
+      flowEvent('evolve','⚡ Skill evolved',name,`registered as ${sid}`);
+    }
     flowAdd('hitl',`⚠ HITL ${dec.toUpperCase()}`,`${id.slice(0,12)}…`,`outcome: ${outcome}`,data);
     setTimeout(()=>refreshHitl(0),400);
     // Refresh session list to pick up the new turn written by Hermes
     setTimeout(loadSessions, 1200);
+    // If we opened a post-HITL thinking block (sub_chunks replay or
+    // Hermes addSteps fired into a fresh streamState), close it now so
+    // the badge bar gets the final tool/skill/hermes counts.
+    if (streamState) {
+      try { finalizeStream(); } catch (e) { /* noop */ }
+    }
   } catch(e){ addMessage('system','HITL decision error: '+e.message,'error'); }
   finally {
     // Always clear the in-flight marker — even on error — so the operator
@@ -3109,8 +3519,132 @@ document.getElementById('query-input').addEventListener('keydown', function(e) {
 });
 
 restoreLastSession(); loadSkills(); loadTools(); refreshStats();
-setInterval(refreshHitl, 3000);
-setInterval(refreshStats, 20000);
+// PERF-3: read poll intervals from /system/wiring; fall back to defaults.
+// Operators can tune in config.yaml under webui.* without touching this file.
+(async function _wireRefreshIntervals() {
+  let hitlMs = 3000, statsMs = 20000;
+  try {
+    const res = await fetch(`${BASE}/system/wiring`);
+    const wiring = await res.json();
+    if (wiring && wiring.webui) {
+      hitlMs  = parseInt(wiring.webui.hitl_poll_interval_ms,  10) || hitlMs;
+      statsMs = parseInt(wiring.webui.stats_poll_interval_ms, 10) || statsMs;
+    }
+  } catch (_e) { /* ignore — keep defaults */ }
+  setInterval(refreshHitl,  hitlMs);
+  setInterval(refreshStats, statsMs);
+})();
+
+
+  // ── Journal tab ──────────────────────────────────────────────
+  async function refreshJournal() {
+    try {
+      const [statsResp, recentResp] = await Promise.all([
+        fetch('/webui/skill_journal/stats'),
+        fetch('/webui/skill_journal/recent?limit=20'),
+      ]);
+      if (statsResp.status === 503 || recentResp.status === 503) {
+        document.getElementById('journal-count').textContent =
+            'Disabled (cfg.skill_orchestration.journal_api_enabled=false)';
+        return;
+      }
+      const stats   = await statsResp.json();
+      const recent  = (await recentResp.json()).entries || [];
+
+      // Aggregate header
+      document.getElementById('journal-count').textContent =
+          (stats.count || 0) + ' total entries';
+
+      const outcomes = stats.outcomes || {};
+      const outcomeStr = Object.entries(outcomes)
+          .map(([k, v]) => k + ':' + v)
+          .join('  ');
+      document.getElementById('journal-outcomes').textContent = outcomeStr || '—';
+
+      const ambig = stats.ambiguous_rate;
+      document.getElementById('journal-ambig-rate').textContent =
+          (ambig != null) ? (Math.round(ambig * 100) + '%') : '—';
+
+      // Per-skill table
+      const useCount     = stats.skill_use_count || {};
+      const dormantCount = stats.skill_dormant_count || {};
+      const allSkills = new Set([
+          ...Object.keys(useCount),
+          ...Object.keys(dormantCount),
+      ]);
+      const tbody = document.getElementById('journal-skill-tbody');
+      if (allSkills.size === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>';
+      } else {
+        const rows = Array.from(allSkills).map(sid => {
+          const uses    = useCount[sid] || 0;
+          const dormant = dormantCount[sid] || 0;
+          const rate    = uses ? (dormant / uses) : 0;
+          const flag    = (rate > 0.3 && uses >= 3) ? ' ⚠' : '';
+          const rateColor = rate > 0.5 ? '#e74c3c' : (rate > 0.3 ? '#f39c12' : 'var(--dim)');
+          return [sid, uses, dormant, rate, flag, rateColor];
+        });
+        rows.sort((a, b) => b[3] - a[3] || b[1] - a[1]);
+        tbody.innerHTML = rows.map(([sid, uses, dormant, rate, flag, rateColor]) =>
+            '<tr>' +
+              '<td style="padding:4px 6px;color:var(--text)">' + sid + flag + '</td>' +
+              '<td style="padding:4px 6px;color:var(--accent)">' + uses + '</td>' +
+              '<td style="padding:4px 6px;color:' + rateColor + '">' + dormant + '</td>' +
+              '<td style="padding:4px 6px;color:' + rateColor + '">' + Math.round(rate * 100) + '%</td>' +
+            '</tr>'
+        ).join('');
+      }
+
+      // Recent activity
+      const recDiv = document.getElementById('journal-recent');
+      if (recent.length === 0) {
+        recDiv.innerHTML = '<div style="color:var(--dim);font-style:italic">No journal entries yet</div>';
+      } else {
+        recDiv.innerHTML = recent.map(e => {
+          const ts = e.started_at ? new Date(e.started_at * 1000).toLocaleTimeString() : '—';
+          const queryEsc = (e.query || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          const outcomeColor = e.outcome === 'answer' ? 'var(--accent)' :
+                               (e.outcome === 'error' ? '#e74c3c' : 'var(--dim)');
+          let attrLines = '';
+          for (const a of (e.attribution || [])) {
+            const dormFlag = a.appeared_dormant ? ' <span style="color:#f39c12">⚠ dormant</span>' : '';
+            attrLines += '<div style="padding-left:14px;color:var(--dim)">' +
+                         '  ↳ ' + a.skill_id + ': ' + a.tool_calls_in_window + ' tool calls' +
+                         dormFlag + '</div>';
+          }
+          const ambBadge = e.ambiguous ?
+              ' <span style="color:#f39c12;font-size:9px;border:1px solid #f39c12;padding:0 4px;border-radius:2px">ambig</span>' :
+              '';
+          return (
+            '<div style="border-left:2px solid var(--border);padding:4px 8px">' +
+              '<div style="display:flex;justify-content:space-between">' +
+                '<span style="color:var(--text)">' + queryEsc.substring(0, 80) + '</span>' +
+                '<span style="color:var(--dim);font-size:10px">' + ts + '</span>' +
+              '</div>' +
+              '<div style="color:var(--dim2);font-size:10px;margin-top:2px">' +
+                '<span style="color:' + outcomeColor + '">' + (e.outcome || 'unknown') + '</span>' +
+                '  · ' + (e.total_turns || 0) + ' turns' +
+                '  · ' + (e.duration_s || 0) + 's' +
+                ambBadge +
+              '</div>' +
+              attrLines +
+            '</div>'
+          );
+        }).join('');
+      }
+    } catch (err) {
+      console.warn('refreshJournal failed', err);
+    }
+  }
+
+  // Auto-refresh when Journal tab visible
+  setInterval(() => {
+    const journalTab = document.getElementById('tab-journal');
+    if (journalTab && journalTab.classList.contains('active')) {
+      refreshJournal();
+    }
+  }, 10000);
+
 </script>
 </body>
 </html>

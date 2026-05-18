@@ -97,6 +97,172 @@ class StopPolicyConfig:
 
 
 # ---------------------------------------------------------------------------
+# FactsLedger — typed, category-aware replacement for the raw confirmed_facts
+# ---------------------------------------------------------------------------
+
+class FactCategory:
+    """Category prefixes for FactsLedger entries."""
+    FACT          = "[FACT]"           # real confirmed network fact
+    TOOL_EXEC     = "TOOL_EXEC:"       # tool execution record
+    PREV_ANALYSIS = "PREV_ANALYSIS:"   # synthesis summary from previous turn
+    NUDGE         = "_NUDGE:"          # internal LLM control instruction
+    LESSON        = "[LESSON]"         # reflection lesson
+
+
+class FactsLedger:
+    """
+    DESIGN-06 fix: typed multi-bucket store replacing the mixed confirmed_facts list.
+
+    Each category has an independent entry list and a configurable max-entries cap
+    (loaded from AppConfig if available, otherwise from class defaults).
+    The ledger serialises to list[str] for backwards compatibility with all
+    existing code that reads state.confirmed_facts.
+
+    Priority for context injection (highest first):
+      1. FACT        — real confirmed facts, highest value
+      2. PREV_ANALYSIS — useful cross-turn context
+      3. TOOL_EXEC   — tool call records (for deduplication)
+      4. LESSON      — reflection lessons
+      5. NUDGE       — ephemeral control, excluded from serialisation by default
+    """
+
+    # Default per-category caps (overridden by config if available)
+    _DEFAULT_CAPS: dict[str, int] = {
+        FactCategory.FACT:          200,
+        FactCategory.TOOL_EXEC:     100,
+        FactCategory.PREV_ANALYSIS:  20,
+        FactCategory.LESSON:         50,
+        FactCategory.NUDGE:           5,
+    }
+
+    def __init__(self, caps: Optional[dict[str, int]] = None):
+        self._caps: dict[str, int] = caps or dict(self._DEFAULT_CAPS)
+        self._buckets: dict[str, list[str]] = {cat: [] for cat in self._caps}
+
+    # ── Write ────────────────────────────────────────────────────────
+
+    def add(self, text: str, category: str = FactCategory.FACT) -> None:
+        """Add an entry.  Oldest entries are dropped when the cap is reached."""
+        if category not in self._buckets:
+            self._buckets[category] = []
+        bucket = self._buckets[category]
+        cap    = self._caps.get(category, 200)
+        if len(bucket) >= cap:
+            # Evict oldest half to avoid O(N) churn on every add
+            evict = max(1, cap // 4)
+            del bucket[:evict]
+        bucket.append(text)
+
+    def add_fact(self, text: str)          -> None: self.add(text, FactCategory.FACT)
+    def add_tool_exec(self, text: str)     -> None: self.add(text, FactCategory.TOOL_EXEC)
+    def add_prev_analysis(self, text: str) -> None: self.add(text, FactCategory.PREV_ANALYSIS)
+    def add_nudge(self, text: str)         -> None: self.add(text, FactCategory.NUDGE)
+    def add_lesson(self, text: str)        -> None: self.add(text, FactCategory.LESSON)
+
+    def clear_nudges(self) -> None:
+        self._buckets[FactCategory.NUDGE] = []
+
+    # ── Read ─────────────────────────────────────────────────────────
+
+    def to_list(self, include_nudges: bool = False) -> list[str]:
+        """Serialise to list[str] in priority order for backwards compat."""
+        out: list[str] = []
+        order = [
+            FactCategory.FACT,
+            FactCategory.PREV_ANALYSIS,
+            FactCategory.TOOL_EXEC,
+            FactCategory.LESSON,
+        ]
+        if include_nudges:
+            order.append(FactCategory.NUDGE)
+        for cat in order:
+            out.extend(self._buckets.get(cat, []))
+        return out
+
+    def facts_only(self) -> list[str]:
+        return list(self._buckets.get(FactCategory.FACT, []))
+
+    def tool_execs(self) -> list[str]:
+        return list(self._buckets.get(FactCategory.TOOL_EXEC, []))
+
+    def nudges(self) -> list[str]:
+        return list(self._buckets.get(FactCategory.NUDGE, []))
+
+    # ── Backwards-compat: full list emulation for legacy readers ────
+    # FactsLedger duck-types as list[str] so any code that treats
+    # confirmed_facts as a list (slicing, contains, iteration, append/extend)
+    # works without isinstance checks.
+
+    def __iter__(self):
+        return iter(self.to_list())
+
+    def __len__(self) -> int:
+        return sum(len(b) for b in self._buckets.values())
+
+    def __bool__(self) -> bool:
+        # Explicit because some callers do `if confirmed_facts:` and we
+        # want truthy when ANY bucket has items, not just FACT.
+        return self.__len__() > 0
+
+    def __getitem__(self, key):
+        """Slicing/indexing returns from the priority-ordered serialised view.
+        Supports the most common patterns we observed in the codebase:
+          facts[:20]   → ContextBudgetManager._format_confirmed_facts
+          facts[-5:]   → StopPolicy._build_summary
+          facts[-3:]   → coordinator.py shared_facts
+          facts[i]     → element access
+        """
+        return self.to_list()[key]
+
+    def __contains__(self, item) -> bool:
+        """Supports `f in confirmed_facts` checks across all buckets."""
+        for bucket in self._buckets.values():
+            if item in bucket:
+                return True
+        return False
+
+    def append(self, item: str) -> None:
+        """List-compatible append. Routes by prefix to the correct bucket so
+        legacy code doing `state.confirmed_facts.append("TOOL_EXEC: …")`
+        still ends up in the right place."""
+        if not isinstance(item, str):
+            item = str(item)
+        if   item.startswith(FactCategory.TOOL_EXEC):     self.add_tool_exec(item)
+        elif item.startswith(FactCategory.PREV_ANALYSIS): self.add_prev_analysis(item)
+        elif item.startswith(FactCategory.NUDGE):         self.add_nudge(item)
+        elif item.startswith(FactCategory.LESSON):        self.add_lesson(item)
+        else:                                             self.add_fact(item)
+
+    def extend(self, items) -> None:
+        """List-compatible extend with per-item prefix routing."""
+        for it in items or []:
+            self.append(it)
+
+    def __repr__(self) -> str:
+        sizes = {cat: len(b) for cat, b in self._buckets.items() if b}
+        return f"FactsLedger({sizes})"
+
+    @classmethod
+    def from_list(cls, items: list[str]) -> "FactsLedger":
+        """Reconstruct a FactsLedger from a serialised list[str] (e.g. from
+        a previous session's confirmed_facts).  Uses prefix detection to
+        route each item into the correct bucket."""
+        ledger = cls()
+        for item in (items or []):
+            if item.startswith(FactCategory.TOOL_EXEC):
+                ledger.add_tool_exec(item)
+            elif item.startswith(FactCategory.PREV_ANALYSIS):
+                ledger.add_prev_analysis(item)
+            elif item.startswith(FactCategory.NUDGE):
+                ledger.add_nudge(item)
+            elif item.startswith(FactCategory.LESSON):
+                ledger.add_lesson(item)
+            else:
+                ledger.add_fact(item)
+        return ledger
+
+
+# ---------------------------------------------------------------------------
 # Mutable loop state (caller maintains this across turns)
 # ---------------------------------------------------------------------------
 
@@ -123,7 +289,10 @@ class LoopState:
     low_confidence_turns_count: int = 0
 
     # Accumulated outputs
-    confirmed_facts:     list[str] = field(default_factory=list)
+    # DESIGN-06 fix: confirmed_facts is now a FactsLedger that separates
+    # real facts, tool exec records, analysis summaries, and nudges into
+    # independent capped buckets. It serialises to list[str] for compat.
+    confirmed_facts:     FactsLedger = field(default_factory=FactsLedger)
     unresolved_points:   list[str] = field(default_factory=list)
     tool_summaries:      list[str] = field(default_factory=list)
 
@@ -134,7 +303,10 @@ class LoopState:
 
     def record_new_fact(self, fact: str) -> None:
         """Call when the agent confirms a new structured fact."""
-        self.confirmed_facts.append(fact)
+        if isinstance(self.confirmed_facts, FactsLedger):
+            self.confirmed_facts.add_fact(fact)
+        else:
+            self.confirmed_facts.append(fact)  # type: ignore[union-attr]
         self.no_progress_turns = 0   # reset stall counter
 
     def record_no_progress(self) -> None:

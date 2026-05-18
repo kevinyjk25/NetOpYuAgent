@@ -85,26 +85,25 @@ class ToolLoader:
         return meta
 
     def skill_definitions(self) -> dict[str, dict[str, Any]]:
+        """DEPRECATED — use skills.SkillLoader(mode).skill_definitions() instead.
+
+        Tools module should not depend on skills module. This method is a
+        backwards-compatible shim that forwards to SkillLoader; existing
+        callers will keep working but emit a deprecation warning.
+
+        Will be removed in a future release.
         """
-        Return {skill_id: {...}} for all skills active in this mode.
-
-        Used to populate SkillCatalogService — no filtering needed because
-        only mode-appropriate skills are loaded to begin with.
-        """
-        from skills.builtin.registry import SKILLS as BUILTIN_SKILLS
-
-        defs: dict[str, dict[str, Any]] = {}
-        defs.update(BUILTIN_SKILLS)
-
-        if self._mode == "mock":
-            from skills.mock.registry import SKILLS as MOCK_SKILLS
-            defs.update(MOCK_SKILLS)
-        else:
-            from skills.pragmatic.registry import SKILLS as PRAGMA_SKILLS
-            defs.update(PRAGMA_SKILLS)
-
-        logger.info("ToolLoader[%s]: %d skills in definitions", self._mode, len(defs))
-        return defs
+        import warnings
+        warnings.warn(
+            "ToolLoader.skill_definitions() is deprecated. "
+            "Use skills.SkillLoader(mode).skill_definitions() — tools should "
+            "not import skills.",
+            DeprecationWarning, stacklevel=2,
+        )
+        # Forward without breaking — but go through SkillLoader so the
+        # actual skill-loading code lives in one place.
+        from skills.loader import SkillLoader  # ← DEPRECATED SHIM: see method docstring
+        return SkillLoader(mode=self._mode).skill_definitions()
 
     def tool_section_for_prompt(self) -> str:
         """

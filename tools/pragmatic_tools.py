@@ -91,7 +91,11 @@ def _list_devices_raw(type_filter: str | None = None,
 
 async def _run_in_executor(fn, *args, **kwargs) -> Any:
     """Run a blocking function in the default thread pool."""
-    loop = asyncio.get_event_loop()
+    # We're in an `async def`, so a loop is definitely running.
+    # get_running_loop() avoids the 3.10+ DeprecationWarning that
+    # get_event_loop() emits when there's no current loop set on the
+    # thread (a corner case that doesn't apply here but is noisy in logs).
+    loop = asyncio.get_running_loop()
     import functools
     return await loop.run_in_executor(None, functools.partial(fn, *args, **kwargs))
 
