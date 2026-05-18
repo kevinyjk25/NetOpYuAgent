@@ -52,8 +52,10 @@ from pathlib import Path
 # main.py + webui/backend.py + any module that takes a services arg.
 SERVICES_VARS = {"services", "_services"}
 
-IGNORE_PATH_FRAGMENTS = ["/__pycache__/", "/tests/", "/examples/",
-                          "/agent_memory/examples/", "scripts/audit_wiring.py"]
+IGNORE_PATH_FRAGMENTS = ["scripts/audit_wiring.py"]
+# Note: .venv / site-packages / __pycache__ / tests / examples are
+# already filtered by _audit_common.iter_repo_python_files — see that
+# module for the canonical exclusion list.
 
 # Keys deliberately registered for introspection/observability and used
 # via paths the audit can't see — singletons resolved by getter functions
@@ -167,9 +169,13 @@ def _scan(repo: Path) -> tuple[
     dict[str, list[Path]],   # writes: key → files that write it
     dict[str, list[Path]],   # reads:  key → files that read it
 ]:
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _audit_common import iter_repo_python_files
+
     writes: dict[str, list[Path]] = defaultdict(list)
     reads:  dict[str, list[Path]] = defaultdict(list)
-    for f in repo.rglob("*.py"):
+    for f in iter_repo_python_files(repo):
         if any(frag in str(f) for frag in IGNORE_PATH_FRAGMENTS):
             continue
         try:

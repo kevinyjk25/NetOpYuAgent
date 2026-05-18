@@ -66,13 +66,17 @@ def is_doc_or_string_only(line: str) -> bool:
 
 
 def main() -> int:
+    # Shared iterator handles .venv/site-packages/__pycache__/etc so we
+    # don't re-discover the "tools/" name collision with third-party libs.
+    import sys
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from _audit_common import iter_repo_python_files
+
     offenders: list[str] = []
 
-    for py in ROOT.rglob("*.py"):
+    for py in iter_repo_python_files(ROOT):
         rel = py.relative_to(ROOT).as_posix()
         if rel in EXEMPT_PATHS:
-            continue
-        if "__pycache__" in rel:
             continue
 
         try:
