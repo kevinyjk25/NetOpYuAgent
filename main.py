@@ -84,6 +84,13 @@ async def build_services() -> dict[str, Any]:
         session_ttl       = 86_400,
         enable_user_model = True,
     )
+    # Auto-consolidate gate — see MemoryAdapter.set_consolidator docstring.
+    # Cfg-driven; 0 disables. Background task style, hot path unblocked.
+    try:
+        _auto_n = int(getattr(cfg.memory, "auto_consolidate_turns", 30))
+        memory_router.set_consolidator(threshold_turns=_auto_n)
+    except Exception as _cons_exc:
+        logger.warning("Memory auto-consolidate setup failed (%s) — disabled", _cons_exc)
     services["memory"] = memory_router
     logger.info("Memory module ready (agent_memory backend)")
 
@@ -744,6 +751,22 @@ async def build_services() -> dict[str, Any]:
                         contradiction_demote=_fcd_cfg.contradiction_demote,
                     )
                     services["fact_conflict_detector"] = fcd
+                    # Wire into MemoryAdapter so add_fact() routes through
+                    # the detector instead of doing a direct mid_term insert.
+                    # This is the LAST mile of the FactConflictDetector
+                    # feature — without it the detector is constructed,
+                    # registered in services, and never called by anyone
+                    # (the "ghost service" anti-pattern caught by
+                    # audit_wiring.py).
+                    if hasattr(_mem_adapter, "set_conflict_detector"):
+                        _mem_adapter.set_conflict_detector(fcd)
+                    else:
+                        logger.warning(
+                            "FactConflictDetector wired in services but "
+                            "MemoryAdapter lacks set_conflict_detector — "
+                            "facts will still take the direct path. "
+                            "Upgrade MemoryAdapter or wire callers manually."
+                        )
                     logger.info(
                         "FactConflictDetector wired (sim_thr=%.2f, llm_reconcile=%s)",
                         _fcd_cfg.similarity_threshold, _fcd_cfg.llm_reconcile_enabled,

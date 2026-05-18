@@ -30,6 +30,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--verbose",    action="store_true", help="Per-case detail in text report")
     parser.add_argument("--fail-below-mrr", type=float, default=0.0,
                         help="Exit 1 if MRR is below this threshold")
+    parser.add_argument("--fail-below-recall-3", type=float, default=0.0,
+                        help="Exit 1 if recall@3 is below this threshold "
+                             "(catches regressions where the right answer "
+                             "moves out of the top-3, even if MRR averages OK)")
+    parser.add_argument("--fail-below-recall-1", type=float, default=0.0,
+                        help="Exit 1 if recall@1 is below this threshold "
+                             "(strictest — right answer must be #1)")
     parser.add_argument("--quiet",      action="store_true", help="Reduce log noise")
     args = parser.parse_args(argv)
 
@@ -87,9 +94,32 @@ def main(argv: Optional[list[str]] = None) -> int:
             fp.write(format_jsonl_report(report))
         print(f"\nJSONL written to {args.out}")
 
+    # ── Threshold gates (any failure → exit 1, report ALL failures) ─────
+    # Collecting all failures (instead of short-circuiting on the first)
+    # makes CI logs easier to triage — you see every metric that regressed,
+    # not just the first one tripped.
+    failures: list[str] = []
     if args.fail_below_mrr > 0 and report.mrr < args.fail_below_mrr:
-        print(f"\n✗ MRR {report.mrr:.3f} below threshold {args.fail_below_mrr:.3f}",
-              file=sys.stderr)
+        failures.append(
+            f"MRR {report.mrr:.3f} < threshold {args.fail_below_mrr:.3f}"
+        )
+    if args.fail_below_recall_3 > 0:
+        r3 = report.recall_at_3
+        if r3 < args.fail_below_recall_3:
+            failures.append(
+                f"recall@3 {r3:.3f} < threshold {args.fail_below_recall_3:.3f}"
+            )
+    if args.fail_below_recall_1 > 0:
+        r1 = report.recall_at_1
+        if r1 < args.fail_below_recall_1:
+            failures.append(
+                f"recall@1 {r1:.3f} < threshold {args.fail_below_recall_1:.3f}"
+            )
+
+    if failures:
+        print(file=sys.stderr)
+        for f in failures:
+            print(f"  ✗ {f}", file=sys.stderr)
         return 1
 
     return 0

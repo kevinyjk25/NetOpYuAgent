@@ -105,7 +105,71 @@ class MemoryAdapter:
         # instance (one per process); on restart we lose count and start
         # nudging from turn 5 again, which is acceptable.
         self._turn_counter: dict[str, int] = {}
+
+        # ── Deferred wiring slots ─────────────────────────────────────────
+        # Optional cross-module hooks. Both are set AFTER construction (via
+        # set_conflict_detector / set_consolidator) because their config
+        # gates and dependencies (LLM engine for reconcile, etc.) aren't
+        # ready when MemoryAdapter is first instantiated in build_services.
+        # If still unset at write-time, add_fact / after_turn fall back to
+        # the legacy direct-write path — i.e. the feature is purely opt-in.
+        self._conflict_detector: Any = None
+        self._consolidator: Any = None
+        # Throttle: track per-session last-consolidate turn count so we
+        # don't fire consolidation N times in a row on a long session.
+        self._last_consolidate_turn: dict[str, int] = {}
+
         logger.info("MemoryAdapter ready — backend=%s", data_dir)
+
+    # ── Deferred hooks (cross-module wiring) ─────────────────────────────
+    #
+    # These setters are called by main.py once the cross-module collaborators
+    # are constructed. Either remaining unset is a valid runtime state —
+    # the relevant code path falls back to the legacy direct-write.
+
+    def set_conflict_detector(self, detector: Any) -> None:
+        """Inject a FactConflictDetector instance.
+
+        Once set, add_fact() routes inserts through detector.insert_with_reconcile()
+        instead of the direct mid_term.add_fact path, so semantic duplicates and
+        contradictions are reconciled rather than blindly stored. Set to None
+        to revert.
+
+        Why a setter and not a constructor arg: the detector takes a memory
+        protocol (i.e. this very adapter) and an LLM function, both of which
+        are built in build_services *after* this adapter. Circular dependency
+        if we tried construction-time wiring.
+        """
+        self._conflict_detector = detector
+        logger.info(
+            "MemoryAdapter: conflict detector %s",
+            "WIRED" if detector is not None else "CLEARED",
+        )
+
+    def set_consolidator(self, *, threshold_turns: int = 30) -> None:
+        """Enable per-session auto-consolidation.
+
+        After every after_turn() call we increment the session's turn counter.
+        When it crosses `threshold_turns` (and is above the previous high-water
+        mark) we fire MemoryManager.consolidate_session() as a background task.
+        Counters are tracked per-session in _last_consolidate_turn so a long
+        session triggers exactly once per N turns, not every turn forever.
+
+        Pass threshold_turns=0 to disable.
+        """
+        # We don't store a separate consolidator instance — MemoryManager
+        # owns one internally and exposes consolidate_session(). We just
+        # store the threshold here as the gate.
+        self._consolidate_threshold = max(0, int(threshold_turns))
+        if self._consolidate_threshold > 0:
+            self._consolidator = self._mgr  # marker: enabled
+            logger.info(
+                "MemoryAdapter: auto-consolidate ENABLED (every %d turns per session)",
+                self._consolidate_threshold,
+            )
+        else:
+            self._consolidator = None
+            logger.info("MemoryAdapter: auto-consolidate DISABLED")
 
     # ── Recall (read path) ────────────────────────────────────────────────
 
@@ -157,7 +221,55 @@ class MemoryAdapter:
 
         Returns the fact_id. Duplicates (same user+session+text) are silently
         deduped and return the existing id.
+
+        If a FactConflictDetector has been wired via set_conflict_detector(),
+        the insert is routed through detector.insert_with_reconcile() which
+        finds semantically similar existing facts and applies an action
+        (equivalent → boost existing, refinement → boost + insert,
+        contradiction → LLM reconcile, unrelated → straight insert).
+        Falls back to the direct path on detector failure or if not wired,
+        so the cross-module hook is purely opt-in and never breaks writes.
         """
+        # ── Routed path: conflict-aware insertion ────────────────────
+        if self._conflict_detector is not None:
+            try:
+                result = await self._conflict_detector.insert_with_reconcile(
+                    session_id=session_id,
+                    user_id=user_id,
+                    fact_text=fact_text,
+                    fact_type=fact_type,
+                    confidence=confidence,
+                    metadata=metadata,
+                    ttl_days=ttl_days,
+                )
+                # ReconcileResult.inserted_fact_id is None when verdict ==
+                # equivalent (existing fact's confidence boosted, no new
+                # row). Return the related_fact_id in that case so callers
+                # always get a valid id for citation/chunk linkage.
+                fid = (
+                    getattr(result, "inserted_fact_id", None)
+                    or getattr(result, "related_fact_id", None)
+                    or ""
+                )
+                if fid:
+                    return fid
+                # Detector returned nothing usable — fall through to direct
+                # write so the caller doesn't get an empty string back.
+                logger.debug(
+                    "add_fact: detector returned no fact_id (verdict=%s), "
+                    "falling through to direct write",
+                    getattr(result, "verdict", "?"),
+                )
+            except Exception as exc:
+                # Detector failures must never block a write. Log and fall
+                # through. Symmetric to how all the other cross-module
+                # hooks degrade (SkillEvolver, JournalToFacts).
+                logger.warning(
+                    "add_fact: conflict detector raised %s — falling back to direct write",
+                    exc,
+                )
+
+        # ── Direct path: legacy behaviour (exact-hash dedup only) ────
         from agent_memory.schemas import MemoryFact
         fact = MemoryFact(
             user_id=user_id, session_id=session_id, fact=fact_text,
@@ -316,7 +428,56 @@ class MemoryAdapter:
                 self._nudge_async(user_id, session_id, deep=nudge_kind)
             )
 
+        # ── Auto-consolidation gate ────────────────────────────────
+        # Schedule consolidate_session() as a background task when this
+        # session has accumulated enough turns since the last compression
+        # pass. The consolidator merges old chunks into LLM-summarised
+        # rollups, keeping the long-term context window bounded as
+        # sessions grow. Without this, long sessions monotonically
+        # increase chunk count → FTS5/embedding search latency rises.
+        #
+        # Per-session "high water mark" semantics: fire when
+        #   turn_n >= last_consolidate + threshold
+        # so a long session at turn 120 with threshold=30 fires at
+        # turns 30, 60, 90, 120 — once per N turns, never reentrant.
+        # Background task means hot path isn't blocked by the LLM
+        # summarisation call.
+        if (
+            self._consolidator is not None
+            and self._consolidate_threshold > 0
+        ):
+            last_at = self._last_consolidate_turn.get(session_id, 0)
+            if turn_n - last_at >= self._consolidate_threshold:
+                self._last_consolidate_turn[session_id] = turn_n
+                asyncio.create_task(
+                    self._consolidate_async(user_id, session_id, turn_n)
+                )
+
         return new_facts
+
+    async def _consolidate_async(
+        self, user_id: str, session_id: str, turn_n: int,
+    ) -> None:
+        """Background wrapper for MemoryManager.consolidate_session.
+
+        Runs in a fire-and-forget task so the hot after_turn path doesn't
+        wait for the LLM summarisation. Failures are logged but never
+        propagate — symmetric to _nudge_async.
+        """
+        try:
+            stats = await asyncio.to_thread(
+                self._mgr.consolidate_session, user_id, session_id,
+            )
+            logger.info(
+                "MemoryAdapter consolidate: session=%s turn=%d → %s",
+                session_id[:12], turn_n,
+                {k: stats.get(k) for k in ("merged", "kept", "compression_ratio")
+                 if k in (stats or {})} or stats,
+            )
+        except Exception as exc:
+            logger.debug(
+                "MemoryAdapter consolidate failed (non-fatal): %s", exc,
+            )
 
     async def _nudge_async(self, user_id: str, session_id: str, deep: bool) -> None:
         """Background wrapper around the sync orchestrator nudge."""

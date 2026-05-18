@@ -155,6 +155,10 @@ class MemoryConfig:
     chroma_path: str; dtm: DTMConfig
     embedding_model: str = "nomic-embed-text"
     embedding_dim:   int = 768
+    # Auto-consolidate gate — fire MemoryManager.consolidate_session every
+    # N turns per session. 0 = disabled (long sessions grow unbounded;
+    # also fine if you periodically clear sessions another way).
+    auto_consolidate_turns: int = 30
 
 @dataclass
 class SkillsConfig:
@@ -1044,6 +1048,8 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             redis_url    = _env_str("REDIS_URL",       m.get("redis_url",   "")) or None,
             postgres_dsn = _env_str("POSTGRES_DSN",    m.get("postgres_dsn","")) or None,
             chroma_path  = _env_str("CHROMA_PATH",     m.get("chroma_path", "./chroma_db")),
+            auto_consolidate_turns = _env_int("MEMORY_AUTO_CONSOLIDATE_TURNS",
+                                              m.get("auto_consolidate_turns", 30)),
             dtm=DTMConfig(
                 compaction_turns        = _env_int  ("DTM_COMPACTION_TURNS", md.get("compaction_turns",        20)),
                 nudge_turns             = _env_int  ("DTM_NUDGE_TURNS",      md.get("nudge_turns",             10)),

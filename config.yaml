@@ -190,6 +190,10 @@ memory:
   redis_url:   ""          # e.g. "redis://localhost:6379" — leave blank for in-memory stub
   postgres_dsn: ""
   chroma_path: "./chroma_db"
+  # Auto-consolidate: every N turns per session, merge old chunks into
+  # LLM-summarised rollups so long-session FTS5/embedding search stays
+  # fast. 0 disables. Background task — never blocks after_turn.
+  auto_consolidate_turns: 30
   dtm:
     compaction_turns:         5    # flush daily .md after 5 turns (raise to 20+ in prod)
     nudge_turns:              5    # deep Hermes review every 5 turns

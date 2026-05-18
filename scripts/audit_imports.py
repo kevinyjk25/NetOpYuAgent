@@ -38,7 +38,7 @@ AUDITED_PACKAGES = ["integrations", "skills", "tools", "agent_memory",
 
 # Files whose imports we IGNORE (test fixtures, examples, etc.)
 IGNORE_FILES = {"__main__.py"}
-IGNORE_PATH_FRAGMENTS = ["/tests/", "/examples/", "/__pycache__/"]
+IGNORE_PATH_FRAGMENTS = ["/tests/", "/examples/", "/__pycache__/", "/.venv/"]
 
 
 def collect_import_lines(repo: Path) -> list[tuple[str, int, str]]:
