@@ -50,12 +50,18 @@ fail()    { printf '%s✗%s %s\n' "$RED" "$RST" "$1"; FAILED=1; }
 if [ "$RUN_AUDITS" = 1 ]; then
     section "Static audits"
 
-    # Syntax sweep — every .py parses
+    # Syntax sweep — every .py parses. Uses the same exclusion list as
+    # the other audits (see scripts/_audit_common.py) so .venv /
+    # site-packages / build dirs don't poison the result with their own
+    # syntax errors (some libs ship test fixtures with deliberately bad
+    # Python).
     if python3 -c "
-import ast, pathlib, sys
+import sys, pathlib
+sys.path.insert(0, 'scripts')
+from _audit_common import iter_repo_python_files
+import ast
 errs = []
-for f in pathlib.Path('.').rglob('*.py'):
-    if '__pycache__' in str(f): continue
+for f in iter_repo_python_files(pathlib.Path('.')):
     try: ast.parse(open(f).read())
     except SyntaxError as e: errs.append(f'{f}:{e.lineno}: {e.msg}')
 for e in errs: print('  ✗', e, file=sys.stderr)

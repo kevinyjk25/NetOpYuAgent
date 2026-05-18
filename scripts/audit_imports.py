@@ -36,18 +36,21 @@ AUDITED_PACKAGES = ["integrations", "skills", "tools", "agent_memory",
                      "memory", "hitl_core", "retrieval", "schema",
                      "evaluation", "runtime", "registry"]
 
-# Files whose imports we IGNORE (test fixtures, examples, etc.)
+# Files whose imports we IGNORE (test fixtures, examples, etc.).
+# Path-fragment exclusions (venv, site-packages, caches) live in
+# _audit_common.iter_repo_python_files so every audit shares the same
+# blind-spot list — see commit history for why this matters (onnxruntime
+# ships a `tools/` submodule that collides with our top-level package).
 IGNORE_FILES = {"__main__.py"}
-IGNORE_PATH_FRAGMENTS = ["/tests/", "/examples/", "/__pycache__/", "/.venv/"]
 
 
 def collect_import_lines(repo: Path) -> list[tuple[str, int, str]]:
     """Walk every .py file, yield (file_relpath, line_no, module_path) for each
     `from X import ...` / `import X` where X starts with one of AUDITED_PACKAGES."""
+    from _audit_common import iter_repo_python_files
     results: list[tuple[str, int, str]] = []
-    for f in repo.rglob("*.py"):
+    for f in iter_repo_python_files(repo):
         if f.name in IGNORE_FILES: continue
-        if any(frag in str(f) for frag in IGNORE_PATH_FRAGMENTS): continue
         try:
             with open(f, encoding="utf-8") as fp:
                 source = fp.read()
