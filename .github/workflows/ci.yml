@@ -1,0 +1,110 @@
+name: CI
+
+# Runs on every PR and on every push to main/master.
+# This is the gate that keeps the codebase healthy. If any audit fails or
+# the eval bench drops below thresholds, merging is blocked (when the
+# `Require status checks` branch protection rule is on).
+#
+# Jobs are intentionally separated so a flaky/slow eval doesn't mask a
+# fast-failing audit, and so the matrix can be expanded later without
+# rewiring everything.
+
+# NOTE: we quote "on" because YAML 1.1 (which PyYAML defaults to) treats
+# `on` / `off` / `yes` / `no` as booleans. GitHub's parser handles bare
+# `on:` correctly, but our own audit / yamllint / IDE plugins generally
+# don't — they read this file as `{True: {...}}` and report "no triggers
+# defined", which is confusing. Quoting makes the key unambiguously a
+# string for every parser.
+"on":
+  pull_request:
+  push:
+    branches: [main, master]
+  # Allow manual runs from the Actions tab for ad-hoc bench runs.
+  workflow_dispatch:
+
+# Cancel in-progress runs for the same PR/branch when new commits land —
+# saves runner minutes and gives faster feedback on what matters now.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 1. Fast static audits (no external deps, runs in ~30s) ────────────
+  audits:
+    name: Static audits
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install minimal deps
+        # Audits don't need fastapi/httpx/ollama — they're pure AST analysis.
+        # pyyaml is the only thing config.py needs to import successfully.
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Run all static audits via precheck
+        run: ./scripts/precheck.sh --audits
+
+  # ── 2. Production-safety unit tests (memory/auth/redaction) ───────────
+  safety-tests:
+    name: Production safety tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps for safety tests
+        # These tests touch agent_memory + auth_core + log_redaction;
+        # only need pyyaml + pytest. No web framework, no LLM.
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml pytest pytest-asyncio
+
+      - name: Run pytest
+        run: pytest tests/ -v
+
+  # ── 3. Retrieval eval gate (catches retrieval-quality regressions) ────
+  retrieval-eval:
+    name: Retrieval eval (BM25)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps for eval
+        # BM25 backend is pure-python (no embedder, no LLM). We still need
+        # pyyaml for config + dataclasses for the report types.
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Run retrieval bench against golden set
+        # BM25 thresholds are intentionally lower than the team's local
+        # `hybrid` benchmark — without semantic matching, paraphrase/zh
+        # cases naturally score lower. These floors catch CATASTROPHIC
+        # regressions; tighten as the golden set + scoring algorithms
+        # mature. Override per-branch via repo secrets if needed.
+        env:
+          MIN_RECALL_3: "0.40"
+          MIN_MRR:      "0.30"
+        run: ./scripts/precheck.sh --eval
