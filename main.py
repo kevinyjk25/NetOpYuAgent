@@ -498,6 +498,24 @@ async def build_services() -> dict[str, Any]:
             )
             services["skill_evolver"] = _skill_evolver
 
+            # Wire the evolver into the HITL executor so the batch
+            # finalizer can mint skills from successful multi-target
+            # batches. The executor was constructed earlier (before
+            # the evolver existed) — use the deferred setter.
+            try:
+                _exec = services.get("executor")
+                if _exec is not None and hasattr(_exec, "set_skill_evolver"):
+                    _exec.set_skill_evolver(_skill_evolver)
+                    logger.info(
+                        "SkillEvolver: wired into HITL executor (batch finalizer hook)"
+                    )
+            except Exception as _wire_exc:
+                logger.warning(
+                    "SkillEvolver: failed to wire into executor (%s) — "
+                    "batch resolution will skip skill evolution",
+                    _wire_exc,
+                )
+
             # Smoke test: prove the LLM actually responds. We don't care about
             # the content — just that no exception is raised. If this fails,
             # /skills/generate would silently fall back to stubs.

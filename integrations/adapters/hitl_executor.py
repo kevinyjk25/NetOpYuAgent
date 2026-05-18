@@ -149,6 +149,7 @@ class HitlExecutor:
         hitl_pipeline: Optional[HitlPipeline] = None,
         coreferencer: Optional[Coreferencer] = None,
         audit_logger: Optional[AuditLogger] = None,
+        skill_evolver=None,
     ):
         self._runtime_loop  = runtime_loop      # patched AgentRuntimeLoop
         self._llm_engine    = llm_engine
@@ -158,6 +159,12 @@ class HitlExecutor:
         self._pipeline      = hitl_pipeline
         self._coref         = coreferencer or build_default_device_coreferencer()
         self._audit         = audit_logger
+        # SkillEvolver may not exist at executor-construction time (it's
+        # built later in main.py once the LLM smoke test passes). Use
+        # set_skill_evolver() to inject after construction. Used only by
+        # the batch finalizer to evolve a skill ONCE per resolved batch
+        # — see _batch_execute_after_resolution.
+        self._skill_evolver = skill_evolver
 
         # Register named resumers so the router can invoke us when
         # decisions arrive for interrupts whose pipeline isn't alive.
@@ -169,6 +176,16 @@ class HitlExecutor:
         hitl_router.register_resumer(
             "tool_call_resumer",  self._tool_call_resumer,
         )
+
+    def set_skill_evolver(self, evolver) -> None:
+        """Inject the SkillEvolver after construction.
+
+        Called from main.py once the evolver instance exists (it's built
+        after the executor because evolver construction needs an LLM
+        engine smoke test). Used by the batch finalizer; safe to leave
+        unset if skill evolution is disabled.
+        """
+        self._skill_evolver = evolver
 
     # ────────────────────────────────────────────────────────────────
     # Public entry point — called by A2A protocol layer
@@ -592,6 +609,17 @@ class HitlExecutor:
             # classifiers). We collect tasks here and gather at the end.
             _pending_writebacks: list = []
 
+            # Accumulate inputs for the per-batch SkillEvolver call.
+            # SkillEvolver runs ONCE after the whole batch finishes
+            # (vs. once-per-child inline, which used to wedge each
+            # POST behind another 8s+ LLM call). Only successful
+            # children contribute — rejects/failures aren't useful as
+            # skill exemplars. See backend.py _submit_hitl_decision
+            # for the singular-HITL counterpart.
+            _evolver_tools: list[str] = []
+            _evolver_results: list[str] = []
+            _evolver_targets: list[str] = []
+
             def _schedule_writeback(user_q: str, asst_t: str, sid: str) -> None:
                 """Schedule writeback as a background task with low
                 importance (0.4) — chunk persisted, no LLM distillation."""
@@ -769,6 +797,15 @@ class HitlExecutor:
                     child_sid,
                 )
 
+                # Accumulate this child's data for the post-batch
+                # SkillEvolver call. We append the tool name once even
+                # if multiple children use it — evolver dedups internally
+                # via "tools_used" set semantics, but the result snippets
+                # are kept distinct for solution-summary diversity.
+                _evolver_tools.append(child_tool)
+                _evolver_results.append(result_text[:200])
+                _evolver_targets.append(child_args.get("device_id", "-"))
+
             # Wait for any background writebacks to settle so the
             # 'completed' log accurately reflects all-done state. These
             # are wrapped in shield-style return_exceptions=True so a
@@ -780,6 +817,70 @@ class HitlExecutor:
                     logger.debug(
                         "batch_execute: writeback gather hit %s — ignoring",
                         _gather_exc,
+                    )
+
+            # ── SkillEvolver for the batch as a whole ─────────────
+            # In the per-child POST path (webui/backend.py:_submit_hitl_decision)
+            # batch members are explicitly skipped so we don't run evolver
+            # N times for the same logical request. Run it ONCE here
+            # against the unioned (tools_used, sample results) so a
+            # successful multi-target batch can still mint a skill.
+            #
+            # Skips:
+            #   - rejected/partial batches (no successful children to learn from)
+            #   - evolver not wired (e.g. mode=pragmatic startup without LLM)
+            #   - batches with zero successful children
+            if (
+                self._skill_evolver is not None
+                and _evolver_tools
+                and not resolution.rejected
+            ):
+                try:
+                    # Dedup tools_used; preserve a representative
+                    # solution summary by joining the first ~3 result
+                    # snippets. Keep complexity moderate (6.0) since
+                    # multi-target batches imply some operational
+                    # complexity even when each child is mechanically
+                    # the same op.
+                    _unique_tools = list(dict.fromkeys(_evolver_tools))
+                    _solution_summary = " | ".join(
+                        f"{t}: {r}"
+                        for t, r in zip(_evolver_targets[:3], _evolver_results[:3])
+                    )[:400]
+                    proposal = await self._skill_evolver.after_task(
+                        task_description = query,
+                        solution_summary = _solution_summary,
+                        tools_used       = _unique_tools,
+                        solution_steps   = [
+                            f"{t} on {tgt}"
+                            for t, tgt in zip(_evolver_tools, _evolver_targets)
+                        ][:10],
+                        key_observations = [
+                            f"batch_size={len(_evolver_tools)}",
+                            f"unique_tools={len(_unique_tools)}",
+                        ],
+                        complexity       = 6.0,
+                        session_id       = batch.batch_id,
+                    )
+                    if proposal is not None:
+                        logger.info(
+                            "batch_execute: SkillEvolver proposed skill %r "
+                            "for batch=%s (reuse_potential=%.2f)",
+                            getattr(proposal, "name", "?"),
+                            batch.batch_id[:12],
+                            getattr(proposal, "reuse_potential", 0.0),
+                        )
+                    else:
+                        logger.debug(
+                            "batch_execute: SkillEvolver returned no proposal "
+                            "for batch=%s (below threshold)",
+                            batch.batch_id[:12],
+                        )
+                except Exception as _ev_exc:
+                    # Evolver failures must never tank the batch finalizer.
+                    logger.warning(
+                        "batch_execute: SkillEvolver failed for batch=%s: %s",
+                        batch.batch_id[:12], _ev_exc,
                     )
 
             logger.info(

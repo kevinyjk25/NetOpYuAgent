@@ -912,7 +912,7 @@ Type a query below. The agent will:
 // UI build marker: bump when shipping a frontend change so we can verify
 // the browser isn't serving a cached version. Check via Console:
 //   > console.log(UI_BUILD)
-const UI_BUILD = '2026-05-17-ux-fix-v3 (placeholder + heartbeat + bubble update)';
+const UI_BUILD = '2026-05-17-ux-fix-v4 (progress before stop-policy catch-all)';
 console.log('[UI_BUILD]', UI_BUILD);
 
 
@@ -1967,6 +1967,42 @@ function dispatchChunk(c, query, sid) {
     }
     return;
   }
+  // progress MUST be matched before the `if (c.message)` catch-all below —
+  // a progress chunk has a c.message field ("Still working — N tools...")
+  // and would otherwise be swallowed by the Stop-Policy branch, which is
+  // why the in-chat placeholder bubble never updated even though the
+  // chunks arrived (right-hand FLOW showed them as "Stop Policy").
+  if (c.type==='progress') {
+    // Heartbeat emitted by the agent_loop_resumer every N tool calls
+    // (+ every LLM turn + every 10s wall-clock). Surfaces "agent is
+    // alive, here's what it's done so far" while a long HITL resume
+    // runs (e.g. 23 read_stored_result pages through a big netflow_dump).
+    const tc = c.tool_calls || 0;
+    const turns = c.turns || 0;
+    const el = (typeof c.elapsed_s === 'number') ? `${c.elapsed_s.toFixed(0)}s` : '';
+    const summary = `${tc} tool calls · ${turns} turns · ${el}`;
+    addStep('progress', '⏳ Agent working', summary, c.message || '');
+    flowEvent('hitl', `⏳ Working (${tc} tools)`, summary, '');
+
+    // ALSO update the in-chat HITL placeholder bubble so the operator
+    // sees progress without switching tabs. c.interrupt_id is set
+    // server-side in _capture_chunk OR force-stamped client-side in
+    // openHitlStream from the URL. If we can find a registered
+    // placeholder for it, rewrite the bubble body in place.
+    const iid = c.interrupt_id || '';
+    const el2 = iid ? _hitlPlaceholders.get(iid) : null;
+    if (el2) {
+      const bubble = el2.querySelector('.bubble');
+      if (bubble) {
+        bubble.innerHTML = _renderMarkdown(
+          `**⏳ HITL — working** \`${iid.slice(0, 10)}…\`\n\n` +
+          `**${tc}** tool calls · **${turns}** turns · **${el}** elapsed\n\n` +
+          `${c.message || 'Agent is processing your request...'}`
+        );
+      }
+    }
+    return;
+  }
   if (c.message) {
     addStep('stop','Stop Policy',c.message.slice(0,80),'');
     flowEvent('stop','■ Stop Policy',c.message.slice(0,60));
@@ -2075,49 +2111,6 @@ function dispatchChunk(c, query, sid) {
       streamState.paused = true;   // reuse the paused flag so finalizeStream() doesn't overwrite
       const lbl = document.getElementById(streamState.sid + '-label');
       if (lbl) lbl.textContent = '⏱ LLM backend timed out — request cancelled';
-    }
-    return;
-  }
-  if (c.type==='progress') {
-    // Heartbeat emitted by the agent_loop_resumer every N tool calls.
-    // Surfaces "agent is alive, here's what it's done so far" while a
-    // long HITL resume runs (e.g. 23 read_stored_result pages through a
-    // big netflow_dump). Without this the operator sees the chat go
-    // silent for minutes and can't tell whether the agent crashed or
-    // is still working.
-    const tc = c.tool_calls || 0;
-    const turns = c.turns || 0;
-    const el = (typeof c.elapsed_s === 'number') ? `${c.elapsed_s.toFixed(0)}s` : '';
-    const summary = `${tc} tool calls · ${turns} turns · ${el}`;
-    addStep('progress', '⏳ Agent working', summary, c.message || '');
-    flowEvent('hitl', `⏳ Working (${tc} tools)`, summary, '');
-
-    // ALSO update the in-chat HITL placeholder bubble so the operator
-    // sees progress without switching tabs. dispatchChunk has no direct
-    // access to the interrupt id, so c.interrupt_id (set server-side in
-    // _capture_chunk OR force-stamped client-side in openHitlStream) is
-    // the anchor. If we can find a registered placeholder for it,
-    // rewrite the bubble body in place.
-    const iid = c.interrupt_id || '';
-    const el2 = iid ? _hitlPlaceholders.get(iid) : null;
-    console.log('[progress]', {
-      iid: iid.slice(0, 10),
-      tc, turns, phase: c.phase,
-      placeholder_registered: !!el2,
-      map_size: _hitlPlaceholders.size,
-      map_keys: Array.from(_hitlPlaceholders.keys()).map(k => k.slice(0, 10)),
-    });
-    if (el2) {
-      const bubble = el2.querySelector('.bubble');
-      if (bubble) {
-        bubble.innerHTML = _renderMarkdown(
-          `**⏳ HITL — working** \`${iid.slice(0, 10)}…\`\n\n` +
-          `**${tc}** tool calls · **${turns}** turns · **${el}** elapsed\n\n` +
-          `${c.message || 'Agent is processing your request...'}`
-        );
-      } else {
-        console.warn('[progress] placeholder element has no .bubble child', el2);
-      }
     }
     return;
   }

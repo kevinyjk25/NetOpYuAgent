@@ -1694,11 +1694,12 @@ async def _submit_hitl_decision(
     # operator clicks approve N times — running SkillEvolver N times
     # for the SAME logical request is wasteful AND each invocation
     # delays its member's POST visible response by another LLM
-    # round-trip. The skill (if any) should fire once after the whole
-    # batch resolves — TODO: wire it into the batch executor finalizer.
-    # For now, skipping batch members entirely is the right move:
-    # singular-HITL approves still get skill evolution; batch members
-    # don't, but the request is logged so we can pattern-mine later.
+    # round-trip. The skill fires ONCE after the whole batch resolves —
+    # wired in hitl_executor.py _batch_execute_after_resolution, which
+    # calls self._skill_evolver.after_task with the unioned tools_used
+    # and a representative solution summary across all successful children.
+    # See `set_skill_evolver` in HitlExecutor for the deferred injection
+    # point used by main.py.
     _is_batch_member_for_evolver = _batch_pending_info is not None
     if (
         _decision in ("approve", "choose", "answer")

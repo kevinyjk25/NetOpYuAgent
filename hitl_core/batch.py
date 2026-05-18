@@ -112,13 +112,31 @@ class BatchCoordinator:
     Lifetime: one per HitlRouter / pipeline runtime. The coordinator owns
     the in-memory waiter table — the store owns persistent state.
 
-    For multi-replica deployments, a child decision arriving on a
-    different replica from the batch's producer falls through to the
-    resumer-by-name path the same way unbatched detached decisions do
-    (see HitlRouter._dispatch). The coordinator on the producer-side
-    replica notices via store polling or pubsub (TODO: add Redis pubsub
-    integration in a future patch — for now, single-replica is the
-    supported deployment).
+    Multi-replica behaviour (current state):
+      A child decision arriving on a DIFFERENT replica from the one that
+      opened the batch falls through to the resumer-by-name path the same
+      way unbatched detached decisions do (see HitlRouter._dispatch). The
+      child gets persisted via the shared store, but the original
+      producer's future on the other replica won't be woken — it will
+      time out or hang.
+
+      For now the supported deployment is single-replica. Running
+      multiple replicas requires a fan-out layer to deliver child
+      decisions back to the producer replica. Two practical options:
+
+        1. Store polling — _check_wait_condition gets called from a
+           periodic task that walks pending batches in the store and
+           re-evaluates them when new children appear. Simple, no new
+           dependencies, ~30s decision-detect latency.
+
+        2. Pubsub (Redis or NATS) — when on_child_decision runs on any
+           replica, publish (batch_id, interrupt_id) to a channel. Each
+           replica subscribes and dispatches inbound msgs through its
+           local on_child_decision. Sub-second latency but adds an infra
+           dependency and a deduplication concern (skip self-published).
+
+      Neither is wired today; doing so should remain a separate, focused
+      patch behind an `enable_multi_replica_sync: true` config flag.
     """
 
     def __init__(self, *, store: BaseCheckpointStore,
