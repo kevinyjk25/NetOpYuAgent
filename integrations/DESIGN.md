@@ -41,6 +41,7 @@ from integrations.clients.openapi_client import OpenAPIClient
 ```
 
 - **`OllamaEngine`**:LLM 客户端,`generate(...) → str`。支持 think-tag 移除、token 统计、retrieval-aware prompt 拼接。
+  - **Native tools 分支**(2026-05 Tier 1-C):开 `cfg.llm.capabilities.supports_native_tools=true` 后,改用 Ollama ≥ 0.4 的 OpenAI 兼容 `tools` 协议拿结构化 tool_calls,引擎再合成 `[TOOL:name] {json}` 行交给下游。Schema 导出在 `schema/ollama_export.py`。详见 §3.2 数据流。
 - **`patch_runtime_loop(executor, llm_engine)`**:monkey-patch `AgentRuntimeLoop._call_llm` 把 stub 替换成真 LLM。**反模式但必要** —— runtime 不能直接 import llm_engine(循环依赖)。
 - **`OllamaEmbedder`**:向量化客户端,跟 `agent_memory.EmbeddingBackend` 兼容。
 - **`MCPClient`**:Model Context Protocol 客户端,发现远程 tools。
@@ -103,7 +104,20 @@ runtime.loop._call_llm(messages, ...)
        ▼ retrieval pre-pass (tool + skill + meta-tools)
        │   ↓  retrieved tools/skills → 注入到 system prompt
        │
-       ▼ HTTP POST → http://localhost:11434/api/chat
+       ▼ ── 分支:capabilities.supports_native_tools? ──
+       │   │
+       │   ├─ False (默认):
+       │   │     POST /api/chat with messages only
+       │   │     → 模型输出含 [TOOL:name] {json} 的文本
+       │   │
+       │   └─ True (Tier 1-C,2026-05):
+       │         _build_native_tools_payload() 从 SchemaRegistry 导出
+       │         retriever 排出的 top-K + HITL safety-net 名字
+       │         → POST /api/chat with messages + tools=[...]
+       │         → 模型返回 {content, tool_calls: [{name, arguments: dict}]}
+       │         → 引擎合成 [TOOL:name] {json.dumps(arguments)} 追加到 content
+       │         ↑ 这一步是关键:下游 runtime/loop + directive_parser
+       │           + HITL flow 全部不动,只看到 100% 合法的 [TOOL:] 行
        │
        ▼ 流式 token decode,累积成 response str
        │
@@ -111,6 +125,15 @@ runtime.loop._call_llm(messages, ...)
        │
        ▼ return str  → runtime loop 再解析 [TOOL:...] 指令
 ```
+
+**Native tools 分支的设计取舍**(参见 `schema/ollama_export.py` + `OllamaEngine._build_native_tools_payload`):
+
+- **桥接合成而不是协议替换**:让 native 路径产出和 text 路径**字节兼容**的 `[TOOL:name] {json}` 行,下游零修改。Trade-off:多一次序列化(dict → JSON string)。换来的好处是 HITL/batch/chunk/skill evolver 一行代码都不用碰。
+- **Top-K 过滤,与 text 协议一致**:复用同一个 `tool_retriever`,native tools 数组只包含本轮 query 相关的 top-K(默认 12)+ HITL safety-net 名字。避免每轮把 40+ tools 全塞过去刷爆 token。
+- **失败回退**:`SchemaRegistry` 空 / 检索失败 / 转换错误时,自动回退 text 协议。zero-disruption 是核心要求。
+- **配置开关**:`cfg.llm.capabilities.supports_native_tools`(默认 false)。生产开关一行即可,无代码改动。
+
+要量化 native 模式的实际价值,参见 `evaluation/compliance_cli.py`:跑 baseline(text) vs `--native`,对比 `args_ok` 指标的提升幅度。
 
 ### 3.3 `FactConflictDetector` 数据流(audit_wiring 修复案例)
 

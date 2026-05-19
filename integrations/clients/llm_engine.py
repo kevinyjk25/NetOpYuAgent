@@ -918,8 +918,65 @@ class OllamaEngine(LLMEngine):
                 turns, _sep, system, _sep, query, _sep,
             )
 
-        raw = await self._chat(messages)
-        result = self._strip_think(raw)
+        # ── Native tools branch ──────────────────────────────────────
+        # When the model + Ollama version support OpenAI-style `tools`,
+        # ship the JSON-schema tool specs alongside the messages and get
+        # back STRUCTURED tool_calls instead of free-text. We then convert
+        # those tool_calls into [TOOL:name] {...} lines appended to the
+        # visible content, so runtime/loop.py keeps using its existing
+        # directive parser — zero changes downstream.
+        #
+        # See integrations/DESIGN.md §3 for the bridge rationale: this
+        # keeps HITL, batch executor, chunk queue, skill evolver, and
+        # MemoryAdapter wiring all unchanged — native tools is a pure
+        # runtime upgrade, not an architectural change. Config gated via
+        # `llm.capabilities.supports_native_tools` (default False).
+        cap = self.capabilities
+        _use_native = bool(getattr(cap, "supports_native_tools", False))
+        if _use_native:
+            tools_payload = self._build_native_tools_payload(state, skill_catalog)
+        else:
+            tools_payload = None
+
+        raw = await self._chat(messages, tools=tools_payload)
+
+        # Normalize to a single `result` string for downstream parsing.
+        # In native mode `raw` is {"content": str, "tool_calls": [...]} and we
+        # synthesize directive lines from tool_calls so the loop's existing
+        # _parse_tool_calls path picks them up unchanged.
+        if isinstance(raw, dict):
+            content = raw.get("content", "") or ""
+            tool_calls = raw.get("tool_calls", []) or []
+            if tool_calls:
+                # Append synthesized directives. We use the SAME wire format
+                # the loop's parser already accepts — that's the bridge.
+                import json as _json
+                synth_lines: list[str] = []
+                for tc in tool_calls:
+                    name = tc.get("name") or ""
+                    args = tc.get("arguments") or {}
+                    if not name:
+                        continue
+                    try:
+                        args_str = _json.dumps(args, ensure_ascii=False, separators=(",", ":"))
+                    except (TypeError, ValueError):
+                        args_str = "{}"
+                    synth_lines.append(f"[TOOL:{name}] {args_str}")
+                # Place directives at the end, separated by blank line so
+                # the user-facing prose (if any) and the directive don't
+                # share a line — matches how the prompt instructs the
+                # text-mode model to lay them out.
+                result = (content + ("\n\n" if content.strip() else "") +
+                          "\n".join(synth_lines))
+                logger.info(
+                    "OllamaEngine: native tools → %d tool_call(s) synthesized as "
+                    "[TOOL:] directives — names=%s",
+                    len(tool_calls), [tc.get("name") for tc in tool_calls],
+                )
+            else:
+                result = content
+        else:
+            result = self._strip_think(raw)
 
         # Consistent detection: use the directive parser's tolerance so
         # trace and log entries match what the parser will actually see.
@@ -972,7 +1029,117 @@ class OllamaEngine(LLMEngine):
         text = self._strip_think(raw)
         return self._parse_intent_json(text)
 
-    async def _chat(self, messages: list[dict]) -> str:
+    def _build_native_tools_payload(
+        self, state: Any, skill_catalog: Any,
+    ) -> list[dict] | None:
+        """Build the Ollama `tools` array for this turn.
+
+        Strategy:
+          1. Use the existing tool retriever to pick top-K names matching
+             the query — same shortlist the text-protocol prompt uses, so
+             native and text modes see equivalent tool surfaces.
+          2. Add the HITL safety-net names (always-inject) so the model
+             can never lose visibility on destructive ops.
+          3. Look each name up in the schema registry; convert to Ollama
+             tool spec via schema/ollama_export.
+
+        Returns None if no schemas are registered (caller falls back to
+        text protocol — see call() for the branch logic). Returns an
+        empty list only if the registry is non-empty but no names matched,
+        which would be a misconfiguration worth logging.
+        """
+        try:
+            from schema.registry import get_schema_registry
+            from schema.ollama_export import export_for_ollama
+        except ImportError:
+            logger.warning(
+                "OllamaEngine native tools requested but schema/ollama_export "
+                "is missing — falling back to text protocol"
+            )
+            return None
+
+        reg = get_schema_registry()
+        if len(reg) == 0:
+            # Schema registry not populated yet (e.g. very early startup
+            # before tool registration). Skip native mode this turn —
+            # text protocol still works (the model knows tools from the
+            # system prompt either way).
+            return None
+
+        # Determine which tools to surface. The retriever returns a query-
+        # ranked shortlist; we add HITL names so destructive ops are never
+        # accidentally absent.
+        names: set[str] = set()
+
+        # Always-inject set: HITL tool names + meta-tools that should be
+        # available every turn.
+        always: set[str] = set()
+        if self._tool_retriever is not None:
+            try:
+                # Mirror the text-protocol path: top-K by query similarity.
+                # _max_tools_in_prompt is set by the loop based on context budget.
+                top_k = getattr(state, "_max_tools_in_prompt", 0) if state else 0
+                top_k = top_k or 12   # 12 is a reasonable default for native mode
+                # `query` lives in state for retriever consumers
+                q = getattr(state, "_current_query", "") if state else ""
+                if q:
+                    res = self._tool_retriever.retrieve(q, top_k=top_k)
+                    for m in res.matches:
+                        names.add(m.id)
+            except Exception as exc:
+                # Retrieval failures must not kill the turn — fall back to
+                # exporting every registered schema (token cost is the
+                # only downside).
+                logger.debug(
+                    "native tools shortlist retrieval failed (%s); "
+                    "exporting full registry", exc,
+                )
+                names = {s.tool_name for s in reg.list_all()}
+
+        # HITL safety-net: union in the destructive tool names so the
+        # model can always reach them.
+        for hitl_name in getattr(self, "_hitl_tool_names", []) or []:
+            if reg.has(hitl_name):
+                always.add(hitl_name)
+        names |= always
+
+        # If retrieval was disabled / empty, export everything we have.
+        if not names:
+            names = {s.tool_name for s in reg.list_all()}
+
+        tools = export_for_ollama(reg.list_all(), allowed_names=names)
+        if not tools:
+            logger.warning(
+                "OllamaEngine: native tools enabled but 0 tools matched "
+                "(names_requested=%d registry_size=%d) — text protocol fallback",
+                len(names), len(reg),
+            )
+            return None
+        return tools
+
+    async def _chat(
+        self,
+        messages: list[dict],
+        *,
+        tools: list[dict] | None = None,
+    ) -> str | dict:
+        """Send a chat request to Ollama.
+
+        Returns:
+          - `str` (legacy / text protocol): just the assistant content.
+          - `dict` (native-tools mode): {"content": str, "tool_calls": [...]}.
+            tool_calls is empty when the model chose to reply with prose
+            instead of a tool call this turn.
+
+        The dual return is so callers that don't pass `tools=` keep their
+        single-string interface (and all their existing parsing). Callers
+        that DO pass tools get the structured form back.
+
+        See `schema/ollama_export.py` for the tool-spec converter and
+        `OllamaEngine.call()` for the bridge that synthesizes [TOOL:]
+        directives from structured tool_calls so downstream parsers
+        (runtime/loop.py + directive_parser) don't need to change.
+        """
         try:
             import httpx
         except ImportError:
@@ -987,6 +1154,13 @@ class OllamaEngine(LLMEngine):
                 "num_predict": self.max_tokens,
             },
         }
+        # Native tools: pass through to Ollama. Ollama (≥ 0.4) supports the
+        # OpenAI-style `tools` field; the model receives them as a structured
+        # spec and returns `message.tool_calls` instead of text args.
+        # Avoid sending an empty `tools=[]` — Ollama would still emit the
+        # tools-mode handshake, costing tokens and confusing smaller models.
+        if tools:
+            payload["tools"] = tools
         # Ollama ≥ 0.6 supports think= parameter for thinking models
         if self._is_thinking_model:
             payload["think"] = self._think  # False = suppress think blocks in API response
@@ -1011,8 +1185,40 @@ class OllamaEngine(LLMEngine):
                             "LLM tokens: prompt=%d completion=%d total=%d model=%s",
                             usage[0], usage[1], sum(usage), self.model,
                         )
+                    msg = data.get("message") or {}
+                    content = self._strip_think(msg.get("content") or "")
+                    # Native-tools mode: return structured dict so caller can
+                    # render args directly without parsing free-text. Ollama
+                    # returns tool_calls as a list of:
+                    #   {"function": {"name": "X", "arguments": {<dict>} or "json-str"}}
+                    # We normalise arguments to dict here so downstream code
+                    # never has to think about it.
+                    if tools is not None:
+                        raw_calls = msg.get("tool_calls") or []
+                        norm_calls = []
+                        for rc in raw_calls:
+                            fn = (rc or {}).get("function") or {}
+                            name = fn.get("name") or ""
+                            args = fn.get("arguments") or {}
+                            if isinstance(args, str):
+                                # Some Ollama versions return arguments as a
+                                # JSON-encoded string; some return a dict.
+                                # Coerce to dict so consumers don't branch.
+                                import json as _json
+                                try:
+                                    args = _json.loads(args) if args.strip() else {}
+                                except _json.JSONDecodeError:
+                                    logger.warning(
+                                        "OllamaEngine: tool_calls[%r].arguments was a "
+                                        "non-JSON string — passing through as {'_raw': ...}",
+                                        name,
+                                    )
+                                    args = {"_raw": args}
+                            if name:
+                                norm_calls.append({"name": name, "arguments": args})
+                        return {"content": content, "tool_calls": norm_calls}
                     # Even with think=False in the API, strip any residual <think> tags
-                    return self._strip_think(data["message"]["content"])
+                    return content
             except httpx.ReadTimeout:
                 if _attempt == 0:
                     logger.warning(

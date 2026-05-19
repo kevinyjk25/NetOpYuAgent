@@ -17,6 +17,8 @@
 | `skills/` | ~2300 | 复用任务模板、SkillEvolver 自动生成、Journal 反馈 | `skills/DESIGN.md` |
 | `tools/` | ~2500 | Tool callable 实现(mock + pragmatic)+ metadata | `tools/DESIGN.md` |
 | `integrations/` | ~4500 | 跨模块胶水(HitlExecutor、LLM/Embedder/MCP 客户端、ToolRouter)| `integrations/DESIGN.md` |
+| `schema/` | ~800 | Tool arg schema(`ArgSchema`)+ JSON-Schema/Ollama 导出 | — (轻量,本文档 §6) |
+| `evaluation/` | ~1500 | Retrieval bench + Tool-compliance bench + CI gate CLI | — (轻量,本文档 §7) |
 | `webui/` | ~5500 | FastAPI + SSE 前端(不含 DESIGN.md,改动局限于路由)| — |
 | `memory/` | ~250 | `MemoryAdapter` thin wrapper,给 runtime 用 | — |
 
@@ -264,6 +266,13 @@ config.yaml
 - BM25 阈值 `recall@3 ≥ 0.40, MRR ≥ 0.30`(CI)
 - 本地 hybrid `recall@3 ≥ 0.65, MRR ≥ 0.55`(precheck.sh 默认)
 
+**tool-compliance eval**(`evaluation/compliance_cli.py`):
+- 与 retrieval 互补:retrieval 测"工具能不能被查到",compliance 测"工具被叫起来时参数填得对不对"
+- 3 个独立指标:`parse_ok`(语法)/ `name_ok`(选对工具)/ `args_ok`(参数对)
+- CI 只做**结构验证**(golden set JSONL 能解析),实跑 bench 需要 Ollama,放本地 / 夜间
+- 用法:`python -m evaluation.compliance_cli --golden data/tool_compliance_set.jsonl --model qwen2.5:7b --native`
+- 数据驱动决策:切模型 / 开 native tools 前后跑一次,对比数字而不是凭感觉
+
 **pre-commit hook**(`.pre-commit-config.yaml`)在本地 commit 时跑 `--audits`,catch 早。
 
 ---
@@ -367,3 +376,63 @@ config.yaml
 
 每份 DESIGN.md 必含 6 节:**职责 / 公开接口 / 数据流 / 设计决策 / 跨模块依赖 / 修改指南**。
 新加模块照此模板,**作为 PR 必须项**。
+
+---
+
+## 10. 轻量工具模块(无 DESIGN.md)
+
+部分模块代码量小、职责单一、对外接口稳定,不值得维护独立 DESIGN.md。这一节集中说明,以免 ARCHITECTURE.md 之外缺乏文档锚点。
+
+### 10.1 `schema/` — Tool 参数 schema
+
+**职责**:用 dataclass(`ArgSchema` / `ArgField`)统一表达 tool 的输入参数。提供导入器(MCP / OpenAPI)和导出器(prompt 文本 / Ollama 原生 tools / JSON Schema)。
+
+**关键文件**:
+- `schema/types.py` — `ArgField` / `ArgSchema` dataclass
+- `schema/registry.py` — `SchemaRegistry` 进程级单例,所有 tool 注册时挂上来
+- `schema/importers.py` — MCP / OpenAPI spec → `ArgSchema` 转换
+- `schema/validator.py` — LLM 给的 args dict 用 `ArgSchema` 校验 + 类型 coercion
+- `schema/prompt.py` — `ArgSchema` → "Use [TOOL:name] with {arg1, arg2}..." prompt 文本
+- `schema/ollama_export.py` — `ArgSchema` → Ollama 原生 tools API 的 JSON-Schema(2026-05 Tier 1-C 加)
+
+**铁律**:`schema/` 不依赖任何其他业务模块(memory / hitl / runtime)。只依赖 stdlib + dataclasses。
+
+**改动 checklist**:加新字段类型 → 同时更新 validator.py 校验 + ollama_export.py 转换 + prompt.py 文本。
+
+### 10.2 `evaluation/` — 质量度量框架
+
+**职责**:跑 golden-set bench、计算指标、生成阈值报告、给 CI 当 gate。
+
+**两条独立 pipeline**:
+
+**Retrieval bench**(`evaluation/retrieval_bench.py` + `evaluation/cli.py`):
+- 输入:`data/golden_set.jsonl`(25 cases)、retrieval backend(BM25/Embedding/Hybrid)
+- 输出:`recall@1`/`recall@3`/`recall@5`/`MRR`,按 language / tag / kind 分组
+- CI gate:`./scripts/precheck.sh --eval` 跑 BM25,阈值 `recall@3 ≥ 0.40, MRR ≥ 0.30`
+
+**Tool-compliance bench**(`evaluation/tool_compliance_bench.py` + `evaluation/compliance_cli.py`):
+- 输入:`data/tool_compliance_set.jsonl`(18 cases)、LLM engine(text 协议或 native tools)
+- 输出:`parse_ok`(语法解析率)/`name_ok`(选对工具率)/`args_ok`(参数对率)/`compliance`(全过率)
+- 用途:**数据驱动决策切模型 / 开 native tools**。本地或夜间跑,需要 Ollama。CI 只做结构验证(golden set JSONL 能解析)。
+- 用法:
+  ```bash
+  # baseline (text 协议):
+  python -m evaluation.compliance_cli --golden data/tool_compliance_set.jsonl --model qwen2.5:7b
+  # 对照(native tools):
+  python -m evaluation.compliance_cli --golden data/tool_compliance_set.jsonl --model qwen2.5:7b --native
+  ```
+
+**关键文件**:
+- `evaluation/types.py` — `EvalCase` / `EvalCaseResult` / `BenchReport`(retrieval 用)
+- `evaluation/tool_compliance_types.py` — `ToolCallCase` / `ToolCallResult` / `ToolComplianceReport`
+- `evaluation/golden_set.py` — JSONL 加载器(retrieval)
+- `evaluation/retrieval_bench.py` — retrieval runner
+- `evaluation/tool_compliance_bench.py` — compliance runner + 平衡大括号 JSON 提取器
+- `evaluation/reporters.py` — text / JSONL 报告
+- `evaluation/cli.py` — retrieval CLI
+- `evaluation/compliance_cli.py` — compliance CLI
+
+**铁律**:`evaluation/` 只在 bench 时构造 engine,**不参与运行时**。修改 bench 不影响产线行为。
+
+**改动 checklist**:加新 case → JSONL 一行;加新指标 → `BenchReport`/`ToolComplianceReport` 加属性 + CLI 加 `--fail-below-X` flag + ARCHITECTURE.md §6 阈值表更新。
+
