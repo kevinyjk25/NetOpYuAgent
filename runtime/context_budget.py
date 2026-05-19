@@ -49,9 +49,7 @@ Usage
 """
 from __future__ import annotations
 
-import json
 import logging
-import uuid
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
@@ -94,7 +92,7 @@ class ToolResultStore:
     TTL_SECONDS      = 86_400  # prune entries older than 24 h
 
     def __init__(self, db_path: Optional[str] = None) -> None:
-        import sqlite3, pathlib, time as _time, os
+        import sqlite3, pathlib
         if db_path is None:
             _data_dir = pathlib.Path("data")
             _data_dir.mkdir(exist_ok=True)
@@ -176,6 +174,19 @@ class BudgetConfig:
     working_set_tokens:     int = 300
     env_context_tokens:     int = 200
     total_cap_tokens:       int = 3_200   # soft overall cap
+    # ── L2 Snip (Claude-Code-inspired, added 2026-05) ─────────────────────
+    # Threshold for try_snip_tool_outputs(). When cross-turn tool_outputs
+    # accumulation exceeds this many chars, the oldest entries are dropped
+    # (keeping the N most recent + any [STORED:] refs). Zero cost, runs
+    # synchronously at turn start. See context_budget.try_snip_tool_outputs
+    # docstring for the full algorithm.
+    #
+    # Rough rule: ~4 chars/token, so 32K chars ≈ 8K tokens of tool history.
+    # Above this, prompt size grows linearly with no LLM benefit (the LLM
+    # only meaningfully references the latest 2-3 outputs per turn).
+    # 0 disables snipping (zero-regression escape hatch).
+    snip_tool_outputs_char_budget: int = 32_000
+    snip_keep_recent:              int = 5
 
 
 @dataclass
@@ -482,3 +493,101 @@ def compress_paged_outputs(outputs: dict) -> dict:
             result[pages[-1][1]] = pages[-1][2]
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# L2 Snip — zero-cost history snip (Claude-Code-inspired)
+# ---------------------------------------------------------------------------
+
+def try_snip_tool_outputs(
+    tool_outputs: dict[str, str],
+    *,
+    target_char_budget: int,
+    keep_recent: int = 5,
+    preserve_ref_ids: bool = True,
+) -> tuple[dict[str, str], int]:
+    """Zero-cost L2 compaction: drop old tool outputs when budget exceeded.
+
+    Inspired by Claude Code's `Snip` compaction layer (arXiv 2604.14228 §4.3).
+    Unlike full LLM-based consolidation (`MemoryConsolidator`, slow + LLM cost),
+    Snip is **synchronous, free**, and runs every turn before LLM dispatch.
+
+    Strategy:
+      - Estimate total characters across all tool_outputs values.
+      - If under budget: return unchanged.
+      - If over budget: keep the `keep_recent` most recently inserted entries
+        (Python dicts preserve insertion order since 3.7) AND any entry whose
+        value contains a [STORED:] ref (when preserve_ref_ids=True), drop the
+        rest. Dropped entries are replaced with a single
+        "[snip: N earlier tool results omitted — see memory context]"
+        placeholder so the LLM knows there was history.
+
+    Returns (new_dict, chars_freed).
+
+    Why this is safe to call on every turn:
+      - It mutates tool_outputs by VALUE (returns new dict); caller updates its
+        reference. The original raw outputs remain in agent_memory long-term
+        store (recall_memory will return them next turn if the LLM needs them).
+      - Drops are recorded in audit log via the placeholder (operators see
+        what happened).
+      - When budget not exceeded, returns the dict UNCHANGED (dict identity
+        is NOT guaranteed — callers must reassign). chars_freed=0 in that case.
+
+    Why we keep [STORED:] entries:
+      - They're tiny references (~50 chars) anyway, no benefit dropping them.
+      - The LLM may still want to `read_stored_result` on them. Dropping the
+        ref means the LLM is stuck.
+
+    Example:
+      >>> outputs = {
+      ...   "list_devices|{}": "alice ap-01 ap-02 ...",       # 8K chars
+      ...   "get_syslog|{a}": "[STORED:syslog:abc]",            # 22 chars (kept)
+      ...   "prometheus|{q}": "...",                            # 12K chars
+      ...   "show_bgp|{d}":  "...",                             # 200 chars
+      ... }
+      >>> new, freed = try_snip_tool_outputs(outputs, target_char_budget=5000, keep_recent=2)
+      # Total = 20222 > 5000 → snip oldest, keep show_bgp (most recent) and
+      # prometheus (2nd-recent) and [STORED:] ref. list_devices dropped.
+      # freed ≈ 8000
+    """
+    if not tool_outputs:
+        return tool_outputs, 0
+
+    total = sum(len(v) for v in tool_outputs.values())
+    if total <= target_char_budget:
+        return tool_outputs, 0
+
+    # Decide which entries to keep:
+    keys = list(tool_outputs.keys())
+    keep_keys: set[str] = set(keys[-keep_recent:])  # the N most recent
+    if preserve_ref_ids:
+        for k, v in tool_outputs.items():
+            if "[STORED:" in v:
+                keep_keys.add(k)
+
+    if len(keep_keys) >= len(keys):
+        # Nothing to snip — every entry is "keep". Return original.
+        return tool_outputs, 0
+
+    dropped_count = len(keys) - len(keep_keys)
+    dropped_chars = sum(len(v) for k, v in tool_outputs.items() if k not in keep_keys)
+
+    new_dict: dict[str, str] = {}
+    placeholder_emitted = False
+    for k in keys:   # preserve insertion order in result
+        if k in keep_keys:
+            new_dict[k] = tool_outputs[k]
+        elif not placeholder_emitted:
+            # Emit a single placeholder at the position of the first drop
+            new_dict["__snip_placeholder__"] = (
+                f"[snip: {dropped_count} earlier tool result(s) omitted — "
+                f"~{dropped_chars} chars freed; see memory context for full history]"
+            )
+            placeholder_emitted = True
+
+    logger.info(
+        "try_snip_tool_outputs: dropped %d/%d entries, freed ~%d chars "
+        "(budget=%d, was=%d)",
+        dropped_count, len(keys), dropped_chars, target_char_budget, total,
+    )
+    return new_dict, dropped_chars

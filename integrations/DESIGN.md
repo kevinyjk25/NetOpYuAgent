@@ -27,6 +27,7 @@ from integrations.adapters.memory_facts_adapter import MemoryFactsAdapter
 
 - **`HitlExecutor`**:外部 A2A 协议入口。`execute_query(query, session_id, ...) → result_dict`,内部驱动 runtime loop + `HitlPipeline`,把中断转成 `Multi-mode HITL raised` 异常给外部 catch。
   - **deferred wiring**:`set_skill_evolver(evolver)` — main.py 构造时 evolver 还没建,后调。
+  - **trust_mode 不在 HitlExecutor 持有**(2026-05 设计决定)— 见 `hitl_core/DESIGN.md §1.1`。HITL gate 决策在 `runtime/loop.py`,trust_mode 状态在 `runtime.policy_engine.PolicyEngine`。HitlExecutor 不知道 trust_mode 存在,接到调用时正常走 pipeline。这避免了"runtime 知道 integrations"的反向依赖。
 - **`FactConflictDetector`**:写 fact 前查相似 fact,LLM 判等价/精化/矛盾/无关,返回 `ReconcileResult`。
 - **`MemoryFactsAdapter`**:把 `agent_memory.MemoryFact` 翻成 `hitl_core` 需要的简化 dict。
 

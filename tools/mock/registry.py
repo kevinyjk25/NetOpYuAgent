@@ -19,6 +19,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"type": "Device type: switch|router|ap|firewall (optional)", "tag": "Site tag filter (optional)"},
         "returns":     "Table of device id, model, role, site, IP",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["inventory", "discovery"],
     },
     "list_interfaces": {
@@ -26,6 +27,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier"},
         "returns":     "Interface table with status, IP, speed",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["inventory", "network"],
     },
     "get_device_config": {
@@ -33,6 +35,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier", "section": "Config section (optional): radius|ntp|vlan|interface"},
         "returns":     "Device configuration text",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["config", "read"],
     },
     "validate_device_config": {
@@ -40,6 +43,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier"},
         "returns":     "Validation report: issues found, severity, recommendations",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["config", "validation"],
     },
     "edit_device_config": {
@@ -48,6 +52,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "required":    ["device_id"],
         "returns":     "Confirmation of config push with diff",
         "hitl":        True,
+        "action_type": "destructive",
         "tags":        ["config", "write", "destructive"],
         "example":     {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
         "examples":    [
@@ -61,6 +66,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier", "section": "Section to diff (optional)"},
         "returns":     "Unified diff of running vs startup config",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["config", "read"],
     },
     "device_info": {
@@ -68,6 +74,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier"},
         "returns":     "Hardware facts table",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["inventory", "hardware"],
     },
     "syslog_search": {
@@ -75,6 +82,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"host": "Device name or glob (e.g. 'radius-*')", "keyword": "Search term", "severity": "Error level: error|warning|info", "lines": "Max lines to return (default 50)"},
         "returns":     "Matching syslog lines with timestamp, host, severity, message",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["logs", "diagnostics"],
     },
     "prometheus_query": {
@@ -82,6 +90,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"query": "PromQL expression", "duration": "Time range (e.g. '5m', '1h')"},
         "returns":     "Time series data as table",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["metrics", "monitoring"],
     },
     "netflow_dump": {
@@ -89,6 +98,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"site": "Site name or 'all'", "top_n": "Limit to top N flows by bytes"},
         "returns":     "Stored NetFlow records [STORED:] — use read_stored_result to page",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["traffic", "security"],
     },
     "dns_lookup": {
@@ -96,6 +106,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"hostname": "FQDN or IP address"},
         "returns":     "DNS records: A, PTR, CNAME",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["network", "diagnostics"],
     },
     "alert_summary": {
@@ -103,6 +114,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"severity": "Filter: critical|warning|info (optional)", "site": "Site filter (optional)"},
         "returns":     "Alert table with name, severity, duration, affected devices",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["monitoring", "alerts"],
     },
     "service_health": {
@@ -110,6 +122,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"service": "Service name", "environment": "prod|staging|dev"},
         "returns":     "Health check results: status, latency, pod counts",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["services", "health"],
     },
     "restart_service": {
@@ -117,6 +130,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"service": "Service name", "environment": "prod|staging|dev"},
         "returns":     "Restart status with pod counts and health check",
         "hitl":        True,
+        "action_type": "destructive",
         "tags":        ["services", "destructive"],
     },
 
@@ -125,6 +139,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Target device", "config_text": "Raw config to apply", "dry_run": "If true, validate only"},
         "returns":     "Push status + diff summary",
         "hitl":        True,
+        "action_type": "destructive",
         "tags":        ["destructive", "config"],
     },
     "rollback_deploy": {
@@ -132,6 +147,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"deploy_id": "Deploy identifier", "scope": "Optional scope filter"},
         "returns":     "Rollback status",
         "hitl":        True,
+        "action_type": "reversible",
         "tags":        ["destructive", "deploy"],
     },
     "drain_node": {
@@ -139,6 +155,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"node_id": "Node to drain", "grace_period_s": "Grace period seconds (default 60)"},
         "returns":     "Drain status with evicted workload count",
         "hitl":        True,
+        "action_type": "destructive",
         "tags":        ["destructive", "node"],
     },
     "failover": {
@@ -146,6 +163,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"resource_id": "Resource to fail over", "target": "Target replica"},
         "returns":     "Failover status + new primary",
         "hitl":        True,
+        "action_type": "reversible",
         "tags":        ["destructive", "ha"],
     },
     "delete_resource": {
@@ -153,6 +171,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"resource_id": "Resource to delete", "force": "Skip dependency check"},
         "returns":     "Deletion status",
         "hitl":        True,
+        "action_type": "destructive",
         "tags":        ["destructive", "delete"],
     },
     "rollback_service": {
@@ -160,6 +179,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"service": "Service name", "version": "Target version (e.g. '3.2.1')", "environment": "prod|staging|dev"},
         "returns":     "Rollback status with pod counts and health check",
         "hitl":        True,
+        "action_type": "reversible",
         "tags":        ["services", "destructive"],
     },
 }

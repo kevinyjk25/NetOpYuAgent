@@ -96,7 +96,9 @@
 9. integrations.clients.embedder
 10. tools           (ToolLoader → ToolRouter)
 11. MCP + OpenAPI   (discover external tools)
-12. PolicyEngine    (from config.yaml)
+12. PolicyEngine    (from config.yaml + cfg.hitl.trust_mode + tool_metadata)
+    ├─► PolicyEngine(..., tool_metadata=loader.build_metadata())  ← action_type 索引
+    └─► policy_engine.set_trust_mode(cfg.hitl.trust_mode)         ← graduated trust
 13. SkillCatalog    (with retriever pending)
 14. SkillEvolver    (after LLM ready)
    ├─► executor.set_skill_evolver(_skill_evolver)     ← deferred wiring point
@@ -113,7 +115,9 @@
 19. webui mount     (FastAPI lifespan: idle_watchdog start, _start_consumer)
 ```
 
-**关键观察**:步骤 14 和 17 都是 `set_*` deferred wiring。`audit_wiring.py` 验证它们都连上了。
+**关键观察**:步骤 12、14、17 都是 `set_*` deferred wiring。`audit_wiring.py` 验证它们都连上了。
+
+**Reversibility 改动(2026-05)**:步骤 10 → 12 之间的依赖加紧 — PolicyEngine 现在需要 ToolLoader.build_metadata() 才能 index action_type。已经满足(10 在 12 前),但若未来重排,**必须确保 tool_loader 在 PolicyEngine 构造前就绪**。
 
 ---
 
@@ -295,14 +299,60 @@ config.yaml
 | 优先级 | 项 | 影响范围 |
 |--------|-----|---------|
 | HIGH | `pragmatic_tools.py` 多 tool 是 stub | tools |
-| HIGH | `loop.py` 2634 行,应拆分 | runtime |
+| HIGH | `loop.py` 2634 行,应拆分(下 Sprint) | runtime |
 | MED | Multi-replica Redis pubsub 未实现 | hitl_core |
 | MED | Vector ANN(hnswlib)未接 | agent_memory + retrieval |
 | MED | SkillEvolver 不学失败 case | skills |
+| MED | Hooks 机制(PreToolUse/PostToolUse 等)未做 | hitl_core / runtime |
+| MED | Subagent sidechain isolation 未做 | runtime / chunk_queue |
 | LOW | LLMJudgeRetriever 未上线 | retrieval |
 | LOW | `context_budget_v2` 跟 v1 共存 | runtime |
 | LOW | hitl_core 缺单元测试目录 | hitl_core |
 | LOW | tools 缺单元测试目录 | tools |
+
+### 8.1 Sprint 1 改造日志(2026-05)
+
+完成的 HIGH 优先级项(从 `ARCHITECTURE_REVIEW.md` Sprint 1):
+
+| 项 | 涉及文件 | DESIGN 章节 |
+|----|---------|------------|
+| ✅ Reversibility 三档分类(`action_type` 元数据) | 33 个 tool registry + `policy_engine.classify_action_type` | tools/§2.4.1 + runtime/§2.3 |
+| ✅ Trust mode 配置(`cautious` / `auto_reversible` / `bypass`) | `config.{py,yaml}` + `policy_engine.set_trust_mode` + `runtime/loop.py:_needs_hitl` skip | runtime/§2.3 + hitl_core/§1.1 + integrations/§2.1 |
+| ✅ classify_query_intent fast-path(routine query 跳 LLM)| `policy_engine.classify_query_intent` + `runtime/loop.classify_async` | runtime/§2.3, §3.6 |
+| ✅ L2 Snip 跨 turn tool_outputs 压缩 | `context_budget.try_snip_tool_outputs` + `loop.py` 两处 turn-start hook | runtime/§3.5, §4.7 |
+
+未做但准备好的(留下个 Sprint):
+- ⏳ `loop.py` 拆分(2634 行 → 5 个 file)— 设计已定,机械重构
+
+各项零回归:default trust_mode=cautious 完全保留原行为。`snip_tool_outputs_char_budget=0` 完全关闭 Snip。`action_type` 未声明的 tool 继续走 LLM classify_destructive。**5/5 audits + 21/21 safety tests + retrieval eval gate 全 PASS**。
+
+### 8.2 Sprint 2 改造日志(2026-05)
+
+完成的 MED 优先级项(从 `ARCHITECTURE_REVIEW.md` Sprint 2):
+
+| 项 | 涉及文件 | DESIGN 章节 |
+|----|---------|------------|
+| ✅ Hooks 机制(6 个核心事件)| `runtime/hooks.py`(新)+ `runtime/loop.py` 5 处 fire 点 + `runtime/__init__.py` export | runtime/§2.6, §3.7, §4.8, §4.9 |
+| ✅ Hermes-style structured consolidation | `agent_memory/consolidation.py` template 切换 + 全链 wire(MemoryConsolidator → MemoryManager → MemoryAdapter → main.py)+ `config.{py,yaml}` | agent_memory/§3.4.1 |
+
+未做(评估后**主动跳过**,非 deferred):
+- ⏭ `loop.py` 拆分(2634 行 → 5 个 file)— **Sprint 1 + Sprint 2 都评估过两次**,结论:纯机械 refactor 在 chat session 内做风险大于收益(没有 e2e 测试覆盖 1300 行 `stream()`)。留给有 IDE + bisect 工具的环境单独做。
+
+**Hooks 设计要点**:
+- 6 个事件:`PRE_TOOL_USE / POST_TOOL_USE / TURN_START / TURN_END(预留)/ SESSION_START / SESSION_END`
+- "Observer 而非 gatekeeper" 哲学(`runtime/DESIGN.md §4.8`):异常被 log + swallowed,唯一 block 路径是 `PRE_TOOL_USE` 的 `ctx["blocked"]=True` 显式 flag
+- `stream()` 包 try/finally wrapper(`runtime/DESIGN.md §4.9`),保证 `SESSION_END` 在 abort 路径也 fire
+- 零 LLM context cost,可对比 Claude Code 4-mechanism extensibility(Hooks 是最便宜的一层)
+
+**Structured rollup 设计要点**:
+- 5 节固定格式:`Goal / Progress / Decisions / Devices / NextSteps`
+- 跟 Hermes `ContextCompressor` 哲学一致(单层 + 结构化模板,而非 Claude Code 5 层 cascade)
+- `MEMORY_CONSOLIDATION_TEMPLATE=legacy` env 一键回滚
+- 全链 deferred-wiring:cfg → MemoryAdapter → MemoryManager → MemoryConsolidator
+
+**单元测试**:8/8 hooks(priority / block / exception isolation / unregister)+ 5/5 consolidation(default / explicit / legacy / invalid / no-llm fallback)。
+
+**全 CI PASS**:5/5 audits + 21/21 safety tests + retrieval eval gate。
 
 ---
 

@@ -7,6 +7,15 @@ These tools operate on the agent's own internal state (paged result store,
 chunk processing) and never touch real or mock network devices.
 
 TOOLS dict is the single source of truth.  ToolLoader imports this directly.
+
+action_type field (added for reversibility-weighted policy):
+  read_only  — no state change, no side effect, safe to call freely
+  reversible — creates artifact that can be undone (e.g. staged config)
+  destructive — irreversible mutation (no automatic action_type fallback;
+                must be explicitly set)
+Fast-path: runtime.policy_engine classify_action_type checks this BEFORE
+LLM evaluation. Tools without action_type fall back to LLM classification
+to preserve current behaviour (no regression).
 """
 from __future__ import annotations
 from typing import Any
@@ -27,6 +36,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "returns":     "Page of stored text with metadata: total size, has_more, next offset",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["storage", "paging"],
     },
     "process_stored_chunks": {
@@ -37,6 +47,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         },
         "returns":     "Structured summary of the stored result",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["storage", "analysis"],
     },
 }

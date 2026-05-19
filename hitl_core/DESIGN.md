@@ -20,6 +20,18 @@
 | `store.py` (921) | checkpoint 持久化(in-memory / sqlite / redis 三种实现)|
 | `transport/` | HTTP/SSE adapter,把核心 future-based API 转成 web 端点 |
 
+### 1.1 Trust mode 不住在这里(2026-05)
+
+Graduated-trust spectrum(`cautious` / `auto_reversible` / `bypass`)的决策点是 `runtime/loop.py:_needs_hitl`,**在 hitl_core 之前**。判断逻辑住在 `runtime.policy_engine.PolicyEngine.should_skip_hitl_for_tool(tool_name)`(因为 runtime 不能 import hitl_core 反向不能,但 PolicyEngine 是 runtime 自有的)。
+
+`hitl_core` 自己**不知道** trust_mode 存在 — 当 runtime 判定 skip,hitl_core 完全不被调用(零侵入)。当 runtime 判定不 skip,流程跟原来一样进 `HitlPipeline.run` / `HitlRouter.deliver`。这是为了:
+
+- 模块独立保持(`audit_module_independence` 通过)
+- hitl_core 测试简单(无新概念)
+- 真要 hitl 时,**审计仍然走 hitl_core/audit.py 全量记录**
+
+详见 `runtime/DESIGN.md §4.6` 的 trust_mode 设计 rationale。
+
 ---
 
 ## 2. 公开接口

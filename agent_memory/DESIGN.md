@@ -158,8 +158,12 @@ turn_n=120, last_consolidate=90, threshold=30  → 触发
                                    选 session_id 的 oldest N chunks(default 50)
                                                   │
                                                   ▼
-                                   LLM prompt: "Summarize these chunks into a single
-                                                rollup preserving facts and decisions"
+                                   LLM prompt:
+                                     - "structured" (default, Sprint 2):
+                                         "请按 5 节输出 — Goal / Progress /
+                                          Decisions / Devices / NextSteps"
+                                     - "legacy":
+                                         "请压缩为简洁摘要(<200字)"
                                                   │
                                                   ▼
                                    add_chunk(role="rollup", text=summary, importance=0.9)
@@ -170,6 +174,31 @@ turn_n=120, last_consolidate=90, threshold=30  → 触发
                                                   ▼
                                    embedding store 索引 rollup,移除 collapsed
 ```
+
+### 3.4.1 Hermes-style structured rollup(Sprint 2,2026-05)
+
+LLM prompt 默认产 **5 节固定格式** 而非自由 prose:
+
+```
+Goal:      <用户的总体目标,1 句话>
+Progress:  <已完成的关键步骤,≤ 3 个 bullet>
+Decisions: <做出的重要决定(审计相关),≤ 3 个 bullet>
+Devices:   <涉及到的设备/服务 ID,逗号分隔>
+NextSteps: <尚未完成或后续可做的事,≤ 2 个 bullet>
+```
+
+**为什么改**(对照 Hermes `ContextCompressor`):
+- **token budget 可预测**:每节有 cap,整体长度稳定
+- **审计 grep-friendly**:reviewer 可以直接 `grep "Devices:"` 找设备列表
+- **迭代 re-consolidation 基础**:下次 compact 可以**更新**已有 section(下个 Sprint 工作),而不是从零重总结
+- **operator 一致体验**:跨 session 同 shape
+
+**migration plan**:
+- Sprint 2:default `structured`,`legacy` 通过 `MEMORY_CONSOLIDATION_TEMPLATE=legacy` env 或 `config.yaml:memory.consolidation_template` 回滚
+- Sprint 3+:观察 1-2 周生产数据,如 structured 稳定则**删除 legacy template**(简化 codebase)
+- 改 prompt 时:**保持 5 节名称稳定**,变 section 内容 cap 即可
+
+**降级**:LLM 不可用时(`llm_fn=None`)直接走 `_fallback_summary`(纯 truncation),template 字段 no-op。不影响 contract。
 
 ---
 

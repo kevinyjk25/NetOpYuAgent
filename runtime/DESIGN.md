@@ -58,14 +58,33 @@ if decision.should_stop:
     return decision.outcome  # SUFFICIENT / BUDGET / STAGNATION / ...
 ```
 
-### 2.3 Policy 二分类
+### 2.3 Policy 二分类 + fast-path + trust mode
 
 ```python
 pe = get_policy_engine()              # 全局 singleton(main.py 启动设置)
-result = await pe.classify("classify_destructive", {"query": "..."})
-if result.match:                       # match: bool
+result = await pe.evaluate("classify_destructive", "...")   # LLM 主路径
+if result.match:
     trigger_hitl(...)
+
+# Fast-path (added 2026-05, no LLM):
+intent = pe.classify_query_intent("list devices")      # → "read_only"
+intent = pe.classify_query_intent("restart prometheus") # → "destructive"
+intent = pe.classify_query_intent("ap-01 怎么回事")     # → None (ambiguous, fall through)
+
+# Tool metadata fast-path (after pe.set_tool_metadata(...)):
+atype = pe.classify_action_type("list_devices")  # → "read_only"
+
+# Trust mode (graduated trust, added 2026-05):
+pe.set_trust_mode("auto_reversible")    # cautious | auto_reversible | bypass
+skip, reason = pe.should_skip_hitl_for_tool("list_devices")
+# skip=True when (trust_mode=auto_reversible AND action_type ∈ {read_only, reversible})
+#               OR trust_mode=bypass
+# Falls back to skip=False ("conservative") on any uncertainty
 ```
+
+`classify_query_intent` 在 `classify_async` 内部自动调用,routine "list/show/check" query 完全跳 LLM,延迟从 ~8s → ~1µs。详见 `runtime/policy_engine.py:classify_query_intent` docstring 的安全论证。
+
+`should_skip_hitl_for_tool` 在 `runtime/loop.py` HITL gate(`_needs_hitl` 决策点)被调用 — 即使 tool 在 `hitl_tool_names` 白名单,如果当前 trust_mode 允许且 action_type 是 read_only/reversible,gate 短路。
 
 ### 2.4 Directive 解析
 
@@ -82,6 +101,38 @@ store = ToolResultStore()                          # singleton in loop
 ref = store.put(tool_name, large_str)             # [STORED:netflow_dump:abc123]
 page = store.read(ref, offset=0, length=8000)     # paged read
 ```
+
+### 2.6 Hooks(Sprint 2,2026-05)
+
+```python
+from runtime import HookEvent, get_hook_registry
+
+reg = get_hook_registry()
+
+# 注册 hook(任何模块都可以,通常在 main.py 启动期)
+async def my_audit_hook(ctx):
+    audit_log.append({"event": "tool_use", "tool": ctx["tool"], "args": ctx["args"]})
+    return ctx
+
+reg.register(HookEvent.PRE_TOOL_USE, my_audit_hook, priority=50)
+
+# Block 一个 tool(只能在 PRE_TOOL_USE)
+async def policy_gate(ctx):
+    if ctx["tool"] == "delete_resource" and not has_admin_role():
+        ctx["blocked"] = True
+        ctx["block_reason"] = "operator lacks delete permission"
+    return ctx
+
+reg.register(HookEvent.PRE_TOOL_USE, policy_gate, priority=80)  # 后跑
+```
+
+6 个核心事件:`PRE_TOOL_USE` / `POST_TOOL_USE` / `TURN_START` / `TURN_END`(预留)/ `SESSION_START` / `SESSION_END`。`runtime/hooks.py` docstring 详细文档。
+
+**关键设计原则**(在 §4.8):
+- Hooks 是 observer 而非 gatekeeper:异常被 log + swallowed,不中断 runtime
+- 唯一例外 — `PRE_TOOL_USE` 可 block,但**只能**通过 `ctx["blocked"]=True` 显式 flag,不能通过 raise
+- Priority order(low → high)— 后跑 hook 可覆盖前跑的 ctx 修改
+- Zero LLM context cost(hooks 不出现在 prompt 里)
 
 ---
 
@@ -164,7 +215,112 @@ parse_directives() 用 brace-scan(find_balanced_end)定位 JSON 边界
 ParsedDirective(type="tool", name="get_device_status", args={"device_id":"ap-01"})
 ```
 
+### 3.5 L2 Snip — graduated context compaction
+
+Claude Code 5 层 cascade 的简化版 — 我们做 **L1 Spill(已有)+ L2 Snip(新增)+ L5 Consolidate(已有 agent_memory)**。L2 在每个 turn 开始时跑,零成本同步。
+
+```
+runtime.loop while True:
+   state.turns += 1
+   │
+   ▼ try_snip_tool_outputs(tool_outputs,
+                           target_char_budget=cfg.budget.snip_tool_outputs_char_budget,
+                           keep_recent=5)
+   │
+   ├─ total chars < budget → 原 dict 返回,freed=0
+   │
+   └─ total chars >= budget:
+          │
+          ▼ keep 最近 N + 任何含 [STORED:] ref 的 entry
+          │
+          ▼ 其余 entry 替换为单条 placeholder:
+          │      "__snip_placeholder__":
+          │        "[snip: N earlier tool result(s) omitted — ~M chars freed;
+          │         see memory context for full history]"
+          │
+          ▼ 返回 (new_dict, freed_chars)
+          │
+          ▼ stream() yield SSE chunk: {node: "context_budget", type: "compaction",
+          │                            freed_chars: M}
+          ▼ run() 仅 log.info(snip log 内置)
+```
+
+关键点:
+- **零 LLM 成本**(纯 dict 操作,< 1ms)
+- **dropped content 不真丢** — 原始 raw outputs 已存在 `agent_memory` long-term store,下个 turn `recall_memory` 可重新检索
+- **`[STORED:]` ref 永远保留**(50 chars 不值得丢,且 LLM 可能还要 `read_stored_result`)
+- **零回归保证**:`snip_tool_outputs_char_budget=0` 完全关闭(default 32K chars ≈ 8K tokens)
+
+### 3.6 reversibility fast-path 数据流
+
+```
+backend.py POST /chat:
+   classify_async(query)
+        │
+        ▼ get_policy_engine().classify_query_intent(query)
+        │
+        ├─ "read_only"  → 直接 return ComplexityDecision(SIMPLE), 跳 LLM
+        ├─ "destructive" → 直接 return ComplexityDecision(COMPLEX), 跳 LLM
+        └─ None         → 走 LLM evaluate_any([...])   ← 原行为
+
+runtime.loop turn HITL gate(_needs_hitl 决策后):
+   if _needs_hitl:
+        │
+        ▼ pe.should_skip_hitl_for_tool(tool_name)
+        │
+        ├─ skip=True  → _needs_hitl=False, 记 audit log, 直接执行
+        │              (例:trust_mode=auto_reversible AND action_type=read_only)
+        │
+        └─ skip=False → 走原 HITL 路径(raise interrupt)
+```
+
 **所有** directive 解析必须通过此文件(`audit_directive_parsing.py` 强制)。
+
+### 3.7 Hook fire 点(Sprint 2)
+
+```
+runtime/loop.py:stream() 的 5 个 fire 点:
+
+stream(query, session_id, ...)
+   │
+   │  ── wrapper(try/finally guarantees SESSION_END) ──
+   │
+   ▼ get_hook_registry().fire(SESSION_START, {session_id, query, delegation_mode})
+   │
+   ▼ _stream_impl(...) 进入 while True:
+        │
+        │  ── 每个 turn 顶 ──
+        │
+        ▼ L2 Snip(non-hook,turn 内部 prep)
+        │
+        ▼ get_hook_registry().fire(TURN_START, {session_id, turn, query, facts_count})
+        │
+        ▼ LLM call → tool dispatch loop:
+              │
+              ▼ get_hook_registry().fire(PRE_TOOL_USE, {tool, args, session_id, turn})
+              │    │
+              │    ├─ ctx["blocked"]=True → yield hook_block chunk, skip dispatch
+              │    │
+              │    └─ ctx["args"] 可能被 hook 修改 → 用修改后的 args
+              │
+              ▼ raw = await _execute_tool(name, args)
+              │
+              ▼ get_hook_registry().fire(POST_TOOL_USE, {tool, args, result, session_id, turn})
+              │    │
+              │    └─ ctx["result"] 可能被 hook 修改(redact / filter)→ 替换 raw
+              │
+              ▼ store stored output, accumulate tool_outputs
+        │
+        │  ── stop check → next turn 或 return ──
+        │
+        ▼ wrapper finally: get_hook_registry().fire(SESSION_END,
+                                                     {session_id, total_turns,
+                                                      tool_calls, outcome, stop})
+            outcome ∈ {completed, consumer_closed, error}
+            保证 abort / consumer-close / exception 路径都触发
+```
+
+Hook 失败(异常)被 log 并 swallowed,**永不**中断 runtime —— 唯一例外是 `PRE_TOOL_USE` 通过 `ctx["blocked"]=True` 显式标记。`TURN_END` 在 enum 里定义但当前**未 fire**(Sprint 2 — 跟 TURN_START 携带的信息有重叠,SESSION_END 已覆盖最终状态)。
 
 ---
 
@@ -208,6 +364,49 @@ LLM 经常重复调同一 tool 同一参数(prompt 漂移)。直接做:
 - LLM 生成的 directive 边界很 tricky(嵌套 JSON、引号、转义)
 - 历史上有 4 个文件各写一份解析,出过 3 次"a 改了 b 没改"bug
 - 集中后用 `find_balanced_end` 一份测试覆盖所有 caller
+
+### 4.6 Reversibility-weighted fast-path 为什么写在 PolicyEngine 而不是 HitlExecutor?
+
+设计上 trust_mode 跟 HITL gate 紧关联,自然倾向放 `HitlExecutor`。但实际上 **HITL gate 决策点在 `runtime/loop.py`**(line ~1806),而 `runtime/` 不能 import `integrations/`(模块独立 audit 强制)。
+
+解决:`PolicyEngine` 是 `runtime/` 自有,加 `set_trust_mode` + `should_skip_hitl_for_tool`,runtime/loop 通过 `get_policy_engine()` singleton 查询。main.py 是装配点,从 `cfg.hitl.trust_mode` wire 到 `PolicyEngine`。
+
+附带好处:**fast-path 跟 classify_destructive 同处**,缓存 / 阈值 / 实现都一致;HitlExecutor 不需要知道 trust_mode 存在(零侵入)。
+
+### 4.7 L2 Snip 为什么是 dict-based 不是 token-based?
+
+Claude Code 的 5 层 cascade 用 `cache_deleted_input_tokens` 这种 prompt cache 经济学指标。我们用 ollama / OpenAI 直 API 没那个信号。改成:
+- **chars**:简单可数,无需 tokenizer
+- **dict**:利用 Python 3.7+ 插入序保证,直接按顺序丢老
+- **keep `[STORED:]` ref**:50 chars 不值得丢,且 LLM 可能还要分页读
+
+不做的事:
+- Microcompact / Context Collapse(需要 prompt cache 信号)
+- Auto-Compact fork child agent(已有 `MemoryConsolidator` 做这事)
+
+Sprint roadmap 选 Snip 是因为**单层 + 零成本 + 立即生效**,跟 Hermes 单 `ContextCompressor` 哲学一致而非 Claude Code 多层。
+
+### 4.8 Hooks 为什么是 "observer 而非 gatekeeper"(Sprint 2)
+
+Claude Code 27 个 hook events 都允许 raise 来 abort runtime。我们选**只允许 `PRE_TOOL_USE` 通过 `ctx["blocked"]=True` 显式 block**,其他事件 hook 异常一律 log + swallow,**不**中断 runtime。
+
+理由:
+- **生产环境 network ops**:operator 在做 incident response 时,**任何**第三方扩展(metrics / audit / compliance hook)崩了**都不应**让 agent 终止。incident 不能等。
+- **可观测性**:hook 失败的 log 是**通知**,让 operator 知道 metrics 可能丢一条,但 agent 仍然完成任务。
+- **明确 block 路径**:policy 需要 block 时**显式**通过 ctx flag,不靠副作用(异常)。这让 reviewer 在 PR 时一眼看到"这个 hook 会阻断 tool"。
+
+trade-off:hook 写 bug(忘了 set blocked=True)无声漏检。**所以建议 production hook 走 audit_log + 显式集成测试**,而非单依赖 hook 行为。
+
+### 4.9 为什么 stream() 包 try/finally wrapper(Sprint 2)
+
+原 `stream()` 1300 行 generator 内有 N 处 `return`。SESSION_END hook 如果直接在每处加,容易漏 + 重复 fire。改造:
+
+- `stream()` → `_stream_impl()`(行为字节级未动)
+- 新 `stream()` thin wrapper:`try { async for chunk in _stream_impl(): yield chunk } finally { fire SESSION_END }`
+
+`GeneratorExit`(consumer 关 iterator) + exception 路径都进 finally,**保证 SESSION_END 必触发**(且只一次)。outcome 字段标 `completed` / `consumer_closed` / `error`,observer hook 自己分流。
+
+代价:wrapper 多一次 async generator forwarding(每 chunk yield 进 wrapper 再 yield 出)。`pytest` 测过吞吐影响 < 1%,可接受。
 
 ---
 

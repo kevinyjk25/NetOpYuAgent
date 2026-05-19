@@ -79,12 +79,36 @@ TOOLS = {
         },
         "tags": ["network", "diagnostic", "large_output"],
         "returns": "Stored NetFlow records [STORED:] — use read_stored_result to page",
+        "hitl": False,                # legacy boolean — kept for backward compat
+        "action_type": "read_only",   # reversibility tier (added 2026-05)
     },
     ...
 }
 ```
 
-`description` 是 LLM 看到的;`tags` 给 retrieval;`returns` hint LLM 输出形式。
+`description` 是 LLM 看到的;`tags` 给 retrieval;`returns` hint LLM 输出形式;`hitl` 是历史 boolean(`hitl_tool_names` 检查仍用)。
+
+### 2.4.1 `action_type` 字段(reversibility 三档)
+
+每个 tool **必须**声明 `action_type ∈ {read_only, reversible, destructive}`。这是 Claude-Code-inspired graduated trust 的核心数据。
+
+| 值 | 语义 | 例子 |
+|----|------|------|
+| `read_only` | 无状态变更、无副作用 | `list_devices`, `get_device_status`, `prometheus_query`, `netflow_dump`(只读流量) |
+| `reversible` | 创建可撤销 artifact | `rollback_service`, `failover`(可 fail back), `rollback_deploy` |
+| `destructive` | 不可撤销变更 | `push_config`, `delete_resource`, `restart_service`, `drain_node` |
+
+**怎么用**:
+- `PolicyEngine.set_tool_metadata(...)` 在 startup index 全部 tools 的 action_type(main.py wire)
+- `PolicyEngine.classify_action_type(tool_name)` 纯 dict lookup(~1µs vs LLM ~8s)
+- `PolicyEngine.should_skip_hitl_for_tool(tool_name)` 结合 trust_mode 决定 HITL skip
+
+**约定**:
+- 不声明 `action_type` 的 tool **fall through 到 LLM** classify_destructive(保留向后兼容,零回归)
+- 在 `auto_reversible` trust mode 下,**未声明 action_type 默认 NOT 跳 HITL**(安全优先)
+- 区分 `reversible` vs `destructive` 看**回滚成本** — 5 分钟操作可恢复 = reversible,需要 30 分钟 incident response = destructive
+
+**`run_command` 的特殊性**:声明为 `read_only`,但 production safety test 强制 allowlist 只允许 `show/display/get` 类命令。若改 allowlist 引入 mutation 命令,action_type 必须改成 `destructive`。
 
 ---
 
@@ -265,10 +289,19 @@ tools
 1. **callable**:在 `mock_tools.py` 或 `pragmatic_tools.py` 写 `async def new_tool(args)`
 2. **metadata**:在 `mock/registry.py` 或 `pragmatic/registry.py` 加 `TOOLS["new_tool"] = {...}`
 3. **`builtin/registry.py`** 加 metadata(如果跨 mode)
-4. **callable signature**:必须 `async def fn(args: dict) -> str`,**不要**变 positional args
-5. **错误处理**:bad args → return `[Error: ...]`,真异常 → raise
-6. **测试**:在 `agent_memory/tests/` 或新建 `tools/tests/` 加 unit test(mock 模式确定性 output 易测)
-7. **eval**:如果新 tool 应该被 retrieval 召回,在 `data/golden_set.jsonl` 加 case
+4. **`action_type` 字段(必填,见 §2.4.1)**:
+   - 完全无 side effect → `"read_only"`
+   - 可撤销 mutation → `"reversible"`(必须能 rollback)
+   - 不可撤销 → `"destructive"`
+   - 不确定?**保守用 `"destructive"`**(`auto_reversible` 模式不会自动 approve)
+5. **callable signature**:必须 `async def fn(args: dict) -> str`,**不要**变 positional args
+6. **错误处理**:bad args → return `[Error: ...]`,真异常 → raise
+7. **`hitl` 字段(legacy boolean)**:跟 `action_type` 相互独立但要协调 —
+   - `action_type=destructive` 通常 `hitl=True`
+   - `action_type=reversible` 通常 `hitl=True`(operator 看到再决定要不要 auto-approve)
+   - `action_type=read_only` 通常 `hitl=False`
+8. **测试**:在 `agent_memory/tests/` 或新建 `tools/tests/` 加 unit test(mock 模式确定性 output 易测)
+9. **eval**:如果新 tool 应该被 retrieval 召回,在 `data/golden_set.jsonl` 加 case
 
 ### 5.2 不该在这里加什么
 
