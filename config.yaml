@@ -56,8 +56,23 @@ llm:
     # this; useful as an early signal that pagination/compaction is needed.
     max_context_chars: 32000
 
-    # Reserved for Tier-1-C migration to Ollama native tools API. Keep off
-    # until that path is built — the [TOOL:] in-band protocol still runs.
+    # Ollama native tools API (Tier 1-C). When true, OllamaEngine ships
+    # an OpenAI-style `tools` array alongside the chat messages and gets
+    # back structured tool_calls instead of free-text [TOOL:name] {...}
+    # directives. The engine then synthesizes [TOOL:name] {json} lines
+    # from the structured response so the existing runtime/loop.py +
+    # directive_parser + HITL flow are completely unchanged.
+    #
+    # Why this is a structural win: when the model wants to call a tool,
+    # the API contract REQUIRES it to emit `{name, arguments: {...}}`
+    # with arguments as a real dict — not JSON the model has to type by
+    # hand. "Forgot a quote", "put device_id in 'target'", "extra trailing
+    # comma" failure modes structurally disappear.
+    #
+    # Requirements: Ollama ≥ 0.4 + a model that supports tools
+    # (qwen2.5/qwen3, llama3.1+, mistral-nemo, deepseek-v3, etc).
+    # Falls back to text protocol if the model doesn't support tools or
+    # if the schema registry is empty (very early startup).
     supports_native_tools: false
 
 

@@ -1,950 +1,523 @@
-# IT Ops Multi-Agent Platform
+# NetOpYuAgent — IT Ops Multi-Agent Platform
 
-> **IT 运维多智能体平台** — A2A-protocol multi-agent orchestration system with HITL human-in-the-loop, Hermes learning loop, dual-path execution engine, and a terminal-style WebUI console.
+> A pluggable, config-driven multi-agent framework for IT/network operations.
+> Built around **module independence**, **HITL safety gates**, and **measurable quality**.
 
----
-
-## Table of Contents
-
-1. [Overview](#1-overview)
-2. [Architecture](#2-architecture)
-3. [Module Reference](#3-module-reference)
-4. [Quick Start](#4-quick-start)
-5. [Running with a Real LLM (Ollama)](#5-running-with-a-real-llm-ollama)
-6. [WebUI Console Guide](#6-webui-console-guide)
-7. [HITL Human Approval Flow](#7-hitl-human-approval-flow)
-8. [Hermes Learning Loop](#8-hermes-learning-loop)
-9. [P0 Tool Result Cache](#9-p0-tool-result-cache)
-10. [P1 / P2 Features](#10-p1--p2-features)
-11. [Mock Tools & Skill Catalog](#11-mock-tools--skill-catalog)
-12. [Environment Variables](#12-environment-variables)
-13. [Project Structure](#13-project-structure)
-14. [Roadmap](#14-roadmap)
+**Languages:** [English](README.md) · [中文](README-cn.md)
 
 ---
 
-## 1. Overview
+## What is this
 
-An IT operations multi-agent platform built around two design principles:
+NetOpYuAgent is a production-style AI agent platform for IT operations. It runs locally on Ollama (or any OpenAI-compatible LLM), pairs an autonomous task loop with a human-in-the-loop (HITL) approval gate for destructive operations, and measures itself with a built-in golden-set eval framework.
 
-**A2A Protocol First** — All agent communication uses Google's A2A Protocol over HTTP. Agents are discoverable, load-balanced, and health-checked through a built-in registry. Agents written in any language or framework can participate.
+The platform is **not** a chatbot. It is a runtime that:
 
-**Thin Loop, Thick Scaffold** — Inspired by Claude Code's architecture: the main execution loop (`AgentRuntimeLoop`) is deliberately thin. All the hard work lives in the scaffold around it — context budget management, tool result caching, stop policy, skill loading, FTS5 cross-session recall, and the Hermes post-turn learning pipeline.
-
-### Core Capabilities
-
-| Capability | Description |
-|---|---|
-| **Dual-path routing** | Simple queries → Runtime Loop (no LangGraph overhead). Complex/destructive operations → HITL LangGraph with human approval gate |
-| **HITL approval** | LangGraph `interrupt()` pauses execution, browser shows approval card, graph resumes on decision |
-| **Hermes learning loop** | After every turn: FTS5 memory write, MemoryCurator extracts facts, UserModelEngine tracks expertise, SkillEvolver creates reusable skill recipes |
-| **FTS5 cross-session recall** | SQLite FTS5 stores all past turns; semantically similar context is injected into new queries automatically |
-| **P0 tool result cache** | Large tool outputs (syslogs, Prometheus, NetFlow) are stored externally; prompt carries only a `[STORED:id]` reference |
-| **Skill catalog** | Level 1 summaries injected every turn, Level 2 details loaded on demand — avoids spending tokens on irrelevant skills |
-| **Context budget** | Per-turn token allocation: confirmed facts > working set > memory > tool results > environment. Soft cap 3 200 tokens |
-| **Stop policy** | Six dimensions: max turns, max tool calls, token budget, low progress, low confidence, explicit stop signal |
-| **Agent registry** | Runtime agent registration/deregistration, health checks, round-robin / random / least-loaded balancing |
-| **MCP + OpenAPI** | Pluggable tool backends: MCP server (JSON config) and any OpenAPI 3.0 spec; mock mode for both |
+- Pulls **relevant tools and skills** per query via BM25+embedding hybrid retrieval (not "send everything to the LLM")
+- Pauses on destructive operations (`edit_device_config`, `rollback`, `restart_service`, etc.) and waits for an operator to approve/reject/modify, then resumes
+- Maintains **five tiers of memory** (short-term per-session, mid-term facts, long-term knowledge, user profile, skill journal) with semantic recall
+- **Learns from every turn**: extracts facts, updates user model, evolves reusable skills, detects fact conflicts
+- Ships with **6 CI audits** + a retrieval bench + a tool-compliance bench so quality is measurable, not vibes
 
 ---
 
-## 2. Architecture
+## Documentation map
 
-```
-External caller (RouterAgent / WebUI / webhook / curl)
-           │  A2A JSON-RPC over HTTP-SSE / REST
-           ▼
-┌──────────────────────────────────────────────────────────┐
-│                      API gateway                          │
-│   /api/v1/a2a/*   /hitl/*   /registry/*   /webui/*       │
-└─────────────────────────┬────────────────────────────────┘
-                          │
-         ┌────────────────▼──────────────────┐
-         │          Execution router          │
-         │                                   │
-         │  classify(query)                  │
-         │    SIMPLE  → Runtime Loop         │
-         │    COMPLEX → HITL Graph           │
-         └───────────────────────────────────┘
-              │                    │
-   ┌──────────▼─────────┐  ┌──────▼──────────────────────┐
-   │   Runtime Loop      │  │  HITL Graph (LangGraph)      │
-   │   context_budget    │  │    intent_classifier         │
-   │   stop_policy       │  │    risk_assessor             │
-   │   skill_catalog     │  │    planner                   │
-   │   tool_cache        │  │    hitl_interrupt_node ←─────│─── operator
-   │   FTS5 recall       │  │    executor                  │
-   └──────────┬──────────┘  │    result_formatter          │
-              │             └──────────────────────────────┘
-              ▼
-   ┌──────────────────────────────────────────────────────┐
-   │              Hermes post-turn pipeline                │
-   │   FTS5SessionStore → MemoryCurator → UserModelEngine  │
-   │                    → SkillEvolver                     │
-   └──────────────────────────────────────────────────────┘
-              │
-   ┌──────────▼───────────────────────────────────────────┐
-   │          Integrations layer                           │
-   │   OllamaEngine / OpenAIEngine   MCP client           │
-   │   OpenAPI client                ToolRouter            │
-   └──────────────────────────────────────────────────────┘
-```
+This README is the shallow entry point. For depth, the project has three layers of documentation:
 
-### Request flow — SIMPLE path
+| Level | Document | Use when... |
+|---|---|---|
+| **L0 — Onboarding** | `README.md` (you are here) | First time looking at the project, want to run it |
+| **L1 — Architecture** | `ARCHITECTURE.md` | Cross-module change, want the dependency graph + module table |
+| **L2 — Module deep-dive** | `<module>/DESIGN.md` | Single-module change, want internal data flow + decision history |
 
-`classify=SIMPLE` → FTS5 recall (past sessions) → `loop.stream()` with real LLM → Turn 1: LLM picks tool → tool executes (large output → `ToolResultStore`) → Turn 2: LLM synthesises answer → stop → Hermes pipeline fires (FTS5 write, curate, user model, skill evolver)
-
-### Request flow — COMPLEX path
-
-`classify=COMPLEX` → `executor.execute()` → `run_with_hitl()` → LangGraph streams → `hitl_interrupt_node` calls `interrupt()` → `register_interrupt()` → `TaskArtifactUpdateEvent` enqueued → SSE stream closes → browser shows HITL approval card → operator clicks Approve/Reject → `POST /hitl/{id}/approve` → `graph.ainvoke(None, thread_cfg)` resumes → executor node runs → result streams back
+Each functional module ships a `DESIGN.md` with 6 standard sections (responsibility / public API / data flow / design decisions / cross-module deps / change checklist). Current set:
+`agent_memory/`, `hitl_core/`, `integrations/`, `retrieval/`, `runtime/`, `skills/`, `tools/`.
 
 ---
 
-## 3. Module Reference
-
-### 3.1 `runtime/` — Execution engine (8 files)
-
-| File | Responsibility |
-|---|---|
-| `loop.py` | `AgentRuntimeLoop`: thin main loop — classify, stream, pre/post verify, tool dispatch |
-| `context_budget.py` | `ContextBudgetManager`: per-turn token prioritisation; `ToolResultStore`: P0 large-output externalisation |
-| `stop_policy.py` | `StopPolicy`: six-dimension stop evaluation; `LoopState`: cross-turn state tracking |
-| `skill_catalog.py` | `SkillCatalogService` integration: L1 summary injection + L2 on-demand detail loading |
-| `model_tier.py` | `ModelTierClassifier`: routes queries to fast model vs full model |
-| `delegation.py` | Fork/fresh delegation modes, context inheritance policy |
-| `tool_cache.py` | Composite skill scoring (tool overlap × 0.6 + semantic similarity × 0.4) |
-
-### 3.2 `hitl/` — Human-in-the-loop (9 files)
-
-| File | Responsibility |
-|---|---|
-| `a2a_integration.py` | `ITOpsHitlAgentExecutor`: dual-path router + post-turn verification hook |
-| `graph.py` | LangGraph `StateGraph(ITOpsGraphState)`: 6 nodes (classify → risk → plan → interrupt → execute → format) |
-| `triggers.py` | Four trigger types: destructive op / alert severity / confidence / ambiguous intent |
-| `decision.py` | `HitlDecisionRouter`: approve / reject / edit / escalate / timeout |
-| `review.py` | Five notification channels: Slack, PagerDuty, SSE, WebSocket, email (concurrent fan-out) |
-| `audit.py` | Seven audit event types; in-memory and PostgreSQL backends |
-| `router.py` | FastAPI routes: `/hitl/pending`, `/hitl/{id}/approve`, `/hitl/{id}/reject`, `/hitl/ws` |
-
-**LangGraph state note:** `StateGraph(ITOpsGraphState)` uses a typed dict so LangGraph merges each node's return dict into accumulated state (`{**old, **new}`). Using a bare `dict` causes each node to receive only the previous node's output, silently dropping earlier keys like `intent_type` before `planner_node` runs.
-
-### 3.3 `memory/` — Storage and learning (12 files)
-
-| Layer | Backend | Retrieval | TTL |
-|---|---|---|---|
-| L1 in-process | Python list | full return | request lifetime |
-| L2 short-term | Redis sorted set | time-descending | 24 h |
-| L3 mid-term | ChromaDB vector index | cosine + time decay | 30 d |
-| L4 long-term | PostgreSQL full-text | pg_trgm similarity | permanent |
-
-**Hermes modules (active in this build):**
-
-| Module | Role |
-|---|---|
-| `fts_store.py` | `FTS5SessionStore`: SQLite FTS5, cross-session turn search, FTS5-safe query sanitiser |
-| `curator.py` | `MemoryCurator`: LLM-driven fact extraction from completed turns; system/user prompt separation prevents injection |
-| `user_model.py` | `UserModelEngine`: tracks tool preferences, domain expertise, technical level, behavioral traits |
-
-### 3.4 `skills/` — Skill system (3 files)
-
-| File | Responsibility |
-|---|---|
-| `catalog.py` | `SkillCatalogService`: L1 summaries + L2 detail loading; composite scoring (tool overlap + semantic similarity) |
-| `evolver.py` | `SkillEvolver`: autonomous skill creation after complex tasks; LLM decides reuse potential; feedback-driven self-improvement |
-
-### 3.5 `integrations/` — LLM and tool backends (5 files)
-
-| File | Responsibility |
-|---|---|
-| `llm_engine.py` | `OllamaEngine`, `OpenAIEngine`, `AnthropicEngine`, `MockEngine`; think-block stripping for reasoning models |
-| `mcp_client.py` | MCP server client; JSON config or env-var driven; mock mode |
-| `openapi_client.py` | OpenAPI 3.0 spec consumer; auto-generates tool definitions; mock mode |
-| `tool_router.py` | `ToolRouter`: dispatches tool calls to MCP / OpenAPI / mock registry |
-
-### 3.6 `task/` — Task orchestration (9 files)
-
-- `intra/planner.py`: `TaskPlanner` (goal → DAG) + `TaskScheduler` (concurrency=5, dependency resolution) + `TaskExecutor`
-- `inter/coordinator.py`: `A2ATaskDispatcher` (SSE delegation) + `MultiRoundCoordinator` (multi-turn context)
-- `inter/hitl_bridge.py`: `HitlTaskBridge` (suspend / resume hooks)
-
-### 3.7 `registry/` — Agent discovery (6 files)
-
-- Dynamic AgentCard fetching (4 well-known paths)
-- Health checks (60 s interval) + card refresh (300 s interval)
-- Load balancing: `round_robin` (default) / `random` / `least_loaded`
-
-### 3.8 `webui/` — Browser console
-
-- `backend.py`: FastAPI sub-app mounted at `/webui`; `/chat/stream` SSE endpoint; `/hitl/*` approval endpoints; `/system/wiring` live wiring status
-- `static/index.html`: terminal-style single-page console, no external JS framework; four tabs: Flow, HITL, Cache, Stats
-
----
-
-## 4. Quick Start
+## Quick Start
 
 ### Requirements
 
-- Python 3.9+ (3.12 recommended)
-- [Ollama](https://ollama.ai) with `qwen3.5:27b` pulled (default LLM — see section 5)
-- Optional: Redis, PostgreSQL, ChromaDB (auto-stub when absent)
+- Python 3.11+
+- [Ollama](https://ollama.com) running locally (for real LLM) — or `LLM_BACKEND=mock` for a stub
+- ~16 GB RAM for `qwen3.5:27b`, ~6 GB for `qwen2.5:7b`
 
 ### Install
 
 ```bash
+git clone <repo>
 cd NetOpYuAgent
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt  # includes pyyaml for config.yaml loading
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-### Run (default: Ollama + qwen3.5:27b)
+### Run with mock LLM (no Ollama needed)
 
 ```bash
-ollama serve
-ollama pull qwen3.5:27b
-uvicorn main:app --reload --port 8000
+LLM_BACKEND=mock uvicorn main:app --port 8000
 ```
 
-### Run (mock LLM — no Ollama needed)
+Then open http://localhost:8000 — you'll get the WebUI console.
+
+### Run with Ollama (recommended)
 
 ```bash
-# Override just the backend in config.yaml:
-#   llm:
-#     backend: "mock"
-# Or via env var:
-LLM_BACKEND=mock uvicorn main:app --reload --port 8000
+# Pull the model first (one-time):
+ollama pull qwen2.5:7b
+ollama pull nomic-embed-text     # embeddings
+
+# Start the agent:
+LLM_BACKEND=ollama LLM_MODEL=qwen2.5:7b uvicorn main:app --port 8000
 ```
 
-Open:
-- **WebUI console**: http://localhost:8000/webui/
-- **A2A endpoint**: http://localhost:8000/api/v1/a2a/
-- **HITL endpoints**: http://localhost:8000/hitl/
-- **Registry**: http://localhost:8000/registry/
-- **API docs**: http://localhost:8000/docs
-- **Health**: http://localhost:8000/health
-
-### Verify startup
-
-The startup log prints a configuration summary:
-
-```
-━━ Configuration ━━
-  LLM           : ollama/qwen3.5:27b  (base_url=http://localhost:11434)
-  Tools         : MCP=mock  OpenAPI=mock
-  HITL tools    : —
-  Memory dir    : ./data
-  DTM compaction: every 20 turns  nudge every 10 turns
-  Log mode      : normal  LLM detail: off
-  Server        : 0.0.0.0:8000  reload=True
+For larger / slower model:
+```bash
+LLM_MODEL=qwen3.5:27b uvicorn main:app --port 8000
 ```
 
-The Stats tab → **🔌 System Wiring** panel shows a live green/red checklist. `GET /webui/system/wiring` returns JSON including DTM stats.
+### Verify it works
+
+```bash
+# 1. Health check
+curl http://localhost:8000/health
+# → {"status":"ok"}
+
+# 2. Try a query via WebUI at http://localhost:8000
+#    "list all devices" — should return mock device list, no HITL
+#    "restart nginx on web-01" — should trigger HITL approval card
+```
 
 ---
 
-## 5. Running with a Real LLM (Ollama)
+## Core capabilities
 
-**Recommended:** set config in `config.yaml` (already defaults to Ollama + qwen3.5:27b):
-
-```yaml
-# config.yaml — already the default, no change needed
-llm:
-  backend:  "ollama"
-  model:    "qwen3.5:27b"
-  base_url: "http://localhost:11434"
-```
-
-Then simply:
-
-```bash
-ollama serve
-ollama pull qwen3.5:27b
-pip install -r requirements.txt   # includes pyyaml
-uvicorn main:app --port 8000 --reload
-```
-
-**Alternative — env var override** (no config.yaml edit needed):
-
-```bash
-ollama serve
-ollama pull qwen3.5:14b   # lighter model
-
-LLM_MODEL=qwen3.5:14b uvicorn main:app --port 8000 --reload
-```
-
-Startup log confirms:
-```
-━━ Configuration ━━
-  LLM           : ollama/qwen3.5:27b  (base_url=http://localhost:11434)
-  Tools         : MCP=mock  OpenAPI=mock
-  Memory dir    : ./data
-  ...
-```
-
-**Supported backends:**
-
-| `LLM_BACKEND` | Notes |
-|---|---|
-| `ollama` | Local Ollama server; default — set `llm.base_url` and `llm.model` in config.yaml |
-| `openai` | OpenAI API; set `OPENAI_API_KEY` env var |
-| `anthropic` | Anthropic API; set `ANTHROPIC_API_KEY` env var |
-| `mock` | Deterministic stub, no LLM calls — for testing without Ollama |
-
-Thinking models (e.g. `qwen3-coder`): the engine automatically strips `<think>…</think>` blocks before parsing tool calls, and passes `think=False` to the Ollama API.
-
----
-
-## 6. WebUI Console Guide
-
-Three-column layout:
-
-### Left — Skills & Tools
-
-- **Skills panel**: all registered skills; click a skill name to populate the query box. Green dot = low risk, amber = medium, red = high/critical. `HITL` badge = approval required before execution.
-- **Quick Tools panel**: call any mock tool directly; large results appear in the Cache tab automatically.
-
-### Centre — Chat
-
-| Control | Description |
-|---|---|
-| Query box | Enter to send, Shift+Enter for newline |
-| `session` | Leave blank to auto-generate; enter an ID to continue a previous session |
-| `mode` | `stream` = SSE token-by-token; `sync` = wait for full response |
-| `delegation` | `fresh` = independent sub-agent; `forked` = inherit parent agent's confirmed facts and working set |
-| `[STORED:…]` chip | Click to load and page through a cached large result in the Cache tab |
-
-**Flow tab**: every module event is streamed in real time — classify, FTS5 recall, pre-verify, tool calls, post-verify, Hermes curation, user model update, skill evolver. Click any row to expand details.
-
-### Right — HITL / Cache / Stats
-
-- **HITL tab**: pending interrupts with trigger type, risk level, proposed action, and Approve / Reject buttons. Polls `/hitl/pending` every 3 s; switches to this tab automatically when an interrupt fires.
-- **Cache tab**: all `ToolResultStore` entries; page through large outputs with Prev/Next buttons.
-- **Stats tab**: skill count, cache entries, active agents, Hermes module status, system wiring checklist.
-
----
-
-## 7. HITL Human Approval Flow
-
-### Trigger queries
-
-```
-restart the payments-service in production
-rollback auth-service to version 3.2.1
-drain k8s-worker-03 for maintenance
-delete the staging database
-force failover payments-db to replica
-```
-
-### What happens
-
-1. `classify()` returns `COMPLEX` — logged as `Complexity: complex — Destructive action detected`
-2. `executor.execute()` calls `run_with_hitl()` — LangGraph graph starts
-3. `intent_classifier_node` → `risk_assessor_node` → `planner_node` → `route_after_plan()`
-4. `DestructiveActionTrigger` fires → routes to `hitl_interrupt_node`
-5. `interrupt(payload)` pauses the graph; checkpointer saves state
-6. `_handle_interrupt_chunk()` calls `register_interrupt()` — payload now in `_payload_store`
-7. `HitlA2AEventProcessor` emits `TaskArtifactUpdateEvent` — SSE delivers `hitl_interrupt` chunk to browser
-8. Browser: `switchTab('hitl')` + `refreshHitl(5)` (5 retries × 500 ms)
-9. HITL card appears: trigger, risk level, proposed action, SLA countdown
-10. Operator clicks **Approve** → `POST /hitl/{id}/approve` → `graph.ainvoke(None, thread_cfg)` → executor node runs
-11. Flow tab logs `⚠ HITL APPROVE` with outcome
-
-### Approval decision types
-
-| Decision | Effect |
-|---|---|
-| `approve` | Graph resumes, executor node runs the proposed action |
-| `reject` | Graph routes to END, task marked rejected |
-| `edit` | Operator patches proposed action params, then graph resumes |
-| `escalate` | Escalates to a senior reviewer; SLA timer resets |
-| `timeout` | Fires automatically when SLA expires |
-
-### Debugging HITL
-
-Key log lines to look for:
-
-```
-hitl.graph:    route_after_plan: intent_type='destructive_op' is_destructive=True action_type='restart_service'
-hitl.graph:    HITL interrupt — interrupt_id=… trigger=destructive_op risk=high
-hitl.graph:    Graph interrupt detection complete: found=True
-hitl.decision: HITL registered: interrupt_id=… status=pending store_size=1
-webui.backend: /hitl/pending: store_size=1 … returning 1 pending interrupts
-```
-
-If `found=False`: confirm `StateGraph(ITOpsGraphState)` is used (not bare `dict`), and that `intent_classifier_node` sees `"restart"` / `"rollback"` / `"delete"` / `"drain"` in the query.
-
----
-
-## 8. Hermes Learning Loop & Dual-Track Memory (DTM)
-
-### Overview
-
-Every completed query passes through two parallel memory systems — a design converging OpenClaw's static file-chunk model with Hermes's dynamic LLM-curation model.
-
-```
-Turn completes
-    │
-    ├── Track A write (Static — OpenClaw-style)
-    │     ├── FTS5SessionStore.write_turn()   → state.db (raw turns, BM25 indexed)
-    │     └── today_turns buffer              → daily/YYYY-MM-DD.md every 20 turns
-    │
-    ├── Track B write (Dynamic — Hermes-style)
-    │     └── MemoryCurator.after_turn()      → facts/facts.jsonl (structured facts)
-    │           LLM extracts: incident_lesson | tool_pattern | operational_fact
-    │                         environment_fact | user_preference
-    │
-    ├── UserModelEngine.after_turn()
-    │     Tracks: tool frequency, domain expertise, technical level, traits
-    │     Injects user profile into subsequent prompts
-    │
-    └── SkillEvolver.after_task()  (COMPLEX tasks only)
-          LLM: should this become a reusable skill?
-          If yes → markdown recipe saved to data/skills/<id>.md
-                 → registered in SkillCatalogService for future queries
-```
-
-### Dual-Track retrieval (before every turn)
-
-```
-Query arrives
-    │
-    ├── Track A ──────────────────────────────────────────────────────────
-    │     • FTS5 BM25 search over state.db (raw conversation turns)
-    │     • Keyword search over daily/YYYY-MM-DD.md (1600-char chunks)
-    │     • Temporal decay: score × e^(−λt), half-life = 7 days
-    │
-    ├── Track B ──────────────────────────────────────────────────────────
-    │     • Keyword + type-boost search over facts/facts.jsonl
-    │     • Type boosts: incident_lesson ×1.3, tool_pattern ×1.2
-    │     • confidence × track_b_weight (default 1.5×) multiplier
-    │
-    └── Arbitration ────────────────────────────────────────────────────────
-          MMR dedup (λ=0.7, Jaccard similarity) — no repeated facts
-          Track B facts first (abstracted signal)
-          Track A chunks follow (verbatim evidence)
-          → single ranked list → injected as prompt context
-```
-
-**Why two tracks?**
-
-| Scenario | Track A alone | Track B alone | Both |
-|---|---|---|---|
-| "Why did auth fail?" | 50 raw log turns, noisy | "RADIUS cert expires quarterly — pre-renew week 3" | Fact leads, chunk validates |
-| First session | Nothing | Nothing | Nothing (correct) |
-| After 5 sessions | Relevant raw turns | Extracted lessons + patterns | Best of both |
-
-### File layout on disk
-
-```
-data/                          ← HERMES_DATA_DIR (default: ./data)
-├── state.db                   # Track A: SQLite FTS5 raw turns (always written)
-├── state.db-shm / .db-wal    # SQLite WAL journal
-├── daily/
-│   └── 2026-04-16.md         # Track A: human-readable compacted sessions
-│                              #   written every DTM_COMPACTION_TURNS turns (default 20)
-│                              #   grep-able, git-versionable, inspectable in any editor
-├── facts/
-│   └── facts.jsonl           # Track B: curated facts, one JSON line per extraction
-│                              #   accumulates across all sessions permanently
-└── skills/
-    └── <skill_id>.md         # Evolved skill markdown recipes (SkillEvolver)
-```
-
-### Memory tab in the WebUI
-
-The **Memory** tab (right panel) auto-opens whenever recall finds results.
-
-| Card style | Track | Meaning |
+| Capability | Where it lives | Why it matters |
 |---|---|---|
-| 🟢 Green left border · `📄 CHUNK` badge | A | Raw chunk from FTS5 or daily .md file |
-| 🟣 Purple left border · `💡 FACT` badge | B | Curated fact from facts.jsonl |
+| **Dual-path routing** | `runtime/policy_engine.py` | Read-only queries skip LLM evaluation (8000× faster); destructive queries go through HITL |
+| **HITL approval gate** | `hitl_core/` + `integrations/adapters/hitl_executor.py` | LangGraph-style `interrupt()` — browser shows approval card, agent resumes on decision |
+| **5-tier memory** | `agent_memory/` | Short/mid/long-term + user profile + skill journal; FTS5 + embedding hybrid recall |
+| **Memory consolidation** | `MemoryAdapter.set_consolidator` | Every 30 turns per-session, old chunks auto-summarised; long sessions stay fast |
+| **Fact conflict detection** | `integrations/adapters/fact_conflict_detector.py` | Before writing a fact, find semantically similar; LLM reconciles contradictions |
+| **Skill catalog + evolver** | `skills/` | L1 summaries always present, L2 details loaded on demand; SkillEvolver auto-improves dormant skills |
+| **Native tool calls** | `integrations/clients/llm_engine.py` + `schema/ollama_export.py` | (Opt-in) Ollama OpenAI-style `tools` API — structurally eliminates "args filled wrong" failures |
+| **Context budget** | `runtime/context_budget.py` | Priority allocation: confirmed_facts > working_set > memory > tool_outputs > env |
+| **Stop policy** | `runtime/stop_policy.py` | Six dimensions (max turns / tool calls / token budget / progress / confidence / explicit signal) |
+| **MCP + OpenAPI tools** | `integrations/router/tool_router.py` | Plug-in MCP servers and any OpenAPI 3.0 spec |
 
-Each card shows: score bar (width = relevance), source file, age, tags. Click any card to expand the full content that was injected into the LLM prompt.
+---
 
-Filter buttons at top: **All** · **💡 Facts (B)** · **📄 Chunks (A)**
-
-Winner badge: `💡 Facts won` · `📄 Chunks won` · `⚖ Tied` — which track dominated for this query.
-
-**Flow tab recall event:**
+## Architecture (one diagram)
 
 ```
-🧠 DTM Recall — 480 chars · A:2 chunks B:1 facts · winner=B
+External caller (RouterAgent / WebUI / webhook / curl)
+       │  A2A JSON-RPC over HTTP-SSE / REST
+       ▼
+┌─────────────────────────────────────────────────────────┐
+│              FastAPI (main:app, uvicorn)                 │
+│  /api/v1/a2a/*   /hitl/*   /registry/*   /webui/*       │
+└───────────────────────────┬─────────────────────────────┘
+                            │
+            ┌───────────────▼──────────────┐
+            │  runtime/policy_engine        │
+            │   classify_query_intent       │
+            │     read_only  → SIMPLE       │
+            │     destructive → COMPLEX     │
+            │     ambiguous   → LLM eval    │
+            └───────────────┬──────────────┘
+                            │
+              ┌─────────────┴────────────┐
+              ▼                          ▼
+   ┌──────────────────┐        ┌─────────────────────┐
+   │  Runtime Loop     │        │  HITL Pipeline      │
+   │   context_budget  │        │   interrupt → wait  │
+   │   stop_policy     │        │   for operator      │
+   │   skill_catalog   │        │   decision → resume │
+   │   tool_cache      │        └─────────┬───────────┘
+   │   memory recall   │                  │
+   └─────────┬─────────┘                  │
+             │                            │
+             ▼                            ▼
+   ┌────────────────────────────────────────────────────┐
+   │  integrations/clients/llm_engine — OllamaEngine     │
+   │   [text protocol]   model emits [TOOL:name] {json}  │
+   │   [native tools]    model emits structured tool_call│
+   │                      → synthesized into [TOOL:] line│
+   └─────────────────────────────┬──────────────────────┘
+                                 │
+                                 ▼
+   ┌────────────────────────────────────────────────────┐
+   │  integrations/router/tool_router — ToolRouter       │
+   │   dispatches to: local callable / MCP / OpenAPI    │
+   └────────────────────────────────────────────────────┘
 ```
 
-### SSE events
+Full dependency graph + module boundaries: see `ARCHITECTURE.md` §2.
 
-| Type | Key fields | Meaning |
-|---|---|---|
-| `recall` | `track_a`, `track_b`, `winner`, `memory_items[]`, `preview` | DTM recall result — drives Memory tab |
-| `hermes_write` | `session_id`, `track` | Turn written to Track A (FTS5 + daily buffer) |
-| `hermes_curate` | `memories_count`, `types[]` | Track B facts extracted → facts.jsonl |
-| `hermes_umodel` | `technical_level`, `domain_counts`, `trait_count` | User model updated |
-| `hermes_skill` | `created`, `skill_id` | Skill created by SkillEvolver (COMPLEX only) |
+---
 
-### Compaction and nudge schedule
+## WebUI console
 
-| Trigger | Action |
+Open http://localhost:8000 — three-column layout:
+
+| Column | Contents |
 |---|---|
-| Every `DTM_COMPACTION_TURNS` turns (default 20) | today_turns buffer flushed to `daily/YYYY-MM-DD.md` |
-| Every `DTM_NUDGE_TURNS` turns (default 10) | Deep LLM review of recent turns → additional facts extracted |
-| Context window ~80% full | `pre_compaction_flush()` — immediate daily .md write + deep nudge |
+| **Left** | Skills catalog (clickable to inspect) + Tool registry (mock + pragmatic) |
+| **Centre** | Chat (SSE streaming) + Flow tab (every turn's tool calls, stop reason) |
+| **Right** | HITL approval cards + tool-result cache + memory recall |
 
-Lower `compaction_turns` in config.yaml to see daily files appear faster in development:
+**Tabs in the right pane**:
+- **HITL** — pending approval cards (Approve / Reject / Edit args / Skip with note)
+- **Cache** — large tool outputs (syslogs, Prometheus) stored externally with `[STORED:id]` references
+- **Memory** — color-coded recall cards: facts (green), profile (blue), recent turns (gray)
+- **Journal** — per-session skill load + tool call events for offline analysis
+
+---
+
+## HITL approval flow
+
+Triggered when query involves destructive tools (`edit_device_config`, `restart_service`, `rollback_config`, ...) OR when the skill matcher is ambiguous OR when explicitly named in `cfg.hitl.tool_names`.
+
+```
+LLM emits [TOOL:edit_device_config] {device_id:"ap-01", ...}
+              │
+              ▼  intercepted by HitlExecutor before tool runs
+        ChunkQueue.push(hitl_card)
+              │
+              ▼  WebUI right pane shows card
+              │   ┌─────────────────────────────────┐
+              │   │ Approve | Reject | Edit | Skip  │
+              │   └─────────────────────────────────┘
+              │
+              ▼  operator clicks Approve
+        POST /hitl/{id}/approve
+              │
+              ▼  HitlPipeline.resume(decision)
+        Tool actually executes; result flows back into the loop
+```
+
+**Batch HITL**: `[TOOL_BATCH:edit_device_config] [{...}, {...}, ...]` opens one card per child target, operator approves each independently. SkillEvolver fires once at the end with the union of successful children.
+
+Full details: `hitl_core/DESIGN.md`.
+
+---
+
+## Memory & learning loop
+
+After every turn, six things happen automatically:
+
+1. **FTS5 write** — turn (query + LLM response + tool calls) indexed for cross-session recall
+2. **Fact extraction** — LLM extracts structured facts ("device ap-01 has IOS 15.4") to mid-term store
+3. **Conflict reconciliation** — new facts go through `FactConflictDetector`: equivalent / refinement / contradiction / unrelated
+4. **User model update** — expertise + traits (e.g. "operator prefers concise responses, uses CLI not GUI")
+5. **Skill evolution** — `SkillJournalConsumer` watches dormant skills, fires `SkillEvolver.apply_feedback` to rewrite prompts
+6. **Auto-consolidation** — every 30 turns per session, old chunks merge into LLM-summarised rollups so long sessions stay fast
+
+Configure thresholds in `config.yaml`:
 
 ```yaml
 memory:
-  dtm:
-    compaction_turns: 3    # dev mode — flush after every 3 turns
-    nudge_turns: 5
+  auto_consolidate_turns: 30           # 0 to disable
+  consolidation_template: "structured" # or "legacy"
+
+cross_module:
+  journal_to_facts:
+    enabled: true                       # promote journal observations to mid-term facts
+  fact_conflict_detection:
+    enabled: true
+    llm_reconcile_enabled: false        # cheap heuristic only by default
 ```
 
-### Verifying memory is working
-
-After a few queries:
-
-```bash
-# Track B: curated facts (one JSON line per extraction)
-cat data/facts/facts.jsonl | python3 -m json.tool | head -30
-
-# Track A: daily compacted sessions (human-readable)
-ls -la data/daily/
-cat data/daily/$(date +%Y-%m-%d).md
-
-# Track A: raw FTS5 turns
-sqlite3 data/state.db \
-  "SELECT session_id, substr(user_text,1,80) FROM session_turns LIMIT 5;"
-
-# Confirm DTM is wired (check system/wiring endpoint)
-curl http://localhost:8000/webui/system/wiring | python3 -m json.tool | grep -A8 '"hermes"'
-# Expected: "dtm": true, "dtm_stats": {"daily_files": 1, "facts_count": 12, ...}
-```
-
-If `daily/` and `facts/` are empty after queries, the most common cause is `dtm` not appearing in services. Check the startup log for the `━━ Configuration ━━` block and ensure `HERMES_DATA_DIR` points to a writable directory.
+Full memory architecture: `agent_memory/DESIGN.md`.
 
 ---
 
+## CI & quality gates
 
-## 9. P0 Tool Result Cache
-
-### Problem
-
-IT ops tools can return tens of thousands of bytes — 300-line syslogs, 60-minute Prometheus time series, 500-record NetFlow dumps. Injecting these directly into the prompt exhausts the context window on the first tool call.
-
-### Solution
-
-`ToolResultStore` + `ContextBudgetManager` — two-step externalisation:
-
-1. Tool output > 4 000 chars → stored in `ToolResultStore`. Prompt receives only:
-   ```
-   [STORED:syslog_search:a3f9c12b] Preview: Apr 10 09:12:01 ap-01 hostapd…
-   ```
-
-2. LLM reads details on demand via `read_stored_result`:
-   ```
-   [TOOL:read_stored_result] {"ref_id": "a3f9c12b", "offset": 0, "length": 2000}
-   ```
-
-### Walkthrough
-
-```
-1. Query: "search syslogs for errors on ap-01"
-   → Runtime Loop calls syslog_search (~6 000 chars)
-   → Stored automatically; [STORED:…] reference injected into prompt
-   → Cache tab shows new entry
-
-2. Click [STORED:syslog_search:abc123] chip in chat
-   → Cache tab loads first page (2 000 chars)
-   → Shows: Total: 6XXX chars | Has more: True | Next offset: 2000
-
-3. Click "Next ▶" to page through remaining content
-```
-
-### API
+Every PR is gated by `scripts/precheck.sh`:
 
 ```bash
-# Trigger a large-result tool
-curl -X POST http://localhost:8000/webui/tools/syslog_search \
-  -H "Content-Type: application/json" \
-  -d '{"args": {"host": "ap-01", "keyword": "error", "lines": 300}}'
-
-# Read a stored result (paginated)
-curl "http://localhost:8000/webui/tools/result/{ref_id}?offset=0&length=2000"
+./scripts/precheck.sh            # everything (audits + eval)
+./scripts/precheck.sh --audits   # static audits only (~30s)
+./scripts/precheck.sh --eval     # retrieval eval only
 ```
+
+**6 static audits** (any FAIL → PR cannot merge):
+
+| Audit | Catches |
+|---|---|
+| `syntax_sweep` | Any `.py` file with parse error |
+| `audit_module_independence` | Cross-module import violations (e.g. `evaluation/` importing `runtime/`) |
+| `audit_imports` | Import paths that don't resolve to any module |
+| `audit_prompt_templates` | Unescaped `{...}` in f-string-like prompts that would crash at format time |
+| `audit_directive_parsing` | `[TOOL:` parser bypass — single source of truth for tool-call extraction |
+| `audit_wiring` | "Ghost services" — registered in `services[...]` but no external readers |
+
+**Retrieval eval gate**:
+- CI: BM25 backend, `recall@3 ≥ 0.40, MRR ≥ 0.30` against `data/golden_set.jsonl` (25 cases)
+- Local: hybrid backend, `recall@3 ≥ 0.65, MRR ≥ 0.55`
+
+**Tool-compliance bench** (`data/tool_compliance_set.jsonl`, 18 cases) — not in CI (needs running Ollama), runs locally or nightly:
+
+```bash
+# Baseline: text protocol
+python -m evaluation.compliance_cli --golden data/tool_compliance_set.jsonl --model qwen2.5:7b
+
+# Native tools (Ollama ≥ 0.4 + supported model)
+python -m evaluation.compliance_cli --golden data/tool_compliance_set.jsonl --model qwen2.5:7b --native
+```
+
+Three independent metrics per case:
+- `parse_ok` — model emitted valid `[TOOL:...]` syntax
+- `name_ok` — model picked the right tool (or an acceptable alternative)
+- `args_ok` — required args present, values match where pinned, no forbidden args
+
+**pre-commit hook** (recommended): `pip install pre-commit && pre-commit install` — runs the same `--audits` locally before each commit.
+
+**Branch protection** (GitHub): in repo Settings → Branches → require status checks for `Static audits`, `Production safety tests`, `Retrieval eval (BM25)`.
 
 ---
 
-## 10. P1 / P2 Features
+## Native tools (opt-in, Tier 1-C)
 
-### P1: Pre- and post-verification
-
-```python
-# Pre-verify: runs before execution, blocks destructive ops
-pre = await loop.pre_verify(query, confirmed_facts, env_context)
-if not pre.passed:
-    return STOP_HITL  # escalates to HITL graph
-
-# Post-verify: runs after each tool call
-post = await loop.post_verify(tool_name, result, confirmed_facts)
-if not post.passed:
-    state.unresolved_points.append(f"Post-verify: {post.reason}")
-```
-
-Built-in rules: destructive operations always fail pre-verify; closed change window + change op fails; `allow_destructive=False` + production env fails.
-
-### P1: Confirmed Facts & Working Set
-
-```python
-# Confirmed facts — injected at highest priority in every prompt
-state.record_new_fact("payments-service is healthy in prod")
-state.record_new_fact("DNS resolution confirmed OK; not the cause")
-
-# Working set — currently focused devices
-working_set = [
-    DeviceRef(id="ap-01", label="AP-01 at Site-A"),
-    DeviceRef(id="sw-core-01", label="Core Switch"),
-]
-```
-
-### P1: Forked delegation
-
-```python
-# fresh: independent sub-agent, starts from scratch
-# forked: inherits parent's confirmed facts and working set
-delegation = "forked"
-```
-
-### P2: Model tiering
-
-```python
-decision = loop.classify(query)
-print(decision.model_tier)   # "fast_model" or "full_model"
-
-# fast_model: check / status / dns / list queries
-# full_model: complex analysis, P0/P1 events, destructive ops
-# In production: map to different Ollama models or haiku vs sonnet
-```
-
----
-
-## 11. Mock Tools & Skill Catalog
-
-### Inventory tools (use these for "what devices exist?" queries)
-
-```bash
-POST /webui/tools/list_devices
-{"args": {}}                                      # all 13 devices (APs, switches, routers, servers)
-{"args": {"type": "switch"}}                       # wired switches only
-{"args": {"type": "wireless_ap"}}                  # wireless APs only
-{"args": {"type": "router"}}                       # routers only
-{"args": {"type": "switch", "site": "site-a"}}    # site-filtered
-
-POST /webui/tools/list_interfaces
-{"args": {"device_id": "sw-core-01"}}             # port table for a switch
-{"args": {"device_id": "ap-01"}}                  # radio interfaces for an AP
-{"args": {"device_id": "router-01"}}              # WAN/LAN interfaces for a router
-```
-
-The 13 mock devices span: 4 wireless APs, 5 switches (2 core + 3 access), 2 edge routers, 2 RADIUS servers — all at site-a or site-b.
-
-### Large-result tools (trigger P0 cache)
-
-```bash
-POST /webui/tools/syslog_search
-{"args": {"host": "ap-01", "keyword": "error", "lines": 300}}    # ~6 KB
-
-POST /webui/tools/prometheus_query
-{"args": {"metric": "up", "job": "network_devices", "range_minutes": 60}}  # ~5 KB
-
-POST /webui/tools/netflow_dump
-{"args": {"site": "site-a", "flows": 500}}   # ~10 KB
-```
-
-### Small-result tools (inline)
-
-```bash
-POST /webui/tools/dns_lookup      {"args": {"hostname": "payments.internal"}}
-POST /webui/tools/device_info     {"args": {"device_id": "sw-core-01"}}
-POST /webui/tools/alert_summary   {"args": {"severity": "P1"}}
-POST /webui/tools/service_health  {"args": {"service": "payments-service"}}
-```
-
-### Cache tools
-
-```bash
-# Read a page of a stored large result
-POST /webui/tools/read_stored_result
-{"args": {"ref_id": "a3f9c12b", "offset": 0, "length": 2000}}
-
-# Process all chunks of a stored result with an operation
-POST /webui/tools/process_stored_chunks
-{"args": {"ref_id": "a3f9c12b", "operation": "filter", "match": "ERROR"}}
-{"args": {"ref_id": "a3f9c12b", "operation": "extract", "pattern": "(\\d+\\.\\d+\\.\\d+\\.\\d+)"}}
-{"args": {"ref_id": "a3f9c12b", "operation": "count",   "match": "timeout"}}
-{"args": {"ref_id": "a3f9c12b", "operation": "summarise"}}
-```
-
-### Skill catalog (9 pre-built skills)
-
-| Skill ID | Risk | HITL |
-|---|---|---|
-| `radius_auth_diagnosis` | low | no |
-| `bgp_neighbor_check` | low | no |
-| `dns_resolution_debug` | low | no |
-| `k8s_pod_restart` | high | **yes** |
-| `db_failover` | critical | **yes** |
-| `syslog_bulk_analysis` | low | no |
-| `network_traffic_analysis` | low | no |
-| `prometheus_alert_triage` | medium | no |
-| `change_window_check` | low | no |
-
----
-
-## 12. Configuration
-
-All settings live in **`config.yaml`** (project root). Edit that file to change defaults — no code changes needed.
-
-Environment variables always override the YAML value (12-factor compatible).
-
-### Quick-start config
+If you're running Ollama ≥ 0.4 with a tools-capable model (qwen2.5+, qwen3, llama3.1+, mistral-nemo, deepseek-v3, ...), flip the switch in `config.yaml`:
 
 ```yaml
-# config.yaml — change these for your deployment
 llm:
-  backend: "ollama"        # ollama | openai | anthropic | mock
-  model:   "qwen3.5:27b"  # any Ollama-compatible model
-  base_url: "http://localhost:11434"
-
-logging:
-  mode: "normal"           # normal | llm | verbose
+  capabilities:
+    supports_native_tools: true     # default false
 ```
 
-### Full environment variable reference
+Then restart. The engine ships an OpenAI-style `tools` array to Ollama and gets back **structured `tool_calls`** instead of free-text `[TOOL:name] {...}` directives. The engine synthesizes `[TOOL:name] {json}` lines from the structured response, so the runtime loop + directive parser + HITL flow are **completely unchanged** — this is a runtime upgrade, not an architectural change.
 
-#### LLM
+**What it fixes**: "model put device_id in the wrong field" / "model forgot a quote and JSON didn't parse" / "model hallucinated an extra arg" — these become structurally impossible because the model can't type the args by hand anymore; the API protocol requires them as a real dict.
 
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `LLM_BACKEND` | `llm.backend` | `ollama` | `ollama` \| `openai` \| `anthropic` \| `mock` |
-| `LLM_MODEL` | `llm.model` | `qwen3.5:27b` | Model name passed to the backend |
-| `LLM_BASE_URL` | `llm.base_url` | `http://localhost:11434` | Ollama or OpenAI-compatible base URL |
-| `LLM_TEMPERATURE` | `llm.temperature` | `0.1` | Sampling temperature |
-| `LLM_MAX_TOKENS` | `llm.max_tokens` | `2048` | Max tokens per LLM call |
-| `LLM_LOG_DETAIL` | `llm.log_detail` | `off` | `off` \| `compact` \| `full` — show LLM conversation in server log |
+**How to measure the improvement** on your specific model: run the compliance bench above with and without `--native`, compare `args_ok`.
 
-#### Logging
+**Rollback**: change one line of config + restart. No code changes.
 
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `LOG_MODE` | `logging.mode` | `normal` | `normal` — INFO only \| `llm` — DEBUG for LLM/tool interactions \| `verbose` — all DEBUG |
+---
 
-#### Tools
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `MCP_USE_MOCK` | `tools.mcp.use_mock` | `true` | Use built-in NetOps mock instead of real MCP server |
-| `MCP_CONFIG_JSON` | `tools.mcp.config_json` | — | MCP server config (JSON string or path to JSON file) |
-| `OPENAPI_USE_MOCK` | `tools.openapi.use_mock` | `true` | Use built-in NetOps mock instead of real OpenAPI spec |
-| `OPENAPI_SPEC_URL` | `tools.openapi.spec_url` | — | URL to OpenAPI 3.0 spec |
-| `OPENAPI_BASE_URL` | `tools.openapi.base_url` | — | Base URL for OpenAPI calls |
-| `OPENAPI_AUTH_TYPE` | `tools.openapi.auth_type` | `bearer` | `bearer` \| `api_key` \| `none` |
-| `OPENAPI_TOKEN_ENV` | `tools.openapi.token_env` | `NETOPS_API_TOKEN` | Env var holding the API token |
-| `HITL_TOOL_NAMES` | `tools.hitl_tool_names` | — | Comma-separated tools that always require HITL approval before execution |
-
-#### HITL
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `HITL_CONFIDENCE_THRESHOLD` | `hitl.confidence_threshold` | `0.75` | Confidence below this triggers HITL ambiguity check |
-| `HITL_MAX_AUTO_HOST_COUNT` | `hitl.max_auto_host_count` | `5` | Actions affecting more hosts than this trigger HITL |
-| `HITL_SKILL_AMBIGUITY` | `hitl.skill_ambiguity` | `false` | `true` to route ambiguous skill matches to HITL approval |
-| `HITL_SLACK_WEBHOOK_URL` | `hitl.slack_webhook_url` | — | Slack incoming webhook URL for HITL notifications |
-| `HITL_PAGERDUTY_ROUTING_KEY` | `hitl.pagerduty_routing_key` | — | PagerDuty Events API routing key |
-
-#### Memory / Dual-Track Memory (DTM)
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `HERMES_DATA_DIR` | `memory.data_dir` | `./data` | Root directory for FTS5 database, daily .md files, facts.jsonl, skills |
-| `REDIS_URL` | `memory.redis_url` | — | Redis connection string (stubs to in-memory if absent) |
-| `POSTGRES_DSN` | `memory.postgres_dsn` | — | PostgreSQL DSN (skips persistence if absent) |
-| `CHROMA_PATH` | `memory.chroma_path` | `./chroma_db` | ChromaDB local path |
-| `DTM_COMPACTION_TURNS` | `memory.dtm.compaction_turns` | `20` | Turns before flushing today's buffer to `daily/YYYY-MM-DD.md` |
-| `DTM_NUDGE_TURNS` | `memory.dtm.nudge_turns` | `10` | Turns between deep Hermes LLM review sweeps |
-| `DTM_TRACK_B_WEIGHT` | `memory.dtm.track_b_weight` | `1.5` | Score multiplier for curated facts vs raw chunks (>1 prefers facts) |
-| `DTM_HALF_LIFE_DAYS` | `memory.dtm.temporal_half_life_days` | `7.0` | Track A temporal decay — score halves every N days |
-
-#### Registry
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `AGENT_URLS` | `registry.agent_urls` | — | Comma-separated peer agent A2A URLs for pre-population |
-| `REGISTRY_LB` | `registry.lb_strategy` | `round_robin` | `round_robin` \| `random` \| `least_loaded` |
-| `REGISTRY_HEALTH_INTERVAL` | `registry.health_check_interval` | `60` | Health check interval in seconds |
-
-#### Server & A2A
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `HOST` | `server.host` | `0.0.0.0` | Bind address |
-| `PORT` | `server.port` | `8000` | Listen port |
-| `RELOAD` | `server.reload` | `false` | Enable hot reload |
-| `A2A_BASE_URL` | `server.a2a_base_url` | `http://localhost:8000/api/v1/a2a` | This agent's outbound A2A base URL |
-
-### Override examples
+## Operations cheatsheet
 
 ```bash
-# Run with a smaller model for testing
+# Switch model
 LLM_MODEL=qwen3.5:14b uvicorn main:app --port 8000
 
-# Enable full LLM conversation logging
+# Make a specific tool always require HITL
+HITL_TOOL_NAMES=netflow_dump,db_failover uvicorn main:app
+
+# Enable cross-module learning (journal → facts)
+# In config.yaml:
+#   cross_module:
+#     journal_to_facts:
+#       enabled: true
+
+# Verbose LLM logs
 LLM_LOG_DETAIL=compact LOG_MODE=llm uvicorn main:app --port 8000
 
-# Enable HITL for specific tools + skill ambiguity
-HITL_TOOL_NAMES=netflow_dump,db_failover HITL_SKILL_AMBIGUITY=true uvicorn main:app
+# Run audits without commits
+./scripts/precheck.sh --audits
 
-# Faster DTM compaction for development (see daily files appear sooner)
-DTM_COMPACTION_TURNS=3 uvicorn main:app --port 8000
+# Run retrieval bench
+python -m evaluation.cli --golden data/golden_set.jsonl --backend hybrid --top-k 5
 
-# Use real Ollama (same as config.yaml defaults)
-LLM_BACKEND=ollama LLM_MODEL=qwen3.5:27b uvicorn main:app --port 8000
+# Run tool-compliance bench (needs Ollama)
+python -m evaluation.compliance_cli --golden data/tool_compliance_set.jsonl --model qwen2.5:7b --verbose
+
+# Check what's in memory for a session
+sqlite3 data/memory/midterm.db "SELECT fact, fact_type, confidence FROM facts ORDER BY created_at DESC LIMIT 20"
 ```
 
 ---
 
-## 13. Project Structure
+## Project layout
 
 ```
-it-ops-agent/
-├── main.py                        # FastAPI entry point — config-driven service assembly (v5)
-├── config.yaml                    # Single source of truth for all settings
-├── config.py                      # YAML loader + env var overlay + AppConfig dataclass
-├── logging_config.py              # Logging presets: normal | llm | verbose
-├── requirements.txt
-├── pytest.ini
+NetOpYuAgent/
+├── ARCHITECTURE.md            ← cross-module reference (read first for any multi-module change)
+├── README.md / README-cn.md   ← onboarding (you are here)
+├── main.py                    ← FastAPI app + lifespan; build_services() wires everything
+├── config.py / config.yaml    ← all module activation knobs
 │
-├── a2a/                           # A2A protocol (9 files)
-│   ├── schemas.py                 # Pydantic data models
-│   ├── agent_card.py              # AgentCard builder
-│   ├── agent_executor.py          # Executor base class + processor chain
-│   ├── event_queue.py             # Sealed async event queue
-│   ├── request_handler.py         # JSON-RPC method router
-│   ├── server.py                  # FastAPI sub-app factory
-│   ├── push_notifications.py      # Push notifications (exponential backoff)
-│   └── task_store.py              # In-memory task state store
+├── runtime/                   ← agent loop, stop policy, directive parser, context budget
+│   └── DESIGN.md
+├── agent_memory/              ← 5-tier memory + consolidation + FTS5 + embedding hybrid
+│   └── DESIGN.md
+├── hitl_core/                 ← interrupt/decision/batch/audit pipeline
+│   └── DESIGN.md
+├── retrieval/                 ← BM25 / Embedding / Hybrid / Cache backends + meta tools
+│   └── DESIGN.md
+├── skills/                    ← catalog + journal + evolver + journal_consumer + loader
+│   └── DESIGN.md
+├── tools/                     ← mock + pragmatic tool implementations + metadata
+│   └── DESIGN.md
+├── integrations/              ← cross-module glue (LLM engine, MCP, OpenAPI, adapters)
+│   └── DESIGN.md
 │
-├── hitl/                          # Human-in-the-loop (9 files)
-│   ├── schemas.py                 # HitlPayload, HitlDecision, AuditRecord …
-│   ├── triggers.py                # Four trigger types + HitlConfig
-│   ├── graph.py                   # LangGraph StateGraph(ITOpsGraphState), 6 nodes
-│   ├── review.py                  # Five notification channels + WebSocket manager
-│   ├── decision.py                # HitlDecisionRouter — five decision types
-│   ├── audit.py                   # Audit service (in-memory + PostgreSQL)
-│   ├── router.py                  # FastAPI routes + /ws WebSocket endpoint
-│   └── a2a_integration.py         # ITOpsHitlAgentExecutor — dual-path + post-verify
+├── schema/                    ← ArgSchema + JSON-Schema / Ollama tools exporter
+├── evaluation/                ← retrieval bench + tool-compliance bench + CLIs
+├── memory/                    ← thin MemoryAdapter facade for runtime
+├── webui/                     ← FastAPI sub-app + SPA dashboard
+├── a2a/                       ← agent-to-agent protocol primitives
+├── task/                      ← task graph primitives
+├── registry/                  ← agent identity + capability registry
 │
-├── memory/                        # Memory and learning (12 files)
-│   ├── schemas.py                 # MemoryRecord, RetrievalQuery …
-│   ├── router.py                  # MemoryRouter façade
-│   ├── fts_store.py               # FTS5SessionStore — SQLite FTS5 cross-session recall
-│   ├── curator.py                 # MemoryCurator — LLM-driven fact extraction
-│   ├── user_model.py              # UserModelEngine — expertise and trait tracking
-│   ├── consolidation.py           # Consolidation worker (summary + entity extraction)
-│   ├── stores/backends.py         # L1–L4 store implementations
-│   └── pipelines/                 # ingestion.py + retrieval.py
+├── data/
+│   ├── golden_set.jsonl              ← retrieval bench (25 cases)
+│   └── tool_compliance_set.jsonl     ← compliance bench (18 cases)
 │
-├── skills/                        # Skill system (3 files)
-│   ├── catalog.py                 # SkillCatalogService + 9 default skills
-│   └── evolver.py                 # SkillEvolver — autonomous skill creation + self-improvement
+├── scripts/
+│   ├── precheck.sh                   ← single entry for audits + eval (used by CI + pre-commit)
+│   ├── audit_module_independence.py
+│   ├── audit_imports.py
+│   ├── audit_wiring.py
+│   ├── audit_prompt_templates.py
+│   ├── audit_directive_parsing.py
+│   └── _audit_common.py
 │
-├── integrations/                  # LLM and tool backends (5 files)
-│   ├── llm_engine.py              # Ollama / OpenAI / Anthropic / Mock engines
-│   ├── mcp_client.py              # MCP server client
-│   ├── openapi_client.py          # OpenAPI 3.0 consumer
-│   └── tool_router.py             # ToolRouter — dispatches to MCP / OpenAPI / mock
-│
-├── runtime/                       # Execution engine (8 files)
-│   ├── loop.py                    # AgentRuntimeLoop — thin main loop
-│   ├── context_budget.py          # ContextBudgetManager + ToolResultStore (P0)
-│   ├── stop_policy.py             # StopPolicy + LoopState
-│   ├── skill_catalog.py           # SkillCatalogService integration
-│   ├── model_tier.py              # ModelTierClassifier (P2)
-│   ├── delegation.py              # Fork / fresh delegation
-│   └── tool_cache.py              # Composite skill scoring
-│
-├── task/                          # Task orchestration (9 files)
-│   ├── schemas.py                 # TaskDefinition, SessionRecord …
-│   ├── intra/planner.py           # TaskPlanner + TaskScheduler + TaskExecutor
-│   ├── intra/store.py             # TaskStore + RetryManager
-│   ├── inter/coordinator.py       # A2ATaskDispatcher + MultiRoundCoordinator
-│   ├── inter/session.py           # SessionManager (Redis, TTL=8 h)
-│   └── inter/hitl_bridge.py       # HitlTaskBridge — suspend / resume hooks
-│
-├── registry/                      # Agent registry (6 files)
-│   ├── schemas.py                 # AgentEntry, AgentSkill, ResolutionResult
-│   ├── store.py                   # InMemory + Redis dual storage
-│   ├── discovery.py               # AgentDiscovery — AgentCard fetching
-│   ├── registry.py                # AgentRegistry — register / resolve / health check
-│   └── router.py                  # FastAPI routes
-│
-├── tools/                         # Mock tools (2 files)
-│   └── mock_tools.py              # 11 mock tools: list_devices, list_interfaces, syslog_search, prometheus_query, netflow_dump, dns_lookup, device_info, alert_summary, service_health, read_stored_result, process_stored_chunks
-│
-├── webui/                         # Browser console
-│   ├── backend.py                 # FastAPI sub-app — chat/stream, HITL, system wiring
-│   └── static/index.html          # Terminal-style single-page console
-│
-└── tests/                         # Test suite
-    ├── test_a2a.py                # A2A module (~30 cases)
-    ├── test_hitl.py               # HITL module (~25 cases)
-    ├── test_memory_task.py        # Memory + Task (~45 cases)
-    ├── test_registry.py           # Registry (~30 cases)
-    ├── test_runtime.py            # Runtime Loop (~50 cases)
-    ├── test_hermes_features.py    # Hermes learning loop (~43 cases)
-    └── test_p0_p1_p2.py           # P0/P1/P2 + WebUI (~60 cases)
+├── .github/workflows/ci.yml          ← 3 parallel jobs on every PR
+└── .pre-commit-config.yaml           ← local audit gate before commit
 ```
+
+For a full file-by-file breakdown of any module, read its `DESIGN.md`.
 
 ---
 
-## 14. Roadmap
+## Contributing
+
+### Before opening a PR
+
+```bash
+# Set up the local quality gate (one-time):
+pip install pre-commit
+pre-commit install
+
+# Run before pushing:
+./scripts/precheck.sh
+```
+
+### Changing one module
+
+Read **only that module's** `DESIGN.md`. Run tests; let CI catch the rest.
+
+### Changing two modules
+
+Read `ARCHITECTURE.md` §4 ("cross-module conventions"). Most cross-module wiring goes in `cfg.cross_module.*` — see `config.yaml`.
+
+### Adding a new service (cross-module collaborator)
+
+1. Construct it in `main.py:build_services()`
+2. Register: `services["my_service"] = obj`
+3. **Have at least one external file read it via `services.get("my_service")` or `services["my_service"]`** — otherwise `audit_wiring.py` flags it as a ghost service and CI fails
+4. If it's introspection-only (no runtime caller — e.g. exposed via `/system/wiring`), add to `KEY_WHITELIST` in `audit_wiring.py` with justification
+
+### Adding a tool-compliance case
+
+Append a JSONL line to `data/tool_compliance_set.jsonl`:
+
+```jsonl
+{"query": "your query", "expected_tool": "tool_name", "expected_args": {"k": "v"}, "tags": ["destructive"]}
+```
+
+CI validates structure; bench measures actual model performance.
+
+### Adding a retrieval golden case
+
+Append to `data/golden_set.jsonl` (see existing cases for schema). Re-run `./scripts/precheck.sh --eval` to confirm thresholds still hold.
+
+### Documentation rules
+
+- Single-module change → update that module's `DESIGN.md`
+- Cross-module change → update `ARCHITECTURE.md` if it touches the dependency graph
+- New module → must ship a `DESIGN.md` with the 6 standard sections (this is a PR requirement)
+- README is for onboarding only; depth belongs in `DESIGN.md` / `ARCHITECTURE.md`
+
+---
+
+## Roadmap
 
 ### Implemented
 
-- [x] A2A Protocol v0.3.0 — full SSE streaming + WebSocket HITL
-- [x] HITL five-layer architecture (trigger → graph interrupt → notification fan-out → decision routing → audit)
-- [x] `StateGraph(ITOpsGraphState)` — typed state prevents silent key clobbering between nodes
-- [x] Four-layer memory (L1–L4, MMR retrieval, consolidation worker)
-- [x] Hermes post-turn pipeline (FTS5 recall, MemoryCurator, UserModelEngine, SkillEvolver)
-- [x] Integrations — Ollama / OpenAI / Anthropic / MCP / OpenAPI tool backends
-- [x] Task module (DAG scheduling + cross-agent delegation + multi-turn sessions)
-- [x] Registry — dynamic service discovery, health checks, load balancing
-- [x] Runtime Loop — thin main loop + dual-path routing + P1/P2 features
-- [x] P0: ToolResultStore large-output externalisation + paginated read API
-- [x] P0: ContextBudgetManager per-turn token prioritisation
-- [x] P0: StopPolicy six-dimension stop evaluation
-- [x] P1: SkillCatalogService — L1/L2 progressive disclosure + composite scoring
-- [x] P1: SkillEvolver — autonomous skill creation and feedback-driven improvement
-- [x] P1: Forked delegation — fresh / forked + context inheritance
-- [x] P1: Confirmed Facts & Working Set as first-class prompt citizens
-- [x] P1: Pre- and post-verification hooks
-- [x] P2: Model tiering — fast_model / full_model routing
-- [x] WebUI console — terminal style, SSE/sync modes, Flow tab, HITL approval, P0 visualisation
+- ✅ A2A Protocol v0.3.0 — full SSE streaming + WebSocket HITL
+- ✅ HITL pipeline (interrupt + 4 decision types + batch + audit) — `hitl_core/`
+- ✅ 5-tier memory (short/mid/long/profile/journal) with FTS5 + embedding hybrid recall
+- ✅ Fact conflict detection wired into `MemoryAdapter.add_fact` (semantic dedup + LLM reconcile)
+- ✅ Auto memory consolidation every N turns per-session (background, non-blocking)
+- ✅ Hermes post-turn pipeline (fact extraction, user model, skill evolver)
+- ✅ MCP + OpenAPI tool backends; unified `ToolRouter`
+- ✅ Skill catalog (L1/L2 progressive disclosure + composite scoring)
+- ✅ SkillEvolver — autonomous creation + dormant-skill rewriting
+- ✅ Tool result external storage (`[STORED:id]`) + paginated read API
+- ✅ Context budget priority allocation (`cfg.context_budget.strategy=priority`)
+- ✅ Stop policy six-dimension evaluation
+- ✅ PolicyEngine intent classifier fast-path (read-only queries skip LLM eval)
+- ✅ Trust-mode graduated HITL (cautious / standard / trusted)
+- ✅ Lifecycle hooks (`runtime/hooks.py`) for extensibility without context cost
+- ✅ JWT / API-key auth (`auth_core.py` / `auth.py`)
+- ✅ Log redaction (secrets, API keys, SNMP community strings)
+- ✅ Native tools API (Ollama OpenAI-style, opt-in via `supports_native_tools`)
+- ✅ Tool-compliance bench (`evaluation/compliance_cli.py`) for A/B model evaluation
+- ✅ Retrieval bench (`evaluation/cli.py`) with CI gate
+- ✅ 6 static audits + CI + pre-commit + branch protection
 
-### Production requirements (not yet implemented)
+### Reserved / not yet implemented
 
-- [ ] **JWT / OIDC auth**: `/hitl/{id}/approve` and `/hitl/{id}/reject` must be restricted to approver roles — highest priority
-- [ ] **Real LLM chains in graph nodes**: replace keyword stubs in `intent_classifier_node`, `risk_assessor_node`, `planner_node` with structured LLM calls
-- [ ] **Real tool backends**: replace `_execute_task` stubs in `task/intra/planner.py` (kubectl / Prometheus HTTP API / OpsGenie)
-- [ ] **Real embeddings**: replace `_EmbedderStub` in `memory/pipelines/ingestion.py`
-- [ ] **OpenTelemetry tracing**: add spans to all cross-module calls; propagate TraceID via `session_id`
-- [ ] **PostgreSQL checkpointer**: replace `MemorySaver` in `build_hitl_graph()` for production durability
-
-### Nice-to-have
-
-- [ ] Prompt cache-friendly prefix ordering (stable prefix first, variable content last)
-- [ ] Lightweight verifier agent (small model for post-execution health checks)
-- [ ] Agent versioning (AgentCard `version` field, canary releases)
-- [ ] MCP protocol integration for external tool access
+- ⏳ **Skill as sub-agent** — high-complexity skills (≥5 steps) become LangGraph subgraphs with independent prompt + budget. `cfg.skill_orchestration.subagent.*` namespace reserved.
+- ⏳ **MemGPT-style LLM-managed memory** — agent self-manages tier promotion/demotion. Defer until fact corpus is reliably clean.
+- ⏳ **OpenTelemetry tracing** — spans on all cross-module calls; `session_id` as TraceID.
+- ⏳ **Postgres checkpointer** for HITL graph state (replaces in-memory `MemorySaver` for production durability).
+- ⏳ **Distributed multi-agent A2A** — primitives exist (`a2a/`); orchestration layer pending.
+- ⏳ **Per-tool circuit breakers** — partial in `ToolMeta`; UI integration pending.
 
 ---
 
-*Version: v3.0 | Updated: 2026-04-15*
+## Glossary
+
+| Term | Meaning |
+|---|---|
+| **Functional module** | Code unit with zero imports from other functional modules (`memory/`, `hitl_core/`, etc.). Verified by `audit_module_independence`. |
+| **Adapter** | Opt-in bridge connecting two functional modules. Lives in `integrations/adapters/`. |
+| **Skill** | A markdown procedure consulted by the LLM (not executable code). |
+| **Tool** | An atomic callable — local fn / MCP server method / OpenAPI op. |
+| **Meta-tool** | A tool the LLM uses to discover other tools (`list_tools`, `tool_details`). |
+| **Journal** | Per-session log of skill loads + tool calls; consumed by `SkillEvolver`. |
+| **Fact** | Structured statement extracted from conversation, stored in mid-term memory. |
+| **HITL gate** | Mechanism pausing the agent until a human decides. |
+| **Ghost service** | An object in `services[...]` with no external readers — `audit_wiring` flags these. |
+| **Native tools** | Ollama's OpenAI-compatible `tools` API — structured tool_calls instead of text protocol. |
+| **Trust mode** | `cautious` / `standard` / `trusted` — operator-set sensitivity for HITL gate triggering. |
+
+---
+
+## Environment variables
+
+Common knobs (full list: see `config.py` field-by-field):
+
+| Env var | Default | Effect |
+|---|---|---|
+| `LLM_BACKEND` | `ollama` | `ollama` / `openai` / `anthropic` / `mock` |
+| `LLM_MODEL` | `qwen3.5:27b` | Any Ollama tag or OpenAI/Anthropic model name |
+| `LLM_BASE_URL` | `http://localhost:11434` | Override for remote Ollama |
+| `LLM_LOG_DETAIL` | `summary` | `summary` / `compact` / `full` |
+| `LLM_SUPPORTS_NATIVE_TOOLS` | `false` | Enable Ollama native tools API (Tier 1-C) |
+| `HITL_BACKEND` | `core` | `core` (recommended) or `langgraph` (legacy) |
+| `HITL_TOOL_NAMES` | (from config.yaml) | Comma-separated tool names to always gate |
+| `HITL_SKILL_AMBIGUITY` | `false` | Gate when skill matcher confidence is low |
+| `MEMORY_AUTO_CONSOLIDATE_TURNS` | `30` | 0 to disable per-session auto-consolidation |
+| `MEMORY_CONSOLIDATION_TEMPLATE` | `structured` | `structured` (Hermes) or `legacy` |
+| `DTM_COMPACTION_TURNS` | `5` | Flush daily `.md` after N turns (raise for prod) |
+| `NETOPYU_JWT_SECRET` | (required if auth enabled) | HS256 signing key |
+| `LOG_MODE` | `default` | `llm` / `verbose` / `default` / `quiet` |
+
+---
+
+## License
+
+(see `LICENSE` in repo root)
+
+---
+
+*Version: v4.0 — May 2026 (post Tier 1-C / 2-E)*
+*Last reviewed against: `ARCHITECTURE.md` rev 2026-05*

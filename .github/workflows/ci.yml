@@ -108,3 +108,20 @@ jobs:
           MIN_RECALL_3: "0.40"
           MIN_MRR:      "0.30"
         run: ./scripts/precheck.sh --eval
+
+      - name: Validate tool-compliance golden set structure
+        # The compliance BENCH itself needs a running Ollama, which we
+        # don't have in GitHub-hosted runners. But the golden SET can
+        # still be validated structurally: every JSONL line must parse
+        # into a valid ToolCallCase. Catches typos / schema drift in
+        # the test data without needing an LLM.
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          from evaluation.compliance_cli import _load_cases
+          from pathlib import Path
+          cases = _load_cases(Path('data/tool_compliance_set.jsonl'))
+          assert len(cases) >= 15, f'compliance set has only {len(cases)} cases; minimum 15 expected'
+          print(f'✓ {len(cases)} compliance cases loaded and validated')
+          "
