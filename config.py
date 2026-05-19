@@ -143,6 +143,23 @@ class HITLConfig:
     skill_ambiguity: bool; slack_webhook_url: Optional[str]
     pagerduty_routing_key: Optional[str]
     sla: HITLSLAConfig; destructive_action_types: list[str]
+    # ── Trust mode (graduated trust spectrum) ─────────────────────────
+    # Controls how aggressively HITL gates fire based on tool action_type.
+    # Values:
+    #   "cautious"        — current behaviour: every hitl_tool_names hit
+    #                       triggers HITL (used by default; preserves
+    #                       backward compatibility, zero behavioural change
+    #                       from pre-trust-mode versions)
+    #   "auto_reversible" — read_only AND reversible tools auto-approve;
+    #                       only destructive triggers HITL
+    #   "bypass"          — all tools auto-approve; HITL only fires for
+    #                       LLM-level low-confidence / clarification needs.
+    #                       USE ONLY FOR TRUSTED ENVIRONMENTS (single-operator
+    #                       dev / shadow runs / replay) — operators in
+    #                       production must NOT have this mode.
+    # Wired via main.py into HitlExecutor.set_trust_mode(). See
+    # ARCHITECTURE_REVIEW.md §2.2 (trust trajectory) for design rationale.
+    trust_mode: str = "cautious"
 
 @dataclass
 class DTMConfig:
@@ -159,6 +176,14 @@ class MemoryConfig:
     # N turns per session. 0 = disabled (long sessions grow unbounded;
     # also fine if you periodically clear sessions another way).
     auto_consolidate_turns: int = 30
+    # Sprint 2 (2026-05): MemoryConsolidator prompt template.
+    #   "structured" — Hermes-style 5-section rollup (Goal/Progress/Decisions/
+    #                  Devices/NextSteps). Token-predictable, audit-friendly.
+    #                  Default.
+    #   "legacy"     — free-form 200-char prose (pre-Sprint-2 behaviour).
+    # Override via env MEMORY_CONSOLIDATION_TEMPLATE. See
+    # agent_memory/consolidation.py:_SUMMARY_PROMPT for the template body.
+    consolidation_template: str = "structured"
 
 @dataclass
 class SkillsConfig:
@@ -1042,6 +1067,11 @@ def load(config_path: str = "config.yaml") -> AppConfig:
                 low      = _env_int("", hs.get("low",      1800)),
             ),
             destructive_action_types=destructive_action_types,
+            # Trust mode — env override or yaml or default "cautious".
+            # Validated against the three known values; invalid input
+            # falls back to "cautious" with a warning log (handled at
+            # use site, not here, to keep Config dataclass pure).
+            trust_mode             = _env_str  ("HITL_TRUST_MODE",            h.get("trust_mode",           "cautious")) or "cautious",
         ),
         memory=MemoryConfig(
             data_dir     = _env_str("HERMES_DATA_DIR", m.get("data_dir",    "./data")),
@@ -1050,6 +1080,11 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             chroma_path  = _env_str("CHROMA_PATH",     m.get("chroma_path", "./chroma_db")),
             auto_consolidate_turns = _env_int("MEMORY_AUTO_CONSOLIDATE_TURNS",
                                               m.get("auto_consolidate_turns", 30)),
+            # Sprint 2 (2026-05): structured Hermes-style rollup vs legacy free-form.
+            # Validated in MemoryConsolidator.__init__; invalid → falls back
+            # to 'structured' with a warning.
+            consolidation_template = _env_str("MEMORY_CONSOLIDATION_TEMPLATE",
+                                              m.get("consolidation_template", "structured")) or "structured",
             dtm=DTMConfig(
                 compaction_turns        = _env_int  ("DTM_COMPACTION_TURNS", md.get("compaction_turns",        20)),
                 nudge_turns             = _env_int  ("DTM_NUDGE_TURNS",      md.get("nudge_turns",             10)),

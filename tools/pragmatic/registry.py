@@ -16,6 +16,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"type": "Filter by device type (optional)", "tag": "Filter by site tag (optional)"},
         "returns":     "Device table: id, model, role, site, management IP",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["inventory", "discovery"],
     },
     "get_device_status": {
@@ -23,6 +24,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier from list_devices"},
         "returns":     "Status dict: cpu_pct, mem_pct, uptime, interface counts",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["monitoring", "status"],
     },
     "get_device_config": {
@@ -30,6 +32,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier", "section": "Config section (optional): radius|ntp|vlan|bgp"},
         "returns":     "Device configuration text",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["config", "read"],
     },
     "validate_device_config": {
@@ -37,6 +40,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier"},
         "returns":     "Validation report: issues, severity, recommendations",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["config", "validation"],
     },
     "edit_device_config": {
@@ -44,6 +48,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier", "section": "Section to change", "changes": "Change dict", "reason": "Audit reason"},
         "returns":     "Push result with diff and rollback instructions",
         "hitl":        True,
+        "action_type": "destructive",
         "tags":        ["config", "write", "destructive"],
     },
     "get_syslog": {
@@ -51,6 +56,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier", "level": "Severity filter: error|warning|info", "lines": "Max lines (default 50)"},
         "returns":     "Syslog lines with timestamp, facility, severity, message",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["logs", "diagnostics"],
     },
     "query_interface_metrics": {
@@ -58,6 +64,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier", "interface": "Interface name (optional, default: all)"},
         "returns":     "Per-interface: rx/tx bytes, error counts, utilisation pct",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["metrics", "network"],
     },
     "get_bgp_summary": {
@@ -65,6 +72,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier"},
         "returns":     "BGP table: peer IP, ASN, state, prefixes received/sent, uptime",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["routing", "bgp"],
     },
     "get_device_facts": {
@@ -72,6 +80,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier"},
         "returns":     "Facts dict: hostname, model, os_version, serial, uptime",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["inventory", "hardware"],
     },
     "run_command": {
@@ -79,6 +88,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_id": "Device identifier", "command": "CLI command string (show/display only)"},
         "returns":     "Command output as text",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["diagnostics", "read"],
     },
     "multi_device_check": {
@@ -86,6 +96,7 @@ TOOLS: dict[str, dict[str, Any]] = {
         "parameters":  {"device_ids": "List of device identifiers", "check": "Check type: status|config|syslog|bgp"},
         "returns":     "Per-device results table",
         "hitl":        False,
+        "action_type": "read_only",
         "tags":        ["inventory", "bulk"],
     },
 }

@@ -83,6 +83,10 @@ async def build_services() -> dict[str, Any]:
         inline_threshold  = 4_000,
         session_ttl       = 86_400,
         enable_user_model = True,
+        # Sprint 2 (2026-05): Hermes-style structured rollup vs legacy
+        # free-form. Validated downstream in MemoryConsolidator;
+        # invalid → falls back to 'structured' with a warning.
+        consolidation_template = getattr(cfg.memory, "consolidation_template", "structured"),
     )
     # Auto-consolidate gate — see MemoryAdapter.set_consolidator docstring.
     # Cfg-driven; 0 disables. Background task style, hot path unblocked.
@@ -445,12 +449,37 @@ async def build_services() -> dict[str, Any]:
                     skill_catalog=None,
                 )
 
+            # Build tool_metadata for action_type fast-path.
+            # services["tool_loader"] is set in step 6c (line ~368) — already
+            # available here. Fail-soft: if loader is missing, just don't
+            # populate the fast-path (PolicyEngine still works without it).
+            try:
+                _tool_md = services["tool_loader"].build_metadata()
+            except (KeyError, AttributeError):
+                _tool_md = None
+
             _policy_engine = PolicyEngine(
                 policies    = _policy_defs,
                 llm_call    = _policy_llm_call,
                 cache_ttl_s = 120,
+                # Wire tool metadata so classify_action_type() fast-path works.
+                # Tools that declare action_type (read_only/reversible/
+                # destructive) will bypass LLM evaluation entirely. See
+                # runtime/policy_engine.py classify_action_type() for rationale.
+                tool_metadata = _tool_md,
             )
             set_policy_engine(_policy_engine)
+            # Wire trust_mode from cfg.hitl (graduated-trust spectrum).
+            # set_trust_mode validates input and falls back to 'cautious'
+            # for unknown values, so this is fail-soft even with bad config.
+            try:
+                _tm = getattr(cfg.hitl, "trust_mode", "cautious") or "cautious"
+                _policy_engine.set_trust_mode(_tm)
+            except Exception as _tm_exc:
+                logger.warning(
+                    "PolicyEngine: trust_mode wire failed (%s) — using 'cautious'",
+                    _tm_exc,
+                )
             logger.info(
                 "PolicyEngine: wired with %d policies from config.yaml",
                 len(_policy_defs),

@@ -169,6 +169,13 @@ hitl:
   skill_ambiguity:       false
   slack_webhook_url:     ""
   pagerduty_routing_key: ""
+  # Trust mode (graduated trust spectrum, added 2026-05).
+  # Override via env HITL_TRUST_MODE. Values:
+  #   cautious          — every hitl_tool_names hit triggers HITL (default)
+  #   auto_reversible   — read_only/reversible tools auto-approve
+  #   bypass            — all auto-approve (trusted dev/replay only — NOT prod)
+  # See config.py:HITLConfig.trust_mode docstring for design rationale.
+  trust_mode: "cautious"
   sla:
     critical: 300
     high:     600
@@ -194,6 +201,12 @@ memory:
   # LLM-summarised rollups so long-session FTS5/embedding search stays
   # fast. 0 disables. Background task — never blocks after_turn.
   auto_consolidate_turns: 30
+  # Sprint 2 (2026-05): MemoryConsolidator prompt template.
+  #   "structured" — Hermes-style 5-section rollup (default,
+  #                  Goal/Progress/Decisions/Devices/NextSteps)
+  #   "legacy"     — free-form 200-char prose (pre-Sprint-2)
+  # Override: MEMORY_CONSOLIDATION_TEMPLATE env var.
+  consolidation_template: "structured"
   dtm:
     compaction_turns:         5    # flush daily .md after 5 turns (raise to 20+ in prod)
     nudge_turns:              5    # deep Hermes review every 5 turns

@@ -45,7 +45,39 @@ logger = logging.getLogger(__name__)
 
 # ── Prompt templates ──────────────────────────────────────────────────────────
 
+# Hermes-style structured rollup template (Sprint 2, 2026-05).
+# Inspired by Hermes' `ContextCompressor` design — produces a stable,
+# parseable summary with named sections instead of free-form prose.
+#
+# Benefits over the legacy free-form template (kept as _SUMMARY_PROMPT_LEGACY):
+#   - Token budget per section is predictable
+#   - Audit log readers can extract specific facts (e.g. "Devices touched")
+#   - Iterative re-consolidation (next compaction round can update sections
+#     in place rather than re-summarising from scratch — future work)
+#   - Operators reading the rollup get consistent shape across sessions
+#
+# The structure mirrors a network-ops post-incident report format. If
+# adapted to other domains, override these section headers via config.
 _SUMMARY_PROMPT = """\
+请将以下对话历史压缩为结构化摘要。严格按以下 5 节输出，每节单独一行，
+section 标题用中文加冒号开头。保留具体事实、设备 ID、决策；忽略重复和闲聊。
+
+格式要求：
+  Goal: <用户的总体目标，1 句话>
+  Progress: <已完成的关键步骤，<= 3 个 bullet>
+  Decisions: <做出的重要决定（审计相关），<= 3 个 bullet>
+  Devices: <涉及到的设备/服务 ID 列表，逗号分隔>
+  NextSteps: <尚未完成或后续可做的事，<= 2 个 bullet>
+
+对话历史：
+{history}
+
+结构化摘要（直接输出 5 节，不要前缀）："""
+
+# Legacy free-form template — kept for rollback. Activate by setting
+# config.memory.consolidation_template = "legacy". See
+# agent_memory/DESIGN.md for the migration plan.
+_SUMMARY_PROMPT_LEGACY = """\
 请将以下对话历史压缩为一段简洁的摘要（不超过200字）。
 保留所有重要的事实、决策和结论。忽略重复内容和闲聊。
 用第三人称描述。不要添加分析或评价，只保留关键信息。
@@ -113,8 +145,19 @@ class MemoryConsolidator:
         keep_recent_n:       int = 10,    # 最近 N 条不压缩
         group_size:          int = 8,     # 每组几条 chunks 合并为一条摘要
         summary_importance:  float = 0.85,
+        template:            str = "structured",   # Sprint 2: "structured" | "legacy"
     ) -> None:
         self._llm_fn        = llm_fn
+        # Hermes-style structured rollup (default, Sprint 2) vs legacy free-form.
+        # See _SUMMARY_PROMPT / _SUMMARY_PROMPT_LEGACY docstrings for the
+        # trade-off. agent_memory/DESIGN.md §4.x has the migration plan.
+        if template not in ("structured", "legacy"):
+            logger.warning(
+                "MemoryConsolidator: unknown template=%r, falling back to 'structured'",
+                template,
+            )
+            template = "structured"
+        self._template = template
         self._trigger_n     = consolidate_after_n
         self._keep_recent   = keep_recent_n
         self._group_size    = group_size
@@ -214,7 +257,10 @@ class MemoryConsolidator:
     def _summarize(self, history: str) -> str:
         if self._llm_fn:
             try:
-                prompt = _SUMMARY_PROMPT.format(history=history[:3000])
+                # Sprint 2: structured Hermes-style template by default;
+                # legacy free-form available via template="legacy" arg.
+                tmpl = _SUMMARY_PROMPT if self._template == "structured" else _SUMMARY_PROMPT_LEGACY
+                prompt = tmpl.format(history=history[:3000])
                 result = self._llm_fn(prompt)
                 return result.strip() if result else self._fallback_summary(history)
             except Exception as e:

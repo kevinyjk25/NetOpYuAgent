@@ -187,6 +187,12 @@ class HitlExecutor:
         """
         self._skill_evolver = evolver
 
+    # NOTE: trust_mode lives in PolicyEngine, not in HitlExecutor —
+    # runtime/loop.py decides whether to skip HITL gating, and runtime
+    # cannot import HitlExecutor (reverse-layer dependency). Both
+    # set_trust_mode() and classify_action_type() are on PolicyEngine so
+    # runtime can call them without breaking module independence audits.
+
     # ────────────────────────────────────────────────────────────────
     # Public entry point — called by A2A protocol layer
     # ────────────────────────────────────────────────────────────────

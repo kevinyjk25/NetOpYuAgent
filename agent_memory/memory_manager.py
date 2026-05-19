@@ -95,6 +95,7 @@ class MemoryManager:
         # Consolidation
         consolidate_after_n_turns: int = 30,
         consolidation_keep_recent: int = 10,
+        consolidation_template:    str = "structured",   # Sprint 2 (2026-05)
         # Skill store
         skill_deprecate_threshold: float = 0.3,
     ) -> None:
@@ -148,6 +149,7 @@ class MemoryManager:
             llm_fn=llm_fn,
             consolidate_after_n=consolidate_after_n_turns,
             keep_recent_n=consolidation_keep_recent,
+            template=consolidation_template,
         )
         self._reflector = ReflectionEngine(llm_fn=llm_fn)
 

@@ -92,6 +92,7 @@ class MemoryAdapter:
         inline_threshold:   int = 4_000,
         session_ttl:        int = 86_400,
         enable_user_model:  bool = True,
+        consolidation_template: str = "structured",   # Sprint 2 (2026-05)
     ) -> None:
         self._mgr = MemoryManager(
             data_dir          = data_dir,
@@ -100,6 +101,7 @@ class MemoryAdapter:
             inline_threshold  = inline_threshold,
             session_ttl       = session_ttl,
             enable_user_model = enable_user_model,
+            consolidation_template = consolidation_template,
         )
         # Per-session turn counter for nudge scheduling. Lives on the adapter
         # instance (one per process); on restart we lose count and start

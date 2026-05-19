@@ -69,17 +69,191 @@ class PolicyEngine:
         "p0 incident", "p1 incident", "sev0", "sev1", "major incident",
         "critical outage", "production down",
     })
+    # Read-only verbs / phrasings — fast-path for routine diagnostic queries.
+    # When a query matches read-only intent AND contains zero destructive
+    # keywords, classify_query_intent() can short-circuit the LLM eval.
+    # See classify_query_intent() docstring for the full algorithm.
+    _FALLBACK_READ_ONLY = frozenset({
+        # English
+        "list", "show", "get", "view", "check", "fetch", "describe",
+        "what is", "what are", "how many", "status of", "summary of",
+        "tell me", "find", "look up", "search",
+        # Chinese
+        "查询", "查看", "查一下", "看看", "看一下", "列出", "列一下",
+        "显示", "状态", "信息", "情况", "有哪些", "是什么", "怎么样",
+    })
 
     def __init__(
         self,
         policies:    list[PolicyDefinition],
         llm_call:    Callable[[str, str], Awaitable[str]],
         cache_ttl_s: int = 120,
+        tool_metadata: Optional[dict[str, dict[str, Any]]] = None,
     ) -> None:
         self._policies   = {p.name: p for p in policies}
         self._llm_call   = llm_call
         self._cache:     dict[str, tuple[PolicyResult, float]] = {}
         self._cache_ttl  = cache_ttl_s
+        # Metadata-driven reversibility fast-path. Keyed by tool name →
+        # action_type ∈ {"read_only", "reversible", "destructive"}. Populated
+        # at startup from tool registries (mock/pragmatic/builtin). Tools
+        # missing this field fall through to the LLM-based classify_destructive
+        # policy (preserves current behaviour). Wired post-construction via
+        # set_tool_metadata() because the tool loader is built AFTER the
+        # PolicyEngine in main.py — see deferred-wiring convention in
+        # ARCHITECTURE.md §4.2.
+        self._tool_action_types: dict[str, str] = {}
+        # Graduated trust spectrum — see set_trust_mode docstring. Default
+        # "cautious" exactly preserves pre-trust-mode behaviour (zero
+        # regression). Wired post-construction from cfg.hitl.trust_mode.
+        self._trust_mode: str = "cautious"
+        if tool_metadata:
+            self.set_tool_metadata(tool_metadata)
+
+    def set_tool_metadata(self, tool_metadata: dict[str, dict[str, Any]]) -> None:
+        """Inject tool metadata to enable action_type fast-path.
+
+        Called from main.py once ToolLoader has built the merged metadata
+        dict (mode-specific + builtin). Safe to call multiple times — last
+        call wins. Tools without an `action_type` field are simply not
+        added to the fast-path index, so classify_action_type() falls back
+        to LLM-based classify_destructive for them.
+        """
+        self._tool_action_types = {
+            name: md["action_type"]
+            for name, md in tool_metadata.items()
+            if isinstance(md, dict) and md.get("action_type") in (
+                "read_only", "reversible", "destructive",
+            )
+        }
+        logger.info(
+            "PolicyEngine: action_type index built — %d tools indexed "
+            "(read_only=%d, reversible=%d, destructive=%d)",
+            len(self._tool_action_types),
+            sum(1 for v in self._tool_action_types.values() if v == "read_only"),
+            sum(1 for v in self._tool_action_types.values() if v == "reversible"),
+            sum(1 for v in self._tool_action_types.values() if v == "destructive"),
+        )
+
+    def set_trust_mode(self, mode: str) -> None:
+        """Set the graduated-trust mode for HITL skip decisions.
+
+        See config.py:HITLConfig.trust_mode for the three values. Invalid
+        input is treated as "cautious" with a warning — that's the safe
+        default. Called from main.py after cfg is loaded; can also be
+        called dynamically (e.g. by an admin endpoint that bumps trust
+        for verified operators).
+        """
+        VALID = ("cautious", "auto_reversible", "bypass")
+        if mode not in VALID:
+            logger.warning(
+                "PolicyEngine: invalid trust_mode=%r, falling back to 'cautious'. "
+                "Valid: %s", mode, VALID,
+            )
+            self._trust_mode = "cautious"
+        else:
+            self._trust_mode = mode
+            if mode == "bypass":
+                logger.warning(
+                    "PolicyEngine: trust_mode=bypass — ALL HITL gates disabled. "
+                    "Use only for trusted dev/replay environments.",
+                )
+            else:
+                logger.info("PolicyEngine: trust_mode set to %s", mode)
+
+    def get_trust_mode(self) -> str:
+        """Return current trust mode (default 'cautious' until set)."""
+        return self._trust_mode
+
+    def should_skip_hitl_for_tool(self, tool_name: str) -> tuple[bool, str]:
+        """Check trust_mode + action_type to decide if HITL can be skipped.
+
+        Returns (skip: bool, reason: str). When skip=True, runtime should
+        NOT raise a HITL interrupt for this tool call. Reason is a short
+        human-readable string for audit logging.
+
+        Rules:
+          bypass mode          → always skip
+          cautious mode        → never skip (default, current behaviour)
+          auto_reversible mode → skip iff action_type ∈ {read_only, reversible}
+
+        Tools with unknown action_type (not declared in registry) always
+        fall through to the normal HITL path — this preserves safety: we
+        don't auto-approve a tool just because its action_type field is
+        missing. Called from runtime/loop.py at the HITL-gate decision
+        point — see runtime/DESIGN.md §3.x.
+        """
+        if self._trust_mode == "bypass":
+            return True, "trust_mode=bypass"
+        if self._trust_mode == "cautious":
+            return False, "trust_mode=cautious"
+        # auto_reversible path
+        atype = self._tool_action_types.get(tool_name)
+        if atype in ("read_only", "reversible"):
+            return True, f"trust_mode=auto_reversible action_type={atype}"
+        return False, f"trust_mode=auto_reversible action_type={atype or 'unknown'}"
+
+    def classify_action_type(self, tool_name: str) -> Optional[str]:
+        """Return action_type ∈ {read_only, reversible, destructive} or None.
+
+        Pure metadata lookup — never calls LLM. Returns None when the tool
+        is not in the index (either set_tool_metadata wasn't called, or the
+        tool doesn't declare action_type). Caller should fall back to the
+        LLM-based classify_destructive policy in that case.
+
+        Performance: ~1µs vs ~8s for the LLM equivalent — this is the
+        Claude-Code-inspired reversibility-weighted fast path. Read-only
+        tools (list_*, get_*, show_*, *_summary) skip HITL evaluation
+        entirely, dramatically improving routine query latency.
+        """
+        return self._tool_action_types.get(tool_name)
+
+    def classify_query_intent(self, query: str) -> Optional[str]:
+        """Cheap keyword-based query intent fast-path.
+
+        Returns:
+          "read_only"   — query matches read-only verb AND no destructive verbs
+                          → caller can skip LLM classify_destructive entirely
+          "destructive" — query contains a destructive verb
+                          → caller can skip LLM (already know it's destructive)
+          None          — ambiguous; caller should run the full LLM evaluation
+
+        This is intentionally narrow: it ONLY fires on high-confidence
+        signals. Anything in between (e.g. ambiguous Chinese phrasing,
+        novel verbs, complex multi-clause queries) falls through to the
+        LLM. False-positive on "destructive" path is safe (just an extra
+        HITL prompt the user has to dismiss); false-positive on the
+        "read_only" path means a destructive op runs without HITL — so the
+        rule MUST require ZERO destructive keyword hits.
+
+        Target: ~80% of routine diagnostic queries ("list devices",
+        "show status of X", "查一下 ap-01") return "read_only" here,
+        eliminating their ~8s LLM classification latency. The remaining
+        20% (ambiguous / novel) still hit the LLM — same correctness as
+        before.
+        """
+        q = query.lower().strip()
+        if not q:
+            return None
+        # Check destructive first — its keywords are more specific and
+        # take precedence (e.g. "restart and list" → destructive, not read_only).
+        for kw in self._FALLBACK_DESTRUCTIVE:
+            if " " in kw or not kw.isascii():
+                if kw in q:
+                    return "destructive"
+            else:
+                # ASCII word-boundary match (avoid "reset" inside "preset")
+                if re.search(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])", q):
+                    return "destructive"
+        # Then check read_only. Already verified zero destructive hits.
+        for kw in self._FALLBACK_READ_ONLY:
+            if " " in kw or not kw.isascii():
+                if kw in q:
+                    return "read_only"
+            else:
+                if re.search(r"(?<![a-z0-9])" + re.escape(kw) + r"(?![a-z0-9])", q):
+                    return "read_only"
+        return None
 
     # ── Async API (primary path) ──────────────────────────────────────────────
 

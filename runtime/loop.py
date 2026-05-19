@@ -294,7 +294,7 @@ def _build_tool_ledger(
     - [STORED:] labels annotated with total_size from their read results
     - Inline results recorded with size
     """
-    import json as _j, re as _re
+    import json as _j
 
     # Pass 1: collect total_size and page count per ref_id from read_stored_result results
     ref_info: dict = {}   # ref_id → {total_size, pages, last_offset}
@@ -706,10 +706,39 @@ class AgentRuntimeLoop:
         Async classify — uses PolicyEngine LLM evaluation when wired.
         Called from backend.py (async context). Falls back to synchronous
         keyword heuristic if engine is unavailable or LLM fails.
+
+        Fast-path (reversibility-weighted, added 2026-05):
+          Before paying the ~8s LLM round-trip, check the cheap keyword-based
+          query intent classifier. Routine "list/show/check" diagnostics
+          short-circuit to SIMPLE here — same outcome as the LLM would give,
+          ~8000× faster. Destructive verbs likewise short-circuit to COMPLEX
+          without LLM. Only ambiguous queries (no clear verb signal) actually
+          pay the LLM cost.
+
+          See PolicyEngine.classify_query_intent docstring for the safety
+          argument: read-only path requires ZERO destructive keyword hits,
+          so false-positives in the dangerous direction are not possible
+          short of inventing a new destructive verb the keyword set misses
+          — which would have been a problem regardless.
         """
         from runtime.policy_engine import get_policy_engine as _get_pe
         _engine = _get_pe()
         if _engine is not None:
+            # ── Fast-path: keyword intent classifier ──────────────────
+            intent = _engine.classify_query_intent(query)
+            if intent == "read_only":
+                return ComplexityDecision(
+                    complexity=QueryComplexity.SIMPLE,
+                    reason="Policy[fast-path]: read-only query intent",
+                    confidence=0.85, model_tier="full_model",
+                )
+            if intent == "destructive":
+                return ComplexityDecision(
+                    complexity=QueryComplexity.COMPLEX,
+                    reason="Policy[fast-path]: destructive verb in query",
+                    confidence=0.90, model_tier="full_model",
+                )
+            # intent is None → ambiguous, fall through to full LLM eval below
             try:
                 results = await _engine.evaluate_any(
                     ["classify_destructive", "classify_incident_severity"], query
@@ -932,7 +961,7 @@ class AgentRuntimeLoop:
         # so tools that ran in previous rounds are not re-executed.
         called_tools: set[str] = set()
         _known_stores: dict[str, str] = {}  # ref_id → tool_name (for context injection)
-        import json as _j2, re as _re2
+        import re as _re2
         for _fact in (list(confirmed_facts) if confirmed_facts is not None else []):
             if _fact.startswith("TOOL_EXEC: "):
                 # Parse: "TOOL_EXEC: tool_name|{args} → ref=abc size=N"
@@ -955,6 +984,32 @@ class AgentRuntimeLoop:
         while True:
             state.turns += 1
             memory_results = await self._retrieve_memory(query, session_id)
+
+            # ── L2 Snip (Claude-Code-inspired, added 2026-05) ──────────────
+            # See stream() copy of this block (~line 1300) for full rationale.
+            # Note: run() does not yield SSE chunks, so we only log the snip
+            # event — it shows up in the audit log via the snip function's
+            # logger.info() call.
+            try:
+                _budget = getattr(self._cfg, "budget", None)
+                _snip_cap = (
+                    getattr(_budget, "snip_tool_outputs_char_budget", 0)
+                    if _budget else 0
+                )
+                _keep_recent = (
+                    getattr(_budget, "snip_keep_recent", 5)
+                    if _budget else 5
+                )
+                if _snip_cap > 0 and tool_outputs:
+                    from runtime.context_budget import try_snip_tool_outputs as _snip
+                    tool_outputs, _freed = _snip(
+                        tool_outputs,
+                        target_char_budget = _snip_cap,
+                        keep_recent        = _keep_recent,
+                    )
+                    # _freed > 0 is already logged by _snip itself.
+            except Exception as _snip_exc:
+                logger.debug("L2 Snip skipped in run() (%s) — non-fatal", _snip_exc)
 
             # NOTE: We intentionally do NOT seed called_tools from memory context.
             # Memory may mention a prior tool call on device X, but we still need
@@ -1161,6 +1216,72 @@ class AgentRuntimeLoop:
     ) -> AsyncIterator[dict[str, Any]]:
         """Run one full turn of the agent loop and stream chunks.
 
+        Thin wrapper around _stream_impl that fires SESSION_END hook in
+        a finally block to guarantee cleanup observers run even on early
+        return / abort. Added Sprint 2 (2026-05).
+        """
+        # Track stats for SESSION_END payload. _stream_impl yields chunks
+        # we count + forward.
+        _stats = {
+            "session_id":  session_id,
+            "total_turns": 0,
+            "tool_calls":  0,
+            "stop":        None,
+            "outcome":     "unknown",
+        }
+        try:
+            async for chunk in self._stream_impl(
+                query           = query,
+                session_id      = session_id,
+                env_context     = env_context,
+                confirmed_facts = confirmed_facts,
+                working_set     = working_set,
+                tool_registry   = tool_registry,
+                delegation_mode = delegation_mode,
+                parent_state    = parent_state,
+            ):
+                # Count turn / tool events for the SESSION_END payload.
+                # The chunk shape conventions are stable (documented in
+                # ARCHITECTURE.md §4.4) so this is safe.
+                _ns = chunk.get("node_step", "")
+                if isinstance(_ns, str) and _ns.startswith("Turn "):
+                    _stats["total_turns"] += 1
+                if chunk.get("node") == "runtime_loop" and "Calling tool:" in str(_ns):
+                    _stats["tool_calls"] += 1
+                if chunk.get("type") == "stop_policy" or chunk.get("stop_hitl"):
+                    _stats["stop"] = chunk.get("outcome") or chunk.get("type")
+                yield chunk
+            _stats["outcome"] = "completed"
+        except GeneratorExit:
+            # Consumer closed the iterator; fire SESSION_END with abort
+            _stats["outcome"] = "consumer_closed"
+            raise
+        except Exception:
+            _stats["outcome"] = "error"
+            raise
+        finally:
+            # SESSION_END hook (Sprint 2) — fires on completion, consumer
+            # close, or exception. Hook failures are logged + swallowed
+            # like all hooks; we never block exit on them.
+            try:
+                from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                await _hr().fire(_HE.SESSION_END, _stats)
+            except Exception as _h_exc:
+                logger.debug("SESSION_END hook block failed: %s", _h_exc)
+
+    async def _stream_impl(
+        self,
+        query:           str,
+        session_id:      str,
+        env_context:     Optional[dict[str, Any]] = None,
+        confirmed_facts: Optional[list[str]] = None,
+        working_set:     Optional[list[DeviceRef]] = None,
+        tool_registry:   Optional[dict[str, Any]] = None,
+        delegation_mode: DelegationMode = DelegationMode.FRESH,
+        parent_state:    Optional[LoopState] = None,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """Run one full turn of the agent loop and stream chunks.
+
         Destructive-action gating happens at a SINGLE point: the LLM
         produces a tool_call, and `_cfg.hitl_tool_names` watch-list
         intercepts before execution, emitting a stop_hitl chunk with
@@ -1183,9 +1304,24 @@ class AgentRuntimeLoop:
 
         state = LoopState()
         # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
-        from runtime.stop_policy import FactsLedger as _FL, FactCategory as _FC
+        from runtime.stop_policy import FactsLedger as _FL
         state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
         setattr(state, "working_set", list(working_set or []))
+
+        # ── SESSION_START hook (Sprint 2, 2026-05) ──────────────────────
+        # Fired once at agent loop entry. Listeners can: log metrics,
+        # init session-level resources, prep audit context. Hook failures
+        # do not abort the runtime — see runtime/hooks.py "Failure
+        # semantics" section.
+        try:
+            from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+            await _hr().fire(_HE.SESSION_START, {
+                "session_id":      session_id,
+                "query":           query,
+                "delegation_mode": str(delegation_mode),
+            })
+        except Exception as _h_exc:
+            logger.debug("SESSION_START hook block failed: %s", _h_exc)
 
         # ── SkillJournal — passive observability (Plan A) ──────────
         # Records skill selection, loads, tool calls, completion outcome.
@@ -1265,6 +1401,63 @@ class AgentRuntimeLoop:
 
         while True:
             state.turns += 1
+
+            # ── L2 Snip (Claude-Code-inspired, added 2026-05) ──────────────
+            # Zero-cost compaction: when accumulated tool_outputs exceed the
+            # char budget, drop the oldest entries. Keeps the most recent N
+            # plus any [STORED:] refs. The dropped content remains in
+            # agent_memory long-term store so recall_memory can re-surface
+            # it next turn if needed. Without this, long sessions with many
+            # tool calls grow the prompt linearly even though the LLM only
+            # references the latest 2-3 outputs per turn — wasted tokens.
+            # See runtime/context_budget.py:try_snip_tool_outputs.
+            try:
+                _budget = getattr(self._cfg, "budget", None)
+                _snip_cap = (
+                    getattr(_budget, "snip_tool_outputs_char_budget", 0)
+                    if _budget else 0
+                )
+                _keep_recent = (
+                    getattr(_budget, "snip_keep_recent", 5)
+                    if _budget else 5
+                )
+                if _snip_cap > 0 and tool_outputs:
+                    from runtime.context_budget import try_snip_tool_outputs as _snip
+                    tool_outputs, _freed = _snip(
+                        tool_outputs,
+                        target_char_budget = _snip_cap,
+                        keep_recent        = _keep_recent,
+                    )
+                    if _freed > 0:
+                        # Surface snip event in the SSE chunk stream so UI
+                        # operators see what happened (transparency, audit).
+                        yield {
+                            "node":      "context_budget",
+                            "node_step": f"L2 Snip: freed ~{_freed} chars",
+                            "type":      "compaction",
+                            "freed_chars": _freed,
+                        }
+            except Exception as _snip_exc:
+                logger.debug("L2 Snip skipped (%s) — non-fatal", _snip_exc)
+
+            # ── TURN_START hook (Sprint 2, 2026-05) ────────────────────────
+            # Fired at the top of every turn after L2 Snip. Listeners can:
+            # observe turn count, prep per-turn metrics, log to audit.
+            # See runtime/hooks.py for the full lifecycle event taxonomy.
+            try:
+                from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                _facts_count_for_hook = (
+                    len(state.confirmed_facts)
+                    if state.confirmed_facts is not None else 0
+                )
+                await _hr().fire(_HE.TURN_START, {
+                    "session_id":  session_id,
+                    "turn":        state.turns,
+                    "query":       query,
+                    "facts_count": _facts_count_for_hook,
+                })
+            except Exception as _h_exc:
+                logger.debug("TURN_START hook block failed: %s", _h_exc)
 
             # ── PERF-1: conditional recall refresh ──────────────────────
             _facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
@@ -1784,6 +1977,35 @@ class AgentRuntimeLoop:
                             _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
                     except Exception:
                         pass
+
+                # Graduated-trust spectrum (Claude-Code-inspired, added 2026-05).
+                # Even if a tool is on the HITL watch-list, the operator's
+                # configured trust_mode may allow auto-approve based on the
+                # tool's action_type:
+                #   cautious        — never skip (default, current behaviour)
+                #   auto_reversible — skip iff action_type ∈ {read_only, reversible}
+                #   bypass          — always skip (trusted dev/replay only)
+                # We log every skip to audit trail so post-hoc review can
+                # confirm intent — silent skips would be unacceptable in
+                # production network ops. See PolicyEngine.should_skip_hitl_for_tool.
+                if _needs_hitl:
+                    try:
+                        from runtime.policy_engine import get_policy_engine as _get_pe2
+                        _pe2 = _get_pe2()
+                        if _pe2 is not None:
+                            _skip, _skip_reason = _pe2.should_skip_hitl_for_tool(tool_name)
+                            if _skip:
+                                logger.info(
+                                    "stream: HITL skipped for tool=%s reason=%s",
+                                    tool_name, _skip_reason,
+                                )
+                                _needs_hitl = False
+                    except Exception as _ts_exc:
+                        logger.debug(
+                            "stream: trust_mode skip check failed (%s) — "
+                            "falling through to HITL", _ts_exc,
+                        )
+
                 if _needs_hitl:
                     import json as _json
                     # Type #2: if this tool is on the editable list, surface
@@ -2000,7 +2222,68 @@ class AgentRuntimeLoop:
                     import json as _json
                     logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
                                  _json.dumps(tool_args, indent=2, default=str), "─"*72)
+
+                # ── PRE_TOOL_USE hook (Sprint 2, 2026-05) ──────────────────
+                # Hooks may mutate ctx["args"] before dispatch, or set
+                # ctx["blocked"]=True with ctx["block_reason"] to abort.
+                # Mutation is by-reference; we then read back tool_args.
+                # Failure semantics: hook exceptions are logged + swallowed;
+                # blocking is ONLY via explicit ctx flag, never via raise.
+                _pre_ctx = {
+                    "tool":       tool_name,
+                    "args":       dict(tool_args),    # copy so hooks can't break our caller
+                    "session_id": session_id,
+                    "turn":       state.turns,
+                }
+                try:
+                    from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                    _pre_ctx = await _hr().fire(_HE.PRE_TOOL_USE, _pre_ctx)
+                except Exception as _h_exc:
+                    logger.debug("PRE_TOOL_USE hook fire failed: %s", _h_exc)
+                if _pre_ctx.get("blocked"):
+                    _reason = _pre_ctx.get("block_reason") or "blocked by hook"
+                    logger.warning(
+                        "stream: tool %s blocked by hook — %s", tool_name, _reason,
+                    )
+                    _blk_msg = f"[Error: tool {tool_name} blocked by policy hook: {_reason}]"
+                    tool_outputs[_call_key(tool_name, tool_args)] = _blk_msg
+                    yield {
+                        "node":      "hook_block",
+                        "node_step": f"Tool blocked: {tool_name}",
+                        "type":      "hook_block",
+                        "tool":      tool_name,
+                        "reason":    _reason,
+                    }
+                    continue
+                # Hook may have mutated args; pick them up
+                tool_args = _pre_ctx.get("args", tool_args)
+
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
+
+                # ── POST_TOOL_USE hook (Sprint 2, 2026-05) ─────────────────
+                # Listeners can: observe result, redact secrets, write audit
+                # event. Hooks may mutate ctx["result"] to filter content.
+                # POST hooks CANNOT block (the tool already ran).
+                try:
+                    from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                    _post_ctx = await _hr().fire(_HE.POST_TOOL_USE, {
+                        "tool":       tool_name,
+                        "args":       tool_args,
+                        "result":     raw,
+                        "session_id": session_id,
+                        "turn":       state.turns,
+                    })
+                    # Pick up redacted/filtered result if hook mutated it
+                    _maybe_filtered = _post_ctx.get("result")
+                    if isinstance(_maybe_filtered, str) and _maybe_filtered != raw:
+                        logger.info(
+                            "stream: tool %s result filtered by hook (%d → %d chars)",
+                            tool_name, len(raw), len(_maybe_filtered),
+                        )
+                        raw = _maybe_filtered
+                except Exception as _h_exc:
+                    logger.debug("POST_TOOL_USE hook fire failed: %s", _h_exc)
+
                 # Same exclusion as ToolRouter — don't double-store pagination
                 # outputs. The 'stored' label here is what the LLM sees in the
                 # next turn's context; for paged reads we want the LLM to see
