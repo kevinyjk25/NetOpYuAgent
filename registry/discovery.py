@@ -176,6 +176,22 @@ class AgentDiscovery:
             metadata=raw.get("metadata", {}),
         )
 
-        entry = AgentEntry(card=card, source=source, health=AgentHealthState.UNKNOWN)
+        # Phase-1 multi-agent (2026-05): respect the top-level `agent_id`
+        # field if the peer's card publishes one. Falls back to AgentEntry's
+        # default UUID factory ONLY when the peer's card lacks the field
+        # (legacy single-agent deployments, or non-NetOpYuAgent peers).
+        # Without this, every discovered peer got a fresh UUID per fetch,
+        # which made registry deduplication unreliable and showed
+        # garbage IDs in /system/peers.
+        published_id = (raw.get("agent_id") or "").strip()
+        entry_kwargs: dict[str, Any] = {
+            "card":   card,
+            "source": source,
+            "health": AgentHealthState.UNKNOWN,
+        }
+        if published_id:
+            entry_kwargs["agent_id"] = published_id
+
+        entry = AgentEntry(**entry_kwargs)
         entry.build_indices()
         return entry

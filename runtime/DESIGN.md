@@ -134,6 +134,36 @@ reg.register(HookEvent.PRE_TOOL_USE, policy_gate, priority=80)  # 后跑
 - Priority order(low → high)— 后跑 hook 可覆盖前跑的 ctx 修改
 - Zero LLM context cost(hooks 不出现在 prompt 里)
 
+### 2.7 Tracing(Sprint-3-pre,2026-05)
+
+```python
+from runtime.tracing import configure, start_span, is_enabled
+
+# Boot once (main.py 启动期):
+configure(
+    enabled         = cfg.observability.tracing_enabled,   # 默认 False
+    service_name    = "netopyu-agent",
+    service_version = "6.0.0",
+    otlp_endpoint   = "http://collector:4317",             # 可选
+    sample_ratio    = 1.0,                                  # 0.0-1.0
+)
+
+# 任何模块的任意热路径:
+with start_span("llm.call", **{"llm.model": "qwen3.5:27b"}) as span:
+    span.set_attribute("output.chars", len(result))
+    # ... 业务代码 ...
+```
+
+**关键设计原则**:
+- **`opentelemetry-*` 是可选依赖** —— 没装就走 `_NoopSpan`,所有 `start_span()` 调用零成本。
+- **默认 OFF** —— `cfg.observability.tracing_enabled=False`。生产开关一行,不动代码。
+- **降级失败模式** —— `configure(enabled=True)` 时 OTel SDK 设置失败,自动回退到 no-op,boot 不挂。
+- **三处接入**(当前):
+  - `hitl_executor.execute_query` → span name `agent.query`,attribute 含 `session_id` + facts count
+  - `llm_engine._chat` → span name `llm.call`,attribute 含 model + message count + native_tools flag
+  - `runtime.loop._dispatch_tool` → span name `tool.dispatch`,attribute 含 tool name + args count + result chars
+- **未来 Sprint 3 扩展**:FastAPI / httpx auto-instrumentation,session_id → trace_id 确定性派生,Jaeger/Tempo dashboard。
+
 ---
 
 ## 3. 核心数据流

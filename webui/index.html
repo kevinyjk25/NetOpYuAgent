@@ -755,6 +755,7 @@ Type a query below. The agent will:
     <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
     <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
     <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
+    <div class="tab" onclick="switchTab('peers');refreshPeers()" id="tab-btn-peers">Peers</div>
     <div class="tab" onclick="switchTab('journal');refreshJournal()" id="tab-btn-journal">Journal</div>
   </div>
 
@@ -854,6 +855,20 @@ Type a query below. The agent will:
       <div class="metric-row"><span class="metric-label">Memory backend</span><span class="metric-val" id="s-memory">—</span></div>
     </div>
     <button class="btn btn-secondary btn-sm" style="flex-shrink:0;margin-top:8px" onclick="refreshStats()">↻ Refresh</button>
+  </div>
+
+  <!-- Peers tab — Phase-1 multi-agent: self + discovered peers -->
+  <div class="tab-content" id="tab-peers">
+    <div style="padding:6px 0 3px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:6px">
+      <div style="font-family:var(--mono);font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--dim);flex:1">👥 Agent Neighbours</div>
+      <span id="peers-poll-indicator" style="font-family:var(--mono);font-size:9px;color:var(--dim)" title="auto-refresh every 15s">·</span>
+    </div>
+    <div id="peers-content" style="flex:1;overflow-y:auto;padding-top:8px">
+      <div style="font-family:var(--mono);font-size:9px;color:var(--dim);font-style:italic;padding:8px">Loading…</div>
+    </div>
+    <div style="flex-shrink:0;margin-top:8px;display:flex;gap:6px">
+      <button class="btn btn-secondary btn-sm" style="flex:1" onclick="refreshPeers()">↻ Refresh</button>
+    </div>
   </div>
 
   <!-- Journal tab — SkillJournal observability dashboard -->
@@ -1354,9 +1369,11 @@ function getSession() {
 }
 
 function switchTab(name) {
-  ['cache','flow','hitl','memory','stats'].forEach(n => {
-    document.getElementById('tab-btn-'+n).classList.toggle('active', n===name);
-    document.getElementById('tab-'+n).classList.toggle('active', n===name);
+  ['cache','flow','hitl','memory','stats','peers','journal'].forEach(n => {
+    const btn = document.getElementById('tab-btn-'+n);
+    const pane = document.getElementById('tab-'+n);
+    if (btn)  btn.classList.toggle('active', n===name);
+    if (pane) pane.classList.toggle('active', n===name);
   });
 }
 
@@ -3094,6 +3111,131 @@ async function refreshStats() {
     if(I('s-api'))    I('s-api').textContent    = data.integrations?.openapi_tools??'—';
   } catch(e) {}
 }
+
+
+// ── Peers tab (Phase-1 multi-agent: identity + peer discovery) ───────
+// Calls GET /system/peers every 15s while the tab is mounted. Renders
+// self at the top + a card per peer with health dot + capabilities.
+// Heartbeat indicator pulses to show the poller is alive.
+let _peersPollTimer = null;
+let _peersLastFetchOK = false;
+
+function _peersHealthColor(state) {
+  // Maps registry.AgentHealthState → semantic colour.
+  const s = String(state || '').toLowerCase();
+  if (s === 'healthy')   return '#4ade80';   // green
+  if (s === 'degraded')  return '#fbbf24';   // amber
+  if (s === 'unhealthy') return '#f87171';   // red
+  return '#9ca3af';                           // unknown / disconnected
+}
+
+function _peersEscape(s) {
+  // Defensive HTML escape — peer-controlled strings flow into innerHTML.
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _renderPeerCard(p, isSelf) {
+  const dotColor = isSelf ? '#4ade80' : _peersHealthColor(p.health);
+  const id       = _peersEscape(p.agent_id || '?');
+  const name     = _peersEscape(p.display_name || p.agent_id || '?');
+  const url      = _peersEscape(p.agent_url || p.url || '');
+  const caps     = (p.capabilities || []);
+  const capsHtml = caps.length
+    ? caps.slice(0, 8).map(c =>
+        `<span style="font-family:var(--mono);font-size:9px;background:rgba(255,255,255,0.05);
+                      border:1px solid var(--border);border-radius:3px;
+                      padding:1px 5px;margin:1px 2px 0 0;display:inline-block">${_peersEscape(c)}</span>`
+      ).join('')
+    : '<span style="font-family:var(--mono);font-size:9px;color:var(--dim);font-style:italic">no capabilities advertised</span>';
+  const badge = isSelf
+    ? '<span style="font-family:var(--mono);font-size:8px;background:#4ade8033;color:#4ade80;padding:1px 4px;border-radius:2px;margin-left:4px">SELF</span>'
+    : (p.health
+        ? `<span style="font-family:var(--mono);font-size:8px;color:${dotColor};text-transform:uppercase;margin-left:4px">${_peersEscape(p.health)}</span>`
+        : '');
+  return `
+  <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;
+              padding:10px 12px;margin-bottom:8px">
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px">
+      <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
+                   background:${dotColor};flex-shrink:0"></span>
+      <span style="font-family:var(--mono);font-size:11px;color:var(--fg);font-weight:600">${id}</span>
+      ${badge}
+    </div>
+    <div style="font-size:10px;color:var(--dim);margin-bottom:4px">${name}</div>
+    <div style="font-family:var(--mono);font-size:9px;color:var(--dim);
+                word-break:break-all;margin-bottom:6px">${url}</div>
+    <div style="line-height:1.6">${capsHtml}</div>
+  </div>`;
+}
+
+async function refreshPeers() {
+  const content = document.getElementById('peers-content');
+  if (!content) return;
+  try {
+    const res = await fetch(`${BASE}/system/peers`);
+    if (!res.ok) {
+      content.innerHTML = `<div style="font-family:var(--mono);font-size:9px;color:#f87171;padding:8px">
+        Error ${res.status} fetching /system/peers</div>`;
+      _peersLastFetchOK = false;
+      return;
+    }
+    const data = await res.json();
+    _peersLastFetchOK = true;
+
+    const self = data.self || {};
+    const peers = data.peers || [];
+    const refresh = data.peer_refresh_interval_s ?? 120;
+
+    let html = _renderPeerCard(self, true);
+    if (peers.length === 0) {
+      html += `<div style="font-family:var(--mono);font-size:9px;color:var(--dim);
+                          font-style:italic;padding:12px 8px;text-align:center;
+                          border:1px dashed var(--border);border-radius:6px;margin-top:4px">
+        No peers configured.<br>
+        Set <code>AGENT_PEERS</code> env or <code>agent.peers</code> in config.yaml.
+      </div>`;
+    } else {
+      html += peers.map(p => _renderPeerCard(p, false)).join('');
+    }
+    html += `<div style="font-family:var(--mono);font-size:9px;color:var(--dim);
+                        padding:4px 0;text-align:center;margin-top:4px">
+      ${peers.length} peer${peers.length===1?'':'s'} ·
+      registry refresh every ${refresh}s
+    </div>`;
+    content.innerHTML = html;
+  } catch (e) {
+    content.innerHTML = `<div style="font-family:var(--mono);font-size:9px;color:#f87171;padding:8px">
+      Network error: ${_peersEscape(e.message || e)}</div>`;
+    _peersLastFetchOK = false;
+  }
+}
+
+function _peersHeartbeat() {
+  // Pulse the indicator so the user can tell the poll is alive.
+  const ind = document.getElementById('peers-poll-indicator');
+  if (!ind) return;
+  ind.textContent = _peersLastFetchOK ? '●' : '○';
+  ind.style.color = _peersLastFetchOK ? '#4ade80' : '#f87171';
+  setTimeout(() => { if (ind) ind.style.color = 'var(--dim)'; }, 600);
+}
+
+function startPeersPoll() {
+  // Start a single global poller. Safe to call multiple times — clears
+  // any prior timer first. Polls every 15s regardless of which tab the
+  // user is viewing (cheap call, gives instant data when they switch).
+  if (_peersPollTimer) clearInterval(_peersPollTimer);
+  refreshPeers().then(_peersHeartbeat);
+  _peersPollTimer = setInterval(() => {
+    refreshPeers().then(_peersHeartbeat);
+  }, 15000);
+}
+
+// Kick off the poller on page load; the WebUI is single-page so this
+// runs exactly once. addEventListener avoids clobbering any other
+// existing handler the page may register.
+document.addEventListener('DOMContentLoaded', () => { startPeersPoll(); });
 
 
 

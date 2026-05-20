@@ -21,6 +21,9 @@
 | `evaluation/` | ~1500 | Retrieval bench + Tool-compliance bench + CI gate CLI | — (轻量,本文档 §7) |
 | `webui/` | ~5500 | FastAPI + SSE 前端(不含 DESIGN.md,改动局限于路由)| — |
 | `memory/` | ~250 | `MemoryAdapter` thin wrapper,给 runtime 用 | — |
+| `a2a/` | ~1200 | A2A 协议层(inbound JSON-RPC + SSE 流 + AgentCard + EventQueue) | — (轻量,本文档 §11) |
+| `registry/` | ~900 | Agent registry — 自注册、peer discovery、health check、load balance | — (轻量,本文档 §11) |
+| `task/` | ~1500 | Task graph + 跨 agent dispatcher(`A2ATaskDispatcher`,Phase 2 唤醒)| — |
 
 ---
 
@@ -87,11 +90,14 @@
 `main.py:build_services` 严格按依赖反向装配,**晚依赖的组件用 deferred wiring**:
 
 ```
-1. Config           (config.py:Config.load)
+1. Config           (config.py:Config.load) — including `cfg.agent` (Phase-1 identity)
 2. Logging          (logging_config.set_*)
 3. agent_memory     (MemoryManager + MemoryAdapter)
 4. hitl_core        (Store + Router + Pipeline + Audit + ChunkQueue.idle_watchdog)
 5. registry         (AgentRegistry)
+   ├─► own_card = get_agent_card(a2a_base_url, identity=cfg.agent)
+   ├─► merge peer urls = cfg.registry.agent_urls ∪ cfg.agent.peer_urls (deduped)
+   └─► register_from_urls(merged) — peer AgentCards fetched + indexed
 6. task             (Task module)
 7. integrations.adapters.executor = HitlExecutor(...)  ← skill_evolver=None
 8. LLM engine       (OllamaEngine 启动 + smoke test)
@@ -363,6 +369,119 @@ config.yaml
 
 **全 CI PASS**:5/5 audits + 21/21 safety tests + retrieval eval gate。
 
+### 8.3 Phase 1 — 多 agent 身份 + peer discovery(2026-05)
+
+**目标**:让多个 agent 进程互相发现,但**不互相调用**(那是 Phase 2)。这一步是 multi-agent 的地基。
+
+完成的项:
+
+| 项 | 涉及文件 | 备注 |
+|----|---------|------|
+| ✅ `AgentIdentityConfig` + `AgentSkillSpec` dataclass | `config.py` | YAML loader + 5 个 env override(AGENT_ID/AGENT_DISPLAY_NAME/AGENT_DESCRIPTION/AGENT_PEERS/AGENT_PEER_REFRESH_S) |
+| ✅ `config.yaml` 新 `agent:` 段 | `config.yaml` | 含完整示例 + LAN/WAN agent 启动命令注释 |
+| ✅ `get_agent_card(base_url, identity=None)` 可选 identity 驱动 | `a2a/agent_card.py` | 向后兼容:identity=None 走 legacy 路径,新加 `agent_id` 顶级字段始终存在 |
+| ✅ `main.py` 在装配 registry 时合并 peer urls | `main.py` build_services | `cfg.registry.agent_urls ∪ cfg.agent.peer_urls`,去重保序 |
+| ✅ Lifespan 加 peer refresh background task | `main.py` lifespan | 每 `peer_refresh_interval_s` 秒 re-fetch peer cards,失败 log 不中断 |
+| ✅ `/system/peers` endpoint | `webui/routes_system.py` | 返回 `{self: {...}, peers: [...]}`,自动排除自己 |
+| ✅ 16 个单元测试 | `tests/test_multi_agent_identity.py` | 默认值 / env override / 畸形 yaml 容错 / agent card 双路径 / peer URL 合并 |
+
+**设计要点**:
+
+- **配置优先级**:env → yaml → defaults。defaults 完全还原 legacy 单 agent 行为,**已有部署不改 yaml 也能继续跑**。
+- **`agent_id` 字段**:既是 registry key,也是 trace tag,也是 `/system/peers` 用来排除自己的依据。Legacy path 也填上(=`"default-agent"`),所以 peer 视角的 schema 始终一致。
+- **`capabilities=[]` 不会清空 skills**:回退到 legacy SKILLS。设计判断:用户改 agent_id 但忘填 capabilities 时,不应该静默失去 retrieval 能力。
+- **Peer URL 双源合并**:`cfg.registry.agent_urls`(legacy 单列表)和 `cfg.agent.peer_urls`(Phase 1 per-agent)都能加 peer,在 `main.py` 去重合并,registry 只看到一份。
+
+**Phase 1 不做的事**(留给 Phase 2):
+
+- ❌ 任何形式的 cross-agent dispatch — `A2ATaskDispatcher` 已经在,但**没有任何运行时代码 call 它**
+- ❌ PolicyEngine 不知道 peer 存在 — 仍然只分类 read_only/destructive
+- ❌ Capability matching(query → 哪个 peer 处理)— 留给 Phase 2 的 `peer_router.py`
+- ❌ 跨 agent HITL — Phase 3
+
+**两端启动验证**:
+
+```bash
+# Terminal 1 — LAN agent on :8000, sees WAN
+AGENT_ID=lan-agent AGENT_DISPLAY_NAME="LAN Agent" \
+  AGENT_PEERS="http://localhost:8001/api/v1/a2a" \
+  uvicorn main:app --port 8000
+
+# Terminal 2 — WAN agent on :8001, sees LAN
+AGENT_ID=wan-agent AGENT_DISPLAY_NAME="WAN Agent" \
+  AGENT_PEERS="http://localhost:8000/api/v1/a2a" \
+  uvicorn main:app --port 8001
+
+# Both should see each other:
+curl http://localhost:8000/webui/system/peers | jq
+curl http://localhost:8001/webui/system/peers | jq
+```
+
+**全 CI PASS**:6/6 audits + 21/21 safety tests + 16/16 multi-agent identity tests + retrieval eval gate。
+
+**2026-05 续:Phase 1 bug fixes + WebUI**:
+
+| 问题 | 修复 | 文件 |
+|------|------|------|
+| `/system/peers` 显示 peer 是一串 UUID,不是真实 agent_id | `AgentDiscovery._parse()` 之前不读取 AgentCard JSON 里的顶层 `agent_id` 字段,所以 `AgentEntry.agent_id = Field(default_factory=uuid.uuid4)` 每次 fetch 给新 UUID。修复:`_parse` 显式 `raw.get("agent_id", ...).strip()`,有就用,空白/缺失 fallback 到 UUID(保留对非 Phase-1 peer 的向后兼容)| `registry/discovery.py` |
+| WebUI 没法看到 peer 邻居 | 加 "Peers" tab(第 7 个),每 15s polling `/system/peers`,显示 self + peers 各自的 health dot / capabilities / URL,带 heartbeat indicator | `webui/index.html` |
+| `switchTab` 之前漏了 journal 和 peers | 列表里补齐 `'journal'` + `'peers'`,并加 null-check 防御 | `webui/index.html` |
+| 3 个新 discovery 单元测试 | agent_id 从 card 读取 / 缺失时 UUID fallback / 空白也 UUID fallback | `tests/test_multi_agent_identity.py` |
+
+### 8.4 Sprint-3-pre — 生产就绪基础工程(2026-05)
+
+**目标**:把上次生产就绪评估中标为 blocker 的 4 项工程基础设施补上,**不影响 Phase 1 multi-agent**。这一节是面向 SRE / 运维的:多 agent 可以投生产之前,单 agent 必须先达标。
+
+完成的项:
+
+| 项 | 文件 | 解决了什么生产风险 |
+|----|------|------------------|
+| ✅ OpenTelemetry 可选 tracing 骨架 | `runtime/tracing.py` 新加(242 行)| 此前 prod 排障只能 grep 日志,无法跨进程对齐一次 query 的完整执行链路 |
+| ✅ 三处 span 接入 | `llm_engine.py` / `loop.py` / `hitl_executor.py` | `agent.query` / `llm.call` / `tool.dispatch` 三层 span,session_id 作为 trace 锚点 |
+| ✅ HITL checkpoint 默认 sqlite | `config.py` + `main.py` | 此前默认 in-memory,SIGTERM 中 pending approval 全部丢失;sqlite 是默认值后,operator 看着卡片时 agent 重启不丢决策 |
+| ✅ Pragmatic 模式 in-memory 警告 | `main.py` | 即使有人强行 `HITL_CHECKPOINT_BACKEND=memory`,启动日志会大字提示风险 |
+| ✅ Graceful shutdown drain | `main.py` lifespan | SIGTERM 时:1)等 in-flight LLM/tool 调用 30s 内完成,2)flush HITL checkpoint store,3)再退出 |
+| ✅ SIGTERM / SIGINT handler + Windows fallback | `main.py` lifespan | 显式 signal handler 而不是依赖 uvicorn 的默认行为;Windows 没有 add_signal_handler 时 fallback 到 lifespan-exit 路径 |
+| ✅ SkillEvolver A/B safety net | `skills/evolver.py` + `main.py` wire | LLM 改写 skill prompt 时,先跑 compliance bench 子集对比 baseline/candidate;`args_ok` 下降则**整个 patch 回滚**,旧 skill 保留 |
+| ✅ 12 + 1 新 unit tests | `tests/test_sprint3_pre.py` | 4 tracing 行为 + 3 ObservabilityConfig + 2 HITLCheckpointConfig + 4 SkillEvolver 安全网(含正/反两种情况)|
+
+**设计要点**:
+
+- **Tracing 默认 OFF**:`opentelemetry-*` 包是可选依赖。boot 时如果没装,`configure()` 返回 False,所有 `with start_span(...)` 调用全部走 `_NoopSpan` 路径,**零性能影响**。包装函数模式(`_chat → _chat_impl` / `execute_query → _execute_query_inner`)保留了原有异常路径。
+- **HITL backend 选择从环境变量改为 `cfg.hitl.checkpoint`**:env var 仍生效(`HITL_CHECKPOINT_BACKEND` 优先级最高),但默认值现在是 yaml/dataclass-driven,可以在 PR 里看到 schema 变化。
+- **Drain 顺序**:in-flight 任务先(30s 上限)→ HITL store flush → SkillJournal stop → registry stop → watchdog stop。device-state-affecting 操作的结果有最长 30s 落库窗口,绝不在拥有未持久化 fact 的时候 hard-kill。
+- **A/B safety net 的失败模式**:bench runner 抛错 → 视为"无信号",patch 照常应用(避免 flaky bench 困死正常进化);bench 返回 None → 同样视为"无信号"。**只有** bench 返回了有效 `args_rate` 且明确下降时才回滚。
+- **新增 service key `hitl_store`** 现在被 `audit_wiring` 识别(read by lifespan flush)。
+
+**Sprint-3-pre 不做的事**(留给真正的 Sprint 3):
+
+- ❌ FastAPI / httpx auto-instrumentation(spans 当前只在 3 个手工标注的地方;runtime/* 其他 hot path 没埋点)
+- ❌ session_id → trace_id 确定性派生(操作员现在没办法从 WebUI 点开 Jaeger / Tempo 直接看 trace)
+- ❌ `/livez` + `/readyz`(`/health` 是 200-or-bust,k8s probe 拿不到真实依赖状态)
+- ❌ Prometheus `/metrics`(`/integrations/metrics` 返回 JSON,不是 OpenMetrics 文本)
+- ❌ Docker / compose / k8s 部署交付物
+- ❌ Auth 启动强制检查(`auth.enabled=false` + `ENVIRONMENT=production` 仍然能 boot)
+
+**全 CI PASS**:6/6 audits + 21/21 safety tests + 16/16 multi-agent identity tests + 13/13 sprint3_pre tests + retrieval eval gate。
+
+**Bonus bug fix(2026-05 续):`SkillEvolver._parse_json_response`**
+
+合并 A/B safety net 时 grep 出来一个**预先存在的、自项目早期就有的 bug**:`SkillEvolver.apply_feedback()` 和 `evaluate_skill_creation()` 都调用 `self._parse_json_response(raw)`,但这个方法**根本没在类里定义**(只有 `_parse_markdown_to_definition`)。两条路径都默默命中 `except Exception` 然后 `return None`。
+
+**影响**:
+- "Hermes Skill 自改进"路径从来没真正生效过 —— 每次 operator 反馈 LLM 改写 prompt 都被静默丢弃
+- 自动 skill 创建评估(`evaluate_skill_creation`)也一样,LLM 决策结果从来没被采纳
+
+**修复**:加 `_parse_json_response` 实现,支持 4 种常见 LLM 输出格式:
+1. 严格 JSON 直接 `json.loads`
+2. 剥 markdown code fence(```json … ``` / ``` … ```)
+3. 剥 `<think>...</think>` 块(qwen3 / deepseek-r1 风格)
+4. balanced-brace 扫描 提取嵌入在散文里的 first complete object
+
+加 9 个单元测试覆盖每种格式 + 嵌套大括号 + 字符串里 } 的情况。
+
+这个 bug 跟 Sprint-3-pre 没关系,但因为合并时发现 + 修了,记录在这一节末尾。**这个修复实际上"打开"了项目原本设计但从未真正跑过的两条路径**,以后 production 跑起来要观察这两条路径是否带来预期之外的副作用(比如 skill 被 LLM 改得乱七八糟)。
+
 ---
 
 ## 9. 模块独立维护原则
@@ -436,3 +555,46 @@ config.yaml
 
 **改动 checklist**:加新 case → JSONL 一行;加新指标 → `BenchReport`/`ToolComplianceReport` 加属性 + CLI 加 `--fail-below-X` flag + ARCHITECTURE.md §6 阈值表更新。
 
+
+## 11. 多 agent 模块(`a2a/` + `registry/`)
+
+Phase-1 引入 multi-agent foundation 后,这两个模块从"未来预留"升级为活跃组件。**当前还没有跨 agent 调用**——Phase 1 只做 identity + discovery。
+
+### 11.1 `a2a/` — A2A 协议层
+
+**职责**:实现 Google A2A Protocol v0.3.0 inbound 端 + AgentCard 暴露。负责把外部 JSON-RPC 请求翻译成 internal `ITOpsAgentExecutor.execute()` 调用,并把内部 chunk 流转回 SSE。
+
+**关键文件**:
+- `a2a/server.py` — FastAPI sub-app factory (`create_a2a_app`),挂载到 `/api/v1/a2a/*`
+- `a2a/agent_card.py` — `get_agent_card(base_url, identity=None)`,Phase 1 后 identity 驱动
+- `a2a/agent_executor.py` — `ITOpsAgentExecutor` + 6 processor 链(token/batch_token/message/node_step/node_result/extra)
+- `a2a/request_handler.py` — JSON-RPC method router(message/send · message/stream · tasks/get · tasks/cancel)
+- `a2a/event_queue.py` — 异步事件队列,sealing + 多消费者
+- `a2a/schemas.py` — pydantic 模型:Task / Message / Part / Artifact / event types
+- `a2a/push_notifications.py` — webhook 回调(指数退避)
+- `a2a/task_store.py` — in-memory task state
+
+**铁律**:`a2a/` 不依赖任何 business 模块。它是**纯协议层**,任何 executor 都能 plug in。
+
+### 11.2 `registry/` — Agent 注册表
+
+**职责**:agent 的"电话簿"——自注册、peer discovery、health check、load-balanced resolution。
+
+**关键文件**:
+- `registry/registry.py` — `AgentRegistry`,核心 register/resolve/list/health-loop
+- `registry/discovery.py` — `AgentDiscovery`,fetch peer AgentCards 通过 HTTP
+- `registry/store.py` — `InMemoryRegistryStore` + `RedisRegistryStore`(多副本)
+- `registry/router.py` — `/registry/agents/*` HTTP endpoints
+- `registry/schemas.py` — `AgentEntry` / `AgentSkill` / `ResolutionResult`
+
+**Phase 1 后的关键 invariant**:每个 agent 实例的 `cfg.agent.agent_id` 是 registry 的 primary key。两个 LAN agent 副本必须 agent_id 不同(否则后注册的覆盖先注册的)。
+
+### 11.3 多 agent roadmap
+
+| Phase | 范围 | 状态 |
+|-------|------|------|
+| **Phase 1** | Identity + peer discovery + `/system/peers` endpoint | ✅ 完成(2026-05) |
+| Phase 2 | Capability-based delegation:LAN agent → WAN agent | ⏳ 设计已定 |
+| Phase 3 | Cross-agent HITL transparent passthrough | ⏳ 设计已定,等 Phase 2 稳定 |
+
+Phase 2 +的工作量、风险点、产品决策详见 `task/inter/coordinator.py:A2ATaskDispatcher` 的 docstring + 各模块 DESIGN.md。

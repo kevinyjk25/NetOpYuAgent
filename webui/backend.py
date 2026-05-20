@@ -566,6 +566,17 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                 exec_task = asyncio.create_task(_run_executor())
 
+                # ── Graceful-shutdown plumbing (Sprint-3-pre, 2026-05) ──
+                # Register this task so main.py's lifespan drain phase can
+                # wait for it (up to 30s) before killing the process. Without
+                # this, a SIGTERM mid-tool-execute would orphan device state.
+                # set.discard on completion guarantees we don't leak entries
+                # (asyncio task callbacks run inline on completion).
+                _in_flight = services.get("in_flight_tasks")
+                if _in_flight is not None:
+                    _in_flight.add(exec_task)
+                    exec_task.add_done_callback(_in_flight.discard)
+
                 # Drain queue → SSE
                 _final_text = ""
                 _final_interrupt: Optional[str] = None

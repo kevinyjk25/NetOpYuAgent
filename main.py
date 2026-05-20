@@ -73,6 +73,23 @@ async def build_services() -> dict[str, Any]:
     services: dict[str, Any] = {}
     _print_banner()
 
+    # ── 0. Observability / tracing (Sprint-3-pre, 2026-05) ──────────────
+    # Initialize OpenTelemetry BEFORE building anything else so any
+    # spans created during component init are captured. Defaults OFF
+    # — see runtime/tracing.py for degradation contract.
+    try:
+        from runtime.tracing import configure as _configure_tracing
+        _obs = getattr(cfg, "observability", None)
+        _configure_tracing(
+            enabled         = bool(getattr(_obs, "tracing_enabled", False)),
+            service_name    = str (getattr(_obs, "service_name",    "netopyu-agent")),
+            service_version = str (getattr(_obs, "service_version", "6.0.0")),
+            otlp_endpoint   =      getattr(_obs, "otlp_endpoint",   None),
+            sample_ratio    = float(getattr(_obs, "sample_ratio",   1.0)),
+        )
+    except Exception as _tr_exc:
+        logger.warning("Tracing configure failed: %s — proceeding without", _tr_exc)
+
     # ── 1. Memory ────────────────────────────────────────────────────────────
     # Production memory backend: agent_memory.MemoryManager wrapped by
     # MemoryAdapter for async + per-operator scoping.
@@ -117,22 +134,43 @@ async def build_services() -> dict[str, Any]:
             build_default_device_coreferencer,
         )
 
-        # Pick checkpoint backend by env
-        _cp_backend = (_os.getenv("HITL_CHECKPOINT_BACKEND") or "memory").lower()
+        # Pick checkpoint backend from cfg.hitl.checkpoint. Env overrides
+        # (HITL_CHECKPOINT_BACKEND etc.) already applied in config.py.
+        # Default backend is "sqlite" (changed from "memory" in 2026-05)
+        # so pending approvals survive agent restart — operators discussing
+        # a destructive-action card while the process crashes would
+        # otherwise see their producing query hang on a dead asyncio.Future.
+        _cp_cfg = getattr(cfg.hitl, "checkpoint", None)
+        _cp_backend = (_cp_cfg.backend if _cp_cfg else "sqlite").lower()
         if _cp_backend == "redis":
             from hitl_core import RedisCheckpointStore
-            hitl_store = RedisCheckpointStore(
-                redis_url=_os.getenv("HITL_REDIS_URL", cfg.memory.redis_url
-                                                       or "redis://localhost:6379/0"),
-            )
+            _redis_url = (_cp_cfg.redis_url if _cp_cfg else None) or cfg.memory.redis_url \
+                         or "redis://localhost:6379/0"
+            hitl_store = RedisCheckpointStore(redis_url=_redis_url)
         elif _cp_backend == "sqlite":
             from hitl_core import SqliteCheckpointStore
-            hitl_store = SqliteCheckpointStore(
-                db_path=_os.getenv("HITL_SQLITE_PATH", "data/hitl_checkpoints.db"),
-            )
+            _sq_path = (_cp_cfg.sqlite_path if _cp_cfg else None) or "data/hitl_checkpoints.db"
+            hitl_store = SqliteCheckpointStore(db_path=_sq_path)
         else:
             hitl_store = InMemoryCheckpointStore()
+            # Pragmatic-mode + in-memory checkpoint = data-loss risk.
+            # Pragmatic mode runs real device operations, so a pending
+            # destructive approval lost on restart means an operator's
+            # in-progress decision evaporates with no audit trail of
+            # what was being asked. Warn loudly.
+            _mode = getattr(cfg, "mode", None) or _os.getenv("MODE", "mock")
+            if str(_mode).lower() == "pragmatic":
+                logger.warning(
+                    "HITL using in-memory checkpoint store in pragmatic mode. "
+                    "Pending approvals will be LOST on restart. Set "
+                    "HITL_CHECKPOINT_BACKEND=sqlite or redis (or "
+                    "hitl.checkpoint.backend in config.yaml) for production."
+                )
         logger.info("HITL checkpoint backend: %s", _cp_backend)
+        # Stash for graceful shutdown (Sprint-3-pre, 2026-05):
+        # lifespan exit will call hitl_store.flush()/close() if available
+        # so any pending state is persisted before we kill in-flight tasks.
+        services["hitl_store"] = hitl_store
 
         # Audit sink: file by default in production, in-memory for dev
         _audit_path = _os.getenv("HITL_AUDIT_LOG_PATH")
@@ -193,16 +231,37 @@ async def build_services() -> dict[str, Any]:
         lb_strategy                   = cfg.registry.lb_strategy,
         health_check_interval_seconds = cfg.registry.health_check_interval,
     )
-    own_card = get_agent_card(cfg.server.a2a_base_url)
+    # AgentCard now carries this agent's identity (agent_id, capabilities)
+    # so peers see who we are. Identity defaults reproduce the legacy
+    # single-agent behaviour when cfg.agent is unset in yaml.
+    own_card = get_agent_card(cfg.server.a2a_base_url, identity=cfg.agent)
+    # Peer URLs come from BOTH places for backwards compat:
+    #   1. cfg.registry.agent_urls (legacy single-list)
+    #   2. cfg.agent.peer_urls (Phase 1, per-agent identity-aware)
+    # Deduped, order-preserving union — registry sees one list either way.
+    _all_peer_urls: list[str] = []
+    _seen: set[str] = set()
+    for u in (cfg.registry.agent_urls or []) + (cfg.agent.peer_urls or []):
+        u = u.strip()
+        if u and u not in _seen:
+            _seen.add(u)
+            _all_peer_urls.append(u)
     registry = await create_registry(
-        static_urls = cfg.registry.agent_urls,
+        static_urls = _all_peer_urls,
         redis_url   = cfg.memory.redis_url,
         config      = registry_config,
         own_card    = own_card,
     )
     await registry.start()
     services["registry"] = registry
-    logger.info("Agent Registry ready — %d peer(s)", len(cfg.registry.agent_urls))
+    # Stash the merged peer-url list so the lifespan peer-refresh loop
+    # picks up the same set without re-merging. Underscore prefix marks
+    # it as internal (audit_wiring whitelist already handles this style).
+    services["_peer_urls"] = list(_all_peer_urls)
+    logger.info(
+        "Agent Registry ready — agent_id=%s peers=%d",
+        cfg.agent.agent_id, len(_all_peer_urls),
+    )
 
     # ── 4. Task module ───────────────────────────────────────────────────────
     # Task system needs a hitl_router. In core mode we don't have the legacy
@@ -550,6 +609,83 @@ async def build_services() -> dict[str, Any]:
                     "SkillEvolver: failed to wire into executor (%s) — "
                     "batch resolution will skip skill evolution",
                     _wire_exc,
+                )
+
+            # ── A/B safety net for SkillEvolver.apply_feedback ──────────────
+            # Wire a bench runner that runs a per-skill subset of the
+            # tool-compliance golden set on both old + new content. If
+            # args_ok would drop, apply_feedback rolls back the patch.
+            # Wire is best-effort: missing golden set or engine just leaves
+            # the safety net disabled (legacy unchecked path remains).
+            #
+            # See skills/evolver.py:set_bench_runner docstring for contract.
+            try:
+                from evaluation.tool_compliance_bench import ToolComplianceBench
+                from evaluation.tool_compliance_types import ToolCallCase
+                import json as _json_skbench
+
+                _golden_path = _pl.Path(_skills_dir) / ".." / "tool_compliance_set.jsonl"
+                if not _golden_path.exists():
+                    _golden_path = _pl.Path("data/tool_compliance_set.jsonl")
+
+                if _golden_path.exists() and llm_engine is not None:
+                    # Load cases once at startup
+                    _cases_all: list[ToolCallCase] = []
+                    for _line in _golden_path.read_text().splitlines():
+                        _line = _line.strip()
+                        if not _line or _line.startswith("#"):
+                            continue
+                        try:
+                            _d = _json_skbench.loads(_line)
+                            _cases_all.append(ToolCallCase(**_d))
+                        except Exception:
+                            continue
+
+                    # Construct a per-skill bench-runner closure. Subsetting
+                    # by tool name keeps the run cheap (3-5 cases per skill);
+                    # see skills/evolver.py:set_bench_runner contract.
+                    async def _ab_bench_runner(skill_id: str, candidate_content: str):
+                        # Filter cases: match any tool the skill probably
+                        # touches. The simplest heuristic — case is included
+                        # if its expected_tool name appears in the candidate
+                        # content. Skills that reference no recognised tools
+                        # bail out to None (skip gate, don't trap improvement).
+                        _matched = [
+                            c for c in _cases_all
+                            if c.expected_tool in candidate_content
+                        ][:5]
+                        if not _matched:
+                            return None
+                        try:
+                            _bench = ToolComplianceBench(
+                                engine = llm_engine,
+                                name   = f"ab-safety-net/{skill_id}",
+                            )
+                            return await _bench.run(_matched)
+                        except Exception as _bench_inner:
+                            logger.debug(
+                                "A/B bench runner exception for %s: %s",
+                                skill_id, _bench_inner,
+                            )
+                            return None
+
+                    _skill_evolver.set_bench_runner(_ab_bench_runner)
+                    logger.info(
+                        "SkillEvolver: A/B safety-net wired (%d compliance cases loaded)",
+                        len(_cases_all),
+                    )
+                else:
+                    logger.info(
+                        "SkillEvolver: A/B safety-net DISABLED — "
+                        "golden set %s exists=%s, engine=%s",
+                        _golden_path, _golden_path.exists(),
+                        "yes" if llm_engine else "no",
+                    )
+            except Exception as _ab_exc:
+                logger.warning(
+                    "SkillEvolver: A/B safety-net wire failed (%s) — "
+                    "feedback patches will skip the regression gate",
+                    _ab_exc,
                 )
 
             # Smoke test: prove the LLM actually responds. We don't care about
@@ -1228,7 +1364,127 @@ async def lifespan(app: FastAPI):
     except Exception as _cq_exc:
         logger.warning("ChunkQueue idle watchdog start failed: %s", _cq_exc)
 
+    # ── Phase 1 multi-agent: periodic peer-card refresh ────────────────
+    # We've already fetched peer AgentCards at registry construction time.
+    # This loop re-fetches them on a schedule so capability changes /
+    # restarts / health flips become visible without operator action.
+    # Skipped when no peers are configured or refresh is disabled.
+    peer_refresh_task = None
+    _peers_to_refresh = list(_services.get("_peer_urls") or [])
+    _refresh_interval = int(cfg.agent.peer_refresh_interval_s)
+    if _peers_to_refresh and _refresh_interval > 0:
+        async def _peer_refresh_loop():
+            """Periodically re-fetch peer AgentCards and update registry."""
+            registry = _services["registry"]
+            while True:
+                try:
+                    await asyncio.sleep(_refresh_interval)
+                    refreshed = await registry.register_from_urls(
+                        _peers_to_refresh,
+                        source=None,  # keep existing source labels
+                    ) if hasattr(registry, "register_from_urls") else None
+                    if refreshed is not None:
+                        logger.debug(
+                            "Peer refresh: %d card(s) updated", len(refreshed),
+                        )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as _pr_exc:
+                    # Never tank the agent because a peer was momentarily
+                    # unreachable. Log + try again next interval.
+                    logger.debug("Peer refresh failed (will retry): %s", _pr_exc)
+        peer_refresh_task = asyncio.create_task(_peer_refresh_loop())
+        logger.info(
+            "Peer refresh loop started (every %ds, %d peer(s))",
+            _refresh_interval, len(_peers_to_refresh),
+        )
+
+    # ── Graceful shutdown plumbing (Sprint-3-pre, 2026-05) ──────────────
+    # Track in-flight LLM/tool work so SIGTERM / docker stop drains them
+    # before killing the process. Without this, a tool that already
+    # executed against a real device but whose result hadn't yet returned
+    # to the LLM would leave the device's state inconsistent with our
+    # memory record. Drain happens BEFORE checkpoint flushes so any
+    # results captured during drain get persisted.
+    _services["in_flight_tasks"] = set()
+    _shutdown_event = asyncio.Event()
+
+    def _handle_shutdown_signal() -> None:
+        # Safe to call from any signal context — just sets the event.
+        logger.info(
+            "Received shutdown signal — initiating drain "
+            "(in_flight=%d, drain_timeout=30s)",
+            len(_services["in_flight_tasks"]),
+        )
+        _shutdown_event.set()
+
+    import signal as _signal
+    try:
+        _loop_ref = asyncio.get_running_loop()
+        for _sig in (_signal.SIGTERM, _signal.SIGINT):
+            try:
+                _loop_ref.add_signal_handler(_sig, _handle_shutdown_signal)
+            except (NotImplementedError, RuntimeError) as _sig_exc:
+                # Windows doesn't support add_signal_handler; fall back
+                # to default handler. uvicorn's own SIGINT path will
+                # still trigger lifespan exit so the drain block below
+                # runs — just without the early _shutdown_event signal.
+                logger.debug(
+                    "Signal handler for %s not installable (%s) — "
+                    "drain will still run on lifespan exit",
+                    _sig.name, _sig_exc,
+                )
+    except RuntimeError:
+        # No running loop (shouldn't happen — we're INSIDE lifespan)
+        pass
+    # NOTE: _shutdown_event lives as a local in this lifespan only.
+    # No service-dict stash since no external module reads it yet.
+    # When Sprint 3 introduces user-facing "shutting down" UX, expose
+    # via services["shutdown_event"] and audit_wiring will validate.
+
     yield
+
+    # ─── Graceful shutdown sequence ───────────────────────────────────
+    # 1. Drain in-flight LLM/tool work (best effort, 30s cap)
+    _in_flight = _services.get("in_flight_tasks") or set()
+    if _in_flight:
+        logger.info(
+            "Waiting for %d in-flight request(s) to complete (max 30s)…",
+            len(_in_flight),
+        )
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*list(_in_flight), return_exceptions=True),
+                timeout=30.0,
+            )
+            logger.info("All in-flight requests drained")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Forced shutdown after 30s drain timeout — %d task(s) "
+                "still pending; their state may not be persisted",
+                len(_in_flight),
+            )
+        except Exception as _drain_exc:
+            logger.warning("Drain hit unexpected error: %s", _drain_exc)
+
+    # 2. Flush HITL checkpoint store so pending interrupts survive restart
+    try:
+        _hs = _services.get("hitl_store")
+        if _hs is not None:
+            # Both sqlite & redis stores expose flush()/close(); memory
+            # store has neither and is irrelevant (data already lost).
+            if hasattr(_hs, "flush"):
+                _res = _hs.flush()
+                if asyncio.iscoroutine(_res):
+                    await _res
+                logger.info("HITL checkpoint store flushed")
+            elif hasattr(_hs, "close"):
+                _res = _hs.close()
+                if asyncio.iscoroutine(_res):
+                    await _res
+                logger.info("HITL checkpoint store closed")
+    except Exception as _flush_exc:
+        logger.warning("HITL checkpoint flush failed: %s", _flush_exc)
 
     # Stop SkillJournalConsumer before other teardown
     try:
@@ -1237,6 +1493,13 @@ async def lifespan(app: FastAPI):
             await _stop()
     except Exception as _jc_exc:
         logger.warning("SkillJournalConsumer stop failed: %s", _jc_exc)
+
+    if peer_refresh_task is not None:
+        peer_refresh_task.cancel()
+        try:
+            await peer_refresh_task
+        except asyncio.CancelledError:
+            pass
 
     if _services.get("hitl_watchdog") is not None:
         _services["hitl_watchdog"].stop()

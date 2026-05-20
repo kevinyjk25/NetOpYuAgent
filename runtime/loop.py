@@ -2840,50 +2840,72 @@ class AgentRuntimeLoop:
         self, tool_name: str, args: dict[str, Any], registry: dict[str, Any]
     ) -> str:
         await asyncio.sleep(0)
-        tool_fn = registry.get(tool_name)
-        if tool_fn is not None:
+        # Sprint-3-pre: trace tool dispatch. No-op when tracing disabled.
+        from runtime.tracing import start_span
+        with start_span(
+            "tool.dispatch",
+            **{
+                "tool.name":       tool_name,
+                "tool.args.count": len(args or {}),
+            },
+        ) as _t_span:
+            tool_fn = registry.get(tool_name)
+            if tool_fn is not None:
+                try:
+                    result = await tool_fn(args)
+                    _result_str = str(result)
+                    try:
+                        _t_span.set_attribute("tool.result.chars", len(_result_str))
+                    except Exception:
+                        pass
+                    return _result_str
+                except Exception as exc:
+                    try:
+                        _t_span.set_attribute("tool.error", str(exc)[:200])
+                    except Exception:
+                        pass
+                    return f"[Tool error: {exc}]"
+
+            # Tool not found — return a LLM-actionable error with fuzzy-match
+            # suggestions so the next turn can self-correct typos / synonyms
+            # without operator help.
+            #
+            # Typical cases that hit this path:
+            #   - Singular/plural error: list_device vs list_devices
+            #   - Synonym guess: get_devices vs list_devices
+            #   - Tier-1 ↔ Tier-2 mistake: prometheus vs prometheus_query
+            #   - Underscore-vs-camelCase: listDevices vs list_devices
+            #
+            # difflib.get_close_matches uses SequenceMatcher; cutoff 0.6 is
+            # tuned to suggest helpful matches without firing on totally
+            # unrelated names (which would just confuse the model further).
             try:
-                result = await tool_fn(args)
-                return str(result)
-            except Exception as exc:
-                return f"[Tool error: {exc}]"
+                _t_span.set_attribute("tool.found", False)
+            except Exception:
+                pass
+            import difflib
+            candidates = sorted(registry.keys())
+            suggestions = difflib.get_close_matches(
+                tool_name, candidates, n=3, cutoff=0.6,
+            )
+            # Fallback for transposition / case mismatches that the ratio
+            # check misses: case-insensitive substring match.
+            if not suggestions:
+                lower = tool_name.lower()
+                suggestions = [c for c in candidates
+                               if lower in c.lower() or c.lower() in lower][:3]
 
-        # Tool not found — return a LLM-actionable error with fuzzy-match
-        # suggestions so the next turn can self-correct typos / synonyms
-        # without operator help.
-        #
-        # Typical cases that hit this path:
-        #   - Singular/plural error: list_device vs list_devices
-        #   - Synonym guess: get_devices vs list_devices
-        #   - Tier-1 ↔ Tier-2 mistake: prometheus vs prometheus_query
-        #   - Underscore-vs-camelCase: listDevices vs list_devices
-        #
-        # difflib.get_close_matches uses SequenceMatcher; cutoff 0.6 is
-        # tuned to suggest helpful matches without firing on totally
-        # unrelated names (which would just confuse the model further).
-        import difflib
-        candidates = sorted(registry.keys())
-        suggestions = difflib.get_close_matches(
-            tool_name, candidates, n=3, cutoff=0.6,
-        )
-        # Fallback for transposition / case mismatches that the ratio
-        # check misses: case-insensitive substring match.
-        if not suggestions:
-            lower = tool_name.lower()
-            suggestions = [c for c in candidates
-                           if lower in c.lower() or c.lower() in lower][:3]
-
-        if suggestions:
+            if suggestions:
+                return (
+                    f"[Tool {tool_name!r} not registered — args={args}]. "
+                    f"Did you mean one of: {', '.join(suggestions)}? "
+                    f"Use [TOOL:list_tools] to search the full registry."
+                )
             return (
                 f"[Tool {tool_name!r} not registered — args={args}]. "
-                f"Did you mean one of: {', '.join(suggestions)}? "
-                f"Use [TOOL:list_tools] to search the full registry."
+                f"No similar tools found in the {len(candidates)}-tool registry. "
+                f"Use [TOOL:list_tools] to see what's available."
             )
-        return (
-            f"[Tool {tool_name!r} not registered — args={args}]. "
-            f"No similar tools found in the {len(candidates)}-tool registry. "
-            f"Use [TOOL:list_tools] to see what's available."
-        )
 
     @staticmethod
     def _skill_loads_in(response: str) -> set:

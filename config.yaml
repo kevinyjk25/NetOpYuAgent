@@ -191,6 +191,20 @@ hitl:
   #   bypass            — all auto-approve (trusted dev/replay only — NOT prod)
   # See config.py:HITLConfig.trust_mode docstring for design rationale.
   trust_mode: "cautious"
+  # Checkpoint persistence (Sprint-3-pre, 2026-05).
+  # Override via env:  HITL_CHECKPOINT_BACKEND, HITL_SQLITE_PATH, HITL_REDIS_URL
+  # Default changed from "memory" → "sqlite" so pending approvals
+  # survive agent restarts. The asyncio.Future backing await
+  # resolution_future does NOT survive process restart — so without a
+  # persistent backend, a SIGTERM mid-approval orphans the producing
+  # query forever. Three backends:
+  #   memory  — fast, NO persistence (dev / test only; production loud-warns)
+  #   sqlite  — default, file-backed, survives restart
+  #   redis   — for multi-replica deployments
+  checkpoint:
+    backend:     "sqlite"
+    sqlite_path: "data/hitl_checkpoints.db"
+    redis_url:   ""                   # leave blank to fall back to memory.redis_url
   sla:
     critical: 300
     high:     600
@@ -273,6 +287,57 @@ auth:
   enabled:        false        # true = enforce auth; false = skip ALL auth
   dev_operator:   "dev-user"   # operator_id used when auth is disabled
   jwt_secret_env: "NETOPYU_JWT_SECRET"   # env var holding the JWT secret
+
+
+# ── Agent identity + peer discovery (Phase 1 multi-agent) ─────
+# This section defines:
+#   1. WHO this agent is — agent_id used as registry key + AgentCard name
+#   2. WHAT it advertises — capabilities published in /.well-known/agent-card.json
+#   3. WHO its peers are — other agent base URLs fetched at startup
+#
+# Phase 1 scope: agents discover each other and appear in /system/peers.
+# They do NOT delegate queries yet (that's Phase 2). This block is the
+# identity + discovery foundation.
+#
+# To run two agents locally:
+#   Terminal 1:  AGENT_ID=lan-agent AGENT_PEERS=http://localhost:8001 \
+#                  uvicorn main:app --port 8000
+#   Terminal 2:  AGENT_ID=wan-agent AGENT_PEERS=http://localhost:8000 \
+#                  uvicorn main:app --port 8001
+#
+# Defaults reproduce the legacy single-agent behaviour, so existing
+# deployments keep working without changing this section.
+agent:
+  agent_id:     "default-agent"           # stable id (registry key, trace tag)
+  display_name: "IT Ops Agent"            # human label shown in WebUI
+  description: >
+    Intelligent IT operations agent — alert analysis, incident
+    management, trend prediction, multi-dataset correlation.
+
+  # Capabilities advertised to other agents via AgentCard.skills.
+  # If empty, falls back to the legacy SKILLS list in a2a/agent_card.py.
+  # Used by Phase 2 capability matching to decide who handles which query.
+  capabilities: []
+    # Example for a LAN-specialised agent:
+    # - skill_id:    "lan_diagnose"
+    #   name:        "LAN diagnose"
+    #   description: "Diagnose internal LAN devices (switches, APs, internal firewalls)"
+    #   tags:        ["lan", "switch", "ap", "internal"]
+    #   examples:
+    #     - "show interface status on switch-7"
+    #     - "ap-01 上的 radius timeout 配置是多少"
+    # - skill_id:    "lan_config"
+    #   name:        "LAN config"
+    #   description: "Push config changes to LAN devices (HITL-gated)"
+    #   tags:        ["lan", "destructive", "internal"]
+
+  # Peer agent base URLs. AgentDiscovery will fetch
+  # /.well-known/agent-card.json from each at startup, then refresh
+  # every peer_refresh_interval_s seconds. Set to [] for solo mode.
+  peers: []
+    # - "http://localhost:8001"
+    # - "http://localhost:8002"
+  peer_refresh_interval_s: 120
 
 
 # ── Policies (prompt-based) ────────────────────────────────────
@@ -810,3 +875,18 @@ evaluation:
   bench_top_k:      5
   report_path:      ""             # JSONL output, empty = stdout-only
   fail_below_mrr:   0.0            # >0 → startup raises if MRR drops
+
+# ── Observability (Sprint-3-pre, 2026-05) ─────────────────────
+# OpenTelemetry tracing. DEFAULTS OFF — opentelemetry packages are
+# optional. To enable in production:
+#   1. pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
+#   2. set tracing_enabled: true (or OTEL_TRACING_ENABLED=true env)
+#   3. set otlp_endpoint to your collector (or OTEL_EXPORTER_OTLP_ENDPOINT env)
+# When disabled OR opentelemetry not installed, all spans become no-ops.
+# See runtime/tracing.py for the API + degradation contract.
+observability:
+  tracing_enabled:  false
+  otlp_endpoint:    ""              # e.g. "http://collector:4317" — empty = console exporter
+  sample_ratio:     1.0             # 0.0-1.0; lower in high-traffic production
+  service_name:     "netopyu-agent"
+  service_version:  "6.0.0"

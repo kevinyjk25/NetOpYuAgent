@@ -1140,6 +1140,30 @@ class OllamaEngine(LLMEngine):
         directives from structured tool_calls so downstream parsers
         (runtime/loop.py + directive_parser) don't need to change.
         """
+        # Sprint-3-pre: optional tracing. start_span degrades to no-op
+        # when OTel is disabled / not installed, so this is zero-cost.
+        from runtime.tracing import start_span
+        _msg_chars = sum(len(m.get("content", "") or "") for m in (messages or []))
+        with start_span(
+            "llm.call",
+            **{
+                "llm.model":            getattr(self, "_model", "unknown"),
+                "llm.message.count":    len(messages or []),
+                "llm.message.chars":    _msg_chars,
+                "llm.native_tools":     bool(tools),
+                "llm.tools.count":      len(tools or []),
+            },
+        ) as _span:
+            return await self._chat_impl(messages, tools=tools, _span=_span)
+
+    async def _chat_impl(
+        self,
+        messages: list[dict],
+        *,
+        tools: list[dict] | None = None,
+        _span: Any = None,
+    ) -> str | dict:
+        """Internal _chat body — wrapped by _chat() for tracing."""
         try:
             import httpx
         except ImportError:
