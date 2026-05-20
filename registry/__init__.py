@@ -28,9 +28,10 @@ Quick start
 
 from __future__ import annotations
 
+import logging
 from typing import Any, Optional
 
-from .discovery import AgentDiscovery, logger
+from .discovery import AgentDiscovery
 from .registry import AgentRegistry
 from registry.router import create_registry_router
 from registry.schemas import (
@@ -43,6 +44,9 @@ from registry.schemas import (
     ResolutionResult,
 )
 from registry.store import InMemoryRegistryStore, RedisRegistryStore, RegistryStore
+
+
+logger = logging.getLogger(__name__)
 
 
 async def create_registry(

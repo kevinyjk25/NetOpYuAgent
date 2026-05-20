@@ -370,5 +370,139 @@ class TestEvolverBenchRunner(unittest.TestCase):
                         "Catalog MUST be mutated when bench accepts")
 
 
+# ─────────────────────────────────────────────────────────────────────
+#  C1 — Prometheus metrics (runtime/metrics.py)
+# ─────────────────────────────────────────────────────────────────────
+class TestMetricsModule(unittest.TestCase):
+    """runtime/metrics.py — all helpers must be no-op-safe whether or not
+    prometheus_client is installed, and render_latest always returns bytes.
+    """
+
+    def test_helpers_never_raise(self):
+        from runtime import metrics as m
+        # None of these may raise regardless of prometheus availability.
+        m.record_llm_call("qwen3.5:27b", "ok", 1.2)
+        m.record_llm_call("m", "error")          # duration optional
+        m.record_tool_call("list_devices", "ok")
+        m.record_tool_call("x", "not_found")
+        m.set_hitl_pending(5)
+        m.set_hitl_pending(0)
+        with m.track_active_llm():
+            pass
+        with m.time_llm_call("m"):
+            pass
+
+    def test_time_llm_call_records_error_on_exception(self):
+        """time_llm_call must re-raise but still record (no swallow)."""
+        from runtime import metrics as m
+        with self.assertRaises(ValueError):
+            with m.time_llm_call("m"):
+                raise ValueError("boom")
+
+    def test_render_latest_returns_bytes_and_content_type(self):
+        from runtime import metrics as m
+        body, ct = m.render_latest()
+        self.assertIsInstance(body, bytes)
+        self.assertIsInstance(ct, str)
+        self.assertIn("text/plain", ct.lower())
+
+    def test_render_includes_metric_names_when_available(self):
+        """When prometheus_client is installed, exposition has our metrics."""
+        from runtime import metrics as m
+        if not m.is_available():
+            self.skipTest("prometheus_client not installed")
+        m.record_llm_call("test-model", "ok", 0.5)
+        body, _ = m.render_latest()
+        text = body.decode()
+        self.assertIn("netopyu_llm_calls_total", text)
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  C2 — tracing instrument_fastapi
+# ─────────────────────────────────────────────────────────────────────
+class TestTracingInstrumentFastapi(unittest.TestCase):
+    def setUp(self):
+        import importlib, sys
+        if "runtime.tracing" in sys.modules:
+            importlib.reload(sys.modules["runtime.tracing"])
+
+    def test_instrument_fastapi_noop_when_disabled(self):
+        from runtime.tracing import configure, instrument_fastapi
+        configure(enabled=False)
+        # Must return False, not raise, when tracing is off.
+        class _FakeApp:
+            pass
+        self.assertFalse(instrument_fastapi(_FakeApp()))
+
+
+# ─────────────────────────────────────────────────────────────────────
+#  D1 — LLM concurrency semaphore (logic-level)
+# ─────────────────────────────────────────────────────────────────────
+class TestLLMConcurrencyCap(unittest.TestCase):
+    """The semaphore gating logic on the base LLMEngine.
+
+    We test the logic in isolation (LLMEngine pulls httpx-heavy deps that
+    may not be in a minimal test env), mirroring the _get_semaphore /
+    set_max_concurrent_calls contract.
+    """
+
+    def _make_engine_like(self):
+        import asyncio
+
+        class _EngineLike:
+            def __init__(self):
+                self._max_concurrent_calls = 0
+                self._llm_semaphore = None
+                self._llm_sem_loop = None
+            def set_max_concurrent_calls(self, n):
+                self._max_concurrent_calls = max(0, int(n))
+                self._llm_semaphore = None
+                self._llm_sem_loop = None
+            def _get_semaphore(self):
+                if self._max_concurrent_calls <= 0:
+                    return None
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    return None
+                if self._llm_semaphore is None or self._llm_sem_loop is not loop:
+                    self._llm_semaphore = asyncio.Semaphore(self._max_concurrent_calls)
+                    self._llm_sem_loop = loop
+                return self._llm_semaphore
+        return _EngineLike()
+
+    def test_disabled_by_default(self):
+        import asyncio
+        e = self._make_engine_like()
+        async def go():
+            return e._get_semaphore()
+        self.assertIsNone(asyncio.run(go()))
+
+    def test_cap_limits_concurrency(self):
+        import asyncio
+        e = self._make_engine_like()
+        e.set_max_concurrent_calls(2)
+
+        async def go():
+            active = 0
+            peak = 0
+            async def work():
+                nonlocal active, peak
+                async with e._get_semaphore():
+                    active += 1
+                    peak = max(peak, active)
+                    await asyncio.sleep(0.01)
+                    active -= 1
+            await asyncio.gather(*[work() for _ in range(12)])
+            return peak
+        peak = asyncio.run(go())
+        self.assertLessEqual(peak, 2, f"peak in-flight {peak} exceeded cap 2")
+
+    def test_config_has_max_concurrent_calls(self):
+        from config import cfg
+        self.assertTrue(hasattr(cfg.llm, "max_concurrent_calls"))
+        self.assertGreaterEqual(cfg.llm.max_concurrent_calls, 0)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -2849,6 +2849,7 @@ class AgentRuntimeLoop:
                 "tool.args.count": len(args or {}),
             },
         ) as _t_span:
+            from runtime import metrics as _metrics
             tool_fn = registry.get(tool_name)
             if tool_fn is not None:
                 try:
@@ -2858,17 +2859,20 @@ class AgentRuntimeLoop:
                         _t_span.set_attribute("tool.result.chars", len(_result_str))
                     except Exception:
                         pass
+                    _metrics.record_tool_call(tool_name, "ok")
                     return _result_str
                 except Exception as exc:
                     try:
                         _t_span.set_attribute("tool.error", str(exc)[:200])
                     except Exception:
                         pass
+                    _metrics.record_tool_call(tool_name, "error")
                     return f"[Tool error: {exc}]"
 
-            # Tool not found — return a LLM-actionable error with fuzzy-match
-            # suggestions so the next turn can self-correct typos / synonyms
-            # without operator help.
+            # Tool not found — record + return a LLM-actionable error with
+            # fuzzy-match suggestions so the next turn can self-correct typos
+            # / synonyms without operator help.
+            _metrics.record_tool_call(tool_name, "not_found")
             #
             # Typical cases that hit this path:
             #   - Singular/plural error: list_device vs list_devices

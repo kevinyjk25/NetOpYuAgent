@@ -485,6 +485,30 @@ curl http://localhost:8001/webui/system/peers | jq
 
 这个 bug 跟 Sprint-3-pre 没关系,但因为合并时发现 + 修了,记录在这一节末尾。**这个修复实际上"打开"了项目原本设计但从未真正跑过的两条路径**,以后 production 跑起来要观察这两条路径是否带来预期之外的副作用(比如 skill 被 LLM 改得乱七八糟)。
 
+### 8.5 Sprint 3 — C1/C2/D1 observability + 并发保护(2026-05)
+
+从生产就绪清单里选了 3 项做(A/B 暂缓,短期不上生产)。完整待办见根目录 `TODO.md`。
+
+| 项 | 文件 | 解决什么 |
+|----|------|---------|
+| ✅ C1 — Prometheus `/metrics` | `runtime/metrics.py`(新) + `main.py` `/metrics` 路由 | 此前 `/integrations/metrics` 返回 JSON,Prometheus/Grafana 不识别。新 endpoint 输出标准 OpenMetrics 文本。指标:`netopyu_llm_calls_total{model,outcome}` / `netopyu_llm_call_duration_seconds{model}` histogram / `netopyu_tool_calls_total{tool,outcome}` / `netopyu_hitl_pending` gauge / `netopyu_active_llm_calls` gauge |
+| ✅ C2 — FastAPI/httpx auto-instrumentation | `runtime/tracing.py` `instrument_fastapi()` + httpx instrument in `configure()` | Sprint-3-pre 只埋了 3 处手工 span。现在每个 inbound 请求 + 每个 outbound HTTP(peer fetch / OpenAPI / MCP-over-HTTP)自动 span,挂在现有 trace 上 |
+| ✅ D1 — LLM 并发信号量 | `config.py` `max_concurrent_calls` + `llm_engine.py` semaphore | 一个 query fan-out 20+ 个内部 LLM 调用,几个并发 query 就打爆 Ollama。`asyncio.Semaphore`(默认 4)限制 in-flight,延迟优雅退化而非雪崩 |
+
+**设计要点**:
+
+- **三项全部可选 + 优雅降级**:`prometheus_client` / `opentelemetry-instrumentation-*` 没装,boot 照常,`/metrics` 返回纯文本提示,instrument 函数返回 False。`requirements.txt` 里标了 OPTIONAL。
+- **`runtime/metrics.py` 跟 `tracing.py` 一个套路**:模块级懒加载 collector,record helper 在包缺失时 no-op,zero import cost。模块独立(不 import 任何内部模块)。
+- **C1 指标埋点位置**:LLM 调用在 `llm_engine._chat` wrapper(同时含 D1 semaphore + tracing span + metrics,三合一);tool dispatch 在 `loop._dispatch_tool`;HITL pending 在 `/metrics` 被 scrape 时实时读 router。
+- **D1 semaphore 懒绑定**:`asyncio.Semaphore` 必须绑定到运行中的 event loop,而 `__init__` 在 uvicorn loop 起来之前就跑了。所以 semaphore 在第一次 `_get_semaphore()` 时才创建,并在 loop 变化时(测试场景)重建。`set_max_concurrent_calls(0)` = 不限制(legacy)。
+- **指标 + tracing + semaphore 在同一个 `_chat` wrapper 里叠加**:`async with _sem: with track_active_llm(), time_llm_call(model): await _chat_impl(...)`。三个关切点(并发/指标/追踪)都从业务函数 `_chat_impl` 里抽出来了。
+
+**8 个新单元测试**(`tests/test_sprint3_pre.py`,共 30):metrics helper no-op 安全 / time_llm_call 异常仍记录 / render 返回 bytes / instrument_fastapi disabled 时 no-op / semaphore 默认禁用 / semaphore 真实限并发 / config 有 max_concurrent_calls 字段。
+
+**仍未做(留 `TODO.md`)**:A1(auth 强制)/ A2(CSRF)/ A3(secrets)/ B1(Docker)/ B2(livez+readyz)/ B3(DEPLOYMENT.md)/ C3(backup)/ C4(migrations)。
+
+**全 CI PASS**:6/6 audits + 21/21 safety + 23 multi-agent(4 skip)+ 30 sprint3 tests。
+
 ---
 
 ## 9. 模块独立维护原则

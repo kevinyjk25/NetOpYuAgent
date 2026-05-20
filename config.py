@@ -118,6 +118,14 @@ class LLMConfig:
     backend: str; model: str; base_url: str
     temperature: float; max_tokens: int; log_detail: str
     capabilities: LLMCapabilities = field(default_factory=LLMCapabilities)
+    # D1 (Sprint 3, 2026-05): cap concurrent in-flight LLM calls. A single
+    # agent query can fan out into 20+ internal LLM calls (policy classify,
+    # tool selection, verification, skill eval, fact extraction…). Without
+    # a cap, a couple of concurrent user queries saturate Ollama, every
+    # call slows down, and timeouts cascade. The semaphore bounds in-flight
+    # calls so latency degrades gracefully instead of collapsing. 0 = no
+    # limit (legacy behaviour). Default 4 suits a single local Ollama.
+    max_concurrent_calls: int = 4
 
 @dataclass
 class MCPConfig:
@@ -1227,6 +1235,8 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             max_tokens  = _env_int  ("LLM_MAX_TOKENS",  l.get("max_tokens",  2048)),
             log_detail  = _env_str  ("LLM_LOG_DETAIL",  l.get("log_detail",  "off")),
             capabilities = _load_llm_capabilities(l.get("capabilities", {}) or {}),
+            max_concurrent_calls = _env_int("LLM_MAX_CONCURRENT_CALLS",
+                                            l.get("max_concurrent_calls", 4)),
         ),
         tools=ToolsConfig(
             mcp=MCPConfig(

@@ -34,6 +34,12 @@ llm:
   temperature: 0.1
   max_tokens:  4096
   log_detail:  "off"   # off | compact | full
+  # D1 (Sprint 3, 2026-05): cap concurrent in-flight LLM calls so one
+  # query's fan-out (20+ internal calls) can't saturate Ollama. A single
+  # local Ollama serves ~1-4 concurrent generations well; raise for a
+  # bigger box or a hosted backend. 0 = unlimited (legacy). Env override:
+  # LLM_MAX_CONCURRENT_CALLS.
+  max_concurrent_calls: 4
 
   # Per-model behaviour declarations. Set these per-model — they replace
   # the old hardcoded THINKING_MODELS set. Override via env vars like

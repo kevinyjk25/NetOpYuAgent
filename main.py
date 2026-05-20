@@ -320,6 +320,14 @@ async def build_services() -> dict[str, Any]:
             "capabilities": cfg.llm.capabilities,
         })
         services["llm_engine"] = llm_engine  # patch_hitl_graph called after tool registry is built
+        # D1 (Sprint 3): apply the concurrency cap. Default 4; 0 = unlimited.
+        try:
+            if hasattr(llm_engine, "set_max_concurrent_calls"):
+                llm_engine.set_max_concurrent_calls(
+                    int(getattr(cfg.llm, "max_concurrent_calls", 4))
+                )
+        except Exception as _sem_exc:
+            logger.warning("LLM concurrency cap wiring failed: %s", _sem_exc)
         logger.info("LLM engine: %s/%s", cfg.llm.backend, cfg.llm.model)
         logger.info("LLM capabilities: thinking_tag=%r format_compliance=%s "
                     "max_context=%d native_tools=%s",
@@ -1289,6 +1297,15 @@ async def lifespan(app: FastAPI):
     logger.info("Starting IT Ops Agent v6 (mode=%s)", cfg.mode.upper())
     _services = await build_services()
 
+    # C2 (Sprint 3): FastAPI auto-instrumentation. Must run AFTER
+    # build_services() (which calls tracing.configure()), and is a no-op
+    # when tracing is disabled / the instrumentation package is absent.
+    try:
+        from runtime.tracing import instrument_fastapi
+        instrument_fastapi(app)
+    except Exception as _fi_exc:
+        logger.warning("FastAPI instrumentation wiring failed: %s", _fi_exc)
+
     from a2a import create_a2a_app, InMemoryTaskStore
     a2a_app = create_a2a_app(
         base_url   = cfg.server.a2a_base_url,
@@ -1548,6 +1565,36 @@ from fastapi.responses import FileResponse
 async def serve_webui():
     html_path = pathlib.Path(__file__).parent / "webui" / "index.html"
     return FileResponse(str(html_path), media_type="text/html")
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    """Prometheus / OpenMetrics text exposition (C1, Sprint 3, 2026-05).
+
+    Returns live counters/gauges/histograms in OpenMetrics format for a
+    Prometheus scraper. Refreshes the pending-HITL gauge on each scrape so
+    it reflects current state without a background poller.
+
+    When prometheus_client isn't installed, returns a plaintext notice
+    (still 200 so scrapers don't hard-fail).
+    """
+    from fastapi.responses import Response
+    from runtime import metrics as _metrics
+
+    # Refresh point-in-time gauges on scrape.
+    try:
+        _rtr = _services.get("hitl_core_router") or _services.get("hitl_router")
+        if _rtr is not None and hasattr(_rtr, "_payload_store"):
+            _pending = sum(
+                1 for p in _rtr._payload_store.values()
+                if getattr(getattr(p, "status", None), "value", None) == "pending"
+            )
+            _metrics.set_hitl_pending(_pending)
+    except Exception:
+        pass
+
+    body, content_type = _metrics.render_latest()
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/health")

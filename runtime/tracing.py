@@ -173,6 +173,25 @@ def configure(
             "Tracing: ENABLED (service=%s v%s, sample=%.2f)",
             service_name, service_version, sample_ratio,
         )
+
+        # C2 (Sprint 3, 2026-05): httpx auto-instrumentation. Every outbound
+        # HTTP call (peer AgentCard fetch, OpenAPI tools, MCP-over-HTTP, etc.)
+        # gets an automatic client span linked to the active trace. Optional
+        # package — if not installed, we log + skip (manual spans still work).
+        # FastAPI instrumentation is separate (needs the app object) — see
+        # instrument_fastapi() called from main.py.
+        try:
+            from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor  # type: ignore
+            HTTPXClientInstrumentor().instrument()
+            logger.info("Tracing: httpx auto-instrumentation enabled")
+        except ImportError:
+            logger.info(
+                "Tracing: opentelemetry-instrumentation-httpx not installed — "
+                "outbound HTTP calls won't be auto-spanned (pip install it to enable)"
+            )
+        except Exception as _httpx_exc:
+            logger.warning("Tracing: httpx instrumentation failed: %s", _httpx_exc)
+
         return True
     except Exception as exc:
         # Any setup failure → degrade to no-op rather than crashing boot.
@@ -183,6 +202,34 @@ def configure(
         )
         _ENABLED = False
         _INITIALIZED = True
+        return False
+
+
+def instrument_fastapi(app: Any) -> bool:
+    """Auto-instrument a FastAPI app so every inbound request gets a span.
+
+    C2 (Sprint 3, 2026-05). Called from main.py AFTER the FastAPI app is
+    constructed (FastAPIInstrumentor needs the app object, unlike httpx
+    which patches the client class globally). No-op when tracing is
+    disabled or the instrumentation package isn't installed.
+
+    Returns True iff instrumentation was applied.
+    """
+    if not _ENABLED:
+        return False
+    try:
+        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor  # type: ignore
+        FastAPIInstrumentor.instrument_app(app)
+        logger.info("Tracing: FastAPI auto-instrumentation enabled")
+        return True
+    except ImportError:
+        logger.info(
+            "Tracing: opentelemetry-instrumentation-fastapi not installed — "
+            "inbound requests won't be auto-spanned (pip install it to enable)"
+        )
+        return False
+    except Exception as exc:
+        logger.warning("Tracing: FastAPI instrumentation failed: %s", exc)
         return False
 
 
