@@ -55,6 +55,7 @@ def create_a2a_app(
     base_url: str,
     executor: ITOpsAgentExecutor | None = None,
     task_store: InMemoryTaskStore | None = None,
+    identity: object | None = None,
 ) -> FastAPI:
     """
     Build and return a self-contained A2A FastAPI sub-application.
@@ -78,7 +79,12 @@ def create_a2a_app(
     _executor = executor or ITOpsAgentExecutor()
     _store = task_store or InMemoryTaskStore()
     _handler = DefaultRequestHandler(agent_executor=_executor, task_store=_store)
-    _agent_card = get_agent_card(base_url)
+    # Phase-1 multi-agent: thread identity through so the PUBLISHED card
+    # (served at /.well-known/agent-card.json, fetched by peers) carries
+    # this agent's real agent_id + capabilities — not the legacy
+    # "default-agent" fallback. Without this, peers discover us as
+    # "default-agent" no matter what AGENT_ID we were started with.
+    _agent_card = get_agent_card(base_url, identity=identity)
 
     a2a = FastAPI(title="IT Ops A2A Agent", version="1.0.0", docs_url=None)
 

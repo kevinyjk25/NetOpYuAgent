@@ -30,7 +30,7 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from .discovery import AgentDiscovery
+from .discovery import AgentDiscovery, logger
 from .registry import AgentRegistry
 from registry.router import create_registry_router
 from registry.schemas import (
@@ -100,9 +100,27 @@ async def create_registry(
 
     # Fetch and register static URL-based agents
     if static_urls:
-        await registry.register_from_urls(
+        _registered = await registry.register_from_urls(
             static_urls, source=RegistrationSource.STATIC
         )
+        # Observability: surface how many peers actually registered vs how
+        # many URLs we tried. A mismatch means some peer cards failed to
+        # fetch/parse — the per-URL error is logged by AgentDiscovery, but
+        # this summary makes a partial failure obvious at startup.
+        _n_ok = len(_registered or [])
+        if _n_ok < len(static_urls):
+            logger.warning(
+                "Registry: only %d/%d peer(s) registered from static URLs — "
+                "the rest failed to fetch/parse (see AgentDiscovery errors above). "
+                "URLs: %s",
+                _n_ok, len(static_urls), static_urls,
+            )
+        else:
+            logger.info(
+                "Registry: registered %d/%d static peer(s): %s",
+                _n_ok, len(static_urls),
+                [e.agent_id for e in (_registered or [])],
+            )
 
     # Register purely static (no HTTP fetch) agents
     if static_agents:

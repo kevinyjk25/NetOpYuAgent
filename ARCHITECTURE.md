@@ -424,9 +424,12 @@ curl http://localhost:8001/webui/system/peers | jq
 | 问题 | 修复 | 文件 |
 |------|------|------|
 | `/system/peers` 显示 peer 是一串 UUID,不是真实 agent_id | `AgentDiscovery._parse()` 之前不读取 AgentCard JSON 里的顶层 `agent_id` 字段,所以 `AgentEntry.agent_id = Field(default_factory=uuid.uuid4)` 每次 fetch 给新 UUID。修复:`_parse` 显式 `raw.get("agent_id", ...).strip()`,有就用,空白/缺失 fallback 到 UUID(保留对非 Phase-1 peer 的向后兼容)| `registry/discovery.py` |
+| **(2026-05 续)peer agent_id 仍显示 `default-agent`** | 上一个修复让 discovery 正确读 card 的 agent_id,但**源头 card 本身就是错的**:`a2a/server.py:create_a2a_app()` 调 `get_agent_card(base_url)` 没传 identity → 发布出去的 `/.well-known/agent-card.json` 永远是 `default-agent`。`/system/peers` 的 self 块对(直接读 cfg.agent),但 peer 互相 fetch 到的 card 错。修复:`create_a2a_app` 加 `identity` 参数,`main.py` 传 `cfg.agent`,加 2 个 source-level regression test | `a2a/server.py` + `main.py` |
+| **(2026-05 续)peer refresh loop 崩溃 + 启动竞态导致 `peers: []`** | 两个叠加问题:(1) refresh loop 传 `source=None`,但 `RegistrationSource` 是必填 enum,`AgentEntry` 构造抛 ValidationError,被 `fetch_many` 每-URL 吞掉 → 每 120s 崩一次;(2) 两个 agent 同时启动时,先起的那个 fetch 后起的会失败(对方还没监听)→ 初始注册 0 个 peer → 本该靠 refresh loop 补,但 refresh 被问题(1)弄崩了 → peer 永远不出现。修复:refresh loop 改用 `RegistrationSource.STATIC`;加 fast-bootstrap 阶段(前 30s 每 5s 重试一次,全部发现后提前退出);`create_registry` 加注册数量 vs URL 数量的 mismatch 日志 | `main.py` + `registry/__init__.py` |
+| **(2026-05 续)Ctrl+C 退不出来** | Sprint-3-pre 加的 `loop.add_signal_handler(SIGINT, ...)` **抢占了 uvicorn 的 SIGINT handler**,而我的 handler 只 set 一个没人 await 的 event → uvicorn 收不到信号 → lifespan 不退出 → 卡死。修复:**完全移除** 自己的 signal handler,靠 uvicorn 自己的 handler 触发 lifespan shutdown(`yield` 之后的 drain 块)。drain timeout 改为可配 `SHUTDOWN_DRAIN_TIMEOUT_S`(默认 10s,无 in-flight 任务时直接跳过)| `main.py` |
 | WebUI 没法看到 peer 邻居 | 加 "Peers" tab(第 7 个),每 15s polling `/system/peers`,显示 self + peers 各自的 health dot / capabilities / URL,带 heartbeat indicator | `webui/index.html` |
 | `switchTab` 之前漏了 journal 和 peers | 列表里补齐 `'journal'` + `'peers'`,并加 null-check 防御 | `webui/index.html` |
-| 3 个新 discovery 单元测试 | agent_id 从 card 读取 / 缺失时 UUID fallback / 空白也 UUID fallback | `tests/test_multi_agent_identity.py` |
+| 3 个新 discovery 单元测试 + 2 个 server-identity regression 测试 | agent_id 从 card 读取 / 缺失时 UUID fallback / 空白也 fallback;create_a2a_app 接收并传递 identity | `tests/test_multi_agent_identity.py` |
 
 ### 8.4 Sprint-3-pre — 生产就绪基础工程(2026-05)
 

@@ -239,6 +239,48 @@ class TestAgentCardIdentityDriven(unittest.TestCase):
         self.assertEqual(card["agent_id"], "lan-agent")
 
 
+class TestA2AServerPublishesIdentity(unittest.TestCase):
+    """Regression: the PUBLISHED AgentCard (served at
+    /.well-known/agent-card.json) must carry the configured agent_id.
+
+    Bug fixed 2026-05: create_a2a_app() called get_agent_card(base_url)
+    with NO identity, so peers always discovered us as "default-agent"
+    regardless of AGENT_ID. The /system/peers self block was correct
+    (read straight from cfg.agent) but the published card — which is
+    what peers actually fetch — was wrong. This test guards the wiring.
+
+    We assert on source rather than booting FastAPI (which needs the
+    full dependency tree). The contract: create_a2a_app must accept an
+    `identity` param AND pass it to get_agent_card.
+    """
+
+    def test_create_a2a_app_accepts_identity_param(self):
+        import inspect
+        # Read the function signature from source without importing a2a
+        # (which pulls httpx). Use the AST-free approach: read the file.
+        import os
+        server_path = os.path.join(
+            os.path.dirname(__file__), "..", "a2a", "server.py",
+        )
+        with open(server_path) as f:
+            src = f.read()
+        # create_a2a_app must declare an identity parameter
+        self.assertIn("identity", src.split("def create_a2a_app")[1].split(")")[0],
+                      "create_a2a_app must accept an identity parameter")
+        # and must forward it to get_agent_card
+        self.assertIn("get_agent_card(base_url, identity=identity)", src,
+                      "create_a2a_app must pass identity to get_agent_card")
+
+    def test_main_passes_identity_to_create_a2a_app(self):
+        import os
+        main_path = os.path.join(os.path.dirname(__file__), "..", "main.py")
+        with open(main_path) as f:
+            src = f.read()
+        # The create_a2a_app call in main.py must pass identity=cfg.agent
+        self.assertIn("identity   = cfg.agent", src,
+                      "main.py must pass identity=cfg.agent to create_a2a_app")
+
+
 class TestAgentDiscoveryParse(unittest.TestCase):
     """`AgentDiscovery._parse` must read agent_id from the raw card JSON.
 
@@ -295,6 +337,46 @@ class TestAgentDiscoveryParse(unittest.TestCase):
             card, "http://x", RegistrationSource.STATIC,
         )
         uuid.UUID(entry.agent_id)
+
+    def test_source_none_is_rejected(self):
+        """_parse must NOT accept source=None.
+
+        Regression: the peer-refresh loop in main.py passed source=None
+        thinking it meant 'keep existing labels', but RegistrationSource
+        is a required enum — None fails AgentEntry validation, fetch_many
+        swallows the error per-URL, and the peer silently never registers
+        (showed as peers: [] in /system/peers). The loop now passes
+        RegistrationSource.STATIC. This test guards _parse's contract.
+        """
+        AgentDiscovery = self._load_disc()
+        card = {"name": "X", "agent_id": "x-agent", "url": "http://x"}
+        with self.assertRaises(Exception):
+            AgentDiscovery._parse(card, "http://x", None)
+
+    def test_main_refresh_loop_uses_valid_source(self):
+        """main.py's peer-refresh loop must not pass source=None.
+
+        Source-level guard — the actual call must use a real enum value.
+        """
+        import os
+        main_path = os.path.join(os.path.dirname(__file__), "..", "main.py")
+        with open(main_path) as f:
+            src = f.read()
+        # The actual register_from_urls call must pass a valid enum, not None.
+        # We check the call expression specifically (not comments, which may
+        # mention source=None when explaining the historical bug).
+        self.assertIn("source=_RS.STATIC", src,
+                      "peer refresh loop must pass a valid RegistrationSource")
+        # Guard against the buggy call expression returning. We look for the
+        # call-site pattern `register_from_urls(` followed (within a small
+        # window) by `source=None` — comments don't contain that sequence.
+        import re
+        # Find the register_from_urls(...) call body
+        m = re.search(r"register_from_urls\((.*?)\)", src, re.DOTALL)
+        self.assertIsNotNone(m, "register_from_urls call not found in main.py")
+        call_args = m.group(1)
+        self.assertNotIn("source=None", call_args,
+                         "register_from_urls call must not pass source=None")
 
 
 class TestPeerURLMerge(unittest.TestCase):

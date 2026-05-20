@@ -1294,6 +1294,7 @@ async def lifespan(app: FastAPI):
         base_url   = cfg.server.a2a_base_url,
         executor   = _services["executor"],
         task_store = InMemoryTaskStore(),
+        identity   = cfg.agent,        # Phase-1: publish real agent_id + caps
     )
     app.mount("/api/v1/a2a", a2a_app)
 
@@ -1374,19 +1375,57 @@ async def lifespan(app: FastAPI):
     _refresh_interval = int(cfg.agent.peer_refresh_interval_s)
     if _peers_to_refresh and _refresh_interval > 0:
         async def _peer_refresh_loop():
-            """Periodically re-fetch peer AgentCards and update registry."""
+            """Periodically re-fetch peer AgentCards and update registry.
+
+            Two phases:
+              1. Fast bootstrap retries — peers may not be up yet when THIS
+                 agent starts (common when launching both processes at once).
+                 Retry every 5s for the first ~30s so they find each other
+                 quickly instead of waiting a full refresh interval.
+              2. Steady-state refresh every peer_refresh_interval_s.
+            """
             registry = _services["registry"]
+            # Re-fetch with the same source label the initial registration
+            # used (STATIC — these peers come from config/env). Passing
+            # source=None breaks AgentEntry validation (the enum rejects
+            # None); register() upserts by agent_id so re-registering with
+            # STATIC is idempotent and refreshes the card. (Bug fixed
+            # 2026-05: the loop previously passed source=None.)
+            from registry.schemas import RegistrationSource as _RS
+
+            async def _do_refresh() -> int:
+                if not hasattr(registry, "register_from_urls"):
+                    return 0
+                refreshed = await registry.register_from_urls(
+                    _peers_to_refresh, source=_RS.STATIC,
+                )
+                return len(refreshed or [])
+
+            # Phase 1: fast bootstrap. Stop early once all peers are found.
+            _bootstrap_attempts = 6      # 6 × 5s = 30s
+            for _i in range(_bootstrap_attempts):
+                try:
+                    await asyncio.sleep(5)
+                    _n = await _do_refresh()
+                    if _n >= len(_peers_to_refresh):
+                        logger.info(
+                            "Peer bootstrap: all %d peer(s) discovered", _n,
+                        )
+                        break
+                    logger.debug(
+                        "Peer bootstrap attempt %d: %d/%d peer(s) found",
+                        _i + 1, _n, len(_peers_to_refresh),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as _pr_exc:
+                    logger.debug("Peer bootstrap attempt %d failed: %s", _i + 1, _pr_exc)
+
+            # Phase 2: steady-state refresh
             while True:
                 try:
                     await asyncio.sleep(_refresh_interval)
-                    refreshed = await registry.register_from_urls(
-                        _peers_to_refresh,
-                        source=None,  # keep existing source labels
-                    ) if hasattr(registry, "register_from_urls") else None
-                    if refreshed is not None:
-                        logger.debug(
-                            "Peer refresh: %d card(s) updated", len(refreshed),
-                        )
+                    await _do_refresh()
                 except asyncio.CancelledError:
                     raise
                 except Exception as _pr_exc:
@@ -1400,69 +1439,52 @@ async def lifespan(app: FastAPI):
         )
 
     # ── Graceful shutdown plumbing (Sprint-3-pre, 2026-05) ──────────────
-    # Track in-flight LLM/tool work so SIGTERM / docker stop drains them
-    # before killing the process. Without this, a tool that already
-    # executed against a real device but whose result hadn't yet returned
-    # to the LLM would leave the device's state inconsistent with our
-    # memory record. Drain happens BEFORE checkpoint flushes so any
-    # results captured during drain get persisted.
+    # Track in-flight LLM/tool work so the shutdown drain (after `yield`)
+    # can wait for it before the process exits. Without this, a tool that
+    # already executed against a real device but whose result hadn't yet
+    # returned to the LLM would leave device state inconsistent with our
+    # memory record.
+    #
+    # IMPORTANT: we deliberately do NOT install our own SIGINT/SIGTERM
+    # handler. uvicorn already installs handlers that (a) stop accepting
+    # connections and (b) run the ASGI lifespan shutdown — i.e. the code
+    # after `yield` below. If we call loop.add_signal_handler() here we
+    # OVERRIDE uvicorn's handler; unless we then re-trigger uvicorn's
+    # shutdown ourselves (we can't cleanly), the server never stops and
+    # Ctrl+C hangs. The correct integration point is the post-`yield`
+    # drain block, which uvicorn invokes for us on signal. (Bug fixed
+    # 2026-05: the earlier add_signal_handler approach broke Ctrl+C.)
     _services["in_flight_tasks"] = set()
-    _shutdown_event = asyncio.Event()
-
-    def _handle_shutdown_signal() -> None:
-        # Safe to call from any signal context — just sets the event.
-        logger.info(
-            "Received shutdown signal — initiating drain "
-            "(in_flight=%d, drain_timeout=30s)",
-            len(_services["in_flight_tasks"]),
-        )
-        _shutdown_event.set()
-
-    import signal as _signal
-    try:
-        _loop_ref = asyncio.get_running_loop()
-        for _sig in (_signal.SIGTERM, _signal.SIGINT):
-            try:
-                _loop_ref.add_signal_handler(_sig, _handle_shutdown_signal)
-            except (NotImplementedError, RuntimeError) as _sig_exc:
-                # Windows doesn't support add_signal_handler; fall back
-                # to default handler. uvicorn's own SIGINT path will
-                # still trigger lifespan exit so the drain block below
-                # runs — just without the early _shutdown_event signal.
-                logger.debug(
-                    "Signal handler for %s not installable (%s) — "
-                    "drain will still run on lifespan exit",
-                    _sig.name, _sig_exc,
-                )
-    except RuntimeError:
-        # No running loop (shouldn't happen — we're INSIDE lifespan)
-        pass
-    # NOTE: _shutdown_event lives as a local in this lifespan only.
-    # No service-dict stash since no external module reads it yet.
-    # When Sprint 3 introduces user-facing "shutting down" UX, expose
-    # via services["shutdown_event"] and audit_wiring will validate.
 
     yield
 
     # ─── Graceful shutdown sequence ───────────────────────────────────
+    # Reached when uvicorn receives SIGINT/SIGTERM and runs lifespan
+    # shutdown. We drain in-flight work, then flush HITL state.
     # 1. Drain in-flight LLM/tool work (best effort, 30s cap)
     _in_flight = _services.get("in_flight_tasks") or set()
     if _in_flight:
+        # Drain timeout is configurable; default 10s keeps interactive
+        # Ctrl+C snappy while still giving real device operations a
+        # chance to finish. Production can raise it (e.g. 30-60s) where
+        # long-running tool calls matter more than fast restart.
+        import os as _os_drain
+        _drain_timeout = float(_os_drain.getenv("SHUTDOWN_DRAIN_TIMEOUT_S", "10"))
         logger.info(
-            "Waiting for %d in-flight request(s) to complete (max 30s)…",
-            len(_in_flight),
+            "Waiting for %d in-flight request(s) to complete (max %.0fs)…",
+            len(_in_flight), _drain_timeout,
         )
         try:
             await asyncio.wait_for(
                 asyncio.gather(*list(_in_flight), return_exceptions=True),
-                timeout=30.0,
+                timeout=_drain_timeout,
             )
             logger.info("All in-flight requests drained")
         except asyncio.TimeoutError:
             logger.warning(
-                "Forced shutdown after 30s drain timeout — %d task(s) "
+                "Forced shutdown after %.0fs drain timeout — %d task(s) "
                 "still pending; their state may not be persisted",
-                len(_in_flight),
+                _drain_timeout, len(_in_flight),
             )
         except Exception as _drain_exc:
             logger.warning("Drain hit unexpected error: %s", _drain_exc)
