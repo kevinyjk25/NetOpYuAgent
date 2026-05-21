@@ -24,7 +24,7 @@
 | `memory/` | ~250 | `MemoryAdapter` thin wrapper,给 runtime 用 | — |
 | `a2a/` | ~1200 | A2A 协议层(inbound JSON-RPC + SSE 流 + AgentCard + EventQueue) | — (轻量,本文档 §11) |
 | `registry/` | ~900 | Agent registry — 自注册、peer discovery、health check、load balance | — (轻量,本文档 §11) |
-| `task/` | ~1500 | Task graph + 跨 agent dispatcher(`A2ATaskDispatcher`,Phase 2 唤醒)| — |
+| `task/` | ~1600 | Task graph + 跨 agent dispatcher(`A2ATaskDispatcher`)+ `delegation.py` 委派工厂(Phase 2B 已接线)| — |
 
 ---
 
@@ -181,7 +181,7 @@ services["executor"].set_skill_evolver(services["skill_evolver"])
 
 ### 4.3 Directive 协议
 
-LLM ↔ Agent 通过 `[TOOL:name] {args}` / `[TOOL_BATCH:name] [{...},...]` / `[SKILL_LOAD:id]` 通信。**所有**解析在 `runtime/directive_parser.py`,`scripts/audit_directive_parsing.py` 强制单一入口。
+LLM ↔ Agent 通过 `[TOOL:name] {args}` / `[TOOL_BATCH:name] [{...},...]` / `[SKILL_LOAD:id]` / `[DELEGATE:target[#mode]] <task>`(Phase 2B,跨 agent 委派,与 TOOL 互斥)通信。**所有**解析在 `runtime/directive_parser.py`,`scripts/audit_directive_parsing.py` 强制单一入口。
 
 加新 directive type:
 1. `runtime/directive_parser.py:parse_directives` 加 type
@@ -541,6 +541,41 @@ curl http://localhost:8001/webui/system/peers | jq
 **全 CI PASS**:7/7 audits(含 profile audit)+ 101 tests(96 baseline + 5 H2 regression,1 skip on pydantic)。
 
 **没做**:MFA(产品决策推迟);H2 真生产路径(operator 真的去 ops 队列审批,要前端 + 队列后端集成,这次只做 demo 自动回复)。
+
+---
+
+### 8.7 Phase 2B — Capability-based delegation(2026-05)
+
+**目标**:agent 遇到自己 profile 不擅长的子任务时,委派给拥有对应能力的 peer agent,流式拿回结果再 merge 进自己的回答。建立在 2A(profile 隔离)+ peer-capability 显示修复之上。
+
+**关键现状发现**(实现前的代码尽职调查):capability→peer 选择逻辑(`registry.resolve` / `_candidates_for_skill` / `_pick`,含 round-robin / least-loaded + task-load 计数)、`A2ATaskDispatcher`(流式调远端)、`create_task_system` 都已存在 —— Phase 2B 主要是**接线**(指令入口 + 注入 runtime + 结果合并),不是从零造。`A2ATaskDispatcher` 的 `/stream` URL 约定经核对是**正确的**(server.py 确有 `POST /stream` 端点)。
+
+**产品决策**(全部按推荐默认):显式 `[DELEGATE:agent_id]`(不做自动委派);默认 fresh 不共享 facts,`#forked` 显式 opt-in;显式 agent_id 直查 / `*capability` 走 `_pick` 排除自己;入口只记委派边界,各 agent 审自己,`context_id` join;`[DELEGATE:]` 与 `[TOOL:]` **互斥**(一轮二选一)。
+
+| 改动 | 文件 |
+|------|------|
+| `[DELEGATE:target[#mode]] <task>` 解析(显式 id / `*capability` / `#forked`)+ strip/has helper | `runtime/directive_parser.py` |
+| audit 把 `[DELEGATE:` 纳入强制(parser 独占该 regex) | `scripts/audit_directive_parsing.py` |
+| `AgentRuntimeLoop` 加可选 `delegate_fn` 注入口 + `_handle_delegate()`(fresh/forked、source_agent 标记、peer-HITL 检测降级、`_inject_context` 结果注入)+ DELEGATE/TOOL 互斥分支 | `runtime/loop.py` |
+| `build_delegate_fn` 工厂:registry 解析 peer → `TaskDefinition` → dispatcher 流式 → task-load 计数 + 边界 audit;graceful degrade(peer 未知/不健康/无能力匹配 → 注入"本地继续"提示,不抛错) | `task/delegation.py`(新) |
+| main.py 构建 delegate_fn 存 services;backend.py 注入 runtime loop | `main.py`, `webui/backend.py` |
+| system prompt 加 `[DELEGATE:]` 用法 + 互斥规则 | `integrations/clients/llm_engine.py` |
+| WebUI 🤝 "via <agent>" 委派徽标(`node==='delegate'`)| `webui/index.html` |
+| coordinator httpx 改 lazy import(只在 dispatch 时需要,sandbox 可加载) | `task/inter/coordinator.py` |
+
+**顺手解决的 HITL 设计债**:
+- #10 — `ProposedAction` builder(`tool_call`/`batch`/`diagnostic`/`delegate`)+ `ActionTypePrefix` 常量,收拢散落的 `"tool_call:"+name` 拼接
+- #7 + #12-3 — 通用 `build_resumption_query(new_observation, original_query, previous_answer, divergence_note)`,从 message history 取原始 query + 上次答案;H2 follow-up 已接入(不再丢失原始上下文)
+
+**模块独立性**:runtime loop 通过**注入的** `delegate_fn` 调委派,不 import `task/` 或 `registry/` —— `audit_module_independence` 仍 PASS。
+
+**与 H2 / HITL 边界**(详见 PHASE_2B_DESIGN §6):委派是**跨进程**(HTTP/SSE 调 peer A2A 端点),状态走持久 A2A task store + `context_id`,**不依赖** H2 的 per-process 内存态(`_async_registry` 等)。因此 HITL 债 #1/#2(状态全内存 / 多 worker SSE)不被委派放大。
+
+**Phase 2B 不做**(留后续):跨 agent HITL 透传(Phase 3);多跳委派;自动委派;并行 fan-out;委派结果跨 agent 记忆写回。peer 任务里若触发 HITL(如 `dc_config_push`),入口 agent 收到 `hitl_interrupt` chunk 时提示用户到 peer 控制台处理,不阻塞。
+
+**测试**:`test_delegate_directive.py`(12,解析)+ `test_delegation_wiring.py`(11:explicit/capability resolution、fresh/forked facts、4 类降级、task-load 括号、loop-side source_agent 标记 + 注入 + peer-HITL 提示)。
+
+**CI**:7/7 audits + 128 tests(117 baseline + 11 delegation)。
 
 ---
 

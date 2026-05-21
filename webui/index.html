@@ -1801,6 +1801,7 @@ function addStep(type, label, detail='', expandData='', extra=null) {
     classify:'🔍',recall:'🔮',verify:'🔒',turn:'⚙',tool:'🔧',
     skill:'📋',cached:'📦',inline:'✓',curate:'🧠',umodel:'👤',
     fts:'🗄',evolve:'⚡',stop:'■',hitl:'⚠',done:'✅',error:'✗',
+    delegate:'🤝',
   };
   const step = document.createElement('div');
   step.className = 'action-step'+(expandData?' expandable':'');
@@ -2010,6 +2011,16 @@ function dispatchChunk(c, query, sid) {
   if (c.token) { appendToken(c.token); return; }
   if (c.node_step) {
     const step = c.node_step, node = c.node||'';
+    if (node==='delegate') {
+      // Phase 2B: delegation to a peer agent. Show a "via <agent>" flow
+      // event + step so the operator sees the subtask was handed off.
+      const peer = c.source_agent || 'peer';
+      addStep('delegate', `Delegating → ${peer}`, step,
+        `peer: ${peer}\n${step}`);
+      flowEvent('delegate', `🤝 Delegated → ${peer}`, step,
+        'subtask handed to peer agent via A2A');
+      return;
+    }
     if (node==='skill_load'||step.toLowerCase().includes('skill')) {
       const skills = c.selected_skills||[];
       const cnt    = c.skill_count != null ? c.skill_count : skills.length;

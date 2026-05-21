@@ -167,6 +167,20 @@ class ClarificationField(BaseModel):
     required: bool = True
 
 
+class ActionTypePrefix:
+    """Canonical prefixes for ProposedAction.action_type (debt #10, 2026-05).
+
+    action_type stays a free-form str (domain-neutral), but these constants +
+    the ProposedAction builders below give callers ONE place to construct the
+    common shapes so we stop hand-writing `"tool_call:" + name` at every site.
+    The convention is `<prefix>:<name>`; callers may still pass raw strings.
+    """
+    TOOL_CALL  = "tool_call"     # tool_call:<tool_name>
+    BATCH      = "batch"         # batch:<tool_name>
+    DIAGNOSTIC = "diagnostic"    # diagnostic:<what>
+    DELEGATE   = "delegate"      # delegate:<agent_id>  (Phase 2B)
+
+
 class ProposedAction(BaseModel):
     """What the agent intends to do.
 
@@ -174,6 +188,9 @@ class ProposedAction(BaseModel):
     parameters is an opaque dict whose keys may be exposed for editing via
     HitlPayload.editable_param_keys. Concrete domains layer their own
     typed models on top by validating after model_dump().
+
+    Prefer the builders (tool_call / batch / diagnostic / delegate) over
+    constructing action_type strings by hand — see ActionTypePrefix (debt #10).
     """
     action_type: str = Field(..., description="Free-form e.g. 'restart_service' or 'tool_call:edit_config'")
     target: str = Field(..., description="What the action affects, e.g. 'payments-svc' or 'ap-01'")
@@ -181,6 +198,32 @@ class ProposedAction(BaseModel):
     estimated_impact: Optional[str] = None
     reversible: bool = True
     risk_level: RiskLevel = RiskLevel.LOW
+
+    # ── Builders (debt #10) — one place to construct the common shapes ──
+    @classmethod
+    def tool_call(cls, tool_name: str, target: str, parameters: dict[str, Any] | None = None,
+                  **kw) -> "ProposedAction":
+        return cls(action_type=f"{ActionTypePrefix.TOOL_CALL}:{tool_name}",
+                   target=target, parameters=parameters or {}, **kw)
+
+    @classmethod
+    def batch(cls, tool_name: str, target: str, parameters: dict[str, Any] | None = None,
+              **kw) -> "ProposedAction":
+        return cls(action_type=f"{ActionTypePrefix.BATCH}:{tool_name}",
+                   target=target, parameters=parameters or {}, **kw)
+
+    @classmethod
+    def diagnostic(cls, what: str, target: str, parameters: dict[str, Any] | None = None,
+                   **kw) -> "ProposedAction":
+        return cls(action_type=f"{ActionTypePrefix.DIAGNOSTIC}:{what}",
+                   target=target, parameters=parameters or {}, **kw)
+
+    @classmethod
+    def delegate(cls, agent_id: str, target: str, parameters: dict[str, Any] | None = None,
+                 **kw) -> "ProposedAction":
+        """Phase 2B: a delegation to a peer agent (target = subtask description)."""
+        return cls(action_type=f"{ActionTypePrefix.DELEGATE}:{agent_id}",
+                   target=target, parameters=parameters or {}, **kw)
 
 
 # ---------------------------------------------------------------------------

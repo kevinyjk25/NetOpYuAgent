@@ -472,6 +472,7 @@ class AgentRuntimeLoop:
         tool_store:      Optional[ToolResultStore] = None,
         skill_catalog:   Optional["SkillCatalogService"] = None,
         llm_fn:          Optional[Any] = None,
+        delegate_fn:     Optional[Any] = None,
     ) -> None:
         """
         Args:
@@ -480,6 +481,15 @@ class AgentRuntimeLoop:
                     main.py (patch_runtime_loop) is skipped.  If omitted, the
                     legacy patch path is preserved for backward compatibility
                     (DESIGN-03 partial fix — injection preferred over patching).
+            delegate_fn: Optional async callable
+                    ``(directive: DelegateDirective, session_id: str,
+                       confirmed_facts: list[str]) -> AsyncIterator[dict]``
+                    that streams chunks back from a delegated peer agent
+                    (Phase 2B). Injected from main.py so the runtime loop
+                    stays business/registry-agnostic (module independence —
+                    loop must NOT import task/ or registry/ directly). When
+                    None, [DELEGATE:] directives degrade to a usable text note
+                    telling the user delegation is unavailable.
         """
         self._memory       = memory_router
         self._cfg          = config or RuntimeConfig()
@@ -487,6 +497,7 @@ class AgentRuntimeLoop:
         self._budget       = ContextBudgetManager(self._cfg.budget, self._store)
         self._policy       = StopPolicy(self._cfg.stop_policy)
         self._skill_catalog = skill_catalog
+        self._delegate_fn  = delegate_fn
 
         # DESIGN-03: constructor injection takes priority over monkey-patch.
         # If llm_fn is supplied at construction time, wire it immediately.
@@ -889,6 +900,102 @@ class AgentRuntimeLoop:
     # ------------------------------------------------------------------
     # Build forked context (P1)
     # ------------------------------------------------------------------
+
+    async def _handle_delegate(
+        self,
+        directive,                       # DelegateDirective
+        state: "LoopState",
+        session_id: str,
+    ):
+        """Execute a [DELEGATE:...] directive (Phase 2B).
+
+        Yields chunks to forward to the user (each tagged source_agent), and
+        finally one ``{"_inject_context": <text>}`` chunk carrying the
+        delegated result for the next turn's reasoning (consumed by the caller
+        — NOT forwarded to the user).
+
+        Graceful degradation: if no delegate_fn was injected (delegation not
+        wired) or the peer is unreachable / unknown, this yields a usable text
+        note and an injected context line so the LLM continues with local
+        capabilities instead of looping or erroring (same lesson as H2).
+        """
+        target = directive.target
+        task = directive.task or ""
+
+        # Not wired → degrade to a note.
+        if self._delegate_fn is None:
+            note = (
+                f"（无法委派给 {target}：本 agent 未启用委派功能。"
+                f"以下基于本地能力回答。）"
+            )
+            yield {"node_step": f"Delegation unavailable ({target})",
+                   "node": "delegate"}
+            yield {"_inject_context":
+                   f"[委派失败] 目标={target} 任务={task!r} 原因=委派未启用。"
+                   f"请基于本地能力继续回答用户。"}
+            return
+
+        # Decide shared context per fresh/forked.
+        shared_facts: list[str] = (
+            list(state.confirmed_facts) if directive.forked else []
+        )
+
+        yield {"node_step":
+               f"Delegating to {target}"
+               + (" (forked)" if directive.forked else ""),
+               "node": "delegate",
+               "source_agent": target}
+
+        # Stream from the peer via the injected delegate_fn. Accumulate the
+        # textual result so we can inject a compact observation for next turn.
+        _result_parts: list[str] = []
+        _peer_hitl = False
+        _ok = True
+        try:
+            async for chunk in self._delegate_fn(directive, session_id,
+                                                 shared_facts):
+                # Tag every forwarded chunk with the source agent so the WebUI
+                # can render a "via <agent>" badge.
+                if isinstance(chunk, dict):
+                    chunk.setdefault("source_agent", target)
+                    # Detect a peer-side HITL interrupt — Phase 2B does NOT do
+                    # cross-agent HITL passthrough; surface a hint instead.
+                    if chunk.get("type") == "hitl_interrupt" or chunk.get(
+                            "hitl_interrupt"):
+                        _peer_hitl = True
+                    tok = chunk.get("token") or chunk.get("message") or ""
+                    if tok:
+                        _result_parts.append(str(tok))
+                    yield chunk
+                else:
+                    _result_parts.append(str(chunk))
+                    yield {"token": str(chunk), "source_agent": target}
+        except Exception as exc:
+            _ok = False
+            logger.exception("Delegation to %s failed: %s", target, exc)
+            yield {"node_step": f"Delegation to {target} failed: {exc}",
+                   "node": "delegate", "source_agent": target}
+
+        _result_text = "".join(_result_parts).strip()
+        if _peer_hitl:
+            yield {"_inject_context":
+                   f"[委派部分完成] {target} 需要操作员审批才能继续。"
+                   f"请告知用户到 {target} 的控制台处理审批，"
+                   f"并基于已获得的信息给出当前可行的回答。\n"
+                   f"已获得：{_result_text[:1500]}"}
+        elif _ok and _result_text:
+            yield {"_inject_context":
+                   f"[委派结果 from {target}] 任务={task!r}\n"
+                   f"{_result_text[:4000]}\n"
+                   f"请综合上述委派结果给用户最终回答。"}
+        elif _ok:
+            yield {"_inject_context":
+                   f"[委派完成但无内容] {target} 未返回可用结果。"
+                   f"请基于本地能力回答。"}
+        else:
+            yield {"_inject_context":
+                   f"[委派失败] {target} 执行出错。请基于本地能力回答用户，"
+                   f"并说明无法从 {target} 获取信息。"}
 
     def build_fork_context(
         self,
@@ -1787,6 +1894,57 @@ class AgentRuntimeLoop:
                     yield {"token": _visible[_i:_i+80]}
                     await asyncio.sleep(0)
             # If the entire response was tool calls (no prose), yield nothing —
+
+            # ── [DELEGATE:agent_id] handling (Phase 2B) ──────────────────
+            # Delegation is MUTUALLY EXCLUSIVE with tool calls in one turn
+            # (decided in PHASE_2B_DESIGN): if the LLM emitted both, we honor
+            # the tool call and ignore the delegate, nudging the LLM to split
+            # them across turns. This keeps the execution model unambiguous.
+            from runtime.directive_parser import (
+                find_delegate_directives as _find_delegates,
+            )
+            _delegates = _find_delegates(llm_response)
+            if _delegates and _has_any_tool_directive(llm_response):
+                # Both present — ignore delegate this turn, nudge.
+                logger.warning(
+                    "Turn %d emitted BOTH [TOOL:] and [DELEGATE:] — honoring "
+                    "tool call, ignoring delegate (they are mutually exclusive)",
+                    state.turns,
+                )
+                context_str += (
+                    "\n\n_NUDGE: You emitted both a [TOOL:] call and a "
+                    "[DELEGATE:] directive in one turn. They are mutually "
+                    "exclusive. The tool call was executed; if you still need "
+                    "to delegate, do it in a later turn (alone)."
+                )
+                _delegates = []   # suppress for this turn
+            if _delegates:
+                # Honor only the first delegate (one per turn).
+                _dlg = _delegates[0]
+                if len(_delegates) > 1:
+                    logger.warning(
+                        "Turn %d emitted %d [DELEGATE:] directives — only the "
+                        "first (%s) is honored this turn",
+                        state.turns, len(_delegates), _dlg.target,
+                    )
+                async for _chunk in self._handle_delegate(_dlg, state, session_id):
+                    # Inject the delegated result as a confirmed fact so it
+                    # survives into the NEXT turn's prompt (context_str is
+                    # rebuilt each turn via budget.assemble, which includes
+                    # confirmed_facts — appending to context_str here would be
+                    # overwritten). Forward streaming chunks (tagged
+                    # source_agent) to the user.
+                    if _chunk.get("_inject_context"):
+                        state.record_new_fact(_chunk["_inject_context"])
+                    else:
+                        yield _chunk
+                # A delegate fully occupies the turn; continue the loop so the
+                # next LLM turn synthesizes the final answer from the injected
+                # delegated result. (The while-loop top increments state.turns,
+                # so we must NOT increment here.)
+                called_tools.add(f"DELEGATE:{_dlg.target}")
+                continue
+
             # the tool result will be injected in the next turn's context and
             # the LLM will produce a proper prose answer then.
             _skill_loads_this_turn: set[str] = set()
@@ -3012,6 +3170,49 @@ _async_inject_queue: dict[str, list[str]] = {}
 # are generous — real sessions drain on the next turn — but cap the worst case.
 _MAX_INJECT_SESSIONS   = 512    # distinct sessions holding undrained facts
 _MAX_INJECT_PER_SESSION = 32    # facts queued for one session before drain
+
+
+def build_resumption_query(
+    new_observation: str,
+    *,
+    original_query: str = "",
+    previous_answer: str = "",
+    divergence_note: str = "",
+) -> str:
+    """Compose a resumption query for an async follow-up turn (debt #7 + #12-3).
+
+    Used when an out-of-band result arrives (H2 async-HITL ack, or a delegated
+    peer's result) and we need the LLM to re-reason WITH the original context.
+    The earlier implementation passed only a synthetic "result has arrived"
+    string, so the LLM had lost the user's original question and its own
+    previous answer — producing disconnected follow-ups (debt #7).
+
+    Callers pull `original_query` + `previous_answer` from message history /
+    agent_memory (the runtime loop does not have them on hand). When unknown,
+    pass "" and the helper degrades to the bare observation.
+
+    Args:
+        new_observation: the newly-arrived result/fact to reason about.
+        original_query:  the user's original question this turn resumes.
+        previous_answer: the agent's prior (pre-result) answer, if any.
+        divergence_note: optional extra steer (e.g. "result differs from the
+                         permission_ok assumption — revise accordingly").
+    """
+    parts: list[str] = []
+    if original_query:
+        parts.append(f"原始问题:{original_query}")
+    if previous_answer:
+        # Cap to keep the synthetic prompt compact.
+        parts.append(f"之前的回答:{previous_answer[:1200]}")
+    parts.append(f"新到达的信息:{new_observation}")
+    tail = (
+        "请结合原始问题与上述新信息给出最终回答 —— "
+        "若新信息与之前结论一致,简短确认;若有分歧,详细说明修正方向。"
+    )
+    if divergence_note:
+        tail += " " + divergence_note
+    parts.append(tail)
+    return "\n".join(parts)
 
 
 def enqueue_async_inject(session_id: str, fact_text: str) -> None:

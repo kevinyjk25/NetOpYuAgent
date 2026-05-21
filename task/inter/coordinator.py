@@ -11,7 +11,11 @@ import logging
 import uuid
 from typing import Any, AsyncIterator, Optional
 
-import httpx
+# httpx is imported lazily inside _stream_request (the only place it's used)
+# so that importing this module — and the task package — does not hard-require
+# httpx. This lets delegation wiring + unit tests load in environments without
+# httpx installed; the dependency is only needed when actually dispatching to
+# a remote peer over HTTP.
 
 from ..schemas import (
     AgentAssignment,
@@ -89,6 +93,7 @@ class A2ATaskDispatcher:
     ) -> AsyncIterator[dict[str, Any]]:
         stream_url = agent_url.rstrip("/") + "/stream"
         try:
+            import httpx   # lazy: only needed when actually dispatching
             async with httpx.AsyncClient(timeout=self._timeout) as client:
                 async with client.stream("POST", stream_url, json=body) as resp:
                     resp.raise_for_status()

@@ -95,6 +95,33 @@ _SKILL_LOAD_FULL_RE = re.compile(
     re.IGNORECASE,
 )
 
+# [DELEGATE:<target>[#forked]] <task description until end of line>
+#   target  : an explicit agent_id (\w plus hyphen, e.g. dc-agent) OR
+#             *<capability> meaning "any peer advertising this capability"
+#             (the leading * routes through registry._pick selection).
+#   #forked : optional modifier — share parent confirmed_facts with the peer.
+#             Default (absent) = fresh (only the task description is sent).
+#   The task description is everything after the closing ']' up to newline;
+#   it is the natural-language subtask the peer should execute.
+#
+# Examples:
+#   [DELEGATE:dc-agent] check BGP EVPN neighbors on spine-1
+#   [DELEGATE:dc-agent#forked] correlate with the LAN-side facts above
+#   [DELEGATE:*dc_fabric_diagnose] trace the fabric path to leaf-3
+_DELEGATE_RE = re.compile(
+    r"\[\s*DELEGATE\s*:\s*"
+    r"(?P<target>\*?[\w\-]+)"
+    r"(?:\s*#\s*(?P<mode>forked|fresh))?"
+    r"\s*\]"
+    r"[ \t]*(?P<task>[^\n]*)",
+    re.IGNORECASE,
+)
+
+_DELEGATE_FULL_RE = re.compile(
+    r"\[\s*DELEGATE\s*:\s*\*?[\w\-]+(?:\s*#\s*(?:forked|fresh))?\s*\][^\n]*",
+    re.IGNORECASE,
+)
+
 
 # ---------------------------------------------------------------------------
 # Public API
@@ -143,6 +170,77 @@ def find_skill_load_names(text: str) -> list[str]:
     if not text:
         return []
     return [m.group("name") for m in _SKILL_LOAD_RE.finditer(text)]
+
+
+@dataclass(frozen=True)
+class DelegateDirective:
+    """One [DELEGATE:target[#mode]] <task> directive parsed from LLM output.
+
+    Attributes:
+        target:   the delegation target. Either an explicit agent_id
+                  (e.g. "dc-agent") or "*<capability>" (e.g. "*dc_fabric_diagnose")
+                  meaning "any healthy peer advertising that capability".
+        by_capability: True when target started with '*' (route via
+                  registry._pick); False for an explicit agent_id (direct lookup).
+        capability: when by_capability, the capability name with '*' stripped;
+                  otherwise "".
+        agent_id: when NOT by_capability, the explicit agent_id; otherwise "".
+        forked:   True if the '#forked' modifier was present (share parent
+                  confirmed_facts). Default False = fresh (task description only).
+        task:     the natural-language subtask description (text after ']').
+        start, end: character offsets of the full directive match.
+    """
+    target: str
+    by_capability: bool
+    capability: str
+    agent_id: str
+    forked: bool
+    task: str
+    start: int
+    end: int
+
+
+def find_delegate_directives(text: str) -> list["DelegateDirective"]:
+    """Return ALL [DELEGATE:...] directives in `text`, in source order.
+
+    The runtime treats DELEGATE as mutually exclusive with TOOL in a single
+    turn (see runtime/loop.py); this parser does not enforce that — it just
+    reports what it finds so the caller can apply the policy.
+    """
+    out: list[DelegateDirective] = []
+    if not text:
+        return out
+    for m in _DELEGATE_RE.finditer(text):
+        raw = m.group("target")
+        by_cap = raw.startswith("*")
+        cap = raw[1:] if by_cap else ""
+        aid = "" if by_cap else raw
+        mode = (m.group("mode") or "").lower()
+        out.append(DelegateDirective(
+            target=raw,
+            by_capability=by_cap,
+            capability=cap,
+            agent_id=aid,
+            forked=(mode == "forked"),
+            task=(m.group("task") or "").strip(),
+            start=m.start(),
+            end=m.end(),
+        ))
+    return out
+
+
+def has_delegate_directive(text: str) -> bool:
+    """True if `text` contains at least one [DELEGATE:...]."""
+    if not text:
+        return False
+    return bool(_DELEGATE_RE.search(text))
+
+
+def strip_delegate_directives(text: str) -> str:
+    """Remove all [DELEGATE:...] <task> lines for prose-only inspection."""
+    if not text:
+        return text
+    return _DELEGATE_FULL_RE.sub("", text)
 
 
 @dataclass(frozen=True)
@@ -306,10 +404,11 @@ def strip_skill_load_directives(text: str) -> str:
 
 
 def strip_all_directives(text: str) -> str:
-    """Remove all three directive types — useful for prose-only inspection."""
+    """Remove all directive types — useful for prose-only inspection."""
     text = strip_tool_batch_directives(text)
     text = strip_tool_directives(text)
     text = strip_skill_load_directives(text)
+    text = strip_delegate_directives(text)
     return text
 
 

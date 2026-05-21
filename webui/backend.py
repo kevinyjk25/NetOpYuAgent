@@ -330,6 +330,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             config=RuntimeConfig(hitl_tool_names=_hitl_tools),
             tool_store=services["tool_store"],
             skill_catalog=services["skill_catalog"],
+            delegate_fn=services.get("delegate_fn"),
         )
     else:
         # Re-inject tool store and catalog into existing loop
@@ -337,6 +338,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         loop._store   = services["tool_store"]
         loop._budget._store = services["tool_store"]
         loop._skill_catalog = services["skill_catalog"]
+        # Re-inject delegation hook (Phase 2B) if present.
+        if services.get("delegate_fn") is not None:
+            loop._delegate_fn = services["delegate_fn"]
 
     # If LLM engine was already patched by main.py, it's already in the loop.
     # If not (webui started standalone), patch now with whatever engine is available.
@@ -1623,15 +1627,32 @@ async def _submit_hitl_decision(
                 if _runtime_loop is not None and _session_for_followup:
                     # Synthetic follow-up query — the agent_memory turn-start
                     # drain will inject the H2 result into confirmed_facts
-                    # before this turn's prompt is assembled, so the LLM
-                    # sees the actual fact without us having to pass it.
-                    _followup_query = (
-                        "异步 HITL 已返回结果。请基于 confirmed_facts 里刚到达的"
-                        " RADIUS 检查事实给出最终建议。"
-                        + ("注意:实际结果可能跟你之前的假设(permission_ok)不一致,"
-                           "请相应修正诊断方向。"
-                           if _diverged else
-                           "(注:实际结果跟初始假设一致,可确认原诊断。)")
+                    # before this turn's prompt is assembled. We ALSO thread
+                    # the original user query + previous answer back in (debt
+                    # #7) so the LLM's follow-up stays connected to what the
+                    # user actually asked, instead of a context-less synthetic.
+                    _hist = _message_history.get(_session_for_followup, [])
+                    _orig_q = ""
+                    _prev_a = ""
+                    for _m in reversed(_hist):
+                        if not _prev_a and _m.get("role") == "assistant":
+                            _prev_a = _m.get("content", "")
+                        elif not _orig_q and _m.get("role") == "user":
+                            _orig_q = _m.get("content", "")
+                        if _orig_q and _prev_a:
+                            break
+                    _div_note = (
+                        "注意:实际结果可能跟你之前的假设(permission_ok)不一致,"
+                        "请相应修正诊断方向。"
+                        if _diverged else
+                        "(注:实际结果跟初始假设一致,可确认原诊断。)"
+                    )
+                    from runtime.loop import build_resumption_query as _brq
+                    _followup_query = _brq(
+                        "异步 HITL 已返回 RADIUS 检查结果(见 confirmed_facts)。",
+                        original_query=_orig_q,
+                        previous_answer=_prev_a,
+                        divergence_note=_div_note,
                     )
                     from runtime import DelegationMode as _DM
                     _t_followup_start = time.time()

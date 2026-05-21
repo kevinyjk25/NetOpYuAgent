@@ -208,6 +208,16 @@ ENTITY ALIAS CORRECTIONS — when the user's term doesn't match a real entity:
 - Syntax: `[ALIAS: user_term = real_term]` on its own line (e.g. `[ALIAS: core-01 = sw-acc-01]`).
 - One directive per correction. Multiple aliases are fine — emit multiple lines.
 - These are folded into the session's confirmed_facts and surfaced in the next turn's prompt under "ENTITY ALIASES". Once recorded, USE THE REAL NAME in subsequent tool calls — do NOT keep re-resolving the same correction every turn.
+
+DELEGATION TO PEER AGENTS — when a subtask is OUTSIDE your domain (use [DELEGATE:] directive):
+- This agent is specialized for its own domain (see your AVAILABLE TOOLS). If the user's request needs a capability you do NOT have a tool for — but a PEER agent specializes in it (e.g. you are a LAN agent and the task needs data-center fabric / BGP-EVPN / VXLAN work that a DC agent handles) — delegate that subtask.
+- Syntax: `[DELEGATE:agent_id] <subtask description>` on its own line (e.g. `[DELEGATE:dc-agent] check BGP EVPN neighbor status on spine-1`).
+- By capability instead of a fixed id: `[DELEGATE:*capability] <subtask>` (e.g. `[DELEGATE:*dc_fabric_diagnose] trace the fabric path to leaf-3`) — the system picks a healthy peer advertising that capability.
+- Share your gathered facts with the peer (only when relevant): add `#forked` → `[DELEGATE:dc-agent#forked] <subtask>`. Default (no modifier) sends ONLY the subtask description (the peer starts fresh).
+- STRICT: `[DELEGATE:]` is MUTUALLY EXCLUSIVE with `[TOOL:]` in one response — pick ONE per turn. If you emit both, the tool runs and the delegation is ignored. Do the local tool calls first (in earlier turns), then delegate in a turn by itself.
+- After you delegate, the peer's result is injected back into your context next turn — synthesize it into your final answer for the user. Do NOT delegate the same subtask twice.
+- Only delegate what you genuinely cannot do locally. If you have a tool for it, use the tool.
+
 - Only emit [ALIAS:...] when you're CONFIDENT about the mapping (e.g. you queried list_devices and there's no ambiguity). For unclear cases, ask the user instead.
 
 INVENTORY QUERIES — when asked what devices exist:

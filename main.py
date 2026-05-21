@@ -327,6 +327,24 @@ async def build_services() -> dict[str, Any]:
     services["task_system"] = task_system
     logger.info("Task module ready")
 
+    # ── 4b. Delegation hook (Phase 2B) ───────────────────────────────────────
+    # Build the delegate_fn the runtime loop calls on [DELEGATE:...] directives.
+    # Injected (not imported) into AgentRuntimeLoop so the loop stays
+    # registry/task-agnostic. Resolves agent_id / *capability → peer via the
+    # registry, streams the subtask through A2ATaskDispatcher.
+    try:
+        from task.delegation import build_delegate_fn
+        services["delegate_fn"] = build_delegate_fn(
+            registry   = registry,
+            dispatcher = task_system.dispatcher,
+            task_store = task_system.store,
+            own_agent_id = cfg.agent.agent_id,
+        )
+        logger.info("Delegation hook ready (agent_id=%s)", cfg.agent.agent_id)
+    except Exception as _dlg_exc:
+        services["delegate_fn"] = None
+        logger.warning("Delegation hook setup failed: %s", _dlg_exc)
+
     # ── 5. A2A executor ──────────────────────────────────────────────────────
     if _hitl_backend == "core":
         # New executor — built later, after llm_engine + tool_registry are

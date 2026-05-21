@@ -111,21 +111,66 @@ See ARCHITECTURE.md §12.7. *(Kept until a release cycle, then delete.)*
 
 ### Phase 2B — Capability-based delegation
 - **Effort**: 5-7 days
-- **Status**: designed, not started. **Now unblocked** — Phase 2A gives the
-  tool isolation that makes delegation meaningful.
-- **Scope**: `PolicyEngine` adds peer capability matching (match query against
-  peer `domain_tags` / advertised capabilities); `runtime/loop.py` gets a
-  `[DELEGATE:agent_id]` directive + `_delegate_to_peer()` branch; wire the
-  existing `A2ATaskDispatcher` (in `task/inter/coordinator.py` — never been
-  exercised, expect bugs); chunks tagged with `source_agent` so the WebUI
-  shows "via dc-agent".
-- **Prereq**: Phase 1 + 2A verified (peer discovery + role isolation working).
-- **Open product questions** (decide before building):
-  1. Auto-delegate (agent decides) vs explicit (`[DELEGATE:dc-agent]` only)?
-  2. Is `confirmed_facts` shared across agents (privacy boundary)?
-  3. When multiple peers match, pick by capability score / load / round-robin?
-  4. Does the entry agent's audit log include the delegated agent's execution
-     detail (compliance)?
+- **Status**: **IN PROGRESS (2026-05)**. Design reviewed + approved
+  (PHASE_2B_DESIGN.md). Decisions: explicit `[DELEGATE:agent_id]` only (no
+  auto-delegate yet); default fresh (facts NOT shared, `#forked` opt-in);
+  reuse registry `_pick` for `*capability`, direct lookup for explicit
+  agent_id; entry agent audits delegation boundary only; `[DELEGATE:]` is
+  MUTUALLY EXCLUSIVE with `[TOOL:]` in one turn.
+- **Scope**: `runtime/directive_parser.py` adds `[DELEGATE:]` regex;
+  `runtime/loop.py` gets a `_delegate_to_peer()` branch; fix
+  `A2ATaskDispatcher` URL bug (posts to `/stream`, server exposes `POST /`);
+  wire `build_task_services()` into main.py (currently never called); chunks
+  tagged `source_agent` so WebUI shows "via dc-agent". Plus debt #10
+  (action_type builder) + #7/#12-3 (build_resumption_query).
+- **Explicitly NOT in 2B**: cross-agent HITL passthrough (Phase 3), multi-hop,
+  auto-delegate, parallel fan-out, cross-agent memory writeback.
+
+### HITL design debt (reviewed 2026-05 against current tree)
+
+Several items from the HITL debt audit were ALREADY FIXED in the H2 hardening
+pass (claim_async_pending race fix #5; unified SLA watchdog #3 in-process half;
+inject-queue bounds #6; per-agent hitl db #11; audit Check 5 path #12-2).
+Remaining real debt, by priority:
+
+#### HITL-P0 — async-HITL state persistence (debt #1 + #2)
+- **Effort**: 3-4 days (declarative resumer handlers) + 2 days (Redis SSE broker)
+- **Why**: `_async_registry` / `_session_sse_emit` are per-process in-memory.
+  Single-process dev/prod is fine; uvicorn `--workers N` or a restart loses
+  pending async-HITL callbacks (operator approve → router finds no pending →
+  silent drop). Delegation does NOT make this worse (it uses the persistent
+  A2A task store, not these dicts — see PHASE_2B_DESIGN §6), but horizontal
+  scale of the HITL feature itself needs this.
+- **Action**: serialize pending via resumer_name handler registry (callbacks
+  are closures, can't pickle — register declarative handlers like ResumeHandle
+  already does); SSE via Redis pub-sub or sticky sessions.
+- **Interim** (cheap): on startup, sweep store for PENDING+ASYNC_NONBLOCKING
+  past SLA → mark EXPIRED + audit + UI "lost on restart" hint.
+
+#### HITL-P1 — follow-up turn UX + context (debt #4 + #7-residual)
+- **Effort**: #4 follow-up UI loading 1.5d; #7 resumption-query is being done
+  in Phase 2B (build_resumption_query shared with delegation).
+- **#4**: operator approve → follow-up turn blocks HTTP 10-60s with no loading
+  state. Fix: return `{async_followup_pending}` immediately + poll, or reopen SSE.
+
+#### HITL-P1 — demo autoresponder config flag (debt #8)
+- **Effort**: 0.5 day, best done WITH HITL-P2 #9.
+- **Why**: `_demo_autoreply` is a tool arg; production has no clean off switch.
+- **Action**: `config.yaml agent.h2.demo_mode` (dev true / prod false); tool
+  reads config not arg. SLA watchdog already prevents the leak when off.
+
+#### HITL-P2 — framework-ize H2 via PolicyEngine hitl_mode (debt #9 + #12-1 + #8)
+- **Effort**: 3-4 days. Suggest as its own **Phase 2C**.
+- **Why**: `tool_meta` marks `hitl_mode: async_nonblocking` but PolicyEngine
+  ignores it — H2 is hand-coded in query_radius_logs. Ideal: PolicyEngine reads
+  the metadata → runtime wraps the tool in a generic fire-and-forget shim →
+  business tools don't import hitl_core. Also fixes #12-1 (`_session_id` arg
+  pollution — only inject for hitl_mode tools) and absorbs #8.
+
+#### HITL-P3 — nice-to-have
+- #10 action_type enum/builder — being partially done in Phase 2B (delegate:
+  type + builder); remaining callers can migrate incrementally.
+- Cross-process SLA timer idempotency residual of #3 (process-restart half).
 
 ### Phase 3 — Cross-agent HITL passthrough
 - **Effort**: 2-3 weeks
