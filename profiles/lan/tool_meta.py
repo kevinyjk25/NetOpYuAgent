@@ -1,14 +1,12 @@
 """
-tools/mock/registry.py
-──────────────────────
-Mock tools — available in mock mode ONLY.
+profiles/lan/tool_meta.py — Prompt-facing metadata for LAN tools
+=================================================================
 
-Each entry declares: description, parameters, returns, hitl flag, tags.
-Callables live in tools/mock_tools.py (unchanged).
-This registry is the prompt-facing declaration; mock_tools.py is the implementation.
+Declares description / parameters / returns / hitl / action_type / tags for
+each enterprise-LAN tool. This is what the LLM sees in its tool section.
+Keys MUST match the callables in profiles/lan/tools.py.
 
-Key principle: the agent prompt is built from THIS dict at runtime.
-No tool name is hardcoded in the system prompt template.
+Migrated 2026-05 from tools/mock/registry.py (profile refactor).
 """
 from __future__ import annotations
 from typing import Any
@@ -181,5 +179,20 @@ TOOLS: dict[str, dict[str, Any]] = {
         "hitl":        True,
         "action_type": "reversible",
         "tags":        ["services", "destructive"],
+    },
+    "query_radius_logs": {
+        "description": (
+            "Query RADIUS auth logs for a user. ASYNC HITL DEMO — pushes "
+            "approval request to ops queue (3-min SLA); agent proceeds with "
+            "the assumed default 'permission_ok'. Real result arrives via "
+            "soft-notify or next-turn confirmed_fact. Use to demonstrate "
+            "H2 (fire-and-forget) HITL semantics."
+        ),
+        "parameters":  {"user_id": "User to look up", "minutes": "Time window in minutes (default 60)"},
+        "returns":     "Immediately returns assumed permission_ok; real RADIUS result is injected as a fact when ops responds.",
+        "hitl":        False,                # not a synchronous gate
+        "hitl_mode":   "async_nonblocking",  # H2 marker for the policy layer
+        "action_type": "read_only",
+        "tags":        ["auth", "async-hitl", "demo"],
     },
 }

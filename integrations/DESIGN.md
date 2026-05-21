@@ -135,6 +135,12 @@ runtime.loop._call_llm(messages, ...)
 
 要量化 native 模式的实际价值,参见 `evaluation/compliance_cli.py`:跑 baseline(text) vs `--native`,对比 `args_ok` 指标的提升幅度。
 
+#### Sprint-3-pre tracing wrapper(2026-05)
+
+`OllamaEngine._chat` 被改造成一个薄包装,真正的实现在 `_chat_impl`。包装层只做一件事:开一个 `llm.call` 的 OTel span,attribute 含 `llm.model` / `llm.message.count` / `llm.message.chars` / `llm.native_tools` / `llm.tools.count`,然后调 `_chat_impl(messages, tools=tools, _span=_span)`。Tracing 默认 OFF,`_chat_impl` 拿到的 `_span` 在 disabled 模式下是 `_NoopSpan`,不影响行为。
+
+同样的模式应用到 `HitlExecutor.execute_query → _execute_query_inner`:外层只开 `agent.query` span,把它存到 `self._query_span` 供深层代码 set_attribute,内层是原有 body。这俩 refactor **不改变任何业务逻辑**,只是把 instrumentation 这一关切从业务函数里抽出来。
+
 ### 3.3 `FactConflictDetector` 数据流(audit_wiring 修复案例)
 
 ```

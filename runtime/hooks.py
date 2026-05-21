@@ -88,6 +88,14 @@ class HookEvent(str, Enum):
     TURN_END       = "turn_end"
     SESSION_START  = "session_start"
     SESSION_END    = "session_end"
+    # Async HITL ack arrived (H2 fire-and-forget; 2026-05).
+    # Fired by the H2 on_resolved callback (in skills/tools) so observers
+    # can react. Runtime uses this internally to enqueue the result into
+    # a per-session inject queue; turn_start consumers drain that queue
+    # and write fresh facts into state.confirmed_facts.
+    # ctx: {interrupt_id, session_id, decision (None if timed out),
+    #       default_value, diverged, fact_text}
+    ASYNC_HITL_RESOLVED = "async_hitl_resolved"
 
 
 # ── Hook function signature ──────────────────────────────────────────────────

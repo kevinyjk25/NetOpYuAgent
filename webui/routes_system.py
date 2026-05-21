@@ -90,6 +90,100 @@ def register_system_routes(app: FastAPI, services: dict[str, Any]) -> None:
             "router_id":  id(hitl_core_router),
         })
 
+    @app.get("/system/peers")
+    async def system_peers() -> JSONResponse:
+        """
+        List peer agents discovered through Phase-1 multi-agent setup.
+
+        Returns this agent's identity + all peers known to the registry,
+        EXCLUDING self. Use this from the WebUI / curl to confirm two
+        agent processes can see each other before attempting any
+        cross-agent work in later phases.
+
+        Sample response:
+        {
+          "self": {"agent_id": "lan-agent", "url": "http://localhost:8000/...",
+                   "capabilities": ["lan_diagnose", "lan_config"]},
+          "peers": [
+            {"agent_id": "wan-agent", "url": "http://localhost:8001/...",
+             "health": "healthy", "capabilities": [...]}
+          ]
+        }
+        """
+        # Import the config singleton lazily so tests / re-imports work.
+        from config import cfg
+        registry = services.get("registry")
+        if registry is None:
+            return JSONResponse(
+                status_code=503,
+                content={"error": "registry not available"},
+            )
+
+        # Self description — built from cfg.agent + AgentCard
+        self_block = {
+            "agent_id":     cfg.agent.agent_id,
+            "display_name": cfg.agent.display_name,
+            "url":          cfg.server.a2a_base_url,
+            "capabilities": [c.skill_id for c in cfg.agent.capabilities],
+        }
+
+        # All agents in the registry, then filter out self by agent_id.
+        try:
+            agents = await registry.list_agents()
+        except Exception as exc:
+            logger.warning("/system/peers: registry list failed: %s", exc)
+            return JSONResponse(
+                status_code=503,
+                content={"self": self_block, "peers": [],
+                         "error": f"registry list failed: {exc}"},
+            )
+
+        peers_out = []
+        own_id = cfg.agent.agent_id
+        for a in agents:
+            # AgentEntry holds the card under `.card`; the skills live at
+            # `a.card.skills` (each an AgentSkill with `.id`). Earlier this
+            # read `a.skills`, which AgentEntry does NOT have, so every peer
+            # showed "no capabilities advertised". Read the real path, with
+            # fallbacks for older/dynamic entries that may expose skills flat.
+            a_id = getattr(a, "agent_id", "") or ""
+            if a_id == own_id:
+                continue   # don't list self
+            card = getattr(a, "card", None)
+            skills_obj = (
+                getattr(card, "skills", None)
+                or getattr(a, "skills", None)
+                or []
+            )
+            caps = []
+            for s in skills_obj:
+                # AgentSkill uses `.id`; some sources use `.skill_id`.
+                sid = getattr(s, "id", "") or getattr(s, "skill_id", "")
+                if sid:
+                    caps.append(sid)
+            health = getattr(a, "health", None)
+            health_val = (
+                health.value if hasattr(health, "value")
+                else str(health) if health is not None
+                else "unknown"
+            )
+            # Display name + url come from the card too.
+            _disp = (getattr(card, "name", "") if card else "") or a_id
+            _url = (getattr(card, "url", "") if card else "") or getattr(a, "agent_url", "")
+            peers_out.append({
+                "agent_id":     a_id,
+                "agent_url":    _url,
+                "display_name": _disp,
+                "health":       health_val,
+                "capabilities": caps,
+            })
+
+        return JSONResponse(content={
+            "self":  self_block,
+            "peers": peers_out,
+            "peer_refresh_interval_s": cfg.agent.peer_refresh_interval_s,
+        })
+
     @app.get("/system/wiring")
     async def system_wiring() -> JSONResponse:
         """

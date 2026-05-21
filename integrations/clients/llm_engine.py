@@ -321,6 +321,49 @@ Return format:
         self._tool_retriever:     Any = None
         self._skill_retriever:    Any = None
         self._meta_tool_registry: Any = None
+        # D1 (Sprint 3, 2026-05): concurrency cap. The semaphore is created
+        # lazily on first use (inside the running loop) because asyncio
+        # primitives must bind to the active event loop, and __init__ runs
+        # before uvicorn's loop exists. 0 = unlimited (legacy). Configured
+        # via set_max_concurrent_calls() from main.py after construction.
+        self._max_concurrent_calls: int = 0
+        self._llm_semaphore: Any = None
+        self._llm_sem_loop: Any = None   # loop the semaphore was bound to
+
+    def set_max_concurrent_calls(self, n: int) -> None:
+        """Set the in-flight LLM call cap. 0 disables limiting.
+
+        Called from main.py with cfg.llm.max_concurrent_calls. The actual
+        Semaphore is created lazily in _acquire_slot() so it binds to the
+        running event loop, not whatever loop (if any) existed at startup.
+        """
+        self._max_concurrent_calls = max(0, int(n))
+        # Reset any previously-created semaphore so the new limit applies.
+        self._llm_semaphore = None
+        self._llm_sem_loop = None
+        logger.info(
+            "LLMEngine: max_concurrent_calls=%s",
+            self._max_concurrent_calls or "unlimited",
+        )
+
+    def _get_semaphore(self) -> Any:
+        """Lazily create + return the semaphore bound to the current loop.
+
+        Returns None when limiting is disabled (max_concurrent_calls=0).
+        Re-creates the semaphore if the event loop changed (e.g. tests that
+        spin up fresh loops) to avoid 'bound to a different loop' errors.
+        """
+        if self._max_concurrent_calls <= 0:
+            return None
+        import asyncio
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            return None   # no running loop → can't gate; run unbounded
+        if self._llm_semaphore is None or self._llm_sem_loop is not loop:
+            self._llm_semaphore = asyncio.Semaphore(self._max_concurrent_calls)
+            self._llm_sem_loop = loop
+        return self._llm_semaphore
 
     def attach_retrieval(
         self,
@@ -496,7 +539,7 @@ Return format:
         try:
             from tools.loader import ToolLoader as _TL
             import config as _cfg
-            _tl = _TL(mode=_cfg.cfg.mode)
+            _tl = _TL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile)
             full = _tl.tool_section_for_prompt()
             if tool_registry:
                 _mode_names = set(_tl.build_metadata().keys())
@@ -844,7 +887,7 @@ class OllamaEngine(LLMEngine):
                 import config as _cfg2
                 from tools.loader import ToolLoader as _TL2
                 _large_data_tools = {
-                    n for n, info in _TL2(mode=_cfg2.cfg.mode).build_metadata().items()
+                    n for n, info in _TL2(mode=_cfg2.cfg.mode, profile=_cfg2.cfg.agent.profile).build_metadata().items()
                     if any(t in info.get("tags", []) for t in ("traffic", "metrics"))
                 }
             except Exception:
@@ -1140,6 +1183,43 @@ class OllamaEngine(LLMEngine):
         directives from structured tool_calls so downstream parsers
         (runtime/loop.py + directive_parser) don't need to change.
         """
+        # Sprint-3-pre: optional tracing. start_span degrades to no-op
+        # when OTel is disabled / not installed, so this is zero-cost.
+        from runtime.tracing import start_span
+        _msg_chars = sum(len(m.get("content", "") or "") for m in (messages or []))
+        with start_span(
+            "llm.call",
+            **{
+                "llm.model":            getattr(self, "_model", "unknown"),
+                "llm.message.count":    len(messages or []),
+                "llm.message.chars":    _msg_chars,
+                "llm.native_tools":     bool(tools),
+                "llm.tools.count":      len(tools or []),
+            },
+        ) as _span:
+            # D1: gate through the concurrency semaphore so a single query's
+            # fan-out (20+ internal calls) can't saturate Ollama. When the
+            # cap is disabled (0) or there's no running loop, _get_semaphore
+            # returns None and we run unbounded (legacy behaviour).
+            # C1: record LLM call count + duration + in-flight gauge.
+            from runtime import metrics as _metrics
+            _model_label = getattr(self, "model", None) or "unknown"
+            _sem = self._get_semaphore()
+            if _sem is None:
+                with _metrics.track_active_llm(), _metrics.time_llm_call(_model_label):
+                    return await self._chat_impl(messages, tools=tools, _span=_span)
+            async with _sem:
+                with _metrics.track_active_llm(), _metrics.time_llm_call(_model_label):
+                    return await self._chat_impl(messages, tools=tools, _span=_span)
+
+    async def _chat_impl(
+        self,
+        messages: list[dict],
+        *,
+        tools: list[dict] | None = None,
+        _span: Any = None,
+    ) -> str | dict:
+        """Internal _chat body — wrapped by _chat() for tracing."""
         try:
             import httpx
         except ImportError:

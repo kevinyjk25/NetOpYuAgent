@@ -228,6 +228,51 @@ class HitlExecutor:
                            callers (webui/backend) forward to SSE without
                            re-implementing chunk handling.
         """
+        # Sprint-3-pre: top-level span for the whole query execution.
+        # Child spans (llm.call, tool.dispatch) hang off this. Use
+        # session_id as a high-cardinality attribute for filtering;
+        # Sprint 3 will derive a deterministic trace_id from it so
+        # the UI can deep-link to traces.
+        from runtime.tracing import start_span as _start_span
+        confirmed_facts_list = list(confirmed_facts or [])
+        self._query_span_cm = _start_span(
+            "agent.query",
+            **{
+                "agent.session_id": session_id,
+                "agent.query.chars": len(query or ""),
+                "agent.facts.count": len(confirmed_facts_list),
+            },
+        )
+        self._query_span = self._query_span_cm.__enter__()
+        try:
+            return await self._execute_query_inner(
+                query=query, session_id=session_id,
+                confirmed_facts=confirmed_facts_list, env_context=env_context,
+                on_token=on_token, on_chunk=on_chunk,
+            )
+        except BaseException as _exc:
+            try:
+                self._query_span.record_exception(_exc)
+            except Exception:
+                pass
+            raise
+        finally:
+            try:
+                self._query_span_cm.__exit__(None, None, None)
+            except Exception:
+                pass
+
+    async def _execute_query_inner(
+        self,
+        *,
+        query: str,
+        session_id: str,
+        confirmed_facts: list[str],
+        env_context: Optional[dict[str, Any]] = None,
+        on_token: Optional[Callable[[str], Awaitable[None]]] = None,
+        on_chunk: Optional[Callable[[dict], Awaitable[None]]] = None,
+    ) -> dict[str, Any]:
+        """Internal body of execute_query — wrapped by execute_query() for tracing."""
         env_context = dict(env_context or {})
         confirmed_facts = list(confirmed_facts or [])
 

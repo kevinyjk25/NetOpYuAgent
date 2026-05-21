@@ -7,15 +7,22 @@
 
 ## 1. 职责
 
+> **2026-05 重构(Phase 2A)**:业务工具从 `tools/` 迁出到 `profiles/<id>/`。
+> `tools/` 现在只放**通用框架**工具(跨所有 profile 共享),业务工具
+> 按 profile(default/lan/dc)隔离。详见 `profiles/DESIGN.md`。
+
 | 文件 | 职责 |
 |------|------|
-| `loader.py` (139) | `ToolLoader(mode)` — 按 mode 装配 callables + metadata + skill defs |
-| `mock_tools.py` (1361) | mock 模式所有 tool 实现(syslog/prometheus/netflow/device_*/...)|
+| `loader.py` | `ToolLoader(mode, profile)` — 按 mode + profile 装配 callables + metadata。mock 模式从 `profiles/<id>` 取业务工具;pragmatic 模式从 `pragmatic_tools.py` 取(暂未按 profile 切分)|
+| `common_tools.py` | 通用工具:`read_stored_result` / `process_stored_chunks`(大结果分页)+ `_ts()` 时间戳 helper。所有 profile 共享 |
 | `pragmatic_tools.py` | pragmatic 模式实现(调真 device / API)|
-| `builtin/registry.py` | 跨 mode 始终注册的 tool metadata(`read_stored_result`, `process_stored_chunks`)|
-| `mock/registry.py` | mock 模式专属 metadata |
+| `builtin/registry.py` | 跨 profile 始终注册的通用 tool metadata(`read_stored_result`, `process_stored_chunks`)|
 | `pragmatic/registry.py` | pragmatic 模式专属 metadata |
-| `__init__.py` | 仅 export `make_read_stored_result_tool`(需要 ToolResultStore 注入)|
+| `__init__.py` | 仅 export `make_read_stored_result_tool`(从 `common_tools` 取,需要 ToolResultStore 注入)|
+
+**业务工具去哪了**(2026-05 前在 `tools/mock_tools.py` + `tools/mock/registry.py`):
+- LAN(思科)工具 → `profiles/lan/{tools,tool_meta,skills}.py`
+- DC(数据中心 fabric)工具 → `profiles/dc/{tools,tool_meta,skills}.py`
 
 ---
 

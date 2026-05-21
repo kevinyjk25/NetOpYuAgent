@@ -73,13 +73,42 @@ async def build_services() -> dict[str, Any]:
     services: dict[str, Any] = {}
     _print_banner()
 
+    # ── Per-agent data isolation (2026-05) ──────────────────────────────
+    # Resolve this agent's private data root ONCE, up front, so every
+    # component below (memory, HITL checkpoints, tool-result cache, evolved
+    # skills, journal) writes under data/agents/<agent_id>/ instead of the
+    # shared data/. Two agents (lan / dc) running from the same image then
+    # never read each other's facts or overwrite each other's databases.
+    _agent_data_dir = cfg.agent_data_dir()
+    logger.info("Agent data dir: %s (agent_id=%s)", _agent_data_dir, cfg.agent.agent_id)
+
+    # ── 0. Observability / tracing (Sprint-3-pre, 2026-05) ──────────────
+    # Initialize OpenTelemetry BEFORE building anything else so any
+    # spans created during component init are captured. Defaults OFF
+    # — see runtime/tracing.py for degradation contract.
+    try:
+        from runtime.tracing import configure as _configure_tracing
+        _obs = getattr(cfg, "observability", None)
+        _configure_tracing(
+            enabled         = bool(getattr(_obs, "tracing_enabled", False)),
+            service_name    = str (getattr(_obs, "service_name",    "netopyu-agent")),
+            service_version = str (getattr(_obs, "service_version", "6.0.0")),
+            otlp_endpoint   =      getattr(_obs, "otlp_endpoint",   None),
+            sample_ratio    = float(getattr(_obs, "sample_ratio",   1.0)),
+        )
+    except Exception as _tr_exc:
+        logger.warning("Tracing configure failed: %s — proceeding without", _tr_exc)
+
     # ── 1. Memory ────────────────────────────────────────────────────────────
     # Production memory backend: agent_memory.MemoryManager wrapped by
     # MemoryAdapter for async + per-operator scoping.
     # Multi-user isolated, SQLite WAL persistent, 311 unit tests.
     from memory import MemoryAdapter
+    # Per-agent data isolation: each agent_id gets its own data subtree
+    # (resolved at the top of build_services). Shared read-only fixtures
+    # stay at cfg.memory.data_dir.
     memory_router = MemoryAdapter(
-        data_dir          = cfg.memory.data_dir,
+        data_dir          = _agent_data_dir + "/memory",
         inline_threshold  = 4_000,
         session_ttl       = 86_400,
         enable_user_model = True,
@@ -117,22 +146,49 @@ async def build_services() -> dict[str, Any]:
             build_default_device_coreferencer,
         )
 
-        # Pick checkpoint backend by env
-        _cp_backend = (_os.getenv("HITL_CHECKPOINT_BACKEND") or "memory").lower()
+        # Pick checkpoint backend from cfg.hitl.checkpoint. Env overrides
+        # (HITL_CHECKPOINT_BACKEND etc.) already applied in config.py.
+        # Default backend is "sqlite" (changed from "memory" in 2026-05)
+        # so pending approvals survive agent restart — operators discussing
+        # a destructive-action card while the process crashes would
+        # otherwise see their producing query hang on a dead asyncio.Future.
+        _cp_cfg = getattr(cfg.hitl, "checkpoint", None)
+        _cp_backend = (_cp_cfg.backend if _cp_cfg else "sqlite").lower()
         if _cp_backend == "redis":
             from hitl_core import RedisCheckpointStore
-            hitl_store = RedisCheckpointStore(
-                redis_url=_os.getenv("HITL_REDIS_URL", cfg.memory.redis_url
-                                                       or "redis://localhost:6379/0"),
-            )
+            _redis_url = (_cp_cfg.redis_url if _cp_cfg else None) or cfg.memory.redis_url \
+                         or "redis://localhost:6379/0"
+            hitl_store = RedisCheckpointStore(redis_url=_redis_url)
         elif _cp_backend == "sqlite":
             from hitl_core import SqliteCheckpointStore
-            hitl_store = SqliteCheckpointStore(
-                db_path=_os.getenv("HITL_SQLITE_PATH", "data/hitl_checkpoints.db"),
-            )
+            # Default lives under the per-agent data dir so each agent's
+            # pending approvals are isolated. An explicit hitl.checkpoint.
+            # sqlite_path in config still wins (operator override).
+            _default_hitl_db = _agent_data_dir + "/hitl_checkpoints.db"
+            _sq_path = (_cp_cfg.sqlite_path if _cp_cfg and _cp_cfg.sqlite_path
+                        and _cp_cfg.sqlite_path != "data/hitl_checkpoints.db"
+                        else None) or _default_hitl_db
+            hitl_store = SqliteCheckpointStore(db_path=_sq_path)
         else:
             hitl_store = InMemoryCheckpointStore()
+            # Pragmatic-mode + in-memory checkpoint = data-loss risk.
+            # Pragmatic mode runs real device operations, so a pending
+            # destructive approval lost on restart means an operator's
+            # in-progress decision evaporates with no audit trail of
+            # what was being asked. Warn loudly.
+            _mode = getattr(cfg, "mode", None) or _os.getenv("MODE", "mock")
+            if str(_mode).lower() == "pragmatic":
+                logger.warning(
+                    "HITL using in-memory checkpoint store in pragmatic mode. "
+                    "Pending approvals will be LOST on restart. Set "
+                    "HITL_CHECKPOINT_BACKEND=sqlite or redis (or "
+                    "hitl.checkpoint.backend in config.yaml) for production."
+                )
         logger.info("HITL checkpoint backend: %s", _cp_backend)
+        # Stash for graceful shutdown (Sprint-3-pre, 2026-05):
+        # lifespan exit will call hitl_store.flush()/close() if available
+        # so any pending state is persisted before we kill in-flight tasks.
+        services["hitl_store"] = hitl_store
 
         # Audit sink: file by default in production, in-memory for dev
         _audit_path = _os.getenv("HITL_AUDIT_LOG_PATH")
@@ -193,16 +249,68 @@ async def build_services() -> dict[str, Any]:
         lb_strategy                   = cfg.registry.lb_strategy,
         health_check_interval_seconds = cfg.registry.health_check_interval,
     )
-    own_card = get_agent_card(cfg.server.a2a_base_url)
+    # AgentCard now carries this agent's identity (agent_id, capabilities)
+    # so peers see who we are. Identity defaults reproduce the legacy
+    # single-agent behaviour when cfg.agent is unset in yaml.
+    #
+    # 2A profile enrichment: if the operator didn't hand-write capabilities
+    # / display_name / description in config, fill them from the active
+    # business profile so each profile advertises a sensible identity to
+    # peers without yaml boilerplate. Operator-set values always win.
+    try:
+        from profiles import load_profile
+        from config import AgentSkillSpec as _AgentSkillSpec
+        _profile = load_profile(cfg.agent.profile)
+        if not cfg.agent.capabilities and _profile.capabilities:
+            cfg.agent.capabilities = [
+                _AgentSkillSpec(
+                    skill_id    = c.get("skill_id", ""),
+                    name        = c.get("name", ""),
+                    description = c.get("description", ""),
+                    tags        = list(c.get("tags", [])),
+                )
+                for c in _profile.capabilities if c.get("skill_id")
+            ]
+        # Only override display_name/description if still at the dataclass
+        # defaults (operator didn't customise them).
+        if cfg.agent.display_name in ("", "IT Ops Agent") and _profile.display_name:
+            cfg.agent.display_name = _profile.display_name
+        logger.info(
+            "Profile %r active: %d business tool(s), %d capability(ies)",
+            cfg.agent.profile, len(_profile.tool_callables),
+            len(cfg.agent.capabilities),
+        )
+    except Exception as _prof_exc:
+        logger.warning("Profile enrichment failed: %s", _prof_exc)
+
+    own_card = get_agent_card(cfg.server.a2a_base_url, identity=cfg.agent)
+    # Peer URLs come from BOTH places for backwards compat:
+    #   1. cfg.registry.agent_urls (legacy single-list)
+    #   2. cfg.agent.peer_urls (Phase 1, per-agent identity-aware)
+    # Deduped, order-preserving union — registry sees one list either way.
+    _all_peer_urls: list[str] = []
+    _seen: set[str] = set()
+    for u in (cfg.registry.agent_urls or []) + (cfg.agent.peer_urls or []):
+        u = u.strip()
+        if u and u not in _seen:
+            _seen.add(u)
+            _all_peer_urls.append(u)
     registry = await create_registry(
-        static_urls = cfg.registry.agent_urls,
+        static_urls = _all_peer_urls,
         redis_url   = cfg.memory.redis_url,
         config      = registry_config,
         own_card    = own_card,
     )
     await registry.start()
     services["registry"] = registry
-    logger.info("Agent Registry ready — %d peer(s)", len(cfg.registry.agent_urls))
+    # Stash the merged peer-url list so the lifespan peer-refresh loop
+    # picks up the same set without re-merging. Underscore prefix marks
+    # it as internal (audit_wiring whitelist already handles this style).
+    services["_peer_urls"] = list(_all_peer_urls)
+    logger.info(
+        "Agent Registry ready — agent_id=%s peers=%d",
+        cfg.agent.agent_id, len(_all_peer_urls),
+    )
 
     # ── 4. Task module ───────────────────────────────────────────────────────
     # Task system needs a hitl_router. In core mode we don't have the legacy
@@ -245,7 +353,7 @@ async def build_services() -> dict[str, Any]:
         from tools import make_read_stored_result_tool
         from runtime import ToolResultStore
 
-        tool_store = ToolResultStore()
+        tool_store = ToolResultStore(db_path=_agent_data_dir + "/tool_results.db")
         services["tool_store"] = tool_store
 
         # 6a. LLM engine — always real (both modes).
@@ -261,6 +369,14 @@ async def build_services() -> dict[str, Any]:
             "capabilities": cfg.llm.capabilities,
         })
         services["llm_engine"] = llm_engine  # patch_hitl_graph called after tool registry is built
+        # D1 (Sprint 3): apply the concurrency cap. Default 4; 0 = unlimited.
+        try:
+            if hasattr(llm_engine, "set_max_concurrent_calls"):
+                llm_engine.set_max_concurrent_calls(
+                    int(getattr(cfg.llm, "max_concurrent_calls", 4))
+                )
+        except Exception as _sem_exc:
+            logger.warning("LLM concurrency cap wiring failed: %s", _sem_exc)
         logger.info("LLM engine: %s/%s", cfg.llm.backend, cfg.llm.model)
         logger.info("LLM capabilities: thinking_tag=%r format_compliance=%s "
                     "max_context=%d native_tools=%s",
@@ -363,7 +479,7 @@ async def build_services() -> dict[str, Any]:
         # ToolLoader assembles: builtin tools + mode-specific tools (mock XOR pragmatic).
         # No tool name is hardcoded here or in llm_engine — metadata comes from registries.
         from tools.loader import ToolLoader as _ToolLoader
-        _loader = _ToolLoader(mode=cfg.mode)
+        _loader = _ToolLoader(mode=cfg.mode, profile=cfg.agent.profile)
         read_stored_fn, process_chunks_fn = make_read_stored_result_tool(tool_store)
         tool_registry_local = _loader.build_callables()
         tool_registry_local["read_stored_result"]    = read_stored_fn
@@ -373,13 +489,31 @@ async def build_services() -> dict[str, Any]:
         logger.info("ToolLoader[%s]: %d tools assembled", cfg.mode, len(tool_registry_local))
 
         # 6d. MCP client
-        mcp_client = await _build_mcp_client(MCPClient)
-        await mcp_client.connect_all()
-        services["mcp_client"] = mcp_client
+        # The built-in "netops" mock MCP server + "netops_api" OpenAPI mock are
+        # LAN-business integrations (get_device_status, get_devices, …). They
+        # must NOT load for non-LAN profiles, or a dc/default agent would gain
+        # LAN device tools and break role isolation. Only the lan profile (or
+        # pragmatic mode with explicitly-configured real servers) wires them.
+        # Tracked: when dc needs its own MCP/OpenAPI, declare per-profile
+        # integration config (TODO.md "profile integrations").
+        _profile_id = (cfg.agent.profile or "default").strip().lower()
+        _load_builtin_netops = (_profile_id == "lan") or cfg.is_pragmatic
+        mcp_client = None
+        api_client = None
+        if _load_builtin_netops:
+            mcp_client = await _build_mcp_client(MCPClient)
+            await mcp_client.connect_all()
+            services["mcp_client"] = mcp_client
 
-        # 6e. OpenAPI client (mock in both modes unless explicitly configured)
-        api_client = await _build_openapi_client(OpenAPIClient)
-        services["api_client"] = api_client
+            # 6e. OpenAPI client (mock in both modes unless explicitly configured)
+            api_client = await _build_openapi_client(OpenAPIClient)
+            services["api_client"] = api_client
+        else:
+            logger.info(
+                "Profile %r: skipping built-in netops MCP+OpenAPI mock "
+                "(LAN-business integrations; not loaded for this profile)",
+                _profile_id,
+            )
 
         # 6f. Pragmatic extra MCP servers
         extra_mcp_clients = []
@@ -388,7 +522,8 @@ async def build_services() -> dict[str, Any]:
 
         # 6g. ToolRouter
         router = ToolRouter(tool_store=tool_store)
-        router.register_mcp(mcp_client)
+        if mcp_client is not None:
+            router.register_mcp(mcp_client)
         for ec in extra_mcp_clients:
             router.register_mcp(ec)
         if api_client:
@@ -493,7 +628,7 @@ async def build_services() -> dict[str, Any]:
         # the loader only returns skills valid for the current mode.
         try:
             from skills import SkillCatalogService, SkillLoader
-            _skill_loader = SkillLoader(mode=cfg.mode)
+            _skill_loader = SkillLoader(mode=cfg.mode, profile=cfg.agent.profile)
             _skill_defs   = _skill_loader.skill_definitions()
             services["skill_loader"] = _skill_loader
             _skill_catalog = SkillCatalogService()
@@ -526,7 +661,11 @@ async def build_services() -> dict[str, Any]:
                 # Fallback: call() takes (user, system, state)
                 return await llm_engine.call(user, system, state=None)
 
-            _skills_dir = _os.getenv("HERMES_DATA_DIR", "./data")
+            # Evolved skills are per-agent state (an LAN agent shouldn't
+            # inherit a DC agent's auto-evolved skills), so they live under
+            # the agent's private data dir. The golden set used by the A/B
+            # bench below is a SHARED fixture and stays at data/.
+            _skills_dir = _agent_data_dir
             _skill_evolver = SkillEvolver(
                 catalog    = services["skill_catalog"],
                 llm_fn     = _async_llm_for_skills,
@@ -550,6 +689,85 @@ async def build_services() -> dict[str, Any]:
                     "SkillEvolver: failed to wire into executor (%s) — "
                     "batch resolution will skip skill evolution",
                     _wire_exc,
+                )
+
+            # ── A/B safety net for SkillEvolver.apply_feedback ──────────────
+            # Wire a bench runner that runs a per-skill subset of the
+            # tool-compliance golden set on both old + new content. If
+            # args_ok would drop, apply_feedback rolls back the patch.
+            # Wire is best-effort: missing golden set or engine just leaves
+            # the safety net disabled (legacy unchecked path remains).
+            #
+            # See skills/evolver.py:set_bench_runner docstring for contract.
+            try:
+                from evaluation.tool_compliance_bench import ToolComplianceBench
+                from evaluation.tool_compliance_types import ToolCallCase
+                import json as _json_skbench
+
+                # Compliance golden set is a SHARED fixture (not per-agent).
+                # Look in the base data dir, not the agent's private subtree.
+                _golden_path = _pl.Path(cfg.memory.data_dir or "./data") / "tool_compliance_set.jsonl"
+                if not _golden_path.exists():
+                    _golden_path = _pl.Path("data/tool_compliance_set.jsonl")
+
+                if _golden_path.exists() and llm_engine is not None:
+                    # Load cases once at startup
+                    _cases_all: list[ToolCallCase] = []
+                    for _line in _golden_path.read_text().splitlines():
+                        _line = _line.strip()
+                        if not _line or _line.startswith("#"):
+                            continue
+                        try:
+                            _d = _json_skbench.loads(_line)
+                            _cases_all.append(ToolCallCase(**_d))
+                        except Exception:
+                            continue
+
+                    # Construct a per-skill bench-runner closure. Subsetting
+                    # by tool name keeps the run cheap (3-5 cases per skill);
+                    # see skills/evolver.py:set_bench_runner contract.
+                    async def _ab_bench_runner(skill_id: str, candidate_content: str):
+                        # Filter cases: match any tool the skill probably
+                        # touches. The simplest heuristic — case is included
+                        # if its expected_tool name appears in the candidate
+                        # content. Skills that reference no recognised tools
+                        # bail out to None (skip gate, don't trap improvement).
+                        _matched = [
+                            c for c in _cases_all
+                            if c.expected_tool in candidate_content
+                        ][:5]
+                        if not _matched:
+                            return None
+                        try:
+                            _bench = ToolComplianceBench(
+                                engine = llm_engine,
+                                name   = f"ab-safety-net/{skill_id}",
+                            )
+                            return await _bench.run(_matched)
+                        except Exception as _bench_inner:
+                            logger.debug(
+                                "A/B bench runner exception for %s: %s",
+                                skill_id, _bench_inner,
+                            )
+                            return None
+
+                    _skill_evolver.set_bench_runner(_ab_bench_runner)
+                    logger.info(
+                        "SkillEvolver: A/B safety-net wired (%d compliance cases loaded)",
+                        len(_cases_all),
+                    )
+                else:
+                    logger.info(
+                        "SkillEvolver: A/B safety-net DISABLED — "
+                        "golden set %s exists=%s, engine=%s",
+                        _golden_path, _golden_path.exists(),
+                        "yes" if llm_engine else "no",
+                    )
+            except Exception as _ab_exc:
+                logger.warning(
+                    "SkillEvolver: A/B safety-net wire failed (%s) — "
+                    "feedback patches will skip the regression gate",
+                    _ab_exc,
                 )
 
             # Smoke test: prove the LLM actually responds. We don't care about
@@ -648,7 +866,7 @@ async def build_services() -> dict[str, Any]:
             # 3) Local tool metadata (dict format) — last so overrides auto-imports
             try:
                 from tools.loader import ToolLoader as _TL
-                _meta = _TL(mode=cfg.mode).build_metadata()
+                _meta = _TL(mode=cfg.mode, profile=cfg.agent.profile).build_metadata()
                 for tool_name, tool_meta in _meta.items():
                     schema_reg.register(from_dict_metadata(tool_name, tool_meta))
                     n_dict += 1
@@ -856,9 +1074,9 @@ async def build_services() -> dict[str, Any]:
             # Build the corpora.  Tool metadata: prefer the live ToolLoader
             # used at startup; skill defs come from the same source.
             from tools.loader import ToolLoader as _TL
-            _tool_meta = _TL(mode=cfg.mode).build_metadata()
+            _tool_meta = _TL(mode=cfg.mode, profile=cfg.agent.profile).build_metadata()
             from skills import SkillLoader as _SL
-            _skill_defs = _SL(mode=cfg.mode).skill_definitions()
+            _skill_defs = _SL(mode=cfg.mode, profile=cfg.agent.profile).skill_definitions()
 
             # Choose async or sync indexing path based on backend + embedder presence.
             # Async path: bounded-concurrency batched embed() calls, ~5-10x faster
@@ -1153,11 +1371,21 @@ async def lifespan(app: FastAPI):
     logger.info("Starting IT Ops Agent v6 (mode=%s)", cfg.mode.upper())
     _services = await build_services()
 
+    # C2 (Sprint 3): FastAPI auto-instrumentation. Must run AFTER
+    # build_services() (which calls tracing.configure()), and is a no-op
+    # when tracing is disabled / the instrumentation package is absent.
+    try:
+        from runtime.tracing import instrument_fastapi
+        instrument_fastapi(app)
+    except Exception as _fi_exc:
+        logger.warning("FastAPI instrumentation wiring failed: %s", _fi_exc)
+
     from a2a import create_a2a_app, InMemoryTaskStore
     a2a_app = create_a2a_app(
         base_url   = cfg.server.a2a_base_url,
         executor   = _services["executor"],
         task_store = InMemoryTaskStore(),
+        identity   = cfg.agent,        # Phase-1: publish real agent_id + caps
     )
     app.mount("/api/v1/a2a", a2a_app)
 
@@ -1228,7 +1456,148 @@ async def lifespan(app: FastAPI):
     except Exception as _cq_exc:
         logger.warning("ChunkQueue idle watchdog start failed: %s", _cq_exc)
 
+    # ── Phase 1 multi-agent: periodic peer-card refresh ────────────────
+    # We've already fetched peer AgentCards at registry construction time.
+    # This loop re-fetches them on a schedule so capability changes /
+    # restarts / health flips become visible without operator action.
+    # Skipped when no peers are configured or refresh is disabled.
+    peer_refresh_task = None
+    _peers_to_refresh = list(_services.get("_peer_urls") or [])
+    _refresh_interval = int(cfg.agent.peer_refresh_interval_s)
+    if _peers_to_refresh and _refresh_interval > 0:
+        async def _peer_refresh_loop():
+            """Periodically re-fetch peer AgentCards and update registry.
+
+            Two phases:
+              1. Fast bootstrap retries — peers may not be up yet when THIS
+                 agent starts (common when launching both processes at once).
+                 Retry every 5s for the first ~30s so they find each other
+                 quickly instead of waiting a full refresh interval.
+              2. Steady-state refresh every peer_refresh_interval_s.
+            """
+            registry = _services["registry"]
+            # Re-fetch with the same source label the initial registration
+            # used (STATIC — these peers come from config/env). Passing
+            # source=None breaks AgentEntry validation (the enum rejects
+            # None); register() upserts by agent_id so re-registering with
+            # STATIC is idempotent and refreshes the card. (Bug fixed
+            # 2026-05: the loop previously passed source=None.)
+            from registry.schemas import RegistrationSource as _RS
+
+            async def _do_refresh() -> int:
+                if not hasattr(registry, "register_from_urls"):
+                    return 0
+                refreshed = await registry.register_from_urls(
+                    _peers_to_refresh, source=_RS.STATIC,
+                )
+                return len(refreshed or [])
+
+            # Phase 1: fast bootstrap. Stop early once all peers are found.
+            _bootstrap_attempts = 6      # 6 × 5s = 30s
+            for _i in range(_bootstrap_attempts):
+                try:
+                    await asyncio.sleep(5)
+                    _n = await _do_refresh()
+                    if _n >= len(_peers_to_refresh):
+                        logger.info(
+                            "Peer bootstrap: all %d peer(s) discovered", _n,
+                        )
+                        break
+                    logger.debug(
+                        "Peer bootstrap attempt %d: %d/%d peer(s) found",
+                        _i + 1, _n, len(_peers_to_refresh),
+                    )
+                except asyncio.CancelledError:
+                    raise
+                except Exception as _pr_exc:
+                    logger.debug("Peer bootstrap attempt %d failed: %s", _i + 1, _pr_exc)
+
+            # Phase 2: steady-state refresh
+            while True:
+                try:
+                    await asyncio.sleep(_refresh_interval)
+                    await _do_refresh()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as _pr_exc:
+                    # Never tank the agent because a peer was momentarily
+                    # unreachable. Log + try again next interval.
+                    logger.debug("Peer refresh failed (will retry): %s", _pr_exc)
+        peer_refresh_task = asyncio.create_task(_peer_refresh_loop())
+        logger.info(
+            "Peer refresh loop started (every %ds, %d peer(s))",
+            _refresh_interval, len(_peers_to_refresh),
+        )
+
+    # ── Graceful shutdown plumbing (Sprint-3-pre, 2026-05) ──────────────
+    # Track in-flight LLM/tool work so the shutdown drain (after `yield`)
+    # can wait for it before the process exits. Without this, a tool that
+    # already executed against a real device but whose result hadn't yet
+    # returned to the LLM would leave device state inconsistent with our
+    # memory record.
+    #
+    # IMPORTANT: we deliberately do NOT install our own SIGINT/SIGTERM
+    # handler. uvicorn already installs handlers that (a) stop accepting
+    # connections and (b) run the ASGI lifespan shutdown — i.e. the code
+    # after `yield` below. If we call loop.add_signal_handler() here we
+    # OVERRIDE uvicorn's handler; unless we then re-trigger uvicorn's
+    # shutdown ourselves (we can't cleanly), the server never stops and
+    # Ctrl+C hangs. The correct integration point is the post-`yield`
+    # drain block, which uvicorn invokes for us on signal. (Bug fixed
+    # 2026-05: the earlier add_signal_handler approach broke Ctrl+C.)
+    _services["in_flight_tasks"] = set()
+
     yield
+
+    # ─── Graceful shutdown sequence ───────────────────────────────────
+    # Reached when uvicorn receives SIGINT/SIGTERM and runs lifespan
+    # shutdown. We drain in-flight work, then flush HITL state.
+    # 1. Drain in-flight LLM/tool work (best effort, 30s cap)
+    _in_flight = _services.get("in_flight_tasks") or set()
+    if _in_flight:
+        # Drain timeout is configurable; default 10s keeps interactive
+        # Ctrl+C snappy while still giving real device operations a
+        # chance to finish. Production can raise it (e.g. 30-60s) where
+        # long-running tool calls matter more than fast restart.
+        import os as _os_drain
+        _drain_timeout = float(_os_drain.getenv("SHUTDOWN_DRAIN_TIMEOUT_S", "10"))
+        logger.info(
+            "Waiting for %d in-flight request(s) to complete (max %.0fs)…",
+            len(_in_flight), _drain_timeout,
+        )
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*list(_in_flight), return_exceptions=True),
+                timeout=_drain_timeout,
+            )
+            logger.info("All in-flight requests drained")
+        except asyncio.TimeoutError:
+            logger.warning(
+                "Forced shutdown after %.0fs drain timeout — %d task(s) "
+                "still pending; their state may not be persisted",
+                _drain_timeout, len(_in_flight),
+            )
+        except Exception as _drain_exc:
+            logger.warning("Drain hit unexpected error: %s", _drain_exc)
+
+    # 2. Flush HITL checkpoint store so pending interrupts survive restart
+    try:
+        _hs = _services.get("hitl_store")
+        if _hs is not None:
+            # Both sqlite & redis stores expose flush()/close(); memory
+            # store has neither and is irrelevant (data already lost).
+            if hasattr(_hs, "flush"):
+                _res = _hs.flush()
+                if asyncio.iscoroutine(_res):
+                    await _res
+                logger.info("HITL checkpoint store flushed")
+            elif hasattr(_hs, "close"):
+                _res = _hs.close()
+                if asyncio.iscoroutine(_res):
+                    await _res
+                logger.info("HITL checkpoint store closed")
+    except Exception as _flush_exc:
+        logger.warning("HITL checkpoint flush failed: %s", _flush_exc)
 
     # Stop SkillJournalConsumer before other teardown
     try:
@@ -1237,6 +1606,13 @@ async def lifespan(app: FastAPI):
             await _stop()
     except Exception as _jc_exc:
         logger.warning("SkillJournalConsumer stop failed: %s", _jc_exc)
+
+    if peer_refresh_task is not None:
+        peer_refresh_task.cancel()
+        try:
+            await peer_refresh_task
+        except asyncio.CancelledError:
+            pass
 
     if _services.get("hitl_watchdog") is not None:
         _services["hitl_watchdog"].stop()
@@ -1263,6 +1639,36 @@ from fastapi.responses import FileResponse
 async def serve_webui():
     html_path = pathlib.Path(__file__).parent / "webui" / "index.html"
     return FileResponse(str(html_path), media_type="text/html")
+
+
+@app.get("/metrics", include_in_schema=False)
+async def metrics():
+    """Prometheus / OpenMetrics text exposition (C1, Sprint 3, 2026-05).
+
+    Returns live counters/gauges/histograms in OpenMetrics format for a
+    Prometheus scraper. Refreshes the pending-HITL gauge on each scrape so
+    it reflects current state without a background poller.
+
+    When prometheus_client isn't installed, returns a plaintext notice
+    (still 200 so scrapers don't hard-fail).
+    """
+    from fastapi.responses import Response
+    from runtime import metrics as _metrics
+
+    # Refresh point-in-time gauges on scrape.
+    try:
+        _rtr = _services.get("hitl_core_router") or _services.get("hitl_router")
+        if _rtr is not None and hasattr(_rtr, "_payload_store"):
+            _pending = sum(
+                1 for p in _rtr._payload_store.values()
+                if getattr(getattr(p, "status", None), "value", None) == "pending"
+            )
+            _metrics.set_hitl_pending(_pending)
+    except Exception:
+        pass
+
+    body, content_type = _metrics.render_latest()
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/health")

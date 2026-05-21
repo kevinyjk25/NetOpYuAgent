@@ -1,45 +1,33 @@
 """
-tools/mock_tools.py
---------------------
-Mock IT-ops tools with realistic synthetic outputs.
+profiles/lan/tools.py — Enterprise LAN (Cisco) business tool implementations
+=============================================================================
 
-Used in mock mode (no real network access required). Each tool is an async
-callable matching the signature `async def tool(args: dict) -> str` and
-registered through tools/loader.py for the runtime loop.
+Mock tools for enterprise LAN operations: Cisco switches, APs, internal
+firewalls. Each is an async callable `async def tool(args: dict) -> str`.
 
-Several tools intentionally return large payloads (hundreds of log lines,
-time-series series, raw flow records) to exercise the ToolResultStore +
-read_stored_result paging path:
-  - syslog_search    → log lines
-  - prometheus_query → time-series data
-  - netflow_dump     → raw flow records
+Migrated 2026-05 from the old tools/mock_tools.py as part of the profile
+refactor (business tools decoupled from the common framework). The common
+paging tools (read_stored_result / process_stored_chunks) stayed in
+tools/common_tools.py since every profile needs them.
 
-When a tool output exceeds ToolResultStore.MAX_INLINE_CHARS (4 000 chars),
-the Budget Manager automatically stores it and returns a reference label
-in the form [STORED:<tool_name>:<ref_id>]. The agent then calls
-[TOOL:read_stored_result] to page through the data.
+The prompt-facing metadata for these tools lives in profiles/lan/tool_meta.py;
+the Profile object that bundles callables + metadata + skills is in
+profiles/lan/__init__.py.
 """
 from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
+# Shared timestamp helper — common framework, used by the mock log generators.
+from tools.common_tools import _ts
 
-# ---------------------------------------------------------------------------
-# Helper generators
-# ---------------------------------------------------------------------------
+logger = logging.getLogger(__name__)
 
-def _ts(offset_minutes: int = 0) -> str:
-    t = datetime.now(timezone.utc) - timedelta(minutes=offset_minutes)
-    return t.strftime("%b %d %H:%M:%S")
-
-
-# ---------------------------------------------------------------------------
-# Tool 1: syslog_search  (LARGE — triggers P0 cache)
-# ---------------------------------------------------------------------------
 
 async def syslog_search(args: dict[str, Any]) -> str:
     """
@@ -289,216 +277,6 @@ async def service_health(args: dict[str, Any]) -> str:
 
 # This is wired dynamically at runtime with the ToolResultStore reference.
 # See webui/backend.py for how it's injected.
-
-def make_read_stored_result_tool(tool_store):
-    """
-    Factory: returns a tool function bound to a specific ToolResultStore.
-    Used to let the LLM retrieve a page of a large cached result.
-    """
-    async def read_stored_result(args: dict[str, Any]) -> str:
-        ref_id = args.get("ref_id", "")
-        offset = int(args.get("offset", 0))
-        # Default length raised from 2000 to 8000 chars (~2K tokens) so a
-        # typical netflow_dump or syslog page-through completes in 5-7 pages
-        # instead of 25+. LLM is still free to override with smaller value
-        # for sampling, but the default favours fewer turns over fewer tokens
-        # per turn — turns are the bottleneck on slow local models.
-        # Hard cap at 16000 to keep one page under typical 4K-token budgets.
-        length = int(args.get("length", 8000))
-        length = max(256, min(length, 16000))
-
-        if not ref_id:
-            return "[Error: ref_id is required]"
-
-        # Normalise ref_id: LLM often copies the full "[STORED:tool:uuid]" label
-        ref_id = ref_id.strip("[]")
-        if ":" in ref_id:
-            ref_id = ref_id.rsplit(":", 1)[-1].strip()
-
-        chunk = tool_store.read(ref_id, offset=offset, length=length)
-        if chunk is None:
-            return f"[Error: no stored result found for ref_id={ref_id!r}]"
-
-        total = len(tool_store._store.get(ref_id, ""))
-        next_offset = offset + len(chunk)
-        has_more    = next_offset < total
-
-        return (
-            f"# Stored result ref_id={ref_id} offset={offset} length={len(chunk)}\n"
-            f"# Total size: {total} chars  |  Has more: {has_more}  |  "
-            f"Next offset: {next_offset if has_more else 'EOF'}\n"
-            f"# {'─'*60}\n"
-            f"{chunk}"
-        )
-
-    async def process_stored_chunks(args: dict[str, Any]) -> str:
-        """
-        General-purpose chunk iterator over a stored large result.
-
-        Splits the stored content into fixed-size chunks and applies one of
-        several built-in operations to every chunk, accumulating the results.
-        This is the right tool whenever you need to process an entire large file
-        rather than just reading one page of it.
-
-        Operations (set via `operation` arg):
-          "filter"    – keep only lines that contain `match` (case-insensitive)
-          "reject"    – keep only lines that do NOT contain `match`
-          "extract"   – extract the first regex `pattern` capture group from each line
-          "count"     – count lines containing `match` per chunk; return totals
-          "summarise" – return the first `head` and last `tail` lines of each chunk
-                        (useful for giving an LLM a digest of each section)
-          "passthrough" – return every chunk verbatim (same as calling read_stored_result
-                          in a loop, but done for you automatically)
-
-        Common usage patterns:
-          Check if user X exists anywhere in a log:
-            {"ref_id": "...", "operation": "filter", "match": "alice@corp.com"}
-
-          Find all ERROR lines across the whole file:
-            {"ref_id": "...", "operation": "filter", "match": "ERROR"}
-
-          Extract all IP addresses from a NetFlow dump:
-            {"ref_id": "...", "operation": "extract", "pattern": "(\\d+\\.\\d+\\.\\d+\\.\\d+)"}
-
-          Count how many times each chunk mentions 'timeout':
-            {"ref_id": "...", "operation": "count", "match": "timeout"}
-
-          Get a digest of a large prometheus dump:
-            {"ref_id": "...", "operation": "summarise", "head": 3, "tail": 2}
-        """
-        import re as _re
-
-        ref_id    = args.get("ref_id", "")
-        operation = args.get("operation", "filter")
-        match_str = args.get("match", "")
-        pattern   = args.get("pattern", "")
-        chunk_size = int(args.get("chunk_size", 3000))   # chars per chunk
-        max_output = int(args.get("max_output", 6000))   # cap total output chars
-        head_n    = int(args.get("head", 5))
-        tail_n    = int(args.get("tail", 5))
-
-        if not ref_id:
-            return "[Error: ref_id is required]"
-
-        full = tool_store._store.get(ref_id)
-        if full is None:
-            return f"[Error: no stored result for ref_id={ref_id!r}]"
-
-        total_chars = len(full)
-        all_lines   = full.splitlines()
-        total_lines = len(all_lines)
-
-        # Split into line-aligned chunks
-        chunks: list[list[str]] = []
-        current: list[str] = []
-        current_len = 0
-        for line in all_lines:
-            current.append(line)
-            current_len += len(line) + 1
-            if current_len >= chunk_size:
-                chunks.append(current)
-                current = []
-                current_len = 0
-        if current:
-            chunks.append(current)
-
-        output_parts: list[str] = []
-        total_matched = 0
-        output_chars  = 0
-
-        header = (
-            f"# process_stored_chunks ref_id={ref_id} operation={operation!r}\n"
-            f"# Total: {total_chars} chars, {total_lines} lines, {len(chunks)} chunk(s)\n"
-            f"# {'─'*60}\n"
-        )
-        output_parts.append(header)
-        output_chars += len(header)
-
-        for chunk_idx, chunk_lines in enumerate(chunks):
-            if output_chars >= max_output:
-                output_parts.append(
-                    f"\n# [Output cap {max_output} chars reached — "
-                    f"{len(chunks) - chunk_idx} chunk(s) not shown]\n"
-                )
-                break
-
-            if operation == "filter":
-                kw = match_str.lower()
-                hits = [l for l in chunk_lines if kw in l.lower()]
-                total_matched += len(hits)
-                if hits:
-                    block = f"\n# chunk {chunk_idx+1}: {len(hits)} match(es)\n" + "\n".join(hits)
-                    output_parts.append(block)
-                    output_chars += len(block)
-
-            elif operation == "reject":
-                kw = match_str.lower()
-                kept = [l for l in chunk_lines if kw not in l.lower()]
-                total_matched += len(kept)
-                block = f"\n# chunk {chunk_idx+1}: {len(kept)} line(s) kept\n" + "\n".join(kept)
-                output_parts.append(block)
-                output_chars += len(block)
-
-            elif operation == "extract":
-                if not pattern:
-                    return "[Error: 'pattern' is required for operation='extract']"
-                extracted = []
-                for line in chunk_lines:
-                    m = _re.search(pattern, line)
-                    if m:
-                        val = m.group(1) if m.lastindex else m.group(0)
-                        extracted.append(val)
-                seen = sorted(set(extracted))
-                total_matched += len(seen)
-                if seen:
-                    block = f"\n# chunk {chunk_idx+1}: {len(seen)} unique value(s)\n" + "\n".join(seen)
-                    output_parts.append(block)
-                    output_chars += len(block)
-
-            elif operation == "count":
-                kw = match_str.lower()
-                count = sum(1 for l in chunk_lines if kw in l.lower())
-                total_matched += count
-                block = f"\n# chunk {chunk_idx+1}: {count} line(s) contain {match_str!r}"
-                output_parts.append(block)
-                output_chars += len(block)
-
-            elif operation == "summarise":
-                h = chunk_lines[:head_n]
-                t = chunk_lines[-tail_n:] if tail_n else []
-                mid_omitted = max(0, len(chunk_lines) - head_n - tail_n)
-                block = (
-                    f"\n# chunk {chunk_idx+1} ({len(chunk_lines)} lines):\n"
-                    + "\n".join(h)
-                    + (f"\n  … {mid_omitted} lines omitted …\n" if mid_omitted > 0 else "\n")
-                    + ("\n".join(t) if t else "")
-                )
-                output_parts.append(block)
-                output_chars += len(block)
-
-            elif operation == "passthrough":
-                block = f"\n# chunk {chunk_idx+1}:\n" + "\n".join(chunk_lines)
-                output_parts.append(block)
-                output_chars += len(block)
-
-            else:
-                return f"[Error: unknown operation={operation!r}. Choose: filter, reject, extract, count, summarise, passthrough]"
-
-        # Summary footer
-        op_summary = {
-            "filter":      f"{total_matched} matching line(s) found",
-            "reject":      f"{total_matched} line(s) passed filter",
-            "extract":     f"{total_matched} unique value(s) extracted across all chunks",
-            "count":       f"{total_matched} total line(s) matched across all chunks",
-            "summarise":   f"{len(chunks)} chunk(s) summarised",
-            "passthrough": f"{len(chunks)} chunk(s) returned",
-        }.get(operation, "")
-        footer = f"\n# {'─'*60}\n# Result: {op_summary}\n"
-        output_parts.append(footer)
-
-        return "".join(output_parts)
-
-    return read_stored_result, process_stored_chunks
 
 
 # ---------------------------------------------------------------------------
@@ -1166,197 +944,329 @@ async def diff_device_config(args: dict[str, Any]) -> str:
         f"# Last write: within last maintenance window"
     )
 
-TOOL_REGISTRY: dict[str, callable] = {
-    "syslog_search":          syslog_search,
-    "prometheus_query":       prometheus_query,
-    "netflow_dump":           netflow_dump,
-    "dns_lookup":             dns_lookup,
-    "device_info":            device_info,
-    "alert_summary":          alert_summary,
-    "service_health":         service_health,
-    "list_devices":           list_devices,
-    "list_interfaces":        list_interfaces,
-    "get_device_config":      get_device_config,
-    "validate_device_config": validate_device_config,
-    "edit_device_config":     edit_device_config,
-    "restart_service":        restart_service,
-    "rollback_service":       rollback_service,
-    "diff_device_config":     diff_device_config,
-    "push_config":            push_config,
-    "rollback_deploy":        rollback_deploy,
-    "drain_node":             drain_node,
-    "failover":               failover,
-    "delete_resource":        delete_resource,
-    # read_stored_result and process_stored_chunks are injected at runtime (need ToolResultStore ref)
-}
+# ---------------------------------------------------------------------------
+# query_radius_logs — H2 (async fire-and-forget) HITL demo (2026-05)
+# ---------------------------------------------------------------------------
+#
+# Demonstrates async-nonblocking HITL:
+#   1. Tool registers an async HITL via register_async_pending() (inserts
+#      into the router registry under lock AND arms the SLA watchdog) and
+#      creates a real checkpoint that /hitl/pending lists.
+#   2. Returns immediately with default "permission_ok (assumed)".
+#   3. After a random delay (3-12s in demo mode), a background task calls
+#      router.deliver(...) directly to simulate "ops queue ack arrived".
+#      In production this spawn does not exist — a real operator clicks and
+#      router.deliver() is invoked via the HTTP endpoint instead.
+#
+# Robust to wiring failures: any error in the H2 setup (schema mismatch,
+# audit/registry write, demo autoreply spawn) is caught and the tool
+# still returns a usable degraded response. This prevents the LLM from
+# looping retrying on a tool error (observed on initial deploy where a
+# ProposedAction field mismatch raised pydantic ValidationError and the
+# LLM retried the same call 3 times before exhausting the turn cap).
 
-TOOL_DESCRIPTIONS = {
-    "syslog_search": {
-        "description": "Search syslog entries across network devices. Supports keyword and user filtering.",
-        "parameters": {
-            "host":    "device name / glob (e.g. 'radius-*')",
-            "keyword": "search term (e.g. 'error', 'timeout')",
-            "user":    "username to search for (e.g. 'alice@corp.com')",
-            "lines":   "number of lines to return (default 300)",
-        },
-        "returns_large": True,
-        "example": {"host": "radius-*", "user": "alice@corp.com", "lines": 300},
-    },
-    "process_stored_chunks": {
-        "description": (
-            "General-purpose chunk iterator over a stored large result. "
-            "Splits the full content into chunks and applies an operation to every chunk automatically — "
-            "no manual offset loop needed. "
-            "Operations: 'filter' (keep lines matching a term), 'reject' (keep non-matching lines), "
-            "'extract' (regex capture from each line), 'count' (count matches per chunk), "
-            "'summarise' (head+tail digest of each chunk), 'passthrough' (all chunks verbatim). "
-            "Use this whenever you need to process an entire large file, not just one page."
-        ),
-        "parameters": {
-            "ref_id":     "stored result ID from a [STORED:...] reference",
-            "operation":  "filter | reject | extract | count | summarise | passthrough",
-            "match":      "string to match against (for filter, reject, count)",
-            "pattern":    "regex pattern with capture group (for extract)",
-            "chunk_size": "chars per chunk (default 3000)",
-            "max_output": "max total output chars (default 6000)",
-            "head":       "lines from top of each chunk for summarise (default 5)",
-            "tail":       "lines from bottom of each chunk for summarise (default 5)",
-        },
-        "returns_large": False,
-        "examples": [
-            {"ref_id": "a3f9c12b", "operation": "filter",    "match": "alice@corp.com"},
-            {"ref_id": "a3f9c12b", "operation": "filter",    "match": "ERROR"},
-            {"ref_id": "a3f9c12b", "operation": "extract",   "pattern": "(\\d+\\.\\d+\\.\\d+\\.\\d+)"},
-            {"ref_id": "a3f9c12b", "operation": "count",     "match": "timeout"},
-            {"ref_id": "a3f9c12b", "operation": "summarise", "head": 3, "tail": 2},
-        ],
-    },
-    "prometheus_query": {
-        "description": "Query Prometheus metrics time series",
-        "parameters": {"metric": "metric name", "job": "job label", "range_minutes": "look-back window"},
-        "returns_large": True,
-        "example": {"metric": "up", "job": "network_devices", "range_minutes": 60},
-    },
-    "netflow_dump": {
-        "description": "Dump NetFlow / IPFIX records for a site",
-        "parameters": {"site": "site name", "flows": "number of flow records"},
-        "returns_large": True,
-        "example": {"site": "site-a", "flows": 500},
-    },
-    "dns_lookup": {
-        "description": "Resolve a hostname and return DNS records",
-        "parameters": {"hostname": "FQDN to resolve"},
-        "returns_large": False,
-        "example": {"hostname": "payments.internal"},
-    },
-    "device_info": {
-        "description": "Get hardware/firmware details for a network device",
-        "parameters": {"device_id": "device identifier (e.g. ap-01)"},
-        "returns_large": False,
-        "example": {"device_id": "ap-01"},
-    },
-    "alert_summary": {
-        "description": "Return current alert counts by severity",
-        "parameters": {"severity": "filter: all | P0 | P1 | P2 | P3"},
-        "returns_large": False,
-        "example": {"severity": "P1"},
-    },
-    "service_health": {
-        "description": "Check health status of a backend service",
-        "parameters": {"service": "service name"},
-        "returns_large": False,
-        "example": {"service": "payments-service"},
-    },
-    "list_devices": {
-        "description": (
-            "List ALL network devices in the inventory — APs, switches, routers, servers. "
-            "Use this when asked 'what devices exist', 'show all devices', or any inventory query. "
-            "Optionally filter by type (wireless_ap | switch | router | server), "
-            "site (site-a | site-b), or role (core_switch | access_point | edge_router | radius_server). "
-            "Returns a table with device ID, type, role, site, IP, and model. "
-            "Use device_info for detailed info on a SPECIFIC device after you know its ID."
-        ),
-        "parameters": {
-            "type": "filter by device type: wireless_ap | switch | router | server | '' (all)",
-            "site": "filter by site: site-a | site-b | '' (all)",
-            "role": "filter by role: core_switch | access_switch | access_point | edge_router | radius_server | '' (all)",
-        },
-        "returns_large": False,
-        "example": {"type": "", "site": ""},
-        "examples": [
-            {"type": ""},                        # all devices
-            {"type": "switch"},                  # wired switches only
-            {"type": "wireless_ap"},             # wireless APs only
-            {"type": "router"},                  # routers only
-            {"type": "switch", "site": "site-a"}, # site-a wired
-        ],
-    },
-    "list_interfaces": {
-        "description": (
-            "List all network interfaces for a specific device. "
-            "Returns port name, state (up/down), VLAN or frequency, speed, and description. "
-            "Requires a valid device_id — use list_devices first if you don't know the ID."
-        ),
-        "parameters": {
-            "device_id": "device identifier from list_devices (e.g. sw-core-01, ap-01, router-01)",
-        },
-        "returns_large": False,
-        "example": {"device_id": "sw-core-01"},
-    },
-    "read_stored_result": {
-        "description": "Page through a large tool result stored by ref_id",
-        "parameters": {
-            "ref_id":  "reference ID from a [STORED:...] label",
-            "offset":  "byte offset (default 0)",
-            "length":  "bytes to read (default 2000)",
-        },
-        "returns_large": False,
-        "example": {"ref_id": "a3f9c12b", "offset": 0, "length": 2000},
-    },
-    "get_device_config": {
-        "description": (
-            "Retrieve running configuration from a device. "
-            "Mock mode returns realistic seeded config with intentional issues on some APs "
-            "(missing NTP, RADIUS timeout, missing ACL). Use section= to narrow output."
-        ),
-        "parameters": {
-            "device_id": "device ID (e.g. 'ap-01', 'sw-core-01')",
-            "section":   "config section keyword — e.g. 'radius', 'ntp' (optional)",
-        },
-        "returns_large": True,
-        "example": {"device_id": "ap-01", "section": "radius"},
-    },
-    "validate_device_config": {
-        "description": (
-            "Run NTP, RADIUS, ACL, CPU and memory validation checks on a device. "
-            "Mock mode returns a deterministic PASS/WARN/FAIL report seeded by device ID."
-        ),
-        "parameters": {
-            "device_id": "device ID (e.g. 'ap-01', 'sw-core-01')",
-        },
-        "returns_large": False,
-        "example": {"device_id": "ap-01"},
-    },
-    "edit_device_config": {
-        "description": (
-            "Push configuration lines to a device (HITL approval required before execution). "
-            "Mock mode simulates the config push and returns a result summary. "
-            "Provide either config_lines (raw IOS commands) OR section+changes (key/value pairs)."
-        ),
-        "parameters": {
-            "device_id":    "device ID (e.g. 'ap-01', 'sw-core-01')",
-            "config_lines": "list of IOS-style config commands to push",
-            "section":      "config section name (e.g. 'radius', 'ntp', 'logging') when using changes",
-            "changes":      "object with field-value pairs, e.g. {timeout: 3, host: '10.0.1.100'}",
-            "reason":       "change reason for audit log",
-        },
-        "required": ["device_id"],
-        "returns_large": False,
-        "example": {"device_id": "ap-01", "config_lines": ["radius-server host 10.0.1.100 timeout 3"], "reason": "fix RADIUS timeout"},
-        "examples": [
-            {"device_id": "ap-01", "config_lines": ["radius-server timeout 3"], "reason": "fix RADIUS timeout"},
-            {"device_id": "ap-01", "section": "radius", "changes": {"timeout": 3}, "reason": "fix RADIUS timeout"},
-            {"device_id": "ap-01", "section": "ntp", "changes": {"servers": ["10.0.0.5", "10.0.0.6"]}, "reason": "add NTP backup"},
-        ],
-    },
-}
+_RADIUS_DEMO_OUTCOMES = [
+    # (decision, comment, weight) — weighted random
+    ("approve", "RADIUS check passed: user has Wi-Fi access permission",        7),
+    ("reject",  "RADIUS check FAILED: user X is DISABLED in directory",         2),
+    ("reject",  "RADIUS check FAILED: user X account locked (5 failed attempts)", 1),
+]
+
+
+async def query_radius_logs(args: dict[str, Any]) -> str:
+    """H2 demo: fire RADIUS query, return assumed default, ack comes later.
+
+    Args:
+        user_id: user to look up
+        minutes: time window in minutes (default 60)
+        # injected by runtime/loop._execute_tool:
+        _session_id: current session_id (for SSE notify routing)
+    """
+    user_id  = str(args.get("user_id") or "unknown_user").strip()
+    minutes  = int(args.get("minutes") or 60)
+    session_id = args.get("_session_id") or ""
+
+    # ── Lazy import of hitl_core / runtime / webui / main ────────────────
+    # tools/ MUST NOT import hitl_core in general. This is the one allowed
+    # exception for the H2 async-HITL DEMO that explicitly integrates with
+    # the async-HITL extension point.
+    # ALLOWED BY DESIGN: H2 async-HITL demo (single integration point)
+    try:
+        import uuid as _uuid                                              # noqa: E501
+        import random as _random                                          # noqa: E501
+        from hitl_core import HitlRouter
+        from hitl_core.schema import (
+            HitlPayload, TriggerKind, RiskLevel, InterruptMode,
+            ProposedAction, HitlDecision, DecisionKind, ClarificationField,
+            CheckpointEntry, ResumeHandle,
+            AuditEventKind, HitlAuditRecord,
+        )
+        from hitl_core.pipeline import AsyncPendingHitl
+        from runtime.loop import enqueue_async_inject
+    except Exception as _imp_exc:
+        # If imports fail (test env / partial install), fall back to a
+        # functional read-only stub so the LLM gets a useful result.
+        return (
+            f"# query_radius_logs (H2 DEMO — imports failed, degraded mode)\n"
+            f"# user_id:  {user_id}\n"
+            f"# window:   last {minutes} min\n"
+            f"# result:   permission_ok (assumed)\n"
+            f"# note:     H2 async-HITL wiring not available in this env\n"
+            f"# error:    {_imp_exc}"
+        )
+
+    # Try to get the global router/store via the service registry.
+    try:
+        from main import _services as _global_services                    # type: ignore
+    except Exception:
+        _global_services = None                                           # type: ignore
+
+    if not _global_services or "hitl_router" not in _global_services:
+        return (
+            f"# query_radius_logs (H2 DEMO — degraded, no router wired)\n"
+            f"# user_id:  {user_id}\n"
+            f"# window:   last {minutes} min\n"
+            f"# result:   permission_ok (assumed; H2 cannot fire here)"
+        )
+
+    router: HitlRouter = _global_services["hitl_router"]
+    store = _global_services.get("hitl_store")
+    if store is None:
+        return (
+            f"# query_radius_logs (H2 DEMO — no store available)\n"
+            f"# user_id:  {user_id}\n"
+            f"# result:   permission_ok (assumed)"
+        )
+
+    # ── H2 setup wrapped in try/except so wiring bugs degrade gracefully ──
+    # If anything below raises, the LLM sees a degraded but usable response
+    # instead of a tool error, avoiding retry loops.
+    try:
+        interrupt_id = str(_uuid.uuid4())
+
+        # Build the H2 payload. Operator-facing card explains the situation.
+        payload = HitlPayload(
+            interrupt_id   = interrupt_id,
+            thread_id      = session_id or "demo",
+            context_id     = session_id or "demo",
+            title          = f"RADIUS auth check for {user_id}",
+            description    = (
+                f"Async HITL: verify {user_id}'s RADIUS permission. "
+                f"Agent will continue with assumed default 'permission_ok' "
+                f"while you check. Reply within 3 minutes — anything later "
+                f"will surface as a follow-up note."
+            ),
+            # ProposedAction needs action_type + target (NOT tool_name/tool_args).
+            # See hitl_core/schema.py:170 — this is the domain-neutral
+            # representation. action_type is free-form; "tool_call:<name>"
+            # is the convention for tool-driven proposals.
+            proposed_action = ProposedAction(
+                action_type = "tool_call:query_radius_logs",
+                target      = user_id,
+                parameters  = {"user_id": user_id, "minutes": minutes},
+                risk_level  = RiskLevel.LOW,
+                reversible  = True,
+            ),
+            trigger_kind   = TriggerKind.EXTERNAL_DELEGATION,
+            risk_level     = RiskLevel.LOW,
+            interrupt_mode = InterruptMode.ASYNC_NONBLOCKING,
+            sla_seconds    = 180,                                # 3 min
+            clarification_fields = [
+                ClarificationField(
+                    key   = "actual_status",
+                    prompt= "Actual RADIUS status for this user",
+                    # Operator sees these as radio options if FE renders them.
+                    allowed_values = ["permission_ok", "permission_denied", "account_locked"],
+                ),
+            ],
+        )
+
+        # Persist as a real checkpoint so /hitl/pending sees it.
+        entry = CheckpointEntry(
+            interrupt_id  = interrupt_id,
+            payload       = payload,
+            resume_handle = ResumeHandle(resumer_name="async_hitl", state={}),
+        )
+        await store.save(entry)
+
+        # Build on_resolved closure — writes a confirmed_fact + SSE notify.
+        default_value = "permission_ok"
+
+        async def _on_resolved(iid: str, decision, default, diverged: bool) -> None:
+            # decision is None on timeout, else HitlDecision
+            if decision is None:
+                fact = (
+                    f"[ASYNC_HITL/radius:{iid[:8]}] "
+                    f"RADIUS check for user={user_id}: NO RESPONSE after "
+                    f"{payload.sla_seconds}s; agent proceeded with default "
+                    f"'{default}'."
+                )
+                outcome_label = "timeout"
+            else:
+                outcome_label = decision.decision.value
+                comment       = (decision.comment or "").strip()
+                answer        = (decision.clarification_answers or {}).get("actual_status", "")
+                if diverged:
+                    fact = (
+                        f"[ASYNC_HITL/radius:{iid[:8]}] "
+                        f"RADIUS check for user={user_id}: result DIVERGES from "
+                        f"assumption. Operator decided '{outcome_label}'"
+                        + (f" (actual={answer})" if answer else "")
+                        + (f" — {comment}" if comment else "")
+                    )
+                else:
+                    fact = (
+                        f"[ASYNC_HITL/radius:{iid[:8]}] "
+                        f"RADIUS check for user={user_id} CONFIRMED "
+                        f"'{default}'"
+                        + (f" — {comment}" if comment else "")
+                    )
+
+            # Inject into next turn's confirmed_facts via runtime inject queue.
+            try:
+                enqueue_async_inject(session_id, fact)
+            except Exception as _inj_exc:
+                logger.warning("async H2: enqueue_async_inject failed: %s", _inj_exc)
+
+            # Soft-notify the active SSE stream so operator sees it immediately.
+            try:
+                from webui.backend import emit_async_hitl_notify
+                emit_async_hitl_notify(session_id, {
+                    "type":            "async_hitl_resolved",
+                    "interrupt_id":    iid,
+                    "tool":            "query_radius_logs",
+                    "user_id":         user_id,
+                    "outcome":         outcome_label,
+                    "diverged":        diverged,
+                    "default_value":   default,
+                    "fact":            fact,
+                })
+            except Exception as _em_exc:
+                logger.warning("async H2: emit_async_hitl_notify failed: %s", _em_exc)
+
+        # Register pending via the unified helper so it (a) inserts under
+        # the registry lock and (b) arms the SLA watchdog. Previously the
+        # tool inserted into _async_registry directly with no timer, so
+        # when _demo_autoreply was disabled and no operator decided, the
+        # entry leaked forever and on_resolved(None) never fired (Bug 2).
+        try:
+            from hitl_core.router import register_async_pending
+            # Adapt the audit service (.log(HitlAuditRecord)) to the watchdog's
+            # on_audit(kind, iid, detail) shape so ASYNC_TIMEOUT is recorded.
+            _audit_svc = _global_services.get("hitl_audit")
+            async def _audit_adapter(kind, iid, detail):
+                if _audit_svc is None:
+                    return
+                from datetime import datetime as _dt2, timezone as _tz2
+                await _audit_svc.log(HitlAuditRecord(
+                    interrupt_id = iid, kind = kind,
+                    detail = detail, timestamp = _dt2.now(_tz2.utc),
+                ))
+            register_async_pending(
+                AsyncPendingHitl(
+                    interrupt_id   = interrupt_id,
+                    payload        = payload,
+                    default_value  = default_value,
+                    on_resolved    = _on_resolved,
+                    divergence_check = None,
+                    sla_seconds    = payload.sla_seconds,
+                    session_id     = session_id,
+                ),
+                store=store,
+                on_audit=_audit_adapter,
+            )
+        except Exception as _reg_exc:
+            logger.warning("async H2: registry insert failed: %s", _reg_exc)
+
+        # Audit ASYNC_DELEGATED so the audit timeline reflects fire moment.
+        try:
+            from datetime import datetime as _dt, timezone as _tz
+            audit = _global_services.get("hitl_audit")
+            if audit is not None:
+                await audit.log(HitlAuditRecord(
+                    interrupt_id = interrupt_id,
+                    kind         = AuditEventKind.ASYNC_DELEGATED,
+                    detail       = {
+                        "tool":         "query_radius_logs",
+                        "user_id":      user_id,
+                        "session_id":   session_id,
+                        "sla_seconds":  payload.sla_seconds,
+                    },
+                    timestamp = _dt.now(_tz.utc),
+                ))
+        except Exception as _aud_exc:
+            logger.debug("async H2: audit ASYNC_DELEGATED failed: %s", _aud_exc)
+
+        # ── Demo-only: auto-respond after a random delay so the flow is
+        # observable without an actual operator clicking. In production
+        # this spawn would not exist — real operators click and
+        # router.deliver() gets called via the HTTP endpoint.
+        if str(args.get("_demo_autoreply", "1")).lower() not in ("0", "false", "no"):
+            async def _demo_autoreply() -> None:
+                await asyncio.sleep(_random.uniform(3.0, 12.0))
+                # Pick weighted outcome
+                outcomes_flat = []
+                for o, c, w in _RADIUS_DEMO_OUTCOMES:
+                    outcomes_flat.extend([(o, c)] * w)
+                kind, comment = _random.choice(outcomes_flat)
+                decision = HitlDecision(
+                    interrupt_id = interrupt_id,
+                    decision     = DecisionKind.APPROVE if kind == "approve" else DecisionKind.REJECT,
+                    operator_id  = "demo_auto_responder",
+                    comment      = comment,
+                    clarification_answers = {
+                        "actual_status": (
+                            "permission_ok"     if kind == "approve" else
+                            "account_locked"    if "locked" in comment.lower() else
+                            "permission_denied"
+                        ),
+                    },
+                )
+                try:
+                    await router.deliver(decision)
+                except Exception as _del_exc:
+                    logger.warning("query_radius_logs demo autoreply failed: %s", _del_exc)
+            asyncio.create_task(
+                _demo_autoreply(),
+                name=f"radius_demo_autoreply_{interrupt_id[:12]}",
+            )
+
+        # Successful setup — return the H2 fire ack to the LLM.
+        return (
+            f"# query_radius_logs — RADIUS auth check pushed to ops queue\n"
+            f"# {'─'*60}\n"
+            f"  user_id:        {user_id}\n"
+            f"  window:         last {minutes} min\n"
+            f"  interrupt_id:   {interrupt_id}\n"
+            f"  assumed_result: permission_ok (proceeding without blocking)\n"
+            f"#\n"
+            f"# This is an ASYNC HITL — your job is now done for this query.\n"
+            f"# The actual ops result will arrive within ~3 minutes via:\n"
+            f"#   1. Soft notification in this chat (🔔 banner appears)\n"
+            f"#   2. confirmed_fact in next turn (LLM auto-uses it)\n"
+            f"#\n"
+            f"# DO NOT call query_radius_logs again for this user — give your\n"
+            f"# best answer based on the assumed result and stop. If the ops\n"
+            f"# result DIVERGES from 'permission_ok' later, the operator can\n"
+            f"# choose to re-ask you with the new fact."
+        )
+
+    except Exception as _setup_exc:
+        # ANY H2 setup failure ⇒ degraded fallback. Keeps the LLM from
+        # treating this as a generic tool error and retrying.
+        logger.warning(
+            "query_radius_logs H2 setup failed for user=%s: %s",
+            user_id, _setup_exc,
+        )
+        return (
+            f"# query_radius_logs (H2 DEMO — setup failed, degraded mode)\n"
+            f"# user_id:  {user_id}\n"
+            f"# window:   last {minutes} min\n"
+            f"# result:   permission_ok (assumed)\n"
+            f"# note:     H2 wiring failed; no async approval will arrive.\n"
+            f"# error:    {_setup_exc}\n"
+            f"#\n"
+            f"# Proceed with the assumed result and answer the user. Do NOT\n"
+            f"# call query_radius_logs again."
+        )
+

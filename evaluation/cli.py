@@ -65,13 +65,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     # Build the right retriever for this benchmark
     if args.kind == "skill":
         from retrieval import build_skill_retriever
-        defs = SkillLoader(_config.cfg.mode).skill_definitions()
+        defs = SkillLoader(_config.cfg.mode, profile=_config.cfg.agent.profile).skill_definitions()
         retriever = build_skill_retriever(_config.cfg, embedder=None,
                                           skill_definitions=defs)
         available_ids = set(defs.keys())
     elif args.kind == "tool":
         from retrieval import build_tool_retriever
-        meta = ToolLoader(_config.cfg.mode).build_metadata()
+        meta = ToolLoader(_config.cfg.mode, profile=_config.cfg.agent.profile).build_metadata()
         retriever = build_tool_retriever(_config.cfg, embedder=None, tool_metadata=meta)
         available_ids = set(meta.keys())
     else:

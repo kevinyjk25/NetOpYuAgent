@@ -73,7 +73,7 @@ import re
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Callable, Optional
+from typing import Any, Awaitable, Callable, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -316,6 +316,22 @@ class SkillEvolver:
         # Pending feedback queue: (skill_id, feedback, success, problem_step)
         self._feedback_queue: list[tuple] = []
 
+        # ── A/B safety net (Sprint-3-pre, 2026-05) ─────────────────────────
+        # Optional compliance-bench wrapper to gate feedback patches. Set via
+        # set_bench_runner() after startup. When set, apply_feedback() runs
+        # the baseline (old content) and candidate (new content) through a
+        # compliance subset; if args_ok would DROP, the patch is rolled back
+        # instead of saved. When unset, falls back to the legacy unchecked
+        # path (zero regression for unmigrated deployments).
+        #
+        # Signature contract:
+        #   bench_runner(skill_id: str, candidate_content: str)
+        #       → Awaitable[ToolComplianceReport | None]
+        # Returning None means "couldn't bench" — apply_feedback treats this
+        # as "skip safety net" rather than blocking the patch (so a benign
+        # bench failure doesn't trap legitimate improvements).
+        self._bench_runner: Optional[Callable[[str, str], Awaitable[Any]]] = None
+
     # ------------------------------------------------------------------
     # 环节二: Auto-creation after complex task
     # ------------------------------------------------------------------
@@ -407,6 +423,24 @@ class SkillEvolver:
     # 环节三: Skill self-improvement via feedback
     # ------------------------------------------------------------------
 
+    def set_bench_runner(
+        self,
+        runner: Optional[Callable[[str, str], Awaitable[Any]]],
+    ) -> None:
+        """Inject the compliance-bench wrapper used by apply_feedback's
+        A/B safety net.
+
+        See __init__ docstring for the signature contract. Pass None to
+        disable the safety net (back to legacy unchecked path). main.py
+        wires this post-construction, after SkillEvolver, OllamaEngine,
+        and the compliance golden set are all loaded.
+        """
+        self._bench_runner = runner
+        if runner is not None:
+            logger.info("SkillEvolver: A/B safety-net bench runner wired")
+        else:
+            logger.info("SkillEvolver: A/B safety-net bench runner cleared")
+
     async def apply_feedback(
         self,
         skill_id:     str,
@@ -451,6 +485,50 @@ class SkillEvolver:
 
         if not updated_content:
             return None
+
+        # ── A/B safety net ──────────────────────────────────────────────
+        # If a bench runner is wired, run baseline vs candidate before
+        # touching the catalog. A drop in args_ok rejects the patch.
+        # This MUST run AFTER updated_content is known but BEFORE any
+        # catalog mutation, so a rejected patch leaves no trace.
+        if self._bench_runner is not None:
+            try:
+                baseline_report  = await self._bench_runner(skill_id, current_detail)
+                candidate_report = await self._bench_runner(skill_id, updated_content)
+            except Exception as bench_exc:
+                # Bench failures are non-fatal — log and proceed with the
+                # patch. This matches the hooks "observer not gatekeeper"
+                # stance: a flaky bench should not block legitimate skill
+                # improvements indefinitely.
+                logger.warning(
+                    "SkillEvolver.apply_feedback: bench runner failed (%s) "
+                    "— proceeding without safety net for skill %s",
+                    bench_exc, skill_id,
+                )
+                baseline_report = None
+                candidate_report = None
+
+            if baseline_report is not None and candidate_report is not None:
+                # Both reports must expose .args_rate (ToolComplianceReport)
+                # — duck-typed for testability. A strict drop is rejected;
+                # equal/better is allowed (we don't require strict gains
+                # since LLM noise can sit within ±2% even with same prompt).
+                base_score = float(getattr(baseline_report, "args_rate", 0.0) or 0.0)
+                cand_score = float(getattr(candidate_report, "args_rate", 0.0) or 0.0)
+                if cand_score < base_score:
+                    logger.warning(
+                        "SkillEvolver: rollback for skill %r — args_ok would "
+                        "DROP %.2f → %.2f (n=%d). Patch rejected, old version kept.",
+                        skill_id, base_score, cand_score,
+                        int(getattr(baseline_report, "total", 0) or 0),
+                    )
+                    return None
+                logger.info(
+                    "SkillEvolver: A/B bench OK for skill %r — args_ok "
+                    "%.2f → %.2f (n=%d)",
+                    skill_id, base_score, cand_score,
+                    int(getattr(baseline_report, "total", 0) or 0),
+                )
 
         # Create new version
         new_ver = SkillVersion(
@@ -837,6 +915,108 @@ class SkillEvolver:
     # ------------------------------------------------------------------
     # Markdown ↔ definition converters
     # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_json_response(raw: str) -> dict:
+        """Extract a JSON object from an LLM response.
+
+        Used by apply_feedback() and evaluate_skill_creation() to read
+        the LLM's structured response. The LLM is *prompted* to emit
+        strict JSON, but in practice models wrap the JSON in:
+          - markdown code fences (```json … ```)
+          - prose preamble ("Here is the JSON:\\n{...}")
+          - trailing chatter
+          - <think>…</think> blocks (some models)
+
+        We try strict parsing first, then fall back to extracting the
+        first balanced { … } substring. Returns a dict (possibly empty
+        if everything failed). Never raises — callers decide what to
+        do with an empty result.
+
+        FIXED 2026-05: this method was referenced from two call-sites
+        but had never been implemented; every LLM-driven path silently
+        hit the `except Exception` branch and returned None, breaking
+        skill feedback patches and auto-creation evaluation entirely.
+        """
+        if not raw:
+            return {}
+
+        text = raw.strip()
+
+        # 1. Strip <think>…</think> blocks (qwen-3, deepseek-r1, etc).
+        #    These can contain braces that confuse the balanced scan.
+        text = re.sub(
+            r"<think>.*?</think>", "", text, flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
+        # 2. Strip markdown code fence wrapping. ```json … ``` and ``` … ```
+        #    are both common. Match conservatively — only if the FIRST line
+        #    is a fence, so we don't eat braces inside legitimate content.
+        if text.startswith("```"):
+            # Find the closing fence; take what's between.
+            first_nl = text.find("\n")
+            if first_nl != -1:
+                close = text.rfind("```")
+                if close > first_nl:
+                    text = text[first_nl + 1 : close].strip()
+
+        # 3. Strict parse first — common path when the LLM behaved.
+        try:
+            obj = json.loads(text)
+            return obj if isinstance(obj, dict) else {}
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # 4. Fall back to balanced-brace extraction. Find the first '{'
+        #    and walk forward tracking depth + string state. Returns the
+        #    first complete top-level object; ignores anything after.
+        first_brace = text.find("{")
+        if first_brace < 0:
+            logger.debug("SkillEvolver._parse_json_response: no '{' found")
+            return {}
+
+        depth = 0
+        in_str = False
+        esc = False
+        end = -1
+        for i in range(first_brace, len(text)):
+            ch = text[i]
+            if esc:
+                esc = False
+                continue
+            if ch == "\\" and in_str:
+                esc = True
+                continue
+            if ch == '"':
+                in_str = not in_str
+                continue
+            if in_str:
+                continue
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    end = i
+                    break
+
+        if end < 0:
+            logger.debug(
+                "SkillEvolver._parse_json_response: unbalanced braces (depth=%d)",
+                depth,
+            )
+            return {}
+
+        candidate = text[first_brace : end + 1]
+        try:
+            obj = json.loads(candidate)
+            return obj if isinstance(obj, dict) else {}
+        except (json.JSONDecodeError, ValueError) as exc:
+            logger.debug(
+                "SkillEvolver._parse_json_response: JSON decode failed: %s "
+                "(snippet=%r)", exc, candidate[:80],
+            )
+            return {}
 
     @staticmethod
     def _parse_markdown_to_definition(skill_id: str, content: str) -> dict:

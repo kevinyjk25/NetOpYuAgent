@@ -73,7 +73,7 @@ sys.exit(1 if errs else 0)
     fi
 
     for audit in audit_module_independence audit_imports audit_prompt_templates \
-                 audit_directive_parsing audit_wiring; do
+                 audit_directive_parsing audit_wiring audit_profiles; do
         if python3 "scripts/${audit}.py" > /tmp/_${audit}.out 2>&1; then
             ok "$audit"
         else
@@ -93,14 +93,23 @@ if [ "$RUN_EVAL" = 1 ]; then
     MIN_RECALL_3="${MIN_RECALL_3:-0.65}"
     MIN_MRR="${MIN_MRR:-0.55}"
 
-    if python3 -m evaluation.cli \
+    # The golden set (data/golden_set.jsonl) is a LAN-domain fixture — its
+    # expected_ids are LAN business skills (syslog_search, service_health,
+    # netflow_analysis, …). Since the 2026-05 profile refactor those skills
+    # only load under AGENT_PROFILE=lan; the default profile has no business
+    # skills, so the eval MUST run against the lan catalog or every case
+    # misses ("not in available catalog"). Override is allowed via
+    # EVAL_PROFILE for a future per-domain golden set.
+    EVAL_PROFILE="${EVAL_PROFILE:-lan}"
+
+    if AGENT_PROFILE="$EVAL_PROFILE" python3 -m evaluation.cli \
         --golden data/golden_set.jsonl \
         --backend hybrid \
         --top-k 5 \
         --quiet \
         --fail-below-recall-3 "$MIN_RECALL_3" \
         --fail-below-mrr      "$MIN_MRR"; then
-        ok "retrieval eval (recall@3 ≥ $MIN_RECALL_3, MRR ≥ $MIN_MRR)"
+        ok "retrieval eval (profile=$EVAL_PROFILE, recall@3 ≥ $MIN_RECALL_3, MRR ≥ $MIN_MRR)"
     else
         fail "retrieval eval below thresholds (recall@3 < $MIN_RECALL_3 or MRR < $MIN_MRR)"
     fi

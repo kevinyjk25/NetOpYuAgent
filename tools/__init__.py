@@ -1,25 +1,31 @@
 """
 tools/
 ──────
-Tool callables and metadata for mock and pragmatic modes.
+Common (profile-independent) tool infrastructure for the agent framework.
+
+Business tools live in the profiles/ package (profiles/lan, profiles/dc, …),
+NOT here. This package holds only what every profile shares:
 
 Entry point: tools.loader.ToolLoader
-  ToolLoader(mode="mock" | "pragmatic")
+  ToolLoader(mode="mock" | "pragmatic", profile="default" | "lan" | "dc")
     .build_callables()           -> {name: async_fn}   (used by runtime loop)
     .build_metadata()            -> {name: {...}}       (used by llm_engine prompt)
-    .skill_definitions()         -> {skill_id: {...}}   (used by SkillCatalogService)
     .tool_section_for_prompt()   -> str                 (injected into system prompt)
 
-Implementation files:
-  tools/mock_tools.py            — callable implementations for mock mode
-  tools/pragmatic_tools.py       — callable implementations for pragmatic mode
-  tools/builtin/registry.py      — metadata for always-available tools
-  tools/mock/registry.py         — metadata for mock-only tools
+Common implementation files:
+  tools/common_tools.py          — profile-independent tools (read_stored_result,
+                                   process_stored_chunks) + shared _ts() helper
+  tools/builtin/registry.py      — metadata for the common tools above
+  tools/pragmatic_tools.py       — real device callables for pragmatic mode
   tools/pragmatic/registry.py    — metadata for pragmatic-only tools
 
-make_read_stored_result_tool is still used directly by main.py to wire
-the ToolResultStore instance into the read_stored_result callable.
+Business implementation files now live under profiles/<id>/:
+  profiles/lan/tools.py, profiles/lan/tool_meta.py, profiles/lan/skills.py
+  profiles/dc/tools.py,  profiles/dc/tool_meta.py,  profiles/dc/skills.py
+
+make_read_stored_result_tool is used directly by main.py to wire the
+ToolResultStore instance into the read_stored_result callable.
 """
-from .mock_tools import make_read_stored_result_tool
+from tools.common_tools import make_read_stored_result_tool
 
 __all__ = ["make_read_stored_result_tool"]

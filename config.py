@@ -118,6 +118,14 @@ class LLMConfig:
     backend: str; model: str; base_url: str
     temperature: float; max_tokens: int; log_detail: str
     capabilities: LLMCapabilities = field(default_factory=LLMCapabilities)
+    # D1 (Sprint 3, 2026-05): cap concurrent in-flight LLM calls. A single
+    # agent query can fan out into 20+ internal LLM calls (policy classify,
+    # tool selection, verification, skill eval, fact extraction…). Without
+    # a cap, a couple of concurrent user queries saturate Ollama, every
+    # call slows down, and timeouts cascade. The semaphore bounds in-flight
+    # calls so latency degrades gracefully instead of collapsing. 0 = no
+    # limit (legacy behaviour). Default 4 suits a single local Ollama.
+    max_concurrent_calls: int = 4
 
 @dataclass
 class MCPConfig:
@@ -136,6 +144,30 @@ class ToolsConfig:
 @dataclass
 class HITLSLAConfig:
     critical: int; high: int; medium: int; low: int
+
+@dataclass
+class HITLCheckpointConfig:
+    """Persistent storage for pending HITL interrupts.
+
+    Sprint-3-pre (2026-05): default changed from "memory" to "sqlite".
+    In-memory store loses every pending approval on agent restart — an
+    operator looking at a destructive-action card while the process
+    crashes will see the producing query hang forever (the asyncio.Future
+    backing `await resolution_future` does not survive process restart).
+
+    Values:
+      "memory" — fast, NO persistence (dev / test only)
+      "sqlite" — file-backed; default; safe across restarts
+      "redis"  — multi-replica deployments
+
+    Env overrides (highest priority):
+      HITL_CHECKPOINT_BACKEND    — backend selector
+      HITL_SQLITE_PATH           — for sqlite
+      HITL_REDIS_URL             — for redis
+    """
+    backend:     str = "sqlite"
+    sqlite_path: str = "data/hitl_checkpoints.db"
+    redis_url:   Optional[str] = None
 
 @dataclass
 class HITLConfig:
@@ -160,6 +192,10 @@ class HITLConfig:
     # Wired via main.py into HitlExecutor.set_trust_mode(). See
     # ARCHITECTURE_REVIEW.md §2.2 (trust trajectory) for design rationale.
     trust_mode: str = "cautious"
+    # ── Checkpoint persistence (Sprint-3-pre, 2026-05) ────────────────
+    # Where pending interrupts live across restart. Defaults to sqlite so
+    # approvals from vanishing on agent restart.
+    checkpoint: HITLCheckpointConfig = field(default_factory=HITLCheckpointConfig)
 
 @dataclass
 class DTMConfig:
@@ -215,9 +251,104 @@ class RuntimeConfig:
 class RegistryConfig:
     agent_urls: list[str]; lb_strategy: str; health_check_interval: int
 
+
+@dataclass
+class AgentSkillSpec:
+    """One capability advertised by this agent in its AgentCard.
+
+    Maps 1:1 to A2A AgentCard `skills` entries. Other agents see these
+    when they fetch our /.well-known/agent-card.json and use them for
+    capability matching (Phase 2 of multi-agent).
+    """
+    skill_id:    str               # canonical name, e.g. "lan_diagnose"
+    name:        str = ""          # human display; defaults to skill_id
+    description: str = ""
+    tags:        list[str] = field(default_factory=list)
+    examples:    list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            self.name = self.skill_id
+
+
+@dataclass
+class AgentIdentityConfig:
+    """Identity + peer discovery for this agent instance.
+
+    Phase 1 scope: each agent process knows who it IS (agent_id /
+    display_name / capabilities) and which peers exist (peer_urls,
+    refreshed every peer_refresh_interval_s seconds). Phase 1 does NOT
+    dispatch queries to peers — that's Phase 2. This is just the
+    identity + discovery foundation.
+
+    Identity precedence (highest wins):
+      1. AGENT_ID / AGENT_DISPLAY_NAME / AGENT_PEERS env vars
+      2. config.yaml `agent:` section
+      3. defaults below (single-agent backwards compatibility)
+
+    Why a separate dataclass and not extending ServerConfig: identity
+    is an agent-level concern that survives transport changes (today
+    A2A-over-HTTP, tomorrow maybe gRPC or NATS). Keeping it isolated
+    means the transport layer can move without rewriting identity.
+    """
+    # Stable identifier — used as the AgentCard `name` field, as the
+    # registry key, and as the trace tag. Lowercase alphanumeric + hyphen.
+    agent_id:     str = "default-agent"
+    # Business profile selects which domain tools/skills load + which
+    # capabilities get advertised. One of: default | lan | dc.
+    #   default — no business tools/skills (pure assistant + common meta)
+    #   lan     — enterprise LAN (Cisco switches/APs/firewalls)
+    #   dc      — data-center fabric (spine/leaf, BGP EVPN, VXLAN, LB)
+    # Env override: AGENT_PROFILE. Defaults to "default" so a fresh boot
+    # has no business logic — proving the framework/business decoupling.
+    profile:      str = "default"
+    # Human-friendly label shown in WebUI title bar + peer list.
+    display_name: str = "IT Ops Agent"
+    # One-line summary other agents see in our AgentCard.
+    description:  str = (
+        "Intelligent IT operations agent — alert analysis, incident "
+        "management, trend prediction, multi-dataset correlation."
+    )
+    # Per-instance capabilities. If empty we fall back to the legacy
+    # SKILLS list in a2a/agent_card.py so backwards-compat is preserved.
+    capabilities: list[AgentSkillSpec] = field(default_factory=list)
+    # Peer agent base URLs (their /api/v1/a2a endpoint, NOT the agent-card
+    # URL — discovery appends /.well-known/agent-card.json internally).
+    peer_urls:    list[str] = field(default_factory=list)
+    # How often to re-fetch peer AgentCards to catch capability changes or
+    # peer restarts. 0 disables refresh; we rely on the registry's own
+    # health-check interval instead.
+    peer_refresh_interval_s: int = 120
+
 @dataclass
 class LoggingConfig:
     mode: str
+
+@dataclass
+class ObservabilityConfig:
+    """OpenTelemetry tracing config (Sprint-3-pre, 2026-05).
+
+    Tracing is OPTIONAL and DEFAULTS OFF — boot must work without the
+    opentelemetry packages installed. When enabled, runtime/tracing.py
+    configures a provider; spans flow from llm_engine, tool dispatch,
+    HITL gate, retrieval. If the OTel SDK isn't installed, configure()
+    degrades to no-op and the agent boots normally.
+
+    Env overrides:
+      OTEL_TRACING_ENABLED          true/false
+      OTEL_EXPORTER_OTLP_ENDPOINT   gRPC URL (e.g. http://collector:4317)
+      OTEL_SAMPLE_RATIO             0.0-1.0 (default 1.0 = all spans)
+
+    NOTE: this is a minimum skeleton. Full OTel coverage (FastAPI/httpx
+    auto-instrumentation, Jaeger/Tempo dashboards, session→trace_id
+    propagation) is 1-2 weeks of additional work — see
+    SPRINT3_PRE_REPORT.md §3 for the full TODO list.
+    """
+    tracing_enabled:  bool = False
+    otlp_endpoint:    Optional[str] = None
+    sample_ratio:     float = 1.0
+    service_name:     str  = "netopyu-agent"
+    service_version:  str  = "6.0.0"
 
 # ── NEW: Embeddings ───────────────────────────────────────────────────────────
 
@@ -645,6 +776,10 @@ class AppConfig:
     embeddings: EmbeddingsConfig
     pragmatic:  PragmaticConfig
     auth:       AuthConfig = field(default_factory=AuthConfig)
+    # NEW (Phase 1): per-instance identity + peer discovery. Defaults
+    # to a single-agent profile so existing deployments keep working
+    # without yaml changes.
+    agent:      AgentIdentityConfig = field(default_factory=AgentIdentityConfig)
     policies:   list = field(default_factory=list)
     hermes:     HermesConfig = field(default_factory=HermesConfig)
     post_verify: PostVerifyConfig = field(default_factory=PostVerifyConfig)
@@ -662,8 +797,44 @@ class AppConfig:
     cross_module:        CrossModuleConfig    = field(default_factory=CrossModuleConfig)
     context_budget:      ContextBudgetConfig  = field(default_factory=ContextBudgetConfig)
     evaluation:          EvaluationConfig     = field(default_factory=EvaluationConfig)  # prompt-based policies from config.yaml
+    observability:       ObservabilityConfig  = field(default_factory=ObservabilityConfig)  # Sprint-3-pre (2026-05) — OTel
     def is_mock(self) -> bool:
         return self.mode == "mock"
+
+    def agent_data_dir(self) -> str:
+        """Per-agent data root — physically isolates each agent's state.
+
+        Every agent instance (lan-agent, dc-agent, …) gets its own
+        subtree so their memory / sessions / cached results / evolved
+        skills / pending HITL approvals never collide. Without this, two
+        agents sharing one process image would read each other's facts
+        and overwrite each other's databases.
+
+        Resolution precedence:
+          1. AGENT_DATA_DIR env  — explicit override (highest)
+          2. <memory.data_dir>/agents/<agent_id>/  — default layout
+
+        The base (memory.data_dir, default "./data") still holds SHARED,
+        read-only fixtures (golden_set.jsonl, tool_compliance_set.jsonl)
+        that are NOT per-agent. Only mutable per-agent state moves under
+        agents/<agent_id>/.
+
+        Examples:
+          agent_id=lan-agent  → ./data/agents/lan-agent/
+          agent_id=dc-agent   → ./data/agents/dc-agent/
+          AGENT_DATA_DIR=/srv/x → /srv/x  (verbatim)
+        """
+        import os as _os
+        import pathlib as _pl
+        override = _os.getenv("AGENT_DATA_DIR", "").strip()
+        if override:
+            p = _pl.Path(override)
+        else:
+            base = _pl.Path(self.memory.data_dir or "./data")
+            agent_id = (self.agent.agent_id or "default-agent").strip() or "default-agent"
+            p = base / "agents" / agent_id
+        p.mkdir(parents=True, exist_ok=True)
+        return str(p)
 
     @property
     def is_pragmatic(self) -> bool:
@@ -720,6 +891,75 @@ def _load_concurrency_config(cc: dict) -> "ConcurrencyConfig":
     return ConcurrencyConfig(
         hitl_pipeline_poll_interval_ms = _env_int ("HITL_PIPELINE_POLL_INTERVAL_MS", cc.get("hitl_pipeline_poll_interval_ms", 50)),
         registry_rr_lock_enabled       = _env_bool("REGISTRY_RR_LOCK_ENABLED",        cc.get("registry_rr_lock_enabled",       True)),
+    )
+
+
+def _load_agent_identity_config(a: dict) -> "AgentIdentityConfig":
+    """Parse the agent: section from config.yaml.
+
+    Env override precedence:
+      AGENT_ID                       → agent_id
+      AGENT_DISPLAY_NAME             → display_name
+      AGENT_DESCRIPTION              → description
+      AGENT_PEERS (comma-separated)  → peer_urls
+      AGENT_PEER_REFRESH_S           → peer_refresh_interval_s
+
+    Capabilities are config-only (rarely vary between dev/prod, and
+    nesting them through env vars would be ugly). If `capabilities` is
+    missing or empty in YAML, the agent uses the legacy static SKILLS
+    list from a2a/agent_card.py (backwards compat).
+    """
+    # Peers: env wins (comma-separated), else yaml list, else yaml string
+    env_peers = _env_str("AGENT_PEERS", "")
+    if env_peers:
+        peer_urls = [u.strip() for u in env_peers.split(",") if u.strip()]
+    else:
+        yaml_peers = a.get("peers", a.get("peer_urls", []))
+        if isinstance(yaml_peers, list):
+            peer_urls = [str(u).strip() for u in yaml_peers if str(u).strip()]
+        else:
+            peer_urls = [u.strip() for u in str(yaml_peers).split(",") if u.strip()]
+
+    # Capabilities: yaml only (env-nested-list is awkward)
+    caps_raw = a.get("capabilities", [])
+    capabilities: list[AgentSkillSpec] = []
+    if isinstance(caps_raw, list):
+        for c in caps_raw:
+            if not isinstance(c, dict):
+                continue
+            sid = str(c.get("skill_id", c.get("id", ""))).strip()
+            if not sid:
+                continue
+            capabilities.append(AgentSkillSpec(
+                skill_id    = sid,
+                name        = str(c.get("name", "")),
+                description = str(c.get("description", "")),
+                tags        = [str(t) for t in c.get("tags", []) if t],
+                examples    = [str(e) for e in c.get("examples", []) if e],
+            ))
+
+    return AgentIdentityConfig(
+        agent_id     = _env_str("AGENT_ID",            a.get("agent_id",     "default-agent")),
+        profile      = _env_str("AGENT_PROFILE",       a.get("profile",      "default")).strip().lower() or "default",
+        display_name = _env_str("AGENT_DISPLAY_NAME",  a.get("display_name", "IT Ops Agent")),
+        description  = _env_str("AGENT_DESCRIPTION",   a.get("description",
+            "Intelligent IT operations agent — alert analysis, incident "
+            "management, trend prediction, multi-dataset correlation.")),
+        capabilities = capabilities,
+        peer_urls    = peer_urls,
+        peer_refresh_interval_s = _env_int("AGENT_PEER_REFRESH_S",
+                                            a.get("peer_refresh_interval_s", 120)),
+    )
+
+
+def _load_observability_config(o: dict) -> "ObservabilityConfig":
+    """Load OpenTelemetry config. Default OFF — see ObservabilityConfig docstring."""
+    return ObservabilityConfig(
+        tracing_enabled = _env_bool ("OTEL_TRACING_ENABLED",          o.get("tracing_enabled", False)),
+        otlp_endpoint   = _env_str  ("OTEL_EXPORTER_OTLP_ENDPOINT",   o.get("otlp_endpoint",   "")) or None,
+        sample_ratio    = _env_float("OTEL_SAMPLE_RATIO",             o.get("sample_ratio",   1.0)),
+        service_name    = _env_str  ("OTEL_SERVICE_NAME",             o.get("service_name",   "netopyu-agent")) or "netopyu-agent",
+        service_version = _env_str  ("OTEL_SERVICE_VERSION",          o.get("service_version", "6.0.0"))      or "6.0.0",
     )
 
 
@@ -1039,6 +1279,8 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             max_tokens  = _env_int  ("LLM_MAX_TOKENS",  l.get("max_tokens",  2048)),
             log_detail  = _env_str  ("LLM_LOG_DETAIL",  l.get("log_detail",  "off")),
             capabilities = _load_llm_capabilities(l.get("capabilities", {}) or {}),
+            max_concurrent_calls = _env_int("LLM_MAX_CONCURRENT_CALLS",
+                                            l.get("max_concurrent_calls", 4)),
         ),
         tools=ToolsConfig(
             mcp=MCPConfig(
@@ -1072,6 +1314,14 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             # falls back to "cautious" with a warning log (handled at
             # use site, not here, to keep Config dataclass pure).
             trust_mode             = _env_str  ("HITL_TRUST_MODE",            h.get("trust_mode",           "cautious")) or "cautious",
+            # ── Persistent HITL checkpoint (Sprint-3-pre, 2026-05) ────────
+            # Default backend is sqlite so pending interrupts/approvals
+            # survive agent restarts. Env vars take precedence over yaml.
+            checkpoint = HITLCheckpointConfig(
+                backend     = _env_str("HITL_CHECKPOINT_BACKEND", (h.get("checkpoint") or {}).get("backend", "sqlite")) or "sqlite",
+                sqlite_path = _env_str("HITL_SQLITE_PATH",        (h.get("checkpoint") or {}).get("sqlite_path", "data/hitl_checkpoints.db")) or "data/hitl_checkpoints.db",
+                redis_url   = _env_str("HITL_REDIS_URL",          (h.get("checkpoint") or {}).get("redis_url",   "")) or None,
+            ),
         ),
         memory=MemoryConfig(
             data_dir     = _env_str("HERMES_DATA_DIR", m.get("data_dir",    "./data")),
@@ -1138,6 +1388,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
             dev_operator   = str(au.get("dev_operator", "dev-user")),
             jwt_secret_env = str(au.get("jwt_secret_env", "NETOPYU_JWT_SECRET")),
         ),
+        agent=_load_agent_identity_config(y.get("agent", {})),
         policies=y.get("policies", []),
         hermes=_load_hermes_config(y.get("hermes", {})),
         post_verify=_load_post_verify_config(y.get("post_verify", {})),
@@ -1155,6 +1406,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
         cross_module        =_load_cross_module_config       (y.get("cross_module",        {})),
         context_budget      =_load_context_budget_config     (y.get("context_budget",      {})),
         evaluation          =_load_evaluation_config         (y.get("evaluation",          {})),
+        observability       =_load_observability_config      (y.get("observability",       {})),
     )
 
 
