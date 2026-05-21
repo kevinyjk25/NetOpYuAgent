@@ -539,7 +539,7 @@ Return format:
         try:
             from tools.loader import ToolLoader as _TL
             import config as _cfg
-            _tl = _TL(mode=_cfg.cfg.mode)
+            _tl = _TL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile)
             full = _tl.tool_section_for_prompt()
             if tool_registry:
                 _mode_names = set(_tl.build_metadata().keys())
@@ -887,7 +887,7 @@ class OllamaEngine(LLMEngine):
                 import config as _cfg2
                 from tools.loader import ToolLoader as _TL2
                 _large_data_tools = {
-                    n for n, info in _TL2(mode=_cfg2.cfg.mode).build_metadata().items()
+                    n for n, info in _TL2(mode=_cfg2.cfg.mode, profile=_cfg2.cfg.agent.profile).build_metadata().items()
                     if any(t in info.get("tags", []) for t in ("traffic", "metrics"))
                 }
             except Exception:

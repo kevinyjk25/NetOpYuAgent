@@ -67,22 +67,71 @@ Grouped by tier. Each item has: effort estimate, what it fixes, and acceptance c
 
 ## Multi-agent roadmap
 
-### Phase 2 — Capability-based delegation
+### Phase 2A — Business profile decoupling + role isolation ✅ DONE (2026-05)
+Delivered: `profiles/` layer (default/lan/dc), `AGENT_PROFILE` selector,
+`ToolLoader`/`SkillLoader` profile-aware, LAN tools migrated out of
+`tools/mock_tools.py`, new DC fabric tools, `audit_profiles.py`,
+`tests/test_profiles.py` (20 tests). Two role-isolated agents can run locally;
+their tool sets are disjoint (verified by audit). See ARCHITECTURE.md §12.
+*(Kept here until a release cycle, then delete.)*
+
+### Phase 2A.1 — Per-agent data isolation ✅ DONE (2026-05)
+Delivered: `cfg.agent_data_dir()` resolves `data/agents/<agent_id>/`;
+memory / tool_results / hitl_checkpoints / evolved-skills all routed under it;
+shared fixtures (golden_set, tool_compliance_set) stay at `data/`;
+`scripts/migrate_data_to_agent.sh` migrates legacy single-agent state.
+See ARCHITECTURE.md §12.7. *(Kept until a release cycle, then delete.)*
+
+#### Phase 2A.1 follow-up — skill journal persist path not auto-isolated
+- **Effort**: 15 min
+- **Why**: `skill_orchestration.journal_persist_path` is operator-set and
+  defaults to off (in-memory only). If an operator sets it to a literal path,
+  two agents would share one journal file. Low risk (off by default).
+- **Action**: when an operator enables journal persistence for a multi-agent
+  deployment, document that they should make the path agent-specific (e.g.
+  include `${AGENT_ID}`), or route it through `agent_data_dir()` too.
+
+#### Phase 2A follow-up — pragmatic mode not profile-split
+- **Effort**: 1-2 days
+- **Why**: `tools/pragmatic_tools.py` (real Netmiko/NAPALM device tools) loads
+  regardless of profile. A `dc` agent in pragmatic mode would still get the
+  LAN device tools. mock mode (what A2A validation uses) IS split correctly.
+- **Action**: when pragmatic multi-domain becomes real, split
+  `pragmatic_tools.py` into `profiles/<id>/pragmatic_tools.py` and have
+  ToolLoader pragmatic branch read from the profile too.
+
+#### Phase 2A follow-up — per-profile MCP / OpenAPI integrations
+- **Effort**: 1 day
+- **Status**: partially handled (2026-05). The built-in `netops` MCP + OpenAPI
+  mock now load ONLY for `profile=lan` (or pragmatic). DC/default get none.
+- **Why remaining**: when DC needs its own MCP servers / OpenAPI specs, the
+  current code has no per-profile integration config — it's a binary lan-or-not
+  gate. Generalize to a `Profile.integrations` declaration (list of MCP server
+  configs + OpenAPI specs per profile) so each domain wires its own.
+
+### Phase 2B — Capability-based delegation
 - **Effort**: 5-7 days
-- **Status**: designed, not started
-- **Scope**: `PolicyEngine.classify_and_route()` adds peer capability matching; `runtime/loop.py` gets a `_delegate_to_peer()` branch; reuse existing `A2ATaskDispatcher` (in `task/inter/coordinator.py` — never been exercised, expect bugs); chunks tagged with `source_agent` so UI shows "via wan-agent".
-- **Prereq**: Phase 1 verified stable (peer discovery working in production).
+- **Status**: designed, not started. **Now unblocked** — Phase 2A gives the
+  tool isolation that makes delegation meaningful.
+- **Scope**: `PolicyEngine` adds peer capability matching (match query against
+  peer `domain_tags` / advertised capabilities); `runtime/loop.py` gets a
+  `[DELEGATE:agent_id]` directive + `_delegate_to_peer()` branch; wire the
+  existing `A2ATaskDispatcher` (in `task/inter/coordinator.py` — never been
+  exercised, expect bugs); chunks tagged with `source_agent` so the WebUI
+  shows "via dc-agent".
+- **Prereq**: Phase 1 + 2A verified (peer discovery + role isolation working).
 - **Open product questions** (decide before building):
-  1. Can agents cross-query domains (does LAN agent know which devices are WAN's)?
+  1. Auto-delegate (agent decides) vs explicit (`[DELEGATE:dc-agent]` only)?
   2. Is `confirmed_facts` shared across agents (privacy boundary)?
-  3. When multiple peers can handle a query, pick by capability score / load / round-robin?
-  4. Does the entry agent's audit log include the delegated agent's execution detail (compliance)?
+  3. When multiple peers match, pick by capability score / load / round-robin?
+  4. Does the entry agent's audit log include the delegated agent's execution
+     detail (compliance)?
 
 ### Phase 3 — Cross-agent HITL passthrough
 - **Effort**: 2-3 weeks
 - **Status**: designed, not started
-- **Scope**: new `hitl_core/cross_agent.py` (`CrossAgentHitlBridge`); A2A `INPUT_REQUIRED` state carries hitl_payload in metadata; entry agent renders peer's HITL card with "from wan-agent" tag; cross-agent correlation id for audit; timeout/cancel handling.
-- **Prereq**: Phase 2 stable for at least a week.
+- **Scope**: new `hitl_core/cross_agent.py` (`CrossAgentHitlBridge`); A2A `INPUT_REQUIRED` state carries hitl_payload in metadata; entry agent renders peer's HITL card with "from dc-agent" tag; cross-agent correlation id for audit; timeout/cancel handling.
+- **Prereq**: Phase 2B stable for at least a week.
 - **Complexity note**: failure modes (network flake / peer crash / operator non-response / concurrent HITLs) are the bulk of the work — needs 5-8 integration test scenarios.
 
 ---
@@ -120,3 +169,5 @@ Grouped by tier. Each item has: effort estimate, what it fixes, and acceptance c
 - ✅ **C1 — Prometheus `/metrics` endpoint** (2026-05) — `prometheus_client` text format at `/metrics`; counters for LLM calls / tool dispatch / HITL pending.
 - ✅ **C2 — FastAPI / httpx auto-instrumentation** (2026-05) — `opentelemetry-instrumentation-fastapi` + `-httpx` wired in `runtime/tracing.py:configure()`; every HTTP request/outbound call auto-spanned when tracing enabled.
 - ✅ **D1 — LLM call semaphore** (2026-05) — `cfg.llm.max_concurrent_calls` (default 4); `OllamaEngine` gates `_chat_impl` through an `asyncio.Semaphore` so a single query's 20+ internal LLM calls can't saturate Ollama.
+- ✅ **Phase 2A — Business profile layer** (2026-05) — `profiles/{default,lan,dc}/` decouples domain-specific tools/skills from the common framework. `AGENT_PROFILE` env (or `agent.profile` config) selects active profile. `audit_profiles.py` enforces (a) callable/metadata alignment, (b) cross-profile tool isolation, (c) `default` is empty (decoupling proof), (d) no framework hard-imports of specific profile packages, (e) every loader call passes `profile=`. Details: `profiles/DESIGN.md`, `ARCHITECTURE.md §12`.
+- ✅ **H2 — Async HITL (fire-and-forget)** (2026-05) — three-mode HITL design: H1/H3 (existing sync) + H2 new. `request_approval_async()` API; `_async_registry` module dict; turn-start inject queue → `state.confirmed_facts`; SSE soft-notify; SLA timeout via `on_resolved(decision=None)`; operator-approve triggers follow-up agent turn so LLM auto-uses the new fact; `query_radius_logs` demo tool lives in `profiles/lan/`; FE 🔔 banner + follow-up answer card. MFA deferred. Details: `ARCHITECTURE.md §8.6`, `hitl_core/DESIGN.md §3.2.5`.

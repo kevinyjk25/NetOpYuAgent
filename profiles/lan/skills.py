@@ -1,14 +1,9 @@
 """
-skills/mock/registry.py
-────────────────────────
-Skills backed by mock tools — available in mock mode ONLY.
+profiles/lan/skills.py — Enterprise LAN SOP skills
+===================================================
 
-Format: skill_id → {name, purpose, risk_level, requires_hitl, tags,
-                    description, parameters, returns, examples, tool_deps}
-
-tool_deps: list of tool names this skill requires.
-The SkillCatalogService.filter_to_registry() uses tool_deps (when present)
-in addition to the skill_id match for filtering.
+Business skills (standard operating procedures) for enterprise LAN ops.
+Migrated 2026-05 from skills/mock/registry.py (profile refactor).
 """
 from __future__ import annotations
 from typing import Any

@@ -1459,6 +1459,34 @@ class AgentRuntimeLoop:
             except Exception as _h_exc:
                 logger.debug("TURN_START hook block failed: %s", _h_exc)
 
+            # ── Async HITL inject drain (H2, 2026-05) ──────────────────────
+            # Pull facts that arrived from async HITL on_resolved callbacks
+            # since the previous turn. Append to confirmed_facts so the
+            # LLM sees them in the prompt about to be assembled. This is
+            # the merge-back mechanism for H2 (see HITL_ASYNC_MERGEBACK_DESIGN
+            # §3 Strategy 3). Drain at turn boundary so we never race the
+            # prompt assembler. Drained list is empty in the common case
+            # (no H2 in flight or no resolutions since last turn).
+            try:
+                _injected = drain_async_inject(session_id)
+                for _f in _injected:
+                    # Append-only, idempotent on text equality so a
+                    # double-resolve (race between sync ack & timeout)
+                    # doesn't double-fact. confirmed_facts compaction
+                    # downstream handles dedup if it ever matters.
+                    if _f not in state.confirmed_facts:
+                        state.confirmed_facts.append(_f)
+                if _injected:
+                    logger.info(
+                        "ASYNC_HITL: injected %d fact(s) at turn %d (session=%s)",
+                        len(_injected), state.turns, session_id,
+                    )
+            except Exception as _inj_exc:
+                logger.debug(
+                    "Async inject drain failed (%s) — non-fatal",
+                    _inj_exc,
+                )
+
             # ── PERF-1: conditional recall refresh ──────────────────────
             _facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
             _need_recall_refresh = (
@@ -2258,6 +2286,17 @@ class AgentRuntimeLoop:
                 # Hook may have mutated args; pick them up
                 tool_args = _pre_ctx.get("args", tool_args)
 
+                # ── Inject session_id for async-HITL tools (H2, 2026-05) ──
+                # The `_session_id` arg is consumed by tools that use
+                # PipelineContext.request_approval_async / emit_async_hitl_notify
+                # for soft-notify routing. Underscore-prefixed → other tools
+                # ignore it. We inject unconditionally because the cost is
+                # one dict key and the tool either reads it (H2) or doesn't.
+                # See tools/mock_tools.py:query_radius_logs for the H2 contract.
+                if "_session_id" not in tool_args:
+                    tool_args = dict(tool_args)
+                    tool_args["_session_id"] = session_id
+
                 raw = await self._execute_tool(tool_name, tool_args, tool_reg)
 
                 # ── POST_TOOL_USE hook (Sprint 2, 2026-05) ─────────────────
@@ -2942,3 +2981,102 @@ class AgentRuntimeLoop:
         if stop:
             return f"{base}\n\n---\n{stop}".strip()
         return base.strip()
+
+# ---------------------------------------------------------------------------
+# Async HITL (H2) — inject queue + turn-start drain helper (2026-05)
+# ---------------------------------------------------------------------------
+#
+# When an H2 (fire-and-forget) HITL is resolved by the operator, the
+# pipeline's on_resolved callback writes the fact text into _async_inject_queue
+# keyed by session_id. The next turn that runs for that session_id drains
+# the queue and appends each item to state.confirmed_facts so the LLM sees
+# the late-arriving information.
+#
+# This is the merge-back mechanism described in HITL_ASYNC_MERGEBACK_DESIGN.md
+# §3 Strategy 3:
+#   - inject happens at a clean turn boundary (no race with prompt assembly)
+#   - SSE notification (handled separately in webui/backend.py) can fire
+#     immediately on resolve so operator sees the soft-notify, but the
+#     LLM-visible inject waits for the next turn
+#
+# Why module-level instead of per-loop instance?
+#   - Async ack arrives outside the loop's lifetime — the pipeline that
+#     started the H2 may have already finished its query and exited
+#   - The next session.stream() call needs to see the queue
+#   - A per-session dict ensures isolation; nothing forced to share state
+
+_async_inject_queue: dict[str, list[str]] = {}
+
+# Safety bounds so a session that triggers an async HITL and then never sends
+# another message can't accumulate facts forever (dead-session leak). These
+# are generous — real sessions drain on the next turn — but cap the worst case.
+_MAX_INJECT_SESSIONS   = 512    # distinct sessions holding undrained facts
+_MAX_INJECT_PER_SESSION = 32    # facts queued for one session before drain
+
+
+def enqueue_async_inject(session_id: str, fact_text: str) -> None:
+    """Queue a fact for injection at the start of the next turn for this session.
+
+    Called by H2 on_resolved callbacks (typically in skills/tools that use
+    PipelineContext.request_approval_async). Safe to call from any task —
+    only mutates a dict, no event loop interaction.
+
+    Args:
+        session_id: target session whose next turn should pick this up.
+                    If None / empty, the fact is logged but NOT enqueued
+                    (no session to surface it to).
+        fact_text:  the fact string that will be appended to
+                    state.confirmed_facts. Caller should pre-format it
+                    in the style other facts use, e.g.:
+                       "RADIUS check (async): user X permission_denied"
+    """
+    if not session_id or not fact_text:
+        logger.debug(
+            "enqueue_async_inject: skipping (session_id=%r, len(text)=%d)",
+            session_id, len(fact_text or ""),
+        )
+        return
+    q = _async_inject_queue.setdefault(session_id, [])
+    q.append(fact_text)
+    # Per-session cap: keep the most recent facts (a session draining normally
+    # never hits this; only a dead session that keeps receiving async acks).
+    if len(q) > _MAX_INJECT_PER_SESSION:
+        del q[: len(q) - _MAX_INJECT_PER_SESSION]
+    # Global cap: if too many distinct dead sessions accumulate, evict the
+    # oldest-inserted ones (dict preserves insertion order in py3.7+).
+    if len(_async_inject_queue) > _MAX_INJECT_SESSIONS:
+        for _stale in list(_async_inject_queue.keys())[
+            : len(_async_inject_queue) - _MAX_INJECT_SESSIONS
+        ]:
+            if _stale != session_id:
+                _async_inject_queue.pop(_stale, None)
+        logger.warning(
+            "enqueue_async_inject: evicted stale dead-session inject entries "
+            "(cap=%d) — sessions that triggered async HITL but never returned",
+            _MAX_INJECT_SESSIONS,
+        )
+    logger.info(
+        "enqueue_async_inject: session=%s queue_len=%d",
+        session_id, len(_async_inject_queue[session_id]),
+    )
+
+
+def drain_async_inject(session_id: str) -> list[str]:
+    """Pop and return all queued facts for this session_id.
+
+    Called at TURN_START by stream() / run() so injected facts appear in
+    the immediately-following prompt assembly. Returns [] if nothing
+    queued. Safe to call when session_id is unknown (returns []).
+
+    Returns:
+        list[str]: in enqueue order. Empty if nothing pending.
+    """
+    if not session_id:
+        return []
+    items = _async_inject_queue.pop(session_id, [])
+    if items:
+        logger.info(
+            "drain_async_inject: session=%s drained=%d items",
+            session_id, len(items),
+        )
+    return items

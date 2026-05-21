@@ -49,6 +49,7 @@ import asyncio
 import logging
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any, AsyncIterator, Awaitable, Callable, Optional
 
 from .batch import BATCH_ID_KEY, BatchCoordinator, BatchResolution
@@ -58,9 +59,11 @@ from .schema import (
     BatchState,
     BatchWaitMode,
     CheckpointEntry,
+    DecisionKind,
     HitlBatch,
     HitlDecision,
     HitlPayload,
+    InterruptMode,
     InterruptState,
     ResumeHandle,
 )
@@ -172,6 +175,51 @@ class _BatchWaiter:
 
 
 # ---------------------------------------------------------------------------
+# Async HITL (H2-style fire-and-forget) — 2026-05
+# ---------------------------------------------------------------------------
+
+@dataclass
+class AsyncPendingHitl:
+    """Bookkeeping for a fire-and-forget HITL interrupt.
+
+    Caller (skill / tool) creates one by invoking
+    `PipelineContext.request_approval_async(...)`. Pipeline does NOT
+    await; the caller's continued execution uses `default_value`.
+
+    When the operator decides (or SLA expires), the HitlRouter looks up
+    this record and invokes `on_resolved`. The runtime side merges the
+    result back into agent state via the inject queue + turn-start hook
+    — see hitl_core/DESIGN.md §async HITL merge-back.
+
+    Fields:
+        interrupt_id: matches the payload's interrupt_id; primary key
+        payload:      original HitlPayload (kept for audit / inspection)
+        default_value: what the caller assumed (e.g. "permission_ok")
+        on_resolved:  async callback (interrupt_id, decision, default,
+                                       diverged) -> None
+                      Caller decides how to write the result into agent
+                      memory / SSE / etc.
+        divergence_check: optional (default, decision) -> bool; True
+                      means the actual decision differs from the
+                      assumption (triggers the "soft notify" UX). When
+                      None, treats `decision.decision != APPROVE` as
+                      divergence — i.e. anything not "yes" is a diverge.
+        created_at:   for SLA / audit
+        sla_seconds:  inherited from payload.sla_seconds
+        session_id:   for SSE notify routing (None when ctx has no
+                      session — pipeline may run outside web context)
+    """
+    interrupt_id:     str
+    payload:          HitlPayload
+    default_value:    Any
+    on_resolved:      Callable[[str, Optional["HitlDecision"], Any, bool], Awaitable[None]]
+    divergence_check: Optional[Callable[[Any, "HitlDecision"], bool]] = None
+    created_at:       datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    sla_seconds:      int = 600
+    session_id:       Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
 # PipelineContext — the API steps see
 # ---------------------------------------------------------------------------
 
@@ -200,6 +248,12 @@ class PipelineContext:
         # loop reads this to know what to yield.
         self._pending_waiter: Optional[_DecisionWaiter] = None
         self._pending_batch: Optional[_BatchWaiter] = None
+        # ── Async HITL pending registry (2026-05) ──────────────────────────
+        # Maps interrupt_id → AsyncPendingHitl record. The runtime owns the
+        # actual on_resolved invocation via the global HitlRouter; we keep
+        # this map per-ctx so cleanup happens automatically when the
+        # pipeline exits. See hitl_core/DESIGN.md §async HITL.
+        self._async_pending: dict[str, "AsyncPendingHitl"] = {}
 
     # ── Public API ────────────────────────────────────────────────────
 
@@ -259,6 +313,139 @@ class PipelineContext:
              "operator": decision.operator_id},
         )
         return decision
+
+    # ── Async approval (H2-style fire-and-forget) ────────────────────────
+
+    async def request_approval_async(
+        self,
+        payload: HitlPayload,
+        *,
+        default_value: Any,
+        on_resolved: Callable[
+            [str, Optional[HitlDecision], Any, bool],
+            Awaitable[None],
+        ],
+        divergence_check: Optional[
+            Callable[[Any, HitlDecision], bool]
+        ] = None,
+        session_id: Optional[str] = None,
+        resume_handle: Optional[ResumeHandle] = None,
+    ) -> tuple[str, Any]:
+        """Fire-and-forget HITL — does NOT block.
+
+        Used for H2-style external delegation. Pipeline persists the
+        checkpoint + audits the delegation, then returns immediately
+        with the caller-supplied default. The real operator decision
+        (if any) arrives later via the HitlRouter, which looks up the
+        pending registry and invokes `on_resolved`.
+
+        Returns:
+            (interrupt_id, default_value): caller proceeds with default
+            and remembers interrupt_id for tracing.
+
+        Args:
+            payload:        the HitlPayload. interrupt_mode is forced to
+                            ASYNC_NONBLOCKING here; trigger_kind should
+                            be EXTERNAL_DELEGATION (or whatever maps to
+                            the H2 UX in your front-end).
+            default_value:  what the caller assumes (e.g. "permission_ok").
+                            Returned immediately AND passed to on_resolved
+                            so the callback can compute divergence.
+            on_resolved:    coroutine called when operator decides OR
+                            SLA expires (with decision=None in the latter
+                            case). Signature:
+                                async def cb(interrupt_id, decision,
+                                             default_value, diverged): ...
+                            Caller decides how to merge into agent state.
+            divergence_check: optional (default, decision) -> bool. When
+                            omitted, divergence = (decision.decision !=
+                            APPROVE). The result is passed as the 4th arg
+                            of on_resolved.
+            session_id:     for SSE notification routing. Pipeline passes
+                            this through to AsyncPendingHitl so the
+                            HitlRouter / runtime can find the right SSE
+                            stream when the operator decides.
+            resume_handle:  unused for async flow (kept for symmetry).
+                            Async resolution goes through on_resolved.
+
+        See hitl_core/DESIGN.md §async HITL for the merge-back semantics
+        and runtime/loop.py for the turn-start drain that surfaces async
+        results into LLM context.
+        """
+        # Force mode regardless of payload field — caller may have passed
+        # SYNC_BLOCKING by mistake.
+        payload.interrupt_mode = InterruptMode.ASYNC_NONBLOCKING
+
+        # Stamp identity from current state so payload.thread_id is consistent
+        if not payload.thread_id:
+            payload.thread_id = self.state.thread_id
+        if not payload.context_id:
+            payload.context_id = self.state.thread_id
+        if payload.task_id is None:
+            payload.task_id = self.state.task_id
+
+        # Persist checkpoint so /hitl/pending lists it, just like sync interrupts
+        entry = CheckpointEntry(
+            interrupt_id=payload.interrupt_id,
+            payload=payload,
+            resume_handle=resume_handle or ResumeHandle(
+                resumer_name="async_hitl",   # router looks up AsyncPendingHitl
+                state={"pipeline_id": self.state.pipeline_id},
+            ),
+        )
+        await self._store.save(entry)
+
+        # Register in pending so the router can find the on_resolved cb.
+        pending = AsyncPendingHitl(
+            interrupt_id     = payload.interrupt_id,
+            payload          = payload,
+            default_value    = default_value,
+            on_resolved      = on_resolved,
+            divergence_check = divergence_check,
+            sla_seconds      = payload.sla_seconds,
+            session_id       = session_id,
+        )
+        self._async_pending[payload.interrupt_id] = pending
+        # Register with the global router via the unified helper, which
+        # inserts under the registry lock AND arms the SLA watchdog. This
+        # replaces the previous direct `_async_registry[...] = pending` +
+        # bespoke local timer, so every async-HITL path shares one
+        # ownership/timeout mechanism (no double-fire, no leaked entry).
+        try:
+            from .router import register_async_pending
+            register_async_pending(
+                pending, store=self._store, on_audit=self._on_audit,
+            )
+        except Exception as _reg_exc:
+            logger.warning(
+                "request_approval_async: failed to register %s in "
+                "global async registry (%s) — operator decisions won't "
+                "route back to on_resolved",
+                payload.interrupt_id, _reg_exc,
+            )
+
+        # Audit the delegation
+        await self.audit(
+            AuditEventKind.ASYNC_DELEGATED,
+            payload.interrupt_id,
+            {
+                "trigger_kind":  payload.trigger_kind.value,
+                "risk_level":    payload.risk_level.value,
+                "sla_seconds":   payload.sla_seconds,
+                "session_id":    session_id,
+            },
+        )
+        logger.info(
+            "request_approval_async: delegated %s (trigger=%s, sla=%ds)",
+            payload.interrupt_id, payload.trigger_kind.value,
+            payload.sla_seconds,
+        )
+
+        # SLA timeout is now armed by register_async_pending() above (the
+        # unified watchdog claims ownership via claim_async_pending so it can
+        # never double-fire with an operator decision). No bespoke local
+        # timer here anymore — see hitl_core/router.py:register_async_pending.
+        return payload.interrupt_id, default_value
 
     # ── Batch approval ───────────────────────────────────────────────
 

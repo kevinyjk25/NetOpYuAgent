@@ -294,6 +294,14 @@ class AgentIdentityConfig:
     # Stable identifier — used as the AgentCard `name` field, as the
     # registry key, and as the trace tag. Lowercase alphanumeric + hyphen.
     agent_id:     str = "default-agent"
+    # Business profile selects which domain tools/skills load + which
+    # capabilities get advertised. One of: default | lan | dc.
+    #   default — no business tools/skills (pure assistant + common meta)
+    #   lan     — enterprise LAN (Cisco switches/APs/firewalls)
+    #   dc      — data-center fabric (spine/leaf, BGP EVPN, VXLAN, LB)
+    # Env override: AGENT_PROFILE. Defaults to "default" so a fresh boot
+    # has no business logic — proving the framework/business decoupling.
+    profile:      str = "default"
     # Human-friendly label shown in WebUI title bar + peer list.
     display_name: str = "IT Ops Agent"
     # One-line summary other agents see in our AgentCard.
@@ -793,6 +801,41 @@ class AppConfig:
     def is_mock(self) -> bool:
         return self.mode == "mock"
 
+    def agent_data_dir(self) -> str:
+        """Per-agent data root — physically isolates each agent's state.
+
+        Every agent instance (lan-agent, dc-agent, …) gets its own
+        subtree so their memory / sessions / cached results / evolved
+        skills / pending HITL approvals never collide. Without this, two
+        agents sharing one process image would read each other's facts
+        and overwrite each other's databases.
+
+        Resolution precedence:
+          1. AGENT_DATA_DIR env  — explicit override (highest)
+          2. <memory.data_dir>/agents/<agent_id>/  — default layout
+
+        The base (memory.data_dir, default "./data") still holds SHARED,
+        read-only fixtures (golden_set.jsonl, tool_compliance_set.jsonl)
+        that are NOT per-agent. Only mutable per-agent state moves under
+        agents/<agent_id>/.
+
+        Examples:
+          agent_id=lan-agent  → ./data/agents/lan-agent/
+          agent_id=dc-agent   → ./data/agents/dc-agent/
+          AGENT_DATA_DIR=/srv/x → /srv/x  (verbatim)
+        """
+        import os as _os
+        import pathlib as _pl
+        override = _os.getenv("AGENT_DATA_DIR", "").strip()
+        if override:
+            p = _pl.Path(override)
+        else:
+            base = _pl.Path(self.memory.data_dir or "./data")
+            agent_id = (self.agent.agent_id or "default-agent").strip() or "default-agent"
+            p = base / "agents" / agent_id
+        p.mkdir(parents=True, exist_ok=True)
+        return str(p)
+
     @property
     def is_pragmatic(self) -> bool:
         return self.mode == "pragmatic"
@@ -897,6 +940,7 @@ def _load_agent_identity_config(a: dict) -> "AgentIdentityConfig":
 
     return AgentIdentityConfig(
         agent_id     = _env_str("AGENT_ID",            a.get("agent_id",     "default-agent")),
+        profile      = _env_str("AGENT_PROFILE",       a.get("profile",      "default")).strip().lower() or "default",
         display_name = _env_str("AGENT_DISPLAY_NAME",  a.get("display_name", "IT Ops Agent")),
         description  = _env_str("AGENT_DESCRIPTION",   a.get("description",
             "Intelligent IT operations agent — alert analysis, incident "

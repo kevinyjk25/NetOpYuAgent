@@ -42,6 +42,11 @@ class TriggerKind(str, Enum):
     USER_CHOICE       = "user_choice"         # operator picks from N
     CLARIFICATION     = "clarification"       # operator answers Qs
     POLICY_VIOLATION  = "policy_violation"    # policy engine blocked
+    # ── Async delegation (2026-05) ──────────────────────────────────────
+    # Used for H2-style fire-and-forget HITLs (e.g. "push RADIUS check
+    # request to ops queue, agent continues with assumed value").
+    # See hitl_core/DESIGN.md §async HITL for the merge-back semantics.
+    EXTERNAL_DELEGATION = "external_delegation"
 
     @classmethod
     def coerce(cls, value: Any) -> "TriggerKind":
@@ -54,6 +59,37 @@ class TriggerKind(str, Enum):
             if member.value == value:
                 return member
         raise ValueError(f"Unknown trigger_kind: {value!r}")
+
+
+class InterruptMode(str, Enum):
+    """How the pipeline / caller should treat an interrupt.
+
+    Added 2026-05 to support 3-mode HITL (sync追问 / 异步委托 / 同步高危).
+    This is ORTHOGONAL to TriggerKind — same trigger can be raised in
+    different modes by different skills (e.g. RADIUS check can be SYNC if
+    operator is on-call, ASYNC if not).
+
+    SYNC_BLOCKING
+        Default. Pipeline awaits operator decision before continuing.
+        Maps to existing `request_approval()` API.
+
+    ASYNC_NONBLOCKING
+        Pipeline does NOT await. Returns immediately with the
+        caller-supplied `default_value`. Real decision (if any) arrives
+        later via `on_resolved` callback; caller decides how to merge
+        back into agent state (typically writes a `confirmed_fact` so
+        subsequent turns see it). Used for H2: "push to external
+        approval system, continue with optimistic default".
+
+    MFA_BLOCKING
+        Like SYNC_BLOCKING but requires a second-factor confirmation.
+        NOT IMPLEMENTED (2026-05) — deferred to a separate sprint
+        because the MFA backend choice (TOTP / WebAuthn / SMS) is a
+        product decision, not a technical one.
+    """
+    SYNC_BLOCKING     = "sync_blocking"
+    ASYNC_NONBLOCKING = "async_nonblocking"
+    MFA_BLOCKING      = "mfa_blocking"   # reserved, not wired
 
 
 class DecisionKind(str, Enum):
@@ -81,6 +117,12 @@ class InterruptState(str, Enum):
     RESOLVED  = "resolved"    # operator decided, callback ran
     EXPIRED   = "expired"     # SLA timeout, no decision
     CANCELLED = "cancelled"   # explicitly aborted
+    # ── Async-only states (2026-05) ─────────────────────────────────────
+    # ASYNC interrupts have additional substates because the caller has
+    # already proceeded with a default; we still want UI visibility into
+    # whether the ack ever arrived.
+    ACKED     = "acked"       # async: external system confirmed receipt
+    WORKING   = "working"     # async: external system processing
 
 
 class AuditEventKind(str, Enum):
@@ -91,6 +133,10 @@ class AuditEventKind(str, Enum):
     EXECUTION_DONE    = "execution_done"
     EXECUTION_FAILED  = "execution_failed"
     EXPIRED           = "expired"
+    # ── Async HITL audit events (2026-05) ───────────────────────────────
+    ASYNC_DELEGATED   = "async_delegated"   # H2 fired, agent proceeded
+    ASYNC_RESOLVED    = "async_resolved"    # H2 ack arrived (may diverge)
+    ASYNC_TIMEOUT     = "async_timeout"     # H2 SLA passed, no decision
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +202,10 @@ class HitlPayload(BaseModel):
     # Why
     trigger_kind: TriggerKind = TriggerKind.LOW_CONFIDENCE
     risk_level: RiskLevel = RiskLevel.MEDIUM
+    # How the pipeline / caller treats this interrupt (added 2026-05).
+    # See InterruptMode docstring for semantics. SYNC_BLOCKING preserves
+    # legacy behaviour (every existing call site).
+    interrupt_mode: InterruptMode = InterruptMode.SYNC_BLOCKING
 
     # What — request context
     user_query: str = ""

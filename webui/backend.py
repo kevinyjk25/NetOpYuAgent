@@ -83,6 +83,64 @@ from memory import set_current_operator, get_current_operator
 logger = logging.getLogger(__name__)
 
 
+# ---------------------------------------------------------------------------
+# Async HITL (H2) SSE notification bridge (2026-05)
+# ---------------------------------------------------------------------------
+#
+# Maps session_id → emit_fn(chunk_dict). Used by H2 on_resolved callbacks
+# to push a soft-notify chunk into a currently-active chat SSE stream so
+# the operator sees "RADIUS result arrived" while still on the page.
+#
+# Populated by chat_stream() while the SSE stream is alive; removed on
+# stream end. If the operator has navigated away (no entry), the H2 ack
+# still writes a confirmed_fact via the inject queue (see runtime/loop.py
+# drain_async_inject) — the SSE notify is purely additive.
+#
+# Thread-safety: chat_stream / SSE runs in the asyncio event loop, and
+# H2 on_resolved callbacks ALSO run in the asyncio event loop (they're
+# triggered by router.deliver which is async). So dict ops are safe
+# without a lock — no concurrent mutation.
+
+_session_sse_emit: dict[str, "Callable[[dict], None]"] = {}
+
+
+def register_session_sse_emit(session_id: str, emit_fn) -> None:
+    """Called by chat_stream while its SSE stream is alive."""
+    if session_id:
+        _session_sse_emit[session_id] = emit_fn
+
+
+def unregister_session_sse_emit(session_id: str) -> None:
+    """Called by chat_stream on stream end (finally block)."""
+    if session_id:
+        _session_sse_emit.pop(session_id, None)
+
+
+def emit_async_hitl_notify(session_id: str, chunk: dict) -> bool:
+    """Push an async-hitl-resolved chunk into the session's SSE stream if active.
+
+    Returns True if delivered to a live stream, False if no stream (operator
+    has navigated away — caller should rely on the confirmed_facts inject
+    queue alone for next-turn merge-back).
+
+    Called by H2 on_resolved callbacks (typically in skills / tools that
+    wire up an async approval). Safe to call when SSE not active — silent
+    no-op.
+    """
+    emit_fn = _session_sse_emit.get(session_id) if session_id else None
+    if emit_fn is None:
+        return False
+    try:
+        emit_fn(chunk)
+        return True
+    except Exception as exc:
+        logger.warning(
+            "emit_async_hitl_notify: emit_fn failed for session %s: %s",
+            session_id, exc,
+        )
+        return False
+
+
 def _streaming_cfg():
     """Lazy load AppConfig.streaming; returns None if config not loaded."""
     try:
@@ -174,8 +232,8 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         import config as _cfg
         from tools.loader import ToolLoader as _TL
         from skills import SkillLoader as _SL
-        _tl = _TL(mode=_cfg.cfg.mode)
-        _skill_loader = _SL(mode=_cfg.cfg.mode)
+        _tl = _TL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile)
+        _skill_loader = _SL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile)
         catalog = SkillCatalogService()
         catalog.register_all(_skill_loader.skill_definitions())
         services["skill_catalog"] = catalog
@@ -227,7 +285,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # Build mode-appropriate tool registry (no mock tools in pragmatic mode)
     import config as _cfg_be
     from tools.loader import ToolLoader as _TL_be
-    tool_registry = _TL_be(mode=_cfg_be.cfg.mode).build_callables()
+    tool_registry = _TL_be(mode=_cfg_be.cfg.mode, profile=_cfg_be.cfg.agent.profile).build_callables()
     _read_fn, _process_fn = make_read_stored_result_tool(services["tool_store"])
     tool_registry["read_stored_result"]    = _read_fn
     tool_registry["process_stored_chunks"] = _process_fn
@@ -543,6 +601,23 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                         nonlocal_intercepted[0] = True
                     await _chunk_queue.put(("chunk", ch))
 
+                # ── Async-HITL SSE bridge (H2, 2026-05) ─────────────────
+                # Register a non-async emit_fn so H2 on_resolved callbacks
+                # (running in the same event loop but outside this generator)
+                # can push a soft-notify chunk into this stream. Use a
+                # nowait put because the emit is fire-and-forget; queue is
+                # unbounded so the put can't fail in practice.
+                def _h2_emit(chunk: dict) -> None:
+                    try:
+                        _chunk_queue.put_nowait(("chunk", chunk))
+                    except Exception as exc:
+                        logger.warning(
+                            "_h2_emit: put_nowait failed for session=%s: %s",
+                            session_id, exc,
+                        )
+
+                register_session_sse_emit(session_id, _h2_emit)
+
                 # Mutable holders so the nested function can update outer state
                 nonlocal_turns       = [0]
                 nonlocal_outcome     = ["done"]
@@ -744,6 +819,14 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 logger.exception("Stream error: %s", exc)
                 yield f"data: {json.dumps({'type':'error','error':str(exc)})}\n\n"
                 yield "data: [DONE]\n\n"
+            finally:
+                # Unregister async-HITL SSE bridge (H2, 2026-05)
+                try:
+                    unregister_session_sse_emit(session_id)
+                except Exception as _u_exc:
+                    logger.debug(
+                        "unregister_session_sse_emit failed: %s", _u_exc,
+                    )
 
         return StreamingResponse(
             generate(),
@@ -1024,7 +1107,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         from tools.loader import ToolLoader
         import config as _cfg
         # ToolLoader returns only tools for the current mode (mock vs pragmatic)
-        _loader = ToolLoader(mode=_cfg.cfg.mode)
+        _loader = ToolLoader(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile)
         all_tools = {}
         for name, meta in _loader.build_metadata().items():
             entry = dict(meta)
@@ -1521,6 +1604,74 @@ async def _submit_hitl_decision(
         _tool_result = result_dict.get("tool_result", "")
         _tool_name   = result_dict.get("tool_name", "agent_loop")
         _user_query  = _user_query_local
+
+        # ── H2 async-HITL follow-up turn (2026-05) ─────────────────────
+        # When the resumer returned {"async_resolved": True, ...} the
+        # H2 fact has been enqueued into runtime/loop._async_inject_queue
+        # by the on_resolved callback, but no turn is currently running
+        # for this session to drain it (the original stream finished
+        # before the operator decided). Fire a fresh agent turn so the
+        # LLM sees the fact (via turn-start drain → state.confirmed_facts)
+        # and can revise/complete its answer. The follow-up result is
+        # returned in result_dict["async_followup"] so the FE can render
+        # it as an additional agent message.
+        if _raw_result.get("async_resolved"):
+            try:
+                _diverged = bool(_raw_result.get("diverged"))
+                _session_for_followup = _thread_id_local or req.session_id or ""
+                _runtime_loop = services.get("runtime_loop")
+                if _runtime_loop is not None and _session_for_followup:
+                    # Synthetic follow-up query — the agent_memory turn-start
+                    # drain will inject the H2 result into confirmed_facts
+                    # before this turn's prompt is assembled, so the LLM
+                    # sees the actual fact without us having to pass it.
+                    _followup_query = (
+                        "异步 HITL 已返回结果。请基于 confirmed_facts 里刚到达的"
+                        " RADIUS 检查事实给出最终建议。"
+                        + ("注意:实际结果可能跟你之前的假设(permission_ok)不一致,"
+                           "请相应修正诊断方向。"
+                           if _diverged else
+                           "(注:实际结果跟初始假设一致,可确认原诊断。)")
+                    )
+                    from runtime import DelegationMode as _DM
+                    _t_followup_start = time.time()
+                    _followup = await _runtime_loop.run(
+                        query           = _followup_query,
+                        session_id      = _session_for_followup,
+                        env_context     = {},
+                        confirmed_facts = [],            # facts come from inject queue
+                        working_set     = None,
+                        tool_registry   = services.get("tool_registry") or {},
+                        delegation_mode = _DM.FRESH,
+                    )
+                    _followup_elapsed = round(time.time() - _t_followup_start, 2)
+                    _followup_text = getattr(_followup, "final_response", "") or ""
+                    result_dict["async_followup"] = {
+                        "answer":     _followup_text,
+                        "diverged":   _diverged,
+                        "elapsed_s":  _followup_elapsed,
+                        "session_id": _session_for_followup,
+                    }
+                    logger.info(
+                        "_submit_hitl_decision: H2 follow-up complete — "
+                        "interrupt=%s diverged=%s elapsed=%.1fs answer_chars=%d",
+                        interrupt_id, _diverged, _followup_elapsed,
+                        len(_followup_text),
+                    )
+                else:
+                    logger.info(
+                        "_submit_hitl_decision: H2 follow-up skipped — "
+                        "runtime_loop=%s session=%r",
+                        _runtime_loop is not None, _session_for_followup,
+                    )
+            except Exception as _fu_exc:
+                logger.warning(
+                    "_submit_hitl_decision: H2 follow-up failed for "
+                    "interrupt=%s: %s",
+                    interrupt_id, _fu_exc,
+                )
+                result_dict["async_followup"] = {"error": str(_fu_exc)}
+
         # Continue to the LLM synthesis section (line below).
     else:
         # No HITL router wired. Legacy LangGraph backend was retired

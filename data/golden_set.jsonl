@@ -1,4 +1,12 @@
 # Starter golden set for retrieval evaluation.
+#
+# DOMAIN: this is a LAN-profile fixture — its expected_ids are LAN business
+# skills (syslog_search, service_health, netflow_analysis, restart_service,
+# rollback_service) plus the common read_stored_result. Since the 2026-05
+# profile refactor those skills only load under AGENT_PROFILE=lan, so the
+# retrieval eval MUST run with that profile (precheck.sh sets EVAL_PROFILE=lan).
+# A future per-domain set (e.g. golden_set_dc.jsonl) would eval the dc profile.
+#
 # Format: JSONL — one EvalCase per line.
 # Fields per case:
 #   query         : string — the user query

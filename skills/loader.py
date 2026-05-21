@@ -33,14 +33,16 @@ class SkillLoader:
     "pragmatic") but reads from skills/{builtin,mock,pragmatic}/registry.py.
     """
 
-    def __init__(self, mode: str = "mock"):
+    def __init__(self, mode: str = "mock", profile: str = "default"):
         self._mode = mode
+        self._profile_id = (profile or "default").strip().lower()
 
     def skill_definitions(self) -> dict[str, dict[str, Any]]:
-        """Return {skill_id: {...flat dict...}} for all skills active in this mode.
+        """Return {skill_id: {...flat dict...}} for all skills active in this
+        mode + profile.
 
-        Always includes builtin skills; adds mock OR pragmatic depending on mode.
-        Mode-appropriate filtering happens at load time, no runtime branching.
+        Always includes the common builtin skills; adds the active profile's
+        business skills (mock mode) or the pragmatic skills (pragmatic mode).
         """
         from skills.builtin.registry import SKILLS as BUILTIN_SKILLS
 
@@ -48,11 +50,16 @@ class SkillLoader:
         defs.update(BUILTIN_SKILLS)
 
         if self._mode == "mock":
-            from skills.mock.registry import SKILLS as MOCK_SKILLS
-            defs.update(MOCK_SKILLS)
+            from profiles import load_profile
+            profile = load_profile(self._profile_id)
+            defs.update(profile.skill_defs)
+            logger.info(
+                "SkillLoader[mock, profile=%s]: %d skills loaded",
+                self._profile_id, len(defs),
+            )
         else:
             from skills.pragmatic.registry import SKILLS as PRAGMA_SKILLS
             defs.update(PRAGMA_SKILLS)
+            logger.info("SkillLoader[pragmatic]: %d skills loaded", len(defs))
 
-        logger.info("SkillLoader[%s]: %d skills loaded", self._mode, len(defs))
         return defs

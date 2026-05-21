@@ -191,6 +191,96 @@ Agent 检测到"对 N 个 device 做同一操作":
                         最后一次 SkillEvolver hook (audit_wiring TODO #1)
 ```
 
+### 3.2.5 Async HITL (H2 — fire-and-forget,2026-05)
+
+**用途**:tool / skill 知道需要操作员决策(如 RADIUS 权限审批、推外部审批工单),但**不能阻塞 agent** — agent 拿默认假设继续推理,等异步 ack 回来时再 merge-back。
+
+**核心 API**:`PipelineContext.request_approval_async(payload, default_value, on_resolved, divergence_check=None, session_id=None)`
+
+```python
+# 在一个 skill / tool 里
+interrupt_id, default_value = await ctx.request_approval_async(
+    payload          = HitlPayload(..., interrupt_mode=InterruptMode.ASYNC_NONBLOCKING),
+    default_value    = "permission_ok",
+    on_resolved      = my_callback,    # async (iid, decision, default, diverged) -> None
+    divergence_check = None,           # 默认: decision != APPROVE 即 diverged
+    session_id       = current_session_id,
+)
+# 立即返回 — 用 default_value 继续推理
+```
+
+**生命周期**:
+
+```
+tool 调 request_approval_async(default="permission_ok")
+  │
+  ▼ pipeline:
+  │   ├─ payload.interrupt_mode 强制设 ASYNC_NONBLOCKING
+  │   ├─ store.save(checkpoint)        ← /hitl/pending 看到
+  │   ├─ _async_registry[id] = pending ← router 查找用
+  │   ├─ audit ASYNC_DELEGATED
+  │   ├─ asyncio.create_task(_sla_timer)
+  │   └─ return (id, "permission_ok")  ← agent 继续
+  │
+  ▼ agent 用 default_value 继续 N 个 turns 直到 answer 发出
+  │
+  ▼ 时间 t+Xs(X < sla_seconds):
+  │   ├─ operator POST /hitl/{id}/decide  (or demo auto-responder)
+  │   │       ↓
+  │   ├─ HitlRouter.deliver(decision)
+  │   ├─ router._dispatch path 0.5 (ASYNC):
+  │   │       1. 查 _async_registry[id] → pending
+  │   │       2. divergence = check(default, decision) 或 decision != APPROVE
+  │   │       3. await pending.on_resolved(id, decision, default, diverged)
+  │   │       4. audit ASYNC_RESOLVED
+  │   │       5. _async_registry.pop(id)
+  │   │       6. return {async_resolved: True, diverged}
+  │
+  │   ▼ on_resolved callback(caller 自己写,通常 in tool/skill):
+  │       a. enqueue_async_inject(session_id, fact_text)
+  │           → 下次 turn-start 时 drain 进 state.confirmed_facts
+  │           → LLM 在下个 turn 自动看到这条新 fact
+  │       b. emit_async_hitl_notify(session_id, chunk)
+  │           → 推 SSE chunk type="async_hitl_resolved"
+  │           → 前端 dispatchChunk 渲染 🔔 banner + 2 个按钮
+  │
+  ▼ OR 时间 t+sla_seconds:
+      ├─ _sla_timer 触发
+      ├─ pending pop from registry
+      ├─ store entry → InterruptState.EXPIRED
+      ├─ await on_resolved(id, None, default, diverged=True)
+      │       ← decision=None 信号 timeout;caller 写 "timed out"
+      │         fact + 通常 emit notify
+      └─ audit ASYNC_TIMEOUT
+```
+
+**Merge-back 策略**(由 caller 在 on_resolved 中决定):
+- **Strategy 1 (Fire-and-forget)** — divergence=False 且无需告知:audit-only,不动 confirmed_facts
+- **Strategy 2 (Inject-only)** — 总是写 confirmed_facts,但不通知 SSE — answer 已发就只在下次 turn 用
+- **Strategy 3 (Inject + Soft-notify)** — 写 fact + 推 SSE → 当前 chat 立即看到 🔔 卡片,**默认推荐**
+- **Strategy 4 (Auto re-think)** — 强制启动新 turn(目前没用,留给未来 risk=CRITICAL 场景)
+
+`query_radius_logs` 示例(profiles/lan/tools.py)走 Strategy 3。
+
+**关键设计决定**:
+- **`_async_registry` 是 module-level dict**,不放 HitlRouter 实例 — 因为 async pending 状态必须**outlive** 创建它的 PipelineContext(pipeline 已经退出,operator 2 分钟后才决策)
+- **merge-back 走 `agent_memory.state.confirmed_facts`** 而非发明新通路 — 跨 turn 持久 + LLM 自动看到 + token budget 已有 L2 Snip 处理
+- **inject 在 turn-start 边界**(`runtime/loop.py:drain_async_inject`)— 避免跟 prompt 拼装 race
+- **divergence=False 也写 fact** — audit 完整性比 token 节省更重要(每条 fact 大约 100 chars)
+- **timeout 走 same on_resolved 路径,decision=None** — 不分两个 callback,caller 一个判断点
+
+**并发安全(2026-05 修复)**:
+- **统一注册入口 `register_async_pending(pending, store=)`** — 所有 async-HITL 生产者(tool / skill / `request_approval_async`)必须走它。它在 `_async_registry_lock` 下插入 registry,**并 arm SLA watchdog**。早期 demo 工具直接 `_async_registry[id]=...` 且不带 timer,导致 autoreply 关闭 + 无人决策时 entry 永久泄漏(Bug 2)。
+- **`claim_async_pending(id)` 是唯一所有权裁决点** — operator 决策路径(`router.deliver` → `_dispatch` path 0.5)和 SLA 超时路径都用它原子地"认领"记录。谁拿到谁负责 resolve,另一个拿到 None 直接 no-op。修复了之前 `deliver` 先 await `on_resolved`、**最后**才 pop registry 留下的竞态窗口 —— SLA watchdog 能在那个窗口里拿到同一条记录,导致 `on_resolved` 被触发两次(一次真实决定 + 一次超时),inject 两条 fact(Bug 1)。
+
+**多 agent 安全(进程级隔离,by construction)**:
+- 每个 agent 是**独立进程**,所以 `_async_registry` / `_async_inject_queue` / `_session_sse_emit` 这些 module-level 全局**天然 per-agent**,不跨 agent 共享。
+- `interrupt_id` 是 uuid4(全局唯一),`session_id` 是 uuid4(全局唯一),HITL checkpoint store 走 per-agent 数据目录(`data/agents/<agent_id>/hitl_checkpoints.db`)。三者叠加 ⇒ 两个 agent 的 async-HITL 状态完全隔离,fact 只会 inject 回触发它的那个 agent 的对应 session。
+- 这些全局**纯内存、不落盘**(不存在两个进程读同一份 async 状态的可能);跨 agent 的 HITL 透传是 Phase 3 才做,届时走 A2A `INPUT_REQUIRED` + correlation id,不复用本地 registry。
+- **inject queue 有容量上限**(`_MAX_INJECT_SESSIONS=512` / `_MAX_INJECT_PER_SESSION=32`)防止"触发了 async HITL 但再也不发消息"的死 session 无限累积。
+
+`query_radius_logs` 示例(profiles/lan/tools.py)走 Strategy 3,并通过 `register_async_pending` 获得 SLA watchdog。
+
 ### 3.3 Coreference 处理
 
 ```

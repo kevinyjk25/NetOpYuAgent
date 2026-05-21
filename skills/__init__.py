@@ -8,7 +8,7 @@ Entry point: tools.loader.ToolLoader.skill_definitions()
 
 Implementation:
   skills/builtin/registry.py     — always-available skills
-  skills/mock/registry.py        — mock-mode skills
+  profiles/<id>/skills.py        — business skills (lan, dc, …)
   skills/pragmatic/registry.py   — pragmatic-mode skills
   skills/catalog.py              — SkillCatalogService (register, load, format)
   skills/evolver.py              — runtime skill creation from LLM

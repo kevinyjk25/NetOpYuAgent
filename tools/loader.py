@@ -34,26 +34,41 @@ class ToolLoader:
     mode: "mock" | "pragmatic"
     """
 
-    def __init__(self, mode: str) -> None:
+    def __init__(self, mode: str, profile: str = "default") -> None:
         self._mode = mode.lower().strip()
         if self._mode not in ("mock", "pragmatic"):
             raise ValueError(f"ToolLoader: unknown mode {mode!r} — expected 'mock' or 'pragmatic'")
+        # Business profile selects which domain tools load. "default" = none.
+        # In pragmatic mode the real device tools come from pragmatic_tools.py
+        # regardless of profile (profile only gates the MOCK business tools);
+        # this keeps pragmatic mode working as before during the transition.
+        self._profile_id = (profile or "default").strip().lower()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
     def build_callables(self) -> dict[str, Callable]:
         """
-        Return {tool_name: async_callable} for all tools active in this mode.
-        Includes: builtin tools + mode-specific tools.
+        Return {tool_name: async_callable} for all tools active in this
+        mode + profile. Includes: common tools + profile business tools.
+
         Does NOT include read_stored_result/process_stored_chunks — these are
         injected later by build_services() after ToolResultStore is initialised.
+
+        mock mode      → common + profile.tool_callables (business)
+        pragmatic mode → common + real pragmatic tools (profile-independent
+                         for now; pragmatic device tooling isn't split by
+                         profile yet — tracked in TODO.md)
         """
         callables: dict[str, Callable] = {}
 
         if self._mode == "mock":
-            from tools.mock_tools import TOOL_REGISTRY as MOCK_CALLABLES
-            callables.update(MOCK_CALLABLES)
-            logger.info("ToolLoader[mock]: loaded %d mock callables", len(MOCK_CALLABLES))
+            from profiles import load_profile
+            profile = load_profile(self._profile_id)
+            callables.update(profile.tool_callables)
+            logger.info(
+                "ToolLoader[mock, profile=%s]: loaded %d business callable(s)",
+                self._profile_id, len(profile.tool_callables),
+            )
         else:
             from tools.pragmatic_tools import PRAGMATIC_TOOL_REGISTRY as REAL_CALLABLES
             callables.update(REAL_CALLABLES)
@@ -64,10 +79,14 @@ class ToolLoader:
     def build_metadata(self) -> dict[str, dict[str, Any]]:
         """
         Return {tool_name: {description, parameters, returns, hitl, tags}}
-        for all tools active in this mode.
+        for all tools active in this mode + profile.
 
         This dict is the ONLY source used to build the agent's tool section
         in the system prompt. No tool name is hardcoded in llm_engine.py.
+
+        Always includes the common builtin tools (read_stored_result etc.);
+        adds the active profile's business tool metadata (mock) or the
+        pragmatic tool metadata (pragmatic mode).
         """
         from tools.builtin.registry import TOOLS as BUILTIN_TOOLS
 
@@ -75,13 +94,17 @@ class ToolLoader:
         meta.update(BUILTIN_TOOLS)
 
         if self._mode == "mock":
-            from tools.mock.registry import TOOLS as MOCK_TOOLS
-            meta.update(MOCK_TOOLS)
+            from profiles import load_profile
+            profile = load_profile(self._profile_id)
+            meta.update(profile.tool_metadata)
         else:
             from tools.pragmatic.registry import TOOLS as PRAGMA_TOOLS
             meta.update(PRAGMA_TOOLS)
 
-        logger.info("ToolLoader[%s]: %d tools in metadata", self._mode, len(meta))
+        logger.info(
+            "ToolLoader[%s, profile=%s]: %d tools in metadata",
+            self._mode, self._profile_id, len(meta),
+        )
         return meta
 
     def skill_definitions(self) -> dict[str, dict[str, Any]]:
@@ -103,7 +126,7 @@ class ToolLoader:
         # Forward without breaking — but go through SkillLoader so the
         # actual skill-loading code lives in one place.
         from skills.loader import SkillLoader  # ← DEPRECATED SHIM: see method docstring
-        return SkillLoader(mode=self._mode).skill_definitions()
+        return SkillLoader(mode=self._mode, profile=self._profile_id).skill_definitions()
 
     def tool_section_for_prompt(self) -> str:
         """

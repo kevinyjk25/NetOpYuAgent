@@ -14,8 +14,9 @@
 | `agent_memory/` | ~3000 | 5 维记忆(short/mid/long/skill/user model)+ 召回 | `agent_memory/DESIGN.md` |
 | `hitl_core/` | ~4500 | Human-in-the-loop 引擎(中断、决策、批量、审计) | `hitl_core/DESIGN.md` |
 | `retrieval/` | ~2200 | BM25 + Embedding + Hybrid 检索框架,Meta tools | `retrieval/DESIGN.md` |
-| `skills/` | ~2300 | 复用任务模板、SkillEvolver 自动生成、Journal 反馈 | `skills/DESIGN.md` |
-| `tools/` | ~2500 | Tool callable 实现(mock + pragmatic)+ metadata | `tools/DESIGN.md` |
+| `skills/` | ~2300 | 复用任务模板、SkillEvolver 自动生成、Journal 反馈;`SkillLoader(mode, profile)` 装配 | `skills/DESIGN.md` |
+| `tools/` | ~1200 | **通用框架**工具(分页 read_stored_result 等)+ `ToolLoader(mode, profile)`。业务工具已迁出到 profiles/ | `tools/DESIGN.md` |
+| `profiles/` | ~1400 | **业务层**(2026-05 新)— default/lan/dc 三个 profile,各自的 tool/skill/capability。和通用框架解耦 | `profiles/DESIGN.md` |
 | `integrations/` | ~4500 | 跨模块胶水(HitlExecutor、LLM/Embedder/MCP 客户端、ToolRouter)| `integrations/DESIGN.md` |
 | `schema/` | ~800 | Tool arg schema(`ArgSchema`)+ JSON-Schema/Ollama 导出 | — (轻量,本文档 §6) |
 | `evaluation/` | ~1500 | Retrieval bench + Tool-compliance bench + CI gate CLI | — (轻量,本文档 §7) |
@@ -509,6 +510,38 @@ curl http://localhost:8001/webui/system/peers | jq
 
 **全 CI PASS**:6/6 audits + 21/21 safety + 23 multi-agent(4 skip)+ 30 sprint3 tests。
 
+### 8.6 Async HITL (H2 — fire-and-forget,2026-05)
+
+**起因**:用户提出"xxx 用户上不了网"诊断闭环可能触发 3 种性质完全不同的 HITL — 同步追问(查终端)/ 异步推送(查 RADIUS 权限)/ 同步高危(下发配置)。H1/H3 当前已支持,但 H2 完全缺位 — `request_approval()` 永远 `await future` 阻塞整个 turn,跟"agent 拿默认值继续推理"的语义对立。
+
+**解决方案 B**:加 `request_approval_async()` API,merge-back 借用 `agent_memory.state.confirmed_facts` 已有的跨 turn 持久化通道。MFA 推迟单独 sprint。
+
+5 个 Step 实施(2026-05-21 与 Phase 2A profile 重构合并后的最终落点):
+
+| Step | 改动 | 文件 |
+|------|------|------|
+| 1. Schema | `TriggerKind.EXTERNAL_DELEGATION` / `InterruptMode {SYNC_BLOCKING, ASYNC_NONBLOCKING, MFA_BLOCKING}` / `InterruptState.ACKED/WORKING` / `AuditEventKind.ASYNC_DELEGATED/RESOLVED/TIMEOUT` / `HitlPayload.interrupt_mode` 字段 | `hitl_core/schema.py` |
+| 2. Pipeline API | `AsyncPendingHitl` dataclass + `request_approval_async(payload, default_value, on_resolved, divergence_check, session_id)` 返 (id, default) 不 await + SLA timeout task | `hitl_core/pipeline.py` |
+| 3. Router 路由 | `_async_registry` module dict + `_dispatch` 加 path 0.5 (ASYNC):查 registry → diverged check → on_resolved cb → audit ASYNC_RESOLVED → pop | `hitl_core/router.py` |
+| 4. Runtime 整合 | `HookEvent.ASYNC_HITL_RESOLVED` + `enqueue_async_inject()` / `drain_async_inject()` per-session queue + `stream()` turn-start drain → `state.confirmed_facts` + `webui/backend.py` SSE bridge (`register_session_sse_emit` / `emit_async_hitl_notify`) | `runtime/loop.py`, `runtime/hooks.py`, `webui/backend.py` |
+| 5. Demo + 前端 | `query_radius_logs` 工具走完整 H2 路径(在 **`profiles/lan/`** — RADIUS 是 LAN 业务,而不是 framework leaf)+ demo 自动 responder(3-12s 随机 ack)+ 前端 `dispatchChunk` 加 `async_hitl_resolved` case 显 🔔 banner + [让 agent 重新分析] / [我已处理,忽略] 两个按钮 | `profiles/lan/tools.py`, `profiles/lan/tool_meta.py`, `profiles/lan/__init__.py`, `webui/index.html` |
+| 6. Follow-up turn | operator approve 后 `_submit_hitl_decision` 检测 `async_resolved` → 跑 `loop.run()` 合成 query → turn-start drain 拿 fact → LLM 给最终答案 → HTTP response 带 `async_followup` → 前端追加渲染 agent message | `webui/backend.py`, `webui/index.html` |
+
+**关键设计决定**(详见 `hitl_core/DESIGN.md §3.2.5`):
+
+- `_async_registry` 是 module-level dict — async pending 必须 outlive 创建它的 PipelineContext
+- merge-back 走 `state.confirmed_facts`(跨 turn 持久 + LLM 自动看到 + 已有 L2 Snip 处理 token budget)而非发明新通路
+- inject 在 turn-start 边界(`drain_async_inject`)— 避免跟 prompt 拼装 race
+- divergence=False 也写 fact — audit 完整性 > token 节省
+- timeout 走 same on_resolved 路径,decision=None — 不分两个 callback,caller 一个判断点
+- approve 触发 follow-up turn — operator 不用追问,agent 自动用新 fact 给最终答案
+
+**Tool → hitl_core 依赖**:`query_radius_logs` 是 demo 性质的"H2 直接消费者",必须 import `hitl_core`。在 Phase 2A profile 重构后,这条依赖**反而合规** — 工具搬到 `profiles/lan/`,profiles 不在 `audit_module_independence.FUNCTIONAL_MODULES` 中,允许引用 framework(arrow framework→profile 反方向 profile→framework 同样合理)。**生产**用法仍建议通过 PolicyEngine + runtime hook 间接驱动,而非工具直接调 hitl_core。
+
+**全 CI PASS**:7/7 audits(含 profile audit)+ 101 tests(96 baseline + 5 H2 regression,1 skip on pydantic)。
+
+**没做**:MFA(产品决策推迟);H2 真生产路径(operator 真的去 ops 队列审批,要前端 + 队列后端集成,这次只做 demo 自动回复)。
+
 ---
 
 ## 9. 模块独立维护原则
@@ -625,3 +658,111 @@ Phase-1 引入 multi-agent foundation 后,这两个模块从"未来预留"升级
 | Phase 3 | Cross-agent HITL transparent passthrough | ⏳ 设计已定,等 Phase 2 稳定 |
 
 Phase 2 +的工作量、风险点、产品决策详见 `task/inter/coordinator.py:A2ATaskDispatcher` 的 docstring + 各模块 DESIGN.md。
+
+---
+
+## 12. 业务 Profile 层(`profiles/`)— Phase 2A(2026-05)
+
+### 12.1 动机
+
+重构前业务工具(`list_devices` 等)直接住在 `tools/mock_tools.py`,通用 agent 循环和**一个**业务领域(企业 LAN 思科)绑死。加第二个领域(数据中心 fabric)、或跑一个纯助手(无业务),都得改框架文件。
+
+Profile 把这个反过来:框架只认"加载当前 profile",不认 LAN/DC。依赖箭头 **框架 → profiles**,绝不反向。
+
+### 12.2 三个 profile
+
+| Profile | tools | skills | 用途 |
+|---------|-------|--------|------|
+| `default` | 0 | 0 | 纯助手 + 通用 meta 工具。**解耦证明**:框架能在 default 上跑起来,就说明 runtime/a2a/hitl_core 没有偷偷依赖某个业务领域 |
+| `lan` | 20 | 7 | 企业 LAN:思科交换机/AP/内部防火墙(从旧 mock_tools.py 迁移)|
+| `dc` | 7 | 3 | 数据中心 fabric:spine/leaf VXLAN、BGP EVPN、负载均衡、k8s overlay |
+
+`AGENT_PROFILE` 环境变量(或 config.yaml `agent.profile`)选择,默认 `default`。
+
+### 12.3 角色隔离(这是重点)
+
+`lan` agent 的 tool registry 只有 LAN 工具;`dc` agent 只有 DC 工具。LAN agent 发 `[TOOL:dc_bgp_evpn_status]` 会收到 "tool not found"(runtime 的 fuzzy-match 提示)。跨域唯一办法是**委派**给 peer agent(Phase 2B)。Profile 是前提:没有隔离的工具集,委派毫无意义(每个 agent 本来就啥都有)。
+
+`scripts/audit_profiles.py` 静态强制:(1) 每个 profile 的 callable/metadata key 对齐;(2) 业务 profile 之间工具/skill 名不重叠;(3) default 零业务;(4) 框架不 hard-import `profiles.lan`/`profiles.dc`;(5) **每个 `ToolLoader(`/`SkillLoader(` 调用必须显式传 `profile=`** —— 漏传会静默退化成空的 default profile,这个 bug 反复出现过 5+ 次(webui 重建 ×3、llm_engine fallback ×2、schema registry、retriever corpus),audit 现在从根上挡住。
+
+### 12.4 通用 vs 业务的切分
+
+| 关切 | 住在 | 为什么 |
+|------|------|--------|
+| `read_stored_result` / `process_stored_chunks` | `tools/common_tools.py` + `tools/builtin/registry.py` | 大结果分页机制,每个 profile 都要 |
+| `_ts()` | `tools/common_tools.py` | mock 日志生成器跨 profile 共用 |
+| `list_devices` 等 | `profiles/lan/` | LAN 业务 |
+| `dc_bgp_evpn_status` 等 | `profiles/dc/` | DC 业务 |
+| `ToolLoader`/`SkillLoader` | `tools/`/`skills/` | 框架,profile 无关 |
+
+### 12.5 本地双 agent A2A 验证(角色隔离)
+
+```bash
+# Terminal 1 — LAN agent
+AGENT_PROFILE=lan AGENT_ID=lan-agent AGENT_DISPLAY_NAME="LAN Agent" \
+  AGENT_PEERS="http://localhost:8001/api/v1/a2a" \
+  uvicorn main:app --port 8000
+
+# Terminal 2 — DC agent
+AGENT_PROFILE=dc AGENT_ID=dc-agent AGENT_DISPLAY_NAME="DC Agent" \
+  AGENT_PEERS="http://localhost:8000/api/v1/a2a" \
+  uvicorn main:app --port 8001
+
+# 验证工具隔离:
+curl -s http://localhost:8000/api/v1/a2a/.well-known/agent-card.json | jq '.skills[].id'
+#   → lan_diagnose / lan_config / lan_observability
+curl -s http://localhost:8001/api/v1/a2a/.well-known/agent-card.json | jq '.skills[].id'
+#   → dc_fabric_diagnose / dc_fabric_config / dc_loadbalancer
+
+# 互相发现(Phase 1):
+curl -s http://localhost:8000/webui/system/peers | jq '{self:.self.agent_id, peers:[.peers[].agent_id]}'
+#   → {"self":"lan-agent","peers":["dc-agent"]}
+```
+
+### 12.6 已知限制(见 TODO.md)
+
+- **pragmatic 模式未按 profile 切分**:真实设备工具(`tools/pragmatic_tools.py`)无视 profile 全量加载。DC agent 在 pragmatic 模式仍会拿到 LAN Netmiko 工具。延后处理 —— A2A 验证用的是 mock 模式。
+- **内置 netops MCP/OpenAPI mock 现在按 profile 门控**:`netops` MCP server + `netops_api` OpenAPI mock 是 LAN 业务集成(`get_device_status`/`get_devices` 等),只在 `profile=lan`(或 pragmatic 模式有显式配置)时加载。DC/default profile 不再混入这些 LAN 工具。后续若 DC 需要自己的 MCP/OpenAPI,应做 per-profile 集成声明。
+- **Phase 2B(委派)未接线**:profile 给了隔离,利用隔离做跨 agent dispatch 是下一步。
+
+### 12.7 每-agent 数据隔离(2026-05)
+
+profile 隔离了**工具**,但早期所有 agent 共用一个 `data/` 目录 —— DC agent 会读到 LAN agent 的记忆/会话/演化 skill,两个同时跑还会互相覆写数据库。现在每个 `agent_id` 有独立数据子树。
+
+**解析逻辑**(`cfg.agent_data_dir()`):
+```
+优先级:
+  1. AGENT_DATA_DIR 环境变量(显式覆盖,最高)
+  2. <memory.data_dir>/agents/<agent_id>/   (默认布局)
+```
+
+**每-agent 状态**(全部路由到 `data/agents/<agent_id>/`):
+
+| 状态 | 路径 | 内容 |
+|------|------|------|
+| Memory | `memory/memory.db` + `memory/tool_cache/` | facts、sessions、user model |
+| ToolResultStore | `tool_results.db` | 大工具输出缓存 |
+| HITL checkpoint | `hitl_checkpoints.db` | pending 审批(operator 显式配 `hitl.checkpoint.sqlite_path` 仍可覆盖)|
+| 演化 skills | `skills/*.md` | SkillEvolver 自动生成 |
+
+**共享只读 fixtures**(留在 `data/`,**不**迁移):`golden_set.jsonl`、`tool_compliance_set.jsonl`(A/B compliance bench 用,跨 agent 共享)。
+
+**两个 agent 的实际布局**:
+```
+data/
+├── golden_set.jsonl              ← 共享
+├── tool_compliance_set.jsonl     ← 共享
+└── agents/
+    ├── lan-agent/
+    │   ├── memory/{memory.db, tool_cache/}
+    │   ├── tool_results.db
+    │   ├── hitl_checkpoints.db
+    │   └── skills/
+    └── dc-agent/
+        ├── memory/{memory.db, tool_cache/}
+        ├── tool_results.db
+        ├── hitl_checkpoints.db
+        └── skills/
+```
+
+**从旧单-agent 状态迁移**:`./scripts/migrate_data_to_agent.sh <agent_id>` 把共享 `data/` 里的每-agent 状态移进 `data/agents/<agent_id>/`,保留共享 fixtures。详见下方迁移指导。

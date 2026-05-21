@@ -73,6 +73,15 @@ async def build_services() -> dict[str, Any]:
     services: dict[str, Any] = {}
     _print_banner()
 
+    # ── Per-agent data isolation (2026-05) ──────────────────────────────
+    # Resolve this agent's private data root ONCE, up front, so every
+    # component below (memory, HITL checkpoints, tool-result cache, evolved
+    # skills, journal) writes under data/agents/<agent_id>/ instead of the
+    # shared data/. Two agents (lan / dc) running from the same image then
+    # never read each other's facts or overwrite each other's databases.
+    _agent_data_dir = cfg.agent_data_dir()
+    logger.info("Agent data dir: %s (agent_id=%s)", _agent_data_dir, cfg.agent.agent_id)
+
     # ── 0. Observability / tracing (Sprint-3-pre, 2026-05) ──────────────
     # Initialize OpenTelemetry BEFORE building anything else so any
     # spans created during component init are captured. Defaults OFF
@@ -95,8 +104,11 @@ async def build_services() -> dict[str, Any]:
     # MemoryAdapter for async + per-operator scoping.
     # Multi-user isolated, SQLite WAL persistent, 311 unit tests.
     from memory import MemoryAdapter
+    # Per-agent data isolation: each agent_id gets its own data subtree
+    # (resolved at the top of build_services). Shared read-only fixtures
+    # stay at cfg.memory.data_dir.
     memory_router = MemoryAdapter(
-        data_dir          = cfg.memory.data_dir,
+        data_dir          = _agent_data_dir + "/memory",
         inline_threshold  = 4_000,
         session_ttl       = 86_400,
         enable_user_model = True,
@@ -149,7 +161,13 @@ async def build_services() -> dict[str, Any]:
             hitl_store = RedisCheckpointStore(redis_url=_redis_url)
         elif _cp_backend == "sqlite":
             from hitl_core import SqliteCheckpointStore
-            _sq_path = (_cp_cfg.sqlite_path if _cp_cfg else None) or "data/hitl_checkpoints.db"
+            # Default lives under the per-agent data dir so each agent's
+            # pending approvals are isolated. An explicit hitl.checkpoint.
+            # sqlite_path in config still wins (operator override).
+            _default_hitl_db = _agent_data_dir + "/hitl_checkpoints.db"
+            _sq_path = (_cp_cfg.sqlite_path if _cp_cfg and _cp_cfg.sqlite_path
+                        and _cp_cfg.sqlite_path != "data/hitl_checkpoints.db"
+                        else None) or _default_hitl_db
             hitl_store = SqliteCheckpointStore(db_path=_sq_path)
         else:
             hitl_store = InMemoryCheckpointStore()
@@ -234,6 +252,37 @@ async def build_services() -> dict[str, Any]:
     # AgentCard now carries this agent's identity (agent_id, capabilities)
     # so peers see who we are. Identity defaults reproduce the legacy
     # single-agent behaviour when cfg.agent is unset in yaml.
+    #
+    # 2A profile enrichment: if the operator didn't hand-write capabilities
+    # / display_name / description in config, fill them from the active
+    # business profile so each profile advertises a sensible identity to
+    # peers without yaml boilerplate. Operator-set values always win.
+    try:
+        from profiles import load_profile
+        from config import AgentSkillSpec as _AgentSkillSpec
+        _profile = load_profile(cfg.agent.profile)
+        if not cfg.agent.capabilities and _profile.capabilities:
+            cfg.agent.capabilities = [
+                _AgentSkillSpec(
+                    skill_id    = c.get("skill_id", ""),
+                    name        = c.get("name", ""),
+                    description = c.get("description", ""),
+                    tags        = list(c.get("tags", [])),
+                )
+                for c in _profile.capabilities if c.get("skill_id")
+            ]
+        # Only override display_name/description if still at the dataclass
+        # defaults (operator didn't customise them).
+        if cfg.agent.display_name in ("", "IT Ops Agent") and _profile.display_name:
+            cfg.agent.display_name = _profile.display_name
+        logger.info(
+            "Profile %r active: %d business tool(s), %d capability(ies)",
+            cfg.agent.profile, len(_profile.tool_callables),
+            len(cfg.agent.capabilities),
+        )
+    except Exception as _prof_exc:
+        logger.warning("Profile enrichment failed: %s", _prof_exc)
+
     own_card = get_agent_card(cfg.server.a2a_base_url, identity=cfg.agent)
     # Peer URLs come from BOTH places for backwards compat:
     #   1. cfg.registry.agent_urls (legacy single-list)
@@ -304,7 +353,7 @@ async def build_services() -> dict[str, Any]:
         from tools import make_read_stored_result_tool
         from runtime import ToolResultStore
 
-        tool_store = ToolResultStore()
+        tool_store = ToolResultStore(db_path=_agent_data_dir + "/tool_results.db")
         services["tool_store"] = tool_store
 
         # 6a. LLM engine — always real (both modes).
@@ -430,7 +479,7 @@ async def build_services() -> dict[str, Any]:
         # ToolLoader assembles: builtin tools + mode-specific tools (mock XOR pragmatic).
         # No tool name is hardcoded here or in llm_engine — metadata comes from registries.
         from tools.loader import ToolLoader as _ToolLoader
-        _loader = _ToolLoader(mode=cfg.mode)
+        _loader = _ToolLoader(mode=cfg.mode, profile=cfg.agent.profile)
         read_stored_fn, process_chunks_fn = make_read_stored_result_tool(tool_store)
         tool_registry_local = _loader.build_callables()
         tool_registry_local["read_stored_result"]    = read_stored_fn
@@ -440,13 +489,31 @@ async def build_services() -> dict[str, Any]:
         logger.info("ToolLoader[%s]: %d tools assembled", cfg.mode, len(tool_registry_local))
 
         # 6d. MCP client
-        mcp_client = await _build_mcp_client(MCPClient)
-        await mcp_client.connect_all()
-        services["mcp_client"] = mcp_client
+        # The built-in "netops" mock MCP server + "netops_api" OpenAPI mock are
+        # LAN-business integrations (get_device_status, get_devices, …). They
+        # must NOT load for non-LAN profiles, or a dc/default agent would gain
+        # LAN device tools and break role isolation. Only the lan profile (or
+        # pragmatic mode with explicitly-configured real servers) wires them.
+        # Tracked: when dc needs its own MCP/OpenAPI, declare per-profile
+        # integration config (TODO.md "profile integrations").
+        _profile_id = (cfg.agent.profile or "default").strip().lower()
+        _load_builtin_netops = (_profile_id == "lan") or cfg.is_pragmatic
+        mcp_client = None
+        api_client = None
+        if _load_builtin_netops:
+            mcp_client = await _build_mcp_client(MCPClient)
+            await mcp_client.connect_all()
+            services["mcp_client"] = mcp_client
 
-        # 6e. OpenAPI client (mock in both modes unless explicitly configured)
-        api_client = await _build_openapi_client(OpenAPIClient)
-        services["api_client"] = api_client
+            # 6e. OpenAPI client (mock in both modes unless explicitly configured)
+            api_client = await _build_openapi_client(OpenAPIClient)
+            services["api_client"] = api_client
+        else:
+            logger.info(
+                "Profile %r: skipping built-in netops MCP+OpenAPI mock "
+                "(LAN-business integrations; not loaded for this profile)",
+                _profile_id,
+            )
 
         # 6f. Pragmatic extra MCP servers
         extra_mcp_clients = []
@@ -455,7 +522,8 @@ async def build_services() -> dict[str, Any]:
 
         # 6g. ToolRouter
         router = ToolRouter(tool_store=tool_store)
-        router.register_mcp(mcp_client)
+        if mcp_client is not None:
+            router.register_mcp(mcp_client)
         for ec in extra_mcp_clients:
             router.register_mcp(ec)
         if api_client:
@@ -560,7 +628,7 @@ async def build_services() -> dict[str, Any]:
         # the loader only returns skills valid for the current mode.
         try:
             from skills import SkillCatalogService, SkillLoader
-            _skill_loader = SkillLoader(mode=cfg.mode)
+            _skill_loader = SkillLoader(mode=cfg.mode, profile=cfg.agent.profile)
             _skill_defs   = _skill_loader.skill_definitions()
             services["skill_loader"] = _skill_loader
             _skill_catalog = SkillCatalogService()
@@ -593,7 +661,11 @@ async def build_services() -> dict[str, Any]:
                 # Fallback: call() takes (user, system, state)
                 return await llm_engine.call(user, system, state=None)
 
-            _skills_dir = _os.getenv("HERMES_DATA_DIR", "./data")
+            # Evolved skills are per-agent state (an LAN agent shouldn't
+            # inherit a DC agent's auto-evolved skills), so they live under
+            # the agent's private data dir. The golden set used by the A/B
+            # bench below is a SHARED fixture and stays at data/.
+            _skills_dir = _agent_data_dir
             _skill_evolver = SkillEvolver(
                 catalog    = services["skill_catalog"],
                 llm_fn     = _async_llm_for_skills,
@@ -632,7 +704,9 @@ async def build_services() -> dict[str, Any]:
                 from evaluation.tool_compliance_types import ToolCallCase
                 import json as _json_skbench
 
-                _golden_path = _pl.Path(_skills_dir) / ".." / "tool_compliance_set.jsonl"
+                # Compliance golden set is a SHARED fixture (not per-agent).
+                # Look in the base data dir, not the agent's private subtree.
+                _golden_path = _pl.Path(cfg.memory.data_dir or "./data") / "tool_compliance_set.jsonl"
                 if not _golden_path.exists():
                     _golden_path = _pl.Path("data/tool_compliance_set.jsonl")
 
@@ -792,7 +866,7 @@ async def build_services() -> dict[str, Any]:
             # 3) Local tool metadata (dict format) — last so overrides auto-imports
             try:
                 from tools.loader import ToolLoader as _TL
-                _meta = _TL(mode=cfg.mode).build_metadata()
+                _meta = _TL(mode=cfg.mode, profile=cfg.agent.profile).build_metadata()
                 for tool_name, tool_meta in _meta.items():
                     schema_reg.register(from_dict_metadata(tool_name, tool_meta))
                     n_dict += 1
@@ -1000,9 +1074,9 @@ async def build_services() -> dict[str, Any]:
             # Build the corpora.  Tool metadata: prefer the live ToolLoader
             # used at startup; skill defs come from the same source.
             from tools.loader import ToolLoader as _TL
-            _tool_meta = _TL(mode=cfg.mode).build_metadata()
+            _tool_meta = _TL(mode=cfg.mode, profile=cfg.agent.profile).build_metadata()
             from skills import SkillLoader as _SL
-            _skill_defs = _SL(mode=cfg.mode).skill_definitions()
+            _skill_defs = _SL(mode=cfg.mode, profile=cfg.agent.profile).skill_definitions()
 
             # Choose async or sync indexing path based on backend + embedder presence.
             # Async path: bounded-concurrency batched embed() calls, ~5-10x faster

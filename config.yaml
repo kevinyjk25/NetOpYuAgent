@@ -315,7 +315,18 @@ auth:
 # deployments keep working without changing this section.
 agent:
   agent_id:     "default-agent"           # stable id (registry key, trace tag)
-  display_name: "IT Ops Agent"            # human label shown in WebUI
+  # Business profile — selects which domain tools/skills load and which
+  # capabilities are advertised. One of: default | lan | dc.
+  #   default — no business tools/skills (pure assistant + common meta tools)
+  #   lan     — enterprise LAN (Cisco switches / APs / internal firewalls)
+  #   dc      — data-center fabric (spine/leaf, BGP EVPN, VXLAN, load balancers)
+  # Env override: AGENT_PROFILE. Defaults to "default" so a fresh boot has
+  # NO business logic — proving the framework/business decoupling. To run
+  # two role-isolated agents locally for A2A:
+  #   AGENT_PROFILE=lan AGENT_ID=lan-agent ... uvicorn main:app --port 8000
+  #   AGENT_PROFILE=dc  AGENT_ID=dc-agent  ... uvicorn main:app --port 8001
+  profile:      "default"
+  display_name: "IT Ops Agent"            # human label; profile fills this if left default
   description: >
     Intelligent IT operations agent — alert analysis, incident
     management, trend prediction, multi-dataset correlation.

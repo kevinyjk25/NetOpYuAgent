@@ -55,11 +55,170 @@ from .schema import (
     HitlBatch,
     HitlDecision,
     HitlPayload,
+    InterruptMode,
     InterruptState,
 )
 from .store import BaseCheckpointStore
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Async HITL registry (2026-05)
+# ---------------------------------------------------------------------------
+#
+# Maps interrupt_id → AsyncPendingHitl (defined in pipeline.py). Populated
+# by PipelineContext.request_approval_async() when the caller fires a
+# fire-and-forget HITL. The router's _dispatch consults this map BEFORE
+# trying the in-process waiter / resumer paths — for ASYNC interrupts the
+# producer has already proceeded with a default and is not awaiting any
+# future.
+#
+# This is a module-level dict because:
+#   - Async pending state must outlive the PipelineContext that created it
+#     (the pipeline keeps running, hits the end-of-query exit, then operator
+#     decides 2 minutes later → ctx is long gone, but registry persists)
+#   - HitlRouter is a singleton per-process; using its instance attribute
+#     would force every async caller to fish out the router from services
+#   - We never need cross-process state for this (each replica runs its
+#     own async HITLs; if needed, future redis-backed registry can replace
+#     this dict)
+#
+# Entries are removed by claim_async_pending() — called by BOTH the operator
+# decision path (deliver → _dispatch path 0.5) and the SLA watchdog armed in
+# register_async_pending(). Whichever claims first owns the resolution; the
+# other gets None and no-ops. So entries never leak: an un-decided interrupt
+# is reclaimed when its SLA watchdog fires on_resolved(None). Entries are
+# small; a size cap on the inject queue (runtime/loop.py) bounds the
+# downstream fact accumulation for dead sessions.
+_async_registry: dict[str, "AsyncPendingHitl"] = {}   # type: ignore[name-defined]
+
+# Guards _async_registry mutations so the two resolution paths — operator
+# decision (via deliver) and SLA timeout (via the watchdog task) — can never
+# both fire on_resolved for the same interrupt. Whoever claim_async_pending()
+# returns the record to "owns" the resolution; the loser gets None and stops.
+# A plain (non-async) lock is enough because every mutation is a tiny dict op
+# with no await inside the critical section.
+import threading as _threading
+_async_registry_lock = _threading.Lock()
+
+
+def claim_async_pending(interrupt_id: str):
+    """Atomically remove and return the AsyncPendingHitl for interrupt_id.
+
+    Returns the record to exactly ONE caller; every subsequent call returns
+    None. This is the single synchronization point that prevents the
+    operator-decision path and the SLA-timeout path from both invoking
+    on_resolved (the double-fire race fixed 2026-05).
+
+    Safe to call from any task/thread — guarded by a plain lock around a
+    dict pop (no await inside).
+    """
+    with _async_registry_lock:
+        return _async_registry.pop(interrupt_id, None)
+
+
+def register_async_pending(
+    pending: "AsyncPendingHitl",          # type: ignore[name-defined]
+    *,
+    store=None,
+    on_audit=None,
+) -> None:
+    """Register a fire-and-forget HITL and arm its SLA timeout.
+
+    This is the SINGLE entry point every async-HITL producer must use
+    (tools, skills, PipelineContext.request_approval_async). It guarantees
+    two invariants that were previously easy to miss:
+
+      1. The record lands in `_async_registry` under the registry lock.
+      2. An SLA watchdog is armed so that, if no operator decides within
+         `pending.sla_seconds`, on_resolved(decision=None) fires exactly
+         once and the registry entry is reclaimed. Without this, a producer
+         that inserted directly into the registry (e.g. the H2 demo tool)
+         leaked the entry forever when no decision and no demo-autoreply
+         arrived — Bug 2, 2026-05.
+
+    Both the timeout path here and the operator path in deliver() resolve
+    ownership via claim_async_pending(), so on_resolved fires at most once.
+
+    Args:
+        pending: the AsyncPendingHitl record (interrupt_id, payload,
+                 default_value, on_resolved, sla_seconds, session_id).
+        store:   optional BaseCheckpointStore — when provided, the watchdog
+                 also flips the checkpoint PENDING → EXPIRED on timeout so
+                 /hitl/pending stops listing it. Pass services["hitl_store"].
+        on_audit: optional async (kind, interrupt_id, detail) -> None hook;
+                 when provided the watchdog emits ASYNC_TIMEOUT on timeout.
+    """
+    iid = pending.interrupt_id
+    with _async_registry_lock:
+        _async_registry[iid] = pending
+
+    sla = int(getattr(pending, "sla_seconds", 0) or 0)
+    if sla <= 0:
+        # No SLA → no watchdog (caller explicitly opted out). The entry will
+        # be reclaimed only by an operator decision.
+        return
+
+    async def _sla_watchdog() -> None:
+        try:
+            await asyncio.sleep(float(sla))
+        except asyncio.CancelledError:
+            return
+        # Claim ownership — if the operator already decided, this is None
+        # and we do nothing (no double-fire).
+        claimed = claim_async_pending(iid)
+        if claimed is None:
+            return
+        # Flip the checkpoint to EXPIRED so the pending list drops it.
+        if store is not None:
+            try:
+                from .schema import InterruptState
+                e = await store.load(iid)
+                if e is not None and e.state == InterruptState.PENDING:
+                    e.state = InterruptState.EXPIRED
+                    await store.save(e)
+            except Exception as _store_exc:
+                logger.warning(
+                    "async SLA watchdog: store EXPIRED update failed for %s: %s",
+                    iid, _store_exc,
+                )
+        # Fire on_resolved(None) → caller writes a "timed out, used default"
+        # fact. diverged=True because "no answer" is informative to the op.
+        try:
+            await claimed.on_resolved(
+                iid, None, claimed.default_value, True,
+            )
+        except Exception as _cb_exc:
+            logger.exception(
+                "async SLA watchdog: on_resolved(timeout) failed for %s: %s",
+                iid, _cb_exc,
+            )
+        # Audit the timeout if a hook was provided.
+        if on_audit is not None:
+            try:
+                from .schema import AuditEventKind
+                await on_audit(
+                    AuditEventKind.ASYNC_TIMEOUT, iid,
+                    {"sla_seconds": sla,
+                     "default_value": str(claimed.default_value)[:200]},
+                )
+            except Exception:
+                pass
+        logger.info("async SLA watchdog: %s timed out after %ds", iid, sla)
+
+    try:
+        asyncio.get_running_loop().create_task(
+            _sla_watchdog(), name=f"async_hitl_sla_{iid[:12]}",
+        )
+    except RuntimeError:
+        # No running loop (e.g. constructed in a sync test). The caller is
+        # responsible for arming the timer in that case; registry insert
+        # still happened so an operator decision can still resolve it.
+        logger.debug(
+            "register_async_pending: no running loop, SLA watchdog not armed "
+            "for %s (registry insert succeeded)", iid,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -448,6 +607,72 @@ class HitlRouter:
                 )
                 # Fall through to other paths so the operator's
                 # decision isn't silently dropped on a coordinator bug.
+
+        # Path 0.5 — async pending (H2 fire-and-forget; 2026-05).
+        # The producer is NOT awaiting any future — it proceeded with
+        # a default value. We invoke the on_resolved callback, which is
+        # responsible for merging the actual decision back into agent
+        # state (typically by writing a confirmed_fact via the runtime's
+        # turn-start drain).
+        #
+        # Ownership is claimed ATOMICALLY up front via claim_async_pending()
+        # so the SLA watchdog (which claims the same way) can never also
+        # fire on_resolved — fixes the double-fire race where the registry
+        # was popped only AFTER awaiting on_resolved, leaving a window for
+        # the timeout task to grab the same entry (Bug 1, 2026-05).
+        if entry.payload.interrupt_mode == InterruptMode.ASYNC_NONBLOCKING:
+            pending = claim_async_pending(decision.interrupt_id)
+        else:
+            pending = None
+        if pending is not None:
+            # Compute divergence using caller-supplied check, or default
+            # to "anything not APPROVE = diverged" so partial answers /
+            # rejects / edits all trigger the soft-notify path.
+            try:
+                if pending.divergence_check is not None:
+                    diverged = bool(pending.divergence_check(
+                        pending.default_value, decision,
+                    ))
+                else:
+                    diverged = decision.decision != DecisionKind.APPROVE
+            except Exception as _div_exc:
+                # Bad check — log + treat as diverged (safer than silent
+                # "no divergence" which would skip the notify path).
+                logger.warning(
+                    "Async divergence_check raised for %s: %s — "
+                    "treating as diverged",
+                    decision.interrupt_id, _div_exc,
+                )
+                diverged = True
+
+            try:
+                await pending.on_resolved(
+                    pending.interrupt_id, decision,
+                    pending.default_value, diverged,
+                )
+            except Exception as _cb_exc:
+                logger.exception(
+                    "Async on_resolved callback failed for %s: %s",
+                    decision.interrupt_id, _cb_exc,
+                )
+                await self._emit_audit(
+                    AuditEventKind.EXECUTION_FAILED,
+                    decision.interrupt_id,
+                    {"path": "async_resolved", "error": str(_cb_exc)},
+                )
+                # Ownership already claimed — no retry will re-invoke
+                # side-effects (the registry entry is gone).
+
+            await self._emit_audit(
+                AuditEventKind.ASYNC_RESOLVED,
+                decision.interrupt_id,
+                {
+                    "decision":      decision.decision.value,
+                    "diverged":      diverged,
+                    "default_value": str(pending.default_value)[:200],
+                },
+            )
+            return {"async_resolved": True, "diverged": diverged}
 
         # Path 1 — in-process waiter (pipeline still alive)
         async with self._waiter_lock:

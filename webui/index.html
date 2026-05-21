@@ -1646,6 +1646,81 @@ function _renderMermaidIn(rootEl) {
   } catch(_e) {}
 }
 
+// ── Async HITL (H2) soft-notify card (2026-05) ─────────────────────────
+// Rendered when backend emits a chunk of type 'async_hitl_resolved' on
+// the live SSE stream. Shows what the operator decided (or that it timed
+// out), whether it diverges from the agent's assumption, and provides
+// two actions:
+//   - [让 agent 重新分析] — re-sends a follow-up query that includes
+//     the fresh fact so the LLM can revise its previous answer.
+//   - [我已处理,忽略]   — acknowledges + collapses the card. The fact
+//     is still injected into confirmed_facts so future turns see it.
+function renderAsyncHitlNotify(c) {
+  const tool       = c.tool || 'async tool';
+  const outcome    = c.outcome || '?';
+  const diverged   = !!c.diverged;
+  const fact       = c.fact || '';
+  const userId     = c.user_id || '';
+  const defaultVal = c.default_value || '';
+  const interruptId = c.interrupt_id || '';
+
+  const headline = diverged
+    ? `🔔 异步 HITL 结果回合 — 与假设有分歧`
+    : `🔔 异步 HITL 结果回合 — 确认假设`;
+  const headlineCls = diverged ? 'metric-warn' : 'metric-blue';
+
+  const subText = outcome === 'timeout'
+    ? `工具 <code>${esc(tool)}</code> 在 SLA 内未收到响应,已使用默认值 <code>${esc(defaultVal)}</code> 继续。`
+    : (diverged
+        ? `工具 <code>${esc(tool)}</code> 的操作员决策 (<b>${esc(outcome)}</b>) 与 agent 假设的 <code>${esc(defaultVal)}</code> 不一致。`
+        : `工具 <code>${esc(tool)}</code> 的操作员决策与 agent 假设一致 (<code>${esc(outcome)}</code>)。`);
+
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap';
+  wrap.innerHTML = `
+    <div class="avatar avatar-sys" style="background:#553;">🔔</div>
+    <div class="msg-body">
+      <div class="msg-meta">async hitl · ${esc(tool)} · ${ts()}</div>
+      <div class="bubble" style="border-left:4px solid #d97706; background:#1f1a12;">
+        <div class="${headlineCls}" style="font-weight:600; margin-bottom:6px;">${headline}</div>
+        <div style="margin-bottom:8px; font-size:13px; color:#cbd5e1;">${subText}</div>
+        ${userId ? `<div style="font-size:12px; color:#94a3b8;">user_id: <code>${esc(userId)}</code></div>` : ''}
+        <div style="font-size:12px; color:#94a3b8; margin-top:4px;">
+          interrupt: <code>${esc(interruptId.slice(0,12))}…</code>
+        </div>
+        <div style="margin-top:8px; padding:8px; background:#0f172a; border-radius:4px; font-family:monospace; font-size:12px; white-space:pre-wrap; color:#e2e8f0;">${esc(fact)}</div>
+        ${diverged ? `
+          <div style="margin-top:10px; display:flex; gap:8px;">
+            <button class="btn btn-primary" style="padding:4px 12px; font-size:12px;"
+                    data-fact="${esc(fact)}"
+                    onclick="reanalyzeWithFact(this.dataset.fact)">
+              让 agent 重新分析
+            </button>
+            <button class="btn" style="padding:4px 12px; font-size:12px; background:#374151; color:#e2e8f0;"
+                    onclick="this.closest('.msg-wrap').style.opacity='0.5'; this.closest('.msg-wrap').querySelector('.bubble').innerHTML += '<div style=\\'margin-top:8px; font-size:11px; color:#94a3b8;\\'>(已忽略 — 事实已注入下次对话)</div>'; this.remove(); this.previousElementSibling?.remove();">
+              我已处理,忽略
+            </button>
+          </div>
+        ` : ''}
+      </div>
+    </div>`;
+  const msgs = document.getElementById('messages');
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+  return wrap;
+}
+
+// Helper: re-send query with the new async fact prepended so LLM revises.
+function reanalyzeWithFact(factText) {
+  const reanalyzeQuery = `异步 HITL 结果回来了:${factText}\n\n请基于这条新信息重新分析上一个问题,你的之前结论可能需要修正。`;
+  const input = document.getElementById('query-input');
+  if (input) {
+    input.value = reanalyzeQuery;
+    // Trigger send
+    try { sendQuery(); } catch (e) { console.warn('reanalyzeWithFact: sendQuery failed', e); }
+  }
+}
+
 function addMessage(role, content, cls='') {
   const msgs = document.getElementById('messages');
   const avMap = {user:'YOU',agent:'AGT',system:'SYS'};
@@ -1871,6 +1946,16 @@ async function streamQuery(query, sid, body) {
 }
 
 function dispatchChunk(c, query, sid) {
+  // ── Async HITL (H2) resolved — show soft-notify banner (2026-05) ────
+  // Pushed by webui/backend.py:emit_async_hitl_notify when the operator
+  // (or demo auto-responder) decides on a fire-and-forget H2 interrupt.
+  // Doesn't replace the agent's answer — it sits as a separate notice
+  // card so the operator can choose whether to re-ask the agent with
+  // this new fact in mind.
+  if (c.type === 'async_hitl_resolved') {
+    renderAsyncHitlNotify(c);
+    return;
+  }
   if (c.type==='llm_trace') {
     const model   = c.model||'llm';
     const turn    = c.turn||'?';
@@ -2991,7 +3076,33 @@ Error: ${data.error}`,'system');
       switchTab('cache');
     } else if (dec==='approve') {
       // No tool_result returned — render synthesis as markdown if present.
-      if (data.synthesis) {
+      // ── H2 async-HITL follow-up (2026-05) ───────────────────────────
+      // backend's _submit_hitl_decision detected this was an async ack
+      // and ran a follow-up agent turn so the LLM could use the just-
+      // injected H2 fact. data.async_followup.answer is the final
+      // revised/confirmed answer. Render it as a fresh agent message.
+      if (data.async_followup) {
+        const fu = data.async_followup;
+        if (fu.error) {
+          addMessage('agent',
+            `🔔 **异步 HITL 已确认** — \`${id.slice(0,10)}…\`\n\n` +
+            `Agent follow-up failed: ${esc(fu.error)}\n\n` +
+            `事实已注入下次对话,你可以追问让 agent 用上。`,
+            'system');
+        } else {
+          const headline = fu.diverged
+            ? `🔔 **异步 HITL 已确认(与原假设有分歧)** — agent 已基于新事实重新分析:`
+            : `✓ **异步 HITL 已确认(符合原假设)** — agent 补充分析:`;
+          addMessage('agent',
+            headline + '\n\n' +
+            (fu.answer || '(agent returned an empty answer.)') +
+            (fu.elapsed_s ? `\n\n*(follow-up turn 用时 ${fu.elapsed_s}s)*` : ''),
+            'agent');
+          addStep('done', `✅ Async HITL follow-up complete`, '', `interrupt: ${id.slice(0,12)}`);
+          flowEvent('done', '✅ Async HITL follow-up complete', 'agent_loop', `interrupt: ${id.slice(0,12)}`);
+          setTimeout(loadSessions, 800);
+        }
+      } else if (data.synthesis) {
         addMessage('agent', data.synthesis, 'agent');
       } else if (isBatchPending) {
         // Batch path: tool execution still pending. Don't claim "approved"

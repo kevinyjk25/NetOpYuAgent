@@ -141,16 +141,24 @@ def register_system_routes(app: FastAPI, services: dict[str, Any]) -> None:
         peers_out = []
         own_id = cfg.agent.agent_id
         for a in agents:
-            # AgentEntry exposes agent_id, agent_url, health, skills (list of AgentSkill)
+            # AgentEntry holds the card under `.card`; the skills live at
+            # `a.card.skills` (each an AgentSkill with `.id`). Earlier this
+            # read `a.skills`, which AgentEntry does NOT have, so every peer
+            # showed "no capabilities advertised". Read the real path, with
+            # fallbacks for older/dynamic entries that may expose skills flat.
             a_id = getattr(a, "agent_id", "") or ""
             if a_id == own_id:
                 continue   # don't list self
-            skills_obj = getattr(a, "skills", []) or []
+            card = getattr(a, "card", None)
+            skills_obj = (
+                getattr(card, "skills", None)
+                or getattr(a, "skills", None)
+                or []
+            )
             caps = []
             for s in skills_obj:
-                # AgentSkill may have either `id` or `skill_id` depending on
-                # registry source — handle both.
-                sid = getattr(s, "skill_id", "") or getattr(s, "id", "")
+                # AgentSkill uses `.id`; some sources use `.skill_id`.
+                sid = getattr(s, "id", "") or getattr(s, "skill_id", "")
                 if sid:
                     caps.append(sid)
             health = getattr(a, "health", None)
@@ -159,10 +167,13 @@ def register_system_routes(app: FastAPI, services: dict[str, Any]) -> None:
                 else str(health) if health is not None
                 else "unknown"
             )
+            # Display name + url come from the card too.
+            _disp = (getattr(card, "name", "") if card else "") or a_id
+            _url = (getattr(card, "url", "") if card else "") or getattr(a, "agent_url", "")
             peers_out.append({
                 "agent_id":     a_id,
-                "agent_url":    getattr(a, "agent_url", ""),
-                "display_name": getattr(a, "agent_name", "") or a_id,
+                "agent_url":    _url,
+                "display_name": _disp,
                 "health":       health_val,
                 "capabilities": caps,
             })
