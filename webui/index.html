@@ -3502,9 +3502,24 @@ async function refreshDelegations() {
       // Detail panel — only render when expanded (avoids cluttering scan view)
       let detailHtml = '';
       if (expanded) {
-        const resultText = r.result
-          ? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 2))
-          : '';
+        // The peer returns result either as {text: "..."} (the common case,
+        // written by HitlExecutor._complete_inbound_delegation) or as a raw
+        // string (legacy). Show the text directly when we can; only fall
+        // back to JSON dump when the shape is unexpected — a raw JSON blob
+        // is unreadable for an operator who just wants to see the answer.
+        let resultText = '';
+        if (r.result) {
+          if (typeof r.result === 'string') {
+            resultText = r.result;
+          } else if (typeof r.result === 'object' && typeof r.result.text === 'string') {
+            resultText = r.result.text;
+          } else {
+            // Unknown shape — fall back to pretty-printed JSON so the
+            // operator at least sees the data, even if not formatted well.
+            try { resultText = JSON.stringify(r.result, null, 2); }
+            catch { resultText = String(r.result); }
+          }
+        }
         const dirLabel = isInbound
           ? `<span style="color:#fbbf24">Received from</span> <span style="color:var(--accent);font-family:var(--mono)">${peer}</span>`
           : `<span style="color:var(--accent)">Sent to</span> <span style="color:var(--accent);font-family:var(--mono)">${peer}</span>`;
@@ -3535,7 +3550,7 @@ async function refreshDelegations() {
             ${resultText ? `
               <div style="margin:6px 0 4px 0">
                 <div style="color:var(--accent);font-size:9px;text-transform:uppercase;letter-spacing:.4px">Result</div>
-                <pre style="color:var(--text);margin:2px 0 0 0;white-space:pre-wrap;word-break:break-word;font-size:10px;max-height:280px;overflow-y:auto">${_delEsc(resultText)}</pre>
+                <div style="color:var(--text);margin-top:4px;font-size:11px;line-height:1.6;font-family:inherit;max-height:380px;overflow-y:auto;padding:8px;background:var(--bg);border-radius:3px">${_renderMarkdown(resultText)}</div>
               </div>` : ''}
           </div>`;
       }

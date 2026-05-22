@@ -204,12 +204,75 @@ class A2ATaskDispatcher:
         # ignores for synthesis purposes but the parent SSE chunk_queue
         # counts as activity, so the request stays alive. heartbeat_s
         # is intentionally well under sse_stall_timeout_seconds.
-        async for chunk in _with_heartbeat(
-            self._stream_request(assignment.agent_url, body),
-            heartbeat_s = 30.0,
-            agent_id    = assignment.agent_id,
-        ):
-            yield chunk
+
+        # Accumulate the peer's token stream so we can write a meaningful
+        # `result` to the outbound TaskDefinition on completion. Without
+        # this, the LAN-side Delegations tab shows a task stuck in RUNNING
+        # forever even after the peer is done (observed 2026-05).
+        _result_parts: list[str] = []
+        _peer_hitl    = False
+        _peer_error: Optional[str] = None
+        _stream_ok    = True
+        try:
+            async for chunk in _with_heartbeat(
+                self._stream_request(assignment.agent_url, body),
+                heartbeat_s = 30.0,
+                agent_id    = assignment.agent_id,
+            ):
+                # Mirror what runtime/loop.py:_handle_delegate does for its
+                # _result_parts accumulator, in case the runtime loop isn't
+                # involved (some callers consume dispatcher directly).
+                if isinstance(chunk, dict):
+                    if chunk.get("type") == "hitl_interrupt" or chunk.get("hitl_interrupt"):
+                        _peer_hitl = True
+                    if chunk.get("error"):
+                        _peer_error = str(chunk["error"])
+                    tok = chunk.get("token") or chunk.get("message") or ""
+                    if tok:
+                        _result_parts.append(str(tok))
+                yield chunk
+        except Exception as exc:
+            _stream_ok = False
+            _peer_error = str(exc) or type(exc).__name__
+            # Re-raise so callers (delegate_fn's try/except) can also see it
+            raise
+        finally:
+            # Update terminal state on the outbound TaskDefinition so the
+            # LAN-side Delegations tab transitions away from RUNNING. Done
+            # in finally so we always write SOMETHING — even on cancellation
+            # or unexpected exception — rather than leaving a ghost row.
+            try:
+                from datetime import datetime, timezone
+                _result_text = "".join(_result_parts).strip()
+                if _peer_error:
+                    task.state = TaskState.FAILED
+                    task.error = _peer_error[:500]
+                elif _peer_hitl:
+                    # Peer is awaiting operator approval — keep the task in
+                    # a non-terminal state so the UI shows "still pending"
+                    # (we don't have a dedicated AWAITING_HITL state).
+                    task.state = TaskState.PENDING
+                    task.metadata["peer_hitl_pending"] = True
+                elif _stream_ok:
+                    task.state = TaskState.COMPLETED
+                    if _result_text:
+                        task.result = {"text": _result_text}
+                else:
+                    task.state = TaskState.FAILED
+                task.completed_at = datetime.now(timezone.utc).isoformat()
+                await store.save(task)
+                await store.write_audit(TaskAuditRecord(
+                    task_id=task.task_id, session_id=task.session_id,
+                    event_kind=TaskEventKind.COMPLETED
+                        if task.state == TaskState.COMPLETED
+                        else TaskEventKind.FAILED,
+                    actor="a2a_dispatcher",
+                    payload={"state": task.state.value,
+                             "result_chars": len(_result_text),
+                             "error": _peer_error or ""},
+                ))
+            except Exception as _save_exc:
+                logger.debug("dispatcher terminal save failed: %s", _save_exc)
 
     async def _stream_request(
         self,
