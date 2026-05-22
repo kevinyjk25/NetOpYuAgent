@@ -150,6 +150,30 @@ class A2ATaskDispatcher:
             payload={"agent_url": assignment.agent_url, "skill_id": assignment.skill_id},
         ))
 
+        # Build the dispatch payload. We pack `task.metadata` (which carries
+        # delegated_by / forked / shared_facts_count, plus anything the
+        # caller put there) into params.metadata so the peer's
+        # agent_executor can read it from `context.metadata` and attach
+        # provenance to any HITL cards it creates. Without this, the peer
+        # has no way to know it's processing a delegation — the operator
+        # sees a bare approval card with no hint of who's upstream.
+        # task_id / session_id stay at the top level for compatibility
+        # with the peer-side keys that already exist; metadata
+        # spread comes last so it can't accidentally overwrite them.
+        _meta: dict[str, Any] = {
+            "task_id":    task.task_id,
+            "session_id": task.session_id,
+        }
+        # task.parameters can be empty; only spread when actually set
+        if task.parameters:
+            _meta.update(task.parameters)
+        # task.metadata carries delegated_by / forked / shared_facts_count
+        if task.metadata:
+            for _k, _v in task.metadata.items():
+                # Don't let metadata clobber our required keys
+                if _k not in ("task_id", "session_id"):
+                    _meta[_k] = _v
+
         body = {
             "jsonrpc": "2.0",
             "method":  "message/stream",
@@ -161,11 +185,7 @@ class A2ATaskDispatcher:
                     "parts": [{"kind": "text", "text": task.description}],
                 },
                 "context_id": task.context_id,
-                "metadata": {
-                    "task_id":    task.task_id,
-                    "session_id": task.session_id,
-                    **task.parameters,
-                },
+                "metadata": _meta,
             },
             "id": 1,
         }

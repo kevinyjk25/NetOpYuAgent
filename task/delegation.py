@@ -95,6 +95,8 @@ def build_delegate_fn(
         directive,
         session_id: str,
         shared_facts: list[str],
+        *,
+        original_query: str = "",
     ) -> AsyncIterator[dict]:
         assignment = await _resolve_assignment(directive)
         if assignment is None:
@@ -112,6 +114,11 @@ def build_delegate_fn(
         params: dict[str, Any] = {}
         if directive.forked and shared_facts:
             params["parent_confirmed_facts"] = list(shared_facts)
+        # metadata carries delegation provenance — the dispatcher embeds
+        # this in the A2A request's params.metadata so the peer's
+        # agent_executor can read it via context.metadata. Peer-side HITL
+        # cards pull source_agent / source_session_id / source_query from
+        # here. Keep keys stable; downstream code reads them by name.
         task = TaskDefinition(
             session_id=session_id,
             context_id=session_id,           # 1:1 for single-hop; Phase 3 may derive
@@ -119,9 +126,15 @@ def build_delegate_fn(
             assignment=assignment,
             parameters=params,
             metadata={
-                "delegated_by": own_agent_id,
-                "forked": directive.forked,
-                "shared_facts_count": len(shared_facts) if directive.forked else 0,
+                "delegated_by":         own_agent_id,
+                "forked":               directive.forked,
+                "shared_facts_count":   len(shared_facts) if directive.forked else 0,
+                # Provenance for peer-side HITL cards (Phase 2B+, 2026-05).
+                # Empty original_query is fine — peer simply skips the
+                # "原 query" banner row.
+                "source_agent":         own_agent_id,
+                "source_session_id":    session_id,
+                "source_query":         original_query or "",
             },
         )
 

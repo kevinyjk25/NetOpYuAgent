@@ -101,6 +101,15 @@ def register_hitl_routes(app: FastAPI, services: dict[str, Any]) -> None:
                     # that don't know about batches still render N independent
                     # cards as before; newer UIs can group on this key.
                     "batch_id":             _batch_id,
+                    # Cross-agent delegation provenance (Phase 2B+, 2026-05).
+                    # All three are None on user-initiated cards. When non-null,
+                    # this card was triggered inside a runtime loop processing
+                    # a [DELEGATE:] from `source_agent` — the UI should show a
+                    # "Delegated from <source_agent>" banner so the peer
+                    # operator knows who's waiting on this decision.
+                    "source_agent":         p.source_agent,
+                    "source_session_id":    p.source_session_id,
+                    "source_query":         p.source_query,
                 })
             # PERF-3: only log at INFO when there's actually something pending,
             # otherwise DEBUG to keep the log clean.

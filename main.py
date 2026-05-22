@@ -571,6 +571,20 @@ async def build_services() -> dict[str, Any]:
             services["executor"] = executor
             logger.info("A2A executor (core) constructed with %d tool(s)",
                         len(real_registry))
+            # Phase 2B+ (2026-05): wire the project's TaskStore into the
+            # executor so inbound A2A delegations get recorded — without
+            # this, dc-agent receives a [DELEGATE:] from lan-agent and
+            # processes it correctly, but the local Delegations tab shows
+            # nothing (it only reads task_system.store, which only had
+            # outbound entries before). The executor's set_task_store()
+            # is a no-op when task_system isn't built (e.g. minimal tests).
+            try:
+                _ts = services.get("task_system")
+                if _ts is not None and hasattr(_ts, "store"):
+                    executor.set_task_store(_ts.store)
+                    logger.info("HitlExecutor: task_store wired for inbound delegation recording")
+            except Exception as _ts_exc:
+                logger.warning("HitlExecutor: task_store wiring skipped: %s", _ts_exc)
             # Don't patch the langgraph hitl_graph — it doesn't exist in core mode.
             # Don't patch_runtime_loop(executor, ...) either — that's a legacy
             # path for executors that have their own internal AgentRuntimeLoop;

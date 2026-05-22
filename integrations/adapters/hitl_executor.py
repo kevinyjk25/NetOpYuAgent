@@ -97,6 +97,30 @@ def _derive_editable_keys(tool_name: str, tool_args: dict[str, Any]) -> list[str
     ]
 
 
+def _extract_delegation_provenance(
+    env_context: Optional[dict[str, Any]],
+) -> tuple[Optional[str], Optional[str], Optional[str]]:
+    """Pull delegation provenance fields from env_context.
+
+    Returns (source_agent, source_session_id, source_query). All three None
+    when this query was not delegated from a peer (the normal case for a
+    user-initiated request). When non-None, peer-side HITL cards display
+    a "Delegated from <agent>" banner so the operator knows who's upstream
+    and what the original user asked.
+
+    The fields originate in task/delegation.py's TaskDefinition.metadata,
+    travel over A2A in params.metadata, and are placed in env_context by
+    a2a/agent_executor.py before invoking the runtime loop.
+    """
+    if not env_context:
+        return (None, None, None)
+    return (
+        env_context.get("source_agent")      or None,
+        env_context.get("source_session_id") or None,
+        env_context.get("source_query")      or None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Destructive verb / clarification heuristics — kept here as IT-ops domain
 # concerns. Generic versions live in hitl_core.triggers; this is the
@@ -166,6 +190,17 @@ class HitlExecutor:
         # — see _batch_execute_after_resolution.
         self._skill_evolver = skill_evolver
 
+        # Task store for recording INBOUND delegations (Phase 2B+, 2026-05).
+        # When this executor handles an A2A request whose metadata carries
+        # source_agent (set by the dispatching peer's task/delegation.py),
+        # we write a TaskDefinition into task_store with metadata.direction
+        # = "inbound" so the local Delegations tab can show "I'm processing
+        # a request from <source_agent>". Out-of-band (deferred) wiring —
+        # main.py calls set_task_store() after services["task_system"] is
+        # constructed. Optional: if not wired, inbound recording silently
+        # no-ops, so HitlExecutor stays buildable without a task_system.
+        self._task_store = None
+
         # Register named resumers so the router can invoke us when
         # decisions arrive for interrupts whose pipeline isn't alive.
         # The "agent_loop_resumer" name is what producer code stamps
@@ -186,6 +221,17 @@ class HitlExecutor:
         unset if skill evolution is disabled.
         """
         self._skill_evolver = evolver
+
+    def set_task_store(self, task_store) -> None:
+        """Inject the project's TaskStore so inbound delegations get logged.
+
+        Deferred-wiring counterpart to ``task_system.store``. Called from
+        main.py after services["task_system"] is built. Optional — if
+        unset, ``_record_inbound_delegation`` no-ops (existing behavior).
+        Decoupled to keep HitlExecutor buildable from tests without a
+        live task_system, and to avoid making it import the task module.
+        """
+        self._task_store = task_store
 
     # NOTE: trust_mode lives in PolicyEngine, not in HitlExecutor —
     # runtime/loop.py decides whether to skip HITL gating, and runtime
@@ -363,6 +409,7 @@ class HitlExecutor:
                 interrupt_id = await self._raise_multi_mode(
                     kind=chunk["hitl_kind"],
                     chunk=chunk, query=query, session_id=session_id,
+                    env_context=env_context,
                 )
                 return {
                     "text":          full_text,
@@ -386,6 +433,7 @@ class HitlExecutor:
                         query=query, session_id=session_id,
                         confirmed_facts=confirmed_facts,
                         chunk=chunk,
+                        env_context=env_context,
                     )
                     # The batch is the "interrupt id" surfaced to caller —
                     # GET /hitl/batch/{id} lists children for the UI.
@@ -403,6 +451,7 @@ class HitlExecutor:
                     query=query, session_id=session_id,
                     confirmed_facts=confirmed_facts,
                     chunk=chunk,
+                    env_context=env_context,
                 )
                 return {
                     "text":          full_text,
@@ -433,6 +482,7 @@ class HitlExecutor:
         session_id: str,
         confirmed_facts: list[str],
         chunk: dict,
+        env_context: Optional[dict[str, Any]] = None,
     ) -> str:
         """Raise a destructive-tool-call HITL via hitl_core.
 
@@ -440,6 +490,11 @@ class HitlExecutor:
         editable_param_keys auto-derived. Registers a tool_call_resumer
         ResumeHandle so the actual tool execution happens on operator
         approval (with parameter_patch merged).
+
+        When env_context carries source_agent / source_session_id /
+        source_query (set by a2a/agent_executor.py from inbound A2A
+        metadata), the card is tagged as a peer-delegated HITL so the
+        operator UI can show "Delegated from <agent>" provenance.
         """
         editable_keys = chunk.get("editable_param_keys") or _derive_editable_keys(
             tool_name, tool_args,
@@ -447,6 +502,10 @@ class HitlExecutor:
 
         _target = str(tool_args.get("device_id") or tool_args.get("target") or "-")
         _intent = f"Agent proposes calling `{tool_name}` on `{_target}`"
+
+        _src_agent, _src_session, _src_query = _extract_delegation_provenance(
+            env_context,
+        )
 
         payload = HitlPayload(
             thread_id=session_id,
@@ -464,6 +523,9 @@ class HitlExecutor:
                 risk_level=RiskLevel.HIGH,
             ),
             editable_param_keys=editable_keys,
+            source_agent      = _src_agent,
+            source_session_id = _src_session,
+            source_query      = _src_query,
         )
         from hitl_core.schema import ResumeHandle
         entry = CheckpointEntry(
@@ -500,6 +562,7 @@ class HitlExecutor:
         session_id: str,
         confirmed_facts: list[str],
         chunk: dict,
+        env_context: Optional[dict[str, Any]] = None,
     ) -> str:
         """Raise a batch of N destructive-tool HITL interrupts that share
         a single batch_id, so the UI shows N pending cards at once and the
@@ -528,6 +591,12 @@ class HitlExecutor:
         # doesn't actually carry — that path raised AttributeError on every
         # batch HITL ('HitlExecutor' object has no attribute '_cfg'),
         # which silently broke multi-target destructive ops.
+        # Provenance is the same for every child in the batch (same parent
+        # delegation). Extract once outside the loop.
+        _src_agent, _src_session, _src_query = _extract_delegation_provenance(
+            env_context,
+        )
+
         child_entries: list[CheckpointEntry] = []
         for (n, a) in calls:
             _editable = _derive_editable_keys(n, a)
@@ -550,6 +619,9 @@ class HitlExecutor:
                     risk_level=RiskLevel.HIGH,
                 ),
                 editable_param_keys=_editable,
+                source_agent      = _src_agent,
+                source_session_id = _src_session,
+                source_query      = _src_query,
             )
             child_entries.append(CheckpointEntry(
                 interrupt_id=child_payload.interrupt_id,
@@ -1096,6 +1168,7 @@ class HitlExecutor:
         chunk: dict,
         query: str,
         session_id: str,
+        env_context: Optional[dict[str, Any]] = None,
     ) -> str:
         """Raise USER_CHOICE or CLARIFICATION HITL via hitl_core."""
         from hitl_core.schema import ResumeHandle
@@ -1117,6 +1190,11 @@ class HitlExecutor:
             TriggerKind.USER_CHOICE if kind == "user_choice"
             else TriggerKind.CLARIFICATION
         )
+
+        _src_agent, _src_session, _src_query = _extract_delegation_provenance(
+            env_context,
+        )
+
         payload = HitlPayload(
             thread_id=session_id,
             context_id=session_id,
@@ -1132,6 +1210,9 @@ class HitlExecutor:
             ),
             choices=choices,
             clarification_fields=clar_fields,
+            source_agent      = _src_agent,
+            source_session_id = _src_session,
+            source_query      = _src_query,
         )
         entry = CheckpointEntry(
             interrupt_id=payload.interrupt_id,
@@ -1544,7 +1625,46 @@ class HitlExecutor:
         confirmed_facts = list(meta.get("confirmed_facts") or [])
         env_context     = dict(meta.get("env_context") or {})
 
+        # Pull delegation provenance from A2A request metadata into the
+        # env_context that flows into the runtime loop. The dispatcher
+        # (task/inter/coordinator.py) sets these top-level keys when this
+        # agent is processing a [DELEGATE:] from a peer; on a user-initiated
+        # request they're absent. _raise_*_hitl methods read them off
+        # env_context via _extract_delegation_provenance() and stamp the
+        # HitlPayload, so the operator UI can show "Delegated from <agent>"
+        # provenance on the approval card. None of these clobber an
+        # explicit env_context value if the caller already set one.
+        for _k in ("source_agent", "source_session_id", "source_query",
+                   "delegated_by", "forked"):
+            if _k in meta and _k not in env_context:
+                env_context[_k] = meta[_k]
+
+        # Record INBOUND delegation in this agent's task_store so the local
+        # Delegations tab can display "received from <source_agent>". This
+        # is a different code path from outbound dispatch (task/delegation.py
+        # writes outbound TaskDefinitions); both end up in the same store
+        # with metadata.direction distinguishing them.
+        _inbound_task = None
+        if meta.get("source_agent"):
+            try:
+                _inbound_task = await self._record_inbound_delegation(
+                    task_id     = task_id,
+                    session_id  = session_id,
+                    context_id  = context_id,
+                    description = query,
+                    meta        = meta,
+                )
+            except Exception as _ir_exc:
+                # Inbound recording is best-effort — never fail the actual
+                # delegation just because the audit row couldn't be written.
+                logger.debug(
+                    "Inbound delegation recording skipped: %s", _ir_exc,
+                )
+
         _finalised = False   # guard so we seal the queue exactly once
+        _streamed_any_token = False   # any token went through _emit_token?
+                                      # — used by _finalize to avoid double-
+                                      # counting (see _finalize body)
 
         async def _emit_status(state) -> None:
             try:
@@ -1559,6 +1679,8 @@ class HitlExecutor:
             # Stream tokens as artifact updates carrying {token,type:token},
             # which the delegating dispatcher's _unwrap_a2a_event maps back to
             # {token: ...} chunks.
+            nonlocal _streamed_any_token
+            _streamed_any_token = True
             try:
                 await event_queue.enqueue_event(TaskArtifactUpdateEvent(
                     task_id=task_id, context_id=context_id,
@@ -1573,15 +1695,32 @@ class HitlExecutor:
         async def _finalize(final_text: str) -> None:
             # A MessageEvent seals the queue (consume() returns). MUST be the
             # last thing we emit on the happy path.
+            #
+            # CRITICAL (Phase 2B+, 2026-05): when we streamed tokens already,
+            # MessageEvent body MUST be empty (or a generic seal token) — not
+            # the full final_text. Otherwise the delegating peer receives BOTH
+            # the streamed tokens AND the final_text as a single big token,
+            # double-counts the content into _result_parts, and the parent LLM
+            # composes a final answer that repeats the peer's analysis 2-3x
+            # ("Analysis: ...\n leaf-1 Established...\nAnalysis: ...\n leaf-1
+            # Established...\n").
+            #
+            # When no tokens were streamed (e.g. peer-side HITL pending, or
+            # non-streaming code paths), keep the legacy behavior and put
+            # final_text in the MessageEvent so the peer has SOMETHING to
+            # work with.
             nonlocal _finalised
             if _finalised:
                 return
             _finalised = True
+            _seal_text = "Task completed." if _streamed_any_token else (
+                final_text or "Task completed."
+            )
             try:
                 await event_queue.enqueue_event(MessageEvent(
                     task_id=task_id, context_id=context_id,
                     message=Message(role="assistant",
-                                    parts=[TextPart(text=final_text or "Task completed.")]),
+                                    parts=[TextPart(text=_seal_text)]),
                 ))
             except Exception as exc:
                 logger.debug("a2a finalize emit failed: %s", exc)
@@ -1632,6 +1771,15 @@ class HitlExecutor:
                 final_text = result.get("text") or ""
                 await _emit_status(TaskState.COMPLETED)
                 await _finalize(final_text)
+            # Update inbound delegation record with terminal state so the
+            # local Delegations tab shows completed / input_required / etc.
+            if _inbound_task is not None:
+                try:
+                    await self._complete_inbound_delegation(
+                        _inbound_task, result,
+                    )
+                except Exception as _ic_exc:
+                    logger.debug("Inbound completion update skipped: %s", _ic_exc)
         except Exception as exc:
             logger.debug("a2a terminal emit failed: %s", exc)
             # Last-resort finalise so the consumer never hangs.
@@ -1649,6 +1797,75 @@ class HitlExecutor:
             )
         except Exception:
             pass
+
+    async def _record_inbound_delegation(
+        self,
+        *,
+        task_id: str,
+        session_id: str,
+        context_id: str,
+        description: str,
+        meta: dict,
+    ):
+        """Write a TaskDefinition row tagged inbound when handling a peer's
+        [DELEGATE:] request, so the local Delegations tab can show
+        'received from <source_agent>'. Returns the saved task (so the
+        caller can update its state on completion) or None when no
+        task_store is wired or write fails.
+        """
+        if self._task_store is None:
+            return None
+        from task.schemas import TaskDefinition, TaskState
+        try:
+            t = TaskDefinition(
+                task_id     = task_id,
+                session_id  = session_id,
+                context_id  = context_id or session_id,
+                description = description or "",
+                state       = TaskState.RUNNING,
+                metadata    = {
+                    # Distinguish from outbound dispatches written by
+                    # task/delegation.py. The /delegations endpoint reads
+                    # this to label rows "→ peer" vs "← peer".
+                    "direction":         "inbound",
+                    "source_agent":      meta.get("source_agent") or "",
+                    "source_session_id": meta.get("source_session_id") or "",
+                    "source_query":      meta.get("source_query") or "",
+                    "delegated_by":      meta.get("delegated_by") or "",
+                    "forked":            bool(meta.get("forked", False)),
+                    "shared_facts_count":
+                        int(meta.get("shared_facts_count", 0) or 0),
+                },
+            )
+            await self._task_store.save(t)
+            return t
+        except Exception as exc:
+            logger.debug("inbound record build/save failed: %s", exc)
+            return None
+
+    async def _complete_inbound_delegation(self, task, result: dict) -> None:
+        """Update the inbound TaskDefinition's state + result on terminal."""
+        if self._task_store is None or task is None:
+            return
+        from task.schemas import TaskState
+        from datetime import datetime, timezone
+        try:
+            if result.get("interrupted"):
+                # Peer-side HITL pending — runtime loop produced no final
+                # text yet. Mark accordingly so the local UI can show
+                # "awaiting operator approval".
+                task.state = TaskState.PENDING
+                task.metadata["awaiting_hitl_id"] = (
+                    result.get("interrupt_id") or ""
+                )
+            else:
+                _txt = result.get("text") or ""
+                task.state  = TaskState.COMPLETED
+                task.result = {"text": _txt}
+            task.completed_at = datetime.now(timezone.utc).isoformat()
+            await self._task_store.save(task)
+        except Exception as exc:
+            logger.debug("inbound completion save failed: %s", exc)
 
     async def _writeback(
         self, user_text: str, assistant_text: str, session_id: str,

@@ -1198,6 +1198,92 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             logger.warning("/sessions/%s/history failed: %s", session_id, exc)
             return JSONResponse(content=_message_history.get(session_id, []))
 
+    @app.get("/delegations/{session_id}")
+    async def list_delegations(session_id: str) -> JSONResponse:
+        """List every [DELEGATE:] dispatched in this session, with status.
+
+        Phase 2B+: parent-side Delegations tab data source. For each task
+        the LAN-side coordinator sent over A2A, return:
+          - task_id / target agent / subtask description
+          - state (pending / running / completed / failed)
+          - created/completed timestamps + latency
+          - result (when completed) or error (when failed)
+          - source_query (original user query at time of dispatch)
+          - forked / shared_facts_count provenance flags
+
+        Frontends not aware of this endpoint just don't render the tab;
+        no other UI code path depends on this data.
+        """
+        task_system = services.get("task_system")
+        if task_system is None or not hasattr(task_system, "store"):
+            return JSONResponse(content=[])
+        try:
+            tasks = await task_system.store.get_by_session(session_id)
+        except Exception as exc:
+            logger.warning("/delegations/%s failed: %s", session_id, exc)
+            return JSONResponse(content=[])
+        out = []
+        for t in tasks:
+            # TaskDefinition.metadata carries delegation provenance —
+            # see task/delegation.py:delegate_fn for the canonical keys.
+            md = dict(t.metadata or {})
+            # direction = "outbound" (this agent dispatched it) or
+            # "inbound" (a peer sent it to this agent — recorded by
+            # integrations/adapters/hitl_executor.py._record_inbound_delegation
+            # when the A2A request carried source_agent metadata).
+            # Default outbound for legacy rows written before Phase 2B+.
+            direction = md.get("direction", "outbound")
+            assignment = getattr(t, "assignment", None)
+            if direction == "inbound":
+                # peer_agent is who SENT it to us — flip the visual semantics
+                # so the row reads "← lan-agent" instead of "→ <some target>"
+                peer_agent = md.get("source_agent") or "?"
+            else:
+                peer_agent = (
+                    (assignment.agent_id if assignment is not None else None)
+                    or md.get("delegated_to")
+                    or "?"
+                )
+            _created_at = getattr(t, "created_at", "") or ""
+            _completed_at = getattr(t, "completed_at", "") or ""
+            # Compute latency_ms when both ends available
+            latency_ms = None
+            try:
+                if _created_at and _completed_at:
+                    from datetime import datetime as _dt
+                    latency_ms = int(1000 * (
+                        _dt.fromisoformat(_completed_at).timestamp()
+                        - _dt.fromisoformat(_created_at).timestamp()
+                    ))
+            except Exception:
+                latency_ms = None
+            out.append({
+                "task_id":      t.task_id,
+                "direction":    direction,
+                "peer_agent":   peer_agent,
+                # Keep target_agent for backward compat with any caller
+                # built against the pre-direction endpoint; it just
+                # mirrors peer_agent.
+                "target_agent": peer_agent,
+                "description":  t.description,
+                "state":        getattr(t.state, "value", str(t.state)),
+                "created_at":   _created_at,
+                "completed_at": _completed_at,
+                "latency_ms":   latency_ms,
+                "result":       t.result if getattr(t, "result", None) else None,
+                "error":        getattr(t, "error", None),
+                "forked":       bool(md.get("forked", False)),
+                "source_query": md.get("source_query") or "",
+                "shared_facts_count": int(md.get("shared_facts_count", 0)),
+                # When inbound + state=PENDING with awaiting_hitl_id set,
+                # this delegation is waiting on a local operator decision —
+                # the UI should highlight it.
+                "awaiting_hitl_id": md.get("awaiting_hitl_id") or None,
+            })
+        # Newest first — operators usually want the most recent delegation
+        out.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+        return JSONResponse(content=out)
+
     @app.post("/sessions")
     async def create_session(request: Request,
     ) -> JSONResponse:

@@ -952,9 +952,23 @@ class AgentRuntimeLoop:
         _peer_hitl = False
         _peer_error = ""
         _ok = True
+        # Forward the original user query to delegate_fn (kw-only, optional).
+        # The dispatcher embeds it in TaskDefinition.metadata so peer-side
+        # HITL cards can show "original user query" to the operator. Falls
+        # back to "" when state has no user_query (e.g. legacy callers).
+        _orig_q = getattr(state, "user_query", "") or ""
         try:
-            async for chunk in self._delegate_fn(directive, session_id,
-                                                 shared_facts):
+            _delegate_iter = self._delegate_fn(
+                directive, session_id, shared_facts,
+                original_query=_orig_q,
+            )
+        except TypeError:
+            # Older delegate_fn implementations don't accept original_query
+            # (e.g. mocks in tests). Degrade gracefully — peer just won't
+            # see the query field on HITL cards.
+            _delegate_iter = self._delegate_fn(directive, session_id, shared_facts)
+        try:
+            async for chunk in _delegate_iter:
                 # Tag every forwarded chunk with the source agent so the WebUI
                 # can render a "via <agent>" badge.
                 if isinstance(chunk, dict):
@@ -1061,6 +1075,12 @@ class AgentRuntimeLoop:
             )
 
         state = LoopState()
+        # Stash the original user query on the state so handlers further
+        # down (notably _handle_delegate, which builds the task to send
+        # to a peer agent) can reach it without changing every helper's
+        # signature. Peer-side HITL cards use this as `source_query` so
+        # the peer operator sees what the original user asked.
+        setattr(state, "user_query", query)
         # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
         from runtime.stop_policy import FactsLedger as _FL
         state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
@@ -1419,6 +1439,8 @@ class AgentRuntimeLoop:
                 working_set = fork_ctx.get("working_set", [])
 
         state = LoopState()
+        # Stash query on state — see run() comment.
+        setattr(state, "user_query", query)
         # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
         from runtime.stop_policy import FactsLedger as _FL
         state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))

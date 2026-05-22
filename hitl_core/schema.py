@@ -276,6 +276,19 @@ class HitlPayload(BaseModel):
     sla_seconds: int = 600
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
 
+    # ── Cross-agent delegation provenance (Phase 2B+, 2026-05) ───────
+    # When this HITL card was triggered inside a peer agent that is handling
+    # a [DELEGATE:] subtask from another agent, these fields identify the
+    # parent. None on cards triggered by the local user. Used by:
+    #   1. peer UI — to show "Delegated from <source_agent>" banner on the
+    #      approval card so the operator knows who's waiting on this decision
+    #   2. peer audit — to attribute the card to the right upstream context
+    #   3. result propagation — peer's approve/reject must flow back to
+    #      source_session_id on the source_agent
+    source_agent: Optional[str] = None         # e.g. "lan-agent"
+    source_session_id: Optional[str] = None    # parent's session_id
+    source_query: Optional[str] = None         # original user query at parent
+
 
 # ---------------------------------------------------------------------------
 # Operator's response

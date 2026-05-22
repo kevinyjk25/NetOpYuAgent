@@ -109,6 +109,13 @@ REQUIRED_METHOD_CALLS: list[tuple[str, str]] = [
         "wires AgentRegistry into LLMEngine so the system prompt lists "
         "available peers + capabilities for [DELEGATE:] decisions",
     ),
+    (
+        "set_task_store",
+        "wires task_system.store into HitlExecutor so inbound A2A "
+        "delegations (peer→this agent) get recorded — without this, "
+        "the Delegations tab shows nothing when this agent is processing "
+        "a [DELEGATE:] from a peer (Phase 2B+, 2026-05)",
+    ),
 ]
 
 

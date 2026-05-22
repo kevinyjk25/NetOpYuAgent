@@ -276,10 +276,11 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 }
 .tabs{display:flex;border-bottom:1px solid var(--border);flex-shrink:0}
 .tab{
-  flex:1;padding:8px 0;text-align:center;
+  flex:1;min-width:0;padding:8px 4px;text-align:center;
   font-family:var(--mono);font-size:9px;font-weight:600;
-  letter-spacing:.8px;color:var(--dim);cursor:pointer;
+  letter-spacing:.3px;color:var(--dim);cursor:pointer;
   text-transform:uppercase;border-bottom:2px solid transparent;transition:all .14s;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 .tab-content{display:none;flex:1;overflow-y:auto;padding:10px}
@@ -753,6 +754,7 @@ Type a query below. The agent will:
     <div class="tab active" onclick="switchTab('cache')" id="tab-btn-cache">Results</div>
     <div class="tab" onclick="switchTab('flow')"   id="tab-btn-flow">Flow</div>
     <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
+    <div class="tab" onclick="switchTab('delegations');refreshDelegations()" id="tab-btn-delegations">Delegate</div>
     <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
     <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
     <div class="tab" onclick="switchTab('peers');refreshPeers()" id="tab-btn-peers">Peers</div>
@@ -813,6 +815,15 @@ Type a query below. The agent will:
       <button class="btn btn-secondary btn-sm" onclick="refreshHitl()">↻ Refresh</button>
       <span style="font-family:var(--mono);font-size:8px;color:var(--dim)">polls every 3s</span>
     </div>
+  </div>
+
+  <!-- Delegations tab — every [DELEGATE:] dispatched in this session -->
+  <div class="tab-content" id="tab-delegations">
+    <div id="delegations-empty" style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:16px 10px;text-align:center;line-height:1.8">
+      No delegations yet.<br>
+      <span style="font-size:10px;opacity:.6">When this agent emits <code>[DELEGATE:peer]</code>, the dispatch + result appear here.</span>
+    </div>
+    <div id="delegations-list" style="overflow-y:auto;flex:1;padding:6px;display:none"></div>
   </div>
 
   <!-- Memory tab — Dual-Track Memory viewer -->
@@ -1369,7 +1380,7 @@ function getSession() {
 }
 
 function switchTab(name) {
-  ['cache','flow','hitl','memory','stats','peers','journal'].forEach(n => {
+  ['cache','flow','hitl','delegations','memory','stats','peers','journal'].forEach(n => {
     const btn = document.getElementById('tab-btn-'+n);
     const pane = document.getElementById('tab-'+n);
     if (btn)  btn.classList.toggle('active', n===name);
@@ -2655,9 +2666,36 @@ async function refreshHitl(retries=0) {
           <button class="btn btn-danger btn-sm" onclick="hitlDec('${p.interrupt_id}','reject')">✗ Reject</button>`;
       }
 
+      // ── Delegation provenance banner ─────────────────────────────
+      // Render when this card was triggered inside a runtime loop
+      // processing a [DELEGATE:] from a peer agent. The operator sees
+      // who's upstream and the original user query — without this they
+      // see a bare approval card with no idea why it appeared.
+      // Fields are null on user-initiated cards (the common case), so
+      // delegBannerHtml is an empty string then and the layout is
+      // identical to before.
+      let delegBannerHtml = '';
+      if (p.source_agent) {
+        const srcA   = esc(p.source_agent);
+        const srcQ   = p.source_query ? esc(p.source_query) : '';
+        const srcSid = p.source_session_id ? esc(p.source_session_id.slice(0, 14)) : '';
+        delegBannerHtml = `
+          <div style="margin:6px 0 4px 0;padding:6px 8px;border:1px solid var(--accent);border-left:3px solid var(--accent);border-radius:4px;background:rgba(0,255,200,.04);font-size:11px">
+            <div style="color:var(--accent);font-weight:600;letter-spacing:.4px;text-transform:uppercase;font-size:9px;margin-bottom:2px">
+              ⇡ Delegated from peer
+            </div>
+            <div style="color:var(--text)">
+              from <span style="color:var(--accent);font-family:var(--mono)">${srcA}</span>
+              ${srcSid ? `<span style="color:var(--dim);font-family:var(--mono);font-size:10px"> · session ${srcSid}…</span>` : ''}
+            </div>
+            ${srcQ ? `<div style="color:var(--dim);font-size:10px;margin-top:2px;font-style:italic">"${srcQ}"</div>` : ''}
+          </div>`;
+      }
+
       card.innerHTML=`
         <div class="hitl-title">⚠ ${tk} — ${rl}</div>
         <div class="hitl-meta">${iid}… | SLA: ${sla}s | ${new Date().toLocaleTimeString()}</div>
+        ${delegBannerHtml}
         <div class="hitl-summary">${summary}</div>
         ${actionHtml}
         ${bodyHtml}
@@ -3342,6 +3380,189 @@ function _peersHeartbeat() {
   ind.style.color = _peersLastFetchOK ? '#4ade80' : '#f87171';
   setTimeout(() => { if (ind) ind.style.color = 'var(--dim)'; }, 600);
 }
+
+// ── Delegations tab ────────────────────────────────────────────────────
+// Polls /webui/delegations/{session_id} every time the user opens the
+// tab (and every 10s while it's the active tab). One row per dispatched
+// [DELEGATE:...] — newest first, expandable to show full subtask /
+// result / error.
+
+let _delegationsPollTimer = null;
+let _delegationsExpanded = {};   // task_id -> bool
+
+function _delEsc(s) {
+  return String(s ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function _delFmtState(state) {
+  // Map TaskState enum values to compact color/label
+  const map = {
+    pending:    {label: 'PENDING',    color: 'var(--dim)'},
+    running:    {label: 'RUNNING',    color: '#fbbf24'},
+    retrying:   {label: 'RETRYING',   color: '#fbbf24'},
+    completed:  {label: 'DONE',       color: '#4ade80'},
+    failed:     {label: 'FAILED',     color: '#f87171'},
+    cancelled:  {label: 'CANCELLED',  color: 'var(--dim)'},
+  };
+  const k = String(state || '').toLowerCase();
+  const m = map[k] || {label: k.toUpperCase() || '?', color: 'var(--dim)'};
+  return `<span style="color:${m.color};font-weight:600;font-size:9px;letter-spacing:.4px">${_delEsc(m.label)}</span>`;
+}
+
+function _delFmtLatency(ms) {
+  if (ms == null || ms < 0) return '<span style="color:var(--dim)">—</span>';
+  if (ms < 1000)   return `${ms}ms`;
+  if (ms < 60000)  return `${(ms/1000).toFixed(1)}s`;
+  return `${(ms/60000).toFixed(1)}m`;
+}
+
+function _delFmtTime(iso) {
+  if (!iso) return '—';
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString();
+  } catch { return iso.slice(11, 19); }
+}
+
+function toggleDelegationDetail(taskId) {
+  _delegationsExpanded[taskId] = !_delegationsExpanded[taskId];
+  refreshDelegations();   // re-render
+}
+
+async function refreshDelegations() {
+  const empty = document.getElementById('delegations-empty');
+  const list  = document.getElementById('delegations-list');
+  if (!empty || !list) return;
+  if (!sessionId) {
+    empty.style.display = 'block';
+    list.style.display  = 'none';
+    empty.innerHTML = `<span style="color:var(--dim);font-size:11px">
+      No active session — send a query first to enable delegations view.</span>`;
+    return;
+  }
+  try {
+    const res = await fetch(`${BASE}/delegations/${encodeURIComponent(sessionId)}`);
+    if (!res.ok) {
+      empty.style.display = 'block';
+      list.style.display = 'none';
+      empty.innerHTML = `<span style="color:#f87171;font-family:var(--mono);font-size:10px">
+        Error ${res.status} fetching delegations</span>`;
+      return;
+    }
+    const rows = await res.json();
+    if (!rows.length) {
+      empty.style.display = 'block';
+      list.style.display = 'none';
+      empty.innerHTML = `No delegations yet.<br>
+        <span style="font-size:10px;opacity:.6">When this agent emits <code>[DELEGATE:peer]</code>, the dispatch + result appear here.</span>`;
+      return;
+    }
+    empty.style.display = 'none';
+    list.style.display = 'block';
+    list.innerHTML = rows.map(r => {
+      const expanded = !!_delegationsExpanded[r.task_id];
+      const stateBadge = _delFmtState(r.state);
+      const lat = _delFmtLatency(r.latency_ms);
+      const t   = _delFmtTime(r.created_at);
+      // direction-aware label:
+      //   outbound  →  "→ dc-agent"  (this agent dispatched to peer)
+      //   inbound   ←  "← lan-agent" (peer dispatched to this agent)
+      const isInbound = r.direction === 'inbound';
+      const arrow     = isInbound ? '←' : '→';
+      const arrowCol  = isInbound ? '#fbbf24' : 'var(--accent)';
+      const peer      = _delEsc(r.peer_agent || r.target_agent || '?');
+      const desc      = _delEsc(r.description || '');
+      const errBadge = r.error
+        ? `<span style="color:#f87171;font-family:var(--mono);font-size:9px;margin-left:6px">⚠ ${_delEsc(String(r.error).slice(0,40))}${String(r.error).length>40?'…':''}</span>`
+        : '';
+      const forkedBadge = r.forked
+        ? `<span style="color:var(--accent);font-family:var(--mono);font-size:9px;margin-left:4px;opacity:.7">#forked·${r.shared_facts_count||0}</span>`
+        : '';
+      const hitlBadge = r.awaiting_hitl_id
+        ? `<span style="color:#fbbf24;font-family:var(--mono);font-size:9px;margin-left:4px">⚠ awaiting local HITL</span>`
+        : '';
+
+      // Detail panel — only render when expanded (avoids cluttering scan view)
+      let detailHtml = '';
+      if (expanded) {
+        const resultText = r.result
+          ? (typeof r.result === 'string' ? r.result : JSON.stringify(r.result, null, 2))
+          : '';
+        const dirLabel = isInbound
+          ? `<span style="color:#fbbf24">Received from</span> <span style="color:var(--accent);font-family:var(--mono)">${peer}</span>`
+          : `<span style="color:var(--accent)">Sent to</span> <span style="color:var(--accent);font-family:var(--mono)">${peer}</span>`;
+        detailHtml = `
+          <div style="margin-top:6px;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:4px;font-family:var(--mono);font-size:10px;line-height:1.5">
+            <div style="margin-bottom:4px">${dirLabel}</div>
+            <div style="color:var(--dim);margin-bottom:4px">
+              task_id: <span style="color:var(--mid)">${_delEsc(r.task_id)}</span>
+            </div>
+            <div style="color:var(--dim);margin-bottom:4px">
+              created: <span style="color:var(--mid)">${_delEsc(r.created_at || '—')}</span>
+              ${r.completed_at ? ` · completed: <span style="color:var(--mid)">${_delEsc(r.completed_at)}</span>` : ''}
+            </div>
+            ${r.source_query ? `
+              <div style="margin:6px 0 4px 0">
+                <div style="color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.4px">Original user query</div>
+                <div style="color:var(--text);font-style:italic;margin-top:2px">"${_delEsc(r.source_query)}"</div>
+              </div>` : ''}
+            <div style="margin:6px 0 4px 0">
+              <div style="color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.4px">Subtask</div>
+              <div style="color:var(--text);margin-top:2px;white-space:pre-wrap;word-break:break-word">${_delEsc(r.description)}</div>
+            </div>
+            ${r.error ? `
+              <div style="margin:6px 0 4px 0">
+                <div style="color:#f87171;font-size:9px;text-transform:uppercase;letter-spacing:.4px">Error</div>
+                <pre style="color:#fda4a4;margin:2px 0 0 0;white-space:pre-wrap;word-break:break-word;font-size:10px">${_delEsc(r.error)}</pre>
+              </div>` : ''}
+            ${resultText ? `
+              <div style="margin:6px 0 4px 0">
+                <div style="color:var(--accent);font-size:9px;text-transform:uppercase;letter-spacing:.4px">Result</div>
+                <pre style="color:var(--text);margin:2px 0 0 0;white-space:pre-wrap;word-break:break-word;font-size:10px;max-height:280px;overflow-y:auto">${_delEsc(resultText)}</pre>
+              </div>` : ''}
+          </div>`;
+      }
+
+      return `
+        <div style="border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin-bottom:6px;background:var(--card);cursor:pointer"
+             onclick="toggleDelegationDetail('${_delEsc(r.task_id)}')">
+          <div style="display:flex;align-items:center;gap:8px;font-size:11px">
+            <span style="color:var(--dim);font-family:var(--mono);font-size:9px;min-width:60px">${_delEsc(t)}</span>
+            <span style="color:${arrowCol};font-family:var(--mono)">${arrow} ${peer}</span>
+            ${forkedBadge}
+            ${hitlBadge}
+            <span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</span>
+            ${stateBadge}
+            <span style="color:var(--dim);font-family:var(--mono);font-size:9px;min-width:42px;text-align:right">${lat}</span>
+            <span style="color:var(--dim);font-size:10px">${expanded ? '▾' : '▸'}</span>
+          </div>
+          ${errBadge && !expanded ? `<div style="margin-top:2px;font-family:var(--mono);font-size:9px">${errBadge}</div>` : ''}
+          ${detailHtml}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    empty.style.display = 'block';
+    list.style.display = 'none';
+    empty.innerHTML = `<span style="color:#f87171;font-family:var(--mono);font-size:10px">
+      Network error: ${_delEsc(e.message || e)}</span>`;
+  }
+}
+
+// Poll delegations while the tab is active. Stop polling when user switches
+// away — there's no point waking the backend if the operator isn't watching.
+function _delegationsTabActive() {
+  const pane = document.getElementById('tab-delegations');
+  return pane && pane.classList.contains('active');
+}
+
+setInterval(() => {
+  if (_delegationsTabActive()) {
+    refreshDelegations();
+  }
+}, 10000);
+
 
 function startPeersPoll() {
   // Start a single global poller. Safe to call multiple times — clears
