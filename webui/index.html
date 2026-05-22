@@ -3435,28 +3435,43 @@ async function refreshDelegations() {
   const empty = document.getElementById('delegations-empty');
   const list  = document.getElementById('delegations-list');
   if (!empty || !list) return;
-  if (!sessionId) {
-    empty.style.display = 'block';
-    list.style.display  = 'none';
-    empty.innerHTML = `<span style="color:var(--dim);font-size:11px">
-      No active session — send a query first to enable delegations view.</span>`;
-    return;
-  }
+  // We always fetch INBOUND (all sessions — peer-initiated delegations
+  // keyed by the upstream agent's session_id, which the local operator
+  // doesn't know). OUTBOUND is fetched only when there's a local session.
+  // This way DC's operator can see "← lan-agent" rows even without any
+  // local activity.
   try {
-    const res = await fetch(`${BASE}/delegations/${encodeURIComponent(sessionId)}`);
-    if (!res.ok) {
-      empty.style.display = 'block';
-      list.style.display = 'none';
-      empty.innerHTML = `<span style="color:#f87171;font-family:var(--mono);font-size:10px">
-        Error ${res.status} fetching delegations</span>`;
-      return;
+    const fetches = [fetch(`${BASE}/delegations/inbound`)];
+    if (sessionId) {
+      fetches.push(fetch(`${BASE}/delegations/${encodeURIComponent(sessionId)}`));
     }
-    const rows = await res.json();
+    const responses = await Promise.all(fetches);
+    const allRows = [];
+    for (const res of responses) {
+      if (!res.ok) {
+        console.warn('delegations fetch returned', res.status);
+        continue;
+      }
+      const rows = await res.json();
+      allRows.push(...rows);
+    }
+    // De-duplicate on task_id in case the same row appears in both feeds
+    // (shouldn't happen — inbound and outbound never overlap — but defensive).
+    const seen = new Set();
+    const rows = [];
+    for (const r of allRows) {
+      if (seen.has(r.task_id)) continue;
+      seen.add(r.task_id);
+      rows.push(r);
+    }
+    // Newest first across the union
+    rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+
     if (!rows.length) {
       empty.style.display = 'block';
       list.style.display = 'none';
       empty.innerHTML = `No delegations yet.<br>
-        <span style="font-size:10px;opacity:.6">When this agent emits <code>[DELEGATE:peer]</code>, the dispatch + result appear here.</span>`;
+        <span style="font-size:10px;opacity:.6">When this agent emits <code>[DELEGATE:peer]</code> or receives one from a peer, rows appear here.</span>`;
       return;
     }
     empty.style.display = 'none';

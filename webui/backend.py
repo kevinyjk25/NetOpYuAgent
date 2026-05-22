@@ -1198,6 +1198,77 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             logger.warning("/sessions/%s/history failed: %s", session_id, exc)
             return JSONResponse(content=_message_history.get(session_id, []))
 
+    @app.get("/delegations/inbound")
+    async def list_inbound_delegations() -> JSONResponse:
+        """List every INBOUND delegation this agent has received from peers,
+        across ALL sessions.
+
+        Rationale: when LAN delegates to DC, the inbound TaskDefinition on
+        the DC side is keyed by the *LAN* session_id (it has to be — that's
+        the join key for end-to-end correlation). But the DC operator
+        opening DC's webui doesn't know LAN's session_id; they need a view
+        that just lists "all the work peers have asked me to do".
+
+        This endpoint serves that view. Outbound delegations remain on
+        /delegations/{session_id} (filtered by the local user's session).
+
+        NOTE: must be registered BEFORE /delegations/{session_id} or FastAPI
+        will route this path's "inbound" literal as a session_id parameter.
+        """
+        task_system = services.get("task_system")
+        if task_system is None or not hasattr(task_system, "store"):
+            return JSONResponse(content=[])
+        try:
+            # Scan all local tasks. InMemory backend exposes _local dict;
+            # Redis backend would need a session_id index — we degrade to
+            # whatever's in the local fallback cache.
+            all_tasks = (
+                list(task_system.store._local.values())
+                if hasattr(task_system.store, "_local") else []
+            )
+        except Exception as exc:
+            logger.warning("/delegations/inbound scan failed: %s", exc)
+            return JSONResponse(content=[])
+        out = []
+        for t in all_tasks:
+            md = dict(t.metadata or {})
+            if md.get("direction") != "inbound":
+                continue
+            assignment = getattr(t, "assignment", None)
+            peer_agent = md.get("source_agent") or "?"
+            _created_at = getattr(t, "created_at", "") or ""
+            _completed_at = getattr(t, "completed_at", "") or ""
+            latency_ms = None
+            try:
+                if _created_at and _completed_at:
+                    from datetime import datetime as _dt
+                    latency_ms = int(1000 * (
+                        _dt.fromisoformat(_completed_at).timestamp()
+                        - _dt.fromisoformat(_created_at).timestamp()
+                    ))
+            except Exception:
+                latency_ms = None
+            out.append({
+                "task_id":      t.task_id,
+                "session_id":   getattr(t, "session_id", "") or "",
+                "direction":    "inbound",
+                "peer_agent":   peer_agent,
+                "target_agent": peer_agent,   # backward-compat alias
+                "description":  t.description,
+                "state":        getattr(t.state, "value", str(t.state)),
+                "created_at":   _created_at,
+                "completed_at": _completed_at,
+                "latency_ms":   latency_ms,
+                "result":       t.result if getattr(t, "result", None) else None,
+                "error":        getattr(t, "error", None),
+                "forked":       bool(md.get("forked", False)),
+                "source_query": md.get("source_query") or "",
+                "shared_facts_count": int(md.get("shared_facts_count", 0)),
+                "awaiting_hitl_id":   md.get("awaiting_hitl_id") or None,
+            })
+        out.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+        return JSONResponse(content=out)
+
     @app.get("/delegations/{session_id}")
     async def list_delegations(session_id: str) -> JSONResponse:
         """List every [DELEGATE:] dispatched in this session, with status.

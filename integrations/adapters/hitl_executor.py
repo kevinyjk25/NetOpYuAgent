@@ -1746,6 +1746,17 @@ class HitlExecutor:
             # CRITICAL: finalise even on failure so the consumer unblocks and
             # the delegating agent gets a terminal signal instead of timing out.
             await _finalize(f"Task failed on peer: {exc}")
+            # Phase 2B+ (2026-05): record the failure on the inbound
+            # delegation row too. Without this, the local Delegations tab
+            # shows the row stuck in RUNNING forever even though the agent
+            # actually errored out (observed: Ollama 300s timeout leaves
+            # `← lan-agent ... RUNNING` stuck on dc-agent's UI). Use
+            # _fail_inbound_delegation so the row clearly shows the error.
+            if _inbound_task is not None:
+                try:
+                    await self._fail_inbound_delegation(_inbound_task, exc)
+                except Exception as _if_exc:
+                    logger.debug("Inbound failure update skipped: %s", _if_exc)
             return
 
         # 5. Terminal handling
@@ -1866,6 +1877,26 @@ class HitlExecutor:
             await self._task_store.save(task)
         except Exception as exc:
             logger.debug("inbound completion save failed: %s", exc)
+
+    async def _fail_inbound_delegation(self, task, exc: BaseException) -> None:
+        """Mark the inbound TaskDefinition as FAILED with the error message.
+
+        Called from execute() when execute_query raises (e.g. Ollama
+        timeout, LLM crash, network error to local LLM). Without this,
+        the row stays in RUNNING forever — the operator can't tell the
+        difference between "still working" and "died 10 minutes ago".
+        """
+        if self._task_store is None or task is None:
+            return
+        from task.schemas import TaskState
+        from datetime import datetime, timezone
+        try:
+            task.state        = TaskState.FAILED
+            task.error        = str(exc)[:500]   # truncate huge tracebacks
+            task.completed_at = datetime.now(timezone.utc).isoformat()
+            await self._task_store.save(task)
+        except Exception as _exc:
+            logger.debug("inbound failure save failed: %s", _exc)
 
     async def _writeback(
         self, user_text: str, assistant_text: str, session_id: str,

@@ -134,6 +134,83 @@ class TestInboundDelegationRecording(unittest.TestCase):
             "main.py must wire executor.set_task_store(task_system.store)",
         )
 
+    def test_fail_inbound_helper_exists(self):
+        """When the runtime loop raises (e.g. Ollama 300s timeout), the
+        inbound TaskDefinition must be marked FAILED — not left in RUNNING
+        forever. Without this, dc-agent's Delegations tab shows '← lan-agent
+        ... RUNNING' indefinitely even after the agent has crashed.
+        """
+        self.assertIn(
+            "async def _fail_inbound_delegation",
+            self.src,
+            "_fail_inbound_delegation helper missing — failure path will "
+            "leave inbound row stuck in RUNNING",
+        )
+
+    def test_execute_calls_fail_on_exception(self):
+        """The except clause in HitlExecutor.execute (around the
+        execute_query call) must invoke _fail_inbound_delegation."""
+        # Find the except block following execute_query
+        i = self.src.find("HitlExecutor.execute_a2a failed")
+        self.assertGreater(i, 0, "execute_query except block not found")
+        block = self.src[i:i+1500]
+        self.assertIn(
+            "_fail_inbound_delegation",
+            block,
+            "execute()'s execute_query except clause must call "
+            "_fail_inbound_delegation — otherwise inbound row stays "
+            "in RUNNING after the agent crashes",
+        )
+
+
+class TestInboundDelegationsEndpoint(unittest.TestCase):
+    """The /delegations/inbound endpoint must list inbound rows across
+    ALL sessions. Required because DC's local operator doesn't know
+    LAN's session_id (which is what inbound TaskDefinitions are keyed by).
+    """
+
+    def setUp(self):
+        self.backend = _read("webui/backend.py")
+        self.front   = _read("webui/index.html")
+
+    def test_inbound_endpoint_registered_before_session(self):
+        """/delegations/inbound must come BEFORE /delegations/{session_id}
+        in the file — FastAPI matches paths in registration order, and
+        a {session_id} placeholder would otherwise capture 'inbound' as
+        a literal session id."""
+        i_inbound = self.backend.find('"/delegations/inbound"')
+        i_session = self.backend.find('"/delegations/{session_id}"')
+        self.assertGreater(i_inbound, 0, "inbound endpoint missing")
+        self.assertGreater(i_session, 0, "by-session endpoint missing")
+        self.assertLess(
+            i_inbound, i_session,
+            "FastAPI route ordering: /delegations/inbound must be "
+            "registered BEFORE /delegations/{session_id} or 'inbound' "
+            "will be parsed as a literal session_id parameter",
+        )
+
+    def test_inbound_endpoint_filters_direction(self):
+        """The endpoint must filter on metadata.direction == 'inbound'
+        so outbound rows from other sessions don't leak in."""
+        # Look for the direction filter in the endpoint body
+        i = self.backend.find('"/delegations/inbound"')
+        body = self.backend[i:i+3000]
+        self.assertIn(
+            'md.get("direction") != "inbound"',
+            body,
+            "Inbound endpoint must filter direction='inbound' explicitly",
+        )
+
+    def test_frontend_fetches_both_inbound_and_session(self):
+        """refreshDelegations must fetch /delegations/inbound — without
+        this, DC's UI can't show '← lan-agent' rows because LAN-side
+        session_id isn't known locally."""
+        self.assertIn(
+            "/delegations/inbound",
+            self.front,
+            "Frontend must call /delegations/inbound for DC-side view",
+        )
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
