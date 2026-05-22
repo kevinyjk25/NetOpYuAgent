@@ -950,6 +950,7 @@ class AgentRuntimeLoop:
         # textual result so we can inject a compact observation for next turn.
         _result_parts: list[str] = []
         _peer_hitl = False
+        _peer_error = ""
         _ok = True
         try:
             async for chunk in self._delegate_fn(directive, session_id,
@@ -963,6 +964,10 @@ class AgentRuntimeLoop:
                     if chunk.get("type") == "hitl_interrupt" or chunk.get(
                             "hitl_interrupt"):
                         _peer_hitl = True
+                    # Detect a peer/transport error chunk (dispatcher emits
+                    # {node_step, error} on stream failure or peer-side error).
+                    if chunk.get("error"):
+                        _peer_error = str(chunk["error"])
                     tok = chunk.get("token") or chunk.get("message") or ""
                     if tok:
                         _result_parts.append(str(tok))
@@ -988,6 +993,10 @@ class AgentRuntimeLoop:
                    f"[委派结果 from {target}] 任务={task!r}\n"
                    f"{_result_text[:4000]}\n"
                    f"请综合上述委派结果给用户最终回答。"}
+        elif _ok and _peer_error:
+            yield {"_inject_context":
+                   f"[委派失败] {target} 返回错误:{_peer_error}。"
+                   f"请基于本地能力回答用户,并说明无法从 {target} 获取信息。"}
         elif _ok:
             yield {"_inject_context":
                    f"[委派完成但无内容] {target} 未返回可用结果。"

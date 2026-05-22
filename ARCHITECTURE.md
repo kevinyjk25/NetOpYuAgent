@@ -577,6 +577,78 @@ curl http://localhost:8001/webui/system/peers | jq
 
 **CI**:7/7 audits + 128 tests(117 baseline + 11 delegation)。
 
+### 8.8 Peer-aware prompt(2026-05)
+
+**起因**:Phase 2B 加了 `[DELEGATE:]` directive + capability 路由,但**实测**(LAN agent 收到 `spine-1 的 BGP EVPN 邻居状态`)LLM 没委派给 dc-agent,而是 5 个 turn 反复试 `syslog_search` → `list_tools` → `get_device_config` → `list_devices`,最后说"spine-1 not found"。
+
+**根因**:`LLMEngine` 早已有 `_build_peers_section()` 方法(从 registry 拉 peer + capabilities 拼一段 "AVAILABLE PEERS"),也有 `attach_peer_registry()` setter,**但 main.py 启动期没调 attach**。结果 LLM 系统 prompt 里:
+- ✅ 有 `[DELEGATE:agent_id]` syntax 描述
+- ❌ 没列**当前活跃的 peer 是谁**(因为 registry 未挂)
+
+LLM 收到 "你能委派" 但不知道委派给谁、对方擅长啥。**默认假设"自己处理"** → 反复用本地工具。
+
+**修复**:
+
+1. `main.py` 装配 retrieval 后,调 `llm_engine.attach_peer_registry(services["registry"], self_agent_id=cfg.agent.agent_id)`
+2. `_build_system_prompt` 调 `_build_peers_section()` 已经实现 — 它从 registry 拉活的 peer(排除 self,filter 掉 down/unreachable),按一行一个 peer 拼:
+   ```
+   AVAILABLE PEERS — delegate to these via [DELEGATE:agent_id] or [DELEGATE:*capability]:
+     - dc-agent (capabilities: dc_fabric_diagnose, dc_fabric_config, dc_loadbalancer) — IT operations for the data-center fabric — BGP-EVPN, VXLAN, leaf-spine.
+   ```
+3. `scripts/audit_wiring.py` 加 **second pass**:`REQUIRED_METHOD_CALLS` 列表登记必须被调的 setter(如 `attach_peer_registry`),若任意一项 zero call site → audit FAIL。防止以后再有"方法实现了但 wiring 忘了"的低级错。
+
+**故意不做的**:**不**加"实体名 hint"那种 prompt 增强(如"spine-N 提示 DC")。原因 — 风险是 LLM 过度委派(把本来能本地查的也甩给 peer)。先看 peer 列表注入单独修完是否够,LLM 看到 dc-agent 明确说能 `dc_fabric_diagnose` 应该足以触发委派。如果实测仍犹豫,再加 prompt 增强。
+
+**实测后续(A+C,2026-05)**:第一轮修复后,实测 qwen3.5:27b 收到同样的 `spine-1 BGP EVPN` query **仍未委派** — 反复 `list_devices` → `syslog_search` → `read_stored_result`,4 turn 后 ReadTimeout。诊断:
+- `LLMEngine: peer registry attached (self_agent_id='lan-agent')` log 出现 ✅ attach 调到
+- 但 turn 1 `system=16058 chars` 跟修复前**完全一样** ❌ peers section 没拼上
+- 根因:**peers section 加在 prompt 末尾**(strip 之后),而 qwen3.5:27b 在 16k 字符 + 中文 query 下注意力分散,**忽略尾部内容**;另外 `TOOL_CALL_SYSTEM_SLIM`(turn 2+ 用)**完全没 DELEGATION 描述**,turn 2 后 LLM 连 [DELEGATE:] syntax 都不知道存在
+
+**A+C 修复**:
+
+A. **prompt 位置上移** — peers section 不再尾部追加,而是 template 里加 `{peers_section}` placeholder,**位置紧跟 DELEGATION 段之后**(LLM 高注意力区)。同时给 `TOOL_CALL_SYSTEM_SLIM` 加一行精简 DELEGATION + `{peers_section}` placeholder,turn 2+ 也能委派。
+
+C. **动态实体名提取** — 给每个 peer 行加 `owns: ...` 行,从该 peer 的 skill descriptions + capability ids 提取关键 token(spine, leaf, fabric, BGP-EVPN, VXLAN)。新版输出:
+   ```
+   AVAILABLE PEERS — delegate to these via [DELEGATE:agent_id] or [DELEGATE:*capability].
+   If the user mentions an entity or concept listed under 'owns' for a peer,
+   DELEGATE to that peer instead of trying local tools first:
+     - dc-agent
+         owns: dc, fabric, spine-leaf, topology, BGP-EVPN, neighbor, VXLAN, tunnels, spine, leaf
+         capabilities: dc_fabric_diagnose, dc_fabric_config, dc_loadbalancer
+         description: Diagnose DC fabric: spine-leaf, BGP-EVPN, VXLAN tunnels
+   ```
+   关键设计:**`owns` 关键字是从 peer 在线时的 AgentCard 动态提取**。peer 掉线 → 整个 peer 行从 prompt 消失 → 关键字也消失,**没有"过度委派"风险**。`_PEER_HINT_STOPWORDS` 过滤通用 IT-ops 词(agent / operations / device / config / monitor 等),保留技术名词(BGP-EVPN / VXLAN / cisco / firewall / load balancer);保留有连字符 / 全大写 / 混合大小写的 token 原样(BGP-EVPN 不被拆开)。
+
+**测试**:audit_wiring 会在 wiring 缺失时 FAIL,生产部署门禁卡住。`audit_prompt_templates` 的 `VALID_PLACEHOLDERS` 白名单加 `peers_section`。
+
+**Follow-up #1(2026-05)**:peers section 拼上后 LLM **真的 emit 了** `[DELEGATE:dc-agent]`,但 backend log:`delegate: agent dc-agent not available`。诊断:
+- LAN log 显示 `AgentRegistry: agent dc-agent health unknown → healthy` **在 LLM emit DELEGATE 之后 ~49s 才出现** — peer 注册时 `health=UNKNOWN`,health watcher 每 60s 才跑一次
+- `AgentEntry.is_available` 只在 `HEALTHY` / `DEGRADED` 时为 true → 启动后第一分钟 `[DELEGATE:]` 静默失败
+
+修复:`is_available` **包含 UNKNOWN**(乐观默认)。只有 `UNHEALTHY` 才排除。理由 — peer 注册一刻它就在 registry + LLM 看得到,如果 delegate 此时拒绝就破坏了"peer 一上线就可用"的预期;而 UNKNOWN 意味着 watcher 还没主动验证,不等于 down。一致性:跟 `_build_peers_section` 行为对齐(也把 UNKNOWN 当包含)。Regression test 在 `tests/test_registry_is_available.py`。
+
+**Follow-up #2 — 数据复现的关键调试技巧**:每次"LLM 没委派"的报告先看 system prompt 的 16k 字符尾部是否真有 `AVAILABLE PEERS` 段。两次假修复都是因为没逐字看 prompt 输出:第一次 attach 没接到(无 attached log),第二次 attach 接到了但 `_build_peers_section` 取 agent_id 走错字段(`card.agent_id` 永远是 None,该用 `entry.agent_id`)。
+
+**Follow-up #3(2026-05)— delegation SSE stall**:`is_available` 修好后,delegation 真的发出去了,但 5 分钟后 UI 报 `Stop Policy: LLM backend did not respond within 300s`,执行被取消。诊断:
+- DC peer 收到 subtask 后,自己 runtime loop 开始跑 query classification + Turn 1 LLM,在 qwen3.5:27b + 8k+ 中文 prompt 下耗时 3-5 分钟
+- 这期间 peer 只发了 1 个 `TaskStatusUpdateEvent(state=WORKING)`,没有任何 token chunk
+- 而 dispatcher 的 `_unwrap_a2a_event` 只把 `FAILED` status 转 chunk,**WORKING 被忽略**
+- 结果 LAN 端 SSE chunk_queue 在 `sse_stall_timeout_seconds`(默认 300s)内零事件,**判定 stall → cancel exec_task → 取消 delegation**
+- UI 文案 "LLM backend did not respond" 误导(其实是 SSE-side 取消,不是 LLM call 本身超时)。这种 stall 本质是**任何 await 阻塞超过 300s 且不向 chunk_queue 推事件**都会触发
+
+修复(双层):
+
+(A) **status 转 progress chunk** — `_unwrap_a2a_event` 把 SUBMITTED/WORKING/RUNNING 转为 `{node_step: "peer status: working", node: "delegate"}` chunk(没 token/message)。这给 parent 至少一次 "peer 开始干活" 信号,但只发一次。
+
+(B) **dispatcher heartbeat 层** — `task/inter/coordinator.py` 加 `_with_heartbeat()` wrapper。背景 task 把 peer stream 喂进 `asyncio.Queue`,主 coroutine 用 `wait_for(queue.get, heartbeat_s=30s)` 拉,timeout 就 yield `{node_step: "peer dc-agent still working...", heartbeat: True}`(无 token/message,不污染 _handle_delegate 的合成上下文)。继续等下一个真 chunk,如此循环。heartbeat_s=30s 远低于 sse_stall_timeout=300s,所以 chunk_queue 永远不缺活动信号。
+
+为什么 heartbeat 不带 token/message:`runtime/loop._handle_delegate` 把所有有 `token` 或 `message` 的 chunk 累计到 `_result_parts` 用于合成最终回答(line 971-973)。如果 heartbeat 带 token,合成上下文就会被 "peer working peer working peer working ..." 污染 → 最终答案变垃圾。只用 `node_step`,parent SSE chunk_queue 计为活动,但 _handle_delegate 不当成内容。
+
+Regression tests:`tests/test_dispatcher_heartbeat.py` 6 个 — 慢上游注入 heartbeat、快上游不注入、heartbeat 不带 token/message、空流、单 chunk 流、异常 propagate。
+
+**CI**:7/7 audits + 145 tests(原 139 + 6 heartbeat)。
+
 ---
 
 ## 9. 模块独立维护原则

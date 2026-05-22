@@ -88,6 +88,68 @@ KEY_WHITELIST: set[str] = {
 }
 
 
+# ── Setters that must be called somewhere (Phase 2B, 2026-05) ─────────────
+#
+# Some wiring isn't a `services[K] = X` registration but a method call on an
+# object — typically `engine.attach_foo(...)`. If the setter is defined but
+# never called, the engine has the slot but no data flows in. Symptom is
+# always "the feature appears wired in /system/wiring but does nothing at
+# runtime".
+#
+# The previous example was `llm_engine.attach_peer_registry` — defined and
+# `_build_peers_section` consumed it inside the prompt, but main.py forgot
+# to call attach. Result: LLM prompt described the [DELEGATE:] syntax but
+# never listed any actual peer, so the LLM didn't delegate (2026-05).
+#
+# This list pairs each method with a one-line reason. Adding here means:
+# "if this method has zero call sites in the repo, fail the audit."
+REQUIRED_METHOD_CALLS: list[tuple[str, str]] = [
+    (
+        "attach_peer_registry",
+        "wires AgentRegistry into LLMEngine so the system prompt lists "
+        "available peers + capabilities for [DELEGATE:] decisions",
+    ),
+]
+
+
+def _find_method_call_sites(method_name: str) -> list[Path]:
+    """Return all repo files containing `.method_name(`.
+
+    Simple substring match — good enough; method names are distinctive.
+    We don't need AST here because both definition and call use the
+    same name token. The audit's job is just "is there at least one
+    call site outside the definition file".
+    """
+    from _audit_common import iter_repo_python_files
+    repo_root = Path(__file__).resolve().parent.parent
+    hits: list[Path] = []
+    needle = f".{method_name}("
+    for f in iter_repo_python_files(repo_root):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if needle in text:
+            hits.append(f)
+    return hits
+
+
+def _find_method_def_files(method_name: str) -> list[Path]:
+    """Return files where `def method_name(...)` is defined (excludes calls)."""
+    from _audit_common import iter_repo_python_files
+    repo_root = Path(__file__).resolve().parent.parent
+    hits: list[Path] = []
+    needle_def = f"def {method_name}("
+    for f in iter_repo_python_files(repo_root):
+        try:
+            text = f.read_text(encoding="utf-8")
+        except Exception:
+            continue
+        if needle_def in text:
+            hits.append(f)
+    return hits
+
+
 def _str_const(node: ast.AST) -> str | None:
     """Return string literal if node is `Constant(str)` or `Str` (Py3.7+)."""
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
@@ -245,10 +307,42 @@ def main() -> int:
         print(f"audit_wiring: FAIL — {len(ghosts)} ghost service(s).")
         return 1
 
+    # ── Second pass: required-method-call audit ───────────────────────────
+    # Some wiring isn't service-dict registration but `engine.attach_X(...)`.
+    # The earlier ghost-services check can't see these — a setter can be
+    # defined and a getter consumed downstream while nobody actually calls
+    # attach. List which setters MUST be called in REQUIRED_METHOD_CALLS;
+    # if any has zero call sites outside its definition file, we fail.
+    missing_calls: list[tuple[str, str, list[Path]]] = []
+    for method_name, reason in REQUIRED_METHOD_CALLS:
+        all_hits      = _find_method_call_sites(method_name)
+        def_files     = _find_method_def_files(method_name)
+        # External callers = files containing `.method_name(` that are NOT
+        # the definition site. (A def file may also self-test internally,
+        # but we want at least one external caller wiring the slot.)
+        def_set       = set(def_files)
+        external_call = [f for f in all_hits if f not in def_set]
+        if not external_call:
+            missing_calls.append((method_name, reason, def_files))
+
+    if missing_calls:
+        print("=" * 70)
+        print("FAIL — required setters with NO external call site:")
+        print("=" * 70)
+        for method_name, reason, def_files in missing_calls:
+            print(f"  {method_name}(...)")
+            print(f"    defined in: {', '.join(str(f) for f in def_files) or 'NONE'}")
+            print(f"    called in:  NONE — wiring forgotten")
+            print(f"    why required: {reason}")
+            print()
+        print(f"audit_wiring: FAIL — {len(missing_calls)} unwired setter(s).")
+        return 1
+
     total_keys = len(writes)
     print(
         f"audit_wiring: ✓ PASS — {total_keys} service keys, "
-        f"all have external readers."
+        f"all have external readers; "
+        f"{len(REQUIRED_METHOD_CALLS)} required setter(s) all called."
     )
     return 0
 

@@ -124,7 +124,25 @@ class AgentEntry(BaseModel):
 
     @property
     def is_available(self) -> bool:
-        return self.health in (AgentHealthState.HEALTHY, AgentHealthState.DEGRADED)
+        """Whether this agent is eligible for delegation / routing.
+
+        Treat UNKNOWN as available (optimistic) — newly-discovered peers
+        start in UNKNOWN state and the health watcher only ticks every
+        ~60s. If we excluded UNKNOWN we'd hit a "60-second blind window"
+        right after startup where the peer is in the registry, listed in
+        the LLM's prompt as a delegation target, but rejected by delegate_fn
+        as 'not available'. Symptom: user sends a query in the first minute
+        after startup, LLM emits [DELEGATE:dc-agent], backend logs
+        'delegate: agent dc-agent not available' even though dc-agent IS
+        reachable. (Observed 2026-05 — see ARCHITECTURE §8.8 follow-up.)
+
+        Excludes only UNHEALTHY — agents the watcher has actively failed.
+        """
+        return self.health in (
+            AgentHealthState.HEALTHY,
+            AgentHealthState.DEGRADED,
+            AgentHealthState.UNKNOWN,
+        )
 
 
 # ---------------------------------------------------------------------------

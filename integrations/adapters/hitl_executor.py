@@ -1502,12 +1502,28 @@ class HitlExecutor:
 
         Extracts query/session_id/confirmed_facts from RequestContext,
         runs the agent loop, and streams tokens through the EventQueue
-        as text parts. Terminal events (interrupt / done / error) become
+        as A2A events. Terminal events (interrupt / done / error) become
         protocol status updates.
+
+        IMPORTANT (2026-05 fix): this MUST use the real EventQueue API —
+        `enqueue_event(<A2AEvent>)` — and MUST guarantee the queue is
+        finalised (a MessageEvent seals it) on every exit path. The earlier
+        version called non-existent helpers (enqueue_event_status /
+        enqueue_event_message), so every enqueue silently failed, NO events
+        reached the queue, and it was never finalised — the consumer
+        (a2a/request_handler._handle_stream) blocked forever on consume(),
+        the SSE stream never sent [DONE], and the delegating agent's
+        dispatcher hit a ReadTimeout. Root cause of "peer stream failed:
+        ReadTimeout" in live two-agent delegation.
         """
         # Lazy import — keep a2a deps optional for non-protocol callers
-        from a2a.schemas import Message, TextPart, TaskState
-        from a2a.event_queue import EventQueue  # noqa: F401 — type hint only
+        from a2a.schemas import (
+            Message, TextPart, DataPart, Artifact, TaskStatus, TaskState,
+            TaskStatusUpdateEvent, TaskArtifactUpdateEvent, MessageEvent,
+        )
+
+        task_id    = getattr(context, "task_id", "")
+        context_id = getattr(context, "context_id", "") or task_id
 
         # 1. Pull inputs from the A2A RequestContext
         try:
@@ -1527,30 +1543,57 @@ class HitlExecutor:
         )
         confirmed_facts = list(meta.get("confirmed_facts") or [])
         env_context     = dict(meta.get("env_context") or {})
-        task_id         = getattr(context, "task_id", "")
 
-        # 2. Wire token streaming through the event queue
-        async def _on_token(tok: str) -> None:
+        _finalised = False   # guard so we seal the queue exactly once
+
+        async def _emit_status(state) -> None:
             try:
-                await event_queue.enqueue_event_message(
-                    message=Message(role="assistant", parts=[TextPart(text=tok)]),
-                    task_id=task_id,
-                )
+                await event_queue.enqueue_event(TaskStatusUpdateEvent(
+                    task_id=task_id, context_id=context_id,
+                    status=TaskStatus(state=state),
+                ))
+            except Exception as exc:
+                logger.debug("a2a status emit failed: %s", exc)
+
+        async def _emit_token(tok: str) -> None:
+            # Stream tokens as artifact updates carrying {token,type:token},
+            # which the delegating dispatcher's _unwrap_a2a_event maps back to
+            # {token: ...} chunks.
+            try:
+                await event_queue.enqueue_event(TaskArtifactUpdateEvent(
+                    task_id=task_id, context_id=context_id,
+                    artifact=Artifact(
+                        name="llm_token",
+                        parts=[DataPart(data={"token": tok, "type": "token"})],
+                    ),
+                ))
             except Exception as exc:
                 logger.debug("a2a token enqueue failed: %s", exc)
 
-        # 3. Status: working
-        try:
-            await event_queue.enqueue_event_status(
-                task_id=task_id, state=TaskState.working,
-            )
-        except Exception:
-            pass
+        async def _finalize(final_text: str) -> None:
+            # A MessageEvent seals the queue (consume() returns). MUST be the
+            # last thing we emit on the happy path.
+            nonlocal _finalised
+            if _finalised:
+                return
+            _finalised = True
+            try:
+                await event_queue.enqueue_event(MessageEvent(
+                    task_id=task_id, context_id=context_id,
+                    message=Message(role="assistant",
+                                    parts=[TextPart(text=final_text or "Task completed.")]),
+                ))
+            except Exception as exc:
+                logger.debug("a2a finalize emit failed: %s", exc)
 
-        # 4. Run agent loop. The loop emits stop_hitl chunks when its
-        #    tool watch-list catches a destructive tool_call; execute_query
-        #    raises HITL via hitl_core and returns interrupted=True. The
-        #    LLM, not pre_verify, is the source of "destructive" detection.
+        # 2. Token streaming hook
+        async def _on_token(tok: str) -> None:
+            await _emit_token(tok)
+
+        # 3. Status: working
+        await _emit_status(TaskState.WORKING)
+
+        # 4. Run agent loop.
         try:
             result = await self.execute_query(
                 query=query, session_id=session_id,
@@ -1560,40 +1603,39 @@ class HitlExecutor:
             )
         except Exception as exc:
             logger.exception("HitlExecutor.execute_a2a failed: %s", exc)
-            try:
-                await event_queue.enqueue_event_status(
-                    task_id=task_id, state=TaskState.failed,
-                )
-            except Exception:
-                pass
+            await _emit_status(TaskState.FAILED)
+            # CRITICAL: finalise even on failure so the consumer unblocks and
+            # the delegating agent gets a terminal signal instead of timing out.
+            await _finalize(f"Task failed on peer: {exc}")
             return
 
-        # 5. Terminal status
+        # 5. Terminal handling
         try:
             if result.get("interrupted"):
-                # Surface the interrupt_id so the UI's HITL tab can pick it up.
-                # The protocol convention: emit an "input-required" status with
-                # the interrupt_id in metadata; the frontend HITL tab polls
-                # /hitl/pending and renders the card.
-                await event_queue.enqueue_event_status(
-                    task_id=task_id,
-                    state=TaskState.input_required,
-                    metadata={"interrupt_id": result.get("interrupt_id", "")},
+                # Peer-side HITL — surface input-required + interrupt_id, then
+                # finalise so the delegating side doesn't hang. (Cross-agent
+                # HITL passthrough is Phase 3; for now the peer's own operator
+                # handles it; the delegating agent is told via the message.)
+                try:
+                    await event_queue.enqueue_event(TaskStatusUpdateEvent(
+                        task_id=task_id, context_id=context_id,
+                        status=TaskStatus(state=TaskState.INPUT_REQUIRED,
+                                          message=str(result.get("interrupt_id", ""))),
+                    ))
+                except Exception as exc:
+                    logger.debug("a2a interrupt-status emit failed: %s", exc)
+                await _finalize(
+                    "Peer requires operator approval (HITL) to continue; "
+                    "handle it on the peer's console."
                 )
             else:
-                # Final answer as one terminal message
                 final_text = result.get("text") or ""
-                if final_text:
-                    await event_queue.enqueue_event_message(
-                        message=Message(role="assistant",
-                                        parts=[TextPart(text=final_text)]),
-                        task_id=task_id, final=True,
-                    )
-                await event_queue.enqueue_event_status(
-                    task_id=task_id, state=TaskState.completed,
-                )
+                await _emit_status(TaskState.COMPLETED)
+                await _finalize(final_text)
         except Exception as exc:
-            logger.debug("a2a terminal-status emit failed: %s", exc)
+            logger.debug("a2a terminal emit failed: %s", exc)
+            # Last-resort finalise so the consumer never hangs.
+            await _finalize("")
 
     async def cancel(self, context, event_queue) -> None:
         """A2A cancel hook. Currently best-effort no-op: the runtime loop

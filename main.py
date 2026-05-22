@@ -1241,6 +1241,28 @@ async def build_services() -> dict[str, Any]:
                 meta_tool_registry = mt_reg,
             )
 
+            # Wire the peer registry into the LLM (Phase 2B — peer-aware
+            # prompts, 2026-05). Without this, the LLMEngine has the
+            # _build_peers_section() method + attach_peer_registry() API but
+            # the registry never gets attached, so the system prompt ends up
+            # describing the [DELEGATE:] syntax in the abstract while the
+            # LLM has no idea which peers exist or what they're good at.
+            # Symptom: when a user asks about a DC-domain entity on the LAN
+            # agent, the LAN agent exhausts its local tools and says "device
+            # not found" instead of delegating to dc-agent.
+            try:
+                _reg = services.get("registry")
+                if _reg is not None:
+                    llm_engine.attach_peer_registry(
+                        _reg, self_agent_id=cfg.agent.agent_id,
+                    )
+            except Exception as _apr_exc:
+                logger.warning(
+                    "attach_peer_registry failed (%s) — LLM prompt will "
+                    "omit AVAILABLE PEERS section, delegation may be "
+                    "underused", _apr_exc,
+                )
+
             # Register meta-tools as ordinary local callables in the ToolRouter
             # so [TOOL:list_tools] dispatches to the meta-tool handler at execution.
             try:
