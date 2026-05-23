@@ -40,9 +40,19 @@ class TestA2AUnwrap(unittest.TestCase):
         self.assertEqual(D._unwrap_a2a_event(evt),
                          [{"token": "a"}, {"token": "b"}, {"token": "c"}])
 
-    def test_status_working_is_silent(self):
-        # Non-content structural event → no chunks forwarded.
-        self.assertEqual(D._unwrap_a2a_event({"status": {"state": "working"}}), [])
+    def test_status_working_emits_keepalive(self):
+        # A non-terminal status (working/submitted/running) now emits a brief
+        # progress chunk — this keeps the delegating-side SSE alive during the
+        # peer's long agent loop and gives the operator a Flow event. (Changed
+        # from the original "silent" contract to fix the 300s stall where the
+        # parent cancelled before the peer's first token; v13.)
+        out = D._unwrap_a2a_event({"status": {"state": "working"}})
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]["node"], "delegate")
+        self.assertIn("working", out[0]["node_step"])
+        # Terminal states stay silent (caller sees MessageEvent / stream end).
+        self.assertEqual(D._unwrap_a2a_event({"status": {"state": "completed"}}), [])
+        self.assertEqual(D._unwrap_a2a_event({"status": {"state": "canceled"}}), [])
 
     def test_status_failed_surfaces_error(self):
         out = D._unwrap_a2a_event({"status": {"state": "failed", "message": "boom"}})

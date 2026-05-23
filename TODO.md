@@ -1,7 +1,7 @@
 # TODO — Production Readiness & Roadmap Tracker
 
 > Tracking doc for deferred work. **Rule: when an item is done, delete it from this file.**
-> Items that remain are not yet done. Last updated: 2026-05.
+> Items that remain are not yet done. Last updated: 2026-05 (refreshed for v13 — Phase 2B delegation done + transport hardened).
 
 This file tracks the production-readiness items surfaced in the Sprint-3
 readiness assessment (see `ARCHITECTURE.md §8.4` "What Sprint-3-pre does NOT fix")
@@ -109,22 +109,72 @@ See ARCHITECTURE.md §12.7. *(Kept until a release cycle, then delete.)*
   gate. Generalize to a `Profile.integrations` declaration (list of MCP server
   configs + OpenAPI specs per profile) so each domain wires its own.
 
-### Phase 2B — Capability-based delegation
-- **Effort**: 5-7 days
-- **Status**: **IN PROGRESS (2026-05)**. Design reviewed + approved
-  (PHASE_2B_DESIGN.md). Decisions: explicit `[DELEGATE:agent_id]` only (no
-  auto-delegate yet); default fresh (facts NOT shared, `#forked` opt-in);
-  reuse registry `_pick` for `*capability`, direct lookup for explicit
-  agent_id; entry agent audits delegation boundary only; `[DELEGATE:]` is
-  MUTUALLY EXCLUSIVE with `[TOOL:]` in one turn.
-- **Scope**: `runtime/directive_parser.py` adds `[DELEGATE:]` regex;
-  `runtime/loop.py` gets a `_delegate_to_peer()` branch; fix
-  `A2ATaskDispatcher` URL bug (posts to `/stream`, server exposes `POST /`);
-  wire `build_task_services()` into main.py (currently never called); chunks
-  tagged `source_agent` so WebUI shows "via dc-agent". Plus debt #10
-  (action_type builder) + #7/#12-3 (build_resumption_query).
-- **Explicitly NOT in 2B**: cross-agent HITL passthrough (Phase 3), multi-hop,
-  auto-delegate, parallel fan-out, cross-agent memory writeback.
+### Phase 2B — Capability-based delegation ✅ DONE (2026-05)
+Delivered + validated end-to-end with two live agents (LAN :8000 ↔ DC :8001,
+real qwen3.5:27b). Decisions held: explicit `[DELEGATE:agent_id]` only (no
+auto-delegate); default fresh (`#forked` opt-in shares parent confirmed_facts);
+registry `_pick` for `*capability`, direct lookup for explicit id; entry agent
+audits the delegation boundary only; `[DELEGATE:]` MUTUALLY EXCLUSIVE with
+`[TOOL:]` in one turn (tool wins + nudge).
+
+Shipped pieces: `[DELEGATE:target[#mode]]` parser + audit; `runtime/loop.py`
+injected `delegate_fn` + `_handle_delegate` (fresh/forked, `source_agent`
+tagging, result injected via `state.record_new_fact()` so it survives the
+per-turn `budget.assemble()` rebuild); `task/delegation.py` `build_delegate_fn`
+factory (resolve -> TaskDefinition -> dispatcher stream -> graceful degrade);
+`main.py`/`webui/backend.py` wiring; peer-aware prompt section; WebUI delegate
+badge. Plus debt #10 (`ProposedAction` builders + `ActionTypePrefix`) and debt
+#7/#12-3 (`build_resumption_query`). Tests: `test_delegate_directive`,
+`test_delegation_wiring`, `test_delegation_e2e`, `test_delegation_a2a_unwrap`.
+See ARCHITECTURE.md §8.7, PHASE_2B_DESIGN.md. *(Kept until a release cycle.)*
+
+**Note on the early design notes (now corrected):** the "A2ATaskDispatcher URL
+bug" was a misread — the server does expose `POST /stream` and the dispatcher
+was correct. `build_task_services()` was likewise already wired (as
+`create_task_system`). The real transport bugs surfaced only under live
+two-agent load and were fixed in the transport hardening pass below.
+
+#### Phase 2B transport hardening ✅ DONE (2026-05, v8->v13)
+Five bugs found only in live two-agent runs (each has a regression test):
+- **A2A event-envelope unwrap** — the peer streams A2A protocol events
+  (`TaskArtifactUpdateEvent` etc.) with token text nested at
+  `artifact.parts[].data.token`; the dispatcher forwarded the raw envelope so
+  the parent loop saw no top-level `token` and accumulated nothing. Fix:
+  `A2ATaskDispatcher._unwrap_a2a_event` (`test_delegation_a2a_unwrap`).
+- **EventQueue never finalised -> ReadTimeout** — `HitlExecutor.execute` (DC's
+  A2A inbound entry) called non-existent `enqueue_event_status/_message`
+  helpers; every enqueue silently failed and the queue was never sealed, so
+  the consumer blocked forever and the parent hit a ReadTimeout. Fix: rewrote
+  to use real `enqueue_event(<A2AEvent>)` + guaranteed `MessageEvent` finalize
+  on every exit path.
+- **300s SSE stall during peer's slow first token** — the peer runs a full
+  agent loop (classify + 2-3 LLM turns, minutes on local qwen3.5) before its
+  first token; the parent's `sse_stall_timeout` cancelled first. Fix:
+  `_with_heartbeat` injects a no-op `node_step` keep-alive every 30s of
+  silence; non-terminal peer status events also map to a brief progress chunk
+  (`test_dispatcher_heartbeat`).
+- **Double-counted final answer** — DC emitted `final_text` both as streamed
+  tokens AND inside the sealing `MessageEvent`, so the parent LLM saw the
+  analysis 2-3x and repeated itself. Fix: when tokens streamed, seal with the
+  generic "Task completed." marker that the parent's unwrap filters out
+  (`test_delegation_no_double_count`).
+- **Outbound task stuck in RUNNING + raw-JSON render** — the parent's outbound
+  `TaskDefinition` never transitioned past RUNNING (Delegations tab stuck) and
+  the result rendered as `{"text": ...}` JSON. Fix: dispatcher updates state to
+  COMPLETED/FAILED/PENDING on stream end + persists; detail panel renders the
+  markdown answer (`test_delegation_outbound_state`).
+
+**Follow-up — heartbeat interval not configurable**
+- **Effort**: 15 min
+- **Why**: `heartbeat_s = 30.0` is hardcoded in `A2ATaskDispatcher`. It must
+  stay comfortably under `sse_stall_timeout_seconds` (default 180s); fine
+  today, but an operator who lowers the stall timeout could starve it.
+- **Action**: read `heartbeat_s` from config (e.g. `task.delegation_heartbeat_s`,
+  default 30) and assert `heartbeat_s < sse_stall_timeout_seconds` at startup.
+
+**Still NOT in 2B** (future): cross-agent HITL passthrough (Phase 3 — but the
+provenance plumbing is now in place, see below), multi-hop, auto-delegate,
+parallel fan-out, cross-agent memory writeback.
 
 ### HITL design debt (reviewed 2026-05 against current tree)
 
@@ -148,8 +198,9 @@ Remaining real debt, by priority:
   past SLA → mark EXPIRED + audit + UI "lost on restart" hint.
 
 #### HITL-P1 — follow-up turn UX + context (debt #4 + #7-residual)
-- **Effort**: #4 follow-up UI loading 1.5d; #7 resumption-query is being done
-  in Phase 2B (build_resumption_query shared with delegation).
+- **Effort**: #4 follow-up UI loading 1.5d; #7 resumption-query ✅ DONE
+  (`build_resumption_query` in `runtime/loop.py`, shared by the H2 follow-up
+  turn and delegation result injection).
 - **#4**: operator approve → follow-up turn blocks HTTP 10-60s with no loading
   state. Fix: return `{async_followup_pending}` immediately + poll, or reopen SSE.
 
@@ -168,16 +219,34 @@ Remaining real debt, by priority:
   pollution — only inject for hitl_mode tools) and absorbs #8.
 
 #### HITL-P3 — nice-to-have
-- #10 action_type enum/builder — being partially done in Phase 2B (delegate:
-  type + builder); remaining callers can migrate incrementally.
+- #10 action_type enum/builder — ✅ DONE in Phase 2B (`ActionTypePrefix` +
+  `ProposedAction.tool_call/batch/diagnostic/delegate` builders). Existing
+  hand-rolled `action_type` strings can still migrate to the builders
+  incrementally, but the contract exists.
 - Cross-process SLA timer idempotency residual of #3 (process-restart half).
 
 ### Phase 3 — Cross-agent HITL passthrough
-- **Effort**: 2-3 weeks
-- **Status**: designed, not started
-- **Scope**: new `hitl_core/cross_agent.py` (`CrossAgentHitlBridge`); A2A `INPUT_REQUIRED` state carries hitl_payload in metadata; entry agent renders peer's HITL card with "from dc-agent" tag; cross-agent correlation id for audit; timeout/cancel handling.
-- **Prereq**: Phase 2B stable for at least a week.
-- **Complexity note**: failure modes (network flake / peer crash / operator non-response / concurrent HITLs) are the bulk of the work — needs 5-8 integration test scenarios.
+- **Effort**: 2-3 weeks (reduced — provenance plumbing now done, see below)
+- **Status**: designed, not started; **provenance groundwork shipped in v13**
+- **Already done (de-risks Phase 3)**: HITL provenance now flows end-to-end
+  when a delegated peer raises a card — `task/delegation.py` stamps
+  `source_agent` / `source_session_id` / `source_query` into
+  `TaskDefinition.metadata`; `A2ATaskDispatcher.dispatch` packs it into the A2A
+  request `params.metadata`; `HitlExecutor.execute` extracts it into
+  `env_context`; `_raise_tool_hitl` / `_raise_tool_hitl_batch` /
+  `_raise_multi_mode` stamp the `HitlPayload` via
+  `_extract_delegation_provenance`. `HitlPayload` carries `source_agent` /
+  `source_session_id` fields (`test_delegation_provenance`). The peer operator's
+  card can already show "Delegated from <source_agent>".
+- **Remaining scope**: the *passthrough* itself — surface the peer's pending
+  card back on the ENTRY agent's UI (today the peer's own operator must
+  approve), via A2A `INPUT_REQUIRED` carrying the payload + a
+  `CrossAgentHitlBridge`; cross-agent correlation id for the joined audit;
+  timeout/cancel handling across the hop.
+- **Prereq**: Phase 2B stable for at least a week (now is).
+- **Complexity note**: failure modes (network flake / peer crash / operator
+  non-response / concurrent HITLs) are the bulk of the work — needs 5-8
+  integration test scenarios.
 
 ---
 
@@ -210,6 +279,9 @@ Remaining real debt, by priority:
 ---
 
 ## Done (kept briefly for reference, delete after a release cycle)
+
+- ✅ **Phase 2B — Capability-based delegation + transport hardening** (2026-05) — explicit `[DELEGATE:agent_id|*capability[#forked]]` cross-agent task hand-off over A2A; validated live (LAN↔DC, qwen3.5:27b). Five transport bugs fixed under real load: A2A event-envelope unwrap, EventQueue finalize (ReadTimeout), 30s dispatcher heartbeat (300s stall), no-double-count of final answer, outbound task state transition + markdown render. HITL provenance (`source_agent`/`source_session_id`/`source_query`) now plumbed end-to-end (de-risks Phase 3). Details: ARCHITECTURE.md §8.7, PHASE_2B_DESIGN.md, and the Phase 2B section above.
+- ✅ **Sprint-3-pre readiness** (2026-05) — `runtime/tracing.py` boots gracefully without OpenTelemetry installed; `HITLCheckpointConfig` defaults to sqlite (approvals survive restart) with env override; `SkillEvolver.set_bench_runner` A/B safety-net gate rejects compliance regressions. Pinned by `tests/test_sprint3_pre.py`.
 
 - ✅ **C1 — Prometheus `/metrics` endpoint** (2026-05) — `prometheus_client` text format at `/metrics`; counters for LLM calls / tool dispatch / HITL pending.
 - ✅ **C2 — FastAPI / httpx auto-instrumentation** (2026-05) — `opentelemetry-instrumentation-fastapi` + `-httpx` wired in `runtime/tracing.py:configure()`; every HTTP request/outbound call auto-spanned when tracing enabled.
