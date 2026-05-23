@@ -11,7 +11,11 @@ import logging
 import uuid
 from typing import Any, AsyncIterator, Optional
 
-import httpx
+# httpx is imported lazily inside _stream_request (the only place it's used)
+# so that importing this module — and the task package — does not hard-require
+# httpx. This lets delegation wiring + unit tests load in environments without
+# httpx installed; the dependency is only needed when actually dispatching to
+# a remote peer over HTTP.
 
 from ..schemas import (
     AgentAssignment,
@@ -27,6 +31,85 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Heartbeat wrapper for streaming delegation
+# ---------------------------------------------------------------------------
+
+async def _with_heartbeat(
+    upstream: "AsyncIterator[dict[str, Any]]",
+    *,
+    heartbeat_s: float,
+    agent_id: str,
+) -> "AsyncIterator[dict[str, Any]]":
+    """Forward chunks from ``upstream`` and inject a heartbeat node_step
+    every ``heartbeat_s`` seconds of silence.
+
+    Design rationale
+    ----------------
+    The delegating side's SSE pipeline cancels the request when the
+    chunk_queue is idle longer than ``sse_stall_timeout_seconds``
+    (default 300s). A peer running a slow local LLM can be silent for
+    minutes before its first token, so we synthesise a no-op chunk
+    periodically. The chunk carries only a ``node_step`` string and
+    intentionally NO ``token`` / ``message`` / ``node_result`` — the
+    parent's _handle_delegate uses tokens/message text to build the
+    final synthesis context, so a heartbeat with token content would
+    pollute that. The Flow tab on the parent UI gets a "peer working"
+    event though, which is what the operator actually wants to see.
+
+    Implementation: background task drains ``upstream`` into an asyncio
+    Queue; the foreground does ``wait_for(queue.get, heartbeat_s)`` and
+    falls back to a heartbeat chunk on timeout. Done sentinel signals
+    end-of-stream. Exceptions in the drainer are forwarded as a special
+    sentinel so they're re-raised in the foreground.
+    """
+    import asyncio
+
+    _END  = object()    # normal end of stream
+    _ERR  = object()    # exception sentinel; followed by the exception
+
+    queue: "asyncio.Queue[Any]" = asyncio.Queue()
+
+    async def _drainer() -> None:
+        try:
+            async for chunk in upstream:
+                await queue.put(chunk)
+        except BaseException as exc:  # noqa: BLE001 — forward everything incl. CancelledError
+            await queue.put(_ERR)
+            await queue.put(exc)
+            return
+        await queue.put(_END)
+
+    drain_task = asyncio.create_task(_drainer())
+    try:
+        while True:
+            try:
+                item = await asyncio.wait_for(queue.get(), timeout=heartbeat_s)
+            except asyncio.TimeoutError:
+                # No real chunk in the heartbeat window — emit one ourselves
+                # so the parent's chunk_queue stays alive. Keep the cadence
+                # going by looping back to wait_for again.
+                yield {
+                    "node_step": f"peer {agent_id} still working...",
+                    "node":       "delegate",
+                    "heartbeat":  True,
+                }
+                continue
+            if item is _END:
+                return
+            if item is _ERR:
+                exc = await queue.get()
+                raise exc
+            yield item
+    finally:
+        if not drain_task.done():
+            drain_task.cancel()
+            try:
+                await drain_task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+
+# ---------------------------------------------------------------------------
 # A2A Task Dispatcher
 # ---------------------------------------------------------------------------
 
@@ -38,7 +121,15 @@ class A2ATaskDispatcher:
     the 6-processor chain in a2a/agent_executor.py + hitl/a2a_integration.py.
     """
 
-    def __init__(self, http_timeout: float = 120.0) -> None:
+    def __init__(self, http_timeout: float = 300.0) -> None:
+        # 300s default: a delegated peer runs its FULL agent loop (query
+        # classification + multiple LLM turns + tools) before the first
+        # content token, and on local models (e.g. Ollama qwen3.5:27b on
+        # consumer hardware) that gap can be 2-3 minutes. The peer emits a
+        # `working` status quickly, but the read-gap until the first real
+        # token is the whole loop — so this must be generous. Override via
+        # build_delegate_fn if needed. _stream_request builds a granular
+        # httpx.Timeout so connect stays short while read is lenient.
         self._timeout = http_timeout
 
     async def dispatch(
@@ -59,6 +150,30 @@ class A2ATaskDispatcher:
             payload={"agent_url": assignment.agent_url, "skill_id": assignment.skill_id},
         ))
 
+        # Build the dispatch payload. We pack `task.metadata` (which carries
+        # delegated_by / forked / shared_facts_count, plus anything the
+        # caller put there) into params.metadata so the peer's
+        # agent_executor can read it from `context.metadata` and attach
+        # provenance to any HITL cards it creates. Without this, the peer
+        # has no way to know it's processing a delegation — the operator
+        # sees a bare approval card with no hint of who's upstream.
+        # task_id / session_id stay at the top level for compatibility
+        # with the peer-side keys that already exist; metadata
+        # spread comes last so it can't accidentally overwrite them.
+        _meta: dict[str, Any] = {
+            "task_id":    task.task_id,
+            "session_id": task.session_id,
+        }
+        # task.parameters can be empty; only spread when actually set
+        if task.parameters:
+            _meta.update(task.parameters)
+        # task.metadata carries delegated_by / forked / shared_facts_count
+        if task.metadata:
+            for _k, _v in task.metadata.items():
+                # Don't let metadata clobber our required keys
+                if _k not in ("task_id", "session_id"):
+                    _meta[_k] = _v
+
         body = {
             "jsonrpc": "2.0",
             "method":  "message/stream",
@@ -70,17 +185,94 @@ class A2ATaskDispatcher:
                     "parts": [{"kind": "text", "text": task.description}],
                 },
                 "context_id": task.context_id,
-                "metadata": {
-                    "task_id":    task.task_id,
-                    "session_id": task.session_id,
-                    **task.parameters,
-                },
+                "metadata": _meta,
             },
             "id": 1,
         }
 
-        async for chunk in self._stream_request(assignment.agent_url, body):
-            yield chunk
+        # Wrap the peer stream with a heartbeat layer so the delegating
+        # side's SSE chunk_queue gets at least one chunk every
+        # `heartbeat_s` seconds even when the peer is silently crunching
+        # its own LLM call. Without this, a slow peer (e.g. qwen3.5:27b
+        # doing query classification + Turn 1) can silence the parent
+        # for 3-5 minutes — long enough to trip the parent's SSE
+        # `sse_stall_timeout_seconds` (default 300s) and cancel the
+        # whole delegation before the peer even streams its first token
+        # (observed 2026-05: LAN → dc-agent → 5 min silence → "LLM
+        # backend did not respond within 300s"). The heartbeat yields a
+        # bare node_step the parent runtime loop's _handle_delegate
+        # ignores for synthesis purposes but the parent SSE chunk_queue
+        # counts as activity, so the request stays alive. heartbeat_s
+        # is intentionally well under sse_stall_timeout_seconds.
+
+        # Accumulate the peer's token stream so we can write a meaningful
+        # `result` to the outbound TaskDefinition on completion. Without
+        # this, the LAN-side Delegations tab shows a task stuck in RUNNING
+        # forever even after the peer is done (observed 2026-05).
+        _result_parts: list[str] = []
+        _peer_hitl    = False
+        _peer_error: Optional[str] = None
+        _stream_ok    = True
+        try:
+            async for chunk in _with_heartbeat(
+                self._stream_request(assignment.agent_url, body),
+                heartbeat_s = 30.0,
+                agent_id    = assignment.agent_id,
+            ):
+                # Mirror what runtime/loop.py:_handle_delegate does for its
+                # _result_parts accumulator, in case the runtime loop isn't
+                # involved (some callers consume dispatcher directly).
+                if isinstance(chunk, dict):
+                    if chunk.get("type") == "hitl_interrupt" or chunk.get("hitl_interrupt"):
+                        _peer_hitl = True
+                    if chunk.get("error"):
+                        _peer_error = str(chunk["error"])
+                    tok = chunk.get("token") or chunk.get("message") or ""
+                    if tok:
+                        _result_parts.append(str(tok))
+                yield chunk
+        except Exception as exc:
+            _stream_ok = False
+            _peer_error = str(exc) or type(exc).__name__
+            # Re-raise so callers (delegate_fn's try/except) can also see it
+            raise
+        finally:
+            # Update terminal state on the outbound TaskDefinition so the
+            # LAN-side Delegations tab transitions away from RUNNING. Done
+            # in finally so we always write SOMETHING — even on cancellation
+            # or unexpected exception — rather than leaving a ghost row.
+            try:
+                from datetime import datetime, timezone
+                _result_text = "".join(_result_parts).strip()
+                if _peer_error:
+                    task.state = TaskState.FAILED
+                    task.error = _peer_error[:500]
+                elif _peer_hitl:
+                    # Peer is awaiting operator approval — keep the task in
+                    # a non-terminal state so the UI shows "still pending"
+                    # (we don't have a dedicated AWAITING_HITL state).
+                    task.state = TaskState.PENDING
+                    task.metadata["peer_hitl_pending"] = True
+                elif _stream_ok:
+                    task.state = TaskState.COMPLETED
+                    if _result_text:
+                        task.result = {"text": _result_text}
+                else:
+                    task.state = TaskState.FAILED
+                task.completed_at = datetime.now(timezone.utc).isoformat()
+                await store.save(task)
+                await store.write_audit(TaskAuditRecord(
+                    task_id=task.task_id, session_id=task.session_id,
+                    event_kind=TaskEventKind.COMPLETED
+                        if task.state == TaskState.COMPLETED
+                        else TaskEventKind.FAILED,
+                    actor="a2a_dispatcher",
+                    payload={"state": task.state.value,
+                             "result_chars": len(_result_text),
+                             "error": _peer_error or ""},
+                ))
+            except Exception as _save_exc:
+                logger.debug("dispatcher terminal save failed: %s", _save_exc)
 
     async def _stream_request(
         self,
@@ -89,7 +281,11 @@ class A2ATaskDispatcher:
     ) -> AsyncIterator[dict[str, Any]]:
         stream_url = agent_url.rstrip("/") + "/stream"
         try:
-            async with httpx.AsyncClient(timeout=self._timeout) as client:
+            import httpx   # lazy: only needed when actually dispatching
+            # Granular timeout: fail fast on connect, but allow a long gap
+            # before the first/next byte since the peer's agent loop is slow.
+            _to = httpx.Timeout(self._timeout, connect=10.0)
+            async with httpx.AsyncClient(timeout=_to) as client:
                 async with client.stream("POST", stream_url, json=body) as resp:
                     resp.raise_for_status()
                     async for line in resp.aiter_lines():
@@ -101,12 +297,112 @@ class A2ATaskDispatcher:
                             return
                         try:
                             import json
-                            yield json.loads(data)
+                            raw = json.loads(data)
                         except Exception:
                             yield {"token": data + " "}
+                            continue
+                        # The peer streams A2A protocol events (Task / Message /
+                        # Artifact update envelopes), not the runtime loop's
+                        # flat {token, node_step, ...} chunks. Unwrap them into
+                        # the flat shape the delegating loop's _handle_delegate
+                        # understands. Without this, the loop sees the raw
+                        # envelope (no top-level 'token') and accumulates
+                        # nothing — the delegation appears to "succeed" but
+                        # returns empty (observed 2026-05).
+                        for chunk in self._unwrap_a2a_event(raw):
+                            yield chunk
         except Exception as exc:
-            logger.error("A2ATaskDispatcher stream failed: %s", exc)
-            yield {"message": f"Remote agent error: {exc}", "node": "dispatcher"}
+            # Surface a meaningful error — bare str(exc) is empty for several
+            # httpx exception types (e.g. ReadTimeout, RemoteProtocolError),
+            # which made this failure undebuggable in the field.
+            _msg = str(exc) or f"{type(exc).__name__} (no message)"
+            logger.error("A2ATaskDispatcher stream to %s failed: %s",
+                         stream_url, _msg)
+            # Yield an error chunk so the delegating loop can degrade
+            # gracefully (inject a "delegation failed" note) instead of just
+            # silently getting nothing.
+            yield {"node_step": f"peer stream failed: {_msg}",
+                   "node": "delegate", "error": _msg}
+
+    @staticmethod
+    def _unwrap_a2a_event(raw: dict[str, Any]) -> "list[dict[str, Any]]":
+        """Translate one A2A protocol event dict into flat loop chunks.
+
+        The peer's request_handler yields `event.model_dump_json()` for
+        TaskArtifactUpdateEvent / TaskStatusUpdateEvent / MessageEvent. The
+        token/message text lives at artifact.parts[*].data. We pull it up to
+        the top level so the delegating runtime loop can forward + accumulate
+        it. Unknown / structural events (status transitions) yield nothing
+        (they're not user-facing content).
+        """
+        out: list[dict[str, Any]] = []
+        if not isinstance(raw, dict):
+            return out
+        # Explicit peer-side error envelope (server sse_generator on exception).
+        if "error" in raw and "artifact" not in raw and "status" not in raw:
+            out.append({"node_step": f"peer error: {raw['error']}",
+                        "node": "delegate", "error": str(raw["error"])})
+            return out
+        artifact = raw.get("artifact")
+        if isinstance(artifact, dict):
+            for part in artifact.get("parts", []) or []:
+                data = part.get("data") if isinstance(part, dict) else None
+                if not isinstance(data, dict):
+                    # A plain text part.
+                    txt = part.get("text") if isinstance(part, dict) else None
+                    if txt:
+                        out.append({"token": txt})
+                    continue
+                ptype = data.get("type")
+                if ptype == "token" and data.get("token"):
+                    out.append({"token": data["token"]})
+                elif ptype == "tokens_batch":
+                    for t in data.get("tokens", []) or []:
+                        out.append({"token": str(t)})
+                elif ptype == "message" and data.get("text"):
+                    out.append({"message": data["text"],
+                                "node": data.get("node", "peer")})
+                elif data.get("token"):
+                    out.append({"token": data["token"]})
+                elif data.get("text"):
+                    out.append({"message": data["text"]})
+            return out
+        # MessageEvent (final assistant message) — pull parts text as tokens.
+        msg = raw.get("message")
+        if isinstance(msg, dict):
+            for part in msg.get("parts", []) or []:
+                txt = part.get("text") if isinstance(part, dict) else None
+                if txt and txt not in ("Task completed.",):
+                    out.append({"token": txt})
+            return out
+        # TaskStatusUpdateEvent — surface progress so the delegating side
+        # has something to push into its SSE chunk_queue while the peer is
+        # still working on its own LLM call. Without this, only token /
+        # message chunks generate output, and on a slow local model the peer
+        # can take 3-5 minutes BEFORE its first token, during which the
+        # delegating side's chunk_queue sees nothing and SSE
+        # `sse_stall_timeout_seconds` (default 300s) cancels the request
+        # (observed 2026-05: LAN delegates to dc-agent → 5 min silence →
+        # "LLM backend did not respond within 300s" → cancel before peer's
+        # first token streams back). We map non-terminal status states to a
+        # node_step "peer working ..." chunk; terminal FAILED state keeps
+        # its existing error-chunk behavior.
+        status = raw.get("status")
+        if isinstance(status, dict):
+            st = (status.get("state") or "").lower()
+            if st in ("failed",) and status.get("message"):
+                out.append({"node_step": f"peer task failed: {status['message']}",
+                            "node": "delegate", "error": str(status["message"])})
+            elif st in ("submitted", "working", "running"):
+                # Progress signal — keeps the delegating-side SSE alive and
+                # gives the operator a Flow event showing the peer is busy.
+                # Brief on purpose (no payload) so a chatty peer can't flood
+                # the parent's stream with status spam.
+                out.append({"node_step": f"peer status: {st}",
+                            "node": "delegate"})
+            # canceled / completed: nothing to surface (caller already sees
+            # MessageEvent / artifact stream end).
+        return out
 
 
 # ---------------------------------------------------------------------------

@@ -53,9 +53,11 @@ FORBIDDEN_PATTERNS = [
     re.compile(r'r"\\\[TOOL:'),           # raw-string regex \[TOOL:
     re.compile(r'r"\\\[SKILL_LOAD:'),
     re.compile(r'r"\\\[TOOL_BATCH:'),
+    re.compile(r'r"\\\[DELEGATE:'),       # Phase 2B: \[DELEGATE: (parser owns it)
     re.compile(r"r'\\\[TOOL:"),           # single-quoted variant
     re.compile(r"r'\\\[SKILL_LOAD:"),
     re.compile(r"r'\\\[TOOL_BATCH:"),
+    re.compile(r"r'\\\[DELEGATE:"),
 ]
 
 

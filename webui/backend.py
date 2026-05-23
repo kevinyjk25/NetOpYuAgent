@@ -330,6 +330,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             config=RuntimeConfig(hitl_tool_names=_hitl_tools),
             tool_store=services["tool_store"],
             skill_catalog=services["skill_catalog"],
+            delegate_fn=services.get("delegate_fn"),
         )
     else:
         # Re-inject tool store and catalog into existing loop
@@ -337,6 +338,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         loop._store   = services["tool_store"]
         loop._budget._store = services["tool_store"]
         loop._skill_catalog = services["skill_catalog"]
+        # Re-inject delegation hook (Phase 2B) if present.
+        if services.get("delegate_fn") is not None:
+            loop._delegate_fn = services["delegate_fn"]
 
     # If LLM engine was already patched by main.py, it's already in the loop.
     # If not (webui started standalone), patch now with whatever engine is available.
@@ -1194,6 +1198,163 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             logger.warning("/sessions/%s/history failed: %s", session_id, exc)
             return JSONResponse(content=_message_history.get(session_id, []))
 
+    @app.get("/delegations/inbound")
+    async def list_inbound_delegations() -> JSONResponse:
+        """List every INBOUND delegation this agent has received from peers,
+        across ALL sessions.
+
+        Rationale: when LAN delegates to DC, the inbound TaskDefinition on
+        the DC side is keyed by the *LAN* session_id (it has to be — that's
+        the join key for end-to-end correlation). But the DC operator
+        opening DC's webui doesn't know LAN's session_id; they need a view
+        that just lists "all the work peers have asked me to do".
+
+        This endpoint serves that view. Outbound delegations remain on
+        /delegations/{session_id} (filtered by the local user's session).
+
+        NOTE: must be registered BEFORE /delegations/{session_id} or FastAPI
+        will route this path's "inbound" literal as a session_id parameter.
+        """
+        task_system = services.get("task_system")
+        if task_system is None or not hasattr(task_system, "store"):
+            return JSONResponse(content=[])
+        try:
+            # Scan all local tasks. InMemory backend exposes _local dict;
+            # Redis backend would need a session_id index — we degrade to
+            # whatever's in the local fallback cache.
+            all_tasks = (
+                list(task_system.store._local.values())
+                if hasattr(task_system.store, "_local") else []
+            )
+        except Exception as exc:
+            logger.warning("/delegations/inbound scan failed: %s", exc)
+            return JSONResponse(content=[])
+        out = []
+        for t in all_tasks:
+            md = dict(t.metadata or {})
+            if md.get("direction") != "inbound":
+                continue
+            assignment = getattr(t, "assignment", None)
+            peer_agent = md.get("source_agent") or "?"
+            _created_at = getattr(t, "created_at", "") or ""
+            _completed_at = getattr(t, "completed_at", "") or ""
+            latency_ms = None
+            try:
+                if _created_at and _completed_at:
+                    from datetime import datetime as _dt
+                    latency_ms = int(1000 * (
+                        _dt.fromisoformat(_completed_at).timestamp()
+                        - _dt.fromisoformat(_created_at).timestamp()
+                    ))
+            except Exception:
+                latency_ms = None
+            out.append({
+                "task_id":      t.task_id,
+                "session_id":   getattr(t, "session_id", "") or "",
+                "direction":    "inbound",
+                "peer_agent":   peer_agent,
+                "target_agent": peer_agent,   # backward-compat alias
+                "description":  t.description,
+                "state":        getattr(t.state, "value", str(t.state)),
+                "created_at":   _created_at,
+                "completed_at": _completed_at,
+                "latency_ms":   latency_ms,
+                "result":       t.result if getattr(t, "result", None) else None,
+                "error":        getattr(t, "error", None),
+                "forked":       bool(md.get("forked", False)),
+                "source_query": md.get("source_query") or "",
+                "shared_facts_count": int(md.get("shared_facts_count", 0)),
+                "awaiting_hitl_id":   md.get("awaiting_hitl_id") or None,
+            })
+        out.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+        return JSONResponse(content=out)
+
+    @app.get("/delegations/{session_id}")
+    async def list_delegations(session_id: str) -> JSONResponse:
+        """List every [DELEGATE:] dispatched in this session, with status.
+
+        Phase 2B+: parent-side Delegations tab data source. For each task
+        the LAN-side coordinator sent over A2A, return:
+          - task_id / target agent / subtask description
+          - state (pending / running / completed / failed)
+          - created/completed timestamps + latency
+          - result (when completed) or error (when failed)
+          - source_query (original user query at time of dispatch)
+          - forked / shared_facts_count provenance flags
+
+        Frontends not aware of this endpoint just don't render the tab;
+        no other UI code path depends on this data.
+        """
+        task_system = services.get("task_system")
+        if task_system is None or not hasattr(task_system, "store"):
+            return JSONResponse(content=[])
+        try:
+            tasks = await task_system.store.get_by_session(session_id)
+        except Exception as exc:
+            logger.warning("/delegations/%s failed: %s", session_id, exc)
+            return JSONResponse(content=[])
+        out = []
+        for t in tasks:
+            # TaskDefinition.metadata carries delegation provenance —
+            # see task/delegation.py:delegate_fn for the canonical keys.
+            md = dict(t.metadata or {})
+            # direction = "outbound" (this agent dispatched it) or
+            # "inbound" (a peer sent it to this agent — recorded by
+            # integrations/adapters/hitl_executor.py._record_inbound_delegation
+            # when the A2A request carried source_agent metadata).
+            # Default outbound for legacy rows written before Phase 2B+.
+            direction = md.get("direction", "outbound")
+            assignment = getattr(t, "assignment", None)
+            if direction == "inbound":
+                # peer_agent is who SENT it to us — flip the visual semantics
+                # so the row reads "← lan-agent" instead of "→ <some target>"
+                peer_agent = md.get("source_agent") or "?"
+            else:
+                peer_agent = (
+                    (assignment.agent_id if assignment is not None else None)
+                    or md.get("delegated_to")
+                    or "?"
+                )
+            _created_at = getattr(t, "created_at", "") or ""
+            _completed_at = getattr(t, "completed_at", "") or ""
+            # Compute latency_ms when both ends available
+            latency_ms = None
+            try:
+                if _created_at and _completed_at:
+                    from datetime import datetime as _dt
+                    latency_ms = int(1000 * (
+                        _dt.fromisoformat(_completed_at).timestamp()
+                        - _dt.fromisoformat(_created_at).timestamp()
+                    ))
+            except Exception:
+                latency_ms = None
+            out.append({
+                "task_id":      t.task_id,
+                "direction":    direction,
+                "peer_agent":   peer_agent,
+                # Keep target_agent for backward compat with any caller
+                # built against the pre-direction endpoint; it just
+                # mirrors peer_agent.
+                "target_agent": peer_agent,
+                "description":  t.description,
+                "state":        getattr(t.state, "value", str(t.state)),
+                "created_at":   _created_at,
+                "completed_at": _completed_at,
+                "latency_ms":   latency_ms,
+                "result":       t.result if getattr(t, "result", None) else None,
+                "error":        getattr(t, "error", None),
+                "forked":       bool(md.get("forked", False)),
+                "source_query": md.get("source_query") or "",
+                "shared_facts_count": int(md.get("shared_facts_count", 0)),
+                # When inbound + state=PENDING with awaiting_hitl_id set,
+                # this delegation is waiting on a local operator decision —
+                # the UI should highlight it.
+                "awaiting_hitl_id": md.get("awaiting_hitl_id") or None,
+            })
+        # Newest first — operators usually want the most recent delegation
+        out.sort(key=lambda d: d.get("created_at") or "", reverse=True)
+        return JSONResponse(content=out)
+
     @app.post("/sessions")
     async def create_session(request: Request,
     ) -> JSONResponse:
@@ -1623,15 +1784,32 @@ async def _submit_hitl_decision(
                 if _runtime_loop is not None and _session_for_followup:
                     # Synthetic follow-up query — the agent_memory turn-start
                     # drain will inject the H2 result into confirmed_facts
-                    # before this turn's prompt is assembled, so the LLM
-                    # sees the actual fact without us having to pass it.
-                    _followup_query = (
-                        "异步 HITL 已返回结果。请基于 confirmed_facts 里刚到达的"
-                        " RADIUS 检查事实给出最终建议。"
-                        + ("注意:实际结果可能跟你之前的假设(permission_ok)不一致,"
-                           "请相应修正诊断方向。"
-                           if _diverged else
-                           "(注:实际结果跟初始假设一致,可确认原诊断。)")
+                    # before this turn's prompt is assembled. We ALSO thread
+                    # the original user query + previous answer back in (debt
+                    # #7) so the LLM's follow-up stays connected to what the
+                    # user actually asked, instead of a context-less synthetic.
+                    _hist = _message_history.get(_session_for_followup, [])
+                    _orig_q = ""
+                    _prev_a = ""
+                    for _m in reversed(_hist):
+                        if not _prev_a and _m.get("role") == "assistant":
+                            _prev_a = _m.get("content", "")
+                        elif not _orig_q and _m.get("role") == "user":
+                            _orig_q = _m.get("content", "")
+                        if _orig_q and _prev_a:
+                            break
+                    _div_note = (
+                        "注意:实际结果可能跟你之前的假设(permission_ok)不一致,"
+                        "请相应修正诊断方向。"
+                        if _diverged else
+                        "(注:实际结果跟初始假设一致,可确认原诊断。)"
+                    )
+                    from runtime.loop import build_resumption_query as _brq
+                    _followup_query = _brq(
+                        "异步 HITL 已返回 RADIUS 检查结果(见 confirmed_facts)。",
+                        original_query=_orig_q,
+                        previous_answer=_prev_a,
+                        divergence_note=_div_note,
                     )
                     from runtime import DelegationMode as _DM
                     _t_followup_start = time.time()

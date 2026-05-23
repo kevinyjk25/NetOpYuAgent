@@ -139,6 +139,8 @@ MULTI-TARGET DESTRUCTIVE BATCH: when the SAME destructive tool needs to run on M
 Destructive tools (⚠HITL) — propose with concrete args; the operator will review before execution.
 ENTITY ALIAS: if the user used the wrong entity name and you found the real one (via list_devices etc), emit `[ALIAS: user_term = real_term]` so the correction survives to subsequent turns. Then USE THE REAL NAME in all tool calls.
 
+DELEGATE TO PEER: if a subtask is OUTSIDE your domain and a peer agent handles it (see AVAILABLE PEERS below), use `[DELEGATE:agent_id] <subtask>` or `[DELEGATE:*capability] <subtask>` on its own line. MUTUALLY EXCLUSIVE with [TOOL:] in one turn.
+
 read_stored_result usage (STRICT):
 - ONLY call [TOOL:read_stored_result] when a previous tool output literally contains a `[STORED:name:ref_id]` label.
 - ref_id is the id INSIDE that label (e.g. `6ac5ade7` or `netflow_dump:6ac5ade7`) — NEVER a device name, hostname, or query string.
@@ -154,6 +156,8 @@ PAGINATED READING — only relevant after a [STORED:] label appears:
 - CRITICAL: If a page says "Has more: True", you MUST continue paging (using Next offset) until "Has more: False". Do NOT pivot to other tools, SKILL_LOAD, or final analysis while data remains unread.
 - Example first call:  [TOOL:read_stored_result] {{"ref_id": "abc123", "offset": 0, "length": 4000}}
 - Example next call:   [TOOL:read_stored_result] {{"ref_id": "abc123", "offset": 4000, "length": 4000}}
+
+{peers_section}
 
 {extra_tools_section}
 
@@ -208,6 +212,18 @@ ENTITY ALIAS CORRECTIONS — when the user's term doesn't match a real entity:
 - Syntax: `[ALIAS: user_term = real_term]` on its own line (e.g. `[ALIAS: core-01 = sw-acc-01]`).
 - One directive per correction. Multiple aliases are fine — emit multiple lines.
 - These are folded into the session's confirmed_facts and surfaced in the next turn's prompt under "ENTITY ALIASES". Once recorded, USE THE REAL NAME in subsequent tool calls — do NOT keep re-resolving the same correction every turn.
+
+DELEGATION TO PEER AGENTS — when a subtask is OUTSIDE your domain (use [DELEGATE:] directive):
+- This agent is specialized for its own domain (see your AVAILABLE TOOLS). If the user's request needs a capability you do NOT have a tool for — but a PEER agent specializes in it (e.g. you are a LAN agent and the task needs data-center fabric / BGP-EVPN / VXLAN work that a DC agent handles) — delegate that subtask.
+- Syntax: `[DELEGATE:agent_id] <subtask description>` on its own line (e.g. `[DELEGATE:dc-agent] check BGP EVPN neighbor status on spine-1`).
+- By capability instead of a fixed id: `[DELEGATE:*capability] <subtask>` (e.g. `[DELEGATE:*dc_fabric_diagnose] trace the fabric path to leaf-3`) — the system picks a healthy peer advertising that capability.
+- Share your gathered facts with the peer (only when relevant): add `#forked` → `[DELEGATE:dc-agent#forked] <subtask>`. Default (no modifier) sends ONLY the subtask description (the peer starts fresh).
+- STRICT: `[DELEGATE:]` is MUTUALLY EXCLUSIVE with `[TOOL:]` in one response — pick ONE per turn. If you emit both, the tool runs and the delegation is ignored. Do the local tool calls first (in earlier turns), then delegate in a turn by itself.
+- After you delegate, the peer's result is injected back into your context next turn — synthesize it into your final answer for the user. Do NOT delegate the same subtask twice.
+- Only delegate what you genuinely cannot do locally. If you have a tool for it, use the tool.
+
+{peers_section}
+
 - Only emit [ALIAS:...] when you're CONFIDENT about the mapping (e.g. you queried list_devices and there's no ambiguity). For unclear cases, ask the user instead.
 
 INVENTORY QUERIES — when asked what devices exist:
@@ -321,6 +337,16 @@ Return format:
         self._tool_retriever:     Any = None
         self._skill_retriever:    Any = None
         self._meta_tool_registry: Any = None
+        # Peer registry (Phase 2B, 2026-05): attached via attach_peer_registry()
+        # from main.py once the AgentRegistry is wired. When set, the system
+        # prompt assembles an "AVAILABLE PEERS" section listing each healthy
+        # peer's agent_id + capabilities + brief description, so the LLM
+        # knows who it can delegate to via [DELEGATE:...]. Without this, the
+        # DELEGATION section in the static prompt is informational only —
+        # the LLM doesn't know whether any peer actually exists / what they
+        # do, and falls back to exhausting local tools.
+        self._peer_registry:      Any = None
+        self._self_agent_id:      str = ""
         # D1 (Sprint 3, 2026-05): concurrency cap. The semaphore is created
         # lazily on first use (inside the running loop) because asyncio
         # primitives must bind to the active event loop, and __init__ runs
@@ -383,6 +409,333 @@ Return format:
             getattr(skill_retriever, "name", None),
             "yes" if meta_tool_registry else "no",
         )
+
+    def attach_peer_registry(
+        self, registry: Any, *, self_agent_id: str = "",
+    ) -> None:
+        """Attach the AgentRegistry so the system prompt can list peers.
+
+        Without this, the static DELEGATION section in the prompt describes
+        the [DELEGATE:agent_id] syntax but doesn't tell the LLM which peers
+        actually exist or what they can do — so the LLM exhausts local
+        tools and then says "not found" instead of delegating. With this
+        attached, _build_peers_section() queries the registry at prompt-
+        assembly time and lists healthy peers (id + capabilities + short
+        description), giving the LLM enough information to pick the right
+        [DELEGATE:] target.
+
+        Idempotent — call any time after construction. Wired from main.py
+        once the registry is up.
+
+        Args:
+            registry:      the AgentRegistry instance (typically
+                           services["registry"]); must expose either
+                           snapshot_agents() (preferred — sync) or an
+                           internal _store with a list-like iterable.
+            self_agent_id: this agent's own id (e.g. "lan-agent"), used to
+                           filter self out of the peer list. Optional —
+                           when empty the list may include self (which is
+                           harmless; the LLM won't usefully delegate to
+                           itself but it costs a few prompt tokens).
+        """
+        self._peer_registry = registry
+        self._self_agent_id = (self_agent_id or "").strip()
+        logger.info(
+            "LLMEngine: peer registry attached (self_agent_id=%r)",
+            self._self_agent_id,
+        )
+
+    def _build_peers_section(self) -> str:
+        """Build the AVAILABLE PEERS section of the system prompt.
+
+        Reads the attached AgentRegistry (set via attach_peer_registry).
+        Returns an empty string when no registry is attached or no healthy
+        peers exist — in which case the DELEGATION section in the static
+        prompt becomes informational only.
+
+        We try multiple registry shapes defensively:
+          1. registry.snapshot_agents() (preferred — sync, no await needed
+             during prompt assembly which is sync code path).
+          2. registry._store._store (InMemoryRegistryStore internal dict),
+             read as a snapshot. The actual store guards async ops with a
+             lock, but a sync dict-read of the snapshot is safe — slightly
+             stale results are tolerable for prompt building (we just see
+             a peer set from a few ms ago, which the LLM treats the same).
+
+        The output format is intentionally compact (one line per peer)
+        because every turn's prompt carries this — token budget matters.
+        """
+        registry = self._peer_registry
+        if registry is None:
+            return ""
+
+        try:
+            if hasattr(registry, "snapshot_agents"):
+                entries = registry.snapshot_agents() or []
+            elif hasattr(registry, "_store"):
+                _store_dict = getattr(registry._store, "_store", None)
+                if _store_dict is not None:
+                    entries = list(_store_dict.values())
+                else:
+                    entries = []
+            else:
+                logger.debug(
+                    "_build_peers_section: registry has neither "
+                    "snapshot_agents nor _store — peer section omitted",
+                )
+                return ""
+        except Exception as exc:
+            logger.warning(
+                "_build_peers_section: registry snapshot failed (%s) — "
+                "peer section omitted from prompt", exc,
+            )
+            return ""
+
+        own_id = (self._self_agent_id or "").strip().lower()
+        peers: list[dict] = []
+        for e in entries:
+            try:
+                # AgentEntry layout (see registry/schemas.py):
+                #   AgentEntry.agent_id     ← top-level
+                #   AgentEntry.health       ← top-level
+                #   AgentEntry.card         ← nested RawAgentCard
+                #       .name (not agent_id!), .description, .skills, .capabilities
+                # The earlier version tried `getattr(card, 'agent_id')` which is
+                # always None on a RawAgentCard, so every entry got skipped and
+                # the peers section came out empty even though the registry was
+                # populated. Take agent_id and health from the entry directly;
+                # take skills/description from card.
+                card = getattr(e, "card", None)
+                # First try entry-level agent_id, then fall back to dict-style
+                # entry / dict-style card / card.name (better than nothing).
+                agent_id = (
+                    getattr(e, "agent_id", None)
+                    or (e.get("agent_id") if isinstance(e, dict) else None)
+                    or (getattr(card, "agent_id", None) if card is not None else None)
+                    or (card.get("agent_id") if isinstance(card, dict) else None)
+                    or ""
+                )
+                if not agent_id:
+                    continue
+                if own_id and agent_id.strip().lower() == own_id:
+                    continue  # skip self
+                # Health filter — only list peers we believe are reachable.
+                # Health lives on the entry, not the card. AgentHealthState
+                # enum values: UNKNOWN/HEALTHY/DEGRADED/UNHEALTHY. Anything
+                # unknown is INCLUDED (newly-discovered peers).
+                health = getattr(e, "health", None)
+                # Pydantic enum → .value string; dict shape → raw string
+                health_str = ""
+                if health is not None:
+                    health_str = (
+                        getattr(health, "value", None)
+                        or (str(health) if not isinstance(health, str) else health)
+                        or ""
+                    ).lower()
+                if health_str in ("unhealthy", "down", "unreachable"):
+                    continue
+                # Capabilities: prefer explicit skill IDs from card.skills
+                # (these are what [DELEGATE:*capability] routes against).
+                # Fall back to card.capabilities dict keys.
+                skills = []
+                if card is not None:
+                    skills = getattr(card, "skills", None) or []
+                    if not skills and isinstance(card, dict):
+                        skills = card.get("skills", []) or []
+                cap_ids = []
+                for s in skills:
+                    sid = (
+                        getattr(s, "id", None)
+                        or (s.get("id") if isinstance(s, dict) else None)
+                    )
+                    if sid:
+                        cap_ids.append(sid)
+                if not cap_ids and card is not None:
+                    caps_obj = getattr(card, "capabilities", None) or {}
+                    if not caps_obj and isinstance(card, dict):
+                        caps_obj = card.get("capabilities", {}) or {}
+                    if isinstance(caps_obj, dict):
+                        cap_ids = list(caps_obj.keys())
+                # One-line description for the LLM — first skill's
+                # description if any, else card.description.
+                desc = ""
+                if skills:
+                    first = skills[0]
+                    desc = (
+                        getattr(first, "description", "")
+                        or (first.get("description", "") if isinstance(first, dict) else "")
+                    )
+                if not desc and card is not None:
+                    desc = (
+                        getattr(card, "description", "")
+                        or (card.get("description", "") if isinstance(card, dict) else "")
+                    )
+                # Collect ALL skill descriptions (not just first) for keyword
+                # extraction — the "owns" hint line below tries to surface
+                # entity tokens (spine, leaf, fabric, BGP-EVPN, ...) so the
+                # LLM matches user-query entity names against peers.
+                all_descs = []
+                for s in skills:
+                    sd = (
+                        getattr(s, "description", "")
+                        or (s.get("description", "") if isinstance(s, dict) else "")
+                    )
+                    if sd: all_descs.append(sd)
+                if card is not None:
+                    card_desc = (
+                        getattr(card, "description", "")
+                        or (card.get("description", "") if isinstance(card, dict) else "")
+                    )
+                    if card_desc: all_descs.append(card_desc)
+                peers.append({
+                    "agent_id":  agent_id,
+                    "caps":      cap_ids,
+                    "desc":      (desc or "").strip(),
+                    "all_descs": all_descs,
+                })
+            except Exception as _peer_exc:
+                logger.debug(
+                    "_build_peers_section: skipping malformed entry: %s",
+                    _peer_exc,
+                )
+                continue
+
+        if not peers:
+            return ""
+
+        lines = [
+            "AVAILABLE PEERS — delegate to these via [DELEGATE:agent_id] "
+            "or [DELEGATE:*capability]. If the user mentions an entity or "
+            "concept listed under 'owns' for a peer, DELEGATE to that peer "
+            "instead of trying local tools first:"
+        ]
+        for p in peers:
+            agent_id = p["agent_id"]
+            caps     = p["caps"]
+            desc     = p["desc"]
+            cap_str  = ", ".join(caps) if caps else "(no advertised capabilities)"
+            # Extract entity hints from this peer's skill descriptions + caps.
+            # Returns at most ~12 distinctive tokens — peer-domain entity
+            # names (spine, leaf, fabric, BGP-EVPN, VXLAN) that the LLM
+            # should match against the user query.
+            hints = self._extract_peer_keywords(
+                agent_id      = agent_id,
+                cap_ids       = caps,
+                all_descs     = p["all_descs"],
+            )
+            # Keep desc short — token budget matters; long descriptions
+            # also dilute attention.
+            short_desc = (desc.replace("\n", " ").strip())[:160]
+            # Multi-line per-peer entry. Putting 'owns' on its own line
+            # makes it more visually distinct than packing into description.
+            lines.append(f"  - {agent_id}")
+            if hints:
+                lines.append(f"      owns: {', '.join(hints)}")
+            lines.append(f"      capabilities: {cap_str}")
+            if short_desc:
+                lines.append(f"      description: {short_desc}")
+        return "\n".join(lines)
+
+    # Tokens that appear in every agent's description and would add zero
+    # signal to "which peer owns this entity" — stripped from the owns line.
+    # Lowercase comparison. Kept conservative: only kill tokens that are
+    # truly generic in any IT-ops agent context.
+    _PEER_HINT_STOPWORDS = frozenset({
+        "agent", "agents", "the", "a", "an", "and", "or", "of", "for",
+        "with", "to", "from", "on", "in", "by", "is", "are", "be", "this",
+        "that", "these", "those", "it", "its", "as", "at",
+        "operations", "ops", "operation", "operational",
+        "management", "manage", "managing",
+        "network", "networks", "networking",
+        "system", "systems",
+        "it",  # "IT" (lowercased after split)
+        "task", "tasks",
+        "subtask", "subtasks",
+        "use", "uses", "using",
+        "diagnose", "diagnosis", "diagnostic",
+        "config", "configs", "configuration", "configurations",
+        "device", "devices",
+        # Common helper verbs in descriptions
+        "check", "checks", "checking",
+        "get", "gets", "getting",
+        "query", "queries", "querying",
+        "list", "lists", "listing",
+        "monitor", "monitors", "monitoring",
+        "trace", "traces", "tracing",
+        "push", "pushed", "pushing",
+        "run", "runs", "running",
+        "show", "shows", "showing",
+        "view", "views", "viewing",
+    })
+
+    @classmethod
+    def _extract_peer_keywords(
+        cls, *, agent_id: str, cap_ids: list[str], all_descs: list[str],
+    ) -> list[str]:
+        """Extract entity-name hints to surface in the AVAILABLE PEERS section.
+
+        Goal: when a user query mentions "spine-1", the prompt should make
+        it visually obvious that `dc-agent` "owns" terms like spine, leaf,
+        fabric, BGP-EVPN — so the LLM picks `[DELEGATE:dc-agent]` instead
+        of trying local LAN tools.
+
+        Heuristic:
+          1. Tokenize cap_ids by underscore + descriptions by whitespace/punct
+          2. Drop stopwords (generic IT-ops terms) and very short tokens
+          3. Preserve compound technical tokens with `-` (BGP-EVPN, spine-leaf)
+          4. De-duplicate, cap at 12 tokens (token budget)
+
+        Returns:
+            Lowercase-or-original-case list of distinctive tokens. Empty when
+            nothing useful (peer with bland generic descriptions).
+        """
+        import re as _re
+
+        # Collect raw tokens from cap_ids (split underscore) + descriptions.
+        raw_tokens: list[str] = []
+
+        # cap_ids first — these are the most signal-rich
+        for cap in cap_ids:
+            # split on underscore; "dc_fabric_diagnose" → ["dc","fabric","diagnose"]
+            for tok in cap.split("_"):
+                if tok: raw_tokens.append(tok)
+
+        # description text — split on whitespace and most punctuation, but
+        # KEEP hyphens (BGP-EVPN, spine-leaf are single technical tokens).
+        for d in all_descs:
+            # Strip common punctuation EXCEPT hyphen
+            cleaned = _re.sub(r"[,.;:()\[\]/'\"!?]", " ", d)
+            for tok in cleaned.split():
+                if tok: raw_tokens.append(tok)
+
+        # Filter + dedupe (case-insensitive dedupe, preserve first casing)
+        seen_lower: set[str] = set()
+        kept: list[str] = []
+        for tok in raw_tokens:
+            t = tok.strip("-")  # strip leading/trailing hyphens but keep inner
+            if len(t) < 2:                      # too short ("a", "—")
+                continue
+            t_lower = t.lower()
+            if t_lower in cls._PEER_HINT_STOPWORDS:
+                continue
+            # Skip if pure number ("01", "2026") — agent ids don't bring value
+            if t.replace("-", "").isdigit():
+                continue
+            # Dedupe
+            if t_lower in seen_lower:
+                continue
+            seen_lower.add(t_lower)
+            # Preserve case for technical tokens (uppercase / mixed-case /
+            # has-hyphen — these are usually acronyms like BGP-EVPN or
+            # product names). Pure lowercase prose words can be lowercased
+            # for compactness.
+            if t.isupper() or "-" in t or any(c.isupper() for c in t[1:]):
+                kept.append(t)
+            else:
+                kept.append(t.lower())
+            if len(kept) >= 12:
+                break
+        return kept
 
     @classmethod
     def from_config(cls, cfg: dict) -> "LLMEngine":
@@ -703,10 +1056,24 @@ Return format:
             if turn_no > _shorten_after
             else self.TOOL_CALL_SYSTEM
         )
+        # Build the AVAILABLE PEERS section (Phase 2B peer-aware prompt, 2026-05).
+        # Returns empty string when no registry attached / no healthy peers — in
+        # that case `{peers_section}` formats to "" and the prompt reads naturally.
+        # Placed in the prompt right after the DELEGATION rules (LLM high-attention
+        # zone) so the model sees "you can delegate" and the actual peer list
+        # together; appending at the very end of the prompt was empirically
+        # ignored by qwen3.5:27b under heavy context (see ARCHITECTURE §8.8).
+        try:
+            peers_section = self._build_peers_section()
+        except Exception as _peers_exc:
+            logger.debug("_build_peers_section failed: %s", _peers_exc)
+            peers_section = ""
+
         system = _template.format(
             skill_summary=skill_summary,
             confirmed_facts_section=facts_section,
             extra_tools_section=extra_tools_section,
+            peers_section=peers_section,
         )
         if context:
             system += f"\n\nContext:\n{context}"

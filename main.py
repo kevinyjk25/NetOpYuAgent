@@ -327,6 +327,24 @@ async def build_services() -> dict[str, Any]:
     services["task_system"] = task_system
     logger.info("Task module ready")
 
+    # ── 4b. Delegation hook (Phase 2B) ───────────────────────────────────────
+    # Build the delegate_fn the runtime loop calls on [DELEGATE:...] directives.
+    # Injected (not imported) into AgentRuntimeLoop so the loop stays
+    # registry/task-agnostic. Resolves agent_id / *capability → peer via the
+    # registry, streams the subtask through A2ATaskDispatcher.
+    try:
+        from task.delegation import build_delegate_fn
+        services["delegate_fn"] = build_delegate_fn(
+            registry   = registry,
+            dispatcher = task_system.dispatcher,
+            task_store = task_system.store,
+            own_agent_id = cfg.agent.agent_id,
+        )
+        logger.info("Delegation hook ready (agent_id=%s)", cfg.agent.agent_id)
+    except Exception as _dlg_exc:
+        services["delegate_fn"] = None
+        logger.warning("Delegation hook setup failed: %s", _dlg_exc)
+
     # ── 5. A2A executor ──────────────────────────────────────────────────────
     if _hitl_backend == "core":
         # New executor — built later, after llm_engine + tool_registry are
@@ -553,6 +571,20 @@ async def build_services() -> dict[str, Any]:
             services["executor"] = executor
             logger.info("A2A executor (core) constructed with %d tool(s)",
                         len(real_registry))
+            # Phase 2B+ (2026-05): wire the project's TaskStore into the
+            # executor so inbound A2A delegations get recorded — without
+            # this, dc-agent receives a [DELEGATE:] from lan-agent and
+            # processes it correctly, but the local Delegations tab shows
+            # nothing (it only reads task_system.store, which only had
+            # outbound entries before). The executor's set_task_store()
+            # is a no-op when task_system isn't built (e.g. minimal tests).
+            try:
+                _ts = services.get("task_system")
+                if _ts is not None and hasattr(_ts, "store"):
+                    executor.set_task_store(_ts.store)
+                    logger.info("HitlExecutor: task_store wired for inbound delegation recording")
+            except Exception as _ts_exc:
+                logger.warning("HitlExecutor: task_store wiring skipped: %s", _ts_exc)
             # Don't patch the langgraph hitl_graph — it doesn't exist in core mode.
             # Don't patch_runtime_loop(executor, ...) either — that's a legacy
             # path for executors that have their own internal AgentRuntimeLoop;
@@ -1222,6 +1254,28 @@ async def build_services() -> dict[str, Any]:
                 skill_retriever    = skill_retriever,
                 meta_tool_registry = mt_reg,
             )
+
+            # Wire the peer registry into the LLM (Phase 2B — peer-aware
+            # prompts, 2026-05). Without this, the LLMEngine has the
+            # _build_peers_section() method + attach_peer_registry() API but
+            # the registry never gets attached, so the system prompt ends up
+            # describing the [DELEGATE:] syntax in the abstract while the
+            # LLM has no idea which peers exist or what they're good at.
+            # Symptom: when a user asks about a DC-domain entity on the LAN
+            # agent, the LAN agent exhausts its local tools and says "device
+            # not found" instead of delegating to dc-agent.
+            try:
+                _reg = services.get("registry")
+                if _reg is not None:
+                    llm_engine.attach_peer_registry(
+                        _reg, self_agent_id=cfg.agent.agent_id,
+                    )
+            except Exception as _apr_exc:
+                logger.warning(
+                    "attach_peer_registry failed (%s) — LLM prompt will "
+                    "omit AVAILABLE PEERS section, delegation may be "
+                    "underused", _apr_exc,
+                )
 
             # Register meta-tools as ordinary local callables in the ToolRouter
             # so [TOOL:list_tools] dispatches to the meta-tool handler at execution.

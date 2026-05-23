@@ -36,6 +36,7 @@ VALID_PLACEHOLDERS = {
     "extra_tools_section",
     "skill_summary",
     "confirmed_facts_section",
+    "peers_section",   # AVAILABLE PEERS list (Phase 2B peer-aware prompt, 2026-05)
 }
 
 # Regex for "all caps template var assignments" — TOOL_CALL_SYSTEM,
