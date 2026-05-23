@@ -18,7 +18,16 @@ Pure dict-shape tests — no httpx / network. Runs in sandbox + CI.
 """
 import unittest
 
-from task.inter.coordinator import A2ATaskDispatcher as D
+# task.inter.coordinator transitively imports task.schemas → pydantic. The
+# unwrap logic under test is pure-python, but the import chain pulls pydantic.
+# CI's lightweight safety-tests job installs only pyyaml+pytest (no pydantic),
+# so guard the import and skip the module cleanly rather than crashing
+# pytest collection with a ModuleNotFoundError. Matches the try/except skip
+# convention used by the other delegation tests.
+try:
+    from task.inter.coordinator import A2ATaskDispatcher as D
+except ImportError as _exc:  # pragma: no cover - env without pydantic
+    raise unittest.SkipTest(f"task.inter.coordinator unavailable: {_exc}")
 
 
 class TestA2AUnwrap(unittest.TestCase):
