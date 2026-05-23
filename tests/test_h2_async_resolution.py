@@ -27,6 +27,20 @@ from __future__ import annotations
 import asyncio
 import unittest
 
+# These tests are pure hitl_core + asyncio (no httpx/fastapi), but hitl_core
+# does require pydantic (hitl_core.schema uses pydantic v2). CI's lightweight
+# safety-tests job installs only pyyaml+pytest, so probe for pydantic up front
+# and skip the whole module when it's absent — otherwise the function-body
+# `from hitl_core.router import ...` imports fail at RUN time (not collection),
+# surfacing as test failures rather than clean skips.
+try:
+    import pydantic  # noqa: F401
+    _HAS_PYDANTIC = True
+except ImportError:
+    _HAS_PYDANTIC = False
+
+_SKIP_REASON = "pydantic not installed (hitl_core.schema requires it)"
+
 
 def _schema():
     from hitl_core.schema import (
@@ -76,6 +90,7 @@ async def _build_router_with_entry(interrupt_id: str, sla_seconds: int = 600):
     return store, router, payload
 
 
+@unittest.skipUnless(_HAS_PYDANTIC, _SKIP_REASON)
 class TestAsyncHappyPath(unittest.TestCase):
     def test_operator_decision_fires_on_resolved_once(self):
         async def run():
@@ -113,6 +128,7 @@ class TestAsyncHappyPath(unittest.TestCase):
         asyncio.run(run())
 
 
+@unittest.skipUnless(_HAS_PYDANTIC, _SKIP_REASON)
 class TestSlaTimeout(unittest.TestCase):
     def test_timeout_fires_on_resolved_none_and_reclaims(self):
         async def run():
@@ -149,6 +165,7 @@ class TestSlaTimeout(unittest.TestCase):
         asyncio.run(run())
 
 
+@unittest.skipUnless(_HAS_PYDANTIC, _SKIP_REASON)
 class TestDoubleFireRace(unittest.TestCase):
     def test_decision_and_timeout_resolve_only_once(self):
         """The race fixed by claim_async_pending: even if the SLA fires at
@@ -190,6 +207,7 @@ class TestDoubleFireRace(unittest.TestCase):
         asyncio.run(run())
 
 
+@unittest.skipUnless(_HAS_PYDANTIC, _SKIP_REASON)
 class TestMultiInterruptIsolation(unittest.TestCase):
     def test_two_interrupts_resolve_independently(self):
         """In-process analogue of two agents: distinct interrupt_ids resolve
