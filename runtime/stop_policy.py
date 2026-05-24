@@ -63,6 +63,7 @@ class StopOutcome(str, Enum):
     STOP_GRACEFUL = "stop_graceful"   # natural end, emit summary
     STOP_HITL     = "stop_hitl"       # escalate to human
     STOP_BUDGET   = "stop_budget"     # hard limit hit
+    USER_CANCELLED = "user_cancelled" # operator hit Stop mid-stream
 
 
 # ---------------------------------------------------------------------------

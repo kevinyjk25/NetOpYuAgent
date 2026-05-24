@@ -30,6 +30,19 @@ from .directive_parser import (
     has_any_tool_directive as _has_any_tool_directive,
     has_skill_load as _has_skill_load,
 )
+from . import loop_helpers as _helpers
+# Public types live in loop_types.py (Item 4 extraction). Re-imported here so
+# `from runtime.loop import RuntimeConfig` etc. and runtime/__init__ re-exports
+# keep working unchanged.
+from .loop_types import (
+    QueryComplexity, DelegationMode, ForkContextPolicy,
+    VerificationResult, ComplexityDecision, RuntimeConfig, LoopResult,
+)
+from .loop_context import _LoopContext
+# Backward-compatible module-level aliases for helpers extracted to
+# loop_helpers.py (Item 4). All existing call sites use these bare names.
+_call_key = _helpers.call_key
+_build_tool_ledger = _helpers.build_tool_ledger
 
 
 def _truncation_cfg():
@@ -42,15 +55,8 @@ def _truncation_cfg():
         return None
 
 
-def _page_default_size_for_ledger() -> int:
-    """Page size used by _build_tool_ledger for read_stored_result coverage estimates.
-    Loaded from cfg.context_budget_display.page_default_size; defaults to 2000.
-    """
-    try:
-        from config import cfg as _app_cfg
-        return int(getattr(getattr(_app_cfg, "context_budget_display", None), "page_default_size", 2000))
-    except Exception:
-        return 2000
+def _page_default_size_for_ledger() -> int:  # noqa: E305 (kept as a name alias)
+    return _helpers.page_default_size_for_ledger()
 
 
 if TYPE_CHECKING:
@@ -64,64 +70,8 @@ logger = logging.getLogger(__name__)
 # Enumerations
 # ---------------------------------------------------------------------------
 
-class QueryComplexity(str, Enum):
-    SIMPLE  = "simple"
-    COMPLEX = "complex"
-
-
-class DelegationMode(str, Enum):
-    """
-    fresh  — start a sub-agent with only the explicitly passed context
-    forked — inherit parent confirmed_facts + working_set (P1)
-    """
-    FRESH  = "fresh"
-    FORKED = "forked"
-
-
-class ForkContextPolicy(str, Enum):
-    """How much parent context a forked sub-agent inherits."""
-    FULL         = "full"           # everything
-    FACTS_ONLY   = "facts_only"     # only confirmed_facts
-    WORKING_SET  = "working_set"    # facts + working_set, not raw memory
-
-
-# ---------------------------------------------------------------------------
-# Verification result (P1)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class VerificationResult:
-    passed:   bool
-    reason:   str
-    warnings: list[str] = field(default_factory=list)
-
-    @classmethod
-    def ok(
-        cls,
-        reason: str = "Verification passed",
-        warnings: Optional[list[str]] = None,
-    ) -> "VerificationResult":
-        """Construct a passing result.  warnings is accepted (and stored)
-        so callers that detect non-fatal anomalies can surface them even
-        on a successful verification — the BUG-09 post_verify() rewrite
-        relies on this symmetric signature with fail()."""
-        return cls(passed=True, reason=reason, warnings=warnings or [])
-
-    @classmethod
-    def fail(cls, reason: str, warnings: Optional[list[str]] = None) -> "VerificationResult":
-        return cls(passed=False, reason=reason, warnings=warnings or [])
-
-
-# ---------------------------------------------------------------------------
-# Complexity decision
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ComplexityDecision:
-    complexity: QueryComplexity
-    reason:     str
-    confidence: float = 1.0
-    model_tier: str   = "full_model"   # P2: fast_model | full_model
+# QueryComplexity / DelegationMode / ForkContextPolicy / VerificationResult /
+# ComplexityDecision are defined in runtime/loop_types.py and imported above.
 
 
 # Keyword frozensets used ONLY as fallback when PolicyEngine is unavailable
@@ -180,78 +130,8 @@ def _classifier_fallback_keywords(category: str) -> frozenset:
 _DESTRUCTIVE_KEYWORDS = _DEFAULT_DESTRUCTIVE_KEYWORDS
 _P0P1_KEYWORDS        = _DEFAULT_P0P1_KEYWORDS
 _FAST_MODEL_KEYWORDS  = _DEFAULT_FAST_MODEL_KEYWORDS
+# RuntimeConfig / LoopResult are defined in runtime/loop_types.py and imported above.
 
-
-# ---------------------------------------------------------------------------
-# Runtime config
-# ---------------------------------------------------------------------------
-
-@dataclass
-class RuntimeConfig:
-    budget:      BudgetConfig      = field(default_factory=BudgetConfig)
-    stop_policy: StopPolicyConfig  = field(default_factory=StopPolicyConfig)
-
-    # Complexity thresholds
-    simple_confidence_floor:  float = 0.70
-    simple_max_tool_calls:    int   = 4
-
-    # P1: delegation
-    default_delegation_mode:   DelegationMode   = DelegationMode.FRESH
-    default_fork_context:      ForkContextPolicy = ForkContextPolicy.FACTS_ONLY
-
-    # Pre-verification REMOVED — replaced by tool-level HITL gate.
-    # The flag is kept for one release for backward compatibility but
-    # has no effect; the new pre_verify() stub returns ok unconditionally.
-    enable_pre_verification:   bool = False   # DEPRECATED, no-op (kept for compat)
-    enable_post_verification:  bool = True
-
-    # Model tiering — flag retained for caller compatibility but unconsumed
-    # in the active runtime path. Tier hint travels via ComplexityDecision.
-    # Wire a real consumer in integrations/llm_engine.py if you want to act on it.
-    enable_model_tiering:      bool = False   # DEPRECATED, unconsumed (kept for compat)
-
-    # Tool result inline limit
-    tool_result_inline_limit:  int  = 4_000
-
-    # CAP 5: tools that force HITL before execution even on SIMPLE path
-    # Populated from HITL_TOOL_NAMES env var in main.py
-    hitl_tool_names: frozenset = field(default_factory=frozenset)
-
-    # ── Type #2 EDIT-flavoured HITL ────────────────────────────────────
-    # Tools where the operator should be allowed to edit the proposed
-    # parameters before approving (e.g. edit the config_lines list).
-    # Subset of hitl_tool_names — for any tool in BOTH sets, the executor
-    # raises trigger_edit_approval (with editable_param_keys) instead of
-    # the bare approve/reject panel.
-    editable_hitl_tools: dict[str, list[str]] = field(default_factory=lambda: {
-        "edit_device_config":  ["config_lines", "reason"],
-        "rollback_deploy":     ["snapshot_id", "reason"],
-        "restart_service":     ["service_name", "graceful"],
-    })
-
-    # ── Type #3 CLARIFICATION ───────────────────────────────────────────
-    # Auto-clarify when the agent's confidence in its plan is below this
-    # threshold AND the operator hasn't exceeded their per-session budget.
-    # 0 disables auto-clarify entirely.
-    clarification_confidence_floor: float = 0.45
-    clarification_max_per_session:  int   = 2
-
-
-# ---------------------------------------------------------------------------
-# Loop result
-# ---------------------------------------------------------------------------
-
-@dataclass
-class LoopResult:
-    outcome:          StopOutcome
-    final_response:   str
-    confirmed_facts:  list[str]   = field(default_factory=list)
-    working_set:      list[DeviceRef] = field(default_factory=list)
-    unresolved:       list[str]   = field(default_factory=list)
-    tool_summaries:   list[str]   = field(default_factory=list)
-    turns_taken:      int         = 0
-    escalated_to_dag: bool        = False
-    verification:     Optional[VerificationResult] = None
 
 
 # ---------------------------------------------------------------------------
@@ -262,110 +142,6 @@ class LoopResult:
 # Clarification gating is handled by PolicyEngine[assess_query_specificity]
 # (see config.yaml policies section).  A keyword-based heuristic was
 # previously used here but removed in favour of the LLM-evaluated policy.
-
-
-def _call_key(tool_name: str, tool_args: dict) -> str:
-    """
-    Deduplicate tool calls by name+args fingerprint, not just name.
-    This allows calling the same tool with different args (e.g. different
-    device_ids) in one session without the second being blocked as a duplicate.
-    Only blocks genuinely identical calls (same tool, same arguments).
-    """
-    import json as _json
-    try:
-        args_sig = _json.dumps(tool_args, sort_keys=True)
-    except Exception:
-        args_sig = str(tool_args)
-    return f"{tool_name}|{args_sig}"
-
-
-def _build_tool_ledger(
-    tool_outputs: dict,
-    tool_reg: dict,
-    raw_outputs: dict,
-) -> list[str]:
-    """
-    Build confirmed_facts ledger entries from the current session's tool_outputs.
-    Written at end of stream() so next HTTP request can seed called_tools and
-    surface existing ref_ids without re-fetching.
-
-    Collapsing rules:
-    - Multiple read_stored_result pages for the same ref_id → single summary entry
-    - [STORED:] labels annotated with total_size from their read results
-    - Inline results recorded with size
-    """
-    import json as _j
-
-    # Pass 1: collect total_size and page count per ref_id from read_stored_result results
-    ref_info: dict = {}   # ref_id → {total_size, pages, last_offset}
-    for key, val in raw_outputs.items():
-        tool = key.split("|")[0] if "|" in key else key
-        if tool != "read_stored_result" or "_summary" in key:
-            continue
-        try:
-            args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
-            ref    = args.get("ref_id", "").strip("[]")
-            ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
-            offset = int(args.get("offset", 0))
-            if not ref:
-                continue
-            total_m = re.search(r"Total size:\s*([\d,]+)", val)
-            total   = int(total_m.group(1).replace(",", "")) if total_m else 0
-            if ref not in ref_info:
-                ref_info[ref] = {"total_size": total, "last_offset": offset, "pages": 0}
-            else:
-                if offset > ref_info[ref]["last_offset"]:
-                    ref_info[ref]["last_offset"] = offset
-                    ref_info[ref]["total_size"]   = total
-            ref_info[ref]["pages"] += 1
-        except Exception:
-            pass
-
-    ledger: list[str] = []
-    seen:   set[str]  = set()
-    seen_read_refs:  set[str] = set()   # track which refs already have a read entry
-
-    for key, stored in tool_outputs.items():
-        if key in seen or "_summary" in key:
-            continue
-        seen.add(key)
-        tool_name = key.split("|")[0] if "|" in key else key
-
-        # Collapse all read_stored_result pages for same ref_id into ONE entry
-        if tool_name == "read_stored_result":
-            try:
-                args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
-                ref    = args.get("ref_id", "").strip("[]")
-                ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
-            except Exception:
-                ref = ""
-            if ref and ref in seen_read_refs:
-                continue   # already emitted a summary for this ref_id
-            if ref:
-                seen_read_refs.add(ref)
-                info    = ref_info.get(ref, {})
-                pages   = info.get("pages", 1)
-                total   = info.get("total_size", 0)
-                covered = info.get("last_offset", 0) + _page_default_size_for_ledger()
-                ledger.append(
-                    f"TOOL_EXEC: read_stored_result|ref={ref} pages_read={pages} "
-                    f"bytes_covered=0-{min(covered, total)} total={total}"
-                )
-            continue
-
-        raw  = raw_outputs.get(key, stored)
-        ref_m = re.search(r"\[STORED:\w+:(\w+)\]", stored)
-        if ref_m:
-            ref_id = ref_m.group(1)
-            total  = ref_info.get(ref_id, {}).get("total_size", len(raw))
-            ledger.append(
-                f"TOOL_EXEC: {key} → ref={ref_id} total_size={total} "
-                f"[reuse: read_stored_result ref_id={ref_id}]"
-            )
-        else:
-            ledger.append(f"TOOL_EXEC: {key} → inline size={len(raw)}")
-
-    return ledger
 
 
 # ---------------------------------------------------------------------------
@@ -499,6 +275,20 @@ class AgentRuntimeLoop:
         self._skill_catalog = skill_catalog
         self._delegate_fn  = delegate_fn
 
+        # Context-budget strategy (Tier 2 #3): "legacy" (default) or "priority".
+        # Read once at construction from the app config; falls back to legacy if
+        # config isn't importable (e.g. minimal unit tests).
+        self._ctx_strategy = "legacy"
+        self._ctx_budget_cfg = None
+        try:
+            from config import cfg as _app_cfg
+            _cb = getattr(_app_cfg, "context_budget", None)
+            if _cb is not None:
+                self._ctx_strategy = (getattr(_cb, "strategy", "legacy") or "legacy").lower()
+                self._ctx_budget_cfg = _cb
+        except Exception:
+            pass
+
         # DESIGN-03: constructor injection takes priority over monkey-patch.
         # If llm_fn is supplied at construction time, wire it immediately.
         if llm_fn is not None:
@@ -527,34 +317,9 @@ class AgentRuntimeLoop:
     @staticmethod
     def _query_mentions_concrete_target(q: str) -> bool:
         """Heuristic: does the query name a specific device/service?
-        Looks for tokens like ap-NN, sw-core-NN, router-NN, IPs, hostnames.
-
-        IMPORTANT: do NOT use \\b here — Python regex \\b only treats
-        ASCII letter↔non-letter as a word boundary, so "ap-01" tucked
-        between Chinese characters (e.g. "修复ap-01设备") fails the
-        \\b match. Use ASCII-explicit lookbehind/lookahead instead so
-        Chinese-glued device IDs are correctly recognised.
-        """
-        q_lower = q.lower()
-        # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01.
-        # The (?<![a-z0-9]) / (?![a-z0-9]) anchors mean "not preceded /
-        # followed by another ASCII alphanumeric" — Chinese characters
-        # satisfy this constraint, so embedded device IDs are matched.
-        if re.search(
-            r"(?<![a-z0-9])[a-z]{2,}[-_]\w{2,}(?![a-z0-9])", q_lower
-        ):
-            return True
-        # Also accept the structured device pattern used elsewhere in
-        # this file (ap/sw/router/switch + digits) to stay consistent.
-        if re.search(
-            r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])",
-            q_lower,
-        ):
-            return True
-        # IPv4 (no character-class boundary issue for digits + dots)
-        if re.search(r"(?<!\d)\d+\.\d+\.\d+\.\d+(?!\d)", q):
-            return True
-        return False
+        Thin wrapper → runtime.loop_helpers.query_mentions_concrete_target
+        (extracted Item 4, 2026-05). Behaviour unchanged."""
+        return _helpers.query_mentions_concrete_target(q)
 
     async def _maybe_clarification_fields(
         self,
@@ -1158,18 +923,15 @@ class AgentRuntimeLoop:
             if self._skill_catalog:
                 skill_section = self._skill_catalog.format_summary()
 
-            # Compress paged results before assembly to prevent context overflow
-            from runtime.context_budget import compress_paged_outputs as _compress
-            _to_assemble = _compress(tool_outputs)
-            context_str = self._budget.assemble(
+            # Context assembly (Item 4 4c): unified legacy/priority path.
+            context_str = self._assemble_context(
                 memory_results=memory_results,
-                tool_outputs=_to_assemble,       # pass compressed accumulated results to LLM
+                tool_outputs=tool_outputs,
                 confirmed_facts=state.confirmed_facts,
                 working_set=working_set,
                 env_context=env_ctx,
+                skill_section=skill_section,
             )
-            if skill_section:
-                context_str = skill_section + "\n\n" + context_str
 
             # Attach live tool registry to state so _call_llm / llm_engine can
             # inject it into the system prompt (shows uploaded tools to the LLM)
@@ -1336,6 +1098,291 @@ class AgentRuntimeLoop:
                 )
 
     # ------------------------------------------------------------------
+    # Priority context assembly (Tier 2 #3)
+    # ------------------------------------------------------------------
+
+    async def _refresh_recall(self, ctx: _LoopContext, recall_every: int, facts_growth: int) -> list:
+        """Phase (Item 4 4b): conditional FTS5/memory recall refresh.
+
+        `query` is invariant across the whole stream call, so recall is
+        memoised on ctx and only re-run on a cadence: every `recall_every`
+        turns, or when confirmed_facts has grown by >= `facts_growth`. Pure
+        compute — mutates ctx cache fields, returns the (possibly cached)
+        memory results. Does not yield.
+        """
+        state = ctx.state
+        facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
+        need_refresh = (
+            ctx.last_recall_turn < 0
+            or (state.turns - ctx.last_recall_turn) >= recall_every
+            or (ctx.last_facts_count >= 0 and (facts_now - ctx.last_facts_count) >= facts_growth)
+        )
+        if need_refresh:
+            ctx.cached_memory_results = await self._retrieve_memory(ctx.query, ctx.session_id)
+            ctx.last_recall_turn = state.turns
+            ctx.last_facts_count = facts_now
+        return ctx.cached_memory_results
+
+    def _refresh_skills(self, ctx: _LoopContext, skill_every: int):
+        """Phase (Item 4 4b): conditional skill-selection refresh.
+
+        Memoised like recall: re-selects skills for the (invariant) query
+        every `skill_every` turns, otherwise returns the cached selection.
+        Pure compute — mutates ctx cache fields + records the first-turn
+        journal selection. Does NOT emit chunks or run the ambiguity HITL
+        gate; that stays in _stream_impl because it yields / can terminate
+        the stream. Returns (skill_section, skill_count, selected_skills,
+        skill_ambiguous).
+        """
+        state = ctx.state
+        skill_section   = ctx.cached_skill_section
+        skill_count     = ctx.cached_skill_count
+        selected_skills = ctx.cached_selected_skills
+        skill_ambiguous = ctx.cached_skill_ambiguous
+
+        need_refresh = (
+            ctx.last_skill_turn < 0
+            or (state.turns - ctx.last_skill_turn) >= skill_every
+        )
+        if self._skill_catalog and need_refresh:
+            try:
+                sel = self._skill_catalog.select_skills_for_query(ctx.query, top_k=5)
+                skill_section   = sel.summary
+                selected_skills = sel.selected          # [(skill_id, score), ...]
+                skill_ambiguous = sel.ambiguous
+                skill_count     = len(selected_skills)
+            except AttributeError:
+                # Fallback if select_skills_for_query not available
+                skill_section = self._skill_catalog.format_summary()
+                skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
+            # Update cache
+            ctx.cached_skill_section   = skill_section
+            ctx.cached_selected_skills = selected_skills
+            ctx.cached_skill_count     = skill_count
+            ctx.cached_skill_ambiguous = skill_ambiguous
+            ctx.last_skill_turn        = state.turns
+            # Journal: first selection of this stream call
+            if state._skill_journal is not None and state.turns <= 1:
+                try:
+                    state._skill_journal.record_selection(
+                        top_k_skills=selected_skills,
+                        ambiguous=skill_ambiguous,
+                        turn=state.turns,
+                    )
+                except Exception as _je:
+                    logger.debug("journal.record_selection failed: %s", _je)
+        return skill_section, skill_count, selected_skills, skill_ambiguous
+
+    def _assemble_priority(
+        self,
+        *,
+        skill_section:   str,
+        memory_results:  Optional[list[Any]],
+        tool_outputs:    Optional[dict[str, str]],
+        confirmed_facts: Optional[list[str]],
+        working_set:     Optional[list[Any]],
+        env_context:     Optional[dict[str, Any]],
+    ) -> str:
+        """Priority-based context assembly (strategy="priority").
+
+        Reuses the legacy ContextBudgetManager section FORMATTERS (so the
+        rendered text is identical to the legacy path) but routes each section
+        through the v2 TokenBudget, which enforces a hard total-char cap by
+        trimming LOW-priority sections (older env, skills, retrieved memory)
+        before HIGH-priority ones (confirmed facts, recent tool results). The
+        behavioural difference vs legacy: under pressure legacy drops whatever
+        comes last in fixed order; priority drops by importance.
+
+        Degrades to the legacy assemble() if the v2 module/config is
+        unavailable, so this can never become a hard dependency.
+        """
+        try:
+            from runtime.context_budget_v2 import (
+                TokenBudget, P0_FIXED, P1_HIGH, P2_MEDIUM, P3_LOW,
+            )
+        except Exception:
+            ctx = self._budget.assemble(
+                memory_results=memory_results, tool_outputs=tool_outputs,
+                confirmed_facts=confirmed_facts, working_set=working_set,
+                env_context=env_context,
+            )
+            return (skill_section + "\n\n" + ctx) if skill_section else ctx
+
+        cb = self._ctx_budget_cfg
+        _g = (lambda name, default: int(getattr(cb, name, default)) if cb else default)
+        total = _g("total_chars", 64000)
+
+        b = self._budget  # ContextBudgetManager — reuse its formatters
+        budget = TokenBudget(total)
+
+        if skill_section:
+            budget.reserve("skills", _g("section_skills", 5000),
+                           priority=P2_MEDIUM, evictable=True, payload=skill_section)
+        if confirmed_facts:
+            budget.reserve("confirmed_facts", _g("section_system_core", 4000),
+                           priority=P0_FIXED, evictable=False,
+                           payload=b._format_confirmed_facts(confirmed_facts))
+        if working_set:
+            budget.reserve("working_set", _g("section_user_profile", 500),
+                           priority=P1_HIGH, evictable=True,
+                           payload=b._format_working_set(working_set))
+        if memory_results:
+            budget.reserve("retrieved_memory", _g("section_retrieved_memory", 10000),
+                           priority=P2_MEDIUM, evictable=True,
+                           payload=b._format_memory(memory_results))
+        if tool_outputs:
+            budget.reserve("tool_results", _g("section_tool_results", 30000),
+                           priority=P1_HIGH, evictable=True,
+                           payload=b._format_tool_outputs(tool_outputs))
+        if env_context:
+            budget.reserve("env", _g("section_older_summary", 5000),
+                           priority=P3_LOW, evictable=True,
+                           payload=b._format_env(env_context))
+
+        report = budget.commit()
+
+        order = ["skills", "confirmed_facts", "working_set",
+                 "retrieved_memory", "tool_results", "env"]
+        parts = []
+        for name in order:
+            payload = report.get(name)
+            if payload:
+                parts.append(str(payload))
+        if report.trim_log:
+            logger.debug("ContextBudget[priority]: util=%.0f%% trims=%d",
+                         report.utilisation * 100, len(report.trim_log))
+        return "\n\n".join(parts)
+
+    async def _run_clarification_gate(self, ctx, memory_results, selected_skills):
+        """Phase (Item 4 4d): Type #3 clarification gate (turn 1 only).
+
+        When the agent would otherwise hallucinate a plan from too little
+        info, ask the operator for the missing pieces instead. Async
+        generator: yields chat tokens + a clarification chunk. If it asks,
+        it yields a final {"_clarification_terminal": True} sentinel — the
+        caller forwards every other chunk and returns on the sentinel to end
+        this turn's stream. If no clarification is needed, yields nothing.
+        """
+        # ── Type #3 CLARIFICATION gate ────────────────────────────
+        # When the agent is about to hallucinate a plan from too little
+        # info, ask the operator for missing pieces instead. Triggered by:
+        #   - top skill score < clarification_confidence_floor AND
+        #   - query mentions an action word but no concrete target (e.g.
+        #     "修复" without device_id, "查日志" without time range), AND
+        #   - we haven't already asked the operator clarification_max_per_session
+        #     times in this session (avoid loops).
+        # Skipped on subsequent turns (state.turns > 1) — clarify only at
+        # the start of a new request, never mid-execution.
+        if ctx.state.turns == 1 and self._cfg.clarification_max_per_session > 0:
+            # Build recent_context from current turn's recall + caller-supplied
+            # _fts_context. _maybe_clarification_fields uses this to detect
+            # "prior turn already asked" and skip re-asking.
+            _recent_for_clar = ctx.env_ctx.get("_fts_context", "") or ""
+            if not _recent_for_clar and memory_results:
+                try:
+                    _tcfg = _truncation_cfg()
+                    _recall_cap = getattr(_tcfg, "recall_context_chars", 1500) if _tcfg else 1500
+                    _recent_for_clar = "\n".join(str(m) for m in memory_results)[:_recall_cap]
+                except Exception:
+                    pass
+            clar_fields = await self._maybe_clarification_fields(
+                query=ctx.query,
+                top_skill_score=(selected_skills[0][1] if selected_skills else 0.0),
+                asked_count=self._clarification_counts.get(ctx.session_id, 0),
+                recent_context=_recent_for_clar,
+            )
+            if clar_fields:
+                self._clarification_counts.increment(ctx.session_id)
+                # Open-ended clarification — render as a CHAT TURN, not a
+                # HITL card. The operator's next message in the same
+                # session naturally provides the answers. This is the
+                # right UX for "which device do you mean?" — operators
+                # have hundreds of devices to potentially reference and
+                # a one-line input box doesn't help them.
+                # Closed candidate lists (e.g. "4 APs match") still go
+                # through the USER_CHOICE card path — see skill ambiguity.
+                logger.info(
+                    "Clarification gate (turn 1): asking operator for %s via chat turn",
+                    [getattr(f, "key", f.get("key") if isinstance(f, dict) else "?")
+                     for f in clar_fields],
+                )
+                _q_lines = []
+                for f in clar_fields:
+                    if hasattr(f, "key"):  # ClarificationField object
+                        _key = f.key
+                        _prompt = f.prompt
+                        _ph = getattr(f, "placeholder", "") or ""
+                        _required = getattr(f, "required", True)
+                    else:                    # plain dict
+                        _key = f.get("key", "")
+                        _prompt = f.get("prompt", _key)
+                        _ph = f.get("placeholder", "")
+                        _required = f.get("required", True)
+                    _star = "" if _required else "（可选）"
+                    line = f"- **{_prompt}**{_star}"
+                    if _ph:
+                        line += f"  _例: {_ph}_"
+                    _q_lines.append(line)
+                _ask_text = (
+                    "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
+                    + "\n".join(_q_lines)
+                    + "\n\n请直接回复，我会基于您的补充继续。"
+                )
+                # Stream as chat tokens — no card, no stop_hitl.
+                for _i in range(0, len(_ask_text), 80):
+                    yield {"token": _ask_text[_i:_i+80]}
+                yield {
+                    "node":      "clarification_chat",
+                    "node_step": "Clarification asked via chat turn",
+                    "reason":    "clarification_needed",
+                    "message":   "Clarification asked — awaiting operator's next message",
+                }
+                yield {"_clarification_terminal": True}
+                return
+
+    def _assemble_context(
+        self,
+        *,
+        memory_results: list,
+        tool_outputs: dict,
+        confirmed_facts,
+        working_set: list,
+        env_context: dict,
+        skill_section: str,
+    ) -> str:
+        """Phase (Item 4 4c): build the LLM context string for one turn.
+
+        Single entry point for both the legacy ContextBudgetManager.assemble
+        path and the v2 priority TokenBudget path (selected by
+        cfg.context_budget.strategy). Compresses paged tool outputs first.
+        Used by both run() and _stream_impl so the two paths can never drift
+        (previously the priority strategy was wired only into run(), so the
+        streaming path silently always used legacy — unifying here fixes that).
+        """
+        from runtime.context_budget import compress_paged_outputs as _compress
+        to_assemble = _compress(tool_outputs)
+
+        if self._ctx_strategy == "priority":
+            return self._assemble_priority(
+                skill_section=skill_section,
+                memory_results=memory_results,
+                tool_outputs=to_assemble,
+                confirmed_facts=confirmed_facts,
+                working_set=working_set,
+                env_context=env_context,
+            )
+        context_str = self._budget.assemble(
+            memory_results=memory_results,
+            tool_outputs=to_assemble,
+            confirmed_facts=confirmed_facts,
+            working_set=working_set,
+            env_context=env_context,
+        )
+        if skill_section:
+            context_str = skill_section + "\n\n" + context_str
+        return context_str
+
+    # ------------------------------------------------------------------
     # Stream
     # ------------------------------------------------------------------
 
@@ -1478,8 +1525,20 @@ class AgentRuntimeLoop:
         except Exception as _jexc:
             logger.debug("SkillJournal init skipped: %s", _jexc)
 
-        tool_outputs: dict[str, str] = {}   # persists across turns
-        called_tools: set[str] = set()       # dedup guard
+        # ── Item 4 (4a): per-turn state container ──────────────────────
+        # _LoopContext owns the cross-turn mutable state. During the staged
+        # decomposition (4a-4e) the loop body still uses local aliases for
+        # the mutable containers (tool_outputs / called_tools) — because they
+        # are mutated in place, the alias and ctx stay in sync with zero
+        # changes to the ~25 existing reference sites. Scalar/cache vars are
+        # migrated to ctx.* as their owning phases are extracted (4b-4d).
+        ctx = _LoopContext(
+            query=query, session_id=session_id, env_ctx=env_ctx,
+            tool_reg=tool_reg, delegation_mode=delegation_mode,
+            parent_state=parent_state, state=state,
+        )
+        tool_outputs = ctx.tool_outputs   # dict, mutated in place → syncs with ctx
+        called_tools = ctx.called_tools   # set,  mutated in place → syncs with ctx
 
         # ── Clarification gate (runs ONCE before the first turn) ─────────
         # When the caller has supplied a complexity decision and its
@@ -1527,15 +1586,6 @@ class AgentRuntimeLoop:
             _recall_every, _skill_every, _facts_growth = 3, 5, 3
             _emit_skills_only_on_change = True
 
-        _cached_memory_results: list = []
-        _cached_skill_section:  str  = ""
-        _cached_selected_skills: list = []
-        _cached_skill_count:    int  = 0
-        _cached_skill_ambiguous: bool = False
-        _last_recall_turn = -1
-        _last_skill_turn  = -1
-        _last_facts_count = -1
-        _last_emitted_skill_sig: str = ""
 
         while True:
             state.turns += 1
@@ -1626,80 +1676,31 @@ class AgentRuntimeLoop:
                 )
 
             # ── PERF-1: conditional recall refresh ──────────────────────
-            _facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
-            _need_recall_refresh = (
-                _last_recall_turn < 0
-                or (state.turns - _last_recall_turn) >= _recall_every
-                or (_last_facts_count >= 0 and (_facts_now - _last_facts_count) >= _facts_growth)
-            )
-            if _need_recall_refresh:
-                _cached_memory_results = await self._retrieve_memory(query, session_id)
-                _last_recall_turn  = state.turns
-                _last_facts_count  = _facts_now
-            memory_results = _cached_memory_results
+            memory_results = await self._refresh_recall(ctx, _recall_every, _facts_growth)
 
             # ── PERF-1: conditional skill-selection refresh ─────────────
-            skill_section  = _cached_skill_section
-            skill_count    = _cached_skill_count
-            selected_skills = _cached_selected_skills
-            skill_ambiguous = _cached_skill_ambiguous
+            skill_section, skill_count, selected_skills, skill_ambiguous = \
+                self._refresh_skills(ctx, _skill_every)
 
-            _need_skill_refresh = (
-                _last_skill_turn < 0
-                or (state.turns - _last_skill_turn) >= _skill_every
-            )
-            if self._skill_catalog and _need_skill_refresh:
-                try:
-                    sel = self._skill_catalog.select_skills_for_query(query, top_k=5)
-                    skill_section   = sel.summary
-                    selected_skills = sel.selected          # [(skill_id, score), ...]
-                    skill_ambiguous = sel.ambiguous
-                    skill_count     = len(selected_skills)
-                except AttributeError:
-                    # Fallback if select_skills_for_query not available
-                    skill_section = self._skill_catalog.format_summary()
-                    skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
-                # Update cache
-                _cached_skill_section    = skill_section
-                _cached_selected_skills  = selected_skills
-                _cached_skill_count      = skill_count
-                _cached_skill_ambiguous  = skill_ambiguous
-                _last_skill_turn         = state.turns
-                # Journal: first selection of this stream call
-                if state._skill_journal is not None and state.turns <= 1:
-                    try:
-                        state._skill_journal.record_selection(
-                            top_k_skills=selected_skills,
-                            ambiguous=skill_ambiguous,
-                            turn=state.turns,
-                        )
-                    except Exception as _je:
-                        logger.debug("journal.record_selection failed: %s", _je)
-
-            # Compress paged results before assembly to prevent context overflow.
-            # Without this, accumulated read_stored_result pages send the full
-            # paged content back to the LLM every turn — Ollama times out.
-            from runtime.context_budget import compress_paged_outputs as _compress
-            _to_assemble = _compress(tool_outputs)
             # BUG-07 fix: use state.working_set (which may be updated mid-loop)
             # rather than the outer `working_set` variable (frozen at call start).
             _current_working_set = getattr(state, "working_set", None) or working_set or []
-            context_str = self._budget.assemble(
+            context_str = self._assemble_context(
                 memory_results=memory_results,
-                tool_outputs=_to_assemble,       # compressed accumulated results
+                tool_outputs=tool_outputs,
                 confirmed_facts=state.confirmed_facts,
                 working_set=_current_working_set,
                 env_context=env_ctx,
+                skill_section=skill_section,
             )
             if skill_section:
-                context_str = skill_section + "\n\n" + context_str
                 # Q1: emit named matched skills so Flow tab shows exactly which skills loaded
                 skill_names = ", ".join(f"{sid}({sc:.2f})" for sid, sc in selected_skills) \
                               or f"{skill_count} skills"
                 # PERF-4: only emit when signature changes (avoid wire spam on cached turns)
                 _skill_sig = f"{skill_count}|{skill_names}"
-                _suppress_skill_emit = _emit_skills_only_on_change and _skill_sig == _last_emitted_skill_sig
-                _last_emitted_skill_sig = _skill_sig
+                _suppress_skill_emit = _emit_skills_only_on_change and _skill_sig == ctx.last_emitted_skill_sig
+                ctx.last_emitted_skill_sig = _skill_sig
                 if _suppress_skill_emit:
                     pass
                 else:
@@ -1785,81 +1786,13 @@ class AgentRuntimeLoop:
                     }
                     return
 
-            # ── Type #3 CLARIFICATION gate ────────────────────────────
-            # When the agent is about to hallucinate a plan from too little
-            # info, ask the operator for missing pieces instead. Triggered by:
-            #   - top skill score < clarification_confidence_floor AND
-            #   - query mentions an action word but no concrete target (e.g.
-            #     "修复" without device_id, "查日志" without time range), AND
-            #   - we haven't already asked the operator clarification_max_per_session
-            #     times in this session (avoid loops).
-            # Skipped on subsequent turns (state.turns > 1) — clarify only at
-            # the start of a new request, never mid-execution.
-            if state.turns == 1 and self._cfg.clarification_max_per_session > 0:
-                # Build recent_context from current turn's recall + caller-supplied
-                # _fts_context. _maybe_clarification_fields uses this to detect
-                # "prior turn already asked" and skip re-asking.
-                _recent_for_clar = env_ctx.get("_fts_context", "") or ""
-                if not _recent_for_clar and memory_results:
-                    try:
-                        _tcfg = _truncation_cfg()
-                        _recall_cap = getattr(_tcfg, "recall_context_chars", 1500) if _tcfg else 1500
-                        _recent_for_clar = "\n".join(str(m) for m in memory_results)[:_recall_cap]
-                    except Exception:
-                        pass
-                clar_fields = await self._maybe_clarification_fields(
-                    query=query,
-                    top_skill_score=(selected_skills[0][1] if selected_skills else 0.0),
-                    asked_count=self._clarification_counts.get(session_id, 0),
-                    recent_context=_recent_for_clar,
-                )
-                if clar_fields:
-                    self._clarification_counts.increment(session_id)
-                    # Open-ended clarification — render as a CHAT TURN, not a
-                    # HITL card. The operator's next message in the same
-                    # session naturally provides the answers. This is the
-                    # right UX for "which device do you mean?" — operators
-                    # have hundreds of devices to potentially reference and
-                    # a one-line input box doesn't help them.
-                    # Closed candidate lists (e.g. "4 APs match") still go
-                    # through the USER_CHOICE card path — see skill ambiguity.
-                    logger.info(
-                        "Clarification gate (turn 1): asking operator for %s via chat turn",
-                        [getattr(f, "key", f.get("key") if isinstance(f, dict) else "?")
-                         for f in clar_fields],
-                    )
-                    _q_lines = []
-                    for f in clar_fields:
-                        if hasattr(f, "key"):  # ClarificationField object
-                            _key = f.key
-                            _prompt = f.prompt
-                            _ph = getattr(f, "placeholder", "") or ""
-                            _required = getattr(f, "required", True)
-                        else:                    # plain dict
-                            _key = f.get("key", "")
-                            _prompt = f.get("prompt", _key)
-                            _ph = f.get("placeholder", "")
-                            _required = f.get("required", True)
-                        _star = "" if _required else "（可选）"
-                        line = f"- **{_prompt}**{_star}"
-                        if _ph:
-                            line += f"  _例: {_ph}_"
-                        _q_lines.append(line)
-                    _ask_text = (
-                        "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
-                        + "\n".join(_q_lines)
-                        + "\n\n请直接回复，我会基于您的补充继续。"
-                    )
-                    # Stream as chat tokens — no card, no stop_hitl.
-                    for _i in range(0, len(_ask_text), 80):
-                        yield {"token": _ask_text[_i:_i+80]}
-                    yield {
-                        "node":      "clarification_chat",
-                        "node_step": "Clarification asked via chat turn",
-                        "reason":    "clarification_needed",
-                        "message":   "Clarification asked — awaiting operator's next message",
-                    }
-                    return
+            # ── Type #3 CLARIFICATION gate (Item 4 4d → _run_clarification_gate) ──
+            async for _clar_chunk in self._run_clarification_gate(
+                ctx, memory_results, selected_skills,
+            ):
+                if _clar_chunk.get('_clarification_terminal'):
+                    return   # gate asked the operator; end this turn's stream
+                yield _clar_chunk
 
             yield {"node_step": f"Turn {state.turns}: analysing", "node": "runtime_loop"}
 
@@ -2880,14 +2813,8 @@ class AgentRuntimeLoop:
 
     @staticmethod
     def _strip_thinking(response: str) -> str:
-        """
-        Remove <think>...</think> blocks emitted by thinking models
-        (qwen3, deepseek-r1, etc.) before tool parsing or display.
-        Preserves everything outside the think block.
-        """
-        # Remove <think>...</think> blocks (case-insensitive, multiline, non-greedy)
-        cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL | re.IGNORECASE)
-        return cleaned.strip()
+        """Thin wrapper → runtime.loop_helpers.strip_thinking (Item 4)."""
+        return _helpers.strip_thinking(response)
 
     def _parse_tool_calls(self, response: str) -> list[tuple[str, dict[str, Any]]]:
         """
@@ -3141,35 +3068,18 @@ class AgentRuntimeLoop:
 
     @staticmethod
     def _skill_loads_in(response: str) -> set:
-        from runtime.directive_parser import find_skill_load_names
-        return set(find_skill_load_names(response))
+        """Thin wrapper → runtime.loop_helpers.skill_loads_in (Item 4)."""
+        return _helpers.skill_loads_in(response)
 
     @staticmethod
     def _is_complete(response: str, tool_calls: list) -> bool:
-        # If the LLM emitted a SKILL_LOAD directive, it needs one more turn
-        # to read the loaded detail and then call the actual tools.
-        # A pure SKILL_LOAD response (no prose, no tool calls) means the model
-        # asked for skill detail and is waiting for it — keep the loop running
-        # so next turn can read the loaded detail. Only mark complete if the
-        # model produced real prose + tool calls alongside the SKILL_LOAD.
-        from runtime.directive_parser import find_skill_load_names, strip_skill_load_directives
-        skill_loads = find_skill_load_names(response)
-        if skill_loads:
-            stripped = strip_skill_load_directives(response).strip()
-            if len(stripped) == 0 and len(tool_calls) == 0:
-                # Pure SKILL_LOAD — keep looping so next turn sees the detail
-                return False
-            # SKILL_LOAD plus other content — completion follows the tool-call rule
-            return len(tool_calls) == 0
-        return len(tool_calls) == 0
+        """Thin wrapper → runtime.loop_helpers.is_complete (Item 4)."""
+        return _helpers.is_complete(response, tool_calls)
 
     @staticmethod
     def _format_final(chunks: list[str], decision: StopDecision) -> str:
-        base = "\n".join(chunks) if chunks else ""
-        stop = decision.summary or decision.reason
-        if stop:
-            return f"{base}\n\n---\n{stop}".strip()
-        return base.strip()
+        """Thin wrapper → runtime.loop_helpers.format_final (Item 4)."""
+        return _helpers.format_final(chunks, decision)
 
 # ---------------------------------------------------------------------------
 # Async HITL (H2) — inject queue + turn-start drain helper (2026-05)

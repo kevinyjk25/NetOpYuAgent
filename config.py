@@ -620,6 +620,13 @@ class SkillOrchestrationConfig:
     evolver_feedback_interval_s: int    = 300   # how often to scan (seconds)
     evolver_feedback_min_uses:   int    = 3     # min observations before feedback
     evolver_dormant_threshold:   float  = 0.6   # dormant_count/use_count above this → feedback
+    # Master switch for whether the self-improvement loop is allowed to MUTATE
+    # the live skill catalog. True (default) = auto-apply feedback patches and
+    # newly-created skills (gated by the A/B compliance bench). False =
+    # "suggest-only": the loop still runs, computes patches/new skills, records
+    # them in version history + logs for review, but does NOT touch the live
+    # catalog. Flip to False in production until auto-evolution is trusted.
+    auto_evolve_apply:           bool   = True
 
 @dataclass
 class StreamingConfig:
@@ -1170,6 +1177,7 @@ def _load_skill_orchestration_config(s: dict) -> "SkillOrchestrationConfig":
         evolver_feedback_interval_s = _env_int  ("SKILL_EVOLVER_INTERVAL",        s.get("evolver_feedback_interval_s", 300)),
         evolver_feedback_min_uses   = _env_int  ("SKILL_EVOLVER_MIN_USES",        s.get("evolver_feedback_min_uses",     3)),
         evolver_dormant_threshold   = _env_float("SKILL_EVOLVER_DORMANT_THR",     s.get("evolver_dormant_threshold",   0.6)),
+        auto_evolve_apply           = _env_bool ("SKILL_AUTO_EVOLVE_APPLY",       s.get("auto_evolve_apply",           True)),
     )
 
 

@@ -1,7 +1,7 @@
 # TODO — Production Readiness & Roadmap Tracker
 
 > Tracking doc for deferred work. **Rule: when an item is done, delete it from this file.**
-> Items that remain are not yet done. Last updated: 2026-05 (refreshed for v13 — Phase 2B delegation done + transport hardened).
+> Items that remain are not yet done. Last updated: 2026-05 (v13 + tech-debt sweep: legacy-hitl removal, user-cancel, auto-evolve switch, priority budget wired; loop.py split: phase 1 + _stream_impl steps 4a-4d done, 4e remaining).
 
 This file tracks the production-readiness items surfaced in the Sprint-3
 readiness assessment (see `ARCHITECTURE.md §8.4` "What Sprint-3-pre does NOT fix")
@@ -253,32 +253,39 @@ Remaining real debt, by priority:
 ## Known bugs / tech debt to revisit
 
 ### Skill feedback path was dead for the project's entire life
-- **Status**: FIXED 2026-05 (`SkillEvolver._parse_json_response` was never implemented).
-- **Follow-up**: now that `apply_feedback` + `evaluate_skill_creation` actually run, watch production for unexpected side effects (e.g. LLM rewriting skills badly). The A/B safety net (compliance bench gate) should catch regressions, but monitor the `SkillEvolver: rollback` log lines.
-- **Action**: After 2 weeks of production data, decide whether the auto-skill-evolution is net-positive or should be gated behind manual approval. **Keep this item until that decision is made.**
+- **Status**: FIXED 2026-05 (`SkillEvolver._parse_json_response` implemented) + **auto-evolve master switch added 2026-05**.
+- **What shipped**: `cfg.skill_orchestration.auto_evolve_apply` (env `SKILL_AUTO_EVOLVE_APPLY`, default `true`). When `false`, the self-improvement loop still runs — computes feedback patches + new-skill proposals, records them in version history + logs — but does NOT mutate the live catalog (gated in both `apply_feedback` and `_register_skill`). Lets production run in "observe" mode. Test: `tests/test_skill_evolve_suggest_only.py`.
+- **Follow-up (product decision, not code)**: after observing production, decide whether to default `auto_evolve_apply` to `false`. The A/B compliance bench still gates auto-applied patches when on. Monitor `SkillEvolver: rollback` / `suggested (suggest-only mode)` log lines.
 
-### Legacy `hitl/*` LangGraph backend retired but referenced
-- **Status**: open
-- **Detail**: `HITL_BACKEND != "core"` raises `NotImplementedError`. The `hitl/` package is a thin schema stub; the implementation modules were never packaged. Some lifespan code still has `if _services.get("hitl_router")` branches for the legacy path.
-- **Action**: Either fully remove the legacy branches + the `HITL_BACKEND` env knob, or restore the langgraph backend. Pick one; don't leave the half-state.
+### Legacy `hitl/*` LangGraph backend retired but referenced ✅ DONE (2026-05)
+- **What shipped**: `HITL_BACKEND` now defaults to `core` (previously defaulted to `langgraph`, which crashed boot). All dead legacy branches removed from `main.py` (section-2 `else: raise`, section-5 defensive guard, section-6 legacy executor + `patch_hitl_graph` calls, the legacy `/hitl/*` mount block, the always-None `create_task_system` ternary). `patch_hitl_graph` function + its three exports deleted. A non-`core` value now fails fast with a clear "backend retired" message. **Bonus bug fixed**: the `/healthz`-style `pending_hitl` metric read the never-set `hitl_router` (always 0); now reads `hitl_core_router`.
 
-### `context_budget_v2.py` co-exists with `context_budget.py`
-- **Status**: open (gradual migration)
-- **Detail**: v2 is the new priority-budget algorithm; some callers still use v1.
-- **Action**: Finish migrating all callers to v2, then delete v1.
+### `context_budget_v2.py` co-exists with `context_budget.py` ✅ DONE (2026-05)
+- **Correction to the old note**: v2 was never meant to *replace* v1 — its own docstring says it's an alternative selectable strategy. The real gap was that `cfg.context_budget.strategy = "priority"` wasn't wired into the loop.
+- **What shipped (方案 A)**: `AgentRuntimeLoop` reads `cfg.context_budget.strategy` at construction; when `"priority"`, context assembly routes through `_assemble_priority` → v2 `TokenBudget` (reusing the legacy section formatters so rendered text is identical, but trimming low-priority sections — env, skills, retrieved memory — before high-priority ones — confirmed facts, recent tool results — under a hard `total_chars` cap). `"legacy"` (default) is unchanged. Degrades to legacy if v2 unavailable. Test: `tests/test_context_budget_priority.py`. Both modules now have a clear reason to exist; neither is deleted.
 
-### `loop.py` is too large (~3000 lines)
-- **Status**: open
-- **Action**: Split into turn-loop / tool-dispatch / verify / stop-check modules sharing a `_LoopContext` dataclass.
+### StopPolicy doesn't know about user cancel ✅ DONE (2026-05)
+- **What shipped**: `StopOutcome.USER_CANCELLED` added. WebUI Send button toggles to a red **Stop** button during streaming; clicking it aborts the fetch (`AbortController`). The backend SSE generator catches the resulting `CancelledError`/`GeneratorExit`, cancels the executor task (reclaiming the blocked Ollama request), marks the outcome `user_cancelled`, and preserves the partial answer in the session transcript (tagged "已取消 — 部分回答") while skipping durable memory writeback (a half-answer isn't a trustworthy fact to recall). The loop's existing `GeneratorExit`/`finally` SESSION_END cleanup makes cancellation safe.
 
-### StopPolicy doesn't know about user cancel
-- **Status**: open
-- **Detail**: The frontend "stop" button isn't wired to the loop.
-- **Action**: Add `StopOutcome.USER_CANCELLED` + wire the WebUI stop button through to the runtime loop.
+### `loop.py` is too large (~3300 lines)  ← IN PROGRESS (2026-05)
+- **Status**: structural extractions + first 4 `_stream_impl` phase extractions done (loop.py 3224 lines, down from 3428; `_stream_impl` 1334 lines, down from 1448). Only the largest phase (`_handle_tools`) remains.
+- **Phase 1 — module-level extractions (verified: 7/7 audits incl. module_independence + 191 tests)**:
+  - `runtime/loop_helpers.py` — pure stateless helpers (`strip_thinking`, `is_complete`, `skill_loads_in`, `format_final`, `query_mentions_concrete_target`, `call_key`, `build_tool_ledger`, `page_default_size_for_ledger`). The loop keeps same-named thin wrappers / aliases so all call sites are unchanged.
+  - `runtime/loop_types.py` — all public type definitions (`QueryComplexity`, `DelegationMode`, `ForkContextPolicy`, `VerificationResult`, `ComplexityDecision`, `RuntimeConfig`, `LoopResult`). loop.py re-imports them and runtime/__init__ re-exports unchanged, so `from runtime.loop import RuntimeConfig` still works.
+- **Phase 2 — `_stream_impl` decomposition steps 4a-4d (each verified: 7/7 audits + 194 tests)**:
+  - `runtime/loop_context.py` — `_LoopContext` dataclass holds the per-turn mutable state (`state`, `tool_outputs`, `called_tools`, clarification flags, the memoised recall/skill caches + their refresh-cadence bookkeeping). Passed as `(self, ctx)` to each phase method instead of threading a dozen closure locals.
+  - `_refresh_recall(ctx, ...)` + `_refresh_skills(ctx, ...)` — the two conditional memoisation phases, pure compute, mutate ctx caches.
+  - `_assemble_context(...)` — unifies the legacy + priority context-assembly branch; now used by BOTH `run()` and `_stream_impl`. **Bonus fix**: the Tier-2 priority strategy was previously wired only into `run()`, so the streaming path (`_stream_impl`, what the WebUI uses) silently always used legacy — unifying here makes `strategy="priority"` actually apply in streaming.
+  - `_run_clarification_gate(ctx, ...)` — the Type-#3 clarification gate (async generator; yields a `{"_clarification_terminal": True}` sentinel the caller returns on). New test: `tests/test_clarification_gate.py` (asks→sentinel / no-ask→empty / skip-after-turn-1).
+- **Remaining — step 4e (deferred, highest regression risk, its own iteration)**: extract `_handle_tools` — the single-tool enforcement + HITL gate + tool execution + paginated-read nudge block (the largest remaining chunk of `_stream_impl`, an async generator that yields and can terminate the stream). Same rhythm: extract, full audit+test, keep `audit_module_independence` green.
 
 ---
 
 ## Done (kept briefly for reference, delete after a release cycle)
+
+- ✅ **loop.py decomposition — phase 1 + _stream_impl 4a-4d** (2026-05) — extracted `runtime/loop_helpers.py` (pure helpers), `runtime/loop_types.py` (public types), `runtime/loop_context.py` (`_LoopContext` per-turn state); extracted `_stream_impl` phases `_refresh_recall`, `_refresh_skills`, `_assemble_context` (also fixed the priority strategy never applying in the streaming path), `_run_clarification_gate`. loop.py 3428→3224, `_stream_impl` 1448→1334. New test `test_clarification_gate.py`. Each step verified 7/7 audits + full suite. Only `_handle_tools` (step 4e) remains — see "Known bugs / tech debt".
+
+- ✅ **Tech-debt sweep** (2026-05) — four of the five "Known bugs" items closed in one pass: (1) legacy LangGraph `hitl/*` backend fully removed, `HITL_BACKEND` defaults to `core`, plus a latent always-0 `pending_hitl` metric fixed; (2) `StopOutcome.USER_CANCELLED` + a real WebUI Stop button that aborts the stream, cancels the executor, and preserves the partial answer; (3) `auto_evolve_apply` master switch for the self-improving-skills loop (suggest-only vs apply); (4) `cfg.context_budget.strategy="priority"` wired into the loop via the v2 `TokenBudget`. New tests: `test_skill_evolve_suggest_only`, `test_context_budget_priority`. The only deferred item is the `loop.py` split (pure refactor). Details in "Known bugs / tech debt" above.
 
 - ✅ **Phase 2B — Capability-based delegation + transport hardening** (2026-05) — explicit `[DELEGATE:agent_id|*capability[#forked]]` cross-agent task hand-off over A2A; validated live (LAN↔DC, qwen3.5:27b). Five transport bugs fixed under real load: A2A event-envelope unwrap, EventQueue finalize (ReadTimeout), 30s dispatcher heartbeat (300s stall), no-double-count of final answer, outbound task state transition + markdown render. HITL provenance (`source_agent`/`source_session_id`/`source_query`) now plumbed end-to-end (de-risks Phase 3). Details: ARCHITECTURE.md §8.7, PHASE_2B_DESIGN.md, and the Phase 2B section above.
 - ✅ **Sprint-3-pre readiness** (2026-05) — `runtime/tracing.py` boots gracefully without OpenTelemetry installed; `HITLCheckpointConfig` defaults to sqlite (approvals survive restart) with env override; `SkillEvolver.set_bench_runner` A/B safety-net gate rejects compliance regressions. Pinned by `tests/test_sprint3_pre.py`.

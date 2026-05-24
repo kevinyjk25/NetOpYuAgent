@@ -819,6 +819,15 @@ skill_orchestration:
   journal_persist_path:     ""     # set e.g. "data/skill_journal.jsonl" to persist
   journal_api_enabled:      true   # exposes /webui/skill_journal/* endpoints
 
+  # Self-improving skills — master switch for LIVE catalog mutation.
+  #   true  (default) = feedback patches + auto-created skills are applied to
+  #                     the live catalog (still gated by the A/B compliance bench)
+  #   false           = "suggest-only": the loop still runs and logs/records
+  #                     proposed changes for review, but never mutates skills.
+  # Recommended: false in production until auto-evolution is trusted.
+  # Env override: SKILL_AUTO_EVOLVE_APPLY=false
+  auto_evolve_apply:        true
+
 # ── Skill scoring weights (legacy path) and evolver feedback ──
 # Append these to the existing `skill_orchestration:` block.
 #
