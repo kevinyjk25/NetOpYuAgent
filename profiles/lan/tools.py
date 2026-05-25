@@ -1021,7 +1021,14 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
     except Exception:
         _global_services = None                                           # type: ignore
 
-    if not _global_services or "hitl_router" not in _global_services:
+    # The active backend is hitl_core: the real router/audit live under the
+    # hitl_core_* keys. The bare hitl_router/hitl_audit keys are retained as
+    # stub-None for legacy safety, so resolve core-first then fall back.
+    _router = None
+    if _global_services:
+        _router = (_global_services.get("hitl_core_router")
+                   or _global_services.get("hitl_router"))
+    if not _global_services or _router is None:
         return (
             f"# query_radius_logs (H2 DEMO — degraded, no router wired)\n"
             f"# user_id:  {user_id}\n"
@@ -1029,7 +1036,7 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
             f"# result:   permission_ok (assumed; H2 cannot fire here)"
         )
 
-    router: HitlRouter = _global_services["hitl_router"]
+    router: HitlRouter = _router
     store = _global_services.get("hitl_store")
     if store is None:
         return (
@@ -1153,7 +1160,7 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
             from hitl_core.router import register_async_pending
             # Adapt the audit service (.log(HitlAuditRecord)) to the watchdog's
             # on_audit(kind, iid, detail) shape so ASYNC_TIMEOUT is recorded.
-            _audit_svc = _global_services.get("hitl_audit")
+            _audit_svc = _global_services.get("hitl_core_audit") or _global_services.get("hitl_audit")
             async def _audit_adapter(kind, iid, detail):
                 if _audit_svc is None:
                     return
@@ -1181,7 +1188,7 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
         # Audit ASYNC_DELEGATED so the audit timeline reflects fire moment.
         try:
             from datetime import datetime as _dt, timezone as _tz
-            audit = _global_services.get("hitl_audit")
+            audit = _global_services.get("hitl_core_audit") or _global_services.get("hitl_audit")
             if audit is not None:
                 await audit.log(HitlAuditRecord(
                     interrupt_id = interrupt_id,

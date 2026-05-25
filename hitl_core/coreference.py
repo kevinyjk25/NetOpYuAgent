@@ -295,6 +295,17 @@ DEFAULT_DEVICE_TOOL_SIGNATURES = (
     "failover", "delete_resource", "syslog_search",
 )
 
+def build_neutral_coreferencer() -> Coreferencer:
+    """Domain-free Coreferencer: no entity patterns, no tool signatures, so
+    it always resolves to "no entity". This is the L0 default — a non-network
+    agent gets no spurious device coreference. The active business profile
+    (L1) injects a domain-specific coreferencer (e.g.
+    build_default_device_coreferencer for network) when it wants one.
+    (L0/L1 Stage B, 2026-05.)
+    """
+    return Coreferencer(entity_patterns=[], tool_call_signatures=())
+
+
 def build_default_device_coreferencer() -> Coreferencer:
     """Pre-configured Coreferencer for IT-ops device queries.
 

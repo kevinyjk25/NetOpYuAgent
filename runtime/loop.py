@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncIterator, Optional, TYPE_CHECKING
 
-from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolResultStore
+from .context_budget import BudgetConfig, ContextBudgetManager, ResourceRef, ToolResultStore
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
 from .directive_parser import (
     has_any_tool_directive as _has_any_tool_directive,
@@ -249,6 +249,7 @@ class AgentRuntimeLoop:
         skill_catalog:   Optional["SkillCatalogService"] = None,
         llm_fn:          Optional[Any] = None,
         delegate_fn:     Optional[Any] = None,
+        batch_resolver_fn: Optional[Any] = None,
     ) -> None:
         """
         Args:
@@ -274,6 +275,12 @@ class AgentRuntimeLoop:
         self._policy       = StopPolicy(self._cfg.stop_policy)
         self._skill_catalog = skill_catalog
         self._delegate_fn  = delegate_fn
+        # L0/L1 Stage B: optional business resolver that decides whether a
+        # single destructive tool call expands into a multi-target batch HITL.
+        # Injected by the active profile (L1); None → single-target HITL (the
+        # domain-free default). Contract: (tool_name, tool_args, llm_response,
+        # hitl_tool_names, confirmed_facts, all_parsed) -> Optional[list[(name,args)]].
+        self._batch_resolver_fn = batch_resolver_fn
 
         # Context-budget strategy (Tier 2 #3): "legacy" (default) or "priority".
         # Read once at construction from the app config; falls back to legacy if
@@ -820,7 +827,7 @@ class AgentRuntimeLoop:
         session_id:      str,
         env_context:     Optional[dict[str, Any]] = None,
         confirmed_facts: Optional[list[str]] = None,
-        working_set:     Optional[list[DeviceRef]] = None,
+        working_set:     Optional[list[ResourceRef]] = None,
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
@@ -1253,6 +1260,349 @@ class AgentRuntimeLoop:
                          report.utilisation * 100, len(report.trim_log))
         return "\n\n".join(parts)
 
+    async def _handle_tools(self, ctx, new_tool_calls, llm_response):
+        """Phase (Item 4 4e): per-turn tool handling.
+
+        Iterates the deduped new_tool_calls and, for each: handles the
+        HITL-required-skill-called-as-tool special case, gates the tool
+        against the HITL watch-list (edit / batch / multi-mode), executes
+        non-gated tools, stores results, runs POST_TOOL_USE + post_verify,
+        and streams tool-result chunks. Async generator.
+
+        HITL stop semantics (UNCHANGED from the inline version): when a
+        tool requires approval, it yields the existing stop_hitl /
+        hitl_gate chunk and then a {"_tools_terminal": True} sentinel. The
+        caller forwards every other chunk and returns on the sentinel,
+        ending this turn's stream exactly as the inline `return` did.
+        Mutates ctx.state / ctx.tool_outputs / ctx.called_tools in place.
+        """
+        # Local aliases to ctx's mutable containers — mutated in place, so
+        # they stay in sync with ctx (same pattern as _stream_impl).
+        tool_outputs = ctx.tool_outputs
+        called_tools = ctx.called_tools
+        for tool_name, tool_args in new_tool_calls:
+            ctx.state.record_tool_call(tool_name)
+            called_tools.add(_call_key(tool_name, tool_args))
+            _journal_tool_start_ts = (
+                __import__("time").monotonic()
+                if ctx.state._skill_journal is not None else None
+            )
+
+            # ── Skill-as-tool guard ───────────────────────────────
+            # If the LLM called a SKILL name as if it were a tool,
+            # inject an error result so the LLM corrects itself on
+            # the next turn rather than hitting the HITL gate or
+            # getting a "not registered" error with no explanation.
+            # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
+            # Tools and skills can share the same name (e.g. list_devices is both a
+            # skill description and a real callable tool). The tool always wins.
+            _is_skill_only = False
+            if self._skill_catalog and tool_name not in ctx.tool_reg:
+                try:
+                    _is_skill_only = any(
+                        s.skill_id == tool_name
+                        for s in self._skill_catalog.list_skills()
+                    )
+                except Exception:
+                    pass
+            if _is_skill_only:
+                # ── Special case: HITL-required skill called as [TOOL:] ──
+                # Rather than injecting a "not a tool" error (which causes
+                # the LLM to loop through SKILL_LOAD indefinitely), detect
+                # the requires_hitl flag and route straight to stop_hitl.
+                # This lets restart_service, rollback_service etc. trigger
+                # the HITL interrupt card exactly like edit_device_config.
+                _skill_requires_hitl = False
+                if self._skill_catalog:
+                    try:
+                        _skill_requires_hitl = self._skill_catalog.requires_hitl(tool_name)
+                    except Exception:
+                        pass
+                if _skill_requires_hitl:
+                    import json as _json
+                    logger.info(
+                        "stream: HITL-required skill '%s' called as tool — routing to HITL",
+                        tool_name,
+                    )
+                    yield {
+                        "message": (
+                            f"stop_hitl: skill '{tool_name}' requires human approval "
+                            "before execution. Routing to HITL graph."
+                        ),
+                        "node":          "hitl_gate",
+                        "stop_hitl":     True,
+                        "tool_name":     tool_name,
+                        "tool_args":     tool_args,
+                        "tool_args_json": _json.dumps(tool_args, default=str),
+                    }
+                    yield {"_tools_terminal": True}
+                    return
+                # Non-HITL skill-only: inject guidance error so LLM learns to SKILL_LOAD
+                _skill_err = (
+                    f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
+                    f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
+                    f"then call the individual tools it describes."
+                )
+                logger.warning("stream: LLM called skill-only '%s' as tool — injecting error", tool_name)
+                tool_outputs[_call_key(tool_name, tool_args)] = _skill_err
+                yield {"node_step": f"Skill-only error: {tool_name}", "node": "runtime_loop"}
+                continue   # skip HITL check and _execute_tool for this name
+
+            # CAP 5: gate tool against HITL watch-list BEFORE execution
+            # Only fires for REAL tools, not skill names (guarded above).
+            _needs_hitl = tool_name in self._cfg.hitl_tool_names
+            if not _needs_hitl and self._skill_catalog:
+                try:
+                    # Only check HITL for a name if it is actually a registered tool
+                    # (i.e. present in the tool registry), not a stray skill name
+                    _is_real_tool = tool_name in ctx.tool_reg
+                    if _is_real_tool:
+                        _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
+                except Exception:
+                    pass
+
+            # Graduated-trust spectrum (Claude-Code-inspired, added 2026-05).
+            # Even if a tool is on the HITL watch-list, the operator's
+            # configured trust_mode may allow auto-approve based on the
+            # tool's action_type:
+            #   cautious        — never skip (default, current behaviour)
+            #   auto_reversible — skip iff action_type ∈ {read_only, reversible}
+            #   bypass          — always skip (trusted dev/replay only)
+            # We log every skip to audit trail so post-hoc review can
+            # confirm intent — silent skips would be unacceptable in
+            # production network ops. See PolicyEngine.should_skip_hitl_for_tool.
+            if _needs_hitl:
+                try:
+                    from runtime.policy_engine import get_policy_engine as _get_pe2
+                    _pe2 = _get_pe2()
+                    if _pe2 is not None:
+                        _skip, _skip_reason = _pe2.should_skip_hitl_for_tool(tool_name)
+                        if _skip:
+                            logger.info(
+                                "stream: HITL skipped for tool=%s reason=%s",
+                                tool_name, _skip_reason,
+                            )
+                            _needs_hitl = False
+                except Exception as _ts_exc:
+                    logger.debug(
+                        "stream: trust_mode skip check failed (%s) — "
+                        "falling through to HITL", _ts_exc,
+                    )
+
+            if _needs_hitl:
+                import json as _json
+                # Type #2: if this tool is on the editable list, surface
+                # the keys the operator should be allowed to tweak before
+                # approving. The executor will fire trigger_edit_approval
+                # (showing inline editors) instead of a bare approve panel.
+                _editable_keys = list(
+                    self._cfg.editable_hitl_tools.get(tool_name, [])
+                )
+                # ── Batch detection (L0/L1 Stage B) ───────────────
+                # The decision of whether one destructive [TOOL:] call should
+                # expand into a multi-target batch HITL is BUSINESS logic
+                # (e.g. network: 'prose names sw-core-01 AND sw-core-02').
+                # L0 delegates it to a profile-injected resolver; when none is
+                # injected (e.g. default profile) batch_calls stays None and a
+                # single-target HITL card is raised — the safe generic default.
+                _batch_calls = None
+                if self._batch_resolver_fn is not None:
+                    try:
+                        _batch_calls = self._batch_resolver_fn(
+                            tool_name=tool_name,
+                            tool_args=tool_args,
+                            llm_response=llm_response,
+                            hitl_tool_names=self._cfg.hitl_tool_names,
+                            confirmed_facts=list(ctx.state.confirmed_facts or []),
+                            all_parsed=self._parse_tool_calls(llm_response),
+                        )
+                    except Exception as _bre:
+                        logger.warning('batch_resolver_fn failed (%s) — single HITL', _bre)
+                        _batch_calls = None
+                # tool calls entirely and falls back to advisory prose
+                # (suggesting backups, asking for confirmation, etc),
+                # which means NEITHER the original single card NOR a
+                # batch ever appears. Letting the single [TOOL:] flow
+                # through to stop_hitl preserves the original card so
+                # at least one device can be approved this turn; the
+                # LLM will propose remaining devices in a subsequent
+                # turn once the first approval completes. The prompt's
+                # multi-target EXCEPTION clause + the worked example in
+                # llm_engine.py still give the LLM the option to emit
+                # multiple [TOOL:] up front (Path A) when it's
+                # confident — but we no longer punish it for emitting
+                # just one.
+
+                yield {
+                    "message": (
+                        f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
+                        "and requires human approval before execution. "
+                        "Routing to HITL graph."
+                    ),
+                    "node":      "hitl_gate",
+                    "stop_hitl": True,
+                    "tool_name": tool_name,
+                    "tool_args": tool_args,          # carry args for post-approval replay
+                    "tool_args_json": _json.dumps(tool_args, default=str),
+                    # Type #2 multi-mode HITL: signal to the executor that
+                    # the operator may edit these specific param keys.
+                    "hitl_kind":            "edit" if _editable_keys else None,
+                    "editable_param_keys":  _editable_keys,
+                    # NEW: list of (name, args) pairs when the LLM
+                    # emitted multiple same-name destructive calls
+                    # in one response. Absent / None when single.
+                    "batch_calls":          _batch_calls,
+                }
+                yield {"_tools_terminal": True}
+                return
+
+            yield {"node_step": f"Calling tool: {tool_name}", "node": "runtime_loop"}
+            logger.info("TOOL▶ %s args=%s", tool_name, tool_args)
+            if logger.isEnabledFor(logging.DEBUG):
+                import json as _json
+                logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
+                             _json.dumps(tool_args, indent=2, default=str), "─"*72)
+
+            # ── PRE_TOOL_USE hook (Sprint 2, 2026-05) ──────────────────
+            # Hooks may mutate ctx["args"] before dispatch, or set
+            # ctx["blocked"]=True with ctx["block_reason"] to abort.
+            # Mutation is by-reference; we then read back tool_args.
+            # Failure semantics: hook exceptions are logged + swallowed;
+            # blocking is ONLY via explicit ctx flag, never via raise.
+            _pre_ctx = {
+                "tool":       tool_name,
+                "args":       dict(tool_args),    # copy so hooks can't break our caller
+                "ctx.session_id": ctx.session_id,
+                "turn":       ctx.state.turns,
+            }
+            try:
+                from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                _pre_ctx = await _hr().fire(_HE.PRE_TOOL_USE, _pre_ctx)
+            except Exception as _h_exc:
+                logger.debug("PRE_TOOL_USE hook fire failed: %s", _h_exc)
+            if _pre_ctx.get("blocked"):
+                _reason = _pre_ctx.get("block_reason") or "blocked by hook"
+                logger.warning(
+                    "stream: tool %s blocked by hook — %s", tool_name, _reason,
+                )
+                _blk_msg = f"[Error: tool {tool_name} blocked by policy hook: {_reason}]"
+                tool_outputs[_call_key(tool_name, tool_args)] = _blk_msg
+                yield {
+                    "node":      "hook_block",
+                    "node_step": f"Tool blocked: {tool_name}",
+                    "type":      "hook_block",
+                    "tool":      tool_name,
+                    "reason":    _reason,
+                }
+                continue
+            # Hook may have mutated args; pick them up
+            tool_args = _pre_ctx.get("args", tool_args)
+
+            # ── Inject ctx.session_id for async-HITL tools (H2, 2026-05) ──
+            # The `_session_id` arg is consumed by tools that use
+            # PipelineContext.request_approval_async / emit_async_hitl_notify
+            # for soft-notify routing. Underscore-prefixed → other tools
+            # ignore it. We inject unconditionally because the cost is
+            # one dict key and the tool either reads it (H2) or doesn't.
+            # See tools/mock_tools.py:query_radius_logs for the H2 contract.
+            if "_session_id" not in tool_args:
+                tool_args = dict(tool_args)
+                tool_args["_session_id"] = ctx.session_id
+
+            raw = await self._execute_tool(tool_name, tool_args, ctx.tool_reg)
+
+            # ── POST_TOOL_USE hook (Sprint 2, 2026-05) ─────────────────
+            # Listeners can: observe result, redact secrets, write audit
+            # event. Hooks may mutate ctx["result"] to filter content.
+            # POST hooks CANNOT block (the tool already ran).
+            try:
+                from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                _post_ctx = await _hr().fire(_HE.POST_TOOL_USE, {
+                    "tool":       tool_name,
+                    "args":       tool_args,
+                    "result":     raw,
+                    "ctx.session_id": ctx.session_id,
+                    "turn":       ctx.state.turns,
+                })
+                # Pick up redacted/filtered result if hook mutated it
+                _maybe_filtered = _post_ctx.get("result")
+                if isinstance(_maybe_filtered, str) and _maybe_filtered != raw:
+                    logger.info(
+                        "stream: tool %s result filtered by hook (%d → %d chars)",
+                        tool_name, len(raw), len(_maybe_filtered),
+                    )
+                    raw = _maybe_filtered
+            except Exception as _h_exc:
+                logger.debug("POST_TOOL_USE hook fire failed: %s", _h_exc)
+
+            # Same exclusion as ToolRouter — don't double-store pagination
+            # outputs. The 'stored' label here is what the LLM sees in the
+            # next turn's context; for paged reads we want the LLM to see
+            # the actual page content, not yet another [STORED:] reference.
+            _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
+            _is_page_or_ref = (
+                raw.startswith("[STORED:")
+                or raw.startswith("# Stored result ref_id=")
+            )
+            if tool_name in _SKIP_STORE or _is_page_or_ref:
+                stored = raw   # pass page content through unchanged
+            else:
+                stored = self._budget.store_tool_result(tool_name, raw)
+            tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
+            # Update count so llm_engine knows how many current-turn results exist
+            ctx.state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
+            ctx.state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
+            # Keep raw results for has_more / paging detection in llm_engine
+            if not hasattr(ctx.state, "_tool_outputs_raw"):
+                ctx.state._tool_outputs_raw = {}  # type: ignore[attr-defined]
+            ctx.state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
+            # Log when tool returns error/empty — high hallucination risk
+            _raw_lower = raw.lower() if isinstance(raw, str) else ""
+            if (raw.startswith("[Error]")
+                    or "not found" in _raw_lower
+                    or raw.strip() in ("", "[]", "{}")
+                    or "no devices" in _raw_lower):
+                logger.warning(
+                    "tool %r returned error/empty: %s", tool_name, raw[:120]
+                )
+            logger.info("TOOL◀ %s result_chars=%d stored=%s",
+                        tool_name, len(raw), stored.startswith("[STORED:"))
+            if logger.isEnabledFor(logging.DEBUG):
+                _tcfg_d = _truncation_cfg()
+                _td_cap = getattr(_tcfg_d, "tool_debug_chars", 2000) if _tcfg_d else 2000
+                logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:_td_cap], "─"*72)
+            yield {
+                "node_result": {
+                    "tool":   tool_name,
+                    "result": stored,      # full stored label (for large) or full raw text (for inline)
+                    "raw":    raw,         # always full raw text — used by frontend Results tab
+                    "args":   tool_args,   # pass args so frontend can label the card accurately
+                },
+                "node": "runtime_tool_result",
+            }
+
+            if self._cfg.enable_post_verification and tool_name != "read_stored_result":
+                post = await self.post_verify(tool_name, raw, ctx.state.confirmed_facts)
+                if not post.passed:
+                    yield {"node_step": f"Post-verify warning: {post.reason}", "node": "post_verify"}
+
+            # Journal: record completed tool call (after exec + verify)
+            if ctx.state._skill_journal is not None:
+                try:
+                    _t = __import__("time").monotonic()
+                    _elapsed = (_t - _journal_tool_start_ts) * 1000 if _journal_tool_start_ts else None
+                    _tool_ok = "[ToolRouter] Tool" not in (raw or "")[:40]
+                    ctx.state._skill_journal.record_tool_call(
+                        turn=ctx.state.turns,
+                        tool_name=tool_name,
+                        args=tool_args,
+                        ok=_tool_ok,
+                        error=(None if _tool_ok else str(raw)[:200]),
+                        elapsed_ms=_elapsed,
+                    )
+                except Exception as _je:
+                    logger.debug("journal.record_tool_call failed: %s", _je)
+
     async def _run_clarification_gate(self, ctx, memory_results, selected_skills):
         """Phase (Item 4 4d): Type #3 clarification gate (turn 1 only).
 
@@ -1392,7 +1742,7 @@ class AgentRuntimeLoop:
         session_id:      str,
         env_context:     Optional[dict[str, Any]] = None,
         confirmed_facts: Optional[list[str]] = None,
-        working_set:     Optional[list[DeviceRef]] = None,
+        working_set:     Optional[list[ResourceRef]] = None,
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
@@ -1458,7 +1808,7 @@ class AgentRuntimeLoop:
         session_id:      str,
         env_context:     Optional[dict[str, Any]] = None,
         confirmed_facts: Optional[list[str]] = None,
-        working_set:     Optional[list[DeviceRef]] = None,
+        working_set:     Optional[list[ResourceRef]] = None,
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
@@ -2048,470 +2398,11 @@ class AgentRuntimeLoop:
                 # Continue the while loop — top of loop bumps state.turns
                 continue
 
-            for tool_name, tool_args in new_tool_calls:
-                state.record_tool_call(tool_name)
-                called_tools.add(_call_key(tool_name, tool_args))
-                _journal_tool_start_ts = (
-                    __import__("time").monotonic()
-                    if state._skill_journal is not None else None
-                )
-
-                # ── Skill-as-tool guard ───────────────────────────────
-                # If the LLM called a SKILL name as if it were a tool,
-                # inject an error result so the LLM corrects itself on
-                # the next turn rather than hitting the HITL gate or
-                # getting a "not registered" error with no explanation.
-                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
-                # Tools and skills can share the same name (e.g. list_devices is both a
-                # skill description and a real callable tool). The tool always wins.
-                _is_skill_only = False
-                if self._skill_catalog and tool_name not in tool_reg:
-                    try:
-                        _is_skill_only = any(
-                            s.skill_id == tool_name
-                            for s in self._skill_catalog.list_skills()
-                        )
-                    except Exception:
-                        pass
-                if _is_skill_only:
-                    # ── Special case: HITL-required skill called as [TOOL:] ──
-                    # Rather than injecting a "not a tool" error (which causes
-                    # the LLM to loop through SKILL_LOAD indefinitely), detect
-                    # the requires_hitl flag and route straight to stop_hitl.
-                    # This lets restart_service, rollback_service etc. trigger
-                    # the HITL interrupt card exactly like edit_device_config.
-                    _skill_requires_hitl = False
-                    if self._skill_catalog:
-                        try:
-                            _skill_requires_hitl = self._skill_catalog.requires_hitl(tool_name)
-                        except Exception:
-                            pass
-                    if _skill_requires_hitl:
-                        import json as _json
-                        logger.info(
-                            "stream: HITL-required skill '%s' called as tool — routing to HITL",
-                            tool_name,
-                        )
-                        yield {
-                            "message": (
-                                f"stop_hitl: skill '{tool_name}' requires human approval "
-                                "before execution. Routing to HITL graph."
-                            ),
-                            "node":          "hitl_gate",
-                            "stop_hitl":     True,
-                            "tool_name":     tool_name,
-                            "tool_args":     tool_args,
-                            "tool_args_json": _json.dumps(tool_args, default=str),
-                        }
-                        return
-                    # Non-HITL skill-only: inject guidance error so LLM learns to SKILL_LOAD
-                    _skill_err = (
-                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
-                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
-                        f"then call the individual tools it describes."
-                    )
-                    logger.warning("stream: LLM called skill-only '%s' as tool — injecting error", tool_name)
-                    tool_outputs[_call_key(tool_name, tool_args)] = _skill_err
-                    yield {"node_step": f"Skill-only error: {tool_name}", "node": "runtime_loop"}
-                    continue   # skip HITL check and _execute_tool for this name
-
-                # CAP 5: gate tool against HITL watch-list BEFORE execution
-                # Only fires for REAL tools, not skill names (guarded above).
-                _needs_hitl = tool_name in self._cfg.hitl_tool_names
-                if not _needs_hitl and self._skill_catalog:
-                    try:
-                        # Only check HITL for a name if it is actually a registered tool
-                        # (i.e. present in the tool registry), not a stray skill name
-                        _is_real_tool = tool_name in tool_reg
-                        if _is_real_tool:
-                            _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
-                    except Exception:
-                        pass
-
-                # Graduated-trust spectrum (Claude-Code-inspired, added 2026-05).
-                # Even if a tool is on the HITL watch-list, the operator's
-                # configured trust_mode may allow auto-approve based on the
-                # tool's action_type:
-                #   cautious        — never skip (default, current behaviour)
-                #   auto_reversible — skip iff action_type ∈ {read_only, reversible}
-                #   bypass          — always skip (trusted dev/replay only)
-                # We log every skip to audit trail so post-hoc review can
-                # confirm intent — silent skips would be unacceptable in
-                # production network ops. See PolicyEngine.should_skip_hitl_for_tool.
-                if _needs_hitl:
-                    try:
-                        from runtime.policy_engine import get_policy_engine as _get_pe2
-                        _pe2 = _get_pe2()
-                        if _pe2 is not None:
-                            _skip, _skip_reason = _pe2.should_skip_hitl_for_tool(tool_name)
-                            if _skip:
-                                logger.info(
-                                    "stream: HITL skipped for tool=%s reason=%s",
-                                    tool_name, _skip_reason,
-                                )
-                                _needs_hitl = False
-                    except Exception as _ts_exc:
-                        logger.debug(
-                            "stream: trust_mode skip check failed (%s) — "
-                            "falling through to HITL", _ts_exc,
-                        )
-
-                if _needs_hitl:
-                    import json as _json
-                    # Type #2: if this tool is on the editable list, surface
-                    # the keys the operator should be allowed to tweak before
-                    # approving. The executor will fire trigger_edit_approval
-                    # (showing inline editors) instead of a bare approve panel.
-                    _editable_keys = list(
-                        self._cfg.editable_hitl_tools.get(tool_name, [])
-                    )
-                    # ── Batch detection ───────────────────────────────
-                    # Path A: LLM already emitted multiple [TOOL:] of the
-                    # SAME destructive name this turn (the textbook case
-                    # after the prompt's "multi-target batches" example).
-                    # Path B: LLM emitted ONLY ONE [TOOL:] this turn but
-                    # its surrounding prose names multiple devices that
-                    # are clearly the intended targets (e.g. the analysis
-                    # text says "为 sw-core-01 和 sw-core-02 应用以下配置"
-                    # but the [TOOL:] block only carries sw-core-01).
-                    # In Path B we DON'T stop_hitl yet; we nudge the LLM
-                    # to re-emit ONE response that contains [TOOL:] lines
-                    # for every target. Otherwise the operator only sees
-                    # the first target and has to start a fresh chat turn
-                    # for each remaining one.
-                    _all_calls = self._parse_tool_calls(llm_response)
-                    _siblings  = [
-                        (n, a) for (n, a) in _all_calls
-                        if n == tool_name and a != tool_args and n in self._cfg.hitl_tool_names
-                    ]
-                    _batch_calls = None
-                    if _siblings:
-                        # Path A — Build the batch list: current + all distinct
-                        # siblings, preserving order. Dedup by JSON-canonical
-                        # key so two identical args don't both show.
-                        _seen_keys = {_call_key(tool_name, tool_args)}
-                        _batch_calls = [(tool_name, tool_args)]
-                        for (n, a) in _siblings:
-                            k = _call_key(n, a)
-                            if k not in _seen_keys:
-                                _seen_keys.add(k)
-                                _batch_calls.append((n, a))
-                        logger.info(
-                            "stream: detected batch of %d %s calls in one turn (path A) — "
-                            "executor will raise a HITL batch",
-                            len(_batch_calls), tool_name,
-                        )
-                    else:
-                        # Path B v2 — silent fabrication.
-                        #
-                        # Real-world testing (sessions ap-01/ap-02 + sw-core-01/02)
-                        # showed that qwen3.5:27b consistently emits a SINGLE
-                        # [TOOL:] even when prose enumerates multiple targets
-                        # for the SAME logical operation ("我将为 ap-01 和
-                        # ap-02 下发修复配置"). Prompt-level teaching (worked
-                        # examples, [TOOL_BATCH:] directive, GOOD/BAD pairs)
-                        # has been tried and the LLM keeps reverting to
-                        # the "one tool per turn" pattern it was trained on.
-                        #
-                        # Strategy: when the LLM's prose names ≥2 distinct
-                        # device-id patterns AND only one [TOOL:] was emitted
-                        # AND the emitted device is among the named ones,
-                        # silently fabricate N-1 sibling tool calls by
-                        # COPYING the LLM's args dict and only swapping the
-                        # device_id field. Mark each fabricated call's
-                        # reason field so operators see this is auto-derived.
-                        #
-                        # Operator safety: every fabricated call still goes
-                        # through HITL approval — the operator reviews each
-                        # card and can edit args or reject. Worst case is
-                        # an extra card to reject; best case (and common
-                        # case in our tests) is "same fix applied to N
-                        # identical devices", which the operator wants
-                        # batched anyway.
-                        #
-                        # Limits:
-                        #  * Only fires for tools with a device_id-like
-                        #    parameter (so fabrication is unambiguous).
-                        #  * Cap at 5 fabricated siblings to prevent
-                        #    runaway batches from prose typos.
-                        #  * Skip if any fabricated device_id would
-                        #    collide with the current one (after
-                        #    case-normalization).
-                        _current_device = str(
-                            tool_args.get("device_id")
-                            or tool_args.get("device")
-                            or tool_args.get("target")
-                            or ""
-                        ).strip()
-                        _device_key = (
-                            "device_id" if "device_id" in tool_args
-                            else "device" if "device" in tool_args
-                            else "target" if "target" in tool_args
-                            else None
-                        )
-                        if _current_device and _device_key:
-                            # Strip [TOOL:] blocks + [ALIAS:] blocks from
-                            # prose so we only match entity names in
-                            # narrative text.
-                            # Use centralized parser to strip directives
-                            # consistently (tolerates whitespace variants).
-                            from runtime.directive_parser import (
-                                strip_tool_directives as _stt,
-                                strip_tool_batch_directives as _stb,
-                            )
-                            _prose = _stb(_stt(llm_response))
-                            _prose = re.sub(
-                                r"\[ALIAS\s*:\s*[^=\]]+?\s*=\s*[^\]]+?\s*\]",
-                                "",
-                                _prose,
-                            )
-                            _DEV_RE = re.compile(
-                                r"(?<![a-z0-9])"
-                                r"(?:sw|ap|router|switch|core)[-_]?[a-z0-9]*[-_]?\d+"
-                                r"(?![a-z0-9])",
-                                re.IGNORECASE,
-                            )
-                            _mentioned: list[str] = []
-                            _seen_dev: set[str] = set()
-                            for _m in _DEV_RE.finditer(_prose):
-                                _id = _m.group(0)
-                                _id_lc = _id.lower()
-                                if _id_lc not in _seen_dev:
-                                    _seen_dev.add(_id_lc)
-                                    _mentioned.append(_id)
-                            # Filter out aliases already recorded so we
-                            # don't double-count "core-01" + "sw-acc-01"
-                            _alias_user_terms = set()
-                            for _f in (state.confirmed_facts or []):
-                                if _f.startswith("ENTITY_ALIAS: "):
-                                    _mm = re.match(
-                                        r"ENTITY_ALIAS:\s*'([^']+)'\s*actually refers to\s*'([^']+)'",
-                                        _f,
-                                    )
-                                    if _mm:
-                                        _alias_user_terms.add(_mm.group(1).lower())
-                            if _alias_user_terms:
-                                _mentioned = [
-                                    d for d in _mentioned
-                                    if d.lower() not in _alias_user_terms
-                                ]
-                            # Only fabricate when current device is among
-                            # the prose-mentioned set and there are 2-5
-                            # distinct targets total.
-                            _other_devices = [
-                                d for d in _mentioned
-                                if d.lower() != _current_device.lower()
-                            ]
-                            if (
-                                _current_device.lower() in {d.lower() for d in _mentioned}
-                                and 1 <= len(_other_devices) <= 4   # 2-5 total
-                            ):
-                                import copy as _copy
-                                _fabricated = []
-                                for _other in _other_devices:
-                                    _new_args = _copy.deepcopy(tool_args)
-                                    _new_args[_device_key] = _other
-                                    # Mark the fabricated call so operators
-                                    # can tell it's auto-derived in the HITL
-                                    # card. Preserve original reason if any.
-                                    _orig_reason = str(_new_args.get("reason", "")).strip()
-                                    _new_args["reason"] = (
-                                        f"[auto-derived from {_current_device} — "
-                                        f"verify before approving] "
-                                        f"{_orig_reason}"
-                                    ).strip()
-                                    _fabricated.append((tool_name, _new_args))
-                                if _fabricated:
-                                    _batch_calls = [(tool_name, tool_args)] + _fabricated
-                                    logger.info(
-                                        "stream: prose mentions %d devices %r — "
-                                        "fabricating %d sibling %s call(s) for batch HITL "
-                                        "(path B fabricate)",
-                                        len(_mentioned), _mentioned,
-                                        len(_fabricated), tool_name,
-                                    )
-                    # tool calls entirely and falls back to advisory prose
-                    # (suggesting backups, asking for confirmation, etc),
-                    # which means NEITHER the original single card NOR a
-                    # batch ever appears. Letting the single [TOOL:] flow
-                    # through to stop_hitl preserves the original card so
-                    # at least one device can be approved this turn; the
-                    # LLM will propose remaining devices in a subsequent
-                    # turn once the first approval completes. The prompt's
-                    # multi-target EXCEPTION clause + the worked example in
-                    # llm_engine.py still give the LLM the option to emit
-                    # multiple [TOOL:] up front (Path A) when it's
-                    # confident — but we no longer punish it for emitting
-                    # just one.
-
-                    yield {
-                        "message": (
-                            f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
-                            "and requires human approval before execution. "
-                            "Routing to HITL graph."
-                        ),
-                        "node":      "hitl_gate",
-                        "stop_hitl": True,
-                        "tool_name": tool_name,
-                        "tool_args": tool_args,          # carry args for post-approval replay
-                        "tool_args_json": _json.dumps(tool_args, default=str),
-                        # Type #2 multi-mode HITL: signal to the executor that
-                        # the operator may edit these specific param keys.
-                        "hitl_kind":            "edit" if _editable_keys else None,
-                        "editable_param_keys":  _editable_keys,
-                        # NEW: list of (name, args) pairs when the LLM
-                        # emitted multiple same-name destructive calls
-                        # in one response. Absent / None when single.
-                        "batch_calls":          _batch_calls,
-                    }
-                    return
-
-                yield {"node_step": f"Calling tool: {tool_name}", "node": "runtime_loop"}
-                logger.info("TOOL▶ %s args=%s", tool_name, tool_args)
-                if logger.isEnabledFor(logging.DEBUG):
-                    import json as _json
-                    logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
-                                 _json.dumps(tool_args, indent=2, default=str), "─"*72)
-
-                # ── PRE_TOOL_USE hook (Sprint 2, 2026-05) ──────────────────
-                # Hooks may mutate ctx["args"] before dispatch, or set
-                # ctx["blocked"]=True with ctx["block_reason"] to abort.
-                # Mutation is by-reference; we then read back tool_args.
-                # Failure semantics: hook exceptions are logged + swallowed;
-                # blocking is ONLY via explicit ctx flag, never via raise.
-                _pre_ctx = {
-                    "tool":       tool_name,
-                    "args":       dict(tool_args),    # copy so hooks can't break our caller
-                    "session_id": session_id,
-                    "turn":       state.turns,
-                }
-                try:
-                    from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
-                    _pre_ctx = await _hr().fire(_HE.PRE_TOOL_USE, _pre_ctx)
-                except Exception as _h_exc:
-                    logger.debug("PRE_TOOL_USE hook fire failed: %s", _h_exc)
-                if _pre_ctx.get("blocked"):
-                    _reason = _pre_ctx.get("block_reason") or "blocked by hook"
-                    logger.warning(
-                        "stream: tool %s blocked by hook — %s", tool_name, _reason,
-                    )
-                    _blk_msg = f"[Error: tool {tool_name} blocked by policy hook: {_reason}]"
-                    tool_outputs[_call_key(tool_name, tool_args)] = _blk_msg
-                    yield {
-                        "node":      "hook_block",
-                        "node_step": f"Tool blocked: {tool_name}",
-                        "type":      "hook_block",
-                        "tool":      tool_name,
-                        "reason":    _reason,
-                    }
-                    continue
-                # Hook may have mutated args; pick them up
-                tool_args = _pre_ctx.get("args", tool_args)
-
-                # ── Inject session_id for async-HITL tools (H2, 2026-05) ──
-                # The `_session_id` arg is consumed by tools that use
-                # PipelineContext.request_approval_async / emit_async_hitl_notify
-                # for soft-notify routing. Underscore-prefixed → other tools
-                # ignore it. We inject unconditionally because the cost is
-                # one dict key and the tool either reads it (H2) or doesn't.
-                # See tools/mock_tools.py:query_radius_logs for the H2 contract.
-                if "_session_id" not in tool_args:
-                    tool_args = dict(tool_args)
-                    tool_args["_session_id"] = session_id
-
-                raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-
-                # ── POST_TOOL_USE hook (Sprint 2, 2026-05) ─────────────────
-                # Listeners can: observe result, redact secrets, write audit
-                # event. Hooks may mutate ctx["result"] to filter content.
-                # POST hooks CANNOT block (the tool already ran).
-                try:
-                    from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
-                    _post_ctx = await _hr().fire(_HE.POST_TOOL_USE, {
-                        "tool":       tool_name,
-                        "args":       tool_args,
-                        "result":     raw,
-                        "session_id": session_id,
-                        "turn":       state.turns,
-                    })
-                    # Pick up redacted/filtered result if hook mutated it
-                    _maybe_filtered = _post_ctx.get("result")
-                    if isinstance(_maybe_filtered, str) and _maybe_filtered != raw:
-                        logger.info(
-                            "stream: tool %s result filtered by hook (%d → %d chars)",
-                            tool_name, len(raw), len(_maybe_filtered),
-                        )
-                        raw = _maybe_filtered
-                except Exception as _h_exc:
-                    logger.debug("POST_TOOL_USE hook fire failed: %s", _h_exc)
-
-                # Same exclusion as ToolRouter — don't double-store pagination
-                # outputs. The 'stored' label here is what the LLM sees in the
-                # next turn's context; for paged reads we want the LLM to see
-                # the actual page content, not yet another [STORED:] reference.
-                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
-                _is_page_or_ref = (
-                    raw.startswith("[STORED:")
-                    or raw.startswith("# Stored result ref_id=")
-                )
-                if tool_name in _SKIP_STORE or _is_page_or_ref:
-                    stored = raw   # pass page content through unchanged
-                else:
-                    stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
-                # Update count so llm_engine knows how many current-turn results exist
-                state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
-                state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
-                # Keep raw results for has_more / paging detection in llm_engine
-                if not hasattr(state, "_tool_outputs_raw"):
-                    state._tool_outputs_raw = {}  # type: ignore[attr-defined]
-                state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
-                # Log when tool returns error/empty — high hallucination risk
-                _raw_lower = raw.lower() if isinstance(raw, str) else ""
-                if (raw.startswith("[Error]")
-                        or "not found" in _raw_lower
-                        or raw.strip() in ("", "[]", "{}")
-                        or "no devices" in _raw_lower):
-                    logger.warning(
-                        "tool %r returned error/empty: %s", tool_name, raw[:120]
-                    )
-                logger.info("TOOL◀ %s result_chars=%d stored=%s",
-                            tool_name, len(raw), stored.startswith("[STORED:"))
-                if logger.isEnabledFor(logging.DEBUG):
-                    _tcfg_d = _truncation_cfg()
-                    _td_cap = getattr(_tcfg_d, "tool_debug_chars", 2000) if _tcfg_d else 2000
-                    logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:_td_cap], "─"*72)
-                yield {
-                    "node_result": {
-                        "tool":   tool_name,
-                        "result": stored,      # full stored label (for large) or full raw text (for inline)
-                        "raw":    raw,         # always full raw text — used by frontend Results tab
-                        "args":   tool_args,   # pass args so frontend can label the card accurately
-                    },
-                    "node": "runtime_tool_result",
-                }
-
-                if self._cfg.enable_post_verification and tool_name != "read_stored_result":
-                    post = await self.post_verify(tool_name, raw, state.confirmed_facts)
-                    if not post.passed:
-                        yield {"node_step": f"Post-verify warning: {post.reason}", "node": "post_verify"}
-
-                # Journal: record completed tool call (after exec + verify)
-                if state._skill_journal is not None:
-                    try:
-                        _t = __import__("time").monotonic()
-                        _elapsed = (_t - _journal_tool_start_ts) * 1000 if _journal_tool_start_ts else None
-                        _tool_ok = "[ToolRouter] Tool" not in (raw or "")[:40]
-                        state._skill_journal.record_tool_call(
-                            turn=state.turns,
-                            tool_name=tool_name,
-                            args=tool_args,
-                            ok=_tool_ok,
-                            error=(None if _tool_ok else str(raw)[:200]),
-                            elapsed_ms=_elapsed,
-                        )
-                    except Exception as _je:
-                        logger.debug("journal.record_tool_call failed: %s", _je)
+            # ── Tool handling (Item 4 4e → _handle_tools) ─────────────
+            async for _tool_chunk in self._handle_tools(ctx, new_tool_calls, llm_response):
+                if _tool_chunk.get('_tools_terminal'):
+                    return   # HITL gate fired; end this turn's stream
+                yield _tool_chunk
 
             # ── Paginated-read findings nudge (defence in depth) ───────
             # If the LLM is paging through a stored result with read_stored_result

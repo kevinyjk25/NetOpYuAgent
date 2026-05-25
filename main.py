@@ -540,6 +540,11 @@ async def build_services() -> dict[str, Any]:
         # Presents the .execute / .cancel interface so webui/backend doesn't
         # need to know the backend internals.
         from integrations.adapters.hitl_executor import HitlExecutor
+        # L0/L1 Stage B: pick the coreferencer by profile. Network profiles
+        # (lan/dc) get the device coreferencer; others get None → the executor
+        # falls back to its neutral (domain-free) default.
+        _profile = getattr(getattr(cfg, "agent", None), "profile", "default")
+        _coref = build_default_device_coreferencer() if _profile in ("lan", "dc") else None
         executor = HitlExecutor(
             runtime_loop=None,             # injected later from services["runtime_loop"]
             llm_engine=llm_engine,
@@ -548,6 +553,7 @@ async def build_services() -> dict[str, Any]:
             hitl_router=services["hitl_core_router"],
             hitl_pipeline=services["hitl_core_pipeline"],
             audit_logger=services["hitl_core_audit"],
+            coreferencer=_coref,
         )
         services["executor"] = executor
         logger.info("A2A executor (core) constructed with %d tool(s)",

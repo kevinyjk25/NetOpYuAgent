@@ -9,12 +9,16 @@
 
 | 文件 | 职责 |
 |------|------|
-| `loop.py` (2634) | `AgentRuntimeLoop` 主循环 — turn iteration、tool dispatch、HITL trigger、verify、stop |
-| `stop_policy.py` (475) | `StopPolicy` — 何时停。预算/重复/事实充足度多维评分 |
+| `loop.py` (~3250) | `AgentRuntimeLoop` 主循环 — turn iteration、tool dispatch、HITL trigger、verify、stop。`_stream_impl` 已拆分为阶段方法(见 §4.5) |
+| `loop_types.py` (159) | 循环的公开类型定义：`QueryComplexity` / `DelegationMode` / `ForkContextPolicy` / `VerificationResult` / `ComplexityDecision` / `RuntimeConfig` / `LoopResult`。`loop.py` 重新 import,`runtime/__init__` 照旧 re-export |
+| `loop_context.py` (66) | `_LoopContext` — `_stream_impl` 每轮的可变状态容器（state / tool_outputs / called_tools / 澄清标志 / recall+skill 记忆化缓存）。以 `(self, ctx)` 传给各阶段方法 |
+| `loop_helpers.py` (216) | 从 loop 抽出的无状态纯函数：`strip_thinking` / `is_complete` / `skill_loads_in` / `format_final` / `query_mentions_concrete_target` / `call_key` / `build_tool_ledger` / `page_default_size_for_ledger`。loop 保留同名薄壳/别名,调用点不变 |
+| `stop_policy.py` (475) | `StopPolicy` — 何时停。预算/重复/事实充足度多维评分。`StopOutcome` 含 `USER_CANCELLED` |
 | `policy_engine.py` (326) | `PolicyEngine` — LLM 驱动的二分类(destructive? incident?) |
-| `directive_parser.py` (356) | 解析 `[TOOL:name] {args}` / `[TOOL_BATCH:...]` / `[SKILL_LOAD:id]` |
+| `directive_parser.py` (356) | 解析 `[TOOL:name] {args}` / `[TOOL_BATCH:...]` / `[SKILL_LOAD:id]` / `[DELEGATE:...]` |
 | `tool_cache.py` (332) | 内存 LRU + 大结果 spill 到 `ToolResultStore` 分页读 |
-| `context_budget.py` (484) | priority-budget tokenization,什么塞 prompt 什么扔掉 |
+| `context_budget.py` (484) | legacy 上下文组装 + 分页压缩(`compress_paged_outputs`) |
+| `context_budget_v2.py` | 可选的 priority-budget 策略(`TokenBudget`,由 `cfg.context_budget.strategy="priority"` 选用,见 §4.6) |
 | `skill_journal.py` (332) | 每个 turn 记录 skill usage,供 `SkillEvolver` 后续聚合 |
 
 ---
@@ -438,6 +442,40 @@ trade-off:hook 写 bug(忘了 set blocked=True)无声漏检。**所以建议 pro
 
 代价:wrapper 多一次 async generator forwarding(每 chunk yield 进 wrapper 再 yield 出)。`pytest` 测过吞吐影响 < 1%,可接受。
 
+### 4.7 `_stream_impl` 拆分(Item 4,2026-05)
+
+`_stream_impl` 曾是 1448 行的单方法,把 turn loop 的所有阶段 + 一堆闭包局部变量挤在一起,定位和修改都困难。重构后(零行为变化,每步全量 audit+test 验证)拆成:
+
+- **`_LoopContext`(`loop_context.py`)** —— 每轮的可变状态容器。原本散在闭包里的 `state` / `tool_outputs` / `called_tools` / 澄清标志 / recall+skill 记忆化缓存 + 刷新节奏簿记,现在集中在一个 dataclass。可变容器(dict/set)在 `_stream_impl` 里以局部别名绑定到 `ctx.*`,in-place mutate 自动同步,所以引用点零改动。
+- **阶段方法**(都挂在 `AgentRuntimeLoop` 上,签名 `(self, ctx, ...)`,因为重度依赖 `self._budget`/`self._policy`/`self._memory`/`self._call_llm`,做成方法比独立模块函数干净):
+  - `_refresh_recall(ctx, ...)` / `_refresh_skills(ctx, ...)` —— 两个条件性记忆化阶段,纯计算,写回 ctx 缓存。
+  - `_assemble_context(...)` —— 统一 legacy / priority 两条上下文组装路径,`run()` 和 `_stream_impl` 共用(见 §4.8)。
+  - `_run_clarification_gate(ctx, ...)` —— Type#3 澄清门,async generator。需要终止整个 stream 时 yield `{"_clarification_terminal": True}` 哨兵,调用方转发其余 chunk 并在哨兵处 `return`。
+  - `_handle_tools(ctx, new_tool_calls, llm_response)` —— 每轮工具处理(单工具强制 + HITL gate + 执行 + post_verify + 分页 nudge)。async generator,**HITL stop 语义严格不变**:工具需审批时 yield 既有的 `stop_hitl`/`hitl_gate` chunk + `{"_tools_terminal": True}` 哨兵,调用方在哨兵处 `return`(等价于原来的内联 `return`)。
+
+哨兵模式说明:async generator 无法像普通函数那样用 `return value` 把"该终止 stream"信号传出,所以约定用一个特殊 chunk(`_clarification_terminal` / `_tools_terminal`)作为带内信号;`_stream_impl` 的转发循环识别到它就 `return`,其余 chunk 原样 yield 给上游。测试:`test_clarification_gate.py`、`test_handle_tools_phase.py`(含"破坏性工具未经批准不执行"的安全断言)。
+
+剩余:`_stream_impl` 仍约 875 行(主要是 token streaming + DELEGATE + 完成判定 + stop-check/ledger 这些与循环控制紧耦合、不宜外迁的部分)。
+
+### 4.8 Context budget 策略选择(legacy vs priority)
+
+`context_budget.py`(v1)和 `context_budget_v2.py`(v2)**不是新旧替代关系,而是两个并存的可选策略**(v2 自己的 docstring 写明了)。由 `cfg.context_budget.strategy` 选择:
+
+- `legacy`(默认)—— `ContextBudgetManager.assemble`,固定顺序组装,超预算时按固定顺序丢尾部。
+- `priority` —— `_assemble_priority` 把各 section 喂进 v2 `TokenBudget`,在硬 `total_chars` 上限下**按优先级裁剪**:P0 confirmed_facts 不可驱逐,P1 tool_results/working_set,P2 skills/retrieved_memory,P3 env 最先被裁。复用 v1 的 section formatter,所以渲染文本一致,只是裁剪策略不同。
+
+两条路径都经 `_assemble_context` 这一个入口(§4.7),`run()` 和 `_stream_impl` 共用 —— 避免了之前 priority 只接在 `run()`、流式路径却一直走 legacy 的隐藏 gap。
+
+### 4.9 业务逻辑注入点(L0/L1 解耦,Stage B,2026-05)
+
+L0 loop 不含任何业务域逻辑;域特定行为靠注入。两个已落地的注入点:
+
+- **`delegate_fn`**(Phase 2B)—— 跨 agent 委派的传输实现,`None` 时优雅降级。
+- **`batch_resolver_fn`**(Stage B)—— 决定一个破坏性工具调用是否应该展开成多目标批量 HITL。这是业务逻辑(网络域:"prose 里点名了 sw-core-01 和 sw-core-02");L0 只负责调用注入的 resolver,`None`(如 default profile)→ 单目标 HITL(域无关的安全默认)。契约:`(tool_name, tool_args, llm_response, hitl_tool_names, confirmed_facts, all_parsed) -> Optional[list[(name,args)]]`。网络实现在 `profiles/network_batch_resolver.py`,由 `profiles.get_batch_resolver_for_profile()` 按 profile 选,webui/backend 注入。
+- **coreferencer**(`HitlExecutor`)—— L0 默认 `build_neutral_coreferencer()`(空 pattern,永远 no-op);网络 profile 注入 `build_default_device_coreferencer()`。
+
+`runtime/loop.py` **不 import `profiles/`** —— 所有业务 resolver 都是注入进来的,`audit_module_independence` 因此持续绿。后续开发者加新业务域时:实现一个 resolver 函数 → 在 `get_batch_resolver_for_profile` 注册 → 不动 L0 任何代码。这就是 L0(纯能力骨架)/ L1(业务注入)的边界。
+
 ---
 
 ## 5. 跨模块依赖与扩展点
@@ -484,7 +522,7 @@ runtime 不依赖:
 
 ### 6.1 改之前必须知道
 
-- **`loop.py` 是项目最大文件(2634 行)**,但里面**只有一个类** `AgentRuntimeLoop`。读之前先扫一遍 `grep "    def " loop.py | head -30` 看方法清单。
+- **`loop.py` 是项目最大文件(~3250 行)**,主体是 `AgentRuntimeLoop` 这一个类(其公开类型/纯函数/每轮状态已分到 `loop_types.py`/`loop_helpers.py`/`loop_context.py`,见 §4.7)。读之前先扫一遍 `grep "    def \|    async def " loop.py` 看方法清单;`_stream_impl` 的各阶段已抽成 `_refresh_recall`/`_refresh_skills`/`_assemble_context`/`_run_clarification_gate`/`_handle_tools`。
 - **Nudge 系统**:loop 在检测到 LLM 行为异常时(repeat tool / premature pivot / unread stored)注入 `_NUDGE: ...` 文本到 `confirmed_facts`,下个 turn LLM 看到提示。改 nudge 看 `_check_*` 系列方法。
 - **Coreference 处理**:`hitl_core/coreference.py` 跟 loop 紧耦合,改 loop 时确认 HITL template 词不会被 coref 误绑(`_strip_hitl_templates` 防护)。
 
@@ -523,7 +561,7 @@ python -m unittest tests.test_production_safety -v
 
 ## 7. 已知限制 & TODO
 
-- **`loop.py` 太大**。未来拆:turn loop / tool dispatch / verify / stop check 各自一个 file,共享 `_LoopContext` dataclass。
-- **`context_budget_v2.py` 跟 `context_budget.py` 共存**(渐进迁移)—— v2 是新 priority-budget 算法,部分 caller 还在用 v1。完工后删 v1。
-- **StopPolicy 不感知 user cancel**——前端"停止"按钮还没接进来,需新增 `StopOutcome.USER_CANCELLED`。
+- **`loop.py` 仍偏大但已显著拆分**(见 §4.7)。`_stream_impl` 从 1448 → ~875 行,公开类型/纯函数/循环状态已分出 `loop_types.py`/`loop_helpers.py`/`loop_context.py`,各阶段抽成 `(self, ctx)` 方法。剩余的 token-streaming/DELEGATE/stop-check 部分与循环控制紧耦合,暂留 `_stream_impl`。
+- **`context_budget_v2.py` 跟 `context_budget.py` 共存 —— 设计如此,非待迁移**(见 §4.8)。v1=legacy 默认策略,v2=可选 priority 策略,由 `cfg.context_budget.strategy` 选择,经统一入口 `_assemble_context`。两者都不删。
+- **StopPolicy 已感知 user cancel** —— `StopOutcome.USER_CANCELLED` 已加;前端 Stop 按钮 abort fetch → 后端 SSE 捕获 cancel → 取消 executor + 保留部分回答(跳过 durable memory 写入)。
 - **PolicyEngine 不缓存** —— 每次 classify 都调 LLM。如果同一 query 反复 classify,加 LRU 显著省 LLM call。

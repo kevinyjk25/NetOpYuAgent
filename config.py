@@ -140,6 +140,10 @@ class OpenAPIConfig:
 class ToolsConfig:
     mcp: MCPConfig; openapi: OpenAPIConfig; hitl_tool_names: list[str]
     schema_validation_enabled: bool = True   # validate args via schema/ before tool dispatch
+    # Per-business map: tool name → editable param keys (Type #2 edit-HITL).
+    # Empty in L0; the active profile (L1) supplies it. e.g. network profile:
+    #   {"edit_device_config": ["config_lines", "reason"]}
+    editable_hitl_tools: dict = field(default_factory=dict)
 
 @dataclass
 class HITLSLAConfig:
@@ -1217,6 +1221,11 @@ def load(config_path: str = "config.yaml") -> AppConfig:
     else:
         hitl_tool_names = [x.strip() for x in str(yaml_ht).split(",") if x.strip()]
 
+    # editable_hitl_tools: { tool_name: [param_keys] } — business-specific,
+    # supplied by the active profile's config block. Empty default keeps L0 clean.
+    _eht = t.get("editable_hitl_tools", {}) or {}
+    editable_hitl_tools = {str(k): [str(x) for x in (v or [])] for k, v in _eht.items()} if isinstance(_eht, dict) else {}
+
     # agent_urls
     yaml_ag = rg.get("agent_urls", "") or ""
     env_ag  = os.getenv("AGENT_URLS", "")
@@ -1303,6 +1312,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
                 token_env = _env_str ("OPENAPI_TOKEN_ENV",to.get("token_env", "NETOPS_API_TOKEN")),
             ),
             hitl_tool_names=hitl_tool_names,
+            editable_hitl_tools=editable_hitl_tools,
         ),
         hitl=HITLConfig(
             confidence_threshold   = _env_float("HITL_CONFIDENCE_THRESHOLD", h.get("confidence_threshold", 0.75)),

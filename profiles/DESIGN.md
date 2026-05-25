@@ -124,3 +124,21 @@ delegation would be pointless (each agent would already have everything).
   tooling by profile is deferred — mock mode is what the A2A validation uses.
 - **Phase 2B (delegation) not yet wired.** Profiles give isolation; the
   cross-agent dispatch that exploits it is the next step.
+
+
+## L1 business logic (not just tools/skills) — added Stage B (2026-05)
+
+Profiles are no longer only "bags of tools + skills". They also supply
+**business decision logic** that the L0 framework calls through injection
+points, so domain rules never live in `runtime/`:
+
+- `network_batch_resolver.py` — decides whether one destructive tool call
+  should expand into a multi-target batch HITL (device-prose parsing). L0 calls
+  it via `AgentRuntimeLoop(batch_resolver_fn=...)`.
+- `get_batch_resolver_for_profile(profile)` (in `profiles/__init__.py`) maps
+  profile → resolver (lan/dc → network resolver, default → None).
+
+Pattern for a new domain: write a resolver function with the documented
+contract, register it in `get_batch_resolver_for_profile`, done — no L0 edits.
+The `default` profile returning None (→ generic single-target HITL) remains the
+decoupling proof.

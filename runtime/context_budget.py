@@ -190,14 +190,31 @@ class BudgetConfig:
 
 
 @dataclass
-class DeviceRef:
-    """Lightweight reference to a network device or resource in the working set."""
+class ResourceRef:
+    """Lightweight reference to any resource in the working set — a network
+    device, a code file, a ticket, a service, whatever the active business
+    profile (L1) deals in. L0 only needs id + label to render it and an
+    optional `type`/`meta` the domain can use.
+
+    `type` defaults to "resource" so L0 carries no domain assumption. The
+    network-ops profile sets type="device"; a coding profile might use
+    type="file", etc. (Stage A of the L0/L1 separation, 2026-05 — was named
+    DeviceRef, which leaked the network domain into this L0 module.)
+    """
     id:    str
     label: str
+    type:  str = "resource"
     meta:  dict[str, Any] = field(default_factory=dict)
 
     def __str__(self) -> str:
         return f"{self.label} ({self.id})"
+
+
+# Back-compat alias: a lot of code + the runtime/__init__ public surface still
+# imports DeviceRef. It is exactly a ResourceRef (the old class had no
+# device-specific behaviour), so alias rather than duplicate. New code should
+# prefer ResourceRef.
+DeviceRef = ResourceRef
 
 
 # ---------------------------------------------------------------------------
@@ -230,7 +247,7 @@ class ContextBudgetManager:
         memory_results: Optional[list[Any]] = None,         # list[RetrievalResult]
         tool_outputs:   Optional[dict[str, str]] = None,    # tool_name → raw output
         confirmed_facts: Optional[list[str]] = None,
-        working_set:    Optional[list[DeviceRef]] = None,
+        working_set:    Optional[list[ResourceRef]] = None,
         env_context:    Optional[dict[str, Any]] = None,
     ) -> str:
         """
@@ -335,7 +352,7 @@ class ContextBudgetManager:
         return f"[CONFIRMED FACTS]\n{items}"
 
     @staticmethod
-    def _format_working_set(ws: list[DeviceRef]) -> str:
+    def _format_working_set(ws: list[ResourceRef]) -> str:
         try:
             from config import cfg as _app_cfg
             _ws_show = int(getattr(getattr(_app_cfg, "context_budget_display", None), "working_set_show", 10))

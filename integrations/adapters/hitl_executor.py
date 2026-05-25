@@ -56,6 +56,7 @@ from hitl_core import (
     RiskLevel,
     TriggerKind,
     build_default_device_coreferencer,
+    build_neutral_coreferencer,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,11 @@ class HitlExecutor:
         self._memory        = memory_router
         self._router        = hitl_router
         self._pipeline      = hitl_pipeline
-        self._coref         = coreferencer or build_default_device_coreferencer()
+        # NOTE (L0/L1 Stage B): default to the DOMAIN-FREE neutral coreferencer.
+        # A non-network agent thus gets no spurious device coreference. The
+        # active profile (L1) injects build_default_device_coreferencer() for
+        # network domains via the `coreferencer` arg (wired in main.py).
+        self._coref         = coreferencer or build_neutral_coreferencer()
         self._audit         = audit_logger
         # SkillEvolver may not exist at executor-construction time (it's
         # built later in main.py once the LLM smoke test passes). Use

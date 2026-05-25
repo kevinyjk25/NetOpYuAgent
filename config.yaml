@@ -116,6 +116,16 @@ tools:
     - failover
     - delete_resource
 
+  # Type #2 edit-flavoured HITL: for these tools the operator can edit the
+  # listed param keys before approving (instead of bare approve/reject).
+  # Business-specific — injected here as the active profile's config; the L0
+  # runtime ships an empty default (L0/L1 separation, Stage A).
+  editable_hitl_tools:
+    edit_device_config: [config_lines, reason]
+    rollback_deploy:    [snapshot_id, reason]
+    restart_service:    [service_name, graceful]
+    push_config:        [config_lines, reason]
+
 
 # ── Pragmatic mode — real network device access ───────────────
 # Only used when mode: pragmatic.

@@ -327,12 +327,31 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 logger.warning("backend: cfg fallback for hitl_tool_names failed: %s", _exc)
                 _hitl_tools = frozenset()
         logger.info("backend: runtime_loop hitl_tool_names=%s", sorted(_hitl_tools))
+        # editable_hitl_tools: business map injected by the active profile's
+        # config (L1). Empty if unset → L0 stays domain-free (Stage A).
+        _editable_hitl = {}
+        try:
+            from config import cfg as _app_cfg2
+            _editable_hitl = dict(getattr(_app_cfg2.tools, "editable_hitl_tools", {}) or {})
+        except Exception as _exc:
+            logger.warning("backend: cfg fallback for editable_hitl_tools failed: %s", _exc)
+        # L0/L1 Stage B: ask the profile layer for its batch HITL resolver
+        # (network profiles return the device-prose resolver; default → None).
+        _batch_resolver = None
+        try:
+            from profiles import get_batch_resolver_for_profile
+            _batch_resolver = get_batch_resolver_for_profile(_cfg_be.cfg.agent.profile)
+            if _batch_resolver:
+                logger.info("backend: batch_resolver injected for profile=%s", _cfg_be.cfg.agent.profile)
+        except Exception as _exc:
+            logger.warning("backend: batch_resolver injection skipped: %s", _exc)
         services["runtime_loop"] = AgentRuntimeLoop(
             memory_router=services.get("memory"),
-            config=RuntimeConfig(hitl_tool_names=_hitl_tools),
+            config=RuntimeConfig(hitl_tool_names=_hitl_tools, editable_hitl_tools=_editable_hitl),
             tool_store=services["tool_store"],
             skill_catalog=services["skill_catalog"],
             delegate_fn=services.get("delegate_fn"),
+            batch_resolver_fn=_batch_resolver,
         )
     else:
         # Re-inject tool store and catalog into existing loop
@@ -358,6 +377,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     # Session message history (in-memory, keyed by session_id)
     _message_history: dict[str, list[dict]] = {}
+    # Publish into services so module-level handlers (e.g.
+    # _submit_hitl_decision, which is NOT a closure of this factory and only
+    # receives `services`) can read the session transcript. Without this the
+    # H2 async-HITL follow-up raised NameError('_message_history') because it
+    # referenced this closure local from the wrong scope.
+    services["_message_history"] = _message_history
 
     # ── Static files ───────────────────────────────────────────────────
     if _STATIC_DIR.exists():
@@ -1817,7 +1842,11 @@ async def _submit_hitl_decision(
                     # the original user query + previous answer back in (debt
                     # #7) so the LLM's follow-up stays connected to what the
                     # user actually asked, instead of a context-less synthetic.
-                    _hist = _message_history.get(_session_for_followup, [])
+                    # _message_history lives in the create_webui_app closure;
+                    # this module-level handler reads it via services (published
+                    # there at factory time). Fixes the H2 follow-up NameError.
+                    _msg_hist = services.get("_message_history", {})
+                    _hist = _msg_hist.get(_session_for_followup, [])
                     _orig_q = ""
                     _prev_a = ""
                     for _m in reversed(_hist):

@@ -21,7 +21,7 @@ from typing import Any, Optional, TYPE_CHECKING
 from .loop_types import DelegationMode
 
 if TYPE_CHECKING:
-    from .context_budget import DeviceRef
+    from .context_budget import ResourceRef
     from .stop_policy import LoopState
 
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
-from .context_budget import BudgetConfig, DeviceRef
+from .context_budget import BudgetConfig, ResourceRef
 from .stop_policy import StopOutcome, StopPolicyConfig
 
 
@@ -128,11 +128,12 @@ class RuntimeConfig:
     # Subset of hitl_tool_names — for any tool in BOTH sets, the executor
     # raises trigger_edit_approval (with editable_param_keys) instead of
     # the bare approve/reject panel.
-    editable_hitl_tools: dict[str, list[str]] = field(default_factory=lambda: {
-        "edit_device_config":  ["config_lines", "reason"],
-        "rollback_deploy":     ["snapshot_id", "reason"],
-        "restart_service":     ["service_name", "graceful"],
-    })
+    #
+    # L0 default is EMPTY — this is a per-business mapping. The active profile
+    # (L1) injects its own via cfg.tools.editable_hitl_tools, e.g. the network
+    # profile maps edit_device_config → [config_lines, reason]. Keeping L0 free
+    # of concrete tool names is part of the L0/L1 separation (Stage A, 2026-05).
+    editable_hitl_tools: dict[str, list[str]] = field(default_factory=dict)
 
     # ── Type #3 CLARIFICATION ───────────────────────────────────────────
     # Auto-clarify when the agent's confidence in its plan is below this
@@ -151,7 +152,7 @@ class LoopResult:
     outcome:          StopOutcome
     final_response:   str
     confirmed_facts:  list[str]   = field(default_factory=list)
-    working_set:      list[DeviceRef] = field(default_factory=list)
+    working_set:      list[ResourceRef] = field(default_factory=list)
     unresolved:       list[str]   = field(default_factory=list)
     tool_summaries:   list[str]   = field(default_factory=list)
     turns_taken:      int         = 0

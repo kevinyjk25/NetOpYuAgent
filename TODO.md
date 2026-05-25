@@ -1,7 +1,7 @@
 # TODO — Production Readiness & Roadmap Tracker
 
 > Tracking doc for deferred work. **Rule: when an item is done, delete it from this file.**
-> Items that remain are not yet done. Last updated: 2026-05 (v13 + tech-debt sweep: legacy-hitl removal, user-cancel, auto-evolve switch, priority budget wired; loop.py split: phase 1 + _stream_impl steps 4a-4d done, 4e remaining).
+> Items that remain are not yet done. Last updated: 2026-05 (v13 + tech-debt sweep: legacy-hitl removal, user-cancel, auto-evolve switch, priority budget wired; loop.py split fully done — all _stream_impl phases extracted).
 
 This file tracks the production-readiness items surfaced in the Sprint-3
 readiness assessment (see `ARCHITECTURE.md §8.4` "What Sprint-3-pre does NOT fix")
@@ -62,6 +62,51 @@ Grouped by tier. Each item has: effort estimate, what it fixes, and acceptance c
 ### Tier D — Performance / scaling
 
 (none remaining — D1 done)
+
+---
+
+## L0/L1 two-layer architecture — clean capability/business separation
+
+**Goal**: formalise two layers so external teams can build any agent (network,
+coding, Q&A, …) on a stable base.
+- **L0 — pure capability framework**: independent modules (runtime loop, memory,
+  retrieval, hitl_core, skills engine, a2a, task) wired by integration + config.
+  Knows nothing about any business domain.
+- **L1 — business framework**: a business designer expresses an actual problem
+  by declaring tools/skills/flows in a profile; the L0 skeleton hooks them
+  together. `profiles/` already IS the start of L1 (framework → profiles
+  dependency arrow, `default` profile = 0 tools = decoupling proof).
+
+**Why now**: the macro seam exists (profiles), but business concepts have leaked
+into L0, and the `memory → skill → delegation → tool → HITL` linkage chain has
+no clean per-seam extension point — so adding/altering a domain risks
+cross-cutting breakage. Target: each seam in that chain is a documented,
+pluggable hook so new developers extend by filling in clearly-bounded slots.
+
+### Stage A — concept repatriation ✅ DONE (2026-05)
+Moved hardcoded business nouns out of L0; behaviour unchanged (verified 7/7 audits + 202 tests).
+- `DeviceRef` → generalised to neutral `ResourceRef` (id/label/`type`/meta; `type` defaults to `"resource"`). `DeviceRef` kept as a back-compat alias; `runtime/__init__` exports both. Internal annotations migrated to `ResourceRef`.
+- `RuntimeConfig.editable_hitl_tools` hardcoded default (`edit_device_config`/`rollback_deploy`/`restart_service`) → EMPTY L0 default; now injected from `cfg.tools.editable_hitl_tools` (added to config.py loader + config.yaml + wired in webui/backend `RuntimeConfig(...)`). `hitl_tool_names` was already config-injected.
+- Test: `tests/test_l0_l1_separation.py` (ResourceRef neutral + alias; editable_hitl_tools empty-default + injectable).
+- **Surfaced for Stage B** (marked in code, not yet fixed): `integrations/adapters/hitl_executor.py` falls back to `build_default_device_coreferencer()` when none injected — an L1 network default leaking into an L0 adapter. The `Coreferencer` class itself is already domain-neutral/parameterised; only the default needs to move to profile injection.
+
+### Stage B — business logic externalised onto the linkage chain ✅ DONE (2026-05)
+Made the tool→HITL seam pluggable; network logic moved to L1 (verified 7/7 audits incl. module_independence + 208 tests).
+- **Batch HITL resolver**: the ~165-line network "should this destructive tool call expand into a multi-target batch?" logic (Path A same-name dedup + Path B device-prose fabrication, with device-id regex + `device_id`/`device`/`target` field mutation) was extracted from `_handle_tools` into `profiles/network_batch_resolver.py`. The L0 loop now exposes an injected `batch_resolver_fn` (precedent: `delegate_fn`); contract `(tool_name, tool_args, llm_response, hitl_tool_names, confirmed_facts, all_parsed) -> Optional[list[(name,args)]]`. No resolver → single-target HITL (domain-free default). Profile picks it via `profiles.get_batch_resolver_for_profile(profile)` (lan/dc → network resolver, default → None), wired in webui/backend.
+- **Coreferencer default**: `HitlExecutor` defaulted to `build_default_device_coreferencer()` (network default leaking into an L0 adapter). Added `build_neutral_coreferencer()` (empty patterns → always "no entity") as the L0 default; main.py injects the device coreferencer only for lan/dc profiles.
+- `runtime/loop.py` does NOT import `profiles/` (resolver injected) — `audit_module_independence` stays green.
+- Test: `tests/test_batch_resolver.py` (profile selection; loop stores injected fn; Path A / Path B / single-device-no-batch).
+- **Note**: the `memory→skill→delegation` seams were audited and found already clean (delegation uses injected `delegate_fn`; skill selection goes through the parameterised `SkillCatalogService`; memory recall is domain-neutral). The concrete L1 leak on the chain was concentrated at the tool→HITL seam, now resolved.
+
+### Stage C — declarative L1 business-flow layer (large, DEFERRED)
+- **Effort**: 1-2 weeks. **Status**: deferred — vision clear, requirements not
+  yet mature (need 2-3 real domains before abstracting the flow model, else we
+  abstract wrong).
+- **Scope**: profiles declare not just capabilities but *flow orchestration*
+  (e.g. a network-triage SOP: check status → on anomaly check neighbours → …);
+  L0 provides a flow-engine that executes the declared graph. Upgrades profiles
+  from "inject capabilities" to "inject flows". Revisit after Stage B ships and
+  a second non-network domain is built on the framework.
 
 ---
 
@@ -267,21 +312,27 @@ Remaining real debt, by priority:
 ### StopPolicy doesn't know about user cancel ✅ DONE (2026-05)
 - **What shipped**: `StopOutcome.USER_CANCELLED` added. WebUI Send button toggles to a red **Stop** button during streaming; clicking it aborts the fetch (`AbortController`). The backend SSE generator catches the resulting `CancelledError`/`GeneratorExit`, cancels the executor task (reclaiming the blocked Ollama request), marks the outcome `user_cancelled`, and preserves the partial answer in the session transcript (tagged "已取消 — 部分回答") while skipping durable memory writeback (a half-answer isn't a trustworthy fact to recall). The loop's existing `GeneratorExit`/`finally` SESSION_END cleanup makes cancellation safe.
 
-### `loop.py` is too large (~3300 lines)  ← IN PROGRESS (2026-05)
-- **Status**: structural extractions + first 4 `_stream_impl` phase extractions done (loop.py 3224 lines, down from 3428; `_stream_impl` 1334 lines, down from 1448). Only the largest phase (`_handle_tools`) remains.
-- **Phase 1 — module-level extractions (verified: 7/7 audits incl. module_independence + 191 tests)**:
-  - `runtime/loop_helpers.py` — pure stateless helpers (`strip_thinking`, `is_complete`, `skill_loads_in`, `format_final`, `query_mentions_concrete_target`, `call_key`, `build_tool_ledger`, `page_default_size_for_ledger`). The loop keeps same-named thin wrappers / aliases so all call sites are unchanged.
-  - `runtime/loop_types.py` — all public type definitions (`QueryComplexity`, `DelegationMode`, `ForkContextPolicy`, `VerificationResult`, `ComplexityDecision`, `RuntimeConfig`, `LoopResult`). loop.py re-imports them and runtime/__init__ re-exports unchanged, so `from runtime.loop import RuntimeConfig` still works.
-- **Phase 2 — `_stream_impl` decomposition steps 4a-4d (each verified: 7/7 audits + 194 tests)**:
-  - `runtime/loop_context.py` — `_LoopContext` dataclass holds the per-turn mutable state (`state`, `tool_outputs`, `called_tools`, clarification flags, the memoised recall/skill caches + their refresh-cadence bookkeeping). Passed as `(self, ctx)` to each phase method instead of threading a dozen closure locals.
-  - `_refresh_recall(ctx, ...)` + `_refresh_skills(ctx, ...)` — the two conditional memoisation phases, pure compute, mutate ctx caches.
-  - `_assemble_context(...)` — unifies the legacy + priority context-assembly branch; now used by BOTH `run()` and `_stream_impl`. **Bonus fix**: the Tier-2 priority strategy was previously wired only into `run()`, so the streaming path (`_stream_impl`, what the WebUI uses) silently always used legacy — unifying here makes `strategy="priority"` actually apply in streaming.
-  - `_run_clarification_gate(ctx, ...)` — the Type-#3 clarification gate (async generator; yields a `{"_clarification_terminal": True}` sentinel the caller returns on). New test: `tests/test_clarification_gate.py` (asks→sentinel / no-ask→empty / skip-after-turn-1).
-- **Remaining — step 4e (deferred, highest regression risk, its own iteration)**: extract `_handle_tools` — the single-tool enforcement + HITL gate + tool execution + paginated-read nudge block (the largest remaining chunk of `_stream_impl`, an async generator that yields and can terminate the stream). Same rhythm: extract, full audit+test, keep `audit_module_independence` green.
+### `loop.py` is too large (~3300 lines)  ✅ DONE (2026-05)
+- **Result**: loop.py 3428 → ~3250; `_stream_impl` 1448 → ~875. Extracted, each step verified (7/7 audits incl. module_independence + full suite):
+  - `runtime/loop_helpers.py` — pure stateless helpers (`strip_thinking`, `is_complete`, `skill_loads_in`, `format_final`, `query_mentions_concrete_target`, `call_key`, `build_tool_ledger`, `page_default_size_for_ledger`). loop keeps same-named wrappers/aliases.
+  - `runtime/loop_types.py` — public types (`QueryComplexity`, `DelegationMode`, `ForkContextPolicy`, `VerificationResult`, `ComplexityDecision`, `RuntimeConfig`, `LoopResult`); re-imported so `from runtime.loop import RuntimeConfig` is unchanged.
+  - `runtime/loop_context.py` — `_LoopContext` per-turn mutable state, passed `(self, ctx)` to phase methods.
+  - `_stream_impl` phases extracted: `_refresh_recall`, `_refresh_skills`, `_assemble_context` (unified legacy/priority — also fixed priority never applying in the streaming path), `_run_clarification_gate` (async-gen + `_clarification_terminal` sentinel), `_handle_tools` (async-gen + `_tools_terminal` sentinel; HITL stop semantics preserved).
+  - New tests: `test_clarification_gate.py`, `test_handle_tools_phase.py` (incl. "destructive tool does not execute without approval" HITL safety assertion).
+  - Docs refreshed: `runtime/DESIGN.md` §4.7/§4.8 + file table + §7; `ARCHITECTURE.md` tech-debt + sprint status.
+- **Intentionally left in `_stream_impl`**: token streaming, DELEGATE handling, completion/stop-check + ledger writes — tightly coupled to loop control flow, not worth extracting.
 
 ---
 
 ## Done (kept briefly for reference, delete after a release cycle)
+
+- ✅ **H2 async-HITL live bugs** (2026-05, from real lan-agent run) — two runtime-path bugs the static tests missed: (1) `_submit_hitl_decision` H2 follow-up raised `NameError: _message_history` — it is a module-level handler and cannot see create_webui_app's closure local; fixed by publishing `_message_history` into `services` and reading it from there (+ static scope-leak regression test `test_hitl_submit_scope.py`). (2) `query_radius_logs` demo autoreply `NoneType.deliver` — the lan tool resolved `services["hitl_router"]` (a stub-None key since the Item-2 legacy-hitl cleanup) instead of the real `hitl_core_router`; fixed to resolve hitl_core_* first (router + audit). Both verified; full suite 210 passed.
+
+- ✅ **L0/L1 separation — Stage B** (2026-05) — tool→HITL seam made pluggable: the ~165-line network batch-HITL logic moved from `_handle_tools` to `profiles/network_batch_resolver.py`, injected via `AgentRuntimeLoop.batch_resolver_fn` (None→single-target HITL). Coreferencer default made neutral in L0 (`build_neutral_coreferencer`), device one injected per-profile. `runtime/loop.py` imports no `profiles/` — module_independence green. Tests `test_batch_resolver.py`. memory/skill/delegation seams audited = already clean. Stage C (declarative flow layer) still deferred.
+
+- ✅ **L0/L1 separation — Stage A** (2026-05) — concept repatriation: `DeviceRef`→neutral `ResourceRef` (back-compat alias kept); `RuntimeConfig.editable_hitl_tools` business default emptied + injected from `cfg.tools.editable_hitl_tools` (config.py/config.yaml/backend wired). L0 runtime now carries no hardcoded network tool names. Test `test_l0_l1_separation.py`. Stage B (hook-based chain externalisation) is next; Stage C (declarative flow layer) deferred. See "L0/L1 two-layer architecture".
+
+- ✅ **loop.py decomposition COMPLETE** (2026-05) — finished step 4e: extracted `_handle_tools` (per-turn tool dispatch + HITL gate + execution + post-verify, async-gen with `_tools_terminal` sentinel; HITL stop semantics preserved + tested). loop.py 3428→~3250, `_stream_impl` 1448→~875. Full module set: `loop_helpers`/`loop_types`/`loop_context` + phase methods. New tests `test_clarification_gate.py` + `test_handle_tools_phase.py`. Docs refreshed (`runtime/DESIGN.md` §4.7-4.8, `ARCHITECTURE.md`).
 
 - ✅ **loop.py decomposition — phase 1 + _stream_impl 4a-4d** (2026-05) — extracted `runtime/loop_helpers.py` (pure helpers), `runtime/loop_types.py` (public types), `runtime/loop_context.py` (`_LoopContext` per-turn state); extracted `_stream_impl` phases `_refresh_recall`, `_refresh_skills`, `_assemble_context` (also fixed the priority strategy never applying in the streaming path), `_run_clarification_gate`. loop.py 3428→3224, `_stream_impl` 1448→1334. New test `test_clarification_gate.py`. Each step verified 7/7 audits + full suite. Only `_handle_tools` (step 4e) remains — see "Known bugs / tech debt".
 

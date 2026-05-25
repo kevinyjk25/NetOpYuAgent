@@ -10,7 +10,7 @@
 
 | 模块 | 行数 | 一句话职责 | 详细文档 |
 |------|-----:|----------|----------|
-| `runtime/` | ~5500 | Agent 主循环、turn iteration、stop policy、directive 解析 | `runtime/DESIGN.md` |
+| `runtime/` | ~5500 | Agent 主循环、turn iteration、stop policy、directive 解析（`loop.py` 已拆出 `loop_types`/`loop_helpers`/`loop_context` + 阶段方法,见 `runtime/DESIGN.md §4.7`）| `runtime/DESIGN.md` |
 | `agent_memory/` | ~3000 | 5 维记忆(short/mid/long/skill/user model)+ 召回 | `agent_memory/DESIGN.md` |
 | `hitl_core/` | ~4500 | Human-in-the-loop 引擎(中断、决策、批量、审计) | `hitl_core/DESIGN.md` |
 | `retrieval/` | ~2200 | BM25 + Embedding + Hybrid 检索框架,Meta tools | `retrieval/DESIGN.md` |
@@ -315,14 +315,13 @@ config.yaml
 | 优先级 | 项 | 影响范围 |
 |--------|-----|---------|
 | HIGH | `pragmatic_tools.py` 多 tool 是 stub | tools |
-| HIGH | `loop.py` 2634 行,应拆分(下 Sprint) | runtime |
 | MED | Multi-replica Redis pubsub 未实现 | hitl_core |
 | MED | Vector ANN(hnswlib)未接 | agent_memory + retrieval |
 | MED | SkillEvolver 不学失败 case | skills |
 | MED | Hooks 机制(PreToolUse/PostToolUse 等)未做 | hitl_core / runtime |
 | MED | Subagent sidechain isolation 未做 | runtime / chunk_queue |
 | LOW | LLMJudgeRetriever 未上线 | retrieval |
-| LOW | `context_budget_v2` 跟 v1 共存 | runtime |
+| —(设计如此) | `context_budget_v2` 与 v1 并存为两个可选策略(legacy/priority),非待迁移 | runtime |
 | LOW | hitl_core 缺单元测试目录 | hitl_core |
 | LOW | tools 缺单元测试目录 | tools |
 
@@ -338,7 +337,7 @@ config.yaml
 | ✅ L2 Snip 跨 turn tool_outputs 压缩 | `context_budget.try_snip_tool_outputs` + `loop.py` 两处 turn-start hook | runtime/§3.5, §4.7 |
 
 未做但准备好的(留下个 Sprint):
-- ⏳ `loop.py` 拆分(2634 行 → 5 个 file)— 设计已定,机械重构
+- ✅ `loop.py` 拆分(2026-05)— 已抽出 `loop_types.py` / `loop_helpers.py` / `loop_context.py`,`_stream_impl` 的 recall/skill/assemble/clarify/tools 阶段抽成 `(self, ctx)` 方法(1448 → ~875 行)。每步全量 audit+test 验证。详见 `runtime/DESIGN.md §4.7`
 
 各项零回归:default trust_mode=cautious 完全保留原行为。`snip_tool_outputs_char_budget=0` 完全关闭 Snip。`action_type` 未声明的 tool 继续走 LLM classify_destructive。**5/5 audits + 21/21 safety tests + retrieval eval gate 全 PASS**。
 
@@ -352,7 +351,7 @@ config.yaml
 | ✅ Hermes-style structured consolidation | `agent_memory/consolidation.py` template 切换 + 全链 wire(MemoryConsolidator → MemoryManager → MemoryAdapter → main.py)+ `config.{py,yaml}` | agent_memory/§3.4.1 |
 
 未做(评估后**主动跳过**,非 deferred):
-- ⏭ `loop.py` 拆分(2634 行 → 5 个 file)— **Sprint 1 + Sprint 2 都评估过两次**,结论:纯机械 refactor 在 chat session 内做风险大于收益(没有 e2e 测试覆盖 1300 行 `stream()`)。留给有 IDE + bisect 工具的环境单独做。
+- ✅ `loop.py` 拆分(2026-05,曾两次评估推迟)— 最终以"每步只抽一组 + 每步全量 audit+test"的节奏安全完成,并为澄清门/工具处理两个 async-generator 阶段补了针对性回归测试(`test_clarification_gate.py` / `test_handle_tools_phase.py`,后者含"破坏性工具未经批准不执行"的 HITL 安全断言)。详见 `runtime/DESIGN.md §4.7`。
 
 **Hooks 设计要点**:
 - 6 个事件:`PRE_TOOL_USE / POST_TOOL_USE / TURN_START / TURN_END(预留)/ SESSION_START / SESSION_END`
