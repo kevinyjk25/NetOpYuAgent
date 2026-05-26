@@ -111,6 +111,56 @@ class TestResumeDriverContract(unittest.TestCase):
             be._resume_driver = saved
             be._pending_resumptions.pop("s-buf", None)
 
+    def test_handle_cross_agent_resume_does_not_block_on_slow_driver(self):
+        # The callback receiver must SCHEDULE the resume turn and return at
+        # once — never block on the (30-60s) LLM synthesis turn, or the peer's
+        # POST /hitl_resolved times out mid-approval (the dc-stuck/lan-orphan
+        # bug). Returns True (scheduled); the answer arrives via the buffer
+        # once the background turn finishes.
+        import asyncio
+        import time
+        try:
+            import webui.backend as be   # needs fastapi
+        except ImportError as e:
+            raise unittest.SkipTest(f"webui.backend import needs fastapi: {e}")
+
+        async def _slow_driver(*, local_session_id, peer_agent, result_text,
+                               decision, correlation_id=""):
+            await asyncio.sleep(1.5)   # simulate a long synthesis turn
+            be._pending_resumptions.setdefault(local_session_id, []).append(
+                {"text": "final synthesized answer", "driven": True,
+                 "peer_agent": peer_agent}
+            )
+            return True
+
+        async def _go():
+            t0 = time.monotonic()
+            ok = await be.handle_cross_agent_resume(
+                local_session_id="s-fast", peer_agent="dc-agent",
+                result_text="granted", decision="approve",
+            )
+            dt = time.monotonic() - t0
+            # Returned fast (scheduled), not after the 1.5s driver.
+            self.assertTrue(ok)
+            self.assertLess(dt, 0.5, f"blocked {dt:.2f}s on slow driver")
+            # Buffer not populated yet (turn still running in background).
+            self.assertFalse(be._pending_resumptions.get("s-fast"))
+            # After the background turn completes, the answer is buffered.
+            await asyncio.sleep(1.8)
+            items = be._pending_resumptions.get("s-fast", [])
+            self.assertTrue(
+                any("final synthesized answer" in i["text"] for i in items),
+                "background resume turn must buffer its answer",
+            )
+
+        saved = be._resume_driver
+        be._resume_driver = _slow_driver
+        try:
+            asyncio.run(_go())
+        finally:
+            be._resume_driver = saved
+            be._pending_resumptions.pop("s-fast", None)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

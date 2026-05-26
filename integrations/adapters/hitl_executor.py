@@ -301,7 +301,7 @@ class HitlExecutor:
         }
         try:
             import httpx
-            async with httpx.AsyncClient(timeout=15.0) as client:
+            async with httpx.AsyncClient(timeout=30.0) as client:
                 resp = await client.post(callback_url, json=body)
             logger.info(
                 "cross-agent callback: POST %s → %s (interrupt=%s decision=%s)",
@@ -1182,6 +1182,9 @@ class HitlExecutor:
                     result_text=f"操作员拒绝了工具调用 `{tool_name}`,未执行。",
                     decision="reject",
                 )
+                await self._complete_inbound_by_interrupt(
+                    interrupt_id=_interrupt_id, decision="reject", result_text="",
+                )
                 return {"tool": tool_name, "decision": "reject", "chunks": _chunks}
 
             # APPROVE or EDIT — merge patch and invoke
@@ -1237,6 +1240,10 @@ class HitlExecutor:
             await self._maybe_callback_source_agent(
                 interrupt_id=_interrupt_id, result_text=result_text,
                 decision="approve",
+            )
+            await self._complete_inbound_by_interrupt(
+                interrupt_id=_interrupt_id, decision="approve",
+                result_text=result_text,
             )
             # Step: tool returned
             _emit({
@@ -1984,6 +1991,43 @@ class HitlExecutor:
             await self._task_store.save(task)
         except Exception as exc:
             logger.debug("inbound completion save failed: %s", exc)
+
+    async def _complete_inbound_by_interrupt(
+        self, *, interrupt_id: str, decision: str, result_text: str,
+    ) -> None:
+        """Mark a PENDING inbound-delegation task terminal once its HITL is
+        resolved by the operator.
+
+        Inbound delegations that hit a HITL are parked in PENDING with
+        metadata['awaiting_hitl_id'] = interrupt_id (see
+        _complete_inbound_delegation). execute() has already returned by the
+        time the operator decides, so without this the task would stay PENDING
+        forever and the delegating agent's view of the delegation never closes.
+        Called from _tool_call_resumer on both approve and reject.
+        """
+        if self._task_store is None or not interrupt_id:
+            return
+        from task.schemas import TaskState
+        from datetime import datetime, timezone
+        try:
+            pending = await self._task_store.list_pending()
+            for t in pending:
+                if (t.metadata or {}).get("awaiting_hitl_id") == interrupt_id:
+                    if decision == "reject":
+                        t.state = TaskState.FAILED
+                        t.error = "operator rejected the HITL action"
+                    else:
+                        t.state = TaskState.COMPLETED
+                        t.result = {"text": result_text}
+                    t.metadata.pop("awaiting_hitl_id", None)
+                    t.completed_at = datetime.now(timezone.utc).isoformat()
+                    await self._task_store.save(t)
+                    logger.info(
+                        "inbound delegation %s → %s after HITL %s (interrupt=%s)",
+                        t.task_id, t.state.value, decision, interrupt_id[:12],
+                    )
+        except Exception as exc:
+            logger.debug("inbound completion-by-interrupt failed: %s", exc)
 
     async def _fail_inbound_delegation(self, task, exc: BaseException) -> None:
         """Mark the inbound TaskDefinition as FAILED with the error message.

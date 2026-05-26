@@ -117,6 +117,9 @@ _session_sse_emit: dict[str, "Callable[[dict], None]"] = {}
 _pending_resumptions: dict[str, list[dict]] = {}
 # Set by create_webui_app so the module-level a2a callback can drive a turn.
 _resume_driver: "Optional[Callable]" = None
+# Strong refs to detached cross-agent resume tasks (asyncio holds only weak
+# refs; without this a fire-and-forget resume turn could be GC'd mid-flight).
+_resume_tasks: set = set()
 
 
 def register_resume_driver(fn) -> None:
@@ -130,8 +133,20 @@ async def handle_cross_agent_resume(
     *, local_session_id: str, peer_agent: str, result_text: str,
     decision: str, correlation_id: str = "",
 ) -> bool:
-    """Entry point invoked by the a2a /hitl_resolved endpoint. Drives the
-    active resume (A2). Returns True if a resume turn was driven."""
+    """Entry point invoked by the a2a /hitl_resolved endpoint.
+
+    SCHEDULES the active resume (A2) on a background task and returns
+    immediately. The resume turn drives a full LLM synthesis on THIS agent
+    (30-60s on a local model); the peer's callback POST must NOT block on it,
+    or the POST's HTTP timeout fires long before the turn finishes — leaving
+    the peer's resumer hung mid-approval and this agent's turn result orphaned
+    (the bug that left dc's inbound task stuck and lan never resuming).
+
+    Returns True when a resume was SCHEDULED (driver present), False when no
+    driver is registered (we buffer the raw result for next-turn merge-back).
+    The completed answer reaches the UI via _pending_resumptions + the
+    /chat/resumptions poll (and a live SSE push if the stream is still open).
+    """
     if _resume_driver is None:
         logger.warning(
             "handle_cross_agent_resume: no resume driver registered "
@@ -143,11 +158,33 @@ async def handle_cross_agent_resume(
             "correlation_id": correlation_id, "driven": False,
         })
         return False
-    return await _resume_driver(
-        local_session_id=local_session_id, peer_agent=peer_agent,
-        result_text=result_text, decision=decision,
-        correlation_id=correlation_id,
+
+    # Fire-and-forget: schedule the synthesis turn, return at once so the
+    # peer's POST /hitl_resolved gets a fast 200. The driver has its own
+    # try/except + logging, and buffers its answer into _pending_resumptions
+    # on completion, so a detached task losing its result is safe.
+    async def _run_resume() -> None:
+        try:
+            await _resume_driver(
+                local_session_id=local_session_id, peer_agent=peer_agent,
+                result_text=result_text, decision=decision,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # never let a detached task die silently
+            logger.exception(
+                "cross-agent resume task failed (session=%s peer=%s): %s",
+                local_session_id, peer_agent, exc,
+            )
+
+    import asyncio as _asyncio
+    _task = _asyncio.create_task(
+        _run_resume(), name=f"xa_resume_{(local_session_id or '?')[:8]}",
     )
+    # Keep a reference so the task isn't GC'd mid-flight (asyncio only holds
+    # a weak ref to tasks); drop it from the set when done.
+    _resume_tasks.add(_task)
+    _task.add_done_callback(_resume_tasks.discard)
+    return True
 
 
 def register_session_sse_emit(session_id: str, emit_fn) -> None:
