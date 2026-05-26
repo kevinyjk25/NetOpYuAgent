@@ -45,7 +45,7 @@ class TestOutboundDispatcherTerminalState(unittest.TestCase):
         # Look in the dispatch method
         i = self.src.find("async def dispatch")
         self.assertGreater(i, 0, "dispatch method not found")
-        block = self.src[i:i+8000]
+        block = self.src[i:i+12000]
         self.assertIn(
             "finally:", block,
             "dispatch() must update terminal state in a finally block",
@@ -57,7 +57,7 @@ class TestOutboundDispatcherTerminalState(unittest.TestCase):
 
     def test_dispatcher_marks_completed_on_success(self):
         i = self.src.find("async def dispatch")
-        block = self.src[i:i+8000]
+        block = self.src[i:i+12000]
         # The success path sets COMPLETED + writes result text
         self.assertIn(
             "TaskState.COMPLETED", block,
@@ -66,7 +66,7 @@ class TestOutboundDispatcherTerminalState(unittest.TestCase):
 
     def test_dispatcher_marks_failed_on_error(self):
         i = self.src.find("async def dispatch")
-        block = self.src[i:i+8000]
+        block = self.src[i:i+12000]
         self.assertIn(
             "TaskState.FAILED", block,
             "dispatch() must mark task FAILED when peer returns error",
@@ -76,7 +76,7 @@ class TestOutboundDispatcherTerminalState(unittest.TestCase):
         """Auditing requirement — terminal state must produce an
         audit record so the trail isn't broken."""
         i = self.src.find("async def dispatch")
-        block = self.src[i:i+8000]
+        block = self.src[i:i+12000]
         # Existing code already had write_audit(DISPATCHED); we add COMPLETED/FAILED
         self.assertIn(
             "TaskEventKind.COMPLETED", block,
@@ -88,7 +88,7 @@ class TestOutboundDispatcherTerminalState(unittest.TestCase):
         (PENDING with peer_hitl_pending flag) so the row clearly shows
         'still waiting on peer' rather than COMPLETED."""
         i = self.src.find("async def dispatch")
-        block = self.src[i:i+8000]
+        block = self.src[i:i+12000]
         self.assertIn(
             "peer_hitl_pending", block,
             "Peer HITL must keep outbound row in non-terminal state",

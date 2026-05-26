@@ -3451,6 +3451,8 @@ function _delFmtState(state) {
     completed:  {label: 'DONE',       color: '#4ade80'},
     failed:     {label: 'FAILED',     color: '#f87171'},
     cancelled:  {label: 'CANCELLED',  color: 'var(--dim)'},
+    awaiting_peer_hitl: {label: 'PEER HITL', color: '#a78bfa'},
+    waiting_hitl: {label: 'HITL', color: '#fbbf24'},
   };
   const k = String(state || '').toLowerCase();
   const m = map[k] || {label: k.toUpperCase() || '?', color: 'var(--dim)'};
@@ -3544,6 +3546,13 @@ async function refreshDelegations() {
       const hitlBadge = r.awaiting_hitl_id
         ? `<span style="color:#fbbf24;font-family:var(--mono);font-size:9px;margin-left:4px">⚠ awaiting local HITL</span>`
         : '';
+      // A2A Phase 3 (mode B): outbound delegation blocked on the PEER's
+      // operator. Read-only — approval happens on the peer's console, not
+      // here. Distinct wording from "awaiting local HITL" so the operator
+      // knows NOT to look for an approve button locally.
+      const peerHitlBadge = (r.peer_hitl_pending || r.state === 'awaiting_peer_hitl')
+        ? `<span style="color:#a78bfa;font-family:var(--mono);font-size:9px;margin-left:4px" title="Approve on ${peer}'s console — this delegation will resume automatically once ${peer}'s operator decides">⏳ awaiting ${peer} approval</span>`
+        : '';
 
       // Detail panel — only render when expanded (avoids cluttering scan view)
       let detailHtml = '';
@@ -3609,6 +3618,7 @@ async function refreshDelegations() {
             <span style="color:${arrowCol};font-family:var(--mono)">${arrow} ${peer}</span>
             ${forkedBadge}
             ${hitlBadge}
+            ${peerHitlBadge}
             <span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</span>
             ${stateBadge}
             <span style="color:var(--dim);font-family:var(--mono);font-size:9px;min-width:42px;text-align:right">${lat}</span>

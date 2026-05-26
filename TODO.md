@@ -271,27 +271,42 @@ Remaining real debt, by priority:
 - Cross-process SLA timer idempotency residual of #3 (process-restart half).
 
 ### Phase 3 — Cross-agent HITL passthrough
-- **Effort**: 2-3 weeks (reduced — provenance plumbing now done, see below)
-- **Status**: designed, not started; **provenance groundwork shipped in v13**
-- **Already done (de-risks Phase 3)**: HITL provenance now flows end-to-end
-  when a delegated peer raises a card — `task/delegation.py` stamps
-  `source_agent` / `source_session_id` / `source_query` into
-  `TaskDefinition.metadata`; `A2ATaskDispatcher.dispatch` packs it into the A2A
-  request `params.metadata`; `HitlExecutor.execute` extracts it into
-  `env_context`; `_raise_tool_hitl` / `_raise_tool_hitl_batch` /
-  `_raise_multi_mode` stamp the `HitlPayload` via
-  `_extract_delegation_provenance`. `HitlPayload` carries `source_agent` /
-  `source_session_id` fields (`test_delegation_provenance`). The peer operator's
-  card can already show "Delegated from <source_agent>".
-- **Remaining scope**: the *passthrough* itself — surface the peer's pending
-  card back on the ENTRY agent's UI (today the peer's own operator must
-  approve), via A2A `INPUT_REQUIRED` carrying the payload + a
-  `CrossAgentHitlBridge`; cross-agent correlation id for the joined audit;
-  timeout/cancel handling across the hop.
-- **Prereq**: Phase 2B stable for at least a week (now is).
-- **Complexity note**: failure modes (network flake / peer crash / operator
-  non-response / concurrent HITLs) are the bulk of the work — needs 5-8
-  integration test scenarios.
+- **Status**: **P3-a + P3-b DONE (2026-05)** — mode B (delegated-local HITL +
+  active resume) is end-to-end. P3-c (correlation audit chain) + P3-d
+  (passthrough mode C + failure-mode hardening + persistence) remain.
+- **Modes**: A=Local (✅ pre-existing), B=Delegated-local — peer's operator
+  approves, result flows back and the originator auto-resumes (✅ this round),
+  C=Passthrough — peer's card surfaced back to the entry agent for approval
+  there (❌ P3-d), D=Chained — one request, two HITLs across agents correlated
+  (partial — correlation_id plumbed, audit join in P3-c). Default = B.
+- **P3-a (done)**: `TaskState.AWAITING_PEER_HITL`; dispatcher marks the outbound
+  task with it + stamps `peer_agent` / `peer_interrupt_id`; lan-side read-only
+  "⏳ awaiting <peer> approval" badge in the Delegations tab (approval happens on
+  the peer's console, NOT locally).
+- **P3-b (done — the closed loop)**: `_unwrap_a2a_event` now translates the
+  peer's `input-required` A2A status (message=interrupt_id) into a
+  `hitl_interrupt` chunk carrying that id — **this closed the gap where the
+  interrupt_id was silently dropped, so the correlation could never form**.
+  `CrossAgentHitlBridge` (`task/inter/cross_agent_hitl.py`) correlates
+  `(peer_agent, interrupt_id)` ↔ the local awaiting session, and on the
+  delegated-to side maps `interrupt_id` → source-agent callback info. New A2A
+  endpoint `POST /api/v1/a2a/hitl_resolved` on the originator. On peer approval,
+  `HitlExecutor._tool_call_resumer` → `_maybe_callback_source_agent` resolves the
+  source agent's URL via the injected peer registry and POSTs the result back;
+  the originator's `handle_cross_agent_resume` injects it (H2 `enqueue_async_inject`
+  reuse) and **actively drives one synthesis turn (A2)**, buffering the answer
+  for the frontend `/chat/resumptions` poll (the original SSE has closed). Tests:
+  `test_cross_agent_hitl.py` (unwrap translation, full correlation chain,
+  double-resume guard, buffer-on-no-driver).
+- **Remaining — P3-c (med)**: thread `correlation_id` into the cross-agent audit
+  log so a request that chains lan-radius-HITL + dc-app-HITL (mode D) shows as
+  one joined trail.
+- **Remaining — P3-d (high)**: passthrough mode C; failure-mode hardening
+  (peer crash / operator non-response / callback POST failure → SLA watchdog
+  re-surface; lan session expired on callback); persist `CrossAgentHitlBridge`
+  + resumption buffer (today in-memory, lost on restart); auth/signing on the
+  `/hitl_resolved` endpoint (today basic validation: must match an awaiting
+  record); 5-8 live integration scenarios.
 
 ---
 
@@ -324,7 +339,18 @@ Remaining real debt, by priority:
 
 ---
 
+
+### Cross-domain tool misinvocation guidance (Phase 3 follow-up, B — deferred)
+- **Context**: the shared HITL watch-list once caused lan to raise a phantom HITL card for `dc_grant_app_access` (a dc-only tool). Fixed (option A) by gating watch-list HITL on the tool being in THIS agent's local registry — see `runtime/loop.py` CAP5 gate (`_needs_hitl = name in hitl_tool_names and name in ctx.tool_reg`) + same-name batch detection guard. Regression: `test_handle_tools_phase.py::test_watchlisted_tool_not_in_local_registry_does_not_raise_hitl`.
+- **Remaining (B)**: when the LLM names a tool that is NOT local but a known peer HAS it, proactively steer the LLM to `[DELEGATE:<peer>]` instead of letting it fall through to a plain "tool not registered" error. Today (post-A) a misinvoked cross-domain tool just errors and the LLM usually self-corrects to delegation on the next turn; B would make that explicit (e.g. inject guidance "tool X belongs to peer Y — use DELEGATE"). Needs peer-capability lookup in the tool-miss path. Do only if misinvocation proves frequent in practice.
+
 ## Done (kept briefly for reference, delete after a release cycle)
+
+- ✅ **Phantom cross-profile HITL fix** (2026-05) — the shared `hitl_tool_names` watch-list caused an agent to raise a HITL approval card for a tool it doesn't have (lan popping a card for dc-only `dc_grant_app_access`), which then failed in the resumer with "tool not registered" AND produced a duplicate card racing the delegated-to agent's real one (two-sided approval, dc task stuck pending, lan resume 404). Fixed in `runtime/loop.py`: watch-list HITL now requires the tool to be in THIS agent's local registry (`_needs_hitl = name in hitl_tool_names and name in ctx.tool_reg`), plus the same guard on same-name destructive batch detection. Confirmed via real two-agent run that the skill-routing (A+C) fix worked: dc correctly diagnosed alice's missing CRM role via dc_get_app_acl, and dc-side HITL on dc_grant_app_access fired correctly. Tests: `test_handle_tools_phase.py` (phantom-HITL case + local-tool-still-gates guard). Follow-up B (steer misinvoked cross-domain tool to DELEGATE) deferred.
+
+- ✅ **Cross-agent fault-scenario mock tools** (2026-05) — added the user/app access-control tools needed to mock "user alice cannot access app CRM" end-to-end across lan+dc. LAN (`profiles/lan`): `list_users`, `get_user_access` (RADIUS/802.1X/NAC/VLAN admission, read-only), `check_nac_policy`, `grant_user_access`/`revoke_user_access` (HITL). DC (`profiles/dc`): `dc_list_apps`, `dc_get_app_acl`, `dc_check_user_app_access` (read-only diagnostic), `dc_grant_app_access`/`dc_revoke_app_access` (HITL). Method 甲: queries read-only, only grant/revoke HITL-gated (dc grant fires the DC-side HITL = Phase 3 mode B). Datasets are consistent: alice is admitted on LAN but holds no CRM role on DC (the root cause). Watch-list + editable_hitl_tools updated; HITL safety-net warning softened for the now cross-profile watch-list; fixed a latent bug in audit_profiles check-5 (relative `tests/` path wasn't exempted). Test `test_access_scenario.py`. 223 tests pass.
+
+- ✅ **A2A Phase 3 P3-a + P3-b — cross-agent HITL mode B** (2026-05) — lan delegates to dc, dc raises a HITL approved on dc's console, result flows back and lan auto-resumes via an active synthesis turn. Closed the core gap: `_unwrap_a2a_event` was silently dropping the peer's `input-required` status so the interrupt_id never reached the originator — now translated into a `hitl_interrupt` chunk. New: `TaskState.AWAITING_PEER_HITL`, `CrossAgentHitlBridge`, A2A `/hitl_resolved` callback endpoint, `HitlExecutor._maybe_callback_source_agent` (registry-resolved POST back), webui active-resume driver + `/chat/resumptions` poll, lan read-only "awaiting peer approval" badge. Tests `test_cross_agent_hitl.py`. P3-c (audit chain) + P3-d (passthrough mode C + failure hardening + persistence + auth) remain. 215 tests pass.
 
 - ✅ **H2 async-HITL live bugs** (2026-05, from real lan-agent run) — two runtime-path bugs the static tests missed: (1) `_submit_hitl_decision` H2 follow-up raised `NameError: _message_history` — it is a module-level handler and cannot see create_webui_app's closure local; fixed by publishing `_message_history` into `services` and reading it from there (+ static scope-leak regression test `test_hitl_submit_scope.py`). (2) `query_radius_logs` demo autoreply `NoneType.deliver` — the lan tool resolved `services["hitl_router"]` (a stub-None key since the Item-2 legacy-hitl cleanup) instead of the real `hitl_core_router`; fixed to resolve hitl_core_* first (router + audit). Both verified; full suite 210 passed.
 

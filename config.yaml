@@ -115,6 +115,15 @@ tools:
     - drain_node
     - failover
     - delete_resource
+    # DC application access control (cross-agent HITL scenario). Only present
+    # in the dc profile's registry; harmless for lan (name never matches a
+    # lan tool). The grant/revoke writes are HITL-gated; queries are not.
+    - dc_grant_app_access
+    - dc_revoke_app_access
+    - dc_config_push
+    # LAN user network-admission control (cross-agent scenario)
+    - grant_user_access
+    - revoke_user_access
 
   # Type #2 edit-flavoured HITL: for these tools the operator can edit the
   # listed param keys before approving (instead of bare approve/reject).
@@ -125,6 +134,11 @@ tools:
     rollback_deploy:    [snapshot_id, reason]
     restart_service:    [service_name, graceful]
     push_config:        [config_lines, reason]
+    dc_grant_app_access: [role, reason]
+    dc_revoke_app_access: [reason]
+    dc_config_push:      [config_lines, reason]
+    grant_user_access:   [reason]
+    revoke_user_access:  [reason]
 
 
 # ── Pragmatic mode — real network device access ───────────────

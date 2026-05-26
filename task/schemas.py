@@ -20,7 +20,8 @@ from pydantic import BaseModel, Field
 class TaskState(str, Enum):
     PENDING       = "pending"
     RUNNING       = "running"
-    WAITING_HITL  = "waiting_hitl"
+    WAITING_HITL  = "waiting_hitl"     # this task is waiting on a LOCAL operator
+    AWAITING_PEER_HITL = "awaiting_peer_hitl"  # outbound delegation waiting on a PEER's operator (A2A Phase 3)
     WAITING_DEP   = "waiting_dep"      # waiting on dependency
     COMPLETED     = "completed"
     FAILED        = "failed"

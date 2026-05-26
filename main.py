@@ -572,6 +572,15 @@ async def build_services() -> dict[str, Any]:
                 logger.info("HitlExecutor: task_store wired for inbound delegation recording")
         except Exception as _ts_exc:
             logger.warning("HitlExecutor: task_store wiring skipped: %s", _ts_exc)
+        # A2A Phase 3 (P3-b): give the executor the peer registry + its own
+        # agent_id so that when a delegated HITL is resolved HERE, it can call
+        # the originating agent's /hitl_resolved endpoint to resume it (mode B).
+        try:
+            executor.set_peer_registry(registry)
+            executor._self_agent_id = cfg.agent.agent_id
+            logger.info("HitlExecutor: peer registry wired for cross-agent HITL callback")
+        except Exception as _pr_exc:
+            logger.warning("HitlExecutor: peer registry wiring skipped: %s", _pr_exc)
         # The core executor uses the external (already-patched) services
         # ["runtime_loop"] instance, which gets patched separately in
         # webui/backend.py at startup — no hitl_graph / runtime-loop patch here.
@@ -1217,15 +1226,22 @@ async def build_services() -> dict[str, Any]:
             try:
                 _registered = set(_tool_meta.keys())
                 _hitl_cfg   = set(getattr(cfg.tools, "hitl_tool_names", []) or [])
+                # hitl_tool_names is a shared, cross-profile watch-list: it may
+                # list tools that only exist in OTHER profiles (e.g. dc_* names
+                # while running the lan profile). Those aren't a coverage gap —
+                # the tool simply isn't in this agent's registry. Only names
+                # that look like they belong to THIS profile's domain but are
+                # missing indicate a real problem. We treat cross-profile names
+                # as expected and log them at debug level.
                 _missing    = sorted(_hitl_cfg - _registered)
                 _hits       = sorted(_hitl_cfg & _registered)
                 if _missing:
-                    logger.warning(
-                        "HITL safety-net: %d/%d tool names from cfg.tools.hitl_tool_names "
-                        "are NOT registered in mode=%s — they cannot fire HITL. "
-                        "Missing: %s. Active: %s",
-                        len(_missing), len(_hitl_cfg), cfg.mode,
-                        _missing, _hits,
+                    logger.info(
+                        "HITL safety-net: %d/%d watch-list names registered in "
+                        "mode=%s profile=%s (active: %s). %d name(s) belong to "
+                        "other profiles and are not in this registry (expected): %s",
+                        len(_hits), len(_hitl_cfg), cfg.mode, cfg.agent.profile,
+                        _hits, len(_missing), _missing,
                     )
                 else:
                     logger.info(

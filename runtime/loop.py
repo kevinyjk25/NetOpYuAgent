@@ -1350,7 +1350,19 @@ class AgentRuntimeLoop:
 
             # CAP 5: gate tool against HITL watch-list BEFORE execution
             # Only fires for REAL tools, not skill names (guarded above).
-            _needs_hitl = tool_name in self._cfg.hitl_tool_names
+            #
+            # The watch-list (cfg.hitl_tool_names) is shared across profiles, so
+            # it may name tools that belong to OTHER agents (e.g. dc_grant_app_access
+            # while running the lan profile). An agent must NOT raise a HITL card
+            # for a tool it does not actually have — otherwise it pops a phantom
+            # approval card and the resumer later fails with "tool not registered"
+            # (and, in cross-agent delegation, produces a duplicate card alongside
+            # the delegated-to agent's real one). So a watch-list hit only counts
+            # when the tool is in THIS agent's local registry. A cross-domain tool
+            # the LLM mistakenly names will fall through to normal execution and
+            # surface a plain "not registered" error, prompting delegation instead.
+            _needs_hitl = (tool_name in self._cfg.hitl_tool_names
+                           and tool_name in ctx.tool_reg)
             if not _needs_hitl and self._skill_catalog:
                 try:
                     # Only check HITL for a name if it is actually a registered tool
@@ -2334,6 +2346,7 @@ class AgentRuntimeLoop:
                 len(_all_parsed) >= 2
                 and all(_n == _all_parsed[0][0] for _n, _ in _all_parsed)
                 and _all_parsed[0][0] in self._cfg.hitl_tool_names
+                and _all_parsed[0][0] in tool_reg
             ):
                 # Looks like a TOOL_BATCH expansion (or a same-name multi
                 # [TOOL:] burst): all destructive, all same name. Keep all.

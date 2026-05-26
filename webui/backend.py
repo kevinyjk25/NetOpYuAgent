@@ -106,6 +106,50 @@ logger = logging.getLogger(__name__)
 _session_sse_emit: dict[str, "Callable[[dict], None]"] = {}
 
 
+# ── A2A Phase 3 (P3-b): cross-agent HITL resume ───────────────────────────
+# When a peer (e.g. dc) resolves a delegated HITL, it calls this agent's
+# /api/v1/a2a/hitl_resolved endpoint. That endpoint hands the result here so
+# we can (1) inject it into the originating session and (2) ACTIVELY drive a
+# synthesis turn (A2 — no user input needed) and buffer the answer for the
+# frontend's poll. Buffer is in-memory (persistence deferred to P3-d).
+#
+# session_id -> list of {text, peer_agent, correlation_id, ts} resumption items
+_pending_resumptions: dict[str, list[dict]] = {}
+# Set by create_webui_app so the module-level a2a callback can drive a turn.
+_resume_driver: "Optional[Callable]" = None
+
+
+def register_resume_driver(fn) -> None:
+    """Called by create_webui_app to publish the active-resume coroutine
+    (drives one synthesis turn for a session and buffers the answer)."""
+    global _resume_driver
+    _resume_driver = fn
+
+
+async def handle_cross_agent_resume(
+    *, local_session_id: str, peer_agent: str, result_text: str,
+    decision: str, correlation_id: str = "",
+) -> bool:
+    """Entry point invoked by the a2a /hitl_resolved endpoint. Drives the
+    active resume (A2). Returns True if a resume turn was driven."""
+    if _resume_driver is None:
+        logger.warning(
+            "handle_cross_agent_resume: no resume driver registered "
+            "(session=%s peer=%s) — buffering raw result only",
+            local_session_id, peer_agent,
+        )
+        _pending_resumptions.setdefault(local_session_id, []).append({
+            "text": result_text, "peer_agent": peer_agent,
+            "correlation_id": correlation_id, "driven": False,
+        })
+        return False
+    return await _resume_driver(
+        local_session_id=local_session_id, peer_agent=peer_agent,
+        result_text=result_text, decision=decision,
+        correlation_id=correlation_id,
+    )
+
+
 def register_session_sse_emit(session_id: str, emit_fn) -> None:
     """Called by chat_stream while its SSE stream is alive."""
     if session_id:
@@ -454,6 +498,81 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         _push_history(session_id, {"role": "user", "content": req.query}, _message_history)
         _push_history(session_id, msg, _message_history)
         return JSONResponse(content=msg)
+
+    # ── A2A Phase 3 (P3-b): active cross-agent HITL resume (A2) ────────
+    # Drives ONE synthesis turn for a session after a peer resolved a
+    # delegated HITL, with no user input, and buffers the answer for the
+    # frontend poll (/chat/resumptions). The peer's result is injected via
+    # the existing H2 async-inject queue so the loop's turn-start drain
+    # merges it into confirmed_facts before assembling the synthesis prompt.
+    async def _drive_cross_agent_resume(
+        *, local_session_id: str, peer_agent: str, result_text: str,
+        decision: str, correlation_id: str = "",
+    ) -> bool:
+        _executor = services.get("executor")
+        if _executor is None or not local_session_id:
+            logger.warning("cross-agent resume: no executor / session — skip")
+            return False
+        # 1. Inject the peer's result as a confirmed fact (H2 reuse).
+        try:
+            from runtime.loop import enqueue_async_inject
+            _fact = (
+                f"[跨 Agent 委派结果 from {peer_agent} — operator {decision}] "
+                f"{result_text}".strip()
+            )
+            enqueue_async_inject(local_session_id, _fact)
+        except Exception as _inj_exc:
+            logger.warning("cross-agent resume: inject failed: %s", _inj_exc)
+        # 2. Actively drive ONE synthesis turn; collect the answer.
+        _parts: list[str] = []
+        async def _collect(ch: dict) -> None:
+            tok = ch.get("token") or ""
+            if tok:
+                _parts.append(str(tok))
+        _synth_q = (
+            f"[系统] 委派到 {peer_agent} 的人在环审批已完成,结果已注入上下文。"
+            f"请综合本地已有信息与该结果,给出针对原始请求的最终完整回答。"
+        )
+        try:
+            await _executor.execute_query(
+                query=_synth_q,
+                session_id=local_session_id,
+                confirmed_facts=[],
+                env_context={"_cross_agent_resume": True},
+                on_chunk=_collect,
+            )
+        except Exception as _ex:
+            logger.exception("cross-agent resume: synthesis turn failed: %s", _ex)
+            return False
+        _answer = "".join(_parts).strip()
+        # 3. Buffer for the frontend poll + push to a live SSE if still open.
+        _pending_resumptions.setdefault(local_session_id, []).append({
+            "text": _answer, "peer_agent": peer_agent,
+            "correlation_id": correlation_id, "decision": decision,
+            "driven": True,
+        })
+        try:
+            emit_async_hitl_notify(local_session_id, {
+                "type": "cross_agent_resume", "peer_agent": peer_agent,
+                "text": _answer, "correlation_id": correlation_id,
+            })
+        except Exception:
+            pass
+        logger.info(
+            "cross-agent resume: drove synthesis turn for session=%s peer=%s "
+            "answer_chars=%d", local_session_id[:12], peer_agent, len(_answer),
+        )
+        return True
+
+    register_resume_driver(_drive_cross_agent_resume)
+
+    @app.get("/chat/resumptions")
+    async def get_resumptions(session_id: str) -> JSONResponse:
+        """Frontend polls this to pick up cross-agent HITL resume answers that
+        arrived after the original SSE stream closed (A2A Phase 3). Returns +
+        clears the buffered items for the session."""
+        items = _pending_resumptions.pop(session_id, [])
+        return JSONResponse(content=items)
 
     @app.post("/chat/stream")
     async def chat_stream(
@@ -1404,6 +1523,13 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 # this delegation is waiting on a local operator decision —
                 # the UI should highlight it.
                 "awaiting_hitl_id": md.get("awaiting_hitl_id") or None,
+                # A2A Phase 3: when state=awaiting_peer_hitl, this outbound
+                # delegation is blocked on the PEER's operator (mode B —
+                # approval happens on the peer's console, NOT here). The UI
+                # renders a read-only "⏳ waiting for <peer> approval" item
+                # and must NOT offer approve/reject locally.
+                "peer_hitl_pending":  bool(md.get("peer_hitl_pending", False)),
+                "peer_interrupt_id":  md.get("peer_interrupt_id") or None,
             })
         # Newest first — operators usually want the most recent delegation
         out.sort(key=lambda d: d.get("created_at") or "", reverse=True)

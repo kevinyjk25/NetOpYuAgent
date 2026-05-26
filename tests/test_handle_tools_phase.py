@@ -91,5 +91,58 @@ class TestHandleToolsPhase(unittest.TestCase):
         asyncio.run(run())
 
 
+    def test_watchlisted_tool_not_in_local_registry_does_not_raise_hitl(self):
+        # A2A cross-profile fix: a tool on the shared watch-list but NOT in this
+        # agent's local registry must NOT raise a HITL card (otherwise lan pops
+        # a phantom approval for a dc-only tool, and the resumer later fails with
+        # "tool not registered"). It should fall through to normal execution.
+        async def run():
+            # dc_grant_app_access is watch-listed but NOT in ctx.tool_reg
+            # (which only has get_status + edit_device_config).
+            loop = _loop(hitl_names=frozenset({"dc_grant_app_access", "edit_device_config"}))
+            ctx = _ctx(query="grant alice access to crm")
+
+            executed = {"called": False}
+            async def _stub_exec(tool_name, args, registry):
+                executed["called"] = True
+                return f"RESULT[{tool_name}]"
+            loop._execute_tool = _stub_exec  # type: ignore
+
+            chunks = []
+            async for c in loop._handle_tools(
+                ctx,
+                [("dc_grant_app_access", {"user_id": "alice", "app_id": "crm"})],
+                llm_response="[TOOL:dc_grant_app_access]",
+            ):
+                chunks.append(c)
+
+            # No HITL card / terminal sentinel for a tool this agent doesn't have.
+            self.assertFalse(any(c.get("stop_hitl") for c in chunks),
+                              f"phantom HITL raised for non-local tool: {chunks}")
+            self.assertFalse(any(c.get("_tools_terminal") for c in chunks))
+            # It fell through to execution (where a real agent would get a
+            # "not registered" error from the router, prompting delegation).
+            self.assertTrue(executed["called"])
+        asyncio.run(run())
+
+    def test_local_watchlisted_tool_still_raises_hitl(self):
+        # Guard: the fix must NOT weaken HITL for tools the agent DOES have.
+        async def run():
+            loop = _loop(hitl_names=frozenset({"edit_device_config"}))
+            ctx = _ctx(query="edit vlan")  # edit_device_config IS in tool_reg
+            async def _stub_exec(tool_name, args, registry):
+                return "SHOULD NOT RUN"
+            loop._execute_tool = _stub_exec  # type: ignore
+            chunks = []
+            async for c in loop._handle_tools(
+                ctx, [("edit_device_config", {"config_lines": ["vlan 10"]})],
+                llm_response="[TOOL:edit_device_config]",
+            ):
+                chunks.append(c)
+            self.assertTrue(any(c.get("stop_hitl") for c in chunks),
+                            "local watch-listed tool must still raise HITL")
+        asyncio.run(run())
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
