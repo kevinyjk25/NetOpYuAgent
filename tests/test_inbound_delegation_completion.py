@@ -19,6 +19,11 @@ real in-memory TaskStore — no LLM, no httpx, no event queue.
 import asyncio
 import unittest
 
+import pytest
+# task.schemas → pydantic; skip the whole module if pydantic isn't installed
+# (e.g. a minimal CI runner) rather than erroring at collection time.
+pytest.importorskip("pydantic")
+
 from task.schemas import TaskDefinition, TaskState
 from task.intra.store import TaskStore
 from integrations.adapters.hitl_executor import HitlExecutor

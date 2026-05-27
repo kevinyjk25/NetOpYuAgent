@@ -18,6 +18,11 @@ chain would silently break.
 """
 import unittest
 
+import pytest
+# task.* and hitl_core.* pull in pydantic; skip the whole module if it's
+# absent (minimal CI runner) instead of failing collection with ImportError.
+pytest.importorskip("pydantic")
+
 from task.inter.coordinator import A2ATaskDispatcher
 from task.inter.cross_agent_hitl import (
     CrossAgentHitlBridge, get_cross_agent_hitl_bridge,
