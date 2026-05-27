@@ -35,6 +35,12 @@ _CALLABLES = {
     "failover":               _tools.failover,
     "delete_resource":        _tools.delete_resource,
     "query_radius_logs":      _tools.query_radius_logs,   # H2 async-HITL demo (2026-05)
+    # User / network-access control (cross-agent HITL scenario, 2026-05)
+    "list_users":             _tools.list_users,
+    "get_user_access":        _tools.get_user_access,
+    "check_nac_policy":       _tools.check_nac_policy,
+    "grant_user_access":      _tools.grant_user_access,
+    "revoke_user_access":     _tools.revoke_user_access,
 }
 
 # Capabilities advertised to peers in the AgentCard (used by Phase-2B

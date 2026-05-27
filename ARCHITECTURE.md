@@ -10,7 +10,7 @@
 
 | 模块 | 行数 | 一句话职责 | 详细文档 |
 |------|-----:|----------|----------|
-| `runtime/` | ~5500 | Agent 主循环、turn iteration、stop policy、directive 解析 | `runtime/DESIGN.md` |
+| `runtime/` | ~5500 | Agent 主循环、turn iteration、stop policy、directive 解析（`loop.py` 已拆出 `loop_types`/`loop_helpers`/`loop_context` + 阶段方法,见 `runtime/DESIGN.md §4.7`）| `runtime/DESIGN.md` |
 | `agent_memory/` | ~3000 | 5 维记忆(short/mid/long/skill/user model)+ 召回 | `agent_memory/DESIGN.md` |
 | `hitl_core/` | ~4500 | Human-in-the-loop 引擎(中断、决策、批量、审计) | `hitl_core/DESIGN.md` |
 | `retrieval/` | ~2200 | BM25 + Embedding + Hybrid 检索框架,Meta tools | `retrieval/DESIGN.md` |
@@ -315,14 +315,13 @@ config.yaml
 | 优先级 | 项 | 影响范围 |
 |--------|-----|---------|
 | HIGH | `pragmatic_tools.py` 多 tool 是 stub | tools |
-| HIGH | `loop.py` 2634 行,应拆分(下 Sprint) | runtime |
 | MED | Multi-replica Redis pubsub 未实现 | hitl_core |
 | MED | Vector ANN(hnswlib)未接 | agent_memory + retrieval |
 | MED | SkillEvolver 不学失败 case | skills |
 | MED | Hooks 机制(PreToolUse/PostToolUse 等)未做 | hitl_core / runtime |
 | MED | Subagent sidechain isolation 未做 | runtime / chunk_queue |
 | LOW | LLMJudgeRetriever 未上线 | retrieval |
-| LOW | `context_budget_v2` 跟 v1 共存 | runtime |
+| —(设计如此) | `context_budget_v2` 与 v1 并存为两个可选策略(legacy/priority),非待迁移 | runtime |
 | LOW | hitl_core 缺单元测试目录 | hitl_core |
 | LOW | tools 缺单元测试目录 | tools |
 
@@ -338,7 +337,7 @@ config.yaml
 | ✅ L2 Snip 跨 turn tool_outputs 压缩 | `context_budget.try_snip_tool_outputs` + `loop.py` 两处 turn-start hook | runtime/§3.5, §4.7 |
 
 未做但准备好的(留下个 Sprint):
-- ⏳ `loop.py` 拆分(2634 行 → 5 个 file)— 设计已定,机械重构
+- ✅ `loop.py` 拆分(2026-05)— 已抽出 `loop_types.py` / `loop_helpers.py` / `loop_context.py`,`_stream_impl` 的 recall/skill/assemble/clarify/tools 阶段抽成 `(self, ctx)` 方法(1448 → ~875 行)。每步全量 audit+test 验证。详见 `runtime/DESIGN.md §4.7`
 
 各项零回归:default trust_mode=cautious 完全保留原行为。`snip_tool_outputs_char_budget=0` 完全关闭 Snip。`action_type` 未声明的 tool 继续走 LLM classify_destructive。**5/5 audits + 21/21 safety tests + retrieval eval gate 全 PASS**。
 
@@ -352,7 +351,7 @@ config.yaml
 | ✅ Hermes-style structured consolidation | `agent_memory/consolidation.py` template 切换 + 全链 wire(MemoryConsolidator → MemoryManager → MemoryAdapter → main.py)+ `config.{py,yaml}` | agent_memory/§3.4.1 |
 
 未做(评估后**主动跳过**,非 deferred):
-- ⏭ `loop.py` 拆分(2634 行 → 5 个 file)— **Sprint 1 + Sprint 2 都评估过两次**,结论:纯机械 refactor 在 chat session 内做风险大于收益(没有 e2e 测试覆盖 1300 行 `stream()`)。留给有 IDE + bisect 工具的环境单独做。
+- ✅ `loop.py` 拆分(2026-05,曾两次评估推迟)— 最终以"每步只抽一组 + 每步全量 audit+test"的节奏安全完成,并为澄清门/工具处理两个 async-generator 阶段补了针对性回归测试(`test_clarification_gate.py` / `test_handle_tools_phase.py`,后者含"破坏性工具未经批准不执行"的 HITL 安全断言)。详见 `runtime/DESIGN.md §4.7`。
 
 **Hooks 设计要点**:
 - 6 个事件:`PRE_TOOL_USE / POST_TOOL_USE / TURN_START / TURN_END(预留)/ SESSION_START / SESSION_END`
@@ -577,7 +576,30 @@ curl http://localhost:8001/webui/system/peers | jq
 
 **CI**:7/7 audits + 128 tests(117 baseline + 11 delegation)。
 
-### 8.8 Peer-aware prompt(2026-05)
+### 8.8 Phase 3 — 跨 agent HITL passthrough,mode B(2026-05,P3-a + P3-b 完成)
+
+**场景**:在 lan 问"用户 X 访问应用 Y 失败"。radius 认证权限在 lan(lan 侧 HITL),应用访问权限在 dc(dc 侧 HITL)。dc 的应用权限审批必须**在 dc 侧**完成(委派目标侧),而非 lan。审批后结果要自动回流 lan 续跑合成最终答案。
+
+**四种模式**:A=Local(lan 本地,既有);B=Delegated-local(dc 审批,结果回流 lan 续跑,**本期**);C=Passthrough(dc 卡片回 lan 审批,P3-d);D=Chained(一个请求串两个 HITL,correlation_id 已铺设,审计 join 在 P3-c)。默认 B。
+
+**修复的核心 gap**:`_unwrap_a2a_event` 之前**静默丢弃** peer 的 `input-required` 状态事件,导致 dc 的 interrupt_id 永远到不了发起方,跨 agent 关联根本无法建立。现在把它翻译成带 interrupt_id 的 `hitl_interrupt` chunk。
+
+**闭环机制(异步回调,非长连接)**:dc raise 本地 HITL 并记录 bridge(interrupt_id→source 回调信息)→ 回 `INPUT_REQUIRED` 关流 → lan 标 `AWAITING_PEER_HITL` + 注册 awaiting record(同 interrupt_id 关联)+ 给部分答案关流 →〔dc 操作员审批〕→ dc `_tool_call_resumer` 产出结果 → `_maybe_callback_source_agent` 经 registry 解析 lan URL 并 `POST /api/v1/a2a/hitl_resolved` → lan 校验 awaiting record → `handle_cross_agent_resume`:`enqueue_async_inject`(复用 H2)+ **主动驱动一轮合成(A2)** → 结果存 resumption 缓冲 → 前端轮询 `/chat/resumptions` 取最终答案。
+
+| 改动 | 文件 |
+|------|------|
+| `TaskState.AWAITING_PEER_HITL` | `task/schemas.py` |
+| dispatcher 标新状态 + 捕获 peer interrupt_id + 注册 awaiting record;`_unwrap_a2a_event` 翻译 input-required→hitl_interrupt | `task/inter/coordinator.py` |
+| `CrossAgentHitlBridge`(双向关联,double-resume 守卫;持久化留 P3-d) | `task/inter/cross_agent_hitl.py`(新) |
+| dc raise 委派 HITL 时记 bridge inbound;`_maybe_callback_source_agent`(registry 解析 URL + POST 回调,失败仅告警不抛);`set_peer_registry` 注入 | `integrations/adapters/hitl_executor.py` |
+| A2A `POST /hitl_resolved` 回调端点(基本校验:须匹配 awaiting record;auth 留 P3-d) | `a2a/server.py` |
+| 主动续跑驱动 + resumption 缓冲 + `/chat/resumptions` 轮询端点 | `webui/backend.py` |
+| lan 只读"⏳ awaiting <peer> approval"徽章 + `awaiting_peer_hitl` 状态色 | `webui/index.html` |
+| 注入 peer registry + self agent_id | `main.py` |
+
+**模块独立性**:`runtime/loop.py` 不 import 任何上述跨 agent 模块;回调/续跑都靠注入与 lazy import,`audit_module_independence` 持续绿。
+
+### 8.9 Peer-aware prompt(2026-05)
 
 **起因**:Phase 2B 加了 `[DELEGATE:]` directive + capability 路由,但**实测**(LAN agent 收到 `spine-1 的 BGP EVPN 邻居状态`)LLM 没委派给 dc-agent,而是 5 个 turn 反复试 `syslog_search` → `list_tools` → `get_device_config` → `list_devices`,最后说"spine-1 not found"。
 

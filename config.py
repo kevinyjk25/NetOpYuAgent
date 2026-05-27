@@ -140,6 +140,10 @@ class OpenAPIConfig:
 class ToolsConfig:
     mcp: MCPConfig; openapi: OpenAPIConfig; hitl_tool_names: list[str]
     schema_validation_enabled: bool = True   # validate args via schema/ before tool dispatch
+    # Per-business map: tool name → editable param keys (Type #2 edit-HITL).
+    # Empty in L0; the active profile (L1) supplies it. e.g. network profile:
+    #   {"edit_device_config": ["config_lines", "reason"]}
+    editable_hitl_tools: dict = field(default_factory=dict)
 
 @dataclass
 class HITLSLAConfig:
@@ -620,6 +624,13 @@ class SkillOrchestrationConfig:
     evolver_feedback_interval_s: int    = 300   # how often to scan (seconds)
     evolver_feedback_min_uses:   int    = 3     # min observations before feedback
     evolver_dormant_threshold:   float  = 0.6   # dormant_count/use_count above this → feedback
+    # Master switch for whether the self-improvement loop is allowed to MUTATE
+    # the live skill catalog. True (default) = auto-apply feedback patches and
+    # newly-created skills (gated by the A/B compliance bench). False =
+    # "suggest-only": the loop still runs, computes patches/new skills, records
+    # them in version history + logs for review, but does NOT touch the live
+    # catalog. Flip to False in production until auto-evolution is trusted.
+    auto_evolve_apply:           bool   = True
 
 @dataclass
 class StreamingConfig:
@@ -1170,6 +1181,7 @@ def _load_skill_orchestration_config(s: dict) -> "SkillOrchestrationConfig":
         evolver_feedback_interval_s = _env_int  ("SKILL_EVOLVER_INTERVAL",        s.get("evolver_feedback_interval_s", 300)),
         evolver_feedback_min_uses   = _env_int  ("SKILL_EVOLVER_MIN_USES",        s.get("evolver_feedback_min_uses",     3)),
         evolver_dormant_threshold   = _env_float("SKILL_EVOLVER_DORMANT_THR",     s.get("evolver_dormant_threshold",   0.6)),
+        auto_evolve_apply           = _env_bool ("SKILL_AUTO_EVOLVE_APPLY",       s.get("auto_evolve_apply",           True)),
     )
 
 
@@ -1208,6 +1220,11 @@ def load(config_path: str = "config.yaml") -> AppConfig:
         hitl_tool_names = [str(x) for x in yaml_ht]
     else:
         hitl_tool_names = [x.strip() for x in str(yaml_ht).split(",") if x.strip()]
+
+    # editable_hitl_tools: { tool_name: [param_keys] } — business-specific,
+    # supplied by the active profile's config block. Empty default keeps L0 clean.
+    _eht = t.get("editable_hitl_tools", {}) or {}
+    editable_hitl_tools = {str(k): [str(x) for x in (v or [])] for k, v in _eht.items()} if isinstance(_eht, dict) else {}
 
     # agent_urls
     yaml_ag = rg.get("agent_urls", "") or ""
@@ -1295,6 +1312,7 @@ def load(config_path: str = "config.yaml") -> AppConfig:
                 token_env = _env_str ("OPENAPI_TOKEN_ENV",to.get("token_env", "NETOPS_API_TOKEN")),
             ),
             hitl_tool_names=hitl_tool_names,
+            editable_hitl_tools=editable_hitl_tools,
         ),
         hitl=HITLConfig(
             confidence_threshold   = _env_float("HITL_CONFIDENCE_THRESHOLD", h.get("confidence_threshold", 0.75)),

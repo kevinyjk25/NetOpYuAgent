@@ -63,6 +63,7 @@ from .coreference import (
     DEFAULT_DEVICE_PATTERN,
     DEFAULT_DEVICE_TOOL_SIGNATURES,
     build_default_device_coreferencer,
+    build_neutral_coreferencer,
 )
 from .pipeline import (
     HitlPipeline,
@@ -156,6 +157,7 @@ __all__ = [
     "DEFAULT_DEVICE_PATTERN",
     "DEFAULT_DEVICE_TOOL_SIGNATURES",
     "build_default_device_coreferencer",
+    "build_neutral_coreferencer",
     # Schema
     "AuditEventKind",
     "BatchPolicy",

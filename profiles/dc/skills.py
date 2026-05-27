@@ -71,4 +71,42 @@ SKILLS: dict[str, dict[str, Any]] = {
             {"args": {"pool": "web-prod"}, "note": "Check web-prod pool health"},
         ],
     },
+
+    "dc_app_access_diagnose": {
+        "name": "DC Application Access Diagnose",
+        "purpose": (
+            "Diagnose why a user cannot access a data-center APPLICATION — this "
+            "is an application-layer ACCESS/PERMISSION problem (RBAC/ACL), NOT a "
+            "network path / VNI / BGP-EVPN problem."
+        ),
+        "risk_level": "low",
+        "requires_hitl": False,
+        "tags": ["dc", "application", "access", "permission", "rbac", "troubleshoot"],
+        "description": (
+            "Use this when a user reports they cannot access / are denied / cannot "
+            "reach a specific application (e.g. CRM). The cause is almost always "
+            "application-layer access control, so check PERMISSIONS FIRST and only "
+            "fall back to network diagnostics if access is confirmed granted. "
+            "Procedure, in order: "
+            "(1) dc_check_user_app_access(user_id, app_id) — does the user hold any "
+            "role granting access? This is the primary check and usually reveals the "
+            "root cause directly. "
+            "(2) If denied, dc_get_app_acl(app_id) — inspect which roles grant access "
+            "and who holds them, to decide the right role to assign. "
+            "(3) If the user legitimately needs access, dc_grant_app_access(user_id, "
+            "app_id, role) to grant the missing role — this is a destructive change "
+            "and requires operator approval (HITL). "
+            "Only if access is already granted but the app is still unreachable should "
+            "you escalate to network-path diagnostics (dc_path_troubleshoot)."
+        ),
+        "parameters": {
+            "user_id": "User reporting the access failure (e.g. alice)",
+            "app_id":  "Application id (e.g. crm, wiki, payroll, grafana)",
+        },
+        "returns": "Access verdict (allowed/denied), roles held, root cause, remediation",
+        "tool_deps": ["dc_check_user_app_access", "dc_get_app_acl", "dc_list_apps", "dc_grant_app_access"],
+        "examples": [
+            {"args": {"user_id": "alice", "app_id": "crm"}, "note": "Why can't alice reach CRM"},
+        ],
+    },
 }

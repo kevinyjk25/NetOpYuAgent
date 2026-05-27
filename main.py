@@ -128,18 +128,27 @@ async def build_services() -> dict[str, Any]:
     logger.info("Memory module ready (agent_memory backend)")
 
     # ── 2. HITL ──────────────────────────────────────────────────────────────
-    # HITL_BACKEND env var picks which implementation to wire up:
-    #   "langgraph" (default) — original hitl/* + LangGraph StateGraph
-    #   "core"               — new hitl_core/ + integrations/hitl_executor
-    # Both backends export the same external API surface (HitlRouter +
-    # ITOpsHitlAgentExecutor), so the rest of main.py and webui/backend
-    # don't change. Switch via:  HITL_BACKEND=core python main.py
+    # This build ships a single HITL backend: the in-house pipeline at
+    # hitl_core/ + integrations/adapters/hitl_executor.py. The original
+    # LangGraph-based `hitl/*` package was a thin schema stub whose
+    # implementation modules were never packaged, so it has been fully
+    # retired. The HITL_BACKEND env var is retained ONLY so a stale
+    # deployment script setting `HITL_BACKEND=langgraph` fails with a clear
+    # message instead of an opaque ImportError; the only accepted value is
+    # "core" (the default).
     import os as _os
-    _hitl_backend = (_os.getenv("HITL_BACKEND") or "langgraph").lower()
-    logger.info("HITL backend selected: %s", _hitl_backend)
+    _hitl_backend = (_os.getenv("HITL_BACKEND") or "core").lower()
+    if _hitl_backend != "core":
+        raise RuntimeError(
+            "HITL_BACKEND=%r is not available: the legacy LangGraph hitl/* "
+            "backend was retired and its modules are not part of this build. "
+            "Unset HITL_BACKEND or set it to 'core' (the only supported "
+            "backend)." % _hitl_backend
+        )
+    logger.info("HITL backend: core (hitl_core/)")
 
-    if _hitl_backend == "core":
-        # New path — hitl_core
+    if True:
+        # hitl_core path (the only path)
         from hitl_core import (
             HitlPipeline, HitlRouter, InMemoryCheckpointStore,
             AuditLogger, InMemoryAuditSink, FileAuditSink,
@@ -227,21 +236,6 @@ async def build_services() -> dict[str, Any]:
         logger.info("HITL module ready (backend=core, %d step(s) wired)",
                     len(hitl_core_pipeline._steps))
 
-    else:
-        # Legacy LangGraph backend (HITL_BACKEND != "core") has been retired
-        # in this build. The `hitl/` package was a thin schema stub and the
-        # implementation modules (hitl/graph.py, hitl/router.py, hitl/review.py,
-        # hitl/triggers.py, etc.) were never packaged here. Attempting to
-        # construct it would explode with an opaque ImportError on
-        # `from hitl import HitlAuditService`. Fail explicitly instead so
-        # operators understand the choice.
-        raise NotImplementedError(
-            "HITL_BACKEND=%r requires the legacy LangGraph hitl/* package, "
-            "which is not part of this build. Set HITL_BACKEND=core (the "
-            "default) to use the in-house HITL pipeline at hitl_core/."
-            % _hitl_backend
-        )
-
     # ── 3. Registry ──────────────────────────────────────────────────────────
     from registry import create_registry, RegistryConfig as RegCfg
     from a2a.agent_card import get_agent_card
@@ -313,15 +307,14 @@ async def build_services() -> dict[str, Any]:
     )
 
     # ── 4. Task module ───────────────────────────────────────────────────────
-    # Task system needs a hitl_router. In core mode we don't have the legacy
-    # router, but task_system uses it only for register/decide which we can
-    # adapter-shim. For now, in core mode we pass None and let the task
-    # system gracefully degrade (HITL escalation in tasks goes through the
-    # core router via the executor instead).
+    # The task system takes a hitl_router only for register/decide. In the
+    # core backend there is no separate task-level router: HITL escalation in
+    # tasks goes through the core router via the executor, so we pass None and
+    # let the task system gracefully degrade.
     from task import create_task_system
     task_system = await create_task_system(
-        hitl_router = (hitl_router if _hitl_backend != "core" else None),
-        review_svc  = (review_service if _hitl_backend != "core" else None),
+        hitl_router = None,
+        review_svc  = None,
         registry    = registry,
     )
     services["task_system"] = task_system
@@ -346,27 +339,17 @@ async def build_services() -> dict[str, Any]:
         logger.warning("Delegation hook setup failed: %s", _dlg_exc)
 
     # ── 5. A2A executor ──────────────────────────────────────────────────────
-    if _hitl_backend == "core":
-        # New executor — built later, after llm_engine + tool_registry are
-        # available (section 6). Stub the slot for now so any reference
-        # to services["executor"] before then errors clearly.
-        services["executor"] = None
-        logger.info("A2A executor (core) — deferred to after LLM + tool wiring")
-    else:
-        # Unreachable: the earlier section-2 else-branch already raises
-        # NotImplementedError for non-core backends, so we never get here.
-        # Kept as a defense-in-depth guard in case someone refactors the
-        # earlier branch without realising this depends on it.
-        raise NotImplementedError(
-            "Legacy `hitl.ITOpsHitlAgentExecutor` not packaged in this build; "
-            "see the section-2 HITL_BACKEND guard above."
-        )
+    # New executor — built later, after llm_engine + tool_registry are
+    # available (section 6). Stub the slot for now so any reference to
+    # services["executor"] before then errors clearly.
+    services["executor"] = None
+    logger.info("A2A executor (core) — deferred to after LLM + tool wiring")
 
     # ── 6. Integrations ──────────────────────────────────────────────────────
     try:
         from integrations import (
             MCPClient, OpenAPIClient, LLMEngine, ToolRouter,
-            patch_runtime_loop, patch_hitl_graph,
+            patch_runtime_loop,
         )
         from tools import make_read_stored_result_tool
         from runtime import ToolResultStore
@@ -386,7 +369,7 @@ async def build_services() -> dict[str, Any]:
             "max_tokens":   cfg.llm.max_tokens,
             "capabilities": cfg.llm.capabilities,
         })
-        services["llm_engine"] = llm_engine  # patch_hitl_graph called after tool registry is built
+        services["llm_engine"] = llm_engine  # tool registry built below
         # D1 (Sprint 3): apply the concurrency cap. Default 4; 0 = unlimited.
         try:
             if hasattr(llm_engine, "set_max_concurrent_calls"):
@@ -553,48 +536,54 @@ async def build_services() -> dict[str, Any]:
                     counts.get("mcp", 0), counts.get("openapi", 0), counts.get("local", 0))
 
         real_registry = router.registry
-        if _hitl_backend == "core":
-            # Build the core executor now that we have llm_engine + tool_registry.
-            # This replaces the legacy hitl/a2a_integration ITOpsHitlAgentExecutor
-            # but presents the same external interface (.execute / .cancel)
-            # so webui/backend doesn't change.
-            from integrations.adapters.hitl_executor import HitlExecutor
-            executor = HitlExecutor(
-                runtime_loop=None,             # injected later from services["runtime_loop"]
-                llm_engine=llm_engine,
-                tool_registry=real_registry,
-                memory_router=memory_router,
-                hitl_router=services["hitl_core_router"],
-                hitl_pipeline=services["hitl_core_pipeline"],
-                audit_logger=services["hitl_core_audit"],
-            )
-            services["executor"] = executor
-            logger.info("A2A executor (core) constructed with %d tool(s)",
-                        len(real_registry))
-            # Phase 2B+ (2026-05): wire the project's TaskStore into the
-            # executor so inbound A2A delegations get recorded — without
-            # this, dc-agent receives a [DELEGATE:] from lan-agent and
-            # processes it correctly, but the local Delegations tab shows
-            # nothing (it only reads task_system.store, which only had
-            # outbound entries before). The executor's set_task_store()
-            # is a no-op when task_system isn't built (e.g. minimal tests).
-            try:
-                _ts = services.get("task_system")
-                if _ts is not None and hasattr(_ts, "store"):
-                    executor.set_task_store(_ts.store)
-                    logger.info("HitlExecutor: task_store wired for inbound delegation recording")
-            except Exception as _ts_exc:
-                logger.warning("HitlExecutor: task_store wiring skipped: %s", _ts_exc)
-            # Don't patch the langgraph hitl_graph — it doesn't exist in core mode.
-            # Don't patch_runtime_loop(executor, ...) either — that's a legacy
-            # path for executors that have their own internal AgentRuntimeLoop;
-            # the core executor uses the external (already-patched) services
-            # ["runtime_loop"] instance instead, which gets patched separately
-            # in webui/backend.py at startup.
-        else:
-            executor._tool_registry = real_registry
-            patch_hitl_graph(llm_engine, tool_registry=real_registry)
-            patch_runtime_loop(executor, llm_engine)
+        # Build the core executor now that we have llm_engine + tool_registry.
+        # Presents the .execute / .cancel interface so webui/backend doesn't
+        # need to know the backend internals.
+        from integrations.adapters.hitl_executor import HitlExecutor
+        # L0/L1 Stage B: pick the coreferencer by profile. Network profiles
+        # (lan/dc) get the device coreferencer; others get None → the executor
+        # falls back to its neutral (domain-free) default.
+        _profile = getattr(getattr(cfg, "agent", None), "profile", "default")
+        _coref = build_default_device_coreferencer() if _profile in ("lan", "dc") else None
+        executor = HitlExecutor(
+            runtime_loop=None,             # injected later from services["runtime_loop"]
+            llm_engine=llm_engine,
+            tool_registry=real_registry,
+            memory_router=memory_router,
+            hitl_router=services["hitl_core_router"],
+            hitl_pipeline=services["hitl_core_pipeline"],
+            audit_logger=services["hitl_core_audit"],
+            coreferencer=_coref,
+        )
+        services["executor"] = executor
+        logger.info("A2A executor (core) constructed with %d tool(s)",
+                    len(real_registry))
+        # Phase 2B+ (2026-05): wire the project's TaskStore into the
+        # executor so inbound A2A delegations get recorded — without
+        # this, dc-agent receives a [DELEGATE:] from lan-agent and
+        # processes it correctly, but the local Delegations tab shows
+        # nothing (it only reads task_system.store, which only had
+        # outbound entries before). The executor's set_task_store()
+        # is a no-op when task_system isn't built (e.g. minimal tests).
+        try:
+            _ts = services.get("task_system")
+            if _ts is not None and hasattr(_ts, "store"):
+                executor.set_task_store(_ts.store)
+                logger.info("HitlExecutor: task_store wired for inbound delegation recording")
+        except Exception as _ts_exc:
+            logger.warning("HitlExecutor: task_store wiring skipped: %s", _ts_exc)
+        # A2A Phase 3 (P3-b): give the executor the peer registry + its own
+        # agent_id so that when a delegated HITL is resolved HERE, it can call
+        # the originating agent's /hitl_resolved endpoint to resume it (mode B).
+        try:
+            executor.set_peer_registry(registry)
+            executor._self_agent_id = cfg.agent.agent_id
+            logger.info("HitlExecutor: peer registry wired for cross-agent HITL callback")
+        except Exception as _pr_exc:
+            logger.warning("HitlExecutor: peer registry wiring skipped: %s", _pr_exc)
+        # The core executor uses the external (already-patched) services
+        # ["runtime_loop"] instance, which gets patched separately in
+        # webui/backend.py at startup — no hitl_graph / runtime-loop patch here.
 
         # ── Wire prompt-based PolicyEngine ────────────────────────────────────
         # Loads policies from config.yaml and registers the global singleton.
@@ -702,8 +691,15 @@ async def build_services() -> dict[str, Any]:
                 catalog    = services["skill_catalog"],
                 llm_fn     = _async_llm_for_skills,
                 skills_dir = str(_pl.Path(_skills_dir) / "skills"),
+                apply_changes = cfg.skill_orchestration.auto_evolve_apply,
             )
             services["skill_evolver"] = _skill_evolver
+            if not cfg.skill_orchestration.auto_evolve_apply:
+                logger.info(
+                    "SkillEvolver: suggest-only mode (auto_evolve_apply=false) "
+                    "— feedback patches + new skills are computed and logged "
+                    "but NOT applied to the live catalog"
+                )
 
             # Wire the evolver into the HITL executor so the batch
             # finalizer can mint skills from successful multi-target
@@ -1230,15 +1226,22 @@ async def build_services() -> dict[str, Any]:
             try:
                 _registered = set(_tool_meta.keys())
                 _hitl_cfg   = set(getattr(cfg.tools, "hitl_tool_names", []) or [])
+                # hitl_tool_names is a shared, cross-profile watch-list: it may
+                # list tools that only exist in OTHER profiles (e.g. dc_* names
+                # while running the lan profile). Those aren't a coverage gap —
+                # the tool simply isn't in this agent's registry. Only names
+                # that look like they belong to THIS profile's domain but are
+                # missing indicate a real problem. We treat cross-profile names
+                # as expected and log them at debug level.
                 _missing    = sorted(_hitl_cfg - _registered)
                 _hits       = sorted(_hitl_cfg & _registered)
                 if _missing:
-                    logger.warning(
-                        "HITL safety-net: %d/%d tool names from cfg.tools.hitl_tool_names "
-                        "are NOT registered in mode=%s — they cannot fire HITL. "
-                        "Missing: %s. Active: %s",
-                        len(_missing), len(_hitl_cfg), cfg.mode,
-                        _missing, _hits,
+                    logger.info(
+                        "HITL safety-net: %d/%d watch-list names registered in "
+                        "mode=%s profile=%s (active: %s). %d name(s) belong to "
+                        "other profiles and are not in this registry (expected): %s",
+                        len(_hits), len(_hitl_cfg), cfg.mode, cfg.agent.profile,
+                        _hits, len(_missing), _missing,
                     )
                 else:
                     logger.info(
@@ -1303,12 +1306,6 @@ async def build_services() -> dict[str, Any]:
                         _exec = services.get("executor")
                         if _exec is not None and hasattr(_exec, "_tool_registry"):
                             _exec._tool_registry = _refreshed_registry
-                        # Re-patch HITL graph if used
-                        try:
-                            from integrations.clients.llm_engine import patch_hitl_graph
-                            patch_hitl_graph(llm_engine, tool_registry=_refreshed_registry)
-                        except Exception:
-                            pass
                         logger.info(
                             "Tool registry refreshed across consumers — "
                             "now %d callable(s) including meta-tools",
@@ -1443,29 +1440,10 @@ async def lifespan(app: FastAPI):
     )
     app.mount("/api/v1/a2a", a2a_app)
 
-    # Mount the legacy /hitl/* router only when running on the langgraph
-    # backend. In core mode, /hitl/* endpoints are served by webui/backend
-    # (which speaks to hitl_core.HitlRouter directly via services).
-    if _services.get("hitl_router") is not None:
-        try:
-            from hitl.router import create_hitl_router
-            from hitl.review import get_sse_channel
-        except ImportError as e:
-            logger.warning(
-                "Legacy /hitl/* router not mountable: hitl.router/review "
-                "modules not packaged in this build (%s). Falling back to "
-                "core backend endpoints in webui/backend.", e,
-            )
-        else:
-            hitl_api = create_hitl_router(
-                decision_router = _services["hitl_router"],
-                audit           = _services["hitl_audit"],
-                sse_channel     = get_sse_channel(),
-            )
-            app.include_router(hitl_api, prefix="/hitl")
-            logger.info("Legacy /hitl/* router mounted (langgraph backend)")
-    else:
-        logger.info("Legacy /hitl/* router skipped (core backend; webui/backend handles HITL endpoints)")
+    # HITL endpoints are served by webui/backend (which speaks to
+    # hitl_core.HitlRouter directly via services). The legacy LangGraph
+    # `/hitl/*` router was retired with the rest of the langgraph backend.
+    logger.info("HITL endpoints served by webui/backend (core backend)")
 
     from registry.router import create_registry_router
     reg_api = create_registry_router(_services["registry"])
@@ -1711,7 +1689,7 @@ async def metrics():
 
     # Refresh point-in-time gauges on scrape.
     try:
-        _rtr = _services.get("hitl_core_router") or _services.get("hitl_router")
+        _rtr = _services.get("hitl_core_router")
         if _rtr is not None and hasattr(_rtr, "_payload_store"):
             _pending = sum(
                 1 for p in _rtr._payload_store.values()
@@ -1733,7 +1711,7 @@ async def health():
     healthy = sum(1 for a in agents if a.health == AgentHealthState.HEALTHY)
     task_sys     = _services.get("task_system")
     pending_tasks = len(await task_sys.store.list_pending()) if task_sys else 0
-    hitl_rtr     = _services.get("hitl_router")
+    hitl_rtr     = _services.get("hitl_core_router")
     pending_hitl = sum(
         1 for p in hitl_rtr._payload_store.values()
         if p.status.value == "pending"

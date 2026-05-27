@@ -185,4 +185,62 @@ def create_a2a_app(
         except Exception:
             raise HTTPException(status_code=400, detail="Invalid JSON body")
 
+    @a2a.post("/hitl_resolved", tags=["A2A"])
+    async def hitl_resolved(request: Request) -> JSONResponse:
+        """Cross-agent HITL resume callback (A2A Phase 3, mode B).
+
+        A peer we delegated to (it raised + locally approved a HITL) calls this
+        to push the resolved result back so THIS agent (the originator) can
+        resume the awaiting session. Body:
+          {peer_agent, interrupt_id, result, decision, correlation_id?,
+           source_session_id?}
+
+        Basic validation only (P3-b): the (peer_agent, interrupt_id) must match
+        an awaiting record this agent registered when the delegation came back
+        INPUT_REQUIRED. Auth/signing deferred to P3-d.
+        """
+        body = await _parse_body(request)
+        peer_agent    = str(body.get("peer_agent") or "").strip()
+        interrupt_id  = str(body.get("interrupt_id") or "").strip()
+        result_text   = str(body.get("result") or "")
+        decision      = str(body.get("decision") or "approve")
+        correlation_id = str(body.get("correlation_id") or "")
+        if not peer_agent or not interrupt_id:
+            raise HTTPException(status_code=400,
+                                detail="peer_agent and interrupt_id required")
+
+        from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+        bridge = get_cross_agent_hitl_bridge()
+        rec = bridge.resolve_awaiting_peer(
+            peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
+        )
+        if rec is None:
+            # Unknown or already-resumed — reject so the caller can log/retry
+            # without us silently driving a phantom turn.
+            raise HTTPException(
+                status_code=404,
+                detail="no matching awaiting-peer HITL record (unknown or "
+                       "already resumed)",
+            )
+
+        # Hand off to the webui resume driver (active A2 resume).
+        try:
+            from webui.backend import handle_cross_agent_resume
+            driven = await handle_cross_agent_resume(
+                local_session_id=rec.local_session_id,
+                peer_agent=peer_agent,
+                result_text=result_text,
+                decision=decision,
+                correlation_id=correlation_id or rec.correlation_id,
+            )
+        except Exception as exc:
+            logger.exception("hitl_resolved: resume failed: %s", exc)
+            raise HTTPException(status_code=500, detail="resume failed")
+        finally:
+            bridge.forget_awaiting(
+                peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
+            )
+        return JSONResponse(content={"ok": True, "resumed": bool(driven),
+                                     "session": rec.local_session_id})
+
     return a2a

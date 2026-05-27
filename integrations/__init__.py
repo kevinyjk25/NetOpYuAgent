@@ -14,7 +14,7 @@ the explicit sub-package path:
 # ── Clients ──────────────────────────────────────────────────────────────
 from .clients.llm_engine import (  # noqa: F401
     LLMEngine, OllamaEngine, OpenAIEngine, AnthropicEngine, MockEngine,
-    IntentResult, patch_runtime_loop, patch_hitl_graph,
+    IntentResult, patch_runtime_loop,
 )
 from .clients.mcp_client     import MCPClient, MCPServer, MCPToolSpec, MCPCallResult  # noqa: F401
 from .clients.openapi_client import OpenAPIClient, OpenAPIParser, OperationSpec, ParamSpec  # noqa: F401
@@ -35,7 +35,7 @@ from .router.tool_router import ToolRouter, ToolMeta  # noqa: F401
 __all__ = [
     # Clients
     "LLMEngine", "OllamaEngine", "OpenAIEngine", "AnthropicEngine", "MockEngine",
-    "IntentResult", "patch_runtime_loop", "patch_hitl_graph",
+    "IntentResult", "patch_runtime_loop",
     "MCPClient", "MCPServer", "MCPToolSpec", "MCPCallResult",
     "OpenAPIClient", "OpenAPIParser", "OperationSpec", "ParamSpec",
     "build_embedder", "OllamaEmbedder", "OpenAIEmbedder", "StubEmbedder",

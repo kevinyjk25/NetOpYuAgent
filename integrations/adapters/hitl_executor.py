@@ -56,6 +56,7 @@ from hitl_core import (
     RiskLevel,
     TriggerKind,
     build_default_device_coreferencer,
+    build_neutral_coreferencer,
 )
 
 logger = logging.getLogger(__name__)
@@ -181,7 +182,11 @@ class HitlExecutor:
         self._memory        = memory_router
         self._router        = hitl_router
         self._pipeline      = hitl_pipeline
-        self._coref         = coreferencer or build_default_device_coreferencer()
+        # NOTE (L0/L1 Stage B): default to the DOMAIN-FREE neutral coreferencer.
+        # A non-network agent thus gets no spurious device coreference. The
+        # active profile (L1) injects build_default_device_coreferencer() for
+        # network domains via the `coreferencer` arg (wired in main.py).
+        self._coref         = coreferencer or build_neutral_coreferencer()
         self._audit         = audit_logger
         # SkillEvolver may not exist at executor-construction time (it's
         # built later in main.py once the LLM smoke test passes). Use
@@ -200,6 +205,10 @@ class HitlExecutor:
         # constructed. Optional: if not wired, inbound recording silently
         # no-ops, so HitlExecutor stays buildable without a task_system.
         self._task_store = None
+        # A2A Phase 3 (P3-b): optional peer registry for resolving a source
+        # agent's callback URL when calling back after a delegated HITL is
+        # resolved here. Injected by main.py via set_peer_registry().
+        self._peer_registry = None
 
         # Register named resumers so the router can invoke us when
         # decisions arrive for interrupts whose pipeline isn't alive.
@@ -232,6 +241,78 @@ class HitlExecutor:
         live task_system, and to avoid making it import the task module.
         """
         self._task_store = task_store
+
+    def set_peer_registry(self, registry) -> None:
+        """Inject the AgentRegistry so cross-agent HITL callbacks can resolve a
+        source agent's base URL (A2A Phase 3 P3-b). Optional — if unset, the
+        callback is skipped (the delegating side stays in AWAITING_PEER_HITL,
+        which P3-d's SLA watchdog will eventually time out)."""
+        self._peer_registry = registry
+
+    async def _maybe_callback_source_agent(
+        self, *, interrupt_id: str, result_text: str, decision: str,
+    ) -> None:
+        """If `interrupt_id` was a HITL raised while serving an inbound
+        delegation, POST the resolution back to the originating agent's
+        /hitl_resolved endpoint so it can resume (A2A Phase 3 mode B).
+
+        No-op when: the interrupt wasn't cross-agent (no bridge record), or no
+        peer registry is wired, or the source agent's URL can't be resolved.
+        Failures are logged, never raised — a callback hiccup must not break
+        the local operator's approval flow.
+        """
+        if not interrupt_id:
+            return
+        try:
+            from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+            rec = get_cross_agent_hitl_bridge().pop_inbound_hitl(interrupt_id)
+        except Exception as exc:
+            logger.debug("cross-agent callback: bridge lookup failed: %s", exc)
+            return
+        if rec is None:
+            return   # not a cross-agent delegated HITL — nothing to call back
+        if self._peer_registry is None:
+            logger.warning(
+                "cross-agent callback: no peer registry wired — cannot resume "
+                "source=%s for interrupt=%s", rec.source_agent, interrupt_id[:12],
+            )
+            return
+        # Resolve the source agent's base URL.
+        try:
+            agent = await self._peer_registry.get_agent(rec.source_agent)
+            base_url = getattr(agent, "base_url", None) if agent else None
+        except Exception as exc:
+            logger.warning("cross-agent callback: registry resolve failed: %s", exc)
+            return
+        if not base_url:
+            logger.warning(
+                "cross-agent callback: no base_url for source=%s", rec.source_agent,
+            )
+            return
+        callback_url = base_url.rstrip("/") + "/hitl_resolved"
+        self_agent_id = getattr(self, "_self_agent_id", None) or "this-agent"
+        body = {
+            "peer_agent":     self_agent_id,   # who is calling back (this agent)
+            "interrupt_id":   interrupt_id,
+            "result":         result_text,
+            "decision":       decision,
+            "correlation_id": rec.correlation_id,
+            "source_session_id": rec.source_session_id,
+        }
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(callback_url, json=body)
+            logger.info(
+                "cross-agent callback: POST %s → %s (interrupt=%s decision=%s)",
+                callback_url, resp.status_code, interrupt_id[:12], decision,
+            )
+        except Exception as exc:
+            logger.warning(
+                "cross-agent callback: POST to %s failed: %s — source agent will "
+                "stay AWAITING_PEER_HITL until its SLA watchdog fires (P3-d)",
+                callback_url, exc,
+            )
 
     # NOTE: trust_mode lives in PolicyEngine, not in HitlExecutor —
     # runtime/loop.py decides whether to skip HITL gating, and runtime
@@ -543,6 +624,21 @@ class HitlExecutor:
             ),
         )
         await self._router.register_payload(entry)
+        # A2A Phase 3 (P3-b): if this HITL was raised while serving an inbound
+        # delegation (provenance present), record where to call back when the
+        # operator here resolves it — so dc can POST the result to lan's
+        # /hitl_resolved and lan can resume (mode B).
+        if _src_agent and _src_session:
+            try:
+                from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+                get_cross_agent_hitl_bridge().record_inbound_hitl(
+                    interrupt_id=payload.interrupt_id,
+                    source_agent=_src_agent,
+                    source_session_id=_src_session,
+                    source_query=_src_query or "",
+                )
+            except Exception as _xa_exc:
+                logger.debug("cross-agent inbound record skipped: %s", _xa_exc)
         logger.info(
             "Tool HITL raised: id=%s tool=%s target=%s editable=%s",
             payload.interrupt_id[:12], tool_name, _target, editable_keys,
@@ -1081,6 +1177,14 @@ class HitlExecutor:
                     f"[HITL REJECTED — operator declined tool call `{tool_name}`]",
                     session_id,
                 )
+                await self._maybe_callback_source_agent(
+                    interrupt_id=_interrupt_id,
+                    result_text=f"操作员拒绝了工具调用 `{tool_name}`,未执行。",
+                    decision="reject",
+                )
+                await self._complete_inbound_by_interrupt(
+                    interrupt_id=_interrupt_id, decision="reject", result_text="",
+                )
                 return {"tool": tool_name, "decision": "reject", "chunks": _chunks}
 
             # APPROVE or EDIT — merge patch and invoke
@@ -1130,6 +1234,16 @@ class HitlExecutor:
                 original_query,
                 f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
                 session_id,
+            )
+            # A2A Phase 3 (P3-b): if this HITL was raised serving an inbound
+            # delegation, call the originator back so it can resume (mode B).
+            await self._maybe_callback_source_agent(
+                interrupt_id=_interrupt_id, result_text=result_text,
+                decision="approve",
+            )
+            await self._complete_inbound_by_interrupt(
+                interrupt_id=_interrupt_id, decision="approve",
+                result_text=result_text,
             )
             # Step: tool returned
             _emit({
@@ -1877,6 +1991,43 @@ class HitlExecutor:
             await self._task_store.save(task)
         except Exception as exc:
             logger.debug("inbound completion save failed: %s", exc)
+
+    async def _complete_inbound_by_interrupt(
+        self, *, interrupt_id: str, decision: str, result_text: str,
+    ) -> None:
+        """Mark a PENDING inbound-delegation task terminal once its HITL is
+        resolved by the operator.
+
+        Inbound delegations that hit a HITL are parked in PENDING with
+        metadata['awaiting_hitl_id'] = interrupt_id (see
+        _complete_inbound_delegation). execute() has already returned by the
+        time the operator decides, so without this the task would stay PENDING
+        forever and the delegating agent's view of the delegation never closes.
+        Called from _tool_call_resumer on both approve and reject.
+        """
+        if self._task_store is None or not interrupt_id:
+            return
+        from task.schemas import TaskState
+        from datetime import datetime, timezone
+        try:
+            pending = await self._task_store.list_pending()
+            for t in pending:
+                if (t.metadata or {}).get("awaiting_hitl_id") == interrupt_id:
+                    if decision == "reject":
+                        t.state = TaskState.FAILED
+                        t.error = "operator rejected the HITL action"
+                    else:
+                        t.state = TaskState.COMPLETED
+                        t.result = {"text": result_text}
+                    t.metadata.pop("awaiting_hitl_id", None)
+                    t.completed_at = datetime.now(timezone.utc).isoformat()
+                    await self._task_store.save(t)
+                    logger.info(
+                        "inbound delegation %s → %s after HITL %s (interrupt=%s)",
+                        t.task_id, t.state.value, decision, interrupt_id[:12],
+                    )
+        except Exception as exc:
+            logger.debug("inbound completion-by-interrupt failed: %s", exc)
 
     async def _fail_inbound_delegation(self, task, exc: BaseException) -> None:
         """Mark the inbound TaskDefinition as FAILED with the error message.

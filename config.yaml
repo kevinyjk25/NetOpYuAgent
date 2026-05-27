@@ -115,6 +115,30 @@ tools:
     - drain_node
     - failover
     - delete_resource
+    # DC application access control (cross-agent HITL scenario). Only present
+    # in the dc profile's registry; harmless for lan (name never matches a
+    # lan tool). The grant/revoke writes are HITL-gated; queries are not.
+    - dc_grant_app_access
+    - dc_revoke_app_access
+    - dc_config_push
+    # LAN user network-admission control (cross-agent scenario)
+    - grant_user_access
+    - revoke_user_access
+
+  # Type #2 edit-flavoured HITL: for these tools the operator can edit the
+  # listed param keys before approving (instead of bare approve/reject).
+  # Business-specific — injected here as the active profile's config; the L0
+  # runtime ships an empty default (L0/L1 separation, Stage A).
+  editable_hitl_tools:
+    edit_device_config: [config_lines, reason]
+    rollback_deploy:    [snapshot_id, reason]
+    restart_service:    [service_name, graceful]
+    push_config:        [config_lines, reason]
+    dc_grant_app_access: [role, reason]
+    dc_revoke_app_access: [reason]
+    dc_config_push:      [config_lines, reason]
+    grant_user_access:   [reason]
+    revoke_user_access:  [reason]
 
 
 # ── Pragmatic mode — real network device access ───────────────
@@ -818,6 +842,15 @@ skill_orchestration:
   journal_max_entries:      200
   journal_persist_path:     ""     # set e.g. "data/skill_journal.jsonl" to persist
   journal_api_enabled:      true   # exposes /webui/skill_journal/* endpoints
+
+  # Self-improving skills — master switch for LIVE catalog mutation.
+  #   true  (default) = feedback patches + auto-created skills are applied to
+  #                     the live catalog (still gated by the A/B compliance bench)
+  #   false           = "suggest-only": the loop still runs and logs/records
+  #                     proposed changes for review, but never mutates skills.
+  # Recommended: false in production until auto-evolution is trusted.
+  # Env override: SKILL_AUTO_EVOLVE_APPLY=false
+  auto_evolve_apply:        true
 
 # ── Skill scoring weights (legacy path) and evolver feedback ──
 # Append these to the existing `skill_orchestration:` block.

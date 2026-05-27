@@ -253,6 +253,8 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
 .btn-primary{background:var(--accent);color:#0a0e14;padding:8px 18px}
 .btn-primary:hover{background:#00f0c0}
 .btn-primary:disabled{background:var(--border2);color:var(--dim);cursor:not-allowed}
+.btn-stop{background:#e5534b !important;color:#fff !important}
+.btn-stop:hover{background:#f06a62 !important}
 .btn-secondary{background:var(--border);color:var(--text);padding:8px 12px}
 .btn-secondary:hover{background:var(--border2)}
 .btn-sm{padding:4px 10px;font-size:11px}
@@ -1891,6 +1893,35 @@ function finalizeStream() {
 }
 
 // Send query
+let _streamAbort = null;   // AbortController for the in-flight stream (Stop button)
+
+function setSendButtonStreaming(streaming) {
+  const btn = document.getElementById('send-btn');
+  if (!btn) return;
+  if (streaming) {
+    btn.textContent = 'Stop';
+    btn.classList.add('btn-stop');
+    btn.disabled = false;                 // must stay clickable to cancel
+    btn.onclick = stopQuery;
+  } else {
+    btn.textContent = 'Send';
+    btn.classList.remove('btn-stop');
+    btn.disabled = false;
+    btn.onclick = sendQuery;
+  }
+}
+
+function stopQuery() {
+  // Operator hit Stop mid-stream. Abort the fetch — the backend's SSE
+  // generator gets cancelled at its next yield, which it treats as a
+  // user cancel (StopOutcome.USER_CANCELLED): it stops the executor and
+  // preserves the partial answer in the session transcript.
+  if (_streamAbort) {
+    try { _streamAbort.abort(); } catch {}
+  }
+  flowEvent('stop','■ Cancelled','user stopped the request');
+}
+
 async function sendQuery() {
   const input = document.getElementById('query-input');
   const query = input.value.trim();
@@ -1913,7 +1944,7 @@ async function sendQuery() {
     if (mode==='stream') await streamQuery(query, sid, body);
     else                  await syncQuery(body);
   } finally {
-    btn.disabled = false;
+    setSendButtonStreaming(false);
     flowEvent('done','✅ Complete',`${elap()} total`,`session: ${sid}`);
     refreshStats();
     // Refresh session list so turn count and last_active update live
@@ -1936,22 +1967,37 @@ async function syncQuery(body) {
 async function streamQuery(query, sid, body) {
   addThinking();
   startStream();
-  const res = await fetch(`${BASE}/chat/stream`,{method:'POST',headers:{'Content-Type':'application/json'},body});
+  _streamAbort = new AbortController();
+  setSendButtonStreaming(true);
+  let res;
+  try {
+    res = await fetch(`${BASE}/chat/stream`,{method:'POST',headers:{'Content-Type':'application/json'},body,signal:_streamAbort.signal});
+  } catch(e) {
+    if (e.name === 'AbortError') { finalizeStream(); _streamAbort = null; return; }
+    throw e;
+  }
   const reader = res.body.getReader();
   const dec = new TextDecoder();
   let buf = '';
-  while (true) {
-    const {done,value} = await reader.read();
-    if (done) break;
-    buf += dec.decode(value,{stream:true});
-    const lines = buf.split('\n');
-    buf = lines.pop();
-    for (const line of lines) {
-      if (!line.startsWith('data: ')) continue;
-      const payload = line.slice(6).trim();
-      if (payload==='[DONE]') break;
-      try { dispatchChunk(JSON.parse(payload), query, sid); } catch {}
+  try {
+    while (true) {
+      const {done,value} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value,{stream:true});
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload==='[DONE]') break;
+        try { dispatchChunk(JSON.parse(payload), query, sid); } catch {}
+      }
     }
+  } catch(e) {
+    // AbortError = operator hit Stop; any partial tokens already rendered.
+    if (e.name !== 'AbortError') throw e;
+  } finally {
+    _streamAbort = null;
   }
   finalizeStream();
   updateCacheBadge();
@@ -3405,6 +3451,8 @@ function _delFmtState(state) {
     completed:  {label: 'DONE',       color: '#4ade80'},
     failed:     {label: 'FAILED',     color: '#f87171'},
     cancelled:  {label: 'CANCELLED',  color: 'var(--dim)'},
+    awaiting_peer_hitl: {label: 'PEER HITL', color: '#a78bfa'},
+    waiting_hitl: {label: 'HITL', color: '#fbbf24'},
   };
   const k = String(state || '').toLowerCase();
   const m = map[k] || {label: k.toUpperCase() || '?', color: 'var(--dim)'};
@@ -3498,6 +3546,13 @@ async function refreshDelegations() {
       const hitlBadge = r.awaiting_hitl_id
         ? `<span style="color:#fbbf24;font-family:var(--mono);font-size:9px;margin-left:4px">⚠ awaiting local HITL</span>`
         : '';
+      // A2A Phase 3 (mode B): outbound delegation blocked on the PEER's
+      // operator. Read-only — approval happens on the peer's console, not
+      // here. Distinct wording from "awaiting local HITL" so the operator
+      // knows NOT to look for an approve button locally.
+      const peerHitlBadge = (r.peer_hitl_pending || r.state === 'awaiting_peer_hitl')
+        ? `<span style="color:#a78bfa;font-family:var(--mono);font-size:9px;margin-left:4px" title="Approve on ${peer}'s console — this delegation will resume automatically once ${peer}'s operator decides">⏳ awaiting ${peer} approval</span>`
+        : '';
 
       // Detail panel — only render when expanded (avoids cluttering scan view)
       let detailHtml = '';
@@ -3563,6 +3618,7 @@ async function refreshDelegations() {
             <span style="color:${arrowCol};font-family:var(--mono)">${arrow} ${peer}</span>
             ${forkedBadge}
             ${hitlBadge}
+            ${peerHitlBadge}
             <span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</span>
             ${stateBadge}
             <span style="color:var(--dim);font-family:var(--mono);font-size:9px;min-width:42px;text-align:right">${lat}</span>

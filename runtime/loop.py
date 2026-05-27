@@ -24,12 +24,25 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, AsyncIterator, Optional, TYPE_CHECKING
 
-from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolResultStore
+from .context_budget import BudgetConfig, ContextBudgetManager, ResourceRef, ToolResultStore
 from .stop_policy import LoopState, StopDecision, StopOutcome, StopPolicy, StopPolicyConfig
 from .directive_parser import (
     has_any_tool_directive as _has_any_tool_directive,
     has_skill_load as _has_skill_load,
 )
+from . import loop_helpers as _helpers
+# Public types live in loop_types.py (Item 4 extraction). Re-imported here so
+# `from runtime.loop import RuntimeConfig` etc. and runtime/__init__ re-exports
+# keep working unchanged.
+from .loop_types import (
+    QueryComplexity, DelegationMode, ForkContextPolicy,
+    VerificationResult, ComplexityDecision, RuntimeConfig, LoopResult,
+)
+from .loop_context import _LoopContext
+# Backward-compatible module-level aliases for helpers extracted to
+# loop_helpers.py (Item 4). All existing call sites use these bare names.
+_call_key = _helpers.call_key
+_build_tool_ledger = _helpers.build_tool_ledger
 
 
 def _truncation_cfg():
@@ -42,15 +55,8 @@ def _truncation_cfg():
         return None
 
 
-def _page_default_size_for_ledger() -> int:
-    """Page size used by _build_tool_ledger for read_stored_result coverage estimates.
-    Loaded from cfg.context_budget_display.page_default_size; defaults to 2000.
-    """
-    try:
-        from config import cfg as _app_cfg
-        return int(getattr(getattr(_app_cfg, "context_budget_display", None), "page_default_size", 2000))
-    except Exception:
-        return 2000
+def _page_default_size_for_ledger() -> int:  # noqa: E305 (kept as a name alias)
+    return _helpers.page_default_size_for_ledger()
 
 
 if TYPE_CHECKING:
@@ -64,64 +70,8 @@ logger = logging.getLogger(__name__)
 # Enumerations
 # ---------------------------------------------------------------------------
 
-class QueryComplexity(str, Enum):
-    SIMPLE  = "simple"
-    COMPLEX = "complex"
-
-
-class DelegationMode(str, Enum):
-    """
-    fresh  — start a sub-agent with only the explicitly passed context
-    forked — inherit parent confirmed_facts + working_set (P1)
-    """
-    FRESH  = "fresh"
-    FORKED = "forked"
-
-
-class ForkContextPolicy(str, Enum):
-    """How much parent context a forked sub-agent inherits."""
-    FULL         = "full"           # everything
-    FACTS_ONLY   = "facts_only"     # only confirmed_facts
-    WORKING_SET  = "working_set"    # facts + working_set, not raw memory
-
-
-# ---------------------------------------------------------------------------
-# Verification result (P1)
-# ---------------------------------------------------------------------------
-
-@dataclass
-class VerificationResult:
-    passed:   bool
-    reason:   str
-    warnings: list[str] = field(default_factory=list)
-
-    @classmethod
-    def ok(
-        cls,
-        reason: str = "Verification passed",
-        warnings: Optional[list[str]] = None,
-    ) -> "VerificationResult":
-        """Construct a passing result.  warnings is accepted (and stored)
-        so callers that detect non-fatal anomalies can surface them even
-        on a successful verification — the BUG-09 post_verify() rewrite
-        relies on this symmetric signature with fail()."""
-        return cls(passed=True, reason=reason, warnings=warnings or [])
-
-    @classmethod
-    def fail(cls, reason: str, warnings: Optional[list[str]] = None) -> "VerificationResult":
-        return cls(passed=False, reason=reason, warnings=warnings or [])
-
-
-# ---------------------------------------------------------------------------
-# Complexity decision
-# ---------------------------------------------------------------------------
-
-@dataclass
-class ComplexityDecision:
-    complexity: QueryComplexity
-    reason:     str
-    confidence: float = 1.0
-    model_tier: str   = "full_model"   # P2: fast_model | full_model
+# QueryComplexity / DelegationMode / ForkContextPolicy / VerificationResult /
+# ComplexityDecision are defined in runtime/loop_types.py and imported above.
 
 
 # Keyword frozensets used ONLY as fallback when PolicyEngine is unavailable
@@ -180,78 +130,8 @@ def _classifier_fallback_keywords(category: str) -> frozenset:
 _DESTRUCTIVE_KEYWORDS = _DEFAULT_DESTRUCTIVE_KEYWORDS
 _P0P1_KEYWORDS        = _DEFAULT_P0P1_KEYWORDS
 _FAST_MODEL_KEYWORDS  = _DEFAULT_FAST_MODEL_KEYWORDS
+# RuntimeConfig / LoopResult are defined in runtime/loop_types.py and imported above.
 
-
-# ---------------------------------------------------------------------------
-# Runtime config
-# ---------------------------------------------------------------------------
-
-@dataclass
-class RuntimeConfig:
-    budget:      BudgetConfig      = field(default_factory=BudgetConfig)
-    stop_policy: StopPolicyConfig  = field(default_factory=StopPolicyConfig)
-
-    # Complexity thresholds
-    simple_confidence_floor:  float = 0.70
-    simple_max_tool_calls:    int   = 4
-
-    # P1: delegation
-    default_delegation_mode:   DelegationMode   = DelegationMode.FRESH
-    default_fork_context:      ForkContextPolicy = ForkContextPolicy.FACTS_ONLY
-
-    # Pre-verification REMOVED — replaced by tool-level HITL gate.
-    # The flag is kept for one release for backward compatibility but
-    # has no effect; the new pre_verify() stub returns ok unconditionally.
-    enable_pre_verification:   bool = False   # DEPRECATED, no-op (kept for compat)
-    enable_post_verification:  bool = True
-
-    # Model tiering — flag retained for caller compatibility but unconsumed
-    # in the active runtime path. Tier hint travels via ComplexityDecision.
-    # Wire a real consumer in integrations/llm_engine.py if you want to act on it.
-    enable_model_tiering:      bool = False   # DEPRECATED, unconsumed (kept for compat)
-
-    # Tool result inline limit
-    tool_result_inline_limit:  int  = 4_000
-
-    # CAP 5: tools that force HITL before execution even on SIMPLE path
-    # Populated from HITL_TOOL_NAMES env var in main.py
-    hitl_tool_names: frozenset = field(default_factory=frozenset)
-
-    # ── Type #2 EDIT-flavoured HITL ────────────────────────────────────
-    # Tools where the operator should be allowed to edit the proposed
-    # parameters before approving (e.g. edit the config_lines list).
-    # Subset of hitl_tool_names — for any tool in BOTH sets, the executor
-    # raises trigger_edit_approval (with editable_param_keys) instead of
-    # the bare approve/reject panel.
-    editable_hitl_tools: dict[str, list[str]] = field(default_factory=lambda: {
-        "edit_device_config":  ["config_lines", "reason"],
-        "rollback_deploy":     ["snapshot_id", "reason"],
-        "restart_service":     ["service_name", "graceful"],
-    })
-
-    # ── Type #3 CLARIFICATION ───────────────────────────────────────────
-    # Auto-clarify when the agent's confidence in its plan is below this
-    # threshold AND the operator hasn't exceeded their per-session budget.
-    # 0 disables auto-clarify entirely.
-    clarification_confidence_floor: float = 0.45
-    clarification_max_per_session:  int   = 2
-
-
-# ---------------------------------------------------------------------------
-# Loop result
-# ---------------------------------------------------------------------------
-
-@dataclass
-class LoopResult:
-    outcome:          StopOutcome
-    final_response:   str
-    confirmed_facts:  list[str]   = field(default_factory=list)
-    working_set:      list[DeviceRef] = field(default_factory=list)
-    unresolved:       list[str]   = field(default_factory=list)
-    tool_summaries:   list[str]   = field(default_factory=list)
-    turns_taken:      int         = 0
-    escalated_to_dag: bool        = False
-    verification:     Optional[VerificationResult] = None
 
 
 # ---------------------------------------------------------------------------
@@ -262,110 +142,6 @@ class LoopResult:
 # Clarification gating is handled by PolicyEngine[assess_query_specificity]
 # (see config.yaml policies section).  A keyword-based heuristic was
 # previously used here but removed in favour of the LLM-evaluated policy.
-
-
-def _call_key(tool_name: str, tool_args: dict) -> str:
-    """
-    Deduplicate tool calls by name+args fingerprint, not just name.
-    This allows calling the same tool with different args (e.g. different
-    device_ids) in one session without the second being blocked as a duplicate.
-    Only blocks genuinely identical calls (same tool, same arguments).
-    """
-    import json as _json
-    try:
-        args_sig = _json.dumps(tool_args, sort_keys=True)
-    except Exception:
-        args_sig = str(tool_args)
-    return f"{tool_name}|{args_sig}"
-
-
-def _build_tool_ledger(
-    tool_outputs: dict,
-    tool_reg: dict,
-    raw_outputs: dict,
-) -> list[str]:
-    """
-    Build confirmed_facts ledger entries from the current session's tool_outputs.
-    Written at end of stream() so next HTTP request can seed called_tools and
-    surface existing ref_ids without re-fetching.
-
-    Collapsing rules:
-    - Multiple read_stored_result pages for the same ref_id → single summary entry
-    - [STORED:] labels annotated with total_size from their read results
-    - Inline results recorded with size
-    """
-    import json as _j
-
-    # Pass 1: collect total_size and page count per ref_id from read_stored_result results
-    ref_info: dict = {}   # ref_id → {total_size, pages, last_offset}
-    for key, val in raw_outputs.items():
-        tool = key.split("|")[0] if "|" in key else key
-        if tool != "read_stored_result" or "_summary" in key:
-            continue
-        try:
-            args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
-            ref    = args.get("ref_id", "").strip("[]")
-            ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
-            offset = int(args.get("offset", 0))
-            if not ref:
-                continue
-            total_m = re.search(r"Total size:\s*([\d,]+)", val)
-            total   = int(total_m.group(1).replace(",", "")) if total_m else 0
-            if ref not in ref_info:
-                ref_info[ref] = {"total_size": total, "last_offset": offset, "pages": 0}
-            else:
-                if offset > ref_info[ref]["last_offset"]:
-                    ref_info[ref]["last_offset"] = offset
-                    ref_info[ref]["total_size"]   = total
-            ref_info[ref]["pages"] += 1
-        except Exception:
-            pass
-
-    ledger: list[str] = []
-    seen:   set[str]  = set()
-    seen_read_refs:  set[str] = set()   # track which refs already have a read entry
-
-    for key, stored in tool_outputs.items():
-        if key in seen or "_summary" in key:
-            continue
-        seen.add(key)
-        tool_name = key.split("|")[0] if "|" in key else key
-
-        # Collapse all read_stored_result pages for same ref_id into ONE entry
-        if tool_name == "read_stored_result":
-            try:
-                args   = _j.loads(key.split("|", 1)[1]) if "|" in key else {}
-                ref    = args.get("ref_id", "").strip("[]")
-                ref    = ref.rsplit(":", 1)[-1].strip() if ":" in ref else ref
-            except Exception:
-                ref = ""
-            if ref and ref in seen_read_refs:
-                continue   # already emitted a summary for this ref_id
-            if ref:
-                seen_read_refs.add(ref)
-                info    = ref_info.get(ref, {})
-                pages   = info.get("pages", 1)
-                total   = info.get("total_size", 0)
-                covered = info.get("last_offset", 0) + _page_default_size_for_ledger()
-                ledger.append(
-                    f"TOOL_EXEC: read_stored_result|ref={ref} pages_read={pages} "
-                    f"bytes_covered=0-{min(covered, total)} total={total}"
-                )
-            continue
-
-        raw  = raw_outputs.get(key, stored)
-        ref_m = re.search(r"\[STORED:\w+:(\w+)\]", stored)
-        if ref_m:
-            ref_id = ref_m.group(1)
-            total  = ref_info.get(ref_id, {}).get("total_size", len(raw))
-            ledger.append(
-                f"TOOL_EXEC: {key} → ref={ref_id} total_size={total} "
-                f"[reuse: read_stored_result ref_id={ref_id}]"
-            )
-        else:
-            ledger.append(f"TOOL_EXEC: {key} → inline size={len(raw)}")
-
-    return ledger
 
 
 # ---------------------------------------------------------------------------
@@ -473,6 +249,7 @@ class AgentRuntimeLoop:
         skill_catalog:   Optional["SkillCatalogService"] = None,
         llm_fn:          Optional[Any] = None,
         delegate_fn:     Optional[Any] = None,
+        batch_resolver_fn: Optional[Any] = None,
     ) -> None:
         """
         Args:
@@ -498,6 +275,26 @@ class AgentRuntimeLoop:
         self._policy       = StopPolicy(self._cfg.stop_policy)
         self._skill_catalog = skill_catalog
         self._delegate_fn  = delegate_fn
+        # L0/L1 Stage B: optional business resolver that decides whether a
+        # single destructive tool call expands into a multi-target batch HITL.
+        # Injected by the active profile (L1); None → single-target HITL (the
+        # domain-free default). Contract: (tool_name, tool_args, llm_response,
+        # hitl_tool_names, confirmed_facts, all_parsed) -> Optional[list[(name,args)]].
+        self._batch_resolver_fn = batch_resolver_fn
+
+        # Context-budget strategy (Tier 2 #3): "legacy" (default) or "priority".
+        # Read once at construction from the app config; falls back to legacy if
+        # config isn't importable (e.g. minimal unit tests).
+        self._ctx_strategy = "legacy"
+        self._ctx_budget_cfg = None
+        try:
+            from config import cfg as _app_cfg
+            _cb = getattr(_app_cfg, "context_budget", None)
+            if _cb is not None:
+                self._ctx_strategy = (getattr(_cb, "strategy", "legacy") or "legacy").lower()
+                self._ctx_budget_cfg = _cb
+        except Exception:
+            pass
 
         # DESIGN-03: constructor injection takes priority over monkey-patch.
         # If llm_fn is supplied at construction time, wire it immediately.
@@ -527,34 +324,9 @@ class AgentRuntimeLoop:
     @staticmethod
     def _query_mentions_concrete_target(q: str) -> bool:
         """Heuristic: does the query name a specific device/service?
-        Looks for tokens like ap-NN, sw-core-NN, router-NN, IPs, hostnames.
-
-        IMPORTANT: do NOT use \\b here — Python regex \\b only treats
-        ASCII letter↔non-letter as a word boundary, so "ap-01" tucked
-        between Chinese characters (e.g. "修复ap-01设备") fails the
-        \\b match. Use ASCII-explicit lookbehind/lookahead instead so
-        Chinese-glued device IDs are correctly recognised.
-        """
-        q_lower = q.lower()
-        # Common device-id patterns: ap-01, sw-core-01, router-02, radius-01.
-        # The (?<![a-z0-9]) / (?![a-z0-9]) anchors mean "not preceded /
-        # followed by another ASCII alphanumeric" — Chinese characters
-        # satisfy this constraint, so embedded device IDs are matched.
-        if re.search(
-            r"(?<![a-z0-9])[a-z]{2,}[-_]\w{2,}(?![a-z0-9])", q_lower
-        ):
-            return True
-        # Also accept the structured device pattern used elsewhere in
-        # this file (ap/sw/router/switch + digits) to stay consistent.
-        if re.search(
-            r"(?<![a-z0-9])(ap|sw|router|switch)[-_]?[a-z0-9]*[-_]?\d+(?![a-z0-9])",
-            q_lower,
-        ):
-            return True
-        # IPv4 (no character-class boundary issue for digits + dots)
-        if re.search(r"(?<!\d)\d+\.\d+\.\d+\.\d+(?!\d)", q):
-            return True
-        return False
+        Thin wrapper → runtime.loop_helpers.query_mentions_concrete_target
+        (extracted Item 4, 2026-05). Behaviour unchanged."""
+        return _helpers.query_mentions_concrete_target(q)
 
     async def _maybe_clarification_fields(
         self,
@@ -1055,7 +827,7 @@ class AgentRuntimeLoop:
         session_id:      str,
         env_context:     Optional[dict[str, Any]] = None,
         confirmed_facts: Optional[list[str]] = None,
-        working_set:     Optional[list[DeviceRef]] = None,
+        working_set:     Optional[list[ResourceRef]] = None,
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
@@ -1158,18 +930,15 @@ class AgentRuntimeLoop:
             if self._skill_catalog:
                 skill_section = self._skill_catalog.format_summary()
 
-            # Compress paged results before assembly to prevent context overflow
-            from runtime.context_budget import compress_paged_outputs as _compress
-            _to_assemble = _compress(tool_outputs)
-            context_str = self._budget.assemble(
+            # Context assembly (Item 4 4c): unified legacy/priority path.
+            context_str = self._assemble_context(
                 memory_results=memory_results,
-                tool_outputs=_to_assemble,       # pass compressed accumulated results to LLM
+                tool_outputs=tool_outputs,
                 confirmed_facts=state.confirmed_facts,
                 working_set=working_set,
                 env_context=env_ctx,
+                skill_section=skill_section,
             )
-            if skill_section:
-                context_str = skill_section + "\n\n" + context_str
 
             # Attach live tool registry to state so _call_llm / llm_engine can
             # inject it into the system prompt (shows uploaded tools to the LLM)
@@ -1336,6 +1105,646 @@ class AgentRuntimeLoop:
                 )
 
     # ------------------------------------------------------------------
+    # Priority context assembly (Tier 2 #3)
+    # ------------------------------------------------------------------
+
+    async def _refresh_recall(self, ctx: _LoopContext, recall_every: int, facts_growth: int) -> list:
+        """Phase (Item 4 4b): conditional FTS5/memory recall refresh.
+
+        `query` is invariant across the whole stream call, so recall is
+        memoised on ctx and only re-run on a cadence: every `recall_every`
+        turns, or when confirmed_facts has grown by >= `facts_growth`. Pure
+        compute — mutates ctx cache fields, returns the (possibly cached)
+        memory results. Does not yield.
+        """
+        state = ctx.state
+        facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
+        need_refresh = (
+            ctx.last_recall_turn < 0
+            or (state.turns - ctx.last_recall_turn) >= recall_every
+            or (ctx.last_facts_count >= 0 and (facts_now - ctx.last_facts_count) >= facts_growth)
+        )
+        if need_refresh:
+            ctx.cached_memory_results = await self._retrieve_memory(ctx.query, ctx.session_id)
+            ctx.last_recall_turn = state.turns
+            ctx.last_facts_count = facts_now
+        return ctx.cached_memory_results
+
+    def _refresh_skills(self, ctx: _LoopContext, skill_every: int):
+        """Phase (Item 4 4b): conditional skill-selection refresh.
+
+        Memoised like recall: re-selects skills for the (invariant) query
+        every `skill_every` turns, otherwise returns the cached selection.
+        Pure compute — mutates ctx cache fields + records the first-turn
+        journal selection. Does NOT emit chunks or run the ambiguity HITL
+        gate; that stays in _stream_impl because it yields / can terminate
+        the stream. Returns (skill_section, skill_count, selected_skills,
+        skill_ambiguous).
+        """
+        state = ctx.state
+        skill_section   = ctx.cached_skill_section
+        skill_count     = ctx.cached_skill_count
+        selected_skills = ctx.cached_selected_skills
+        skill_ambiguous = ctx.cached_skill_ambiguous
+
+        need_refresh = (
+            ctx.last_skill_turn < 0
+            or (state.turns - ctx.last_skill_turn) >= skill_every
+        )
+        if self._skill_catalog and need_refresh:
+            try:
+                sel = self._skill_catalog.select_skills_for_query(ctx.query, top_k=5)
+                skill_section   = sel.summary
+                selected_skills = sel.selected          # [(skill_id, score), ...]
+                skill_ambiguous = sel.ambiguous
+                skill_count     = len(selected_skills)
+            except AttributeError:
+                # Fallback if select_skills_for_query not available
+                skill_section = self._skill_catalog.format_summary()
+                skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
+            # Update cache
+            ctx.cached_skill_section   = skill_section
+            ctx.cached_selected_skills = selected_skills
+            ctx.cached_skill_count     = skill_count
+            ctx.cached_skill_ambiguous = skill_ambiguous
+            ctx.last_skill_turn        = state.turns
+            # Journal: first selection of this stream call
+            if state._skill_journal is not None and state.turns <= 1:
+                try:
+                    state._skill_journal.record_selection(
+                        top_k_skills=selected_skills,
+                        ambiguous=skill_ambiguous,
+                        turn=state.turns,
+                    )
+                except Exception as _je:
+                    logger.debug("journal.record_selection failed: %s", _je)
+        return skill_section, skill_count, selected_skills, skill_ambiguous
+
+    def _assemble_priority(
+        self,
+        *,
+        skill_section:   str,
+        memory_results:  Optional[list[Any]],
+        tool_outputs:    Optional[dict[str, str]],
+        confirmed_facts: Optional[list[str]],
+        working_set:     Optional[list[Any]],
+        env_context:     Optional[dict[str, Any]],
+    ) -> str:
+        """Priority-based context assembly (strategy="priority").
+
+        Reuses the legacy ContextBudgetManager section FORMATTERS (so the
+        rendered text is identical to the legacy path) but routes each section
+        through the v2 TokenBudget, which enforces a hard total-char cap by
+        trimming LOW-priority sections (older env, skills, retrieved memory)
+        before HIGH-priority ones (confirmed facts, recent tool results). The
+        behavioural difference vs legacy: under pressure legacy drops whatever
+        comes last in fixed order; priority drops by importance.
+
+        Degrades to the legacy assemble() if the v2 module/config is
+        unavailable, so this can never become a hard dependency.
+        """
+        try:
+            from runtime.context_budget_v2 import (
+                TokenBudget, P0_FIXED, P1_HIGH, P2_MEDIUM, P3_LOW,
+            )
+        except Exception:
+            ctx = self._budget.assemble(
+                memory_results=memory_results, tool_outputs=tool_outputs,
+                confirmed_facts=confirmed_facts, working_set=working_set,
+                env_context=env_context,
+            )
+            return (skill_section + "\n\n" + ctx) if skill_section else ctx
+
+        cb = self._ctx_budget_cfg
+        _g = (lambda name, default: int(getattr(cb, name, default)) if cb else default)
+        total = _g("total_chars", 64000)
+
+        b = self._budget  # ContextBudgetManager — reuse its formatters
+        budget = TokenBudget(total)
+
+        if skill_section:
+            budget.reserve("skills", _g("section_skills", 5000),
+                           priority=P2_MEDIUM, evictable=True, payload=skill_section)
+        if confirmed_facts:
+            budget.reserve("confirmed_facts", _g("section_system_core", 4000),
+                           priority=P0_FIXED, evictable=False,
+                           payload=b._format_confirmed_facts(confirmed_facts))
+        if working_set:
+            budget.reserve("working_set", _g("section_user_profile", 500),
+                           priority=P1_HIGH, evictable=True,
+                           payload=b._format_working_set(working_set))
+        if memory_results:
+            budget.reserve("retrieved_memory", _g("section_retrieved_memory", 10000),
+                           priority=P2_MEDIUM, evictable=True,
+                           payload=b._format_memory(memory_results))
+        if tool_outputs:
+            budget.reserve("tool_results", _g("section_tool_results", 30000),
+                           priority=P1_HIGH, evictable=True,
+                           payload=b._format_tool_outputs(tool_outputs))
+        if env_context:
+            budget.reserve("env", _g("section_older_summary", 5000),
+                           priority=P3_LOW, evictable=True,
+                           payload=b._format_env(env_context))
+
+        report = budget.commit()
+
+        order = ["skills", "confirmed_facts", "working_set",
+                 "retrieved_memory", "tool_results", "env"]
+        parts = []
+        for name in order:
+            payload = report.get(name)
+            if payload:
+                parts.append(str(payload))
+        if report.trim_log:
+            logger.debug("ContextBudget[priority]: util=%.0f%% trims=%d",
+                         report.utilisation * 100, len(report.trim_log))
+        return "\n\n".join(parts)
+
+    async def _handle_tools(self, ctx, new_tool_calls, llm_response):
+        """Phase (Item 4 4e): per-turn tool handling.
+
+        Iterates the deduped new_tool_calls and, for each: handles the
+        HITL-required-skill-called-as-tool special case, gates the tool
+        against the HITL watch-list (edit / batch / multi-mode), executes
+        non-gated tools, stores results, runs POST_TOOL_USE + post_verify,
+        and streams tool-result chunks. Async generator.
+
+        HITL stop semantics (UNCHANGED from the inline version): when a
+        tool requires approval, it yields the existing stop_hitl /
+        hitl_gate chunk and then a {"_tools_terminal": True} sentinel. The
+        caller forwards every other chunk and returns on the sentinel,
+        ending this turn's stream exactly as the inline `return` did.
+        Mutates ctx.state / ctx.tool_outputs / ctx.called_tools in place.
+        """
+        # Local aliases to ctx's mutable containers — mutated in place, so
+        # they stay in sync with ctx (same pattern as _stream_impl).
+        tool_outputs = ctx.tool_outputs
+        called_tools = ctx.called_tools
+        for tool_name, tool_args in new_tool_calls:
+            ctx.state.record_tool_call(tool_name)
+            called_tools.add(_call_key(tool_name, tool_args))
+            _journal_tool_start_ts = (
+                __import__("time").monotonic()
+                if ctx.state._skill_journal is not None else None
+            )
+
+            # ── Skill-as-tool guard ───────────────────────────────
+            # If the LLM called a SKILL name as if it were a tool,
+            # inject an error result so the LLM corrects itself on
+            # the next turn rather than hitting the HITL gate or
+            # getting a "not registered" error with no explanation.
+            # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
+            # Tools and skills can share the same name (e.g. list_devices is both a
+            # skill description and a real callable tool). The tool always wins.
+            _is_skill_only = False
+            if self._skill_catalog and tool_name not in ctx.tool_reg:
+                try:
+                    _is_skill_only = any(
+                        s.skill_id == tool_name
+                        for s in self._skill_catalog.list_skills()
+                    )
+                except Exception:
+                    pass
+            if _is_skill_only:
+                # ── Special case: HITL-required skill called as [TOOL:] ──
+                # Rather than injecting a "not a tool" error (which causes
+                # the LLM to loop through SKILL_LOAD indefinitely), detect
+                # the requires_hitl flag and route straight to stop_hitl.
+                # This lets restart_service, rollback_service etc. trigger
+                # the HITL interrupt card exactly like edit_device_config.
+                _skill_requires_hitl = False
+                if self._skill_catalog:
+                    try:
+                        _skill_requires_hitl = self._skill_catalog.requires_hitl(tool_name)
+                    except Exception:
+                        pass
+                if _skill_requires_hitl:
+                    import json as _json
+                    logger.info(
+                        "stream: HITL-required skill '%s' called as tool — routing to HITL",
+                        tool_name,
+                    )
+                    yield {
+                        "message": (
+                            f"stop_hitl: skill '{tool_name}' requires human approval "
+                            "before execution. Routing to HITL graph."
+                        ),
+                        "node":          "hitl_gate",
+                        "stop_hitl":     True,
+                        "tool_name":     tool_name,
+                        "tool_args":     tool_args,
+                        "tool_args_json": _json.dumps(tool_args, default=str),
+                    }
+                    yield {"_tools_terminal": True}
+                    return
+                # Non-HITL skill-only: inject guidance error so LLM learns to SKILL_LOAD
+                _skill_err = (
+                    f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
+                    f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
+                    f"then call the individual tools it describes."
+                )
+                logger.warning("stream: LLM called skill-only '%s' as tool — injecting error", tool_name)
+                tool_outputs[_call_key(tool_name, tool_args)] = _skill_err
+                yield {"node_step": f"Skill-only error: {tool_name}", "node": "runtime_loop"}
+                continue   # skip HITL check and _execute_tool for this name
+
+            # CAP 5: gate tool against HITL watch-list BEFORE execution
+            # Only fires for REAL tools, not skill names (guarded above).
+            #
+            # The watch-list (cfg.hitl_tool_names) is shared across profiles, so
+            # it may name tools that belong to OTHER agents (e.g. dc_grant_app_access
+            # while running the lan profile). An agent must NOT raise a HITL card
+            # for a tool it does not actually have — otherwise it pops a phantom
+            # approval card and the resumer later fails with "tool not registered"
+            # (and, in cross-agent delegation, produces a duplicate card alongside
+            # the delegated-to agent's real one). So a watch-list hit only counts
+            # when the tool is in THIS agent's local registry. A cross-domain tool
+            # the LLM mistakenly names will fall through to normal execution and
+            # surface a plain "not registered" error, prompting delegation instead.
+            _needs_hitl = (tool_name in self._cfg.hitl_tool_names
+                           and tool_name in ctx.tool_reg)
+            if not _needs_hitl and self._skill_catalog:
+                try:
+                    # Only check HITL for a name if it is actually a registered tool
+                    # (i.e. present in the tool registry), not a stray skill name
+                    _is_real_tool = tool_name in ctx.tool_reg
+                    if _is_real_tool:
+                        _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
+                except Exception:
+                    pass
+
+            # Graduated-trust spectrum (Claude-Code-inspired, added 2026-05).
+            # Even if a tool is on the HITL watch-list, the operator's
+            # configured trust_mode may allow auto-approve based on the
+            # tool's action_type:
+            #   cautious        — never skip (default, current behaviour)
+            #   auto_reversible — skip iff action_type ∈ {read_only, reversible}
+            #   bypass          — always skip (trusted dev/replay only)
+            # We log every skip to audit trail so post-hoc review can
+            # confirm intent — silent skips would be unacceptable in
+            # production network ops. See PolicyEngine.should_skip_hitl_for_tool.
+            if _needs_hitl:
+                try:
+                    from runtime.policy_engine import get_policy_engine as _get_pe2
+                    _pe2 = _get_pe2()
+                    if _pe2 is not None:
+                        _skip, _skip_reason = _pe2.should_skip_hitl_for_tool(tool_name)
+                        if _skip:
+                            logger.info(
+                                "stream: HITL skipped for tool=%s reason=%s",
+                                tool_name, _skip_reason,
+                            )
+                            _needs_hitl = False
+                except Exception as _ts_exc:
+                    logger.debug(
+                        "stream: trust_mode skip check failed (%s) — "
+                        "falling through to HITL", _ts_exc,
+                    )
+
+            if _needs_hitl:
+                import json as _json
+                # Type #2: if this tool is on the editable list, surface
+                # the keys the operator should be allowed to tweak before
+                # approving. The executor will fire trigger_edit_approval
+                # (showing inline editors) instead of a bare approve panel.
+                _editable_keys = list(
+                    self._cfg.editable_hitl_tools.get(tool_name, [])
+                )
+                # ── Batch detection (L0/L1 Stage B) ───────────────
+                # The decision of whether one destructive [TOOL:] call should
+                # expand into a multi-target batch HITL is BUSINESS logic
+                # (e.g. network: 'prose names sw-core-01 AND sw-core-02').
+                # L0 delegates it to a profile-injected resolver; when none is
+                # injected (e.g. default profile) batch_calls stays None and a
+                # single-target HITL card is raised — the safe generic default.
+                _batch_calls = None
+                if self._batch_resolver_fn is not None:
+                    try:
+                        _batch_calls = self._batch_resolver_fn(
+                            tool_name=tool_name,
+                            tool_args=tool_args,
+                            llm_response=llm_response,
+                            hitl_tool_names=self._cfg.hitl_tool_names,
+                            confirmed_facts=list(ctx.state.confirmed_facts or []),
+                            all_parsed=self._parse_tool_calls(llm_response),
+                        )
+                    except Exception as _bre:
+                        logger.warning('batch_resolver_fn failed (%s) — single HITL', _bre)
+                        _batch_calls = None
+                # tool calls entirely and falls back to advisory prose
+                # (suggesting backups, asking for confirmation, etc),
+                # which means NEITHER the original single card NOR a
+                # batch ever appears. Letting the single [TOOL:] flow
+                # through to stop_hitl preserves the original card so
+                # at least one device can be approved this turn; the
+                # LLM will propose remaining devices in a subsequent
+                # turn once the first approval completes. The prompt's
+                # multi-target EXCEPTION clause + the worked example in
+                # llm_engine.py still give the LLM the option to emit
+                # multiple [TOOL:] up front (Path A) when it's
+                # confident — but we no longer punish it for emitting
+                # just one.
+
+                yield {
+                    "message": (
+                        f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
+                        "and requires human approval before execution. "
+                        "Routing to HITL graph."
+                    ),
+                    "node":      "hitl_gate",
+                    "stop_hitl": True,
+                    "tool_name": tool_name,
+                    "tool_args": tool_args,          # carry args for post-approval replay
+                    "tool_args_json": _json.dumps(tool_args, default=str),
+                    # Type #2 multi-mode HITL: signal to the executor that
+                    # the operator may edit these specific param keys.
+                    "hitl_kind":            "edit" if _editable_keys else None,
+                    "editable_param_keys":  _editable_keys,
+                    # NEW: list of (name, args) pairs when the LLM
+                    # emitted multiple same-name destructive calls
+                    # in one response. Absent / None when single.
+                    "batch_calls":          _batch_calls,
+                }
+                yield {"_tools_terminal": True}
+                return
+
+            yield {"node_step": f"Calling tool: {tool_name}", "node": "runtime_loop"}
+            logger.info("TOOL▶ %s args=%s", tool_name, tool_args)
+            if logger.isEnabledFor(logging.DEBUG):
+                import json as _json
+                logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
+                             _json.dumps(tool_args, indent=2, default=str), "─"*72)
+
+            # ── PRE_TOOL_USE hook (Sprint 2, 2026-05) ──────────────────
+            # Hooks may mutate ctx["args"] before dispatch, or set
+            # ctx["blocked"]=True with ctx["block_reason"] to abort.
+            # Mutation is by-reference; we then read back tool_args.
+            # Failure semantics: hook exceptions are logged + swallowed;
+            # blocking is ONLY via explicit ctx flag, never via raise.
+            _pre_ctx = {
+                "tool":       tool_name,
+                "args":       dict(tool_args),    # copy so hooks can't break our caller
+                "ctx.session_id": ctx.session_id,
+                "turn":       ctx.state.turns,
+            }
+            try:
+                from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                _pre_ctx = await _hr().fire(_HE.PRE_TOOL_USE, _pre_ctx)
+            except Exception as _h_exc:
+                logger.debug("PRE_TOOL_USE hook fire failed: %s", _h_exc)
+            if _pre_ctx.get("blocked"):
+                _reason = _pre_ctx.get("block_reason") or "blocked by hook"
+                logger.warning(
+                    "stream: tool %s blocked by hook — %s", tool_name, _reason,
+                )
+                _blk_msg = f"[Error: tool {tool_name} blocked by policy hook: {_reason}]"
+                tool_outputs[_call_key(tool_name, tool_args)] = _blk_msg
+                yield {
+                    "node":      "hook_block",
+                    "node_step": f"Tool blocked: {tool_name}",
+                    "type":      "hook_block",
+                    "tool":      tool_name,
+                    "reason":    _reason,
+                }
+                continue
+            # Hook may have mutated args; pick them up
+            tool_args = _pre_ctx.get("args", tool_args)
+
+            # ── Inject ctx.session_id for async-HITL tools (H2, 2026-05) ──
+            # The `_session_id` arg is consumed by tools that use
+            # PipelineContext.request_approval_async / emit_async_hitl_notify
+            # for soft-notify routing. Underscore-prefixed → other tools
+            # ignore it. We inject unconditionally because the cost is
+            # one dict key and the tool either reads it (H2) or doesn't.
+            # See tools/mock_tools.py:query_radius_logs for the H2 contract.
+            if "_session_id" not in tool_args:
+                tool_args = dict(tool_args)
+                tool_args["_session_id"] = ctx.session_id
+
+            raw = await self._execute_tool(tool_name, tool_args, ctx.tool_reg)
+
+            # ── POST_TOOL_USE hook (Sprint 2, 2026-05) ─────────────────
+            # Listeners can: observe result, redact secrets, write audit
+            # event. Hooks may mutate ctx["result"] to filter content.
+            # POST hooks CANNOT block (the tool already ran).
+            try:
+                from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
+                _post_ctx = await _hr().fire(_HE.POST_TOOL_USE, {
+                    "tool":       tool_name,
+                    "args":       tool_args,
+                    "result":     raw,
+                    "ctx.session_id": ctx.session_id,
+                    "turn":       ctx.state.turns,
+                })
+                # Pick up redacted/filtered result if hook mutated it
+                _maybe_filtered = _post_ctx.get("result")
+                if isinstance(_maybe_filtered, str) and _maybe_filtered != raw:
+                    logger.info(
+                        "stream: tool %s result filtered by hook (%d → %d chars)",
+                        tool_name, len(raw), len(_maybe_filtered),
+                    )
+                    raw = _maybe_filtered
+            except Exception as _h_exc:
+                logger.debug("POST_TOOL_USE hook fire failed: %s", _h_exc)
+
+            # Same exclusion as ToolRouter — don't double-store pagination
+            # outputs. The 'stored' label here is what the LLM sees in the
+            # next turn's context; for paged reads we want the LLM to see
+            # the actual page content, not yet another [STORED:] reference.
+            _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
+            _is_page_or_ref = (
+                raw.startswith("[STORED:")
+                or raw.startswith("# Stored result ref_id=")
+            )
+            if tool_name in _SKIP_STORE or _is_page_or_ref:
+                stored = raw   # pass page content through unchanged
+            else:
+                stored = self._budget.store_tool_result(tool_name, raw)
+            tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
+            # Update count so llm_engine knows how many current-turn results exist
+            ctx.state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
+            ctx.state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
+            # Keep raw results for has_more / paging detection in llm_engine
+            if not hasattr(ctx.state, "_tool_outputs_raw"):
+                ctx.state._tool_outputs_raw = {}  # type: ignore[attr-defined]
+            ctx.state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
+            # Log when tool returns error/empty — high hallucination risk
+            _raw_lower = raw.lower() if isinstance(raw, str) else ""
+            if (raw.startswith("[Error]")
+                    or "not found" in _raw_lower
+                    or raw.strip() in ("", "[]", "{}")
+                    or "no devices" in _raw_lower):
+                logger.warning(
+                    "tool %r returned error/empty: %s", tool_name, raw[:120]
+                )
+            logger.info("TOOL◀ %s result_chars=%d stored=%s",
+                        tool_name, len(raw), stored.startswith("[STORED:"))
+            if logger.isEnabledFor(logging.DEBUG):
+                _tcfg_d = _truncation_cfg()
+                _td_cap = getattr(_tcfg_d, "tool_debug_chars", 2000) if _tcfg_d else 2000
+                logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:_td_cap], "─"*72)
+            yield {
+                "node_result": {
+                    "tool":   tool_name,
+                    "result": stored,      # full stored label (for large) or full raw text (for inline)
+                    "raw":    raw,         # always full raw text — used by frontend Results tab
+                    "args":   tool_args,   # pass args so frontend can label the card accurately
+                },
+                "node": "runtime_tool_result",
+            }
+
+            if self._cfg.enable_post_verification and tool_name != "read_stored_result":
+                post = await self.post_verify(tool_name, raw, ctx.state.confirmed_facts)
+                if not post.passed:
+                    yield {"node_step": f"Post-verify warning: {post.reason}", "node": "post_verify"}
+
+            # Journal: record completed tool call (after exec + verify)
+            if ctx.state._skill_journal is not None:
+                try:
+                    _t = __import__("time").monotonic()
+                    _elapsed = (_t - _journal_tool_start_ts) * 1000 if _journal_tool_start_ts else None
+                    _tool_ok = "[ToolRouter] Tool" not in (raw or "")[:40]
+                    ctx.state._skill_journal.record_tool_call(
+                        turn=ctx.state.turns,
+                        tool_name=tool_name,
+                        args=tool_args,
+                        ok=_tool_ok,
+                        error=(None if _tool_ok else str(raw)[:200]),
+                        elapsed_ms=_elapsed,
+                    )
+                except Exception as _je:
+                    logger.debug("journal.record_tool_call failed: %s", _je)
+
+    async def _run_clarification_gate(self, ctx, memory_results, selected_skills):
+        """Phase (Item 4 4d): Type #3 clarification gate (turn 1 only).
+
+        When the agent would otherwise hallucinate a plan from too little
+        info, ask the operator for the missing pieces instead. Async
+        generator: yields chat tokens + a clarification chunk. If it asks,
+        it yields a final {"_clarification_terminal": True} sentinel — the
+        caller forwards every other chunk and returns on the sentinel to end
+        this turn's stream. If no clarification is needed, yields nothing.
+        """
+        # ── Type #3 CLARIFICATION gate ────────────────────────────
+        # When the agent is about to hallucinate a plan from too little
+        # info, ask the operator for missing pieces instead. Triggered by:
+        #   - top skill score < clarification_confidence_floor AND
+        #   - query mentions an action word but no concrete target (e.g.
+        #     "修复" without device_id, "查日志" without time range), AND
+        #   - we haven't already asked the operator clarification_max_per_session
+        #     times in this session (avoid loops).
+        # Skipped on subsequent turns (state.turns > 1) — clarify only at
+        # the start of a new request, never mid-execution.
+        if ctx.state.turns == 1 and self._cfg.clarification_max_per_session > 0:
+            # Build recent_context from current turn's recall + caller-supplied
+            # _fts_context. _maybe_clarification_fields uses this to detect
+            # "prior turn already asked" and skip re-asking.
+            _recent_for_clar = ctx.env_ctx.get("_fts_context", "") or ""
+            if not _recent_for_clar and memory_results:
+                try:
+                    _tcfg = _truncation_cfg()
+                    _recall_cap = getattr(_tcfg, "recall_context_chars", 1500) if _tcfg else 1500
+                    _recent_for_clar = "\n".join(str(m) for m in memory_results)[:_recall_cap]
+                except Exception:
+                    pass
+            clar_fields = await self._maybe_clarification_fields(
+                query=ctx.query,
+                top_skill_score=(selected_skills[0][1] if selected_skills else 0.0),
+                asked_count=self._clarification_counts.get(ctx.session_id, 0),
+                recent_context=_recent_for_clar,
+            )
+            if clar_fields:
+                self._clarification_counts.increment(ctx.session_id)
+                # Open-ended clarification — render as a CHAT TURN, not a
+                # HITL card. The operator's next message in the same
+                # session naturally provides the answers. This is the
+                # right UX for "which device do you mean?" — operators
+                # have hundreds of devices to potentially reference and
+                # a one-line input box doesn't help them.
+                # Closed candidate lists (e.g. "4 APs match") still go
+                # through the USER_CHOICE card path — see skill ambiguity.
+                logger.info(
+                    "Clarification gate (turn 1): asking operator for %s via chat turn",
+                    [getattr(f, "key", f.get("key") if isinstance(f, dict) else "?")
+                     for f in clar_fields],
+                )
+                _q_lines = []
+                for f in clar_fields:
+                    if hasattr(f, "key"):  # ClarificationField object
+                        _key = f.key
+                        _prompt = f.prompt
+                        _ph = getattr(f, "placeholder", "") or ""
+                        _required = getattr(f, "required", True)
+                    else:                    # plain dict
+                        _key = f.get("key", "")
+                        _prompt = f.get("prompt", _key)
+                        _ph = f.get("placeholder", "")
+                        _required = f.get("required", True)
+                    _star = "" if _required else "（可选）"
+                    line = f"- **{_prompt}**{_star}"
+                    if _ph:
+                        line += f"  _例: {_ph}_"
+                    _q_lines.append(line)
+                _ask_text = (
+                    "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
+                    + "\n".join(_q_lines)
+                    + "\n\n请直接回复，我会基于您的补充继续。"
+                )
+                # Stream as chat tokens — no card, no stop_hitl.
+                for _i in range(0, len(_ask_text), 80):
+                    yield {"token": _ask_text[_i:_i+80]}
+                yield {
+                    "node":      "clarification_chat",
+                    "node_step": "Clarification asked via chat turn",
+                    "reason":    "clarification_needed",
+                    "message":   "Clarification asked — awaiting operator's next message",
+                }
+                yield {"_clarification_terminal": True}
+                return
+
+    def _assemble_context(
+        self,
+        *,
+        memory_results: list,
+        tool_outputs: dict,
+        confirmed_facts,
+        working_set: list,
+        env_context: dict,
+        skill_section: str,
+    ) -> str:
+        """Phase (Item 4 4c): build the LLM context string for one turn.
+
+        Single entry point for both the legacy ContextBudgetManager.assemble
+        path and the v2 priority TokenBudget path (selected by
+        cfg.context_budget.strategy). Compresses paged tool outputs first.
+        Used by both run() and _stream_impl so the two paths can never drift
+        (previously the priority strategy was wired only into run(), so the
+        streaming path silently always used legacy — unifying here fixes that).
+        """
+        from runtime.context_budget import compress_paged_outputs as _compress
+        to_assemble = _compress(tool_outputs)
+
+        if self._ctx_strategy == "priority":
+            return self._assemble_priority(
+                skill_section=skill_section,
+                memory_results=memory_results,
+                tool_outputs=to_assemble,
+                confirmed_facts=confirmed_facts,
+                working_set=working_set,
+                env_context=env_context,
+            )
+        context_str = self._budget.assemble(
+            memory_results=memory_results,
+            tool_outputs=to_assemble,
+            confirmed_facts=confirmed_facts,
+            working_set=working_set,
+            env_context=env_context,
+        )
+        if skill_section:
+            context_str = skill_section + "\n\n" + context_str
+        return context_str
+
+    # ------------------------------------------------------------------
     # Stream
     # ------------------------------------------------------------------
 
@@ -1345,7 +1754,7 @@ class AgentRuntimeLoop:
         session_id:      str,
         env_context:     Optional[dict[str, Any]] = None,
         confirmed_facts: Optional[list[str]] = None,
-        working_set:     Optional[list[DeviceRef]] = None,
+        working_set:     Optional[list[ResourceRef]] = None,
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
@@ -1411,7 +1820,7 @@ class AgentRuntimeLoop:
         session_id:      str,
         env_context:     Optional[dict[str, Any]] = None,
         confirmed_facts: Optional[list[str]] = None,
-        working_set:     Optional[list[DeviceRef]] = None,
+        working_set:     Optional[list[ResourceRef]] = None,
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
@@ -1478,8 +1887,20 @@ class AgentRuntimeLoop:
         except Exception as _jexc:
             logger.debug("SkillJournal init skipped: %s", _jexc)
 
-        tool_outputs: dict[str, str] = {}   # persists across turns
-        called_tools: set[str] = set()       # dedup guard
+        # ── Item 4 (4a): per-turn state container ──────────────────────
+        # _LoopContext owns the cross-turn mutable state. During the staged
+        # decomposition (4a-4e) the loop body still uses local aliases for
+        # the mutable containers (tool_outputs / called_tools) — because they
+        # are mutated in place, the alias and ctx stay in sync with zero
+        # changes to the ~25 existing reference sites. Scalar/cache vars are
+        # migrated to ctx.* as their owning phases are extracted (4b-4d).
+        ctx = _LoopContext(
+            query=query, session_id=session_id, env_ctx=env_ctx,
+            tool_reg=tool_reg, delegation_mode=delegation_mode,
+            parent_state=parent_state, state=state,
+        )
+        tool_outputs = ctx.tool_outputs   # dict, mutated in place → syncs with ctx
+        called_tools = ctx.called_tools   # set,  mutated in place → syncs with ctx
 
         # ── Clarification gate (runs ONCE before the first turn) ─────────
         # When the caller has supplied a complexity decision and its
@@ -1527,15 +1948,6 @@ class AgentRuntimeLoop:
             _recall_every, _skill_every, _facts_growth = 3, 5, 3
             _emit_skills_only_on_change = True
 
-        _cached_memory_results: list = []
-        _cached_skill_section:  str  = ""
-        _cached_selected_skills: list = []
-        _cached_skill_count:    int  = 0
-        _cached_skill_ambiguous: bool = False
-        _last_recall_turn = -1
-        _last_skill_turn  = -1
-        _last_facts_count = -1
-        _last_emitted_skill_sig: str = ""
 
         while True:
             state.turns += 1
@@ -1626,80 +2038,31 @@ class AgentRuntimeLoop:
                 )
 
             # ── PERF-1: conditional recall refresh ──────────────────────
-            _facts_now = len(state.confirmed_facts) if state.confirmed_facts is not None else 0
-            _need_recall_refresh = (
-                _last_recall_turn < 0
-                or (state.turns - _last_recall_turn) >= _recall_every
-                or (_last_facts_count >= 0 and (_facts_now - _last_facts_count) >= _facts_growth)
-            )
-            if _need_recall_refresh:
-                _cached_memory_results = await self._retrieve_memory(query, session_id)
-                _last_recall_turn  = state.turns
-                _last_facts_count  = _facts_now
-            memory_results = _cached_memory_results
+            memory_results = await self._refresh_recall(ctx, _recall_every, _facts_growth)
 
             # ── PERF-1: conditional skill-selection refresh ─────────────
-            skill_section  = _cached_skill_section
-            skill_count    = _cached_skill_count
-            selected_skills = _cached_selected_skills
-            skill_ambiguous = _cached_skill_ambiguous
+            skill_section, skill_count, selected_skills, skill_ambiguous = \
+                self._refresh_skills(ctx, _skill_every)
 
-            _need_skill_refresh = (
-                _last_skill_turn < 0
-                or (state.turns - _last_skill_turn) >= _skill_every
-            )
-            if self._skill_catalog and _need_skill_refresh:
-                try:
-                    sel = self._skill_catalog.select_skills_for_query(query, top_k=5)
-                    skill_section   = sel.summary
-                    selected_skills = sel.selected          # [(skill_id, score), ...]
-                    skill_ambiguous = sel.ambiguous
-                    skill_count     = len(selected_skills)
-                except AttributeError:
-                    # Fallback if select_skills_for_query not available
-                    skill_section = self._skill_catalog.format_summary()
-                    skill_count   = len(getattr(self._skill_catalog, "_skills", {}))
-                # Update cache
-                _cached_skill_section    = skill_section
-                _cached_selected_skills  = selected_skills
-                _cached_skill_count      = skill_count
-                _cached_skill_ambiguous  = skill_ambiguous
-                _last_skill_turn         = state.turns
-                # Journal: first selection of this stream call
-                if state._skill_journal is not None and state.turns <= 1:
-                    try:
-                        state._skill_journal.record_selection(
-                            top_k_skills=selected_skills,
-                            ambiguous=skill_ambiguous,
-                            turn=state.turns,
-                        )
-                    except Exception as _je:
-                        logger.debug("journal.record_selection failed: %s", _je)
-
-            # Compress paged results before assembly to prevent context overflow.
-            # Without this, accumulated read_stored_result pages send the full
-            # paged content back to the LLM every turn — Ollama times out.
-            from runtime.context_budget import compress_paged_outputs as _compress
-            _to_assemble = _compress(tool_outputs)
             # BUG-07 fix: use state.working_set (which may be updated mid-loop)
             # rather than the outer `working_set` variable (frozen at call start).
             _current_working_set = getattr(state, "working_set", None) or working_set or []
-            context_str = self._budget.assemble(
+            context_str = self._assemble_context(
                 memory_results=memory_results,
-                tool_outputs=_to_assemble,       # compressed accumulated results
+                tool_outputs=tool_outputs,
                 confirmed_facts=state.confirmed_facts,
                 working_set=_current_working_set,
                 env_context=env_ctx,
+                skill_section=skill_section,
             )
             if skill_section:
-                context_str = skill_section + "\n\n" + context_str
                 # Q1: emit named matched skills so Flow tab shows exactly which skills loaded
                 skill_names = ", ".join(f"{sid}({sc:.2f})" for sid, sc in selected_skills) \
                               or f"{skill_count} skills"
                 # PERF-4: only emit when signature changes (avoid wire spam on cached turns)
                 _skill_sig = f"{skill_count}|{skill_names}"
-                _suppress_skill_emit = _emit_skills_only_on_change and _skill_sig == _last_emitted_skill_sig
-                _last_emitted_skill_sig = _skill_sig
+                _suppress_skill_emit = _emit_skills_only_on_change and _skill_sig == ctx.last_emitted_skill_sig
+                ctx.last_emitted_skill_sig = _skill_sig
                 if _suppress_skill_emit:
                     pass
                 else:
@@ -1785,81 +2148,13 @@ class AgentRuntimeLoop:
                     }
                     return
 
-            # ── Type #3 CLARIFICATION gate ────────────────────────────
-            # When the agent is about to hallucinate a plan from too little
-            # info, ask the operator for missing pieces instead. Triggered by:
-            #   - top skill score < clarification_confidence_floor AND
-            #   - query mentions an action word but no concrete target (e.g.
-            #     "修复" without device_id, "查日志" without time range), AND
-            #   - we haven't already asked the operator clarification_max_per_session
-            #     times in this session (avoid loops).
-            # Skipped on subsequent turns (state.turns > 1) — clarify only at
-            # the start of a new request, never mid-execution.
-            if state.turns == 1 and self._cfg.clarification_max_per_session > 0:
-                # Build recent_context from current turn's recall + caller-supplied
-                # _fts_context. _maybe_clarification_fields uses this to detect
-                # "prior turn already asked" and skip re-asking.
-                _recent_for_clar = env_ctx.get("_fts_context", "") or ""
-                if not _recent_for_clar and memory_results:
-                    try:
-                        _tcfg = _truncation_cfg()
-                        _recall_cap = getattr(_tcfg, "recall_context_chars", 1500) if _tcfg else 1500
-                        _recent_for_clar = "\n".join(str(m) for m in memory_results)[:_recall_cap]
-                    except Exception:
-                        pass
-                clar_fields = await self._maybe_clarification_fields(
-                    query=query,
-                    top_skill_score=(selected_skills[0][1] if selected_skills else 0.0),
-                    asked_count=self._clarification_counts.get(session_id, 0),
-                    recent_context=_recent_for_clar,
-                )
-                if clar_fields:
-                    self._clarification_counts.increment(session_id)
-                    # Open-ended clarification — render as a CHAT TURN, not a
-                    # HITL card. The operator's next message in the same
-                    # session naturally provides the answers. This is the
-                    # right UX for "which device do you mean?" — operators
-                    # have hundreds of devices to potentially reference and
-                    # a one-line input box doesn't help them.
-                    # Closed candidate lists (e.g. "4 APs match") still go
-                    # through the USER_CHOICE card path — see skill ambiguity.
-                    logger.info(
-                        "Clarification gate (turn 1): asking operator for %s via chat turn",
-                        [getattr(f, "key", f.get("key") if isinstance(f, dict) else "?")
-                         for f in clar_fields],
-                    )
-                    _q_lines = []
-                    for f in clar_fields:
-                        if hasattr(f, "key"):  # ClarificationField object
-                            _key = f.key
-                            _prompt = f.prompt
-                            _ph = getattr(f, "placeholder", "") or ""
-                            _required = getattr(f, "required", True)
-                        else:                    # plain dict
-                            _key = f.get("key", "")
-                            _prompt = f.get("prompt", _key)
-                            _ph = f.get("placeholder", "")
-                            _required = f.get("required", True)
-                        _star = "" if _required else "（可选）"
-                        line = f"- **{_prompt}**{_star}"
-                        if _ph:
-                            line += f"  _例: {_ph}_"
-                        _q_lines.append(line)
-                    _ask_text = (
-                        "为了准确处理这个请求，我需要您补充几个关键信息：\n\n"
-                        + "\n".join(_q_lines)
-                        + "\n\n请直接回复，我会基于您的补充继续。"
-                    )
-                    # Stream as chat tokens — no card, no stop_hitl.
-                    for _i in range(0, len(_ask_text), 80):
-                        yield {"token": _ask_text[_i:_i+80]}
-                    yield {
-                        "node":      "clarification_chat",
-                        "node_step": "Clarification asked via chat turn",
-                        "reason":    "clarification_needed",
-                        "message":   "Clarification asked — awaiting operator's next message",
-                    }
-                    return
+            # ── Type #3 CLARIFICATION gate (Item 4 4d → _run_clarification_gate) ──
+            async for _clar_chunk in self._run_clarification_gate(
+                ctx, memory_results, selected_skills,
+            ):
+                if _clar_chunk.get('_clarification_terminal'):
+                    return   # gate asked the operator; end this turn's stream
+                yield _clar_chunk
 
             yield {"node_step": f"Turn {state.turns}: analysing", "node": "runtime_loop"}
 
@@ -2051,6 +2346,7 @@ class AgentRuntimeLoop:
                 len(_all_parsed) >= 2
                 and all(_n == _all_parsed[0][0] for _n, _ in _all_parsed)
                 and _all_parsed[0][0] in self._cfg.hitl_tool_names
+                and _all_parsed[0][0] in tool_reg
             ):
                 # Looks like a TOOL_BATCH expansion (or a same-name multi
                 # [TOOL:] burst): all destructive, all same name. Keep all.
@@ -2115,470 +2411,11 @@ class AgentRuntimeLoop:
                 # Continue the while loop — top of loop bumps state.turns
                 continue
 
-            for tool_name, tool_args in new_tool_calls:
-                state.record_tool_call(tool_name)
-                called_tools.add(_call_key(tool_name, tool_args))
-                _journal_tool_start_ts = (
-                    __import__("time").monotonic()
-                    if state._skill_journal is not None else None
-                )
-
-                # ── Skill-as-tool guard ───────────────────────────────
-                # If the LLM called a SKILL name as if it were a tool,
-                # inject an error result so the LLM corrects itself on
-                # the next turn rather than hitting the HITL gate or
-                # getting a "not registered" error with no explanation.
-                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
-                # Tools and skills can share the same name (e.g. list_devices is both a
-                # skill description and a real callable tool). The tool always wins.
-                _is_skill_only = False
-                if self._skill_catalog and tool_name not in tool_reg:
-                    try:
-                        _is_skill_only = any(
-                            s.skill_id == tool_name
-                            for s in self._skill_catalog.list_skills()
-                        )
-                    except Exception:
-                        pass
-                if _is_skill_only:
-                    # ── Special case: HITL-required skill called as [TOOL:] ──
-                    # Rather than injecting a "not a tool" error (which causes
-                    # the LLM to loop through SKILL_LOAD indefinitely), detect
-                    # the requires_hitl flag and route straight to stop_hitl.
-                    # This lets restart_service, rollback_service etc. trigger
-                    # the HITL interrupt card exactly like edit_device_config.
-                    _skill_requires_hitl = False
-                    if self._skill_catalog:
-                        try:
-                            _skill_requires_hitl = self._skill_catalog.requires_hitl(tool_name)
-                        except Exception:
-                            pass
-                    if _skill_requires_hitl:
-                        import json as _json
-                        logger.info(
-                            "stream: HITL-required skill '%s' called as tool — routing to HITL",
-                            tool_name,
-                        )
-                        yield {
-                            "message": (
-                                f"stop_hitl: skill '{tool_name}' requires human approval "
-                                "before execution. Routing to HITL graph."
-                            ),
-                            "node":          "hitl_gate",
-                            "stop_hitl":     True,
-                            "tool_name":     tool_name,
-                            "tool_args":     tool_args,
-                            "tool_args_json": _json.dumps(tool_args, default=str),
-                        }
-                        return
-                    # Non-HITL skill-only: inject guidance error so LLM learns to SKILL_LOAD
-                    _skill_err = (
-                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
-                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
-                        f"then call the individual tools it describes."
-                    )
-                    logger.warning("stream: LLM called skill-only '%s' as tool — injecting error", tool_name)
-                    tool_outputs[_call_key(tool_name, tool_args)] = _skill_err
-                    yield {"node_step": f"Skill-only error: {tool_name}", "node": "runtime_loop"}
-                    continue   # skip HITL check and _execute_tool for this name
-
-                # CAP 5: gate tool against HITL watch-list BEFORE execution
-                # Only fires for REAL tools, not skill names (guarded above).
-                _needs_hitl = tool_name in self._cfg.hitl_tool_names
-                if not _needs_hitl and self._skill_catalog:
-                    try:
-                        # Only check HITL for a name if it is actually a registered tool
-                        # (i.e. present in the tool registry), not a stray skill name
-                        _is_real_tool = tool_name in tool_reg
-                        if _is_real_tool:
-                            _needs_hitl = self._skill_catalog.requires_hitl(tool_name)
-                    except Exception:
-                        pass
-
-                # Graduated-trust spectrum (Claude-Code-inspired, added 2026-05).
-                # Even if a tool is on the HITL watch-list, the operator's
-                # configured trust_mode may allow auto-approve based on the
-                # tool's action_type:
-                #   cautious        — never skip (default, current behaviour)
-                #   auto_reversible — skip iff action_type ∈ {read_only, reversible}
-                #   bypass          — always skip (trusted dev/replay only)
-                # We log every skip to audit trail so post-hoc review can
-                # confirm intent — silent skips would be unacceptable in
-                # production network ops. See PolicyEngine.should_skip_hitl_for_tool.
-                if _needs_hitl:
-                    try:
-                        from runtime.policy_engine import get_policy_engine as _get_pe2
-                        _pe2 = _get_pe2()
-                        if _pe2 is not None:
-                            _skip, _skip_reason = _pe2.should_skip_hitl_for_tool(tool_name)
-                            if _skip:
-                                logger.info(
-                                    "stream: HITL skipped for tool=%s reason=%s",
-                                    tool_name, _skip_reason,
-                                )
-                                _needs_hitl = False
-                    except Exception as _ts_exc:
-                        logger.debug(
-                            "stream: trust_mode skip check failed (%s) — "
-                            "falling through to HITL", _ts_exc,
-                        )
-
-                if _needs_hitl:
-                    import json as _json
-                    # Type #2: if this tool is on the editable list, surface
-                    # the keys the operator should be allowed to tweak before
-                    # approving. The executor will fire trigger_edit_approval
-                    # (showing inline editors) instead of a bare approve panel.
-                    _editable_keys = list(
-                        self._cfg.editable_hitl_tools.get(tool_name, [])
-                    )
-                    # ── Batch detection ───────────────────────────────
-                    # Path A: LLM already emitted multiple [TOOL:] of the
-                    # SAME destructive name this turn (the textbook case
-                    # after the prompt's "multi-target batches" example).
-                    # Path B: LLM emitted ONLY ONE [TOOL:] this turn but
-                    # its surrounding prose names multiple devices that
-                    # are clearly the intended targets (e.g. the analysis
-                    # text says "为 sw-core-01 和 sw-core-02 应用以下配置"
-                    # but the [TOOL:] block only carries sw-core-01).
-                    # In Path B we DON'T stop_hitl yet; we nudge the LLM
-                    # to re-emit ONE response that contains [TOOL:] lines
-                    # for every target. Otherwise the operator only sees
-                    # the first target and has to start a fresh chat turn
-                    # for each remaining one.
-                    _all_calls = self._parse_tool_calls(llm_response)
-                    _siblings  = [
-                        (n, a) for (n, a) in _all_calls
-                        if n == tool_name and a != tool_args and n in self._cfg.hitl_tool_names
-                    ]
-                    _batch_calls = None
-                    if _siblings:
-                        # Path A — Build the batch list: current + all distinct
-                        # siblings, preserving order. Dedup by JSON-canonical
-                        # key so two identical args don't both show.
-                        _seen_keys = {_call_key(tool_name, tool_args)}
-                        _batch_calls = [(tool_name, tool_args)]
-                        for (n, a) in _siblings:
-                            k = _call_key(n, a)
-                            if k not in _seen_keys:
-                                _seen_keys.add(k)
-                                _batch_calls.append((n, a))
-                        logger.info(
-                            "stream: detected batch of %d %s calls in one turn (path A) — "
-                            "executor will raise a HITL batch",
-                            len(_batch_calls), tool_name,
-                        )
-                    else:
-                        # Path B v2 — silent fabrication.
-                        #
-                        # Real-world testing (sessions ap-01/ap-02 + sw-core-01/02)
-                        # showed that qwen3.5:27b consistently emits a SINGLE
-                        # [TOOL:] even when prose enumerates multiple targets
-                        # for the SAME logical operation ("我将为 ap-01 和
-                        # ap-02 下发修复配置"). Prompt-level teaching (worked
-                        # examples, [TOOL_BATCH:] directive, GOOD/BAD pairs)
-                        # has been tried and the LLM keeps reverting to
-                        # the "one tool per turn" pattern it was trained on.
-                        #
-                        # Strategy: when the LLM's prose names ≥2 distinct
-                        # device-id patterns AND only one [TOOL:] was emitted
-                        # AND the emitted device is among the named ones,
-                        # silently fabricate N-1 sibling tool calls by
-                        # COPYING the LLM's args dict and only swapping the
-                        # device_id field. Mark each fabricated call's
-                        # reason field so operators see this is auto-derived.
-                        #
-                        # Operator safety: every fabricated call still goes
-                        # through HITL approval — the operator reviews each
-                        # card and can edit args or reject. Worst case is
-                        # an extra card to reject; best case (and common
-                        # case in our tests) is "same fix applied to N
-                        # identical devices", which the operator wants
-                        # batched anyway.
-                        #
-                        # Limits:
-                        #  * Only fires for tools with a device_id-like
-                        #    parameter (so fabrication is unambiguous).
-                        #  * Cap at 5 fabricated siblings to prevent
-                        #    runaway batches from prose typos.
-                        #  * Skip if any fabricated device_id would
-                        #    collide with the current one (after
-                        #    case-normalization).
-                        _current_device = str(
-                            tool_args.get("device_id")
-                            or tool_args.get("device")
-                            or tool_args.get("target")
-                            or ""
-                        ).strip()
-                        _device_key = (
-                            "device_id" if "device_id" in tool_args
-                            else "device" if "device" in tool_args
-                            else "target" if "target" in tool_args
-                            else None
-                        )
-                        if _current_device and _device_key:
-                            # Strip [TOOL:] blocks + [ALIAS:] blocks from
-                            # prose so we only match entity names in
-                            # narrative text.
-                            # Use centralized parser to strip directives
-                            # consistently (tolerates whitespace variants).
-                            from runtime.directive_parser import (
-                                strip_tool_directives as _stt,
-                                strip_tool_batch_directives as _stb,
-                            )
-                            _prose = _stb(_stt(llm_response))
-                            _prose = re.sub(
-                                r"\[ALIAS\s*:\s*[^=\]]+?\s*=\s*[^\]]+?\s*\]",
-                                "",
-                                _prose,
-                            )
-                            _DEV_RE = re.compile(
-                                r"(?<![a-z0-9])"
-                                r"(?:sw|ap|router|switch|core)[-_]?[a-z0-9]*[-_]?\d+"
-                                r"(?![a-z0-9])",
-                                re.IGNORECASE,
-                            )
-                            _mentioned: list[str] = []
-                            _seen_dev: set[str] = set()
-                            for _m in _DEV_RE.finditer(_prose):
-                                _id = _m.group(0)
-                                _id_lc = _id.lower()
-                                if _id_lc not in _seen_dev:
-                                    _seen_dev.add(_id_lc)
-                                    _mentioned.append(_id)
-                            # Filter out aliases already recorded so we
-                            # don't double-count "core-01" + "sw-acc-01"
-                            _alias_user_terms = set()
-                            for _f in (state.confirmed_facts or []):
-                                if _f.startswith("ENTITY_ALIAS: "):
-                                    _mm = re.match(
-                                        r"ENTITY_ALIAS:\s*'([^']+)'\s*actually refers to\s*'([^']+)'",
-                                        _f,
-                                    )
-                                    if _mm:
-                                        _alias_user_terms.add(_mm.group(1).lower())
-                            if _alias_user_terms:
-                                _mentioned = [
-                                    d for d in _mentioned
-                                    if d.lower() not in _alias_user_terms
-                                ]
-                            # Only fabricate when current device is among
-                            # the prose-mentioned set and there are 2-5
-                            # distinct targets total.
-                            _other_devices = [
-                                d for d in _mentioned
-                                if d.lower() != _current_device.lower()
-                            ]
-                            if (
-                                _current_device.lower() in {d.lower() for d in _mentioned}
-                                and 1 <= len(_other_devices) <= 4   # 2-5 total
-                            ):
-                                import copy as _copy
-                                _fabricated = []
-                                for _other in _other_devices:
-                                    _new_args = _copy.deepcopy(tool_args)
-                                    _new_args[_device_key] = _other
-                                    # Mark the fabricated call so operators
-                                    # can tell it's auto-derived in the HITL
-                                    # card. Preserve original reason if any.
-                                    _orig_reason = str(_new_args.get("reason", "")).strip()
-                                    _new_args["reason"] = (
-                                        f"[auto-derived from {_current_device} — "
-                                        f"verify before approving] "
-                                        f"{_orig_reason}"
-                                    ).strip()
-                                    _fabricated.append((tool_name, _new_args))
-                                if _fabricated:
-                                    _batch_calls = [(tool_name, tool_args)] + _fabricated
-                                    logger.info(
-                                        "stream: prose mentions %d devices %r — "
-                                        "fabricating %d sibling %s call(s) for batch HITL "
-                                        "(path B fabricate)",
-                                        len(_mentioned), _mentioned,
-                                        len(_fabricated), tool_name,
-                                    )
-                    # tool calls entirely and falls back to advisory prose
-                    # (suggesting backups, asking for confirmation, etc),
-                    # which means NEITHER the original single card NOR a
-                    # batch ever appears. Letting the single [TOOL:] flow
-                    # through to stop_hitl preserves the original card so
-                    # at least one device can be approved this turn; the
-                    # LLM will propose remaining devices in a subsequent
-                    # turn once the first approval completes. The prompt's
-                    # multi-target EXCEPTION clause + the worked example in
-                    # llm_engine.py still give the LLM the option to emit
-                    # multiple [TOOL:] up front (Path A) when it's
-                    # confident — but we no longer punish it for emitting
-                    # just one.
-
-                    yield {
-                        "message": (
-                            f"stop_hitl: tool '{tool_name}' is on the HITL watch-list "
-                            "and requires human approval before execution. "
-                            "Routing to HITL graph."
-                        ),
-                        "node":      "hitl_gate",
-                        "stop_hitl": True,
-                        "tool_name": tool_name,
-                        "tool_args": tool_args,          # carry args for post-approval replay
-                        "tool_args_json": _json.dumps(tool_args, default=str),
-                        # Type #2 multi-mode HITL: signal to the executor that
-                        # the operator may edit these specific param keys.
-                        "hitl_kind":            "edit" if _editable_keys else None,
-                        "editable_param_keys":  _editable_keys,
-                        # NEW: list of (name, args) pairs when the LLM
-                        # emitted multiple same-name destructive calls
-                        # in one response. Absent / None when single.
-                        "batch_calls":          _batch_calls,
-                    }
-                    return
-
-                yield {"node_step": f"Calling tool: {tool_name}", "node": "runtime_loop"}
-                logger.info("TOOL▶ %s args=%s", tool_name, tool_args)
-                if logger.isEnabledFor(logging.DEBUG):
-                    import json as _json
-                    logger.debug("TOOL ARGS\n%s\n%s\n%s", "─"*72,
-                                 _json.dumps(tool_args, indent=2, default=str), "─"*72)
-
-                # ── PRE_TOOL_USE hook (Sprint 2, 2026-05) ──────────────────
-                # Hooks may mutate ctx["args"] before dispatch, or set
-                # ctx["blocked"]=True with ctx["block_reason"] to abort.
-                # Mutation is by-reference; we then read back tool_args.
-                # Failure semantics: hook exceptions are logged + swallowed;
-                # blocking is ONLY via explicit ctx flag, never via raise.
-                _pre_ctx = {
-                    "tool":       tool_name,
-                    "args":       dict(tool_args),    # copy so hooks can't break our caller
-                    "session_id": session_id,
-                    "turn":       state.turns,
-                }
-                try:
-                    from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
-                    _pre_ctx = await _hr().fire(_HE.PRE_TOOL_USE, _pre_ctx)
-                except Exception as _h_exc:
-                    logger.debug("PRE_TOOL_USE hook fire failed: %s", _h_exc)
-                if _pre_ctx.get("blocked"):
-                    _reason = _pre_ctx.get("block_reason") or "blocked by hook"
-                    logger.warning(
-                        "stream: tool %s blocked by hook — %s", tool_name, _reason,
-                    )
-                    _blk_msg = f"[Error: tool {tool_name} blocked by policy hook: {_reason}]"
-                    tool_outputs[_call_key(tool_name, tool_args)] = _blk_msg
-                    yield {
-                        "node":      "hook_block",
-                        "node_step": f"Tool blocked: {tool_name}",
-                        "type":      "hook_block",
-                        "tool":      tool_name,
-                        "reason":    _reason,
-                    }
-                    continue
-                # Hook may have mutated args; pick them up
-                tool_args = _pre_ctx.get("args", tool_args)
-
-                # ── Inject session_id for async-HITL tools (H2, 2026-05) ──
-                # The `_session_id` arg is consumed by tools that use
-                # PipelineContext.request_approval_async / emit_async_hitl_notify
-                # for soft-notify routing. Underscore-prefixed → other tools
-                # ignore it. We inject unconditionally because the cost is
-                # one dict key and the tool either reads it (H2) or doesn't.
-                # See tools/mock_tools.py:query_radius_logs for the H2 contract.
-                if "_session_id" not in tool_args:
-                    tool_args = dict(tool_args)
-                    tool_args["_session_id"] = session_id
-
-                raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-
-                # ── POST_TOOL_USE hook (Sprint 2, 2026-05) ─────────────────
-                # Listeners can: observe result, redact secrets, write audit
-                # event. Hooks may mutate ctx["result"] to filter content.
-                # POST hooks CANNOT block (the tool already ran).
-                try:
-                    from runtime.hooks import get_hook_registry as _hr, HookEvent as _HE
-                    _post_ctx = await _hr().fire(_HE.POST_TOOL_USE, {
-                        "tool":       tool_name,
-                        "args":       tool_args,
-                        "result":     raw,
-                        "session_id": session_id,
-                        "turn":       state.turns,
-                    })
-                    # Pick up redacted/filtered result if hook mutated it
-                    _maybe_filtered = _post_ctx.get("result")
-                    if isinstance(_maybe_filtered, str) and _maybe_filtered != raw:
-                        logger.info(
-                            "stream: tool %s result filtered by hook (%d → %d chars)",
-                            tool_name, len(raw), len(_maybe_filtered),
-                        )
-                        raw = _maybe_filtered
-                except Exception as _h_exc:
-                    logger.debug("POST_TOOL_USE hook fire failed: %s", _h_exc)
-
-                # Same exclusion as ToolRouter — don't double-store pagination
-                # outputs. The 'stored' label here is what the LLM sees in the
-                # next turn's context; for paged reads we want the LLM to see
-                # the actual page content, not yet another [STORED:] reference.
-                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
-                _is_page_or_ref = (
-                    raw.startswith("[STORED:")
-                    or raw.startswith("# Stored result ref_id=")
-                )
-                if tool_name in _SKIP_STORE or _is_page_or_ref:
-                    stored = raw   # pass page content through unchanged
-                else:
-                    stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
-                # Update count so llm_engine knows how many current-turn results exist
-                state._current_tool_outputs_count = len(tool_outputs)  # type: ignore[attr-defined]
-                state._tool_output_keys = list(tool_outputs.keys())      # type: ignore[attr-defined]
-                # Keep raw results for has_more / paging detection in llm_engine
-                if not hasattr(state, "_tool_outputs_raw"):
-                    state._tool_outputs_raw = {}  # type: ignore[attr-defined]
-                state._tool_outputs_raw[_call_key(tool_name, tool_args)] = raw  # type: ignore[attr-defined]
-                # Log when tool returns error/empty — high hallucination risk
-                _raw_lower = raw.lower() if isinstance(raw, str) else ""
-                if (raw.startswith("[Error]")
-                        or "not found" in _raw_lower
-                        or raw.strip() in ("", "[]", "{}")
-                        or "no devices" in _raw_lower):
-                    logger.warning(
-                        "tool %r returned error/empty: %s", tool_name, raw[:120]
-                    )
-                logger.info("TOOL◀ %s result_chars=%d stored=%s",
-                            tool_name, len(raw), stored.startswith("[STORED:"))
-                if logger.isEnabledFor(logging.DEBUG):
-                    _tcfg_d = _truncation_cfg()
-                    _td_cap = getattr(_tcfg_d, "tool_debug_chars", 2000) if _tcfg_d else 2000
-                    logger.debug("TOOL RESULT %s\n%s\n%s\n%s", tool_name, "─"*72, raw[:_td_cap], "─"*72)
-                yield {
-                    "node_result": {
-                        "tool":   tool_name,
-                        "result": stored,      # full stored label (for large) or full raw text (for inline)
-                        "raw":    raw,         # always full raw text — used by frontend Results tab
-                        "args":   tool_args,   # pass args so frontend can label the card accurately
-                    },
-                    "node": "runtime_tool_result",
-                }
-
-                if self._cfg.enable_post_verification and tool_name != "read_stored_result":
-                    post = await self.post_verify(tool_name, raw, state.confirmed_facts)
-                    if not post.passed:
-                        yield {"node_step": f"Post-verify warning: {post.reason}", "node": "post_verify"}
-
-                # Journal: record completed tool call (after exec + verify)
-                if state._skill_journal is not None:
-                    try:
-                        _t = __import__("time").monotonic()
-                        _elapsed = (_t - _journal_tool_start_ts) * 1000 if _journal_tool_start_ts else None
-                        _tool_ok = "[ToolRouter] Tool" not in (raw or "")[:40]
-                        state._skill_journal.record_tool_call(
-                            turn=state.turns,
-                            tool_name=tool_name,
-                            args=tool_args,
-                            ok=_tool_ok,
-                            error=(None if _tool_ok else str(raw)[:200]),
-                            elapsed_ms=_elapsed,
-                        )
-                    except Exception as _je:
-                        logger.debug("journal.record_tool_call failed: %s", _je)
+            # ── Tool handling (Item 4 4e → _handle_tools) ─────────────
+            async for _tool_chunk in self._handle_tools(ctx, new_tool_calls, llm_response):
+                if _tool_chunk.get('_tools_terminal'):
+                    return   # HITL gate fired; end this turn's stream
+                yield _tool_chunk
 
             # ── Paginated-read findings nudge (defence in depth) ───────
             # If the LLM is paging through a stored result with read_stored_result
@@ -2880,14 +2717,8 @@ class AgentRuntimeLoop:
 
     @staticmethod
     def _strip_thinking(response: str) -> str:
-        """
-        Remove <think>...</think> blocks emitted by thinking models
-        (qwen3, deepseek-r1, etc.) before tool parsing or display.
-        Preserves everything outside the think block.
-        """
-        # Remove <think>...</think> blocks (case-insensitive, multiline, non-greedy)
-        cleaned = re.sub(r"<think>.*?</think>", "", response, flags=re.DOTALL | re.IGNORECASE)
-        return cleaned.strip()
+        """Thin wrapper → runtime.loop_helpers.strip_thinking (Item 4)."""
+        return _helpers.strip_thinking(response)
 
     def _parse_tool_calls(self, response: str) -> list[tuple[str, dict[str, Any]]]:
         """
@@ -3141,35 +2972,18 @@ class AgentRuntimeLoop:
 
     @staticmethod
     def _skill_loads_in(response: str) -> set:
-        from runtime.directive_parser import find_skill_load_names
-        return set(find_skill_load_names(response))
+        """Thin wrapper → runtime.loop_helpers.skill_loads_in (Item 4)."""
+        return _helpers.skill_loads_in(response)
 
     @staticmethod
     def _is_complete(response: str, tool_calls: list) -> bool:
-        # If the LLM emitted a SKILL_LOAD directive, it needs one more turn
-        # to read the loaded detail and then call the actual tools.
-        # A pure SKILL_LOAD response (no prose, no tool calls) means the model
-        # asked for skill detail and is waiting for it — keep the loop running
-        # so next turn can read the loaded detail. Only mark complete if the
-        # model produced real prose + tool calls alongside the SKILL_LOAD.
-        from runtime.directive_parser import find_skill_load_names, strip_skill_load_directives
-        skill_loads = find_skill_load_names(response)
-        if skill_loads:
-            stripped = strip_skill_load_directives(response).strip()
-            if len(stripped) == 0 and len(tool_calls) == 0:
-                # Pure SKILL_LOAD — keep looping so next turn sees the detail
-                return False
-            # SKILL_LOAD plus other content — completion follows the tool-call rule
-            return len(tool_calls) == 0
-        return len(tool_calls) == 0
+        """Thin wrapper → runtime.loop_helpers.is_complete (Item 4)."""
+        return _helpers.is_complete(response, tool_calls)
 
     @staticmethod
     def _format_final(chunks: list[str], decision: StopDecision) -> str:
-        base = "\n".join(chunks) if chunks else ""
-        stop = decision.summary or decision.reason
-        if stop:
-            return f"{base}\n\n---\n{stop}".strip()
-        return base.strip()
+        """Thin wrapper → runtime.loop_helpers.format_final (Item 4)."""
+        return _helpers.format_final(chunks, decision)
 
 # ---------------------------------------------------------------------------
 # Async HITL (H2) — inject queue + turn-start drain helper (2026-05)

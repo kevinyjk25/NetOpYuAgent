@@ -1,7 +1,7 @@
 # TODO — Production Readiness & Roadmap Tracker
 
 > Tracking doc for deferred work. **Rule: when an item is done, delete it from this file.**
-> Items that remain are not yet done. Last updated: 2026-05 (refreshed for v13 — Phase 2B delegation done + transport hardened).
+> Items that remain are not yet done. Last updated: 2026-05 (v13 + tech-debt sweep: legacy-hitl removal, user-cancel, auto-evolve switch, priority budget wired; loop.py split fully done — all _stream_impl phases extracted).
 
 This file tracks the production-readiness items surfaced in the Sprint-3
 readiness assessment (see `ARCHITECTURE.md §8.4` "What Sprint-3-pre does NOT fix")
@@ -62,6 +62,51 @@ Grouped by tier. Each item has: effort estimate, what it fixes, and acceptance c
 ### Tier D — Performance / scaling
 
 (none remaining — D1 done)
+
+---
+
+## L0/L1 two-layer architecture — clean capability/business separation
+
+**Goal**: formalise two layers so external teams can build any agent (network,
+coding, Q&A, …) on a stable base.
+- **L0 — pure capability framework**: independent modules (runtime loop, memory,
+  retrieval, hitl_core, skills engine, a2a, task) wired by integration + config.
+  Knows nothing about any business domain.
+- **L1 — business framework**: a business designer expresses an actual problem
+  by declaring tools/skills/flows in a profile; the L0 skeleton hooks them
+  together. `profiles/` already IS the start of L1 (framework → profiles
+  dependency arrow, `default` profile = 0 tools = decoupling proof).
+
+**Why now**: the macro seam exists (profiles), but business concepts have leaked
+into L0, and the `memory → skill → delegation → tool → HITL` linkage chain has
+no clean per-seam extension point — so adding/altering a domain risks
+cross-cutting breakage. Target: each seam in that chain is a documented,
+pluggable hook so new developers extend by filling in clearly-bounded slots.
+
+### Stage A — concept repatriation ✅ DONE (2026-05)
+Moved hardcoded business nouns out of L0; behaviour unchanged (verified 7/7 audits + 202 tests).
+- `DeviceRef` → generalised to neutral `ResourceRef` (id/label/`type`/meta; `type` defaults to `"resource"`). `DeviceRef` kept as a back-compat alias; `runtime/__init__` exports both. Internal annotations migrated to `ResourceRef`.
+- `RuntimeConfig.editable_hitl_tools` hardcoded default (`edit_device_config`/`rollback_deploy`/`restart_service`) → EMPTY L0 default; now injected from `cfg.tools.editable_hitl_tools` (added to config.py loader + config.yaml + wired in webui/backend `RuntimeConfig(...)`). `hitl_tool_names` was already config-injected.
+- Test: `tests/test_l0_l1_separation.py` (ResourceRef neutral + alias; editable_hitl_tools empty-default + injectable).
+- **Surfaced for Stage B** (marked in code, not yet fixed): `integrations/adapters/hitl_executor.py` falls back to `build_default_device_coreferencer()` when none injected — an L1 network default leaking into an L0 adapter. The `Coreferencer` class itself is already domain-neutral/parameterised; only the default needs to move to profile injection.
+
+### Stage B — business logic externalised onto the linkage chain ✅ DONE (2026-05)
+Made the tool→HITL seam pluggable; network logic moved to L1 (verified 7/7 audits incl. module_independence + 208 tests).
+- **Batch HITL resolver**: the ~165-line network "should this destructive tool call expand into a multi-target batch?" logic (Path A same-name dedup + Path B device-prose fabrication, with device-id regex + `device_id`/`device`/`target` field mutation) was extracted from `_handle_tools` into `profiles/network_batch_resolver.py`. The L0 loop now exposes an injected `batch_resolver_fn` (precedent: `delegate_fn`); contract `(tool_name, tool_args, llm_response, hitl_tool_names, confirmed_facts, all_parsed) -> Optional[list[(name,args)]]`. No resolver → single-target HITL (domain-free default). Profile picks it via `profiles.get_batch_resolver_for_profile(profile)` (lan/dc → network resolver, default → None), wired in webui/backend.
+- **Coreferencer default**: `HitlExecutor` defaulted to `build_default_device_coreferencer()` (network default leaking into an L0 adapter). Added `build_neutral_coreferencer()` (empty patterns → always "no entity") as the L0 default; main.py injects the device coreferencer only for lan/dc profiles.
+- `runtime/loop.py` does NOT import `profiles/` (resolver injected) — `audit_module_independence` stays green.
+- Test: `tests/test_batch_resolver.py` (profile selection; loop stores injected fn; Path A / Path B / single-device-no-batch).
+- **Note**: the `memory→skill→delegation` seams were audited and found already clean (delegation uses injected `delegate_fn`; skill selection goes through the parameterised `SkillCatalogService`; memory recall is domain-neutral). The concrete L1 leak on the chain was concentrated at the tool→HITL seam, now resolved.
+
+### Stage C — declarative L1 business-flow layer (large, DEFERRED)
+- **Effort**: 1-2 weeks. **Status**: deferred — vision clear, requirements not
+  yet mature (need 2-3 real domains before abstracting the flow model, else we
+  abstract wrong).
+- **Scope**: profiles declare not just capabilities but *flow orchestration*
+  (e.g. a network-triage SOP: check status → on anomaly check neighbours → …);
+  L0 provides a flow-engine that executes the declared graph. Upgrades profiles
+  from "inject capabilities" to "inject flows". Revisit after Stage B ships and
+  a second non-network domain is built on the framework.
 
 ---
 
@@ -226,59 +271,102 @@ Remaining real debt, by priority:
 - Cross-process SLA timer idempotency residual of #3 (process-restart half).
 
 ### Phase 3 — Cross-agent HITL passthrough
-- **Effort**: 2-3 weeks (reduced — provenance plumbing now done, see below)
-- **Status**: designed, not started; **provenance groundwork shipped in v13**
-- **Already done (de-risks Phase 3)**: HITL provenance now flows end-to-end
-  when a delegated peer raises a card — `task/delegation.py` stamps
-  `source_agent` / `source_session_id` / `source_query` into
-  `TaskDefinition.metadata`; `A2ATaskDispatcher.dispatch` packs it into the A2A
-  request `params.metadata`; `HitlExecutor.execute` extracts it into
-  `env_context`; `_raise_tool_hitl` / `_raise_tool_hitl_batch` /
-  `_raise_multi_mode` stamp the `HitlPayload` via
-  `_extract_delegation_provenance`. `HitlPayload` carries `source_agent` /
-  `source_session_id` fields (`test_delegation_provenance`). The peer operator's
-  card can already show "Delegated from <source_agent>".
-- **Remaining scope**: the *passthrough* itself — surface the peer's pending
-  card back on the ENTRY agent's UI (today the peer's own operator must
-  approve), via A2A `INPUT_REQUIRED` carrying the payload + a
-  `CrossAgentHitlBridge`; cross-agent correlation id for the joined audit;
-  timeout/cancel handling across the hop.
-- **Prereq**: Phase 2B stable for at least a week (now is).
-- **Complexity note**: failure modes (network flake / peer crash / operator
-  non-response / concurrent HITLs) are the bulk of the work — needs 5-8
-  integration test scenarios.
+- **Status**: **P3-a + P3-b DONE (2026-05)** — mode B (delegated-local HITL +
+  active resume) is end-to-end. P3-c (correlation audit chain) + P3-d
+  (passthrough mode C + failure-mode hardening + persistence) remain.
+- **Modes**: A=Local (✅ pre-existing), B=Delegated-local — peer's operator
+  approves, result flows back and the originator auto-resumes (✅ this round),
+  C=Passthrough — peer's card surfaced back to the entry agent for approval
+  there (❌ P3-d), D=Chained — one request, two HITLs across agents correlated
+  (partial — correlation_id plumbed, audit join in P3-c). Default = B.
+- **P3-a (done)**: `TaskState.AWAITING_PEER_HITL`; dispatcher marks the outbound
+  task with it + stamps `peer_agent` / `peer_interrupt_id`; lan-side read-only
+  "⏳ awaiting <peer> approval" badge in the Delegations tab (approval happens on
+  the peer's console, NOT locally).
+- **P3-b (done — the closed loop)**: `_unwrap_a2a_event` now translates the
+  peer's `input-required` A2A status (message=interrupt_id) into a
+  `hitl_interrupt` chunk carrying that id — **this closed the gap where the
+  interrupt_id was silently dropped, so the correlation could never form**.
+  `CrossAgentHitlBridge` (`task/inter/cross_agent_hitl.py`) correlates
+  `(peer_agent, interrupt_id)` ↔ the local awaiting session, and on the
+  delegated-to side maps `interrupt_id` → source-agent callback info. New A2A
+  endpoint `POST /api/v1/a2a/hitl_resolved` on the originator. On peer approval,
+  `HitlExecutor._tool_call_resumer` → `_maybe_callback_source_agent` resolves the
+  source agent's URL via the injected peer registry and POSTs the result back;
+  the originator's `handle_cross_agent_resume` injects it (H2 `enqueue_async_inject`
+  reuse) and **actively drives one synthesis turn (A2)**, buffering the answer
+  for the frontend `/chat/resumptions` poll (the original SSE has closed). Tests:
+  `test_cross_agent_hitl.py` (unwrap translation, full correlation chain,
+  double-resume guard, buffer-on-no-driver).
+- **Remaining — P3-c (med)**: thread `correlation_id` into the cross-agent audit
+  log so a request that chains lan-radius-HITL + dc-app-HITL (mode D) shows as
+  one joined trail.
+- **Remaining — P3-d (high)**: passthrough mode C; failure-mode hardening
+  (peer crash / operator non-response / callback POST failure → SLA watchdog
+  re-surface; lan session expired on callback); persist `CrossAgentHitlBridge`
+  + resumption buffer (today in-memory, lost on restart); auth/signing on the
+  `/hitl_resolved` endpoint (today basic validation: must match an awaiting
+  record); 5-8 live integration scenarios.
 
 ---
 
 ## Known bugs / tech debt to revisit
 
 ### Skill feedback path was dead for the project's entire life
-- **Status**: FIXED 2026-05 (`SkillEvolver._parse_json_response` was never implemented).
-- **Follow-up**: now that `apply_feedback` + `evaluate_skill_creation` actually run, watch production for unexpected side effects (e.g. LLM rewriting skills badly). The A/B safety net (compliance bench gate) should catch regressions, but monitor the `SkillEvolver: rollback` log lines.
-- **Action**: After 2 weeks of production data, decide whether the auto-skill-evolution is net-positive or should be gated behind manual approval. **Keep this item until that decision is made.**
+- **Status**: FIXED 2026-05 (`SkillEvolver._parse_json_response` implemented) + **auto-evolve master switch added 2026-05**.
+- **What shipped**: `cfg.skill_orchestration.auto_evolve_apply` (env `SKILL_AUTO_EVOLVE_APPLY`, default `true`). When `false`, the self-improvement loop still runs — computes feedback patches + new-skill proposals, records them in version history + logs — but does NOT mutate the live catalog (gated in both `apply_feedback` and `_register_skill`). Lets production run in "observe" mode. Test: `tests/test_skill_evolve_suggest_only.py`.
+- **Follow-up (product decision, not code)**: after observing production, decide whether to default `auto_evolve_apply` to `false`. The A/B compliance bench still gates auto-applied patches when on. Monitor `SkillEvolver: rollback` / `suggested (suggest-only mode)` log lines.
 
-### Legacy `hitl/*` LangGraph backend retired but referenced
-- **Status**: open
-- **Detail**: `HITL_BACKEND != "core"` raises `NotImplementedError`. The `hitl/` package is a thin schema stub; the implementation modules were never packaged. Some lifespan code still has `if _services.get("hitl_router")` branches for the legacy path.
-- **Action**: Either fully remove the legacy branches + the `HITL_BACKEND` env knob, or restore the langgraph backend. Pick one; don't leave the half-state.
+### Legacy `hitl/*` LangGraph backend retired but referenced ✅ DONE (2026-05)
+- **What shipped**: `HITL_BACKEND` now defaults to `core` (previously defaulted to `langgraph`, which crashed boot). All dead legacy branches removed from `main.py` (section-2 `else: raise`, section-5 defensive guard, section-6 legacy executor + `patch_hitl_graph` calls, the legacy `/hitl/*` mount block, the always-None `create_task_system` ternary). `patch_hitl_graph` function + its three exports deleted. A non-`core` value now fails fast with a clear "backend retired" message. **Bonus bug fixed**: the `/healthz`-style `pending_hitl` metric read the never-set `hitl_router` (always 0); now reads `hitl_core_router`.
 
-### `context_budget_v2.py` co-exists with `context_budget.py`
-- **Status**: open (gradual migration)
-- **Detail**: v2 is the new priority-budget algorithm; some callers still use v1.
-- **Action**: Finish migrating all callers to v2, then delete v1.
+### `context_budget_v2.py` co-exists with `context_budget.py` ✅ DONE (2026-05)
+- **Correction to the old note**: v2 was never meant to *replace* v1 — its own docstring says it's an alternative selectable strategy. The real gap was that `cfg.context_budget.strategy = "priority"` wasn't wired into the loop.
+- **What shipped (方案 A)**: `AgentRuntimeLoop` reads `cfg.context_budget.strategy` at construction; when `"priority"`, context assembly routes through `_assemble_priority` → v2 `TokenBudget` (reusing the legacy section formatters so rendered text is identical, but trimming low-priority sections — env, skills, retrieved memory — before high-priority ones — confirmed facts, recent tool results — under a hard `total_chars` cap). `"legacy"` (default) is unchanged. Degrades to legacy if v2 unavailable. Test: `tests/test_context_budget_priority.py`. Both modules now have a clear reason to exist; neither is deleted.
 
-### `loop.py` is too large (~3000 lines)
-- **Status**: open
-- **Action**: Split into turn-loop / tool-dispatch / verify / stop-check modules sharing a `_LoopContext` dataclass.
+### StopPolicy doesn't know about user cancel ✅ DONE (2026-05)
+- **What shipped**: `StopOutcome.USER_CANCELLED` added. WebUI Send button toggles to a red **Stop** button during streaming; clicking it aborts the fetch (`AbortController`). The backend SSE generator catches the resulting `CancelledError`/`GeneratorExit`, cancels the executor task (reclaiming the blocked Ollama request), marks the outcome `user_cancelled`, and preserves the partial answer in the session transcript (tagged "已取消 — 部分回答") while skipping durable memory writeback (a half-answer isn't a trustworthy fact to recall). The loop's existing `GeneratorExit`/`finally` SESSION_END cleanup makes cancellation safe.
 
-### StopPolicy doesn't know about user cancel
-- **Status**: open
-- **Detail**: The frontend "stop" button isn't wired to the loop.
-- **Action**: Add `StopOutcome.USER_CANCELLED` + wire the WebUI stop button through to the runtime loop.
+### `loop.py` is too large (~3300 lines)  ✅ DONE (2026-05)
+- **Result**: loop.py 3428 → ~3250; `_stream_impl` 1448 → ~875. Extracted, each step verified (7/7 audits incl. module_independence + full suite):
+  - `runtime/loop_helpers.py` — pure stateless helpers (`strip_thinking`, `is_complete`, `skill_loads_in`, `format_final`, `query_mentions_concrete_target`, `call_key`, `build_tool_ledger`, `page_default_size_for_ledger`). loop keeps same-named wrappers/aliases.
+  - `runtime/loop_types.py` — public types (`QueryComplexity`, `DelegationMode`, `ForkContextPolicy`, `VerificationResult`, `ComplexityDecision`, `RuntimeConfig`, `LoopResult`); re-imported so `from runtime.loop import RuntimeConfig` is unchanged.
+  - `runtime/loop_context.py` — `_LoopContext` per-turn mutable state, passed `(self, ctx)` to phase methods.
+  - `_stream_impl` phases extracted: `_refresh_recall`, `_refresh_skills`, `_assemble_context` (unified legacy/priority — also fixed priority never applying in the streaming path), `_run_clarification_gate` (async-gen + `_clarification_terminal` sentinel), `_handle_tools` (async-gen + `_tools_terminal` sentinel; HITL stop semantics preserved).
+  - New tests: `test_clarification_gate.py`, `test_handle_tools_phase.py` (incl. "destructive tool does not execute without approval" HITL safety assertion).
+  - Docs refreshed: `runtime/DESIGN.md` §4.7/§4.8 + file table + §7; `ARCHITECTURE.md` tech-debt + sprint status.
+- **Intentionally left in `_stream_impl`**: token streaming, DELEGATE handling, completion/stop-check + ledger writes — tightly coupled to loop control flow, not worth extracting.
 
 ---
 
+
+### Cross-domain tool misinvocation guidance (Phase 3 follow-up, B — deferred)
+- **Context**: the shared HITL watch-list once caused lan to raise a phantom HITL card for `dc_grant_app_access` (a dc-only tool). Fixed (option A) by gating watch-list HITL on the tool being in THIS agent's local registry — see `runtime/loop.py` CAP5 gate (`_needs_hitl = name in hitl_tool_names and name in ctx.tool_reg`) + same-name batch detection guard. Regression: `test_handle_tools_phase.py::test_watchlisted_tool_not_in_local_registry_does_not_raise_hitl`.
+- **Remaining (B)**: when the LLM names a tool that is NOT local but a known peer HAS it, proactively steer the LLM to `[DELEGATE:<peer>]` instead of letting it fall through to a plain "tool not registered" error. Today (post-A) a misinvoked cross-domain tool just errors and the LLM usually self-corrects to delegation on the next turn; B would make that explicit (e.g. inject guidance "tool X belongs to peer Y — use DELEGATE"). Needs peer-capability lookup in the tool-miss path. Do only if misinvocation proves frequent in practice.
+
 ## Done (kept briefly for reference, delete after a release cycle)
+
+- ✅ **Cross-agent resume callback no longer blocks on the peer's LLM turn** (2026-05, A2A Phase 3 mode B) — root-caused from real two-agent logs: the whole resume chain was synchronous — dc resumer `await POST(lan /hitl_resolved, httpx timeout)` → lan handler `await handle_cross_agent_resume` → `await _drive_cross_agent_resume` → `await executor.execute_query(...)` (a full 30-60s LLM synthesis turn on qwen3.5:27b). The 15s POST timeout fired long before lan's turn finished, so dc's resumer hung mid-approval (never reached tool-exec/_complete_inbound_by_interrupt → dc inbound task stuck; lan's turn result orphaned; lan never resumed). Logs proved bridge inbound record + lan awaiting record were both created with matching interrupt_id (f4192096-98d) — ruling out id/agent mismatch; the break was purely the synchronous blocking callback. Fix (option A): `webui/backend.py handle_cross_agent_resume` now SCHEDULES the resume turn via asyncio.create_task (held in module-level _resume_tasks set so it isn't GC'd) and returns True immediately, so the peer's POST gets a fast 200; the completed answer still reaches the UI via the existing _pending_resumptions buffer + /chat/resumptions poll + live SSE. Backstop: dc-side callback httpx timeout 15s→30s. Test: `test_cross_agent_hitl.py::TestResumeDriverContract::test_handle_cross_agent_resume_does_not_block_on_slow_driver` (fastapi-guarded skip). NOTE: real two-agent verification still pending — confirm dc inbound flips DONE right after approval, dc callback POST logs →200 (not timeout), and lan's resume turn streams the final answer into its UI.
+
+- ✅ **Inbound-delegation-stuck-PENDING fix** (2026-05) — when the dc agent served a peer [DELEGATE:] request whose tool required HITL, execute() returned at the interrupt and parked the inbound TaskDefinition in PENDING (metadata['awaiting_hitl_id']=interrupt_id). The operator approves LATER via _tool_call_resumer, which runs the tool + calls back the originator but NEVER re-reached execute()'s completion path — so the inbound task stayed PENDING forever, the delegating agent's view never closed, and (because the delegation never completed) lan kept RE-DELEGATING ("请再次...") piling up duplicate inbound tasks on dc. Fixed with `HitlExecutor._complete_inbound_by_interrupt(interrupt_id, decision, result_text)` (scans task_store.list_pending() for the task whose awaiting_hitl_id matches; approve→COMPLETED+result, reject→FAILED+error, pops awaiting_hitl_id, stamps completed_at), wired into _tool_call_resumer at BOTH approve + reject sites alongside _maybe_callback_source_agent. Tests: `test_inbound_delegation_completion.py` (approve/reject/unknown-interrupt no-op/no-store-safe/only-matching-completes). Fixing the PENDING closure also removes the duplicate-re-delegation source. NOTE: real two-agent verification still pending — confirm after dc HITL approval the dc inbound task flips PENDING→DONE and lan stops re-delegating.
+
+- ✅ **Phantom cross-profile HITL fix** (2026-05) — the shared `hitl_tool_names` watch-list caused an agent to raise a HITL approval card for a tool it doesn't have (lan popping a card for dc-only `dc_grant_app_access`), which then failed in the resumer with "tool not registered" AND produced a duplicate card racing the delegated-to agent's real one (two-sided approval, dc task stuck pending, lan resume 404). Fixed in `runtime/loop.py`: watch-list HITL now requires the tool to be in THIS agent's local registry (`_needs_hitl = name in hitl_tool_names and name in ctx.tool_reg`), plus the same guard on same-name destructive batch detection. Confirmed via real two-agent run that the skill-routing (A+C) fix worked: dc correctly diagnosed alice's missing CRM role via dc_get_app_acl, and dc-side HITL on dc_grant_app_access fired correctly. Tests: `test_handle_tools_phase.py` (phantom-HITL case + local-tool-still-gates guard). Follow-up B (steer misinvoked cross-domain tool to DELEGATE) deferred.
+
+- ✅ **Cross-agent fault-scenario mock tools** (2026-05) — added the user/app access-control tools needed to mock "user alice cannot access app CRM" end-to-end across lan+dc. LAN (`profiles/lan`): `list_users`, `get_user_access` (RADIUS/802.1X/NAC/VLAN admission, read-only), `check_nac_policy`, `grant_user_access`/`revoke_user_access` (HITL). DC (`profiles/dc`): `dc_list_apps`, `dc_get_app_acl`, `dc_check_user_app_access` (read-only diagnostic), `dc_grant_app_access`/`dc_revoke_app_access` (HITL). Method 甲: queries read-only, only grant/revoke HITL-gated (dc grant fires the DC-side HITL = Phase 3 mode B). Datasets are consistent: alice is admitted on LAN but holds no CRM role on DC (the root cause). Watch-list + editable_hitl_tools updated; HITL safety-net warning softened for the now cross-profile watch-list; fixed a latent bug in audit_profiles check-5 (relative `tests/` path wasn't exempted). Test `test_access_scenario.py`. 223 tests pass.
+
+- ✅ **A2A Phase 3 P3-a + P3-b — cross-agent HITL mode B** (2026-05) — lan delegates to dc, dc raises a HITL approved on dc's console, result flows back and lan auto-resumes via an active synthesis turn. Closed the core gap: `_unwrap_a2a_event` was silently dropping the peer's `input-required` status so the interrupt_id never reached the originator — now translated into a `hitl_interrupt` chunk. New: `TaskState.AWAITING_PEER_HITL`, `CrossAgentHitlBridge`, A2A `/hitl_resolved` callback endpoint, `HitlExecutor._maybe_callback_source_agent` (registry-resolved POST back), webui active-resume driver + `/chat/resumptions` poll, lan read-only "awaiting peer approval" badge. Tests `test_cross_agent_hitl.py`. P3-c (audit chain) + P3-d (passthrough mode C + failure hardening + persistence + auth) remain. 215 tests pass.
+
+- ✅ **H2 async-HITL live bugs** (2026-05, from real lan-agent run) — two runtime-path bugs the static tests missed: (1) `_submit_hitl_decision` H2 follow-up raised `NameError: _message_history` — it is a module-level handler and cannot see create_webui_app's closure local; fixed by publishing `_message_history` into `services` and reading it from there (+ static scope-leak regression test `test_hitl_submit_scope.py`). (2) `query_radius_logs` demo autoreply `NoneType.deliver` — the lan tool resolved `services["hitl_router"]` (a stub-None key since the Item-2 legacy-hitl cleanup) instead of the real `hitl_core_router`; fixed to resolve hitl_core_* first (router + audit). Both verified; full suite 210 passed.
+
+- ✅ **L0/L1 separation — Stage B** (2026-05) — tool→HITL seam made pluggable: the ~165-line network batch-HITL logic moved from `_handle_tools` to `profiles/network_batch_resolver.py`, injected via `AgentRuntimeLoop.batch_resolver_fn` (None→single-target HITL). Coreferencer default made neutral in L0 (`build_neutral_coreferencer`), device one injected per-profile. `runtime/loop.py` imports no `profiles/` — module_independence green. Tests `test_batch_resolver.py`. memory/skill/delegation seams audited = already clean. Stage C (declarative flow layer) still deferred.
+
+- ✅ **L0/L1 separation — Stage A** (2026-05) — concept repatriation: `DeviceRef`→neutral `ResourceRef` (back-compat alias kept); `RuntimeConfig.editable_hitl_tools` business default emptied + injected from `cfg.tools.editable_hitl_tools` (config.py/config.yaml/backend wired). L0 runtime now carries no hardcoded network tool names. Test `test_l0_l1_separation.py`. Stage B (hook-based chain externalisation) is next; Stage C (declarative flow layer) deferred. See "L0/L1 two-layer architecture".
+
+- ✅ **loop.py decomposition COMPLETE** (2026-05) — finished step 4e: extracted `_handle_tools` (per-turn tool dispatch + HITL gate + execution + post-verify, async-gen with `_tools_terminal` sentinel; HITL stop semantics preserved + tested). loop.py 3428→~3250, `_stream_impl` 1448→~875. Full module set: `loop_helpers`/`loop_types`/`loop_context` + phase methods. New tests `test_clarification_gate.py` + `test_handle_tools_phase.py`. Docs refreshed (`runtime/DESIGN.md` §4.7-4.8, `ARCHITECTURE.md`).
+
+- ✅ **loop.py decomposition — phase 1 + _stream_impl 4a-4d** (2026-05) — extracted `runtime/loop_helpers.py` (pure helpers), `runtime/loop_types.py` (public types), `runtime/loop_context.py` (`_LoopContext` per-turn state); extracted `_stream_impl` phases `_refresh_recall`, `_refresh_skills`, `_assemble_context` (also fixed the priority strategy never applying in the streaming path), `_run_clarification_gate`. loop.py 3428→3224, `_stream_impl` 1448→1334. New test `test_clarification_gate.py`. Each step verified 7/7 audits + full suite. Only `_handle_tools` (step 4e) remains — see "Known bugs / tech debt".
+
+- ✅ **Tech-debt sweep** (2026-05) — four of the five "Known bugs" items closed in one pass: (1) legacy LangGraph `hitl/*` backend fully removed, `HITL_BACKEND` defaults to `core`, plus a latent always-0 `pending_hitl` metric fixed; (2) `StopOutcome.USER_CANCELLED` + a real WebUI Stop button that aborts the stream, cancels the executor, and preserves the partial answer; (3) `auto_evolve_apply` master switch for the self-improving-skills loop (suggest-only vs apply); (4) `cfg.context_budget.strategy="priority"` wired into the loop via the v2 `TokenBudget`. New tests: `test_skill_evolve_suggest_only`, `test_context_budget_priority`. The only deferred item is the `loop.py` split (pure refactor). Details in "Known bugs / tech debt" above.
 
 - ✅ **Phase 2B — Capability-based delegation + transport hardening** (2026-05) — explicit `[DELEGATE:agent_id|*capability[#forked]]` cross-agent task hand-off over A2A; validated live (LAN↔DC, qwen3.5:27b). Five transport bugs fixed under real load: A2A event-envelope unwrap, EventQueue finalize (ReadTimeout), 30s dispatcher heartbeat (300s stall), no-double-count of final answer, outbound task state transition + markdown render. HITL provenance (`source_agent`/`source_session_id`/`source_query`) now plumbed end-to-end (de-risks Phase 3). Details: ARCHITECTURE.md §8.7, PHASE_2B_DESIGN.md, and the Phase 2B section above.
 - ✅ **Sprint-3-pre readiness** (2026-05) — `runtime/tracing.py` boots gracefully without OpenTelemetry installed; `HITLCheckpointConfig` defaults to sqlite (approvals survive restart) with env override; `SkillEvolver.set_bench_runner` A/B safety-net gate rejects compliance regressions. Pinned by `tests/test_sprint3_pre.py`.

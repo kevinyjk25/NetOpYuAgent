@@ -1021,7 +1021,14 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
     except Exception:
         _global_services = None                                           # type: ignore
 
-    if not _global_services or "hitl_router" not in _global_services:
+    # The active backend is hitl_core: the real router/audit live under the
+    # hitl_core_* keys. The bare hitl_router/hitl_audit keys are retained as
+    # stub-None for legacy safety, so resolve core-first then fall back.
+    _router = None
+    if _global_services:
+        _router = (_global_services.get("hitl_core_router")
+                   or _global_services.get("hitl_router"))
+    if not _global_services or _router is None:
         return (
             f"# query_radius_logs (H2 DEMO — degraded, no router wired)\n"
             f"# user_id:  {user_id}\n"
@@ -1029,7 +1036,7 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
             f"# result:   permission_ok (assumed; H2 cannot fire here)"
         )
 
-    router: HitlRouter = _global_services["hitl_router"]
+    router: HitlRouter = _router
     store = _global_services.get("hitl_store")
     if store is None:
         return (
@@ -1153,7 +1160,7 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
             from hitl_core.router import register_async_pending
             # Adapt the audit service (.log(HitlAuditRecord)) to the watchdog's
             # on_audit(kind, iid, detail) shape so ASYNC_TIMEOUT is recorded.
-            _audit_svc = _global_services.get("hitl_audit")
+            _audit_svc = _global_services.get("hitl_core_audit") or _global_services.get("hitl_audit")
             async def _audit_adapter(kind, iid, detail):
                 if _audit_svc is None:
                     return
@@ -1181,7 +1188,7 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
         # Audit ASYNC_DELEGATED so the audit timeline reflects fire moment.
         try:
             from datetime import datetime as _dt, timezone as _tz
-            audit = _global_services.get("hitl_audit")
+            audit = _global_services.get("hitl_core_audit") or _global_services.get("hitl_audit")
             if audit is not None:
                 await audit.log(HitlAuditRecord(
                     interrupt_id = interrupt_id,
@@ -1270,3 +1277,147 @@ async def query_radius_logs(args: dict[str, Any]) -> str:
             f"# call query_radius_logs again."
         )
 
+
+# ===========================================================================
+# User / network-access tools (2026-05) — LAN side of the cross-agent HITL
+# fault scenario. The LAN owns USER IDENTITY + NETWORK ADMISSION (802.1X/NAC/
+# VLAN authorization + RADIUS auth). Application-layer access lives on the DC.
+#
+# Scenario consistency: 'alice' exists and is fully admitted on the LAN
+# (authenticated, NAC-permitted, VLAN-authorized) — so when "alice cannot
+# reach CRM", the LAN diagnosis comes back CLEAN and the agent must delegate
+# to the DC, where the real cause (no CRM app-access role) lives.
+#
+# Method 甲: queries are read-only; only grant/revoke (writes) are HITL-gated.
+# ===========================================================================
+
+_LAN_USERS = [
+    {"id": "alice", "name": "Alice Chen",    "dept": "sales",     "status": "active"},
+    {"id": "bob",   "name": "Bob Ramirez",   "dept": "sales",     "status": "active"},
+    {"id": "carol", "name": "Carol Singh",   "dept": "support",   "status": "active"},
+    {"id": "dave",  "name": "Dave Okafor",   "dept": "finance",   "status": "active"},
+    {"id": "erin",  "name": "Erin Lopez",    "dept": "finance",   "status": "suspended"},
+]
+
+# Per-user network admission state. 'alice' is fully admitted (the LAN is NOT
+# the problem in the CRM scenario). 'erin' is suspended (a LAN-side fault, for
+# contrast / other scenarios).
+_LAN_USER_ACCESS: dict[str, dict[str, Any]] = {
+    "alice": {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 20,  "last_auth": "2 min ago"},
+    "bob":   {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 20,  "last_auth": "5 min ago"},
+    "carol": {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 30,  "last_auth": "1 min ago"},
+    "dave":  {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 40,  "last_auth": "8 min ago"},
+    "erin":  {"radius": "fail", "dot1x": "rejected",   "nac": "quarantine", "vlan": None, "last_auth": "denied"},
+}
+
+_LAN_ACCESS_CHANGES: list[dict[str, Any]] = []
+
+
+async def list_users(args: dict[str, Any]) -> str:
+    """List enterprise users (read-only)."""
+    await asyncio.sleep(0)
+    dept = (args.get("dept") or "").strip().lower()
+    users = _LAN_USERS
+    if dept:
+        users = [u for u in users if u["dept"] == dept]
+        if not users:
+            return f"No user in dept={dept!r}. Depts: sales, support, finance."
+    out = ["Enterprise users:", "", f"  {'ID':<8}{'NAME':<18}{'DEPT':<10}STATUS"]
+    for u in users:
+        out.append(f"  {u['id']:<8}{u['name']:<18}{u['dept']:<10}{u['status']}")
+    return "\n".join(out)
+
+
+async def get_user_access(args: dict[str, Any]) -> str:
+    """Show a user's network-admission state: RADIUS auth, 802.1X, NAC, VLAN
+    (read-only). This is the LAN half of an access diagnosis."""
+    await asyncio.sleep(0)
+    user_id = (args.get("user_id") or args.get("user") or "").strip().lower()
+    if not user_id:
+        return "get_user_access requires 'user_id'."
+    acc = _LAN_USER_ACCESS.get(user_id)
+    if acc is None:
+        return f"Unknown user {user_id!r}. Known: {', '.join(u['id'] for u in _LAN_USERS)}."
+    # Apply session changes.
+    for c in _LAN_ACCESS_CHANGES:
+        if c["user_id"] == user_id:
+            acc = {**acc, **c["changes"]}
+    user = next((u for u in _LAN_USERS if u["id"] == user_id), {})
+    admitted = acc["radius"] == "pass" and acc["dot1x"] == "authorized" and acc["nac"] == "compliant"
+    out = [f"Network access for user '{user_id}' ({user.get('name','?')}):", ""]
+    out.append(f"  RADIUS auth : {acc['radius']}")
+    out.append(f"  802.1X      : {acc['dot1x']}")
+    out.append(f"  NAC posture : {acc['nac']}")
+    out.append(f"  VLAN        : {acc['vlan'] if acc['vlan'] is not None else '(none — not admitted)'}")
+    out.append(f"  last auth   : {acc['last_auth']}")
+    out.append("")
+    out.append(f"  network admission: {'✅ ADMITTED' if admitted else '❌ BLOCKED at network layer'}")
+    if admitted:
+        out.append(f"  note: user is fully admitted on the LAN. If an APPLICATION is "
+                   f"unreachable, the cause is likely application-layer access "
+                   f"(owned by the DC) — delegate to the DC agent to check.")
+    return "\n".join(out)
+
+
+async def check_nac_policy(args: dict[str, Any]) -> str:
+    """Explain which NAC policy a user hits and why (read-only)."""
+    await asyncio.sleep(0)
+    user_id = (args.get("user_id") or args.get("user") or "").strip().lower()
+    if not user_id:
+        return "check_nac_policy requires 'user_id'."
+    acc = _LAN_USER_ACCESS.get(user_id)
+    if acc is None:
+        return f"Unknown user {user_id!r}."
+    compliant = acc["nac"] == "compliant"
+    out = [f"NAC policy evaluation for '{user_id}':", ""]
+    if compliant:
+        out.append(f"  matched policy : CORP-COMPLIANT-DEVICE")
+        out.append(f"  posture checks : AV ✓  patch-level ✓  disk-encryption ✓")
+        out.append(f"  authorization  : VLAN {acc['vlan']} (full corporate access)")
+        out.append(f"  result         : PERMIT")
+    else:
+        out.append(f"  matched policy : QUARANTINE-NONCOMPLIANT")
+        out.append(f"  posture checks : failed (suspended account or posture violation)")
+        out.append(f"  authorization  : quarantine VLAN (remediation only)")
+        out.append(f"  result         : DENY")
+    return "\n".join(out)
+
+
+async def grant_user_access(args: dict[str, Any]) -> str:
+    """Restore/grant a user's network admission (DESTRUCTIVE — HITL-gated on LAN)."""
+    await asyncio.sleep(0)
+    user_id = (args.get("user_id") or args.get("user") or "").strip().lower()
+    reason  = (args.get("reason") or "").strip()
+    if not user_id:
+        return "grant_user_access requires 'user_id'."
+    if user_id not in _LAN_USER_ACCESS:
+        return f"Unknown user {user_id!r}."
+    changes = {"radius": "pass", "dot1x": "authorized", "nac": "compliant", "vlan": 20}
+    _LAN_ACCESS_CHANGES.append({"user_id": user_id, "op": "grant",
+                                "changes": changes, "reason": reason})
+    out = [f"Granted network access:", ""]
+    out.append(f"  user   : {user_id}")
+    out.append(f"  changes: RADIUS=pass, 802.1X=authorized, NAC=compliant, VLAN=20")
+    out.append(f"  reason : {reason or '(none given)'}")
+    out.append(f"  status : applied at {_ts()}")
+    return "\n".join(out)
+
+
+async def revoke_user_access(args: dict[str, Any]) -> str:
+    """Revoke a user's network admission (DESTRUCTIVE — HITL-gated on LAN)."""
+    await asyncio.sleep(0)
+    user_id = (args.get("user_id") or args.get("user") or "").strip().lower()
+    reason  = (args.get("reason") or "").strip()
+    if not user_id:
+        return "revoke_user_access requires 'user_id'."
+    if user_id not in _LAN_USER_ACCESS:
+        return f"Unknown user {user_id!r}."
+    changes = {"radius": "fail", "dot1x": "rejected", "nac": "quarantine", "vlan": None}
+    _LAN_ACCESS_CHANGES.append({"user_id": user_id, "op": "revoke",
+                                "changes": changes, "reason": reason})
+    out = [f"Revoked network access:", ""]
+    out.append(f"  user   : {user_id}")
+    out.append(f"  changes: RADIUS=fail, 802.1X=rejected, NAC=quarantine, VLAN=none")
+    out.append(f"  reason : {reason or '(none given)'}")
+    out.append(f"  status : applied at {_ts()}")
+    return "\n".join(out)

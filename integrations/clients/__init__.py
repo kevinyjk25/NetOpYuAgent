@@ -11,7 +11,7 @@ Modules in clients/ DO NOT import from adapters/ or router/.
 """
 from .llm_engine import (  # noqa: F401
     LLMEngine, OllamaEngine, OpenAIEngine, AnthropicEngine, MockEngine,
-    IntentResult, patch_runtime_loop, patch_hitl_graph,
+    IntentResult, patch_runtime_loop,
 )
 from .mcp_client     import MCPClient, MCPServer, MCPToolSpec, MCPCallResult  # noqa: F401
 from .openapi_client import OpenAPIClient, OpenAPIParser, OperationSpec, ParamSpec  # noqa: F401

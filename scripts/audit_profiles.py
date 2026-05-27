@@ -125,7 +125,7 @@ def main() -> int:
         sf = str(f)
         if "/profiles/" in sf or sf.startswith("profiles/"):
             continue   # profiles may import their own submodules
-        if "/tests/" in sf:
+        if "/tests/" in sf or sf.startswith("tests/"):
             continue   # tests may import a specific profile to assert on it
         if "/scripts/" in sf or sf.startswith("scripts/"):
             continue   # audit scripts mention the patterns as string literals

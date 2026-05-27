@@ -13,7 +13,7 @@ Optional submodules (imported lazily inside their factory functions):
   delegation.py      — standalone
   model_tier.py      — standalone
 """
-from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ToolResultStore
+from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ResourceRef, ToolResultStore
 from runtime.loop import (
     AgentRuntimeLoop, ComplexityDecision, DelegationMode, ForkContextPolicy,
     LoopResult, QueryComplexity, RuntimeConfig, VerificationResult,
@@ -23,7 +23,7 @@ from runtime.hooks import HookEvent, HookRegistry, get_hook_registry
 
 __all__ = [
     # Context budget
-    "ContextBudgetManager", "BudgetConfig", "ToolResultStore", "DeviceRef",
+    "ContextBudgetManager", "BudgetConfig", "ToolResultStore", "ResourceRef", "DeviceRef",
     # Loop
     "AgentRuntimeLoop", "RuntimeConfig", "QueryComplexity", "ComplexityDecision",
     "DelegationMode", "ForkContextPolicy", "LoopResult", "VerificationResult",

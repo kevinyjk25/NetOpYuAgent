@@ -211,6 +211,7 @@ class A2ATaskDispatcher:
         # forever even after the peer is done (observed 2026-05).
         _result_parts: list[str] = []
         _peer_hitl    = False
+        _peer_interrupt_id = None
         _peer_error: Optional[str] = None
         _stream_ok    = True
         try:
@@ -225,6 +226,12 @@ class A2ATaskDispatcher:
                 if isinstance(chunk, dict):
                     if chunk.get("type") == "hitl_interrupt" or chunk.get("hitl_interrupt"):
                         _peer_hitl = True
+                        # Capture the peer's interrupt_id so the outbound task
+                        # can be correlated when the peer's operator resolves it
+                        # (A2A Phase 3 cross-agent HITL passthrough).
+                        _iid = chunk.get("interrupt_id")
+                        if _iid:
+                            _peer_interrupt_id = _iid
                     if chunk.get("error"):
                         _peer_error = str(chunk["error"])
                     tok = chunk.get("token") or chunk.get("message") or ""
@@ -248,11 +255,33 @@ class A2ATaskDispatcher:
                     task.state = TaskState.FAILED
                     task.error = _peer_error[:500]
                 elif _peer_hitl:
-                    # Peer is awaiting operator approval — keep the task in
-                    # a non-terminal state so the UI shows "still pending"
-                    # (we don't have a dedicated AWAITING_HITL state).
-                    task.state = TaskState.PENDING
+                    # Peer is awaiting ITS OWN operator's approval (mode B:
+                    # the delegated-to side approves). Mark a dedicated
+                    # non-terminal state + carry the peer agent_id and the
+                    # peer's interrupt_id so the cross-agent resume callback
+                    # (A2A Phase 3 P3-b) can correlate the resolution back to
+                    # this outbound delegation.
+                    task.state = TaskState.AWAITING_PEER_HITL
                     task.metadata["peer_hitl_pending"] = True
+                    task.metadata["peer_agent"] = assignment.agent_id
+                    if _peer_interrupt_id:
+                        task.metadata["peer_interrupt_id"] = _peer_interrupt_id
+                        # Register the awaiting record so the peer's later
+                        # /hitl_resolved callback can find this local session
+                        # to resume (A2A Phase 3 P3-b).
+                        try:
+                            from task.inter.cross_agent_hitl import (
+                                get_cross_agent_hitl_bridge,
+                            )
+                            get_cross_agent_hitl_bridge().record_awaiting_peer(
+                                local_session_id=task.session_id,
+                                peer_agent=assignment.agent_id,
+                                peer_interrupt_id=_peer_interrupt_id,
+                                correlation_id=task.metadata.get("correlation_id", ""),
+                                original_query=task.metadata.get("source_query", ""),
+                            )
+                        except Exception as _br_exc:
+                            logger.debug("awaiting-peer record skipped: %s", _br_exc)
                 elif _stream_ok:
                     task.state = TaskState.COMPLETED
                     if _result_text:
@@ -393,6 +422,23 @@ class A2ATaskDispatcher:
             if st in ("failed",) and status.get("message"):
                 out.append({"node_step": f"peer task failed: {status['message']}",
                             "node": "delegate", "error": str(status["message"])})
+            elif st in ("input-required", "input_required"):
+                # A2A Phase 3: the peer raised a HITL while serving our
+                # delegation and is awaiting ITS OWN operator (mode B). The
+                # peer's local interrupt_id is carried in status.message. Surface
+                # it as a hitl_interrupt chunk so the dispatcher can mark the
+                # outbound task AWAITING_PEER_HITL and register the awaiting
+                # record (keyed by this interrupt_id) for the later
+                # /hitl_resolved resume callback. Previously this status was
+                # dropped, so the delegating side never learned the interrupt_id.
+                _iid = str(status.get("message") or "").strip()
+                out.append({
+                    "type": "hitl_interrupt",
+                    "hitl_interrupt": True,
+                    "interrupt_id": _iid,
+                    "node": "delegate",
+                    "node_step": "peer requires operator approval (HITL)",
+                })
             elif st in ("submitted", "working", "running"):
                 # Progress signal — keeps the delegating-side SSE alive and
                 # gives the operator a Flow event showing the peer is busy.

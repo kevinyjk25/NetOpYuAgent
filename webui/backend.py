@@ -47,6 +47,8 @@ import time
 import uuid
 from typing import Annotated, Any, AsyncIterator, Optional
 
+from runtime.stop_policy import StopOutcome
+
 from fastapi import APIRouter, Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -102,6 +104,87 @@ logger = logging.getLogger(__name__)
 # without a lock — no concurrent mutation.
 
 _session_sse_emit: dict[str, "Callable[[dict], None]"] = {}
+
+
+# ── A2A Phase 3 (P3-b): cross-agent HITL resume ───────────────────────────
+# When a peer (e.g. dc) resolves a delegated HITL, it calls this agent's
+# /api/v1/a2a/hitl_resolved endpoint. That endpoint hands the result here so
+# we can (1) inject it into the originating session and (2) ACTIVELY drive a
+# synthesis turn (A2 — no user input needed) and buffer the answer for the
+# frontend's poll. Buffer is in-memory (persistence deferred to P3-d).
+#
+# session_id -> list of {text, peer_agent, correlation_id, ts} resumption items
+_pending_resumptions: dict[str, list[dict]] = {}
+# Set by create_webui_app so the module-level a2a callback can drive a turn.
+_resume_driver: "Optional[Callable]" = None
+# Strong refs to detached cross-agent resume tasks (asyncio holds only weak
+# refs; without this a fire-and-forget resume turn could be GC'd mid-flight).
+_resume_tasks: set = set()
+
+
+def register_resume_driver(fn) -> None:
+    """Called by create_webui_app to publish the active-resume coroutine
+    (drives one synthesis turn for a session and buffers the answer)."""
+    global _resume_driver
+    _resume_driver = fn
+
+
+async def handle_cross_agent_resume(
+    *, local_session_id: str, peer_agent: str, result_text: str,
+    decision: str, correlation_id: str = "",
+) -> bool:
+    """Entry point invoked by the a2a /hitl_resolved endpoint.
+
+    SCHEDULES the active resume (A2) on a background task and returns
+    immediately. The resume turn drives a full LLM synthesis on THIS agent
+    (30-60s on a local model); the peer's callback POST must NOT block on it,
+    or the POST's HTTP timeout fires long before the turn finishes — leaving
+    the peer's resumer hung mid-approval and this agent's turn result orphaned
+    (the bug that left dc's inbound task stuck and lan never resuming).
+
+    Returns True when a resume was SCHEDULED (driver present), False when no
+    driver is registered (we buffer the raw result for next-turn merge-back).
+    The completed answer reaches the UI via _pending_resumptions + the
+    /chat/resumptions poll (and a live SSE push if the stream is still open).
+    """
+    if _resume_driver is None:
+        logger.warning(
+            "handle_cross_agent_resume: no resume driver registered "
+            "(session=%s peer=%s) — buffering raw result only",
+            local_session_id, peer_agent,
+        )
+        _pending_resumptions.setdefault(local_session_id, []).append({
+            "text": result_text, "peer_agent": peer_agent,
+            "correlation_id": correlation_id, "driven": False,
+        })
+        return False
+
+    # Fire-and-forget: schedule the synthesis turn, return at once so the
+    # peer's POST /hitl_resolved gets a fast 200. The driver has its own
+    # try/except + logging, and buffers its answer into _pending_resumptions
+    # on completion, so a detached task losing its result is safe.
+    async def _run_resume() -> None:
+        try:
+            await _resume_driver(
+                local_session_id=local_session_id, peer_agent=peer_agent,
+                result_text=result_text, decision=decision,
+                correlation_id=correlation_id,
+            )
+        except Exception as exc:  # never let a detached task die silently
+            logger.exception(
+                "cross-agent resume task failed (session=%s peer=%s): %s",
+                local_session_id, peer_agent, exc,
+            )
+
+    import asyncio as _asyncio
+    _task = _asyncio.create_task(
+        _run_resume(), name=f"xa_resume_{(local_session_id or '?')[:8]}",
+    )
+    # Keep a reference so the task isn't GC'd mid-flight (asyncio only holds
+    # a weak ref to tasks); drop it from the set when done.
+    _resume_tasks.add(_task)
+    _task.add_done_callback(_resume_tasks.discard)
+    return True
 
 
 def register_session_sse_emit(session_id: str, emit_fn) -> None:
@@ -325,12 +408,31 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 logger.warning("backend: cfg fallback for hitl_tool_names failed: %s", _exc)
                 _hitl_tools = frozenset()
         logger.info("backend: runtime_loop hitl_tool_names=%s", sorted(_hitl_tools))
+        # editable_hitl_tools: business map injected by the active profile's
+        # config (L1). Empty if unset → L0 stays domain-free (Stage A).
+        _editable_hitl = {}
+        try:
+            from config import cfg as _app_cfg2
+            _editable_hitl = dict(getattr(_app_cfg2.tools, "editable_hitl_tools", {}) or {})
+        except Exception as _exc:
+            logger.warning("backend: cfg fallback for editable_hitl_tools failed: %s", _exc)
+        # L0/L1 Stage B: ask the profile layer for its batch HITL resolver
+        # (network profiles return the device-prose resolver; default → None).
+        _batch_resolver = None
+        try:
+            from profiles import get_batch_resolver_for_profile
+            _batch_resolver = get_batch_resolver_for_profile(_cfg_be.cfg.agent.profile)
+            if _batch_resolver:
+                logger.info("backend: batch_resolver injected for profile=%s", _cfg_be.cfg.agent.profile)
+        except Exception as _exc:
+            logger.warning("backend: batch_resolver injection skipped: %s", _exc)
         services["runtime_loop"] = AgentRuntimeLoop(
             memory_router=services.get("memory"),
-            config=RuntimeConfig(hitl_tool_names=_hitl_tools),
+            config=RuntimeConfig(hitl_tool_names=_hitl_tools, editable_hitl_tools=_editable_hitl),
             tool_store=services["tool_store"],
             skill_catalog=services["skill_catalog"],
             delegate_fn=services.get("delegate_fn"),
+            batch_resolver_fn=_batch_resolver,
         )
     else:
         # Re-inject tool store and catalog into existing loop
@@ -356,6 +458,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
     # Session message history (in-memory, keyed by session_id)
     _message_history: dict[str, list[dict]] = {}
+    # Publish into services so module-level handlers (e.g.
+    # _submit_hitl_decision, which is NOT a closure of this factory and only
+    # receives `services`) can read the session transcript. Without this the
+    # H2 async-HITL follow-up raised NameError('_message_history') because it
+    # referenced this closure local from the wrong scope.
+    services["_message_history"] = _message_history
 
     # ── Static files ───────────────────────────────────────────────────
     if _STATIC_DIR.exists():
@@ -427,6 +535,81 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         _push_history(session_id, {"role": "user", "content": req.query}, _message_history)
         _push_history(session_id, msg, _message_history)
         return JSONResponse(content=msg)
+
+    # ── A2A Phase 3 (P3-b): active cross-agent HITL resume (A2) ────────
+    # Drives ONE synthesis turn for a session after a peer resolved a
+    # delegated HITL, with no user input, and buffers the answer for the
+    # frontend poll (/chat/resumptions). The peer's result is injected via
+    # the existing H2 async-inject queue so the loop's turn-start drain
+    # merges it into confirmed_facts before assembling the synthesis prompt.
+    async def _drive_cross_agent_resume(
+        *, local_session_id: str, peer_agent: str, result_text: str,
+        decision: str, correlation_id: str = "",
+    ) -> bool:
+        _executor = services.get("executor")
+        if _executor is None or not local_session_id:
+            logger.warning("cross-agent resume: no executor / session — skip")
+            return False
+        # 1. Inject the peer's result as a confirmed fact (H2 reuse).
+        try:
+            from runtime.loop import enqueue_async_inject
+            _fact = (
+                f"[跨 Agent 委派结果 from {peer_agent} — operator {decision}] "
+                f"{result_text}".strip()
+            )
+            enqueue_async_inject(local_session_id, _fact)
+        except Exception as _inj_exc:
+            logger.warning("cross-agent resume: inject failed: %s", _inj_exc)
+        # 2. Actively drive ONE synthesis turn; collect the answer.
+        _parts: list[str] = []
+        async def _collect(ch: dict) -> None:
+            tok = ch.get("token") or ""
+            if tok:
+                _parts.append(str(tok))
+        _synth_q = (
+            f"[系统] 委派到 {peer_agent} 的人在环审批已完成,结果已注入上下文。"
+            f"请综合本地已有信息与该结果,给出针对原始请求的最终完整回答。"
+        )
+        try:
+            await _executor.execute_query(
+                query=_synth_q,
+                session_id=local_session_id,
+                confirmed_facts=[],
+                env_context={"_cross_agent_resume": True},
+                on_chunk=_collect,
+            )
+        except Exception as _ex:
+            logger.exception("cross-agent resume: synthesis turn failed: %s", _ex)
+            return False
+        _answer = "".join(_parts).strip()
+        # 3. Buffer for the frontend poll + push to a live SSE if still open.
+        _pending_resumptions.setdefault(local_session_id, []).append({
+            "text": _answer, "peer_agent": peer_agent,
+            "correlation_id": correlation_id, "decision": decision,
+            "driven": True,
+        })
+        try:
+            emit_async_hitl_notify(local_session_id, {
+                "type": "cross_agent_resume", "peer_agent": peer_agent,
+                "text": _answer, "correlation_id": correlation_id,
+            })
+        except Exception:
+            pass
+        logger.info(
+            "cross-agent resume: drove synthesis turn for session=%s peer=%s "
+            "answer_chars=%d", local_session_id[:12], peer_agent, len(_answer),
+        )
+        return True
+
+    register_resume_driver(_drive_cross_agent_resume)
+
+    @app.get("/chat/resumptions")
+    async def get_resumptions(session_id: str) -> JSONResponse:
+        """Frontend polls this to pick up cross-agent HITL resume answers that
+        arrived after the original SSE stream closed (A2A Phase 3). Returns +
+        clears the buffered items for the session."""
+        items = _pending_resumptions.pop(session_id, [])
+        return JSONResponse(content=items)
 
     @app.post("/chat/stream")
     async def chat_stream(
@@ -660,50 +843,64 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 _final_text = ""
                 _final_interrupt: Optional[str] = None
                 _stalled = False
-                while True:
-                    try:
-                        _scfg = _streaming_cfg()
-                        _stall_to = float(getattr(_scfg, "sse_stall_timeout_seconds", 180.0)) if _scfg else 180.0
-                        kind, payload = await asyncio.wait_for(_chunk_queue.get(), timeout=_stall_to)
-                    except asyncio.TimeoutError:
-                        logger.warning("executor.execute_query stream stalled (%.1fs)", _stall_to)
-                        _stalled = True
-                        # Tell the frontend WHY the stream ended so the UI
-                        # can show a meaningful message instead of just
-                        # losing the response. The single most common
-                        # cause is a slow LLM backend (e.g. Ollama on a
-                        # large model + 8K+ prompt taking 3-5 minutes on
-                        # consumer hardware); without this signal, the
-                        # operator sees the trace freeze and can't tell
-                        # whether the agent crashed or is still working.
-                        yield f"data: {json.dumps({'type':'stall','stalled':True,'timeout_s':_stall_to,'message':'LLM backend did not respond within {:.0f}s — likely a slow model or large prompt. The request was cancelled.'.format(_stall_to)})}\n\n"
-                        break
-                    if kind == "chunk":
-                        yield f"data: {json.dumps(payload)}\n\n"
-                        await asyncio.sleep(0)
-                    elif kind == "done":
-                        _final_text       = payload.get("text", "")
-                        _final_interrupt  = payload.get("interrupt_id") if payload.get("interrupted") else None
-                        if _final_interrupt:
-                            yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,'interrupt_id':_final_interrupt})}\n\n"
+                _user_cancelled = False
+                try:
+                    while True:
+                        try:
+                            _scfg = _streaming_cfg()
+                            _stall_to = float(getattr(_scfg, "sse_stall_timeout_seconds", 180.0)) if _scfg else 180.0
+                            kind, payload = await asyncio.wait_for(_chunk_queue.get(), timeout=_stall_to)
+                        except asyncio.TimeoutError:
+                            logger.warning("executor.execute_query stream stalled (%.1fs)", _stall_to)
+                            _stalled = True
+                            # Tell the frontend WHY the stream ended so the UI
+                            # can show a meaningful message instead of just
+                            # losing the response. The single most common
+                            # cause is a slow LLM backend (e.g. Ollama on a
+                            # large model + 8K+ prompt taking 3-5 minutes on
+                            # consumer hardware); without this signal, the
+                            # operator sees the trace freeze and can't tell
+                            # whether the agent crashed or is still working.
+                            yield f"data: {json.dumps({'type':'stall','stalled':True,'timeout_s':_stall_to,'message':'LLM backend did not respond within {:.0f}s — likely a slow model or large prompt. The request was cancelled.'.format(_stall_to)})}\n\n"
+                            break
+                        if kind == "chunk":
+                            yield f"data: {json.dumps(payload)}\n\n"
                             await asyncio.sleep(0)
-                        break
-                    elif kind == "error":
-                        yield f"data: {json.dumps({'type':'error','error':str(payload)})}\n\n"
-                        break
+                        elif kind == "done":
+                            _final_text       = payload.get("text", "")
+                            _final_interrupt  = payload.get("interrupt_id") if payload.get("interrupted") else None
+                            if _final_interrupt:
+                                yield f"data: {json.dumps({'type':'hitl_interrupt','hitl_interrupt':True,'interrupt_id':_final_interrupt})}\n\n"
+                                await asyncio.sleep(0)
+                            break
+                        elif kind == "error":
+                            yield f"data: {json.dumps({'type':'error','error':str(payload)})}\n\n"
+                            break
+                except (asyncio.CancelledError, GeneratorExit):
+                    # The client aborted the request mid-stream (operator hit
+                    # the Stop button → fetch().abort() / reader.cancel()).
+                    # FastAPI propagates that as a cancellation at our yield.
+                    # Treat it as an explicit user cancel: stop the executor,
+                    # mark the outcome, and fall through to the finally-style
+                    # cleanup below so any partial answer + audit are still
+                    # persisted. We deliberately swallow it (don't re-raise)
+                    # so the post-turn hooks run; the connection is already
+                    # gone so further yields are no-ops.
+                    _user_cancelled = True
+                    nonlocal_outcome[0] = StopOutcome.USER_CANCELLED.value
+                    logger.info("chat_stream: user cancelled session=%s after %d turn(s)",
+                                session_id, nonlocal_turns[0])
 
                 try:
                     _drain_to = (lambda _s: float(getattr(_s, "exec_task_drain_timeout_seconds", 5.0)) if _s else 5.0)(_streaming_cfg())
-                    if _stalled:
-                        # When the SSE side gave up due to a stalled LLM, the
-                        # executor task is almost certainly still blocked inside
-                        # httpx awaiting Ollama. If we don't cancel it explicitly,
-                        # the orphaned task keeps the HTTP connection open until
-                        # Ollama eventually responds (could be many more minutes)
-                        # — and the user's next query may be processed by a
-                        # backend that's still busy with the old one. Cancel so
-                        # the underlying httpx request gets aborted and resources
-                        # are reclaimed promptly.
+                    if _stalled or _user_cancelled:
+                        # Stalled LLM OR user cancel: the executor task is
+                        # almost certainly still blocked inside httpx awaiting
+                        # Ollama. Cancel it so the underlying request aborts and
+                        # resources are reclaimed promptly — otherwise the
+                        # orphaned task keeps running (and the user's next query
+                        # could be processed by a backend still busy with the
+                        # old one).
                         exec_task.cancel()
                     await asyncio.wait_for(exec_task, timeout=_drain_to)
                 except (asyncio.TimeoutError, asyncio.CancelledError, Exception):
@@ -712,7 +909,12 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 turns_taken     = nonlocal_turns[0]
                 stop_outcome    = nonlocal_outcome[0]
                 _hitl_intercepted = nonlocal_intercepted[0] or bool(_final_interrupt)
+                _was_cancelled  = (stop_outcome == StopOutcome.USER_CANCELLED.value)
                 full_text       = _final_text or "".join(tokens)
+                if _was_cancelled and full_text:
+                    # Mark the partial answer so a later read of the session
+                    # transcript is honest about what happened.
+                    full_text = full_text.rstrip() + "\n\n_[已取消 — 部分回答]_"
 
                 _push_history(session_id, {"role": "user",      "content": req.query},   _message_history)
                 _push_history(session_id, {"role": "assistant", "content": full_text},    _message_history)
@@ -728,12 +930,20 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 # after it has actually completed. _submit_hitl_decision
                 # writes the proper {user_query, synthesis} pair when the
                 # operator approves / rejects / escalates.
-                if _hitl_intercepted:
+                #
+                # Likewise, when the operator CANCELLED mid-stream, the
+                # partial answer is not a trustworthy fact — keep it in the
+                # session transcript (above) for context, but do NOT distil it
+                # into durable memory / facts where recall would resurface a
+                # half-finished answer as if complete.
+                if _hitl_intercepted or _was_cancelled:
                     logger.info(
                         "chat_stream: skipping memory write for session=%s "
-                        "(HITL intercepted; _submit_hitl_decision will persist "
-                        "the completed turn after operator decision)",
+                        "(%s)",
                         session_id[:12],
+                        "HITL intercepted; _submit_hitl_decision will persist "
+                        "after operator decision" if _hitl_intercepted
+                        else "user cancelled; partial answer not distilled to memory",
                     )
                 else:
                     import re as _re
@@ -1350,6 +1560,13 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 # this delegation is waiting on a local operator decision —
                 # the UI should highlight it.
                 "awaiting_hitl_id": md.get("awaiting_hitl_id") or None,
+                # A2A Phase 3: when state=awaiting_peer_hitl, this outbound
+                # delegation is blocked on the PEER's operator (mode B —
+                # approval happens on the peer's console, NOT here). The UI
+                # renders a read-only "⏳ waiting for <peer> approval" item
+                # and must NOT offer approve/reject locally.
+                "peer_hitl_pending":  bool(md.get("peer_hitl_pending", False)),
+                "peer_interrupt_id":  md.get("peer_interrupt_id") or None,
             })
         # Newest first — operators usually want the most recent delegation
         out.sort(key=lambda d: d.get("created_at") or "", reverse=True)
@@ -1788,7 +2005,11 @@ async def _submit_hitl_decision(
                     # the original user query + previous answer back in (debt
                     # #7) so the LLM's follow-up stays connected to what the
                     # user actually asked, instead of a context-less synthetic.
-                    _hist = _message_history.get(_session_for_followup, [])
+                    # _message_history lives in the create_webui_app closure;
+                    # this module-level handler reads it via services (published
+                    # there at factory time). Fixes the H2 follow-up NameError.
+                    _msg_hist = services.get("_message_history", {})
+                    _hist = _msg_hist.get(_session_for_followup, [])
                     _orig_q = ""
                     _prev_a = ""
                     for _m in reversed(_hist):

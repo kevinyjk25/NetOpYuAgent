@@ -296,6 +296,7 @@ class SkillEvolver:
         min_reuse_potential: float = 0.60,
         max_skills:          int   = 200,
         skills_dir:          Optional[str] = None,  # directory to persist skill .md files
+        apply_changes:       bool = True,  # False = suggest-only (no live catalog mutation)
     ) -> None:
         self._catalog      = catalog
         self._llm_fn       = llm_fn
@@ -304,6 +305,13 @@ class SkillEvolver:
         self._min_reuse    = min_reuse_potential
         self._max_skills   = max_skills
         self._skills_dir   = pathlib.Path(skills_dir) if skills_dir else None
+        # When False, apply_feedback / evaluate_skill_creation compute and
+        # record the proposed change (version history, suggestion logs) but do
+        # NOT mutate the live skill catalog. Lets an operator run the
+        # self-improvement loop in "observe" mode and review suggestions
+        # before trusting auto-application. Wired from
+        # cfg.skill_orchestration.auto_evolve_apply.
+        self._apply_changes = apply_changes
 
         # On startup, load any previously-persisted skill files
         if self._skills_dir:
@@ -543,8 +551,15 @@ class SkillEvolver:
             self._versions[skill_id] = []
         self._versions[skill_id].append(new_ver)
 
-        # Update the catalog with improved content
-        await self._update_catalog_from_markdown(skill_id, updated_content)
+        # Update the catalog with improved content — UNLESS we're in
+        # suggest-only mode, in which case we record the proposed version
+        # (above) and surface it via the return value / logs, but leave the
+        # live catalog untouched for an operator to review.
+        if self._apply_changes:
+            await self._update_catalog_from_markdown(skill_id, updated_content)
+            _applied_note = "applied"
+        else:
+            _applied_note = "suggested (suggest-only mode; catalog NOT mutated)"
 
         result = FeedbackApplication(
             skill_id=skill_id,
@@ -554,8 +569,8 @@ class SkillEvolver:
             quality_delta=quality_delta,
         )
         logger.info(
-            "SkillEvolver: updated skill '%s' v%d→v%d quality_delta=%.2f changes=%d",
-            skill_id, current_version, current_version + 1,
+            "SkillEvolver: %s skill '%s' v%d→v%d quality_delta=%.2f changes=%d",
+            _applied_note, skill_id, current_version, current_version + 1,
             quality_delta, len(changes),
         )
         return result
@@ -853,15 +868,7 @@ class SkillEvolver:
         parsed = self._parse_markdown_to_definition(
             proposal.skill_id, proposal.markdown_content
         )
-        try:
-            self._catalog.register_all({proposal.skill_id: parsed})
-        except Exception as exc:
-            logger.warning("SkillEvolver: catalog registration failed: %s", exc)
-
-        # Persist markdown to disk so skill survives restarts
-        self._save_skill_to_disk(proposal.skill_id, proposal.markdown_content)
-
-        # Record initial version
+        # Always record the proposed version (cheap, in-memory, reviewable).
         v = SkillVersion(
             skill_id=proposal.skill_id,
             version=1,
@@ -872,6 +879,23 @@ class SkillEvolver:
             quality_score=proposal.reuse_potential,
         )
         self._versions[proposal.skill_id] = [v]
+
+        # In suggest-only mode, stop here: the proposal is recorded for review
+        # but NOT registered in the live catalog or written to disk.
+        if not self._apply_changes:
+            logger.info(
+                "SkillEvolver: suggested new skill '%s' (suggest-only mode; "
+                "NOT registered in catalog)", proposal.skill_id,
+            )
+            return
+
+        try:
+            self._catalog.register_all({proposal.skill_id: parsed})
+        except Exception as exc:
+            logger.warning("SkillEvolver: catalog registration failed: %s", exc)
+
+        # Persist markdown to disk so skill survives restarts
+        self._save_skill_to_disk(proposal.skill_id, proposal.markdown_content)
 
     def _save_skill_to_disk(self, skill_id: str, content: str) -> None:
         """Write skill markdown to HERMES_DATA_DIR/skills/<skill_id>.md"""
