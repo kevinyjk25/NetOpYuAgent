@@ -251,10 +251,20 @@ class HitlExecutor:
 
     async def _maybe_callback_source_agent(
         self, *, interrupt_id: str, result_text: str, decision: str,
+        phase: str = "result",
     ) -> None:
         """If `interrupt_id` was a HITL raised while serving an inbound
         delegation, POST the resolution back to the originating agent's
         /hitl_resolved endpoint so it can resume (A2A Phase 3 mode B).
+
+        A2A Phase 3 case-3 (HITL with async follow-up) sends TWO pushes:
+          • phase="approval": the operator approved; the tool is about to run.
+            Sent immediately so the originator can show an interim
+            "approved, executing…" status. Uses PEEK so the bridge record is
+            KEPT for the later result push.
+          • phase="result": terminal (tool finished, or rejected). Uses POP to
+            consume the record.
+        case-1/2 (no async follow-up) send only the single phase="result".
 
         No-op when: the interrupt wasn't cross-agent (no bridge record), or no
         peer registry is wired, or the source agent's URL can't be resolved.
@@ -265,7 +275,11 @@ class HitlExecutor:
             return
         try:
             from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
-            rec = get_cross_agent_hitl_bridge().pop_inbound_hitl(interrupt_id)
+            _bridge = get_cross_agent_hitl_bridge()
+            if phase == "approval":
+                rec = _bridge.peek_inbound_hitl(interrupt_id)   # keep for result push
+            else:
+                rec = _bridge.pop_inbound_hitl(interrupt_id)    # terminal: consume
         except Exception as exc:
             logger.debug("cross-agent callback: bridge lookup failed: %s", exc)
             return
@@ -296,6 +310,7 @@ class HitlExecutor:
             "interrupt_id":   interrupt_id,
             "result":         result_text,
             "decision":       decision,
+            "phase":          phase,           # "approval" | "result"
             "correlation_id": rec.correlation_id,
             "source_session_id": rec.source_session_id,
         }
@@ -1180,7 +1195,7 @@ class HitlExecutor:
                 await self._maybe_callback_source_agent(
                     interrupt_id=_interrupt_id,
                     result_text=f"操作员拒绝了工具调用 `{tool_name}`,未执行。",
-                    decision="reject",
+                    decision="reject", phase="result",
                 )
                 await self._complete_inbound_by_interrupt(
                     interrupt_id=_interrupt_id, decision="reject", result_text="",
@@ -1214,6 +1229,15 @@ class HitlExecutor:
                 "node":      "tool_call",
                 "node_step": f"Calling tool: {tool_name}",
             })
+            # A2A Phase 3 (case3, push #1 — intermediate): notify the originator
+            # the operator approved and execution is starting, BEFORE the
+            # (possibly slow) tool runs. peek keeps the bridge record for the
+            # terminal result push below.
+            await self._maybe_callback_source_agent(
+                interrupt_id=_interrupt_id,
+                result_text=f"操作员已批准工具 `{tool_name}`，正在执行…",
+                decision="approve", phase="approval",
+            )
             try:
                 result = await self._tool_registry[tool_name](tool_args)
             except Exception as exc:
@@ -1235,11 +1259,12 @@ class HitlExecutor:
                 f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
                 session_id,
             )
-            # A2A Phase 3 (P3-b): if this HITL was raised serving an inbound
-            # delegation, call the originator back so it can resume (mode B).
+            # A2A Phase 3 (case3, push #2 — terminal): tool finished; push the
+            # result so the originator can supplement its answer. phase=result
+            # pops the bridge record (delegation fully resolved).
             await self._maybe_callback_source_agent(
                 interrupt_id=_interrupt_id, result_text=result_text,
-                decision="approve",
+                decision="approve", phase="result",
             )
             await self._complete_inbound_by_interrupt(
                 interrupt_id=_interrupt_id, decision="approve",

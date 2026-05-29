@@ -204,15 +204,18 @@ def create_a2a_app(
         interrupt_id  = str(body.get("interrupt_id") or "").strip()
         result_text   = str(body.get("result") or "")
         decision      = str(body.get("decision") or "approve")
+        phase         = str(body.get("phase") or "result").strip()
         correlation_id = str(body.get("correlation_id") or "")
         if not peer_agent or not interrupt_id:
             raise HTTPException(status_code=400,
                                 detail="peer_agent and interrupt_id required")
+        _is_terminal = (phase != "approval")
 
         from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
         bridge = get_cross_agent_hitl_bridge()
         rec = bridge.resolve_awaiting_peer(
             peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
+            terminal=_is_terminal,
         )
         if rec is None:
             # Unknown or already-resumed — reject so the caller can log/retry
@@ -232,15 +235,21 @@ def create_a2a_app(
                 result_text=result_text,
                 decision=decision,
                 correlation_id=correlation_id or rec.correlation_id,
+                phase=phase,
+                outbound_task_id=rec.outbound_task_id,
             )
         except Exception as exc:
             logger.exception("hitl_resolved: resume failed: %s", exc)
             raise HTTPException(status_code=500, detail="resume failed")
         finally:
-            bridge.forget_awaiting(
-                peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
-            )
+            # Only drop the awaiting record on the TERMINAL push; the
+            # intermediate approval push must keep it for the result push.
+            if _is_terminal:
+                bridge.forget_awaiting(
+                    peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
+                )
         return JSONResponse(content={"ok": True, "resumed": bool(driven),
+                                     "phase": phase,
                                      "session": rec.local_session_id})
 
     return a2a

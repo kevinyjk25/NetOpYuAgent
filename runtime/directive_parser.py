@@ -395,6 +395,17 @@ def strip_tool_batch_directives(text: str) -> str:
     return _strip_directive_with_args(text, _TOOL_BATCH_RE, "[", "]")
 
 
+def strip_delegate_directives(text: str) -> str:
+    """Remove all [DELEGATE:target[#mode]] <task> directive lines. The
+    directive is control machinery, never user-facing prose — strip it from
+    the visible stream so a pure-directive response (e.g. a suppressed
+    re-delegation) doesn't leak raw `[DELEGATE:...]` text to the user.
+    _DELEGATE_FULL_RE matches the whole line, so a simple sub is correct."""
+    if not text:
+        return text
+    return _DELEGATE_FULL_RE.sub("", text)
+
+
 def strip_skill_load_directives(text: str) -> str:
     """Remove all [SKILL_LOAD:...] tokens. No args — simple regex sub
     is correct here."""

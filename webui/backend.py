@@ -131,7 +131,8 @@ def register_resume_driver(fn) -> None:
 
 async def handle_cross_agent_resume(
     *, local_session_id: str, peer_agent: str, result_text: str,
-    decision: str, correlation_id: str = "",
+    decision: str, correlation_id: str = "", phase: str = "result",
+    outbound_task_id: str = "",
 ) -> bool:
     """Entry point invoked by the a2a /hitl_resolved endpoint.
 
@@ -168,7 +169,8 @@ async def handle_cross_agent_resume(
             await _resume_driver(
                 local_session_id=local_session_id, peer_agent=peer_agent,
                 result_text=result_text, decision=decision,
-                correlation_id=correlation_id,
+                correlation_id=correlation_id, phase=phase,
+                outbound_task_id=outbound_task_id,
             )
         except Exception as exc:  # never let a detached task die silently
             logger.exception(
@@ -544,13 +546,103 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # merges it into confirmed_facts before assembling the synthesis prompt.
     async def _drive_cross_agent_resume(
         *, local_session_id: str, peer_agent: str, result_text: str,
-        decision: str, correlation_id: str = "",
+        decision: str, correlation_id: str = "", phase: str = "result",
+        outbound_task_id: str = "",
     ) -> bool:
         _executor = services.get("executor")
         if _executor is None or not local_session_id:
             logger.warning("cross-agent resume: no executor / session — skip")
             return False
-        # 1. Inject the peer's result as a confirmed fact (H2 reuse).
+
+        # ── case3 phase 1 — intermediate approval ─────────────────────────
+        # The peer's operator approved; the tool is executing. Surface an
+        # interim status to the frontend WITHOUT burning an LLM synthesis turn
+        # (per design: only the terminal result stage synthesizes). Inject the
+        # interim note as a fact too, so the eventual synthesis turn has the
+        # full timeline.
+        if phase == "approval":
+            try:
+                from runtime.loop import enqueue_async_inject
+                enqueue_async_inject(
+                    local_session_id,
+                    f"[跨 Agent 委派中间状态 from {peer_agent} — operator {decision}] "
+                    f"{result_text}".strip(),
+                )
+            except Exception as _inj_exc:
+                logger.warning("cross-agent resume(approval): inject failed: %s",
+                               _inj_exc)
+            _interim = f"✓ {peer_agent}：{result_text}"
+            _pending_resumptions.setdefault(local_session_id, []).append({
+                "text": _interim, "peer_agent": peer_agent,
+                "correlation_id": correlation_id, "decision": decision,
+                "phase": "approval", "driven": True, "interim": True,
+            })
+            try:
+                emit_async_hitl_notify(local_session_id, {
+                    "type": "cross_agent_resume_interim", "peer_agent": peer_agent,
+                    "text": _interim, "correlation_id": correlation_id,
+                })
+            except Exception:
+                pass
+            logger.info(
+                "cross-agent resume: phase=approval interim pushed for "
+                "session=%s peer=%s (no synthesis turn)",
+                local_session_id[:12], peer_agent,
+            )
+            return True
+
+        # ── case3 phase 2 (or case1/2 single push) — terminal result ──────
+        # 1a. CRITICAL: transition the LAN outbound delegation task from
+        # AWAITING_PEER_HITL → COMPLETED. Without this, the UI keeps showing
+        # "PEER HITL awaiting" forever even though DC has already approved &
+        # executed, AND the next LLM turn might re-delegate because it sees
+        # a still-pending outbound. This is the state-disagree the user kept
+        # seeing in the DELEG panel (LAN side stuck while DC was done).
+        if outbound_task_id:
+            try:
+                _task_system = services.get("task_system")
+                _store = getattr(_task_system, "store", None) if _task_system else None
+                if _store is not None:
+                    _task = await _store.get(outbound_task_id)
+                    if _task is not None:
+                        from task.schemas import TaskState
+                        from datetime import datetime, timezone
+                        if _task.state == TaskState.AWAITING_PEER_HITL:
+                            _task.state = (TaskState.COMPLETED
+                                           if decision == "approve"
+                                           else TaskState.FAILED)
+                            _task.result = {"text": result_text}
+                            _task.metadata["peer_hitl_pending"] = False
+                            _task.metadata["peer_decision"] = decision
+                            _task.completed_at = datetime.now(
+                                timezone.utc).isoformat()
+                            await _store.save(_task)
+                            logger.info(
+                                "cross-agent resume: transitioned outbound "
+                                "task %s AWAITING_PEER_HITL → %s "
+                                "(session=%s peer=%s)",
+                                outbound_task_id[:12], _task.state.value,
+                                local_session_id[:12], peer_agent,
+                            )
+                        else:
+                            logger.debug(
+                                "cross-agent resume: outbound task %s already "
+                                "in state %s, not transitioning",
+                                outbound_task_id[:12], _task.state.value,
+                            )
+                    else:
+                        logger.warning(
+                            "cross-agent resume: outbound task %s not found "
+                            "in store — UI state may be stale",
+                            outbound_task_id[:12],
+                        )
+            except Exception as _tx_exc:
+                logger.exception(
+                    "cross-agent resume: task state transition failed: %s",
+                    _tx_exc,
+                )
+
+        # 1b. Inject the peer's result as a confirmed fact (H2 reuse).
         try:
             from runtime.loop import enqueue_async_inject
             _fact = (
@@ -567,8 +659,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             if tok:
                 _parts.append(str(tok))
         _synth_q = (
-            f"[系统] 委派到 {peer_agent} 的人在环审批已完成,结果已注入上下文。"
-            f"请综合本地已有信息与该结果,给出针对原始请求的最终完整回答。"
+            f"[系统] 委派到 {peer_agent} 的人在环审批已完成,结果已注入上下文（见 [跨 Agent 委派结果] 事实）。"
+            f"⚠ 这是综合答复阶段：禁止再发出任何 [DELEGATE:...] 或 [TOOL:...] 指令。"
+            f"请基于本地已有信息与该结果，直接用自然语言给出针对原始请求的最终完整回答。"
         )
         try:
             await _executor.execute_query(
@@ -586,7 +679,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         _pending_resumptions.setdefault(local_session_id, []).append({
             "text": _answer, "peer_agent": peer_agent,
             "correlation_id": correlation_id, "decision": decision,
-            "driven": True,
+            "phase": "result", "driven": True,
         })
         try:
             emit_async_hitl_notify(local_session_id, {

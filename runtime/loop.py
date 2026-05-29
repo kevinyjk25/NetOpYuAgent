@@ -770,10 +770,14 @@ class AgentRuntimeLoop:
         _result_text = "".join(_result_parts).strip()
         if _peer_hitl:
             yield {"_inject_context":
-                   f"[委派部分完成] {target} 需要操作员审批才能继续。"
-                   f"请告知用户到 {target} 的控制台处理审批，"
-                   f"并基于已获得的信息给出当前可行的回答。\n"
-                   f"已获得：{_result_text[:1500]}"}
+                   f"[委派进行中 — 等待 {target} 异步审批] "
+                   f"已将任务委派给 {target}，对方已提交操作员审批，正在等待。"
+                   f"审批通过及工具执行结果将稍后通过异步回调自动补充，无需你再次委派。"
+                   f"⚠ 禁止再次发出 [DELEGATE:{target}] 指令。"
+                   f"请基于当前已获得的信息给出一个简短的中间答复（说明已委派、等待审批中），"
+                   f"不要编造最终结果。\n"
+                   f"已获得的中间信息：{_result_text[:1500]}",
+                   "_peer_hitl_pending": True}
         elif _ok and _result_text:
             yield {"_inject_context":
                    f"[委派结果 from {target}] 任务={task!r}\n"
@@ -955,12 +959,30 @@ class AgentRuntimeLoop:
             for skill_id in find_skill_load_names(llm_response):
                 if skill_id in _skill_loads_this_turn_r:
                     continue
+                # Cross-turn dedup: if a previous turn already loaded this
+                # skill, do NOT honor a repeat — the LLM is in a loop (it
+                # forgot the loaded detail because context_str is rebuilt
+                # every turn and the appended detail didn't survive).
+                if f"SKILL_LOAD:{skill_id}" in called_tools:
+                    logger.warning(
+                        "Turn %d: SKILL_LOAD:%s suppressed — already loaded "
+                        "in a prior turn this session (LLM is re-emitting)",
+                        state.turns, skill_id,
+                    )
+                    continue
                 _skill_loads_this_turn_r.add(skill_id)
                 called_tools.add(f"SKILL_LOAD:{skill_id}")
                 if self._skill_catalog:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
                         context_str += "\n\n" + detail
+                        # Persist as a confirmed fact so the NEXT turn's
+                        # rebuilt context still contains the skill detail
+                        # (without this, the LLM re-emits SKILL_LOAD endlessly
+                        # — the DC SKILL_LOAD death-loop bug).
+                        state.record_new_fact(
+                            f"[SKILL LOADED: {skill_id}]\n{detail}"
+                        )
                         logger.debug("SkillCatalog: loaded detail for %s", skill_id)
 
             # P1+: detect ALIAS directives. When the LLM discovers that the
@@ -1949,6 +1971,20 @@ class AgentRuntimeLoop:
             _emit_skills_only_on_change = True
 
 
+        # Peers already delegated to during THIS user request (this stream).
+        # Per the A2A contract (spec point 3): the same decomposed task must
+        # not be re-delegated to the same agent. After a delegation to a peer
+        # returns — even a case1 synchronous result that the LLM reads as
+        # "inconclusive" (e.g. the peer diagnosed but asked "shall I grant?"
+        # instead of acting) — the LLM tends to re-delegate the same task to
+        # the same peer, spawning duplicate inbound tasks; the peer then re-
+        # diagnoses against now-mutated state and returns a contradictory
+        # answer (the storm). The in-flight TaskStore gate can't catch this
+        # because a case1 task is already terminal. Per-stream scope is
+        # correct: a later user query starts a fresh stream with a fresh set,
+        # so legitimate re-use of the same peer across requests still works.
+        _delegated_targets_this_request: set[str] = set()
+
         while True:
             state.turns += 1
 
@@ -2201,15 +2237,20 @@ class AgentRuntimeLoop:
             from runtime.directive_parser import (
                 strip_tool_directives as _strip_tools,
                 strip_tool_batch_directives as _strip_batch,
+                strip_delegate_directives as _strip_delegate,
+                strip_skill_load_directives as _strip_skill,
             )
-            _visible = _strip_batch(_strip_tools(llm_response)).strip()
+            _visible = _strip_skill(
+                _strip_delegate(_strip_batch(_strip_tools(llm_response)))
+            ).strip()
             # Also drop any per-line residue (e.g. a bare "[TOOL:foo]"
             # with no args dict that the multi-strippers skipped because
             # the open-brace lookahead didn't fire).
             _visible_lines = [
                 ln for ln in _visible.splitlines()
-                if not re.match(r'\s*\[\s*TOOL(?:_BATCH)?\s*:\s*\w+\s*\]\s*$',
-                                ln, re.IGNORECASE)
+                if not re.match(
+                    r'\s*\[\s*(?:TOOL(?:_BATCH)?|DELEGATE|SKILL_LOAD)\s*:',
+                    ln, re.IGNORECASE)
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
@@ -2245,31 +2286,122 @@ class AgentRuntimeLoop:
                 )
                 _delegates = []   # suppress for this turn
             if _delegates:
-                # Honor only the first delegate (one per turn).
                 _dlg = _delegates[0]
-                if len(_delegates) > 1:
+                # ── Synthesis-turn hard-block (A2A Phase 3) ───────────────
+                # A cross-agent resume synthesis turn exists solely to compose
+                # a final answer from the peer result already injected as a
+                # fact. Delegating here is categorically wrong and the in-flight
+                # gate can't catch it (the outbound task is already COMPLETED by
+                # the time the result callback drives this turn). _cross_agent_
+                # resume is set fresh per synthesis execute_query by the resume
+                # driver — a per-turn role flag, NOT the fragile cross-turn
+                # count guard removed earlier. Drop the directive and fall
+                # through to normal turn handling (the response text becomes the
+                # answer).
+                if (env_ctx or {}).get("_cross_agent_resume"):
                     logger.warning(
-                        "Turn %d emitted %d [DELEGATE:] directives — only the "
-                        "first (%s) is honored this turn",
-                        state.turns, len(_delegates), _dlg.target,
+                        "Turn %d: DELEGATE to %s dropped — this is a cross-agent "
+                        "resume synthesis turn (must synthesize, not delegate) "
+                        "(session=%s).",
+                        state.turns, _dlg.target, session_id,
                     )
-                async for _chunk in self._handle_delegate(_dlg, state, session_id):
-                    # Inject the delegated result as a confirmed fact so it
-                    # survives into the NEXT turn's prompt (context_str is
-                    # rebuilt each turn via budget.assemble, which includes
-                    # confirmed_facts — appending to context_str here would be
-                    # overwritten). Forward streaming chunks (tagged
-                    # source_agent) to the user.
-                    if _chunk.get("_inject_context"):
-                        state.record_new_fact(_chunk["_inject_context"])
-                    else:
-                        yield _chunk
-                # A delegate fully occupies the turn; continue the loop so the
-                # next LLM turn synthesizes the final answer from the injected
-                # delegated result. (The while-loop top increments state.turns,
-                # so we must NOT increment here.)
-                called_tools.add(f"DELEGATE:{_dlg.target}")
-                continue
+                    context_str += (
+                        f"\n\n_SYSTEM: 本轮是综合答复阶段，{_dlg.target} 的结果已在"
+                        f"上下文中。禁止再委派。请直接基于已有信息给出最终回答。"
+                    )
+                    _delegates = []
+                    # Fall through to normal (non-delegate) turn handling.
+                if _delegates:
+                    # Honor only the first delegate (one per turn). The
+                    # duplicate-delegation gate lives in delegate_fn
+                    # (task/delegation.py), keyed on TaskStore state — durable
+                    # across turns AND streams. If a delegation to this peer is
+                    # already in flight, delegate_fn creates no task and yields
+                    # a suppression note (_delegation_suppressed) injected below.
+
+                    # ── Per-request re-delegation block (spec point 3) ────
+                    # Already delegated this task to this peer in THIS request.
+                    # Re-delegating the same (task, peer) is never the right
+                    # move — per spec point 2 the LLM must instead synthesize a
+                    # final answer or degrade (different peer / summarize). This
+                    # stops the case1 storm the in-flight gate can't (the prior
+                    # task is already terminal).
+                    if _dlg.target in _delegated_targets_this_request:
+                        logger.warning(
+                            "Turn %d: DELEGATE to %s suppressed — already "
+                            "delegated to it this request; the result is in "
+                            "context. Synthesize or degrade, do NOT re-delegate "
+                            "(session=%s).",
+                            state.turns, _dlg.target, session_id,
+                        )
+                        context_str += (
+                            f"\n\n_SYSTEM: 你本轮请求已委派过 {_dlg.target}，其结果已在"
+                            f"上下文中（见 [委派结果]/[委派进行中] 事实）。⚠ 禁止再次委派 "
+                            f"{_dlg.target}。请合并分析已有结果：若已能回答用户请求则直接给出"
+                            f"最终综合答复；若 {_dlg.target} 的结果不足以完成请求，则如实总结"
+                            f"当前结论与缺口（不要重复委派同一个 agent）。"
+                        )
+                        _delegates = []
+                        # Fall through to normal (non-delegate) turn handling.
+                if _delegates:
+                    if len(_delegates) > 1:
+                        logger.warning(
+                            "Turn %d emitted %d [DELEGATE:] directives — only "
+                            "the first (%s) is honored this turn",
+                            state.turns, len(_delegates), _dlg.target,
+                        )
+                    _delegated_targets_this_request.add(_dlg.target)
+                    _parked_peer_hitl = False
+                    async for _chunk in self._handle_delegate(
+                        _dlg, state, session_id
+                    ):
+                        # Inject the delegated result as a confirmed fact so it
+                        # survives into the NEXT turn's prompt (context_str is
+                        # rebuilt each turn via budget.assemble). Forward
+                        # streaming chunks (tagged source_agent) to the user.
+                        if _chunk.get("_inject_context"):
+                            state.record_new_fact(_chunk["_inject_context"])
+                            if _chunk.get("_peer_hitl_pending"):
+                                _parked_peer_hitl = True
+                        else:
+                            yield _chunk
+                    called_tools.add(f"DELEGATE:{_dlg.target}")
+
+                    # ── PARK on case2 peer HITL ───────────────────────────
+                    # The peer raised an operator-approval HITL: per the A2A
+                    # contract, this delegated task is NOT complete until the
+                    # stage-2 tool result arrives. We must WAIT for that async
+                    # callback, not busy-loop. Busy-looping here races with the
+                    # result callback: the instant it flips the outbound task to
+                    # COMPLETED, the in-flight gate releases and the next loop
+                    # turn re-delegates → duplicate inbound task on the peer →
+                    # the peer re-diagnoses against now-mutated state and returns
+                    # a contradictory answer (the storm the user observed).
+                    # End the stream with a deterministic interim; the result
+                    # callback's synthesis turn delivers the final answer via
+                    # the resumption channel.
+                    if _parked_peer_hitl:
+                        logger.info(
+                            "Turn %d: parking request — %s raised an async "
+                            "operator-approval HITL; awaiting stage-2 result "
+                            "callback (session=%s).",
+                            state.turns, _dlg.target, session_id,
+                        )
+                        yield {
+                            "type": "cross_agent_parked",
+                            "peer_agent": _dlg.target,
+                        }
+                        yield {
+                            "token":
+                                f"\n\n已将该任务委派给 {_dlg.target}，对方需要操作员审批。"
+                                f"审批与执行结果完成后会自动补充最终答复，无需重复提交。",
+                        }
+                        return
+                    # No peer HITL → a normal delegate fully occupies the turn;
+                    # continue so the next LLM turn synthesizes from the
+                    # injected delegated result. (The while-loop top increments
+                    # state.turns, so do NOT increment here.)
+                    continue
 
             # the tool result will be injected in the next turn's context and
             # the LLM will produce a proper prose answer then.
@@ -2278,6 +2410,16 @@ class AgentRuntimeLoop:
             for skill_id in find_skill_load_names(llm_response):
                 if skill_id in _skill_loads_this_turn:
                     continue   # deduplicate within a single response
+                # Cross-turn dedup (mirror of run() path): suppress if already
+                # loaded in a prior turn — prevents the LLM looping on
+                # SKILL_LOAD when the detail was lost from rebuilt context.
+                if f"SKILL_LOAD:{skill_id}" in called_tools:
+                    logger.warning(
+                        "Turn %d: SKILL_LOAD:%s suppressed — already loaded "
+                        "in a prior turn (LLM is in a re-emit loop)",
+                        state.turns, skill_id,
+                    )
+                    continue
                 _skill_loads_this_turn.add(skill_id)
                 # Mark as "called" so dedup blocks repeated SKILL_LOAD across turns
                 called_tools.add(f"SKILL_LOAD:{skill_id}")
@@ -2285,6 +2427,13 @@ class AgentRuntimeLoop:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
                         context_str += "\n\n" + detail   # inject for next turn
+                        # Also persist as a confirmed fact so the skill detail
+                        # survives the next turn's context rebuild — without
+                        # this the LLM forgets and re-emits SKILL_LOAD forever
+                        # (the DC SKILL_LOAD death-loop bug).
+                        state.record_new_fact(
+                            f"[SKILL LOADED: {skill_id}]\n{detail}"
+                        )
                         yield {"node_step": f"Loading skill details: {skill_id}", "node": "skill_load"}
                         # Journal: record the load with position+score from top-k
                         if state._skill_journal is not None:

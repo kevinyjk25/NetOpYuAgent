@@ -109,6 +109,62 @@ def build_delegate_fn(
             }
             return
 
+        # ── SINGLE DELEGATION GATE (A2A Phase 3) ──────────────────────────
+        # Identity of a delegated task = (session_id, target_agent): while a
+        # delegation to this peer is still in flight (any non-terminal state),
+        # the SAME originating request must NOT be delegated to the SAME peer
+        # again. This is the one source of truth that replaces the old
+        # env_ctx-scoped guards (count / pending-set / resume-flag), which
+        # broke because env_ctx is per-execute_query and reset every time the
+        # resume driver started a fresh synthesis turn. TaskStore is durable
+        # across turns AND streams, and is the same store the UI reads — so
+        # the gate and the UI can never disagree.
+        #
+        # Terminal states (delegation finished, a fresh one is allowed):
+        #   COMPLETED, FAILED, CANCELLED.
+        # Everything else (RUNNING, AWAITING_PEER_HITL, PENDING, …) is in
+        # flight → suppress.
+        try:
+            from task.schemas import TaskState, TaskScope
+            _TERMINAL = {TaskState.COMPLETED, TaskState.FAILED,
+                         TaskState.CANCELLED}
+            _existing = await task_store.get_by_session(session_id)
+            _inflight = next(
+                (t for t in _existing
+                 if t.assignment is not None
+                 and t.assignment.agent_id == assignment.agent_id
+                 and t.scope == TaskScope.INTER
+                 and t.state not in _TERMINAL),
+                None,
+            )
+            if _inflight is not None:
+                logger.warning(
+                    "delegate gate: suppressing duplicate delegation to %s "
+                    "(session=%s) — existing task %s is in-flight (state=%s)",
+                    assignment.agent_id, session_id,
+                    _inflight.task_id[:12], _inflight.state.value,
+                )
+                yield {
+                    "node_step": f"Delegation to {assignment.agent_id} "
+                                 f"already in progress",
+                    "node": "delegate",
+                    "source_agent": assignment.agent_id,
+                }
+                yield {
+                    "_inject_context":
+                        f"[委派进行中] 你已就当前请求委派 {assignment.agent_id}，"
+                        f"该委派尚未完成（状态：{_inflight.state.value}）。"
+                        f"⚠ 禁止再次委派 {assignment.agent_id}。"
+                        f"结果会在对方完成后自动补充。请基于现有信息给出简短中间答复，"
+                        f"或处理其他未委派的子任务，然后结束本轮。",
+                    "_delegation_suppressed": True,
+                }
+                return
+        except Exception as _gate_exc:
+            # Gate must never break delegation on an internal error; log and
+            # fall through to normal dispatch.
+            logger.debug("delegate gate check skipped: %s", _gate_exc)
+
         # Build the subtask. context_id = session-derived join key shared with
         # the peer's audit. parameters carry shared facts only when forked.
         params: dict[str, Any] = {}
@@ -122,6 +178,7 @@ def build_delegate_fn(
         task = TaskDefinition(
             session_id=session_id,
             context_id=session_id,           # 1:1 for single-hop; Phase 3 may derive
+            scope=TaskScope.INTER,           # outbound delegation — gate keys on this
             description=directive.task,
             assignment=assignment,
             parameters=params,

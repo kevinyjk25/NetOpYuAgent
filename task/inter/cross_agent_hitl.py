@@ -53,6 +53,7 @@ class AwaitingPeerRecord:
     peer_interrupt_id:  str
     correlation_id:     str
     original_query:     str = ""
+    outbound_task_id:   str = ""    # the LAN task to transition COMPLETED on terminal callback
     resumed:            bool = False    # guard against double-resume
 
 
@@ -109,15 +110,18 @@ class CrossAgentHitlBridge:
         peer_interrupt_id: str,
         correlation_id: Optional[str] = None,
         original_query: str = "",
+        outbound_task_id: str = "",
     ) -> None:
         """Called when an outbound delegation returns INPUT_REQUIRED, so the
-        later /hitl_resolved callback can find the local session to resume."""
+        later /hitl_resolved callback can find the local session to resume
+        AND transition the corresponding outbound task to COMPLETED."""
         self._awaiting[(peer_agent, peer_interrupt_id)] = AwaitingPeerRecord(
             local_session_id=local_session_id,
             peer_agent=peer_agent,
             peer_interrupt_id=peer_interrupt_id,
             correlation_id=correlation_id or "",
             original_query=original_query,
+            outbound_task_id=outbound_task_id,
         )
         logger.info(
             "CrossAgentHitlBridge: awaiting peer HITL peer=%s interrupt=%s "
@@ -127,9 +131,19 @@ class CrossAgentHitlBridge:
 
     def resolve_awaiting_peer(
         self, *, peer_agent: str, peer_interrupt_id: str,
+        terminal: bool = True,
     ) -> Optional[AwaitingPeerRecord]:
         """Called by the /hitl_resolved callback. Returns the awaiting record
-        (marking it resumed) or None if unknown / already resumed."""
+        or None if unknown / already resumed.
+
+        case-3 (HITL + async follow-up) delivers two callbacks per delegation:
+          • terminal=False (phase="approval"): intermediate. Returns the record
+            WITHOUT marking it resumed, so the later terminal callback can
+            still find it.
+          • terminal=True (phase="result"): final. Marks resumed so a duplicate
+            terminal callback is ignored.
+        case-1/2 send only the terminal callback (default terminal=True).
+        """
         rec = self._awaiting.get((peer_agent, peer_interrupt_id))
         if rec is None:
             logger.warning(
@@ -145,7 +159,8 @@ class CrossAgentHitlBridge:
                 peer_agent, peer_interrupt_id[:12],
             )
             return None
-        rec.resumed = True
+        if terminal:
+            rec.resumed = True
         return rec
 
     def forget_awaiting(self, *, peer_agent: str, peer_interrupt_id: str) -> None:

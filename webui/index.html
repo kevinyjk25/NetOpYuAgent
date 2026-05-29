@@ -1999,8 +1999,48 @@ async function streamQuery(query, sid, body) {
   } finally {
     _streamAbort = null;
   }
+  const _parked = !!(streamState && streamState.parked);
   finalizeStream();
   updateCacheBadge();
+  // ── Cross-agent HITL resumption poll (A2A Phase 3) ─────────────────
+  // When a delegated peer raised an operator-approval HITL, the request
+  // PARKS: this SSE stream ends now, and the final synthesis answer is
+  // produced later by an async result callback on the backend (buffered
+  // in _pending_resumptions). The closed SSE can't receive it, so poll
+  // for it and render it as a new agent message when it arrives. Only
+  // poll when we actually parked — normal queries finish on the SSE.
+  if (_parked) startResumptionPoll(sid);
+}
+
+// Tracks correlation_ids already rendered so the SSE-notify path and this
+// poll can't double-render the same synthesis answer.
+const _seenResumptions = new Set();
+
+function startResumptionPoll(sid) {
+  const session = (typeof getSession === 'function' ? getSession() : '') || '';
+  if (!session) return;
+  let _tries = 0;
+  const MAX_TRIES = 150;           // ~5 min at 2s interval
+  const _timer = setInterval(async () => {
+    _tries += 1;
+    if (_tries > MAX_TRIES) { clearInterval(_timer); return; }
+    let items = [];
+    try {
+      const r = await fetch(`${BASE}/chat/resumptions?session_id=${encodeURIComponent(session)}`);
+      items = await r.json().catch(() => []);
+    } catch (_) { return; }
+    if (!Array.isArray(items) || items.length === 0) return;
+    for (const it of items) {
+      const key = it.correlation_id || (it.text || '').slice(0, 40);
+      if (_seenResumptions.has(key)) continue;
+      _seenResumptions.add(key);
+      const txt = (it.text || '').trim();
+      if (txt) addMessage('agent', txt);
+    }
+    // A resolved resumption means the delegated task reached a terminal
+    // result — stop polling once we've rendered one.
+    clearInterval(_timer);
+  }, 2000);
 }
 
 function dispatchChunk(c, query, sid) {
@@ -2012,6 +2052,13 @@ function dispatchChunk(c, query, sid) {
   // this new fact in mind.
   if (c.type === 'async_hitl_resolved') {
     renderAsyncHitlNotify(c);
+    return;
+  }
+  if (c.type === 'cross_agent_parked') {
+    // The request parked awaiting a peer's operator-approval HITL. The
+    // final answer will arrive asynchronously after this SSE closes —
+    // flag it so finalizeStream's caller starts the resumptions poll.
+    if (streamState) streamState.parked = true;
     return;
   }
   if (c.type==='llm_trace') {
