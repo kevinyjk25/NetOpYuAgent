@@ -163,3 +163,54 @@ Phase 2B 顺手纳入两条债(正好在委派路径上):
   user query + 上次 final answer 拼进合成 query,H2 follow-up 与委派结果注入共用。
 
 其余债进 TODO.md。
+
+---
+
+## 7. Phase 3 — 跨 agent HITL（mode B，2026-05 已落地）
+
+> Phase 2B 只做"委派 → peer 自主完成 → 返回结果"(case1)。Phase 3 加入 peer
+> 侧需要操作员审批的情形(case2),并把委派固化为**有身份、有生命周期、被持久
+> 跟踪的任务**,而非 LLM 每轮自由发起的指令。
+
+### 7.1 业务模型（权威规格）
+
+入口 agent A 收到请求 → 处理自己那部分 → 把剩余分解委派给有能力的 peer B。两类终止:
+- **case1(同步)**：B 自主完成 → 返回结果 → 委派完成。
+- **case2(HITL)**：B 无法自主完成,需操作员审批。HITL 分两阶段(审批动作 +
+  工具执行结果),所以委派要**收到两个阶段结果**才算完成。
+
+对 A 的要求:(1) 可并行委派多个 peer,但有依赖的子任务串行;(2) 结果返回后合并
+分析是否满足用户请求,满足则总结,不满足则降级(换任务/换 peer/总结失败);
+(3) 委派任务带心跳跟踪,**同一分解任务不得重复委派同一 peer**;(4) case2 中 B 若
+被拒则按 case1 完成,若批准则等 stage-2 工具结果才算完成。
+
+### 7.2 架构(四层防风暴 + 两阶段回调 + 前端送达)
+
+委派身份 = `(session_id, target_agent)`,状态存在既有 TaskStore(持久、UI 已读)。
+
+- **单一闸门**(`task/delegation.py delegate_fn`):委派前查 TaskStore,该 peer 有
+  非终态 `scope==INTER` 出站任务则抑制。取代早期三个 env_ctx 守卫(per-`execute_query`,
+  resume 轮重置 → 失效)。
+- **park**(`runtime/loop.py`):case2 peer HITL → 发 `cross_agent_parked` marker +
+  中间答复 → `return` 结束 stream,等异步 result 回调。不空转(空转会和回调竞速重委派)。
+- **per-request 阻断 + 综合轮硬禁**:`_delegated_targets_this_request`(挡 case1 重委派)
+  + `_cross_agent_resume`(综合轮禁止 DELEGATE)。
+- **两阶段回调**(`integrations/adapters/hitl_executor.py` + `webui/backend.py`):
+  approval 阶段推中间状态、**不**转任务状态(闸门保持);result 阶段才把出站任务
+  AWAITING_PEER_HITL → COMPLETED 并驱动一次综合轮。`AwaitingPeerRecord.outbound_task_id`
+  贯穿 coordinator → bridge → `/hitl_resolved` → driver。
+- **前端送达**(`webui/index.html`):park 后原始 SSE 已关,综合答复 buffer 进
+  `_pending_resumptions`,前端 `/chat/resumptions` 轮询取。去重 key 必须含 `phase`
+  (approval/result 共用一个 `correlation_id`),且只在终态 `phase==result` 停轮询。
+
+### 7.3 关键教训
+
+1. 委派是有状态任务(身份 + 生命周期),不是 per-turn 指令 —— 用守卫事后拦 LLM 重发是打地鼠。
+2. env_ctx 是 per-`execute_query`,跨轮/跨 stream 状态必须放 TaskStore。
+3. 单一事实来源:闸门读 UI 同一个 store → 状态不一致从构造上不可能。
+4. 终态 = {COMPLETED, FAILED, CANCELLED};其余(含 RUNNING / AWAITING_PEER_HITL)= 在途 = 闸门激活,RUNNING→AWAITING 窗口无缝隙。
+5. case2 两阶段:approval 推送**不得**转任务状态(保持闸门),只有 result 终态推送完成它。
+
+详细落地与测试见 `runtime/DESIGN.md §4.10` 与 TODO.md Phase 3 段。仍未做:P3-c(correlation
+audit join)、P3-d(passthrough mode C、故障硬化、bridge/buffer 持久化、`/hitl_resolved`
+鉴权)。

@@ -298,9 +298,56 @@ Remaining real debt, by priority:
   for the frontend `/chat/resumptions` poll (the original SSE has closed). Tests:
   `test_cross_agent_hitl.py` (unwrap translation, full correlation chain,
   double-resume guard, buffer-on-no-driver).
+- **P3-b hardening — delegation storm elimination + reliable UI delivery (done, 2026-05)**:
+  live two-agent runs exposed that mode B "worked" but spawned 4-5 duplicate DC
+  inbound tasks per request, returned contradictory diagnoses, and never showed
+  the final answer in the UI. Four root causes, four fixes, all on the LAN
+  (originator) side + frontend:
+  - **Single delegation gate (replaces 3 fragile env_ctx guards)**: the old
+    per-target count / pending-set / resume-flag guards lived on `env_ctx`,
+    which is per-`execute_query` and reset every time the resume driver started
+    a fresh synthesis turn → duplicates slipped through. Replaced with ONE gate
+    in `task/delegation.py build_delegate_fn` keyed on TaskStore state: identity
+    = `(session_id, target_agent)`; if an outbound `scope==INTER` task to that
+    peer is non-terminal (RUNNING / AWAITING_PEER_HITL / PENDING — terminal =
+    COMPLETED/FAILED/CANCELLED), suppress (no task, no dispatch). TaskStore is
+    durable across turns AND streams and is the same store the UI reads, so the
+    gate and UI can never disagree. Test `test_delegation_gate.py` (6 cases).
+  - **Park on case2 peer HITL**: when the peer raises an operator-approval HITL,
+    the originating stream must WAIT for the async stage-2 result, not busy-loop
+    (busy-looping races the result callback: the instant it flips the task to
+    COMPLETED the gate releases and the next turn re-delegates). The loop now
+    emits a `cross_agent_parked` marker + a deterministic interim and `return`s
+    (ends the stream); the async result callback drives the synthesis turn.
+    Test `test_delegation_park_on_peer_hitl.py`.
+  - **Per-request re-delegation block + synthesis-turn hard-block**: a case1
+    (synchronous, no-HITL) peer return that the LLM reads as inconclusive (e.g.
+    DC asks "shall I grant?" instead of acting) was re-delegated to the same
+    peer — the gate can't catch it (the task is already terminal). A per-stream
+    `_delegated_targets_this_request` set suppresses re-delegating the same peer
+    within one request, forcing the LLM to synthesize/degrade (spec point 2).
+    Separately, a `_cross_agent_resume` per-turn flag hard-blocks any DELEGATE
+    in a synthesis turn. Test `test_delegation_park_on_peer_hitl.py::TestCase1NoReDelegate`.
+  - **Directive leak fix**: `[DELEGATE:]` / `[SKILL_LOAD:]` are now stripped from
+    the user-visible token stream (previously only `[TOOL:]` was), so a
+    pure-directive response (e.g. a suppressed re-delegation) doesn't leak raw
+    directive text. `strip_delegate_directives` in `runtime/directive_parser.py`.
+  - **Frontend resumption delivery**: the original SSE closes on park, so the
+    async synthesis answer is buffered in `_pending_resumptions` for the
+    `/chat/resumptions` poll. Two frontend bugs fixed: (a) the dedup key must
+    include `phase` — approval (interim) and result (final) share one
+    `correlation_id`, so keying on it alone dropped the final answer as a
+    "duplicate" of the interim; (b) the poll must only stop on a terminal
+    `phase==result` item, not on the first item (the approval interim).
+    `webui/index.html startResumptionPoll`, gated on a `cross_agent_parked`
+    marker so normal queries don't poll.
 - **Remaining — P3-c (med)**: thread `correlation_id` into the cross-agent audit
   log so a request that chains lan-radius-HITL + dc-app-HITL (mode D) shows as
   one joined trail.
+- **Remaining — DC-side robustness (low/product)**: DC's LLM sometimes diagnoses
+  a permission gap then *asks* "shall I grant?" (case1) instead of firing the
+  grant HITL (case2). The framework now handles both, but steering DC to act
+  directly is a `dc_app_access_diagnose` skill-prompt tweak, not a framework fix.
 - **Remaining — P3-d (high)**: passthrough mode C; failure-mode hardening
   (peer crash / operator non-response / callback POST failure → SLA watchdog
   re-surface; lan session expired on callback); persist `CrossAgentHitlBridge`
@@ -354,6 +401,7 @@ Remaining real debt, by priority:
 
 - ✅ **Cross-agent fault-scenario mock tools** (2026-05) — added the user/app access-control tools needed to mock "user alice cannot access app CRM" end-to-end across lan+dc. LAN (`profiles/lan`): `list_users`, `get_user_access` (RADIUS/802.1X/NAC/VLAN admission, read-only), `check_nac_policy`, `grant_user_access`/`revoke_user_access` (HITL). DC (`profiles/dc`): `dc_list_apps`, `dc_get_app_acl`, `dc_check_user_app_access` (read-only diagnostic), `dc_grant_app_access`/`dc_revoke_app_access` (HITL). Method 甲: queries read-only, only grant/revoke HITL-gated (dc grant fires the DC-side HITL = Phase 3 mode B). Datasets are consistent: alice is admitted on LAN but holds no CRM role on DC (the root cause). Watch-list + editable_hitl_tools updated; HITL safety-net warning softened for the now cross-profile watch-list; fixed a latent bug in audit_profiles check-5 (relative `tests/` path wasn't exempted). Test `test_access_scenario.py`. 223 tests pass.
 
+- ✅ **A2A Phase 3 P3-b hardening — delegation storm fix + reliable UI delivery** (2026-05) — mode B was validated end-to-end but live runs spawned 4-5 duplicate DC inbound tasks per request, returned contradictory diagnoses (DC re-diagnosing already-mutated state), and never rendered the final answer in the UI. Four root causes fixed: (1) **single TaskStore-state delegation gate** in `task/delegation.py` (identity `(session, target)`, suppress non-terminal `scope==INTER` task) replacing three fragile per-`execute_query` env_ctx guards that reset on every resume turn; (2) **park-on-peer-HITL** — the originating stream now ends with a `cross_agent_parked` marker + interim and waits for the async result callback instead of busy-looping (which raced the callback and re-delegated the instant the task went terminal); (3) **per-request re-delegation block** (`_delegated_targets_this_request`) + **synthesis-turn hard-block** (`_cross_agent_resume`) to stop case1 (no-HITL) re-delegation the gate can't catch; (4) **frontend `/chat/resumptions` poll** dedup-by-`phase` + stop-only-on-terminal fix (approval interim and result final share one `correlation_id`, so the final answer was being dropped as a duplicate and the poll stopped after the interim). Also: `[DELEGATE:]`/`[SKILL_LOAD:]` now stripped from the visible token stream (`strip_delegate_directives`). Tests `test_delegation_gate.py` (6), `test_delegation_park_on_peer_hitl.py` (park + case1-no-re-delegate). 255 tests pass.
 - ✅ **A2A Phase 3 P3-a + P3-b — cross-agent HITL mode B** (2026-05) — lan delegates to dc, dc raises a HITL approved on dc's console, result flows back and lan auto-resumes via an active synthesis turn. Closed the core gap: `_unwrap_a2a_event` was silently dropping the peer's `input-required` status so the interrupt_id never reached the originator — now translated into a `hitl_interrupt` chunk. New: `TaskState.AWAITING_PEER_HITL`, `CrossAgentHitlBridge`, A2A `/hitl_resolved` callback endpoint, `HitlExecutor._maybe_callback_source_agent` (registry-resolved POST back), webui active-resume driver + `/chat/resumptions` poll, lan read-only "awaiting peer approval" badge. Tests `test_cross_agent_hitl.py`. P3-c (audit chain) + P3-d (passthrough mode C + failure hardening + persistence + auth) remain. 215 tests pass.
 
 - ✅ **H2 async-HITL live bugs** (2026-05, from real lan-agent run) — two runtime-path bugs the static tests missed: (1) `_submit_hitl_decision` H2 follow-up raised `NameError: _message_history` — it is a module-level handler and cannot see create_webui_app's closure local; fixed by publishing `_message_history` into `services` and reading it from there (+ static scope-leak regression test `test_hitl_submit_scope.py`). (2) `query_radius_logs` demo autoreply `NoneType.deliver` — the lan tool resolved `services["hitl_router"]` (a stub-None key since the Item-2 legacy-hitl cleanup) instead of the real `hitl_core_router`; fixed to resolve hitl_core_* first (router + audit). Both verified; full suite 210 passed.

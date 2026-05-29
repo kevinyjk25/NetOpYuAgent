@@ -476,6 +476,19 @@ L0 loop 不含任何业务域逻辑;域特定行为靠注入。两个已落地�
 
 `runtime/loop.py` **不 import `profiles/`** —— 所有业务 resolver 都是注入进来的,`audit_module_independence` 因此持续绿。后续开发者加新业务域时:实现一个 resolver 函数 → 在 `get_batch_resolver_for_profile` 注册 → 不动 L0 任何代码。这就是 L0(纯能力骨架)/ L1(业务注入)的边界。
 
+### 4.10 跨 agent 委派的循环控制流(A2A Phase 3，2026-05）
+
+`_stream_impl` 里 DELEGATE 处理这一段看似简单(解析 `[DELEGATE:]` → 调 `delegate_fn`),但有四层防重复/防风暴的控制,缺一不可。**委派是有身份、有生命周期的有状态任务,不是 LLM 每轮自由发起的指令** —— 早期版本用 env_ctx 上的计数/标志事后拦截 LLM 重复委派,但 env_ctx 是 per-`execute_query` 的,resume driver 每次起综合轮都重置,守卫形同虚设。现在四层是:
+
+1. **单一委派闸门(跨 turn + 跨 stream,在 `task/delegation.py delegate_fn`)** —— 唯一咽喉点。身份 = `(session_id, target_agent)`;委派前查 TaskStore,若该 peer 有一个 `scope==INTER` 且**非终态**(RUNNING / AWAITING_PEER_HITL / PENDING;终态 = COMPLETED/FAILED/CANCELLED)的出站任务 → 抑制(不建任务、不 dispatch、yield 一个 `_delegation_suppressed` 注入块)。TaskStore 跨 turn 跨 stream 持久,且和 UI 读同一个 store → 闸门与 UI 状态不可能不一致。
+2. **case2 peer HITL → park(在 `_stream_impl`)** —— peer 触发操作员审批时,原始 stream 必须**等**异步 stage-2 结果,不能空转 loop(空转会和 result 回调竞速:回调一把任务转 COMPLETED,闸门立刻释放,下一轮就重委派)。检测到 `_peer_hitl_pending` → yield 一个 `cross_agent_parked` marker + 确定性中间答复 → `return` 结束 stream。最终答复由 result 回调驱动的综合轮通过 `/chat/resumptions` 送达前端。
+3. **本请求重委派阻断(per-stream,在 `_stream_impl`)** —— `_delegated_targets_this_request` 集合记录本 stream 已委派过的 peer。case1(同步、无 HITL)返回后若 LLM 把"对方只是反问"当成没解决、想重委派同一 peer → 闸门拦不住(任务已终态),由这个集合抑制,逼 LLM 综合/降级(spec 第2点)。per-stream scope 正确:后续新请求是新 stream、新集合。
+4. **综合轮硬禁委派(per-turn,在 `_stream_impl`)** —— resume driver 起综合轮时设 `env_context={"_cross_agent_resume": True}`。这一轮只能基于已注入结果综合,任何 DELEGATE 一律丢弃。这是 per-turn 角色声明,不是被删掉的那个跨轮计数守卫。
+
+附带:`[DELEGATE:]` / `[SKILL_LOAD:]` 与 `[TOOL:]` 一样,在可见 token 流里被 strip 掉(`strip_*_directives`),避免纯指令响应(如被抑制的重委派)把裸指令文本泄漏给用户。
+
+回归测试:`test_delegation_gate.py`(6 例,闸门行为)、`test_delegation_park_on_peer_hitl.py`(park + case1 不重委派 + marker + 无指令泄漏)。
+
 ---
 
 ## 5. 跨模块依赖与扩展点

@@ -397,7 +397,7 @@ config.yaml
 - ❌ 任何形式的 cross-agent dispatch — `A2ATaskDispatcher` 已经在,但**没有任何运行时代码 call 它**
 - ❌ PolicyEngine 不知道 peer 存在 — 仍然只分类 read_only/destructive
 - ❌ Capability matching(query → 哪个 peer 处理)— 留给 Phase 2 的 `peer_router.py`
-- ❌ 跨 agent HITL — Phase 3
+- ✅ 跨 agent HITL(mode B)— Phase 3 已落地(见 §8.8);mode C 透传 + 故障硬化待做
 
 **两端启动验证**:
 
@@ -573,6 +573,25 @@ curl http://localhost:8001/webui/system/peers | jq
 **Phase 2B 不做**(留后续):跨 agent HITL 透传(Phase 3);多跳委派;自动委派;并行 fan-out;委派结果跨 agent 记忆写回。peer 任务里若触发 HITL(如 `dc_config_push`),入口 agent 收到 `hitl_interrupt` chunk 时提示用户到 peer 控制台处理,不阻塞。
 
 **测试**:`test_delegate_directive.py`(12,解析)+ `test_delegation_wiring.py`(11:explicit/capability resolution、fresh/forked facts、4 类降级、task-load 括号、loop-side source_agent 标记 + 注入 + peer-HITL 提示)。
+
+### 8.8 Phase 3 — 跨 agent HITL(mode B,2026-05)
+
+Phase 2B 的委派只覆盖 case1(peer 自主完成)。Phase 3 加入 case2(peer 侧需操作员审批),并把委派固化为**有身份、有生命周期、被 TaskStore 持久跟踪的任务**。委派身份 = `(session_id, target_agent)`。
+
+落地经多轮实战(LAN↔DC,qwen3.5:27b)收敛到四层防风暴 + 两阶段回调 + 前端送达:
+
+| 层 | 位置 | 作用 |
+|----|------|------|
+| 单一委派闸门 | `task/delegation.py delegate_fn` | 查 TaskStore,该 peer 有非终态 `scope==INTER` 出站任务则抑制(取代早期三个 per-`execute_query` env_ctx 守卫) |
+| park | `runtime/loop.py` | case2 peer HITL → 发 `cross_agent_parked` marker + 中间答复 → return;等异步 result 回调,不空转 |
+| per-request 阻断 | `runtime/loop.py` | `_delegated_targets_this_request` 挡 case1 同步返回后的重委派 |
+| 综合轮硬禁 | `runtime/loop.py` | `_cross_agent_resume` 标志,综合轮丢弃任何 DELEGATE |
+| 两阶段回调 | `hitl_executor.py` + `webui/backend.py` | approval 推中间状态不转任务态;result 才 AWAITING_PEER_HITL→COMPLETED + 驱动综合轮 |
+| 前端送达 | `webui/index.html` | park 后 SSE 已关,综合答复经 `/chat/resumptions` 轮询取;去重 key 含 phase、只在 result 终态停 |
+
+**核心不变量**:闸门读 UI 同一个 TaskStore → 状态不一致从构造上不可能;终态 = {COMPLETED, FAILED, CANCELLED},其余皆在途;case2 的 approval 推送**不得**转任务态(只有 result 终态才完成)。详见 `PHASE_2B_DESIGN.md §7`、`runtime/DESIGN.md §4.10`、TODO.md Phase 3 段。
+
+**测试**:`test_delegation_gate.py`(6)、`test_delegation_park_on_peer_hitl.py`(park + case1 不重委派)、`test_cross_agent_hitl.py`。仍未做:P3-c(correlation audit join)、P3-d(passthrough mode C + 故障硬化 + 持久化 + 鉴权)。
 
 **CI**:7/7 audits + 128 tests(117 baseline + 11 delegation)。
 
