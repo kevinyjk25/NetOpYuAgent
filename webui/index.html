@@ -2030,16 +2030,24 @@ function startResumptionPoll(sid) {
       items = await r.json().catch(() => []);
     } catch (_) { return; }
     if (!Array.isArray(items) || items.length === 0) return;
+    let _gotTerminal = false;
     for (const it of items) {
-      const key = it.correlation_id || (it.text || '').slice(0, 40);
+      // Dedup key MUST include phase: approval (interim) and result
+      // (final) share the same correlation_id. Keying on correlation_id
+      // alone would drop the final answer as a "duplicate" of the
+      // interim — the exact bug that left the UI stuck on "正在执行…".
+      const phase = it.phase || (it.interim ? 'approval' : 'result');
+      const key = (it.correlation_id || (it.text || '').slice(0, 40)) + ':' + phase;
       if (_seenResumptions.has(key)) continue;
       _seenResumptions.add(key);
       const txt = (it.text || '').trim();
       if (txt) addMessage('agent', txt);
+      // Only the terminal result stage ends the delegation; interim
+      // (approval) notes must NOT stop the poll, or the final answer
+      // never gets fetched.
+      if (phase === 'result' && !it.interim) _gotTerminal = true;
     }
-    // A resolved resumption means the delegated task reached a terminal
-    // result — stop polling once we've rendered one.
-    clearInterval(_timer);
+    if (_gotTerminal) clearInterval(_timer);
   }, 2000);
 }
 
