@@ -242,47 +242,39 @@ class SkillCatalogService:
 
     def as_markdown(self, skill_id: str) -> Optional[str]:
         """
-        Return the full markdown content of a skill in IT-ops skill format.
-        Works for both built-in skills (synthesised from catalog detail)
-        and evolved/uploaded skills whose .md source is stored in detail.description.
+        Return the skill as a standard Anthropic SKILL.md (YAML frontmatter +
+        markdown body). Works for built-in skills (synthesised from the catalog
+        detail) and evolved/uploaded skills.
         """
         skill = self._skills.get(skill_id)
         if skill is None:
             return None
         s, d = skill.summary, skill.detail
 
-        # If the description already looks like markdown (starts with #), return it directly
-        if d.description.strip().startswith("#"):
+        # Reconstruct the flat-dict shape skill_format expects, then serialise.
+        defn = {
+            "name":          s.name,
+            "purpose":       s.purpose,
+            "risk_level":    s.risk_level,
+            "requires_hitl": s.requires_hitl,
+            "tags":          list(s.tags),
+            "description":   d.description,
+            "parameters":    dict(d.parameters),
+            "returns":       d.returns,
+            "examples":      list(d.examples),
+            "constraints":   list(d.constraints),
+            "estimated_size": d.estimated_size,
+            "returns_large":  d.returns_large,
+        }
+        # If the description already IS a standard SKILL.md (uploaded verbatim),
+        # return it unchanged.
+        try:
+            from skills.skill_format import flat_dict_to_skill_md, has_frontmatter
+            if has_frontmatter(d.description.strip()):
+                return d.description
+            return flat_dict_to_skill_md(skill_id, defn)
+        except Exception:  # noqa: BLE001 - never break the read path
             return d.description
-
-        # Synthesise clean markdown from the structured detail
-        hitl_str = "yes" if s.requires_hitl else "no"
-        lines = [
-            f"# {s.name}",
-            f"**Purpose:** {s.purpose}",
-            f"**Tags:** [{', '.join(s.tags)}]",
-            f"**Risk:** {s.risk_level}",
-            f"**HITL:** {hitl_str}",
-            "",
-        ]
-        if d.description and d.description != s.purpose:
-            lines += ["## Description", d.description, ""]
-        if d.parameters:
-            lines.append("## Parameters")
-            for pname, pdesc in d.parameters.items():
-                lines.append(f"- `{pname}`: {pdesc}")
-            lines.append("")
-        if d.examples:
-            lines.append("## Examples")
-            for ex in d.examples:
-                lines.append(f"    {ex}")
-            lines.append("")
-        if d.constraints:
-            lines.append("## Constraints")
-            for c in d.constraints:
-                lines.append(f"- {c}")
-            lines.append("")
-        return "\n".join(lines)
 
     def _legacy_score(
         self,
@@ -531,8 +523,6 @@ class SkillSelectionResult:
 # ---------------------------------------------------------------------------
 # Query-matched skill selection (Q4)
 # --------------------------------------------------------------------------
-# DEFAULT_SKILL_DEFINITIONS removed — use ToolLoader.skill_definitions() instead.
-# Skills are now in:
-#   skills/builtin/registry.py   (always-available)
-#   skills/mock/registry.py      (mock mode)
-#   skills/pragmatic/registry.py (pragmatic mode)
+# DEFAULT_SKILL_DEFINITIONS removed — use SkillLoader.skill_definitions() instead.
+# Skills now live as Anthropic-standard SKILL.md folders (builtin / pragmatic /
+# profiles/<id>/skills), loaded by skills.loader.SkillLoader.

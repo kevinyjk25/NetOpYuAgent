@@ -20,8 +20,8 @@ Common implementation files:
   tools/pragmatic/registry.py    — metadata for pragmatic-only tools
 
 Business implementation files now live under profiles/<id>/:
-  profiles/lan/tools.py, profiles/lan/tool_meta.py, profiles/lan/skills.py
-  profiles/dc/tools.py,  profiles/dc/tool_meta.py,  profiles/dc/skills.py
+  profiles/lan/tools.py, profiles/lan/tool_meta.py, profiles/lan/skills/ (SKILL.md)
+  profiles/dc/tools.py,  profiles/dc/tool_meta.py,  profiles/dc/skills/ (SKILL.md)
 
 make_read_stored_result_tool is used directly by main.py to wire the
 ToolResultStore instance into the read_stored_result callable.

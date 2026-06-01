@@ -92,12 +92,17 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
         skill_evol = services.get("skill_evolver")
         import pathlib as _pl
 
-        # Which skills live on disk (evolved / uploaded — not just built-in)
+        # Which skills live on disk (evolved / uploaded — not just built-in).
+        # Standard layout: <kebab-name>/SKILL.md (metadata.skill_id is the id);
+        # legacy flat layout: <skill_id>.md.
         evolved_ids: set = set()
         if skill_evol and getattr(skill_evol, "_skills_dir", None):
             skills_dir = _pl.Path(skill_evol._skills_dir)
             if skills_dir.exists():
-                evolved_ids = {p.stem for p in skills_dir.glob("*.md")}
+                for md in skills_dir.glob("*/SKILL.md"):
+                    evolved_ids.add(md.parent.name.replace("-", "_"))
+                # Legacy flat files
+                evolved_ids |= {p.stem for p in skills_dir.glob("*.md")}
 
         return JSONResponse(content=[
             {
@@ -167,6 +172,9 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
 
         filename  = getattr(upload, "filename", None) or "uploaded_skill"
         skill_id  = filename.removesuffix(".md").removesuffix(".json")
+        # SKILL.md uploads carry the id in metadata, not the filename.
+        if skill_id.upper() == "SKILL":
+            skill_id = "uploaded_skill"
         # Sanitise: only alphanumeric + underscore
         import re as _re
         skill_id  = _re.sub(r"[^a-zA-Z0-9_]", "_", skill_id).strip("_") or "uploaded_skill"
@@ -183,26 +191,46 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
             except Exception as exc:
                 raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
         else:
-            # Markdown — use SkillEvolver parser if available, else minimal parse
-            if skill_evol and hasattr(skill_evol, "_parse_markdown_to_definition"):
-                defn = skill_evol._parse_markdown_to_definition(skill_id, content)
+            # Markdown upload. Standard SKILL.md (with YAML frontmatter) is the
+            # preferred form; bare-body markdown is still accepted. Both route
+            # through skill_format / the evolver parser so the resulting
+            # definition is identical to a freshly-loaded standard skill.
+            from skills.skill_format import (
+                SkillFormatError,
+                has_frontmatter as _has_fm,
+                load_skill_md as _load_md,
+            )
+            try:
+                if _has_fm(content):
+                    # Standard format — metadata.skill_id is authoritative.
+                    skill_id, defn = _load_md(content, skill_id_hint=skill_id)
+                elif skill_evol and hasattr(skill_evol, "_parse_markdown_to_definition"):
+                    defn = skill_evol._parse_markdown_to_definition(skill_id, content)
+                else:
+                    # Minimal fallback: register with raw content as description.
+                    defn = {
+                        "name":          skill_id.replace("_", " ").title(),
+                        "purpose":       content.split("\n")[0].lstrip("# ").strip()[:200],
+                        "description":   content,
+                        "risk_level":    "low",
+                        "requires_hitl": False,
+                        "tags":          [],
+                        "parameters":    {},
+                        "returns":       "string",
+                        "examples":      [],
+                        "constraints":   [],
+                        "estimated_size": "small",
+                        "returns_large":  False,
+                    }
+            except SkillFormatError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid SKILL.md format: {exc}",
+                )
+            try:
                 catalog.register_all({skill_id: defn})
-            else:
-                # Minimal fallback: register with raw content as description
-                catalog.register_all({skill_id: {
-                    "name":          skill_id.replace("_", " ").title(),
-                    "purpose":       content.split("\n")[0].lstrip("# ").strip()[:200],
-                    "description":   content,
-                    "risk_level":    "low",
-                    "requires_hitl": False,
-                    "tags":          [],
-                    "parameters":    {},
-                    "returns":       "string",
-                    "examples":      [],
-                    "constraints":   [],
-                    "estimated_size": "small",
-                    "returns_large":  False,
-                }})
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
 
         # Persist to disk via SkillEvolver if available
         if skill_evol and hasattr(skill_evol, "_save_skill_to_disk"):
@@ -406,12 +434,19 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
         raw_content = None
         source = "unknown"
 
-        # 1. Try disk file first (evolved / uploaded skills)
+        # 1. Try disk file first (evolved / uploaded skills). Prefer the
+        #    standard layout <kebab-name>/SKILL.md, fall back to legacy <id>.md.
         if skill_evol and getattr(skill_evol, "_skills_dir", None):
             import pathlib as _pl
-            path = _pl.Path(skill_evol._skills_dir) / f"{skill_id}.md"
-            if path.exists():
-                raw_content = path.read_text(encoding="utf-8")
+            from skills.skill_format import skill_id_to_name as _to_name
+            base = _pl.Path(skill_evol._skills_dir)
+            std_path = base / _to_name(skill_id) / "SKILL.md"
+            legacy_path = base / f"{skill_id}.md"
+            if std_path.exists():
+                raw_content = std_path.read_text(encoding="utf-8")
+                source = "disk"
+            elif legacy_path.exists():
+                raw_content = legacy_path.read_text(encoding="utf-8")
                 source = "disk"
 
         # 2. Fall back to catalog.as_markdown() — works for built-in skills too

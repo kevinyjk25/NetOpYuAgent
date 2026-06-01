@@ -10,7 +10,11 @@ from __future__ import annotations
 from profiles.base import Profile
 from profiles.dc import tools as _tools
 from profiles.dc.tool_meta import TOOLS as _TOOL_META
-from profiles.dc.skills import SKILLS as _SKILLS
+
+# Business skills loaded from Anthropic-standard SKILL.md folders under
+# profiles/dc/skills/<name>/SKILL.md (Anthropic-standard format).
+from skills.loader import SkillLoader as _SkillLoader
+_SKILLS = _SkillLoader().profile_skill_definitions("dc")
 
 _CALLABLES = {
     "dc_list_fabric":        _tools.dc_list_fabric,
