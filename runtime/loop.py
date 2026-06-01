@@ -1855,7 +1855,9 @@ class AgentRuntimeLoop:
                     _so = getattr(_app_cfg, "skill_orchestration", None)
                     if _so is None or getattr(_so, "journal_api_enabled", True):
                         from runtime.skill_journal import get_journal_store
-                        get_journal_store().append(_pj.to_dict())
+                        _final = _pj.to_dict()
+                        _final["_complete"] = True
+                        get_journal_store().append(_final)
             except Exception as _jf_exc:
                 logger.debug("SkillJournal flush failed: %s", _jf_exc)
 
@@ -1929,6 +1931,23 @@ class AgentRuntimeLoop:
                     session_id=session_id,
                     query=query,
                 )
+                # Live observability: push a snapshot to the global store
+                # after each recorded event so the JOURNAL tab can watch the
+                # stream WHILE it runs (not only after it completes). The
+                # final flush in stream()'s finally replaces this live entry
+                # with the completed journal.
+                try:
+                    from runtime.skill_journal import get_journal_store as _gjs
+                    _live_store = _gjs()
+                    _live_journal = state._skill_journal
+                    def _on_journal_event(_j=_live_journal, _s=_live_store):
+                        try:
+                            _s.upsert_live(_j.to_dict())
+                        except Exception:
+                            pass
+                    state._skill_journal.on_event = _on_journal_event
+                except Exception:
+                    pass
                 # Stash so the stream() wrapper's finally can flush this
                 # per-stream journal into the global SkillJournalStore (which
                 # the /skill_journal/* API + JOURNAL tab read). Without this

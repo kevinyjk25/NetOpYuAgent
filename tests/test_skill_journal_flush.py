@@ -55,3 +55,42 @@ class TestSkillJournalFlush(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestSkillJournalLiveObservability(unittest.TestCase):
+    """The journal must be visible mid-stream (live upsert), and the final
+    completed journal must supersede the live entry, not duplicate it."""
+
+    def test_live_upsert_then_complete_supersedes(self):
+        from runtime.skill_journal import SkillJournalStore, SkillJournal
+        store = SkillJournalStore()
+        j = SkillJournal(session_id="sess-live-1", query="onboard alice")
+        j.on_event = lambda: store.upsert_live(j.to_dict())
+
+        j.record_selection([("lan_new_employee_onboarding_access", 0.8)],
+                           ambiguous=False, turn=1)
+        live = store.list_recent()
+        self.assertEqual(len(live), 1)
+        self.assertEqual(live[0].get("_complete"), False, "live entry must be marked in-progress")
+
+        j.record_skill_load("lan_new_employee_onboarding_access", turn=1, position=0)
+        j.record_tool_call(turn=2, tool_name="get_user_access", args={"u": "alice"}, ok=True)
+        self.assertEqual(len(store.list_recent()), 1, "events must upsert in place, not duplicate")
+
+        j.record_completion(outcome="completed", total_turns=3)
+        final = j.to_dict(); final["_complete"] = True
+        store.append(final)
+        recent = store.list_recent()
+        self.assertEqual(len(recent), 1, "completed journal must supersede the live entry")
+        self.assertEqual(recent[0].get("_complete"), True)
+        self.assertEqual(recent[0].get("outcome"), "completed")
+
+    def test_on_event_failure_never_breaks_recording(self):
+        from runtime.skill_journal import SkillJournal
+        j = SkillJournal(session_id="s", query="q")
+        def boom():
+            raise RuntimeError("store down")
+        j.on_event = boom
+        # Must not raise — recording is best-effort observability.
+        j.record_selection([("x", 0.5)], ambiguous=False, turn=1)
+        self.assertEqual(len(j.events), 1)

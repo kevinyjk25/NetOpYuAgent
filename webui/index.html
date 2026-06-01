@@ -4339,18 +4339,42 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
           const ambBadge = e.ambiguous ?
               ' <span style="color:#f39c12;font-size:9px;border:1px solid #f39c12;padding:0 4px;border-radius:2px">ambig</span>' :
               '';
+          const runningBadge = (e._complete === false) ?
+              ' <span style="color:#2dd4bf;font-size:9px;border:1px solid #2dd4bf;padding:0 4px;border-radius:2px">● running</span>' :
+              '';
+          // Live event trail — lets you watch the skill-runtime flow as it
+          // happens (selection → skill_load → tool_call), not just the
+          // post-hoc attribution summary.
+          let evLines = '';
+          for (const ev of (e.events || [])) {
+            const p = ev.payload || {};
+            let label = ev.type;
+            if (ev.type === 'selection') {
+              const top = (p.top_k || []).map(t => Array.isArray(t) ? t[0] : t).slice(0,2).join(', ');
+              label = 'select: ' + top + (p.ambiguous ? ' (ambiguous)' : '');
+            } else if (ev.type === 'skill_load') {
+              label = 'load: ' + (p.skill_id || '');
+            } else if (ev.type === 'tool_call') {
+              label = 'tool: ' + (p.tool_name || '') + (p.ok === false ? ' ✗' : ' ✓');
+            } else if (ev.type === 'completion') {
+              label = 'done: ' + (p.outcome || '');
+            }
+            evLines += '<div style="padding-left:14px;color:var(--dim2);font-size:10px">' +
+                       'T' + (ev.turn || 0) + ' · ' + label + '</div>';
+          }
           return (
             '<div style="border-left:2px solid var(--border);padding:4px 8px">' +
               '<div style="display:flex;justify-content:space-between">' +
-                '<span style="color:var(--text)">' + queryEsc.substring(0, 80) + '</span>' +
+                '<span style="color:var(--text)">' + queryEsc.substring(0, 80) + runningBadge + '</span>' +
                 '<span style="color:var(--dim);font-size:10px">' + ts + '</span>' +
               '</div>' +
               '<div style="color:var(--dim2);font-size:10px;margin-top:2px">' +
-                '<span style="color:' + outcomeColor + '">' + (e.outcome || 'unknown') + '</span>' +
+                '<span style="color:' + outcomeColor + '">' + (e.outcome || (e._complete === false ? 'running' : 'unknown')) + '</span>' +
                 '  · ' + (e.total_turns || 0) + ' turns' +
                 '  · ' + (e.duration_s || 0) + 's' +
                 ambBadge +
               '</div>' +
+              evLines +
               attrLines +
             '</div>'
           );
@@ -4361,13 +4385,14 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
     }
   }
 
-  // Auto-refresh when Journal tab visible
+  // Auto-refresh when Journal tab visible. 3s so live (in-progress) entries
+  // and their event trail update promptly while a stream is still running.
   setInterval(() => {
     const journalTab = document.getElementById('tab-journal');
     if (journalTab && journalTab.classList.contains('active')) {
       refreshJournal();
     }
-  }, 10000);
+  }, 3000);
 
 </script>
 </body>

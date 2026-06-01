@@ -90,6 +90,11 @@ class SkillJournal:
     outcome:      Optional[str] = None
     total_turns:  int = 0
 
+    # Optional live-observability hook: a zero-arg callable invoked after each
+    # recorded event (set by the runtime loop to upsert a snapshot into the
+    # global store). None = no live push.
+    on_event:     Optional[Any] = None
+
     # ── Recording (thread-safe enough — runtime loop is single-task per journal) ──
 
     def record_selection(
@@ -225,6 +230,15 @@ class SkillJournal:
             ts=time.monotonic() - self._t0,
             payload=payload,
         ))
+        # Optional live-observability hook (set by the runtime loop). Pushes
+        # a snapshot to the global store so the JOURNAL tab can watch an
+        # in-progress stream. Never raises into the record path.
+        _cb = getattr(self, "on_event", None)
+        if _cb is not None:
+            try:
+                _cb()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +259,19 @@ class SkillJournalStore:
 
     def append(self, journal_dict: dict[str, Any]) -> None:
         with self._lock:
-            self._entries.append(journal_dict)
+            # If a live (in-progress) entry exists for this session, replace
+            # it in place so the completed journal supersedes the running
+            # snapshot rather than duplicating it.
+            sid = journal_dict.get("session_id")
+            replaced = False
+            if sid:
+                for i, e in enumerate(self._entries):
+                    if e.get("session_id") == sid and not e.get("_complete", True):
+                        self._entries[i] = journal_dict
+                        replaced = True
+                        break
+            if not replaced:
+                self._entries.append(journal_dict)
             while len(self._entries) > self._max:
                 self._entries.pop(0)
             # Persist under the same lock — without this, two threads
@@ -262,6 +288,27 @@ class SkillJournalStore:
                         "SkillJournalStore: persist failed (%s) — continuing in-memory only",
                         exc,
                     )
+
+    def upsert_live(self, journal_dict: dict[str, Any]) -> None:
+        """Insert or replace an IN-PROGRESS journal keyed by session_id.
+
+        Lets the JOURNAL tab observe a stream while it's still running. The
+        entry carries `_complete=False`; the final `append()` at stream end
+        replaces it with the completed journal. Never persisted to disk (only
+        completed journals are), to avoid JSONL churn."""
+        sid = journal_dict.get("session_id")
+        if not sid:
+            return
+        journal_dict = dict(journal_dict)
+        journal_dict["_complete"] = False
+        with self._lock:
+            for i, e in enumerate(self._entries):
+                if e.get("session_id") == sid and not e.get("_complete", True):
+                    self._entries[i] = journal_dict
+                    return
+            self._entries.append(journal_dict)
+            while len(self._entries) > self._max:
+                self._entries.pop(0)
 
     def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
