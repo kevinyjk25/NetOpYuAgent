@@ -1111,8 +1111,8 @@ class AgentRuntimeLoop:
                     turns_taken=state.turns,
                 )
 
-            if self._is_complete(llm_response, new_tool_calls):
-                # BUG-04 fix: the loop completed normally (LLM stopped calling
+            if self._is_complete(llm_response, new_tool_calls,
+                                  skill_load_honored=bool(_skill_loads_this_turn_r)):
                 # tools), which means the task is done — use STOP_GRACEFUL, not
                 # CONTINUE. CONTINUE means "keep looping"; callers check this
                 # value to decide whether to trigger Hermes post-processing.
@@ -1836,6 +1836,29 @@ class AgentRuntimeLoop:
             except Exception as _h_exc:
                 logger.debug("SESSION_END hook block failed: %s", _h_exc)
 
+            # Flush the per-stream SkillJournal into the global store so the
+            # /skill_journal/* endpoints + JOURNAL tab can observe it. The
+            # journal is populated during the stream (record_selection /
+            # record_skill_load / record_tool_call) but is only persisted
+            # here, at stream end.
+            try:
+                _pj = getattr(self, "_pending_journals", {}).pop(session_id, None)
+                if _pj is not None:
+                    try:
+                        _pj.record_completion(
+                            outcome=_stats.get("outcome", "unknown"),
+                            total_turns=_stats.get("total_turns", 0),
+                        )
+                    except Exception:
+                        pass
+                    from config import cfg as _app_cfg
+                    _so = getattr(_app_cfg, "skill_orchestration", None)
+                    if _so is None or getattr(_so, "journal_api_enabled", True):
+                        from runtime.skill_journal import get_journal_store
+                        get_journal_store().append(_pj.to_dict())
+            except Exception as _jf_exc:
+                logger.debug("SkillJournal flush failed: %s", _jf_exc)
+
     async def _stream_impl(
         self,
         query:           str,
@@ -1906,6 +1929,13 @@ class AgentRuntimeLoop:
                     session_id=session_id,
                     query=query,
                 )
+                # Stash so the stream() wrapper's finally can flush this
+                # per-stream journal into the global SkillJournalStore (which
+                # the /skill_journal/* API + JOURNAL tab read). Without this
+                # the journal records events but is never persisted.
+                if not hasattr(self, "_pending_journals"):
+                    self._pending_journals = {}
+                self._pending_journals[session_id] = state._skill_journal
         except Exception as _jexc:
             logger.debug("SkillJournal init skipped: %s", _jexc)
 
@@ -2766,8 +2796,8 @@ class AgentRuntimeLoop:
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
-            if self._is_complete(llm_response, new_tool_calls):
-                # Guard: never exit with empty or trivial response when we have context.
+            if self._is_complete(llm_response, new_tool_calls,
+                                  skill_load_honored=bool(_skill_loads_this_turn)):
                 # Also fires when LLM returns a very short response after tool errors/empty
                 # results — it should tell the user something meaningful, not go silent.
                 _resp_stripped = llm_response.strip()
@@ -3125,9 +3155,9 @@ class AgentRuntimeLoop:
         return _helpers.skill_loads_in(response)
 
     @staticmethod
-    def _is_complete(response: str, tool_calls: list) -> bool:
+    def _is_complete(response: str, tool_calls: list, skill_load_honored: bool = True) -> bool:
         """Thin wrapper → runtime.loop_helpers.is_complete (Item 4)."""
-        return _helpers.is_complete(response, tool_calls)
+        return _helpers.is_complete(response, tool_calls, skill_load_honored)
 
     @staticmethod
     def _format_final(chunks: list[str], decision: StopDecision) -> str:

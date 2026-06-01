@@ -135,4 +135,89 @@ SKILLS: dict[str, dict[str, Any]] = {
             {"args": {"user_id": "alice", "app": "CRM"}, "note": "Why can't alice reach CRM"},
         ],
     },
+    # ── Deliberately complex multi-phase cross-agent SOP ────────────────
+    # Purpose: stress-test skill-runtime fidelity. This skill has 4 ordered
+    # phases, conditional branches, TWO distinct DC delegation points, and a
+    # HITL gate. Because skills are *hints* (the LLM may follow or deviate),
+    # the journal/journey lets you compare the SOP's prescribed tool/delegate
+    # sequence against what the model actually does on a real run.
+    "lan_new_employee_onboarding_access": {
+        "name":        "New-Employee End-to-End Access Provisioning",
+        "purpose": (
+            "Provision and VERIFY end-to-end access for a NEW employee who needs "
+            "to use a data-center application: confirm LAN network admission, then "
+            "grant application-layer access (DC-owned), then confirm the path is "
+            "actually reachable. This is a multi-stage provisioning workflow that "
+            "spans BOTH the LAN agent (network admission) and the DC agent "
+            "(application RBAC + fabric path). It is NOT a single permission check."
+        ),
+        "risk_level":    "medium",
+        "requires_hitl": True,
+        "tags": ["onboarding", "provisioning", "access", "cross-agent",
+                 "workflow", "employee", "rbac", "nac"],
+        "description": (
+            "Use this for onboarding/provisioning requests like '为新员工 <user> "
+            "开通对应用 <app> 的访问' / 'set up access to <app> for new hire <user>'. "
+            "This is a STRICT, ORDERED, multi-phase workflow — do not skip phases, "
+            "do not jump straight to granting, and do not collapse it into one "
+            "tool call. Run the phases IN ORDER and stop early only on the "
+            "documented exit conditions.\n"
+            "\n"
+            "PHASE 1 — LAN identity & admission (do this FIRST, locally):\n"
+            "  1a. list_users — confirm the user account exists. If it does NOT "
+            "exist, STOP and report that the account must be created in IAM first "
+            "(do not attempt to grant anything).\n"
+            "  1b. get_user_access(user_id) — is the user admitted on the LAN "
+            "(RADIUS / 802.1X / NAC / VLAN)?\n"
+            "  1c. If NOT admitted: check_nac_policy(user_id) to explain why, then "
+            "grant_user_access(user_id) to restore LAN admission. This is a "
+            "destructive change → requires operator approval (HITL). Only after "
+            "admission is confirmed do you continue to Phase 2.\n"
+            "  1d. If already admitted: continue to Phase 2 directly.\n"
+            "\n"
+            "PHASE 2 — DC application access (DELEGATE — do NOT do locally):\n"
+            "  Application RBAC/ACL lives on the DATA CENTER, not the LAN. DELEGATE "
+            "to the dc agent: 'check whether user <id> has access permission to "
+            "application <app>, and if not, grant the appropriate role'. Describe "
+            "it plainly as an application-permission task — do NOT pre-frame it as "
+            "a VNI / overlay / BGP-EVPN problem. The DC side may require its own "
+            "operator approval (HITL) to grant a role; wait for that result before "
+            "Phase 3. Do NOT re-delegate the same task to dc if it already replied.\n"
+            "\n"
+            "PHASE 3 — End-to-end path verification (DELEGATE — DC-owned):\n"
+            "  Only AFTER both LAN admission (Phase 1) and DC application access "
+            "(Phase 2) are confirmed granted, delegate ONE more check to dc: "
+            "'confirm the network path from the user's VLAN to application <app> is "
+            "reachable (path / VNI / load-balancer health)'. This is the step that "
+            "distinguishes 'permission granted but still unreachable' from a fully "
+            "working setup. Skip this phase only if the user explicitly said access "
+            "already works and they just need the permission.\n"
+            "\n"
+            "PHASE 4 — Synthesize the provisioning report:\n"
+            "  Produce ONE final report covering: account exists (Y/N), LAN "
+            "admission (was it already OK or did you restore it, with the approval "
+            "reference), DC application role granted (which role, approval "
+            "reference), and end-to-end reachability verdict. If any phase failed "
+            "or was rejected at HITL, report exactly which phase and the "
+            "consequence — do NOT claim success. Never re-run a phase that already "
+            "completed; synthesize from the results already in context."
+        ),
+        "parameters": {
+            "user_id": "New employee's user id (e.g. alice)",
+            "app":     "Application to provision access for (e.g. crm)",
+        },
+        "returns": (
+            "End-to-end provisioning report: account/admission/app-role/"
+            "reachability, with HITL approval references and per-phase status."
+        ),
+        # Local tools this skill drives directly (Phase 1). Phases 2-3 are
+        # delegated to dc, so dc's tools are NOT listed here — they're the
+        # peer's responsibility, reached via [DELEGATE:dc-agent].
+        "tool_deps": ["list_users", "get_user_access", "check_nac_policy",
+                      "grant_user_access"],
+        "examples": [
+            {"args": {"user_id": "alice", "app": "crm"},
+             "note": "Onboard alice end-to-end for CRM access"},
+        ],
+    },
 }
