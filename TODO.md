@@ -355,6 +355,56 @@ Remaining real debt, by priority:
   `/hitl_resolved` endpoint (today basic validation: must match an awaiting
   record); 5-8 live integration scenarios.
 
+### Phase 4 — Periodic task scheduler ✅ DONE (prototype, 2026-05)
+In-memory periodic-task scheduler registered as agent tools. A user request can
+trigger the LLM to create a scheduled job that periodically runs a tool or sends
+a query to this agent.
+
+**Decisions** (confirmed with operator): (1) **dual mode** — at registration the
+job is `mode="tool"` (invoke a local tool) OR `mode="query"` (send a query to
+this agent's own loop, full LLM cycle); (2) **in-memory only** — jobs + run
+history lost on restart (prototype scope); (3) **no push delivery** — results are
+NOT pushed to the user, only listed in a dedicated SCHEDULE tab (run history).
+
+**Shipped pieces**:
+- `scheduler/service.py` — `SchedulerService` (in-memory `_jobs` + `_history`
+  ring buffer, single `asyncio` tick loop mirroring `SkillJournalConsumer`'s
+  `start()`/`_run_loop()` pattern, `tick_once()` public for tests).
+  `ScheduledJob` dataclass (mode / payload / interval_s / next_run_at / runs /
+  last_ok / cancelled / done). Guardrails: `MIN_INTERVAL_S=5`, `MAX_JOBS=100`,
+  `MAX_HISTORY=200`. `_fire`: tool mode → injected `tool_invoker(name, args)`;
+  query mode → injected `query_runner(query, session_id)` with a distinct
+  session per fire (`sched-{job_id}-{runs}`) so periodic queries don't pile into
+  one conversation. All execution errors recorded in history, never raised.
+- Three agent tools (`build_scheduler_tools`): `schedule_create` /
+  `schedule_list` / `schedule_cancel`, args-dict→str contract like every local
+  tool. `SCHEDULER_TOOL_METADATA` exports their metadata.
+- `main.py` wiring: tools registered via `router.register_local` alongside
+  meta-tools; `tool_invoker` (closure over the refreshed tool registry) +
+  `query_runner` (closure over `executor.execute_query`) injected after the
+  registry refresh; tick loop started on app startup.
+- **Tool discoverability**: `register_local` makes a tool DISPATCHABLE but the
+  LLM only sees tools in the retriever corpus. `SCHEDULER_TOOL_METADATA` is
+  merged into `_tool_meta` (indexed by the tool retriever) and the names added
+  to `always_inject_extra_tools` so scheduling-intent queries reliably surface
+  them.
+- `webui/routes_schedule.py` — `GET /webui/schedule` (jobs + history) +
+  `POST /webui/schedule/cancel`; SCHEDULE tab in `webui/index.html`
+  (`refreshSchedule`) renders jobs with cancel buttons + run history.
+- **L0/L1 decoupling**: `scheduler/` imports nothing from runtime/webui/task —
+  behaviour comes from the two injected callables (precedent: `delegate_fn`,
+  `batch_resolver_fn`). `audit_module_independence` stays green.
+- Tests: `test_scheduler.py` (10) — tick fires due job, both modes via fake
+  invoker/runner, interval reschedule vs one-shot done, cancel, guardrails,
+  history ring buffer, tool contracts, metadata shape.
+
+**Remaining** (deferred, not prototype scope): persistence (sqlite/jsonl + restart
+recovery — `_jobs` is the single state source,接口不变); cron-style schedules
+(today: fixed `interval_s` + optional `first_delay_s`); concurrent fire
+(today serial `await` per tick — a slow query job delays the next tick but can't
+fan out); push delivery of results (today history-only by decision); per-job
+auth / quota.
+
 ---
 
 ## Known bugs / tech debt to revisit
@@ -401,6 +451,7 @@ Remaining real debt, by priority:
 
 - ✅ **Cross-agent fault-scenario mock tools** (2026-05) — added the user/app access-control tools needed to mock "user alice cannot access app CRM" end-to-end across lan+dc. LAN (`profiles/lan`): `list_users`, `get_user_access` (RADIUS/802.1X/NAC/VLAN admission, read-only), `check_nac_policy`, `grant_user_access`/`revoke_user_access` (HITL). DC (`profiles/dc`): `dc_list_apps`, `dc_get_app_acl`, `dc_check_user_app_access` (read-only diagnostic), `dc_grant_app_access`/`dc_revoke_app_access` (HITL). Method 甲: queries read-only, only grant/revoke HITL-gated (dc grant fires the DC-side HITL = Phase 3 mode B). Datasets are consistent: alice is admitted on LAN but holds no CRM role on DC (the root cause). Watch-list + editable_hitl_tools updated; HITL safety-net warning softened for the now cross-profile watch-list; fixed a latent bug in audit_profiles check-5 (relative `tests/` path wasn't exempted). Test `test_access_scenario.py`. 223 tests pass.
 
+- ✅ **Phase 4 — periodic task scheduler** (2026-05, prototype) — in-memory scheduler registered as agent tools (`schedule_create`/`schedule_list`/`schedule_cancel`); a user request can have the LLM create a job that periodically runs a local tool (`mode=tool`) or sends a query to this agent (`mode=query`, full LLM cycle, distinct session per fire). New `scheduler/` module (L0-pure, behaviour via injected `tool_invoker`/`query_runner` — `audit_module_independence` green): `SchedulerService` (in-memory jobs + history ring buffer + `asyncio` tick loop, guardrails MIN_INTERVAL_S=5/MAX_JOBS=100/MAX_HISTORY=200). Wired in `main.py` (register_local + inject + start on startup). Tool discoverability: `SCHEDULER_TOOL_METADATA` merged into the retriever corpus + always-inject (register_local alone is dispatchable-but-invisible to the LLM). `webui/routes_schedule.py` + SCHEDULE tab (jobs + run history, cancel). Decisions: in-memory only (lost on restart), results history-only (not pushed). Test `test_scheduler.py` (10). 265 tests pass.
 - ✅ **A2A Phase 3 P3-b hardening — delegation storm fix + reliable UI delivery** (2026-05) — mode B was validated end-to-end but live runs spawned 4-5 duplicate DC inbound tasks per request, returned contradictory diagnoses (DC re-diagnosing already-mutated state), and never rendered the final answer in the UI. Four root causes fixed: (1) **single TaskStore-state delegation gate** in `task/delegation.py` (identity `(session, target)`, suppress non-terminal `scope==INTER` task) replacing three fragile per-`execute_query` env_ctx guards that reset on every resume turn; (2) **park-on-peer-HITL** — the originating stream now ends with a `cross_agent_parked` marker + interim and waits for the async result callback instead of busy-looping (which raced the callback and re-delegated the instant the task went terminal); (3) **per-request re-delegation block** (`_delegated_targets_this_request`) + **synthesis-turn hard-block** (`_cross_agent_resume`) to stop case1 (no-HITL) re-delegation the gate can't catch; (4) **frontend `/chat/resumptions` poll** dedup-by-`phase` + stop-only-on-terminal fix (approval interim and result final share one `correlation_id`, so the final answer was being dropped as a duplicate and the poll stopped after the interim). Also: `[DELEGATE:]`/`[SKILL_LOAD:]` now stripped from the visible token stream (`strip_delegate_directives`). Tests `test_delegation_gate.py` (6), `test_delegation_park_on_peer_hitl.py` (park + case1-no-re-delegate). 255 tests pass.
 - ✅ **A2A Phase 3 P3-a + P3-b — cross-agent HITL mode B** (2026-05) — lan delegates to dc, dc raises a HITL approved on dc's console, result flows back and lan auto-resumes via an active synthesis turn. Closed the core gap: `_unwrap_a2a_event` was silently dropping the peer's `input-required` status so the interrupt_id never reached the originator — now translated into a `hitl_interrupt` chunk. New: `TaskState.AWAITING_PEER_HITL`, `CrossAgentHitlBridge`, A2A `/hitl_resolved` callback endpoint, `HitlExecutor._maybe_callback_source_agent` (registry-resolved POST back), webui active-resume driver + `/chat/resumptions` poll, lan read-only "awaiting peer approval" badge. Tests `test_cross_agent_hitl.py`. P3-c (audit chain) + P3-d (passthrough mode C + failure hardening + persistence + auth) remain. 215 tests pass.
 

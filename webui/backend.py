@@ -1407,6 +1407,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     from webui.routes_skills import register_skills_routes
     register_skills_routes(app, services)
 
+    # Scheduler (SCHEDULE tab) endpoints — webui/routes_schedule.py
+    from webui.routes_schedule import register_schedule_routes
+    register_schedule_routes(app, services)
+
 
     @app.get("/tools")
     async def list_tools() -> JSONResponse:

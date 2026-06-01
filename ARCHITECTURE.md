@@ -25,6 +25,7 @@
 | `a2a/` | ~1200 | A2A 协议层(inbound JSON-RPC + SSE 流 + AgentCard + EventQueue) | — (轻量,本文档 §11) |
 | `registry/` | ~900 | Agent registry — 自注册、peer discovery、health check、load balance | — (轻量,本文档 §11) |
 | `task/` | ~1600 | Task graph + 跨 agent dispatcher(`A2ATaskDispatcher`)+ `delegation.py` 委派工厂(Phase 2B 已接线)| — |
+| `scheduler/` | ~400 | 内存周期任务调度器(Phase 4)——`SchedulerService` + 3 个 agent 工具(`schedule_create/list/cancel`),tick loop 到期跑 tool/query | `scheduler/`(轻量,本文档 §8.10）|
 
 ---
 
@@ -689,6 +690,28 @@ C. **动态实体名提取** — 给每个 peer 行加 `owns: ...` 行,从该 pe
 Regression tests:`tests/test_dispatcher_heartbeat.py` 6 个 — 慢上游注入 heartbeat、快上游不注入、heartbeat 不带 token/message、空流、单 chunk 流、异常 propagate。
 
 **CI**:7/7 audits + 145 tests(原 139 + 6 heartbeat)。
+
+---
+
+### 8.10 Phase 4 — 周期任务调度器(2026-05,原型)
+
+用户提问可触发 LLM 创建一个**周期任务**,到期自动跑某个工具或对本 agent 发一条 query。调度器注册成 agent 可用的工具。
+
+**三个产品决策**:(1) 双模式 —— 注册时选 `mode="tool"`(调本地工具)或 `mode="query"`(对本 agent 发 query,跑完整 LLM 循环);(2) 内存态 —— 重启丢失(原型范围);(3) 结果不主动送达用户,只在 SCHEDULE tab 列执行历史。
+
+**核心** `scheduler/SchedulerService`:内存 `_jobs` + `_history`(环形缓冲 200)+ 单个 `asyncio` tick loop(每 2s,复用 `SkillJournalConsumer` 的 `start()`/`_run_loop()` 范式)。`tick_once()` 公开供测试。`ScheduledJob`(mode/payload/interval_s/next_run_at/runs/last_ok/cancelled/done)。护栏:`MIN_INTERVAL_S=5`/`MAX_JOBS=100`/`MAX_HISTORY=200`。`_fire`:tool 模式 → 注入的 `tool_invoker(name,args)`;query 模式 → 注入的 `query_runner(query,session_id)`,每次 fire 用独立 session(`sched-{job_id}-{runs}`)避免周期 query 堆进一个会话。所有执行错误记进 history,不抛出。
+
+**三个 agent 工具**(`build_scheduler_tools`):`schedule_create`/`schedule_list`/`schedule_cancel`,与所有本地工具一样的 `async (args: dict) -> str` 契约。
+
+**让 LLM 发现工具的关键**:`register_local` 只让工具**可被调用**,但 LLM 只看得到进了检索语料的工具。`SCHEDULER_TOOL_METADATA` 合并进 `_tool_meta`(检索器索引)+ 加进 `always_inject_extra_tools`,让"定时/周期"类提问稳定召回。
+
+**接线**(`main.py`):工具经 `router.register_local` 与 meta-tools 并列注册;`tool_invoker`(闭包 over 刷新后的工具 registry)+ `query_runner`(闭包 over `executor.execute_query`)在 registry refresh 后注入;tick loop 在 startup 启动。
+
+**UI**:`webui/routes_schedule.py`(`GET /webui/schedule` jobs+history、`POST /webui/schedule/cancel`)+ `webui/index.html` SCHEDULE tab(`refreshSchedule`)。
+
+**L0/L1 解耦**:`scheduler/` 不 import runtime/webui/task —— 行为全靠两个注入的 callable(precedent:`delegate_fn`/`batch_resolver_fn`),`audit_module_independence` 持续绿。
+
+**测试**:`tests/test_scheduler.py`(10)。**未做**(非原型范围):持久化、cron 式调度、并发 fire、结果推送、per-job 鉴权/配额 —— 详见 TODO.md Phase 4 段。
 
 ---
 
