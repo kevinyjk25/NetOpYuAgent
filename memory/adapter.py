@@ -298,21 +298,24 @@ class MemoryAdapter:
         score, metadata} dicts.
         """
         def _go():
-            res = self._mgr.mid_term.search(
+            res = self._mgr.search_facts(
                 user_id=user_id, query=query_text, session_id=session_id,
                 fact_type=fact_type, top_k=top_k,
             )
-            return [
-                {
-                    "fact_id":    f.fact_id,
-                    "fact":       f.fact,
-                    "fact_type":  f.fact_type,
-                    "confidence": f.confidence,
-                    "score":      sc,
+            out = []
+            for rank, f in enumerate(getattr(res, "items", []) or []):
+                # Score isn't carried per-item; items are relevance-sorted, so
+                # derive a descending proxy score in (0,1].
+                proxy = 1.0 - (rank / max(top_k, 1)) * 0.5
+                out.append({
+                    "fact_id":    getattr(f, "fact_id", ""),
+                    "fact":       getattr(f, "fact", ""),
+                    "fact_type":  getattr(f, "fact_type", ""),
+                    "confidence": getattr(f, "confidence", 0.0),
+                    "score":      round(proxy, 4),
                     "metadata":   getattr(f, "metadata", {}) or {},
-                }
-                for f, sc in zip(res.facts, res.scores)
-            ]
+                })
+            return out
         try:
             return await asyncio.to_thread(_go)
         except Exception as exc:

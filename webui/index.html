@@ -911,13 +911,14 @@ Type a query below. The agent will:
           <thead>
             <tr style="color:var(--dim);text-align:left">
               <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Skill</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:60px">Selected</th>
               <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:60px">Uses</th>
               <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:70px">Dormant</th>
               <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:80px">Dormant %</th>
             </tr>
           </thead>
           <tbody id="journal-skill-tbody">
-            <tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>
+            <tr><td colspan="5" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>
           </tbody>
         </table>
       </div>
@@ -4292,26 +4293,32 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
       // Per-skill table
       const useCount     = stats.skill_use_count || {};
       const dormantCount = stats.skill_dormant_count || {};
+      const selCount     = stats.skill_selected_count || {};
       const allSkills = new Set([
           ...Object.keys(useCount),
           ...Object.keys(dormantCount),
+          ...Object.keys(selCount),
       ]);
       const tbody = document.getElementById('journal-skill-tbody');
       if (allSkills.size === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>';
       } else {
         const rows = Array.from(allSkills).map(sid => {
+          const sel     = selCount[sid] || 0;
           const uses    = useCount[sid] || 0;
           const dormant = dormantCount[sid] || 0;
           const rate    = uses ? (dormant / uses) : 0;
-          const flag    = (rate > 0.3 && uses >= 3) ? ' ⚠' : '';
-          const rateColor = rate > 0.5 ? '#e74c3c' : (rate > 0.3 ? '#f39c12' : 'var(--dim)');
-          return [sid, uses, dormant, rate, flag, rateColor];
+          // ⚠ selected but never loaded = model picked it then answered directly
+          const neverLoaded = (sel > 0 && uses === 0);
+          const flag    = neverLoaded ? ' ⚠never-loaded' : ((rate > 0.3 && uses >= 3) ? ' ⚠' : '');
+          const rateColor = neverLoaded ? '#e74c3c' : (rate > 0.5 ? '#e74c3c' : (rate > 0.3 ? '#f39c12' : 'var(--dim)'));
+          return [sid, sel, uses, dormant, rate, flag, rateColor];
         });
-        rows.sort((a, b) => b[3] - a[3] || b[1] - a[1]);
-        tbody.innerHTML = rows.map(([sid, uses, dormant, rate, flag, rateColor]) =>
+        rows.sort((a, b) => b[4] - a[4] || b[2] - a[2] || b[1] - a[1]);
+        tbody.innerHTML = rows.map(([sid, sel, uses, dormant, rate, flag, rateColor]) =>
             '<tr>' +
               '<td style="padding:4px 6px;color:var(--text)">' + sid + flag + '</td>' +
+              '<td style="padding:4px 6px;color:var(--dim)">' + sel + '</td>' +
               '<td style="padding:4px 6px;color:var(--accent)">' + uses + '</td>' +
               '<td style="padding:4px 6px;color:' + rateColor + '">' + dormant + '</td>' +
               '<td style="padding:4px 6px;color:' + rateColor + '">' + Math.round(rate * 100) + '%</td>' +
@@ -4352,12 +4359,14 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
             if (ev.type === 'selection') {
               const top = (p.top_k || []).map(t => Array.isArray(t) ? t[0] : t).slice(0,2).join(', ');
               label = 'select: ' + top + (p.ambiguous ? ' (ambiguous)' : '');
-            } else if (ev.type === 'skill_load') {
+            } else if (ev.type === 'load') {
               label = 'load: ' + (p.skill_id || '');
             } else if (ev.type === 'tool_call') {
               label = 'tool: ' + (p.tool_name || '') + (p.ok === false ? ' ✗' : ' ✓');
             } else if (ev.type === 'completion') {
               label = 'done: ' + (p.outcome || '');
+            } else if (ev.type === 'preference_auto_select') {
+              label = '⭐ auto-selected: ' + (p.skill_id || '') + ' (conf ' + (p.confidence || '?') + ')';
             }
             evLines += '<div style="padding-left:14px;color:var(--dim2);font-size:10px">' +
                        'T' + (ev.turn || 0) + ' · ' + label + '</div>';

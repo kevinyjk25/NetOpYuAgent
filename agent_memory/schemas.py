@@ -79,7 +79,8 @@ class MemoryFact:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
     _VALID_TYPES = frozenset(
-        ["preference", "entity", "procedure", "lesson", "config", "env", "general"]
+        ["preference", "entity", "procedure", "lesson", "config", "env",
+         "general", "skill_preference"]
     )
 
     def __post_init__(self) -> None:

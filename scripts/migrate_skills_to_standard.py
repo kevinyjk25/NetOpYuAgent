@@ -33,7 +33,6 @@ import argparse
 import sys
 from pathlib import Path
 
-
 from skills.skill_format import (
     flat_dict_to_skill_md,
     load_skill_md,

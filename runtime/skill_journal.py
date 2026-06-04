@@ -314,6 +314,69 @@ class SkillJournalStore:
         with self._lock:
             return list(reversed(self._entries[-limit:]))
 
+    def extract_trajectory(self, session_id: str) -> dict[str, Any]:
+        """Reconstruct a real execution trajectory for a session from its
+        journal events — the P0 input the evolver needs (it was getting
+        solution_steps=[] before).
+
+        Returns {steps: [str], tools: [str], observations: [str],
+                 loaded_skills: [str], turns: int} — empty lists if no journal.
+        """
+        entry = None
+        with self._lock:
+            # Prefer the most recent entry for this session (completed wins
+            # over live since append supersedes the live copy).
+            for e in reversed(self._entries):
+                if e.get("session_id") == session_id:
+                    entry = e
+                    break
+        if entry is None:
+            return {"steps": [], "tools": [], "observations": [],
+                    "loaded_skills": [], "turns": 0}
+
+        steps: list[str] = []
+        tools: list[str] = []
+        observations: list[str] = []
+        for ev in entry.get("events", []):
+            t = ev.get("type")
+            p = ev.get("payload") or {}
+            turn = ev.get("turn", 0)
+            if t == "load":
+                steps.append(f"[T{turn}] 加载 skill: {p.get('skill_id','')}")
+            elif t == "tool_call":
+                name = p.get("tool_name", "")
+                ok = p.get("ok")
+                argk = ",".join(p.get("arg_keys", []) or [])
+                steps.append(
+                    f"[T{turn}] 调用工具: {name}"
+                    + (f"({argk})" if argk else "")
+                    + ("" if ok is not False else " [失败]")
+                )
+                if name:
+                    tools.append(name)
+            elif t == "selection":
+                topk = []
+                for s in (p.get("top_k") or [])[:3]:
+                    if isinstance(s, dict):
+                        topk.append(s.get("id"))
+                    elif isinstance(s, (list, tuple)):
+                        topk.append(s[0])
+                    else:
+                        topk.append(s)
+                topk = [x for x in topk if x]
+                if topk:
+                    observations.append(f"候选 skill: {', '.join(topk)}")
+        # de-dup tools, preserve order
+        seen = set()
+        tools = [x for x in tools if not (x in seen or seen.add(x))]
+        return {
+            "steps": steps,
+            "tools": tools or list(entry.get("tool_calls", [])),
+            "observations": observations,
+            "loaded_skills": list(entry.get("loaded_skills", [])),
+            "turns": int(entry.get("total_turns", 0)),
+        }
+
     def filter(self, *, skill_id: Optional[str] = None, outcome: Optional[str] = None,
                ambiguous: Optional[bool] = None, limit: int = 50) -> list[dict[str, Any]]:
         out = []
@@ -340,12 +403,25 @@ class SkillJournalStore:
             outcomes:   dict[str, int] = {}
             skill_use:  dict[str, int] = {}
             skill_dormant: dict[str, int] = {}
+            skill_selected: dict[str, int] = {}
             ambiguous_count = 0
 
             for e in self._entries:
                 outcomes[e.get("outcome") or "unknown"] = outcomes.get(e.get("outcome") or "unknown", 0) + 1
                 if e.get("ambiguous"):
                     ambiguous_count += 1
+                # Count selections (top_k) so a skill that is repeatedly
+                # SELECTED but never LOADED is visible — otherwise it's a
+                # blind spot (the model answered directly without loading).
+                for sel in e.get("top_k", []):
+                    if isinstance(sel, dict):
+                        sid = sel.get("id")
+                    elif isinstance(sel, (list, tuple)):
+                        sid = sel[0]
+                    else:
+                        sid = sel
+                    if sid:
+                        skill_selected[sid] = skill_selected.get(sid, 0) + 1
                 for attr in e.get("attribution", []):
                     sid = attr["skill_id"]
                     skill_use[sid] = skill_use.get(sid, 0) + 1
@@ -358,6 +434,7 @@ class SkillJournalStore:
                 "ambiguous_rate":   round(ambiguous_count / n, 3),
                 "skill_use_count":  skill_use,
                 "skill_dormant_count": skill_dormant,
+                "skill_selected_count": skill_selected,
             }
 
 

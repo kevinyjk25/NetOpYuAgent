@@ -1093,10 +1093,21 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
 
                     if evolver and decision and decision.complexity.value == "complex":
                         try:
+                            # P0: pull the REAL execution trajectory from the
+                            # journal (ordered steps + tools + observations)
+                            # instead of solution_steps=[]. The skill is now
+                            # distilled from what actually ran.
+                            from runtime.skill_journal import get_journal_store as _gjs
+                            _traj = _gjs().extract_trajectory(session_id)
+                            _real_tools = _traj["tools"] or [t["tool"] for t in tc]
+                            _real_complexity = 5.0 + min(len(_traj["steps"]), 10) * 0.5
                             proposal = await evolver.after_task(
                                 task_description=req.query, solution_summary=full_text[:400],
-                                tools_used=[t["tool"] for t in tc], solution_steps=[],
-                                key_observations=[], complexity=7.0, session_id=session_id,
+                                tools_used=_real_tools,
+                                solution_steps=_traj["steps"],
+                                key_observations=_traj["observations"],
+                                complexity=(_real_complexity if _traj["steps"] else 7.0),
+                                session_id=session_id,
                             )
                             yield f"data: {json.dumps({'type':'hermes_skill','created':proposal is not None,'skill_id':proposal.skill_id if proposal else None})}\n\n"
                             await asyncio.sleep(0)
@@ -1979,6 +1990,33 @@ async def _submit_hitl_decision(
                     )
         except Exception as exc:
             logger.debug("batch_pending detection failed: %s", exc)
+
+        # ── B1: record skill-choice preference ───────────────────────────
+        # If this resolved interrupt was a skill-ambiguity user_choice, write
+        # (or boost) a skill_preference fact so future similar queries can be
+        # recommended / auto-selected.
+        try:
+            _mem_pref = services.get("memory")
+            if _mem_pref is not None and entry is not None:
+                _pm = (entry.payload.context_snapshot or {}).get("_pref_meta")
+                if _pm and req.selected_choice_id is not None:
+                    _chosen = req.selected_choice_id
+                    _chosen_skill = None if _chosen == "__none__" else _chosen
+                    from skills.skill_preference import SkillPreferenceService
+                    _svc = SkillPreferenceService(_mem_pref)
+                    if _svc.cfg.enabled:
+                        await _svc.record_choice(
+                            user_id=_pm.get("user_id", "system"),
+                            session_id=entry.payload.thread_id or "default",
+                            query=_pm.get("query", ""),
+                            chosen_skill_id=_chosen_skill,
+                            candidates=_pm.get("candidates", []),
+                        )
+                        logger.info(
+                            "Skill preference: recorded choice=%s for user=%s",
+                            _chosen, _pm.get("user_id", "system"))
+        except Exception as exc:
+            logger.debug("skill preference record failed: %s", exc)
 
         if isinstance(_raw_result, dict):
             _tool_result_str = (

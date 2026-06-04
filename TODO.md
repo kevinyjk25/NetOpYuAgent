@@ -355,7 +355,43 @@ Remaining real debt, by priority:
   `/hitl_resolved` endpoint (today basic validation: must match an awaiting
   record); 5-8 live integration scenarios.
 
-### Phase 4 — Periodic task scheduler ✅ DONE (prototype, 2026-05)
+### Phase 6 — Agent evolution: preference learning + real-trajectory evolver + CSI (in progress, 2026-06)
+Three evolution capabilities + a shared capability space. **This round: P0 + CSI done.**
+- ✅ **进化1 — skill 选择困难 → 人工 → 自动**: weak-match ambiguity (`catalog.ambiguous_kind`
+  strong/weak) so low-but-clustered candidates also trigger the user_choice HITL.
+  Choice → `skill_preference` fact (per user, ttl 90d); conflict detector auto-boosts
+  confidence on repeat; three stages by confidence: learn(<0.5, ask) / recommend(0.5-0.85,
+  ask but pin ⭐) / auto(≥0.85, load without asking). High-risk skills never auto;
+  wrong auto → demote. `skills/skill_preference.py` (L1 over add_fact/find_similar_facts).
+  Tests `test_skill_preference.py` (11).
+- ✅ **P0 — feed real execution trajectory to evolver**: was `solution_steps=[]`.
+  `SkillJournalStore.extract_trajectory(session_id)` reconstructs ordered steps + tool
+  sequence + observations from journal events; backend stream call site now passes them.
+  Generated skills are distilled from what actually ran. Tests in `test_skill_journal_flush.py`.
+- ✅ **CSI v1 — capability semantic index** (`skills/capability_index.py`): unified,
+  interpretable similarity/attribution over tools+skills, replacing 4 inconsistent
+  similarities. Two-level clusters (DC splits fabric/application), hybrid similarity
+  (emb+tag+tool_set+act, with reasons — NOT learned black-box), `route`/`nearest_skill`/
+  `cluster_trajectories`. tool_set ground-truth-first (allowed-tools → trajectory → tags).
+  Evaluated on real LAN/DC data (CSI_EVALUATION_ON_REAL_DATA.md). Tests `test_capability_index.py` (9).
+- ⏳ **P1 — repeated trajectory → skill** (next round): use `CSI.cluster_trajectories` over
+  journal history; cluster size ≥ N → trigger evolver generation.
+- ⏳ **P3 — append intent → targeted merge** (next round): `CSI.nearest_skill(session tool_set,
+  append text)` → merge delta into the in-use skill, not a fuzzy jaccard match.
+- ⏳ **P2 — outcome-satisfied check → feed back** (last): judge if a run satisfied the
+  request; unsatisfied → demote/improve skill; auto-optimize descriptions from journal
+  dormant/never-loaded signals.
+
+### Phase 5 — Anthropic standard skill format + scripts ✅ DONE (2026-06)
+Full Anthropic SKILL.md support: folder + frontmatter parsing, progressive disclosure,
+**scripts execution** (script-as-tool: `scripts/*.py` exposing `run(inputs)->dict`
+AST-validated + registered as `<skill_id>__<script>` tools — no arbitrary exec, respects
+the no-sandbox stance), references/assets inventory, allowed-tools carried through.
+`skills/script_runner.py` + loader skill_dir injection + skill_format allowed_tools.
+Example cross-agent skill `app-access-troubleshoot` (tool+script+reference+delegation).
+Tests `test_anthropic_skill_standard.py` (11).
+
+
 In-memory periodic-task scheduler registered as agent tools. A user request can
 trigger the LLM to create a scheduled job that periodically runs a tool or sends
 a query to this agent.

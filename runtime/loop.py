@@ -2033,6 +2033,7 @@ class AgentRuntimeLoop:
         # correct: a later user query starts a fresh stream with a fresh set,
         # so legitimate re-use of the same peer across requests still works.
         _delegated_targets_this_request: set[str] = set()
+        _needs_synthesis_turn = False   # set when a re-delegate is suppressed
 
         while True:
             state.turns += 1
@@ -2181,23 +2182,75 @@ class AgentRuntimeLoop:
                     _hitl_on_ambig = _env_val.lower() != "false"
 
                 _ambig_already_resolved = bool(env_ctx.get("_skill_choice_resolved"))
+
+                # ── B: skill-preference learning ──────────────────────────
+                # Recall this user's past choices for similar queries, boost
+                # the selection, and decide stage (learn/recommend/auto).
+                _pref_stage, _pref_skill, _pref_hits = "learn", None, []
+                if not _ambig_already_resolved and self._memory is not None:
+                    try:
+                        from skills.skill_preference import SkillPreferenceService
+                        _uid = (env_ctx.get("user_id") or env_ctx.get("operator")
+                                or "system")
+                        _pref = SkillPreferenceService(self._memory)
+                        if _pref.cfg.enabled:
+                            _pref_hits = await _pref.recall(user_id=_uid, query=query)
+                            if _pref_hits:
+                                selected_skills = _pref.apply_boost(selected_skills, _pref_hits)
+                                def _req_hitl(sid):
+                                    try:
+                                        s = self._skill_catalog.get_summary(sid)
+                                        return bool(s and s.requires_hitl)
+                                    except Exception:
+                                        return False
+                                _pref_stage, _pref_skill = _pref.stage_for(
+                                    _pref_hits, skill_requires_hitl=_req_hitl)
+                    except Exception as _pe:
+                        logger.debug("preference recall/boost failed: %s", _pe)
+
+                # AUTO stage: skip HITL, load the preferred skill directly.
+                if (_pref_stage == "auto" and _pref_skill
+                        and not _ambig_already_resolved):
+                    env_ctx["_skill_choice_resolved"] = True
+                    env_ctx["_selected_skills"] = [_pref_skill]
+                    if state._skill_journal is not None:
+                        try:
+                            state._skill_journal._emit(
+                                "preference_auto_select", state.turns,
+                                {"skill_id": _pref_skill,
+                                 "confidence": round(max(h.confidence for h in _pref_hits), 3)})
+                        except Exception:
+                            pass
+                    logger.info(
+                        "Skill preference: AUTO-selected %s for user (session=%s)",
+                        _pref_skill, session_id)
+
                 if (
                     skill_ambiguous
+                    and _pref_stage != "auto"
                     and not _ambig_already_resolved
                     and _hitl_on_ambig
                 ):
                     # Build choices from top candidates + a "none" option.
+                    # Recommend stage: pin the preferred skill first + mark it.
+                    _ordered = list(selected_skills[:_max_choices])
+                    if _pref_stage == "recommend" and _pref_skill:
+                        _ordered.sort(key=lambda t: (t[0] != _pref_skill,))
                     _choices = []
-                    for sid, score in selected_skills[:_max_choices]:
+                    for sid, score in _ordered:
                         summary = None
                         if self._skill_catalog is not None:
                             try:
                                 summary = self._skill_catalog.get_summary(sid)
                             except Exception:
                                 summary = None
+                        _is_pref = (_pref_stage == "recommend" and sid == _pref_skill)
+                        _label = (summary.name if summary else sid)
+                        if _is_pref:
+                            _label = "⭐ " + _label + "（上次你选了这个）"
                         _choices.append({
                             "id":       sid,
-                            "label":    (summary.name if summary else sid),
+                            "label":    _label,
                             "description": (
                                 f"{(summary.purpose if summary else '')[:120]}"
                                 + (f" · {summary.risk_level}" if summary and summary.risk_level else "")
@@ -2206,6 +2259,7 @@ class AgentRuntimeLoop:
                                 "skill_id": sid,
                                 "score":    round(float(score), 3),
                                 "tags":     (summary.tags[:4] if summary else []),
+                                "recommended": _is_pref,
                             },
                         })
                     # Always offer a "do not use any skill" option so
@@ -2230,6 +2284,13 @@ class AgentRuntimeLoop:
                         "summary":        f"找到多个匹配的 skill，请选择要使用的具体 skill (或选择不使用)：",
                         "choices":        _choices,
                         "top_skills":     [c["id"] for c in _choices[:3] if c["id"] != "__none__"],
+                        # For preference learning (B1): the resolution handler
+                        # writes a skill_preference fact from these.
+                        "_pref_meta": {
+                            "query":       query,
+                            "user_id":     (env_ctx.get("user_id") or env_ctx.get("operator") or "system"),
+                            "candidates":  [c["id"] for c in _choices if c["id"] != "__none__"],
+                        },
                     }
                     return
 
@@ -2383,14 +2444,21 @@ class AgentRuntimeLoop:
                             "(session=%s).",
                             state.turns, _dlg.target, session_id,
                         )
-                        context_str += (
-                            f"\n\n_SYSTEM: 你本轮请求已委派过 {_dlg.target}，其结果已在"
+                        # Inject the synthesis instruction as a DURABLE fact —
+                        # context_str is rebuilt each turn via _assemble_context
+                        # (line ~2136), so a context_str += here would be lost
+                        # before the forced synthesis turn runs. record_new_fact
+                        # routes into state.confirmed_facts which _assemble_context
+                        # reads, so it survives into the next turn's prompt.
+                        state.record_new_fact(
+                            f"[需要综合答复] 你本轮请求已委派过 {_dlg.target}，其结果已在"
                             f"上下文中（见 [委派结果]/[委派进行中] 事实）。⚠ 禁止再次委派 "
                             f"{_dlg.target}。请合并分析已有结果：若已能回答用户请求则直接给出"
                             f"最终综合答复；若 {_dlg.target} 的结果不足以完成请求，则如实总结"
                             f"当前结论与缺口（不要重复委派同一个 agent）。"
                         )
                         _delegates = []
+                        _needs_synthesis_turn = True
                         # Fall through to normal (non-delegate) turn handling.
                 if _delegates:
                     if len(_delegates) > 1:
@@ -2815,7 +2883,16 @@ class AgentRuntimeLoop:
                 yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
                 return
 
-            if self._is_complete(llm_response, new_tool_calls,
+            if _needs_synthesis_turn:
+                # A re-delegate was just suppressed; the system note asking the
+                # LLM to synthesize from the delegated result is now in
+                # context_str. Force one more turn to deliver that synthesis —
+                # do NOT let the empty-tool-call response end the loop here.
+                _needs_synthesis_turn = False
+                logger.info(
+                    "stream: forcing synthesis turn after suppressed re-delegate "
+                    "(session=%s, turn=%d)", session_id, state.turns)
+            elif self._is_complete(llm_response, new_tool_calls,
                                   skill_load_honored=bool(_skill_loads_this_turn)):
                 # Also fires when LLM returns a very short response after tool errors/empty
                 # results — it should tell the user something meaningful, not go silent.

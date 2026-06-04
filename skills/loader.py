@@ -117,6 +117,19 @@ class SkillLoader:
                 # metadata.skill_id when present.
                 hint = skill_dir.name.replace("-", "_")
                 skill_id, defn = load_skill_md(text, skill_id_hint=hint)
+                # Anthropic-standard folder layout: capture the skill's source
+                # directory + bundled resources so runtime can locate scripts
+                # (to execute) and references/assets (to read on demand).
+                defn["skill_dir"] = str(skill_dir.resolve())
+                defn["scripts"] = sorted(
+                    p.name for p in (skill_dir / "scripts").glob("*.py")
+                ) if (skill_dir / "scripts").is_dir() else []
+                defn["references"] = sorted(
+                    p.name for p in (skill_dir / "references").iterdir() if p.is_file()
+                ) if (skill_dir / "references").is_dir() else []
+                defn["assets"] = sorted(
+                    p.name for p in (skill_dir / "assets").iterdir() if p.is_file()
+                ) if (skill_dir / "assets").is_dir() else []
                 if skill_id in out:
                     logger.warning(
                         "SkillLoader: duplicate skill_id %r (folder %s) — overwriting",

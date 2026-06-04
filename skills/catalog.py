@@ -405,6 +405,9 @@ class SkillCatalogService:
           cfg.skill_orchestration (ambiguity_gap_threshold / ambiguity_floor).
         """
         # Load thresholds from config when not explicitly supplied
+        _weak_floor = 0.08
+        _weak_gap = 0.05
+        _weak_min = 2
         if ambiguity_threshold is None or ambiguity_floor is None:
             try:
                 from config import cfg as _app_cfg
@@ -413,11 +416,23 @@ class SkillCatalogService:
                     ambiguity_threshold = float(getattr(_so_cfg, "ambiguity_gap_threshold", 0.08))
                 if ambiguity_floor is None:
                     ambiguity_floor = float(getattr(_so_cfg, "ambiguity_floor", 0.40))
+                _weak_floor = float(getattr(_so_cfg, "weak_ambiguity_floor", 0.08))
+                _weak_gap = float(getattr(_so_cfg, "weak_ambiguity_gap", 0.05))
+                _weak_min = int(getattr(_so_cfg, "weak_ambiguity_min_candidates", 2))
             except Exception:
                 if ambiguity_threshold is None:
                     ambiguity_threshold = 0.08
                 if ambiguity_floor is None:
                     ambiguity_floor = 0.40
+        else:
+            try:
+                from config import cfg as _app_cfg
+                _so_cfg = getattr(_app_cfg, "skill_orchestration", None)
+                _weak_floor = float(getattr(_so_cfg, "weak_ambiguity_floor", 0.08))
+                _weak_gap = float(getattr(_so_cfg, "weak_ambiguity_gap", 0.05))
+                _weak_min = int(getattr(_so_cfg, "weak_ambiguity_min_candidates", 2))
+            except Exception:
+                pass
 
         import re as _re
         query_words = set(_re.findall(r'\b\w{2,}\b', query.lower()))
@@ -473,6 +488,21 @@ class SkillCatalogService:
             and abs(top[0][0] - top[1][0]) < ambiguity_threshold
         )
 
+        # Second ambiguity type — WEAK match: no skill is a strong fit (top <
+        # floor) but several candidates cluster together above a weak floor.
+        # This is the "several skills all sort of match but none clearly wins"
+        # case (e.g. top=0.12, second=0.08 for a CN query against EN skill
+        # descriptions). The LLM picking unaided here tends to either load the
+        # wrong skill or load none at all — so it's worth asking the operator.
+        ambiguous_weak = (
+            not ambiguous
+            and len(top) >= _weak_min
+            and top[0][0] >= _weak_floor
+            and top[0][0] < ambiguity_floor
+            and abs(top[0][0] - top[1][0]) < _weak_gap
+        )
+        ambiguous_kind = "strong" if ambiguous else ("weak" if ambiguous_weak else None)
+
         meaningful = [(sc, sid) for sc, sid in top if sc >= 0.01]
         if not meaningful:
             summary  = self.format_summary()
@@ -492,7 +522,8 @@ class SkillCatalogService:
 
         return SkillSelectionResult(
             selected=selected,
-            ambiguous=ambiguous,
+            ambiguous=(ambiguous or ambiguous_weak),
+            ambiguous_kind=ambiguous_kind,
             summary=summary,
             top_score=top[0][0] if top else 0.0,
             second_score=top[1][0] if len(top) > 1 else 0.0,
@@ -508,10 +539,11 @@ from dataclasses import dataclass as _dc
 @_dc
 class SkillSelectionResult:
     selected:     list   # [(skill_id, score), ...] sorted descending
-    ambiguous:    bool   # top-2 scores within ambiguity_threshold of each other
+    ambiguous:    bool   # True when strong OR weak ambiguity fired
     summary:      str    # Level-1 prompt string containing only matched skills
     top_score:    float
     second_score: float
+    ambiguous_kind: str = None   # "strong" | "weak" | None
 
 
 # ---------------------------------------------------------------------------

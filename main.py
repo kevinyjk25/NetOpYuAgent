@@ -658,6 +658,21 @@ async def build_services() -> dict[str, Any]:
             logger.info(
                 "SkillCatalog[%s]: %d skills registered", cfg.mode, len(_skill_catalog._skills)
             )
+            # Anthropic-standard skill scripts → tools (缺口B, script-as-tool).
+            # Each skill's scripts/*.py exposing run(inputs)->dict is AST-
+            # validated and registered as a local tool <skill_id>__<script>.
+            try:
+                from skills.script_runner import build_all_script_tools
+                _script_tools = build_all_script_tools(_skill_defs)
+                services["skill_script_tools"] = _script_tools
+                if _script_tools:
+                    logger.info(
+                        "Skill scripts: %d script tool(s) registered (%s)",
+                        len(_script_tools), ", ".join(sorted(_script_tools)),
+                    )
+            except Exception as _sst_exc:
+                logger.warning("Skill scripts: setup failed: %s", _sst_exc)
+                services["skill_script_tools"] = {}
         except Exception as _sc_exc:
             logger.warning("SkillCatalog: build failed (%s) — catalog unavailable", _sc_exc)
 
@@ -1323,6 +1338,19 @@ async def build_services() -> dict[str, Any]:
                     except Exception as _sched_exc:
                         logger.warning("Scheduler: setup failed: %s", _sched_exc)
                         _scheduler = None
+
+                    # Skill script tools (缺口B): register <skill_id>__<script>
+                    # callables built from skills' scripts/*.py so they're
+                    # dispatchable by the runtime (invoked by name from a skill,
+                    # NOT surfaced to the LLM's free tool selection).
+                    try:
+                        _sst = services.get("skill_script_tools") or {}
+                        if _sst:
+                            router.register_local(_sst)
+                            logger.info("Skill scripts: %d tool(s) wired into ToolRouter",
+                                        len(_sst))
+                    except Exception as _sst_w_exc:
+                        logger.warning("Skill scripts: ToolRouter wiring failed: %s", _sst_w_exc)
 
                     # IMPORTANT: real_registry was snapshotted earlier from
                     # router.registry. The snapshot is a fresh dict — additions

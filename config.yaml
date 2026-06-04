@@ -835,6 +835,18 @@ skill_orchestration:
   ambiguity_floor:          0.40   # min score for top-1 to count as "real match"
   ambiguity_gap_threshold:  0.08   # max gap between top-1 and top-2 to fire HITL
                                     # lower = stricter trigger; higher = looser
+  # Weak-match ambiguity: no strong match (top < ambiguity_floor) but several
+  # candidates cluster together — "several skills sort of match, none wins".
+  weak_ambiguity_floor:         0.08  # top-1 must clear this (else nothing matches)
+  weak_ambiguity_gap:           0.05  # top-1..top-2 gap below this = clustered
+  weak_ambiguity_min_candidates: 2
+  # Skill-preference learning (choice → fact → progressive auto-select)
+  preference_learning_enabled:  true
+  preference_recommend_floor:   0.50  # >= this → recommend (pin choice in HITL)
+  preference_auto_threshold:    0.85  # >= this → auto-select, no HITL
+  preference_initial_confidence: 0.60 # confidence written on first choice
+  preference_ttl_days:          90
+  preference_auto_exclude_hitl: true  # high-risk (requires_hitl) skills never auto
   ambiguity_max_choices:    5
 
   # SkillJournal — passive observability, no control-flow effect.

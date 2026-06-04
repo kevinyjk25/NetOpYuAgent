@@ -1353,6 +1353,11 @@ class HitlExecutor:
             source_session_id = _src_session,
             source_query      = _src_query,
         )
+        # Carry preference-learning metadata so the resolution handler can
+        # record a skill_preference fact (B1).
+        _pm = chunk.get("_pref_meta")
+        if _pm:
+            payload.context_snapshot["_pref_meta"] = _pm
         entry = CheckpointEntry(
             interrupt_id=payload.interrupt_id,
             payload=payload,

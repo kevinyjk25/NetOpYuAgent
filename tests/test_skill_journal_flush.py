@@ -94,3 +94,35 @@ class TestSkillJournalLiveObservability(unittest.TestCase):
         # Must not raise — recording is best-effort observability.
         j.record_selection([("x", 0.5)], ambiguous=False, turn=1)
         self.assertEqual(len(j.events), 1)
+
+
+class TestP0TrajectoryExtraction(unittest.TestCase):
+    """P0: the journal must reconstruct a real execution trajectory (ordered
+    steps + tools + observations) for the evolver — it was getting [] before."""
+
+    def test_extract_trajectory_reconstructs_steps_and_tools(self):
+        from runtime.skill_journal import SkillJournalStore, SkillJournal
+        store = SkillJournalStore()
+        j = SkillJournal(session_id="s-traj", query="诊断 alice 访问 crm")
+        j.record_selection(top_k_skills=[("app_access_troubleshoot", 0.7)],
+                           ambiguous=True, turn=1)
+        j.record_skill_load("app_access_troubleshoot", turn=1, position=0)
+        j.record_tool_call(turn=2, tool_name="get_user_access", args={"u": "alice"}, ok=True)
+        j.record_tool_call(turn=3, tool_name="check_nac_policy", args={"u": "alice"}, ok=True)
+        j.record_completion(outcome="completed", total_turns=3)
+        final = j.to_dict(); final["_complete"] = True
+        store.append(final)
+
+        traj = store.extract_trajectory("s-traj")
+        self.assertEqual(traj["turns"], 3)
+        self.assertEqual(traj["tools"], ["get_user_access", "check_nac_policy"])
+        self.assertTrue(any("加载 skill" in s for s in traj["steps"]))
+        self.assertTrue(any("get_user_access" in s for s in traj["steps"]))
+        self.assertTrue(traj["observations"])   # candidate-skill observation
+
+    def test_extract_trajectory_empty_for_unknown_session(self):
+        from runtime.skill_journal import SkillJournalStore
+        store = SkillJournalStore()
+        traj = store.extract_trajectory("nope")
+        self.assertEqual(traj["steps"], [])
+        self.assertEqual(traj["tools"], [])

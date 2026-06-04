@@ -339,6 +339,18 @@ def to_flat_dict(
         else bool(sections["body_hitl"])
     )
 
+    # allowed-tools (Anthropic standard frontmatter key): the set of tools this
+    # skill is permitted to invoke. Carried through so runtime can enforce a
+    # per-skill tool whitelist when the skill is active. Accepts a YAML list or
+    # a comma-separated string.
+    _at = fm.get("allowed-tools")
+    if isinstance(_at, str):
+        allowed_tools = [x.strip() for x in _at.split(",") if x.strip()]
+    elif isinstance(_at, (list, tuple)):
+        allowed_tools = [str(x).strip() for x in _at if str(x).strip()]
+    else:
+        allowed_tools = []
+
     # The description fed to the retriever/prompt is the full standard
     # description plus the body so retrieval keeps the rich SOP text the LAN
     # skills rely on. Steps (if any) are appended for prompt fidelity.
@@ -364,6 +376,7 @@ def to_flat_dict(
         "constraints":    sections["constraints"],
         "estimated_size": meta.get("estimated_size", "small"),
         "returns_large":  _meta_bool("returns_large"),
+        "allowed_tools":  allowed_tools,
         # Carry the standard fields through so callers that want the raw
         # standard view (webui, AgentCard) don't have to re-parse.
         "_std_name":        fm["name"],
