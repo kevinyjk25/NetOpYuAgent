@@ -134,6 +134,20 @@ class CapabilitySemanticIndex:
 
     # ── build ────────────────────────────────────────────────────────────
     def build(self, tool_defs: dict[str, dict], skill_defs: dict[str, dict]) -> None:
+        self._build_vectors(tool_defs, skill_defs)
+        # embeddings (optional, sync)
+        if self._embed is not None:
+            for cap in self._caps.values():
+                try:
+                    cap.embedding = self._embed(cap.text) or []
+                except Exception:
+                    cap.embedding = []
+        self._cluster()
+        logger.info("CSI: built %d capabilities in %d clusters (%s)",
+                    len(self._caps), len(self._clusters), ", ".join(sorted(self._clusters)))
+
+    def _build_vectors(self, tool_defs, skill_defs) -> None:
+        """Populate self._caps WITHOUT embeddings (shared by sync/async build)."""
         self._caps.clear()
         self._clusters.clear()
         for name, m in (tool_defs or {}).items():
@@ -150,7 +164,6 @@ class CapabilitySemanticIndex:
                 continue
             tags = set(d.get("tags", []))
             dom, sec = _infer_domain(sid, tags)
-            # correction #3: tool_set ground-truth-first
             tset = set(d.get("allowed_tools", []) or [])
             if not tset:
                 tset = set(d.get("tool_deps", []) or [])
@@ -160,21 +173,57 @@ class CapabilitySemanticIndex:
                 domain=dom, secondary=sec, tool_set=tset,
                 text=f"{sid} {d.get('purpose','')} {d.get('description','')[:200]} {' '.join(tags)}",
             )
-        # embeddings (optional)
-        if self._embed is not None:
-            for cap in self._caps.values():
-                try:
-                    cap.embedding = self._embed(cap.text) or []
-                except Exception:
-                    cap.embedding = []
-        # two-level clustering
+
+    def _cluster(self) -> None:
         for cap in self._caps.values():
             key = cap.domain + (f"/{cap.secondary}" if cap.secondary else "")
             cl = self._clusters.setdefault(key, Cluster(name=key))
             cl.members.append(cap.cap_id)
             cl.dominant_tags |= cap.tags
-        logger.info("CSI: built %d capabilities in %d clusters (%s)",
-                    len(self._caps), len(self._clusters), ", ".join(sorted(self._clusters)))
+
+    async def build_async(self, tool_defs, skill_defs, *, async_embed=None) -> None:
+        """Build with a real ASYNC embedder (embed(text) -> coroutine[list[float]]).
+        Falls back to no embeddings if async_embed is None. Used in production
+        where the embedder is async; tests use the sync build()."""
+        self._build_vectors(tool_defs, skill_defs)
+        if async_embed is not None:
+            self._async_embed = async_embed   # cache for route()
+            for cap in self._caps.values():
+                try:
+                    cap.embedding = (await async_embed(cap.text)) or []
+                except Exception:
+                    cap.embedding = []
+        self._cluster()
+        logger.info("CSI(async): built %d capabilities in %d clusters",
+                    len(self._caps), len(self._clusters))
+
+    async def route_async(self, *, text=None, tool_set=None, kind=None, top_k=3):
+        """Like route() but embeds the probe text via the cached async embedder."""
+        emb = []
+        ae = getattr(self, "_async_embed", None)
+        if ae is not None and text:
+            try:
+                emb = (await ae(text)) or []
+            except Exception:
+                emb = []
+        probe = CapabilityVector(cap_id="__probe__", kind="probe",
+                                 tool_set=set(tool_set or []), embedding=emb, text=text or "")
+        hits = []
+        for cap in self._caps.values():
+            if kind and cap.kind != kind:
+                continue
+            r = self._sim(probe, cap)
+            if r.score > 0:
+                hits.append(RouteHit(cap.cap_id, r.score, r.reasons))
+        hits.sort(key=lambda h: h.score, reverse=True)
+        return hits[:top_k]
+
+    async def nearest_skill_async(self, tool_set, text=""):
+        hits = await self.route_async(text=text, tool_set=tool_set, kind="skill", top_k=1)
+        if not hits:
+            return None
+        h = hits[0]
+        return h.target, SimResult(h.score, h.reasons)
 
     # ── similarity (interpretable hybrid) ────────────────────────────────
     def _sim(self, a: CapabilityVector, b: CapabilityVector) -> SimResult:
@@ -266,3 +315,4 @@ class CapabilitySemanticIndex:
                 for cid, c in self._caps.items()
             },
         }
+

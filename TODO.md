@@ -374,10 +374,29 @@ Three evolution capabilities + a shared capability space. **This round: P0 + CSI
   (emb+tag+tool_set+act, with reasons — NOT learned black-box), `route`/`nearest_skill`/
   `cluster_trajectories`. tool_set ground-truth-first (allowed-tools → trajectory → tags).
   Evaluated on real LAN/DC data (CSI_EVALUATION_ON_REAL_DATA.md). Tests `test_capability_index.py` (9).
-- ⏳ **P1 — repeated trajectory → skill** (next round): use `CSI.cluster_trajectories` over
-  journal history; cluster size ≥ N → trigger evolver generation.
-- ⏳ **P3 — append intent → targeted merge** (next round): `CSI.nearest_skill(session tool_set,
-  append text)` → merge delta into the in-use skill, not a fuzzy jaccard match.
+- ✅ **P1 — repeated trajectory → skill** (`skills/trajectory_miner.py`): mines journal
+  history, clusters trajectories via `CSI.cluster_trajectories`, solidifies clusters that
+  recur ≥ N times (default 3) into a skill via the evolver. Skips clusters already covered
+  by an existing skill (that's P3). Wired into backend as a lazy periodic sweep (every 5
+  complex tasks); CSI built once with the real async embedder. "single-run→generate"
+  becomes "repeated→solidify".
+- ✅ **P3 — append intent → targeted merge** (`skills/append_merger.py`): attributes an
+  append to the in-use skill (session-active skill = ground truth, else CSI.nearest_skill)
+  and merges the delta into THAT skill via evolver `_merge_into_existing_skill`. Wired into
+  backend, gated by append markers (也/还/再/顺便/append...). **LIMITATION**: the journal
+  supersedes per session so it can't distinguish first-use from follow-up by itself; the
+  append-marker gate is a heuristic. A loop-tracked "skill loaded in a PRIOR request" signal
+  would let us drop the heuristic — future work. Also: without injected embeddings, CSI
+  tool_set-only attribution scores are low (~0.12), so P3 leans on the session-active signal.
+- ✅ Both P1/P3 build on the shared CSI (async embedder via `build_async`/`route_async`),
+  not a fourth bespoke similarity. Tests `test_p1_p3_evolution.py` (6).
+- ✅ **Manual trigger endpoints** (verification): `POST /webui/evolution/sweep` runs P1
+  (recurring-trajectory mining; `dry_run` to detect-only) + optional P3 (pass `session_id`
+  + `append_text`), bypassing the every-5-tasks counter and append-marker gate. Returns what
+  fired + why (cluster sizes, attribution reason, similarity). `GET /webui/evolution/space`
+  dumps the CSI capability space (clusters + per-cap domain/tool_set) for auditing. CSI build
+  helper lives in webui layer (`build_csi_from_profile`) so capability_index.py stays decoupled
+  from tools/ (module-independence preserved). Offline harness: `verify_csi_p1_p3.py`.
 - ⏳ **P2 — outcome-satisfied check → feed back** (last): judge if a run satisfied the
   request; unsatisfied → demote/improve skill; auto-optimize descriptions from journal
   dormant/never-loaded signals.
@@ -512,3 +531,34 @@ auth / quota.
 - ✅ **Phase 2A — Business profile layer** (2026-05) — `profiles/{default,lan,dc}/` decouples domain-specific tools/skills from the common framework. `AGENT_PROFILE` env (or `agent.profile` config) selects active profile. `audit_profiles.py` enforces (a) callable/metadata alignment, (b) cross-profile tool isolation, (c) `default` is empty (decoupling proof), (d) no framework hard-imports of specific profile packages, (e) every loader call passes `profile=`. Details: `profiles/DESIGN.md`, `ARCHITECTURE.md §12`.
 - ✅ **H2 — Async HITL (fire-and-forget)** (2026-05) — three-mode HITL design: H1/H3 (existing sync) + H2 new. `request_approval_async()` API; `_async_registry` module dict; turn-start inject queue → `state.confirmed_facts`; SSE soft-notify; SLA timeout via `on_resolved(decision=None)`; operator-approve triggers follow-up agent turn so LLM auto-uses the new fact; `query_radius_logs` demo tool lives in `profiles/lan/`; FE 🔔 banner + follow-up answer card. MFA deferred. Details: `ARCHITECTURE.md §8.6`, `hitl_core/DESIGN.md §3.2.5`.
 - ✅ **Peer-aware prompt** (2026-05) — `main.py` calls `llm.attach_peer_registry()` after retrieval wiring; `_build_peers_section()` from `LLMEngine` queries the registry at prompt-assembly time and injects an "AVAILABLE PEERS — delegate via [DELEGATE:agent_id]" section listing healthy peers + capabilities. Fixes the symptom where the LAN agent, asked about `spine-1 BGP EVPN`, exhausted local tools instead of delegating to dc-agent (because the prompt described the syntax but never said any peer existed). `audit_wiring.py` extended with a `REQUIRED_METHOD_CALLS` second pass so any future wiring-forgot regression fails CI. Details: `ARCHITECTURE.md §8.8`.
+
+## 整体审计 (2026-06, JK 要求的全量 design+code review)
+
+**修复的问题**:
+1. `tests/test_delegation_repeat_guard.py` 3 个测试过时 — 断言已被替换的旧设计
+   (`_delegate_target_counts` env_ctx 计数、>=2 阈值)。现实现更严格(set + 首次重复即拦
+   + 强制综合轮 + peer-HITL park),已实跑验证。测试重写为断言当前不变量,docstring 记录演进。
+2. backend P0/P1/P3 hook 嵌套耦合 — P1/P3 原嵌在 P0 的 try 内,P0 异常会静默跳过
+   P1/P3 且 P1 计数器停摆。已拆为三个平级 try 块,各自独立容错。
+3. `verify_csi_p1_p3.py` embedder 真伪误判 — OllamaEmbedder 失败时按调用静默退化为
+   确定性 sha256 stub,"返回了向量"≠真实语义。改为与 StubEmbedder 同探针输出精确比对。
+
+**验证通过(非问题)**:
+- 配置三处一致性:skill_orchestration 全部 yaml 键在运行时对象上可用(runtime 验证,
+  早前 regex diff 是误报)。
+- P3 CSI=None 降级:主路径(session-active)不触 CSI;归属路径 None 被 _attribute
+  捕获返回可读原因,不崩。
+- 偏好 TTL:通过 add_fact(ttl_days=90) 委托 memory 后端按既有契约强制执行。
+- 模块独立性 precheck PASS;端点/前端按钮回归 200。
+
+**已决策并完成 (2026-06, JK 选方案a)**:
+- ✅ `run()` 重构为 stream() 收集器(~300 行重复循环体删除,单一执行路径,漂移类问题根除)。
+  **顺带修复安全缺口**:旧 run() 无 hitl_tool_names 看门检查 — 非流式 /chat 可不经审批执行
+  破坏性工具;现在 stop_hitl → outcome=STOP_HITL + pending_interaction 附加结构化卡片,
+  工具不执行(行为测试 test_run_wrapper.py 钉死)。非交互语义:non_interactive=True(默认)
+  经 env 标志抑制歧义选择卡 + 澄清问句(等价于操作员选"不用特定skill"),审批类 HITL 永不抑制。
+  顺带接通死代码 `_clarification_resolved` 标志(原来读了从不用)。终止 chunk 增补
+  outcome/tool_summaries/unresolved/turns 字段(加法,既有消费者不受影响)。
+  H2 异步回归合成轮(backend ~2268)现带 _cross_agent_resume 硬禁委派。
+  过时的双路径源码计数测试更新 + 新增 run()-是-包装器不变量测试(防循环体复制回潮)。
+- /evolution/sweep 端点与 backend hook 的 _evolve_cb 适配器代码重复(轻微,P2 时合并)。

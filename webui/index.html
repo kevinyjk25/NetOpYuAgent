@@ -923,6 +923,25 @@ Type a query below. The agent will:
         </table>
       </div>
 
+      <!-- Evolution controls — manual P1/P3 triggers + CSI space audit -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+          Evolution — P1 / P3 / CSI <span style="color:var(--dim2);text-transform:none;letter-spacing:0">(manual triggers for verification)</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+          <button onclick="evolutionSweep(true)" title="P1: detect recurring trajectories without generating" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🔍 P1 detect (dry-run)</button>
+          <button onclick="evolutionSweep(false)" title="P1: detect AND solidify recurring trajectories into skills" style="background:none;border:1px solid var(--accent);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">⚙ P1 solidify</button>
+          <button onclick="evolutionSpace()" title="Dump the CSI capability space (clusters + tool sets)" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--dim);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🗺 CSI space</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+          <span style="font-size:10px;color:var(--dim);font-family:var(--mono)">P3 merge:</span>
+          <input id="evo-p3-session" placeholder="session_id" style="background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--fg);font-size:10px;padding:3px 6px;font-family:var(--mono);width:130px">
+          <input id="evo-p3-append" placeholder="追加诉求 (append text)" style="background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--fg);font-size:10px;padding:3px 6px;font-family:var(--mono);flex:1;min-width:160px">
+          <button onclick="evolutionP3()" title="P3: attribute the append to the in-use skill + merge" style="background:none;border:1px solid var(--accent);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🔗 P3 merge</button>
+        </div>
+        <pre id="evo-result" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;margin:0;font-family:var(--mono);font-size:10px;color:var(--dim);white-space:pre-wrap;max-height:280px;overflow:auto"></pre>
+      </div>
+
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
         <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;display:flex;align-items:center">
           Recent activity
@@ -4262,6 +4281,72 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
 
 
   // ── Journal tab ──────────────────────────────────────────────
+  // ── Evolution controls (P1/P3/CSI manual triggers) ───────────────
+  function _evoShow(obj) {
+    const el = document.getElementById('evo-result');
+    el.style.display = 'block';
+    el.textContent = (typeof obj === 'string') ? obj : JSON.stringify(obj, null, 2);
+  }
+  function _evoSummary(r) {
+    // Build a readable summary on top of the raw JSON.
+    const lines = [];
+    if (r.embedder) lines.push('embedder: ' + r.embedder);
+    if (r.p1) {
+      const cl = r.p1.recurring_clusters || [];
+      lines.push(`P1: ${cl.length} recurring cluster(s) ≥ threshold ${r.p1.threshold}`);
+      cl.forEach(c => lines.push(
+        `  • size=${c.size} tools=[${(c.tools||[]).join(', ')}]` +
+        (c.covered_by_skill ? ` (covered by ${c.covered_by_skill} → skipped, P3 territory)` : '')));
+      if (r.p1.solidified) lines.push(`  solidified → ${r.p1.solidified.join(', ') || '(none)'}`);
+    }
+    if (r.p3) {
+      lines.push(`P3: active_skill=${r.p3.active_skill || '(none)'} merged=${r.p3.merged} ` +
+                 `skill=${r.p3.skill_id || '-'} sim=${r.p3.similarity}`);
+      lines.push(`  reason: ${r.p3.reason}`);
+    }
+    return lines.join('\n') + '\n\n--- raw ---\n' + JSON.stringify(r, null, 2);
+  }
+  async function evolutionSweep(dryRun) {
+    _evoShow(dryRun ? 'Detecting recurring trajectories…' : 'Mining + solidifying…');
+    try {
+      const resp = await fetch('/webui/evolution/sweep', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ dry_run: !!dryRun, limit: 200 }),
+      });
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      _evoShow(_evoSummary(r));
+      if (!dryRun) refreshJournal();
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+  async function evolutionP3() {
+    const session_id = document.getElementById('evo-p3-session').value.trim();
+    const append_text = document.getElementById('evo-p3-append').value.trim();
+    if (!session_id || !append_text) { _evoShow('Need both session_id and append text.'); return; }
+    _evoShow('Attributing append + merging…');
+    try {
+      const resp = await fetch('/webui/evolution/sweep', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ session_id, append_text, dry_run: true }),
+      });
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      _evoShow(_evoSummary(r));
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+  async function evolutionSpace() {
+    _evoShow('Loading CSI capability space…');
+    try {
+      const resp = await fetch('/webui/evolution/space');
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      const lines = ['CSI capability space — clusters:'];
+      Object.entries(r.clusters || {}).forEach(([k, v]) =>
+        lines.push(`  ${k}: ${(v.members||[]).length} member(s) [${(v.members||[]).slice(0,6).join(', ')}${(v.members||[]).length>6?'…':''}]`));
+      _evoShow(lines.join('\n') + '\n\n--- raw ---\n' + JSON.stringify(r, null, 2));
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+
   async function refreshJournal() {
     try {
       const [statsResp, recentResp] = await Promise.all([

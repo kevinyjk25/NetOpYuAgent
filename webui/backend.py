@@ -129,6 +129,30 @@ def register_resume_driver(fn) -> None:
     _resume_driver = fn
 
 
+async def build_csi_from_profile(services: dict, *, cache_key: str = "_csi"):
+    """Build (or return cached) a CapabilitySemanticIndex from the active
+    profile's tool + skill metadata, using the real async embedder if available.
+
+    Lives in the webui layer (not skills/) so capability_index.py stays
+    decoupled from tools/ (module-independence). Shared by the P1/P3 backend
+    hooks and the /evolution/sweep endpoint. Caches on services[cache_key].
+    """
+    csi = services.get(cache_key)
+    if csi is not None:
+        return csi
+    import config as _cfg
+    from tools.loader import ToolLoader as _TL
+    from skills import SkillLoader as _SL
+    from skills.capability_index import CapabilitySemanticIndex
+    emb = services.get("embedder")
+    csi = CapabilitySemanticIndex()
+    tool_md = _TL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile).build_metadata()
+    sk_defs = _SL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile).skill_definitions()
+    await csi.build_async(tool_md, sk_defs, async_embed=(emb.embed if emb else None))
+    services[cache_key] = csi
+    return csi
+
+
 async def handle_cross_agent_resume(
     *, local_session_id: str, peer_agent: str, result_text: str,
     decision: str, correlation_id: str = "", phase: str = "result",
@@ -1092,12 +1116,15 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             logger.debug("User model skipped: %s", _e)
 
                     if evolver and decision and decision.complexity.value == "complex":
+                        from runtime.skill_journal import get_journal_store as _gjs
+                        # P0 / P1 / P3 are SIBLING blocks, each with its own
+                        # try/except — a P0 failure must not silently skip
+                        # P1/P3 (nor stall P1's every-N cadence counter).
                         try:
                             # P0: pull the REAL execution trajectory from the
                             # journal (ordered steps + tools + observations)
                             # instead of solution_steps=[]. The skill is now
                             # distilled from what actually ran.
-                            from runtime.skill_journal import get_journal_store as _gjs
                             _traj = _gjs().extract_trajectory(session_id)
                             _real_tools = _traj["tools"] or [t["tool"] for t in tc]
                             _real_complexity = 5.0 + min(len(_traj["steps"]), 10) * 0.5
@@ -1112,7 +1139,76 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             yield f"data: {json.dumps({'type':'hermes_skill','created':proposal is not None,'skill_id':proposal.skill_id if proposal else None})}\n\n"
                             await asyncio.sleep(0)
                         except Exception as _e:
-                            logger.debug("Skill evolver skipped: %s", _e)
+                            logger.debug("Skill evolver (P0) skipped: %s", _e)
+
+                        # P1: periodically mine the journal for RECURRING
+                        # trajectories and solidify them (single-run→generate
+                        # becomes repeated→solidify). Lazy CSI build with the
+                        # real async embedder; runs every N complex tasks to
+                        # bound cost.
+                        try:
+                            _p1n = services.setdefault("_p1_complex_count", [0])
+                            _p1n[0] += 1
+                            _p1_every = 5
+                            if _p1n[0] % _p1_every == 0:
+                                from skills.trajectory_miner import TrajectoryMiner
+                                _csi = await build_csi_from_profile(services)
+                                async def _evolve_cb(**kw):
+                                    return await evolver.after_task(
+                                        task_description=kw["task_description"],
+                                        solution_summary=kw["task_description"][:200],
+                                        tools_used=kw["tools_used"],
+                                        solution_steps=kw["solution_steps"],
+                                        key_observations=kw["key_observations"],
+                                        complexity=kw["complexity"],
+                                        session_id=kw["session_id"])
+                                _miner = TrajectoryMiner(_gjs(), _csi, _evolve_cb)
+                                _props = await _miner.sweep()
+                                if _props:
+                                    logger.info("P1: solidified %d recurring trajectory(ies)", len(_props))
+                        except Exception as _p1e:
+                            logger.debug("P1 trajectory mining skipped: %s", _p1e)
+
+                        # P3: if this session previously loaded+executed a
+                        # skill, treat the current query as a possible APPEND
+                        # and merge its delta into that in-use skill (targeted,
+                        # not a fuzzy new-skill match).
+                        # GATE: the journal supersedes per session, so it can't
+                        # by itself tell "first use" from "follow-up append".
+                        # Require an explicit append marker to avoid merging the
+                        # ORIGINAL query back into the skill on first use. (A
+                        # loop-tracked "skill loaded in a PRIOR request" signal
+                        # would let us drop this heuristic — future work.)
+                        _APPEND_MARKERS = ("还要", "还需", "再加", "顺便", "另外",
+                                           "追加", "补充", "除此", "并且", "append",
+                                           "also", "additionally")
+                        _looks_append = any(m in (req.query or "") for m in _APPEND_MARKERS)
+                        try:
+                            _traj_p3 = _gjs().extract_trajectory(session_id) if _looks_append else None
+                            _active = (_traj_p3.get("loaded_skills") or [None])[0] if _traj_p3 else None
+                            if _active:
+                                from skills.append_merger import AppendMerger
+                                _csi3 = services.get("_csi")
+                                async def _merge_cb(*, skill_id, append_text, session_id, tools):
+                                    fb = await evolver._merge_into_existing_skill(
+                                        existing_id=skill_id,
+                                        task_description=append_text,
+                                        solution_steps=_traj_p3.get("steps", []),
+                                        tools_used=tools,
+                                        key_observations=_traj_p3.get("observations", []),
+                                        operator_prefs="")
+                                    return fb is not None
+                                _merger = AppendMerger(_csi3, _merge_cb)
+                                _mres = await _merger.maybe_merge(
+                                    append_text=req.query, session_id=session_id,
+                                    active_skill=_active,
+                                    session_tools=_traj_p3.get("tools", []))
+                                if _mres.merged:
+                                    logger.info("P3: merged append into skill '%s'", _mres.skill_id)
+                                    yield f"data: {json.dumps({'type':'skill_merged','skill_id':_mres.skill_id})}\n\n"
+                                    await asyncio.sleep(0)
+                        except Exception as _p3e:
+                            logger.debug("P3 append merge skipped: %s", _p3e)
 
                 # Include confirmed_facts so frontend can carry them to next query
                 _done_facts = getattr(loop, '_last_confirmed_facts', []) or []
@@ -2172,7 +2268,11 @@ async def _submit_hitl_decision(
                     _followup = await _runtime_loop.run(
                         query           = _followup_query,
                         session_id      = _session_for_followup,
-                        env_context     = {},
+                        # Synthesis turn: hard-block [DELEGATE:] (must compose
+                        # from the injected facts) — same flag the cross-agent
+                        # resume driver uses. Choice/clarification gates are
+                        # suppressed by run()'s non_interactive default.
+                        env_context     = {"_cross_agent_resume": True},
                         confirmed_facts = [],            # facts come from inject queue
                         working_set     = None,
                         tool_registry   = services.get("tool_registry") or {},

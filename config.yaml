@@ -847,6 +847,11 @@ skill_orchestration:
   preference_initial_confidence: 0.60 # confidence written on first choice
   preference_ttl_days:          90
   preference_auto_exclude_hitl: true  # high-risk (requires_hitl) skills never auto
+  # P1 trajectory mining: recurring trajectory → solidify into skill
+  trajectory_recurrence_threshold: 3    # cluster must recur >= this to solidify
+  trajectory_similarity_threshold: 0.5  # CSI trajectory-cluster link threshold
+  # P3 append merge: attribute append to in-use skill
+  append_attribution_floor:        0.45 # min CSI similarity to attribute (session-active overrides)
   ambiguity_max_choices:    5
 
   # SkillJournal — passive observability, no control-flow effect.

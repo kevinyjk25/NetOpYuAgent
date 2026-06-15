@@ -11,42 +11,65 @@ was supposed to enable was never actually checked. This test pins both:
      next turn's context_str still contains the skill content (eliminating
      the LLM's reason to re-emit SKILL_LOAD).
 
-We verify by inspecting source — the behavioral hooks (state.record_new_fact
-+ called_tools check) are guarded by easily-greppable comments.
+DESIGN EVOLUTION (2026-06): these guards used to be asserted in BOTH run()
+and stream() (count >= 2) because run() carried its own duplicated turn
+loop. run() is now a thin collector over stream() (single execution path —
+the duplication was deliberately deleted, also closing a safety gap where
+run() executed watch-listed tools without HITL). The guards therefore exist
+exactly ONCE, in _stream_impl; a third test pins run() as a wrapper so the
+duplicated-loop drift can never silently return.
 """
 import unittest
 from pathlib import Path
 
 
+def _src() -> str:
+    return Path("runtime/loop.py").read_text(encoding="utf-8")
+
+
 class TestSkillLoadCrossTurnDedup(unittest.TestCase):
     def test_skill_load_persists_as_confirmed_fact(self):
-        src = Path("runtime/loop.py").read_text(encoding="utf-8")
-        # Both run path (~960) and stream path (~2309) must call record_new_fact.
-        # Be tolerant of formatting/whitespace.
+        src = _src()
         self.assertIn("record_new_fact", src,
                       "expected state.record_new_fact to persist SKILL_LOAD detail")
         self.assertIn("[SKILL LOADED:", src,
                       "expected '[SKILL LOADED:' marker in the persisted fact")
-        # Count occurrences — both code paths should persist.
         n = src.count('f"[SKILL LOADED: {skill_id}]\\n{detail}"')
-        self.assertGreaterEqual(n, 2,
-                                f"expected SKILL LOADED fact persistence in BOTH "
-                                f"run() and stream() paths; found {n}")
+        self.assertGreaterEqual(n, 1,
+                                f"expected SKILL LOADED fact persistence in the "
+                                f"unified stream path; found {n}")
 
     def test_skill_load_cross_turn_guard_present(self):
-        src = Path("runtime/loop.py").read_text(encoding="utf-8")
-        # Cross-turn suppress check (the previously-missing enforcement).
+        src = _src()
         self.assertIn('f"SKILL_LOAD:{skill_id}" in called_tools', src,
                       "expected cross-turn SKILL_LOAD dedup against called_tools")
-        # Both code paths.
         n = src.count('f"SKILL_LOAD:{skill_id}" in called_tools')
-        self.assertGreaterEqual(n, 2,
-                                f"expected cross-turn SKILL_LOAD guard in BOTH "
-                                f"run() and stream() paths; found {n}")
+        self.assertGreaterEqual(n, 1,
+                                f"expected cross-turn SKILL_LOAD guard in the "
+                                f"unified stream path; found {n}")
+
+    def test_run_is_stream_collector_no_duplicate_loop(self):
+        """run() must remain a collector over stream() — if a turn loop
+        (while True + _call_llm) reappears inside run(), the drift class
+        this refactor eliminated has returned."""
+        src = _src()
+        i = src.find("    async def run(")
+        j = src.find("\n    # ------", i + 10)
+        body = src[i:j]
+        self.assertIn("self.stream(", body,
+                      "run() must delegate to stream()")
+        self.assertNotIn("while True", body,
+                         "run() must NOT contain its own turn loop")
+        self.assertNotIn("_call_llm", body,
+                         "run() must NOT call the LLM directly")
+        # The safety gap that motivated the refactor: HITL gating must apply
+        # to run() via stream(); a stop_hitl chunk maps to STOP_HITL.
+        self.assertIn("stop_hitl", body,
+                      "run() must surface stream's HITL gate as STOP_HITL")
 
 
-if __name__ == "__main__":
-    unittest.main(verbosity=2)
+
+
 
 
 class TestSkillLoadCompletion(unittest.TestCase):
@@ -83,3 +106,7 @@ class TestSkillLoadCompletion(unittest.TestCase):
     def test_tool_call_is_not_complete(self):
         from runtime.loop_helpers import is_complete
         self.assertFalse(is_complete("[TOOL:get_user_access] {}", [("get_user_access", {})]))
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)

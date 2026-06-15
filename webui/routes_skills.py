@@ -27,6 +27,105 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
     # Late import to avoid circular dependency on backend.py at module load
     from webui.backend import _identity   # noqa: F401 (used in some routes)
 
+    @app.post("/evolution/sweep")
+    async def evolution_sweep(request: Request):
+        """Manually trigger P1 (recurring-trajectory mining) and optionally P3
+        (append merge), for verification — bypasses the every-N-tasks counter
+        and the append-marker gate.
+
+        Body (all optional):
+          { "limit": 200, "session_id": "...", "append_text": "...",
+            "dry_run": true }
+        Returns what fired + why, so you can see the mechanism, not just results.
+        """
+        try:
+            body = {}
+            try:
+                body = await request.json()
+            except Exception:
+                pass
+            limit       = int(body.get("limit", 200))
+            session_id  = body.get("session_id")
+            append_text = body.get("append_text")
+            dry_run     = bool(body.get("dry_run", False))
+
+            evolver = services.get("skill_evolver")
+            if evolver is None:
+                raise HTTPException(503, "skill_evolver not available")
+
+            from webui.backend import build_csi_from_profile
+            from skills.trajectory_miner import TrajectoryMiner
+            from runtime.skill_journal import get_journal_store
+            jstore = get_journal_store()
+            csi = await build_csi_from_profile(services)
+
+            result: dict[str, Any] = {"embedder": (
+                "real" if services.get("embedder") else "none(tag+tool_set only)")}
+
+            async def _evolve_cb(**kw):
+                return await evolver.after_task(
+                    task_description=kw["task_description"],
+                    solution_summary=kw["task_description"][:200],
+                    tools_used=kw["tools_used"], solution_steps=kw["solution_steps"],
+                    key_observations=kw["key_observations"],
+                    complexity=kw["complexity"], session_id=kw["session_id"])
+            miner = TrajectoryMiner(jstore, csi, _evolve_cb)
+            clusters = miner.find_recurring(limit=limit)
+            result["p1"] = {
+                "recurring_clusters": [
+                    {"size": c.size, "tools": sorted(c.rep_tools),
+                     "sample_query": c.sample_query,
+                     "covered_by_skill": c.covered_by_skill}
+                    for c in clusters
+                ],
+                "threshold": miner.cfg.recurrence_threshold,
+            }
+            if not dry_run:
+                solidified = []
+                for c in clusters:
+                    p = await miner.solidify(c)
+                    if p:
+                        solidified.append(getattr(p, "skill_id", str(p)))
+                result["p1"]["solidified"] = solidified
+
+            if session_id and append_text:
+                from skills.append_merger import AppendMerger
+                traj = jstore.extract_trajectory(session_id)
+                active = (traj.get("loaded_skills") or [None])[0]
+                async def _merge_cb(*, skill_id, append_text, session_id, tools):
+                    fb = await evolver._merge_into_existing_skill(
+                        existing_id=skill_id, task_description=append_text,
+                        solution_steps=traj.get("steps", []), tools_used=tools,
+                        key_observations=traj.get("observations", []), operator_prefs="")
+                    return fb is not None
+                merger = AppendMerger(csi, _merge_cb)
+                mres = await merger.maybe_merge(
+                    append_text=append_text, session_id=session_id,
+                    active_skill=active, session_tools=traj.get("tools", []))
+                result["p3"] = {
+                    "active_skill": active, "merged": mres.merged,
+                    "skill_id": mres.skill_id, "reason": mres.reason,
+                    "similarity": round(mres.similarity, 3),
+                }
+            return JSONResponse(content=result)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/evolution/sweep failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/evolution/space")
+    async def evolution_space():
+        """Dump the CSI capability space (clusters + per-capability domain/
+        tool_set) for auditing — the interpretable index, not a black box."""
+        try:
+            from webui.backend import build_csi_from_profile
+            csi = await build_csi_from_profile(services)
+            return JSONResponse(content=csi.export_space())
+        except Exception as exc:
+            logger.warning("/evolution/space failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
     @app.get("/skill_journal/recent")
     async def skill_journal_recent(limit: int = 20):
         """Return the most recent SkillJournal entries (newest first)."""

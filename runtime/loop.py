@@ -835,296 +835,104 @@ class AgentRuntimeLoop:
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
+        non_interactive: bool = True,
     ) -> LoopResult:
-        env_ctx  = env_context or {}
-        tool_reg = tool_registry or {}
+        """Non-streaming entry point — a thin COLLECTOR over stream().
 
-        # P1: forked delegation — inherit parent context
-        if delegation_mode == DelegationMode.FORKED and parent_state is not None:
-            fork_ctx      = self.build_fork_context(parent_state, self._cfg.default_fork_context)
-            confirmed_facts = fork_ctx.get("confirmed_facts", confirmed_facts or [])
-            if not working_set:
-                working_set = fork_ctx.get("working_set", [])
-            logger.info(
-                "RuntimeLoop: forked delegation — inheriting %d facts from parent",
-                len(confirmed_facts),
-            )
+        DESIGN (2026-06, replaces the former ~300-line duplicated loop):
+        run() used to carry its own copy of the turn loop, which drifted from
+        _stream_impl as features landed there — by audit time it lacked
+        preference learning, ambiguity HITL, journal, DELEGATE handling, and
+        critically the **hitl_tool_names watch-list gate**, meaning the
+        non-streaming path could execute destructive tools WITHOUT operator
+        approval. Wrapping stream() removes the entire drift class: every
+        feature and every safety gate applies identically to both paths.
 
-        state = LoopState()
-        # Stash the original user query on the state so handlers further
-        # down (notably _handle_delegate, which builds the task to send
-        # to a peer agent) can reach it without changing every helper's
-        # signature. Peer-side HITL cards use this as `source_query` so
-        # the peer operator sees what the original user asked.
-        setattr(state, "user_query", query)
-        # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
-        from runtime.stop_policy import FactsLedger as _FL
-        state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
-        setattr(state, "working_set", list(working_set or []))
+        Non-streaming interaction semantics:
+          * Tool-approval HITL (watch-listed destructive tool, or a skill
+            with requires_hitl): NEVER suppressed. The stream ends with a
+            stop_hitl chunk; run() returns outcome=STOP_HITL with the gate
+            message as final_response and the structured card in
+            `pending_interaction` (attached attribute) so API callers can
+            surface it. The action is NOT executed.
+          * Skill-ambiguity choice card + clarification question: with
+            non_interactive=True (default) these are suppressed via env
+            flags — an API caller cannot click a card; the LLM proceeds
+            with its best judgment (equivalent to the operator choosing
+            "no specific skill"). Pass non_interactive=False to receive
+            them: ambiguity then also surfaces as STOP_HITL, and a
+            clarification question becomes the (graceful) response text —
+            the caller answers in its next run() call.
+          * Cross-agent park (peer raised an async HITL): returns
+            outcome=STOP_HITL with the interim message; the stage-2 result
+            callback delivers the final answer via the resumption channel.
+        """
+        env_ctx = dict(env_context or {})
+        if non_interactive:
+            env_ctx.setdefault("_skill_choice_resolved", True)   # no choice card
+            env_ctx.setdefault("_clarification_resolved", True)  # no chat-turn question
 
-        chunks: list[str] = []
-        last_tool_result  = ""
-        tool_outputs: dict[str, str] = {}   # persists across turns — tool results feed next LLM call
-        # Seed called_tools from any prior tool calls visible in memory context.
-        # This prevents the LLM from re-calling the same tool+args when memory
-        # already has the result from a previous stream() invocation.
-        # called_tools uses _call_key(name, args) fingerprints — not bare names.
-        # Also seeded from TOOL_EXEC ledger in confirmed_facts (from prior HTTP requests)
-        # so tools that ran in previous rounds are not re-executed.
-        called_tools: set[str] = set()
-        _known_stores: dict[str, str] = {}  # ref_id → tool_name (for context injection)
-        import re as _re2
-        for _fact in (list(confirmed_facts) if confirmed_facts is not None else []):
-            if _fact.startswith("TOOL_EXEC: "):
-                # Parse: "TOOL_EXEC: tool_name|{args} → ref=abc size=N"
-                _body = _fact[len("TOOL_EXEC: "):]
-                _arrow = _body.find(" → ")
-                if _arrow > 0:
-                    _call_part = _body[:_arrow].strip()
-                    _info_part = _body[_arrow+3:].strip()
-                    # Seed called_tools with the _call_key fingerprint
-                    called_tools.add(_call_part)
-                    # Extract ref_id if present
-                    _ref_m = _re2.search(r"ref=(\w+)", _info_part)
-                    if _ref_m:
-                        _tool_n = _call_part.split("|")[0]
-                        _known_stores[_ref_m.group(1)] = _tool_n
-        if called_tools:
-            logger.info("stream: seeded %d prior tool calls from ledger; %d known stores",
-                        len(called_tools), len(_known_stores))
+        tokens:   list[str] = []
+        facts:    list[str] = list(confirmed_facts or [])
+        t_summ:   list[str] = []
+        unres:    list[str] = []
+        turns                = 0
+        outcome              = StopOutcome.STOP_GRACEFUL
+        stop_msg             = ""
+        pending: Optional[dict[str, Any]] = None
 
-        while True:
-            state.turns += 1
-            memory_results = await self._retrieve_memory(query, session_id)
-
-            # ── L2 Snip (Claude-Code-inspired, added 2026-05) ──────────────
-            # See stream() copy of this block (~line 1300) for full rationale.
-            # Note: run() does not yield SSE chunks, so we only log the snip
-            # event — it shows up in the audit log via the snip function's
-            # logger.info() call.
-            try:
-                _budget = getattr(self._cfg, "budget", None)
-                _snip_cap = (
-                    getattr(_budget, "snip_tool_outputs_char_budget", 0)
-                    if _budget else 0
-                )
-                _keep_recent = (
-                    getattr(_budget, "snip_keep_recent", 5)
-                    if _budget else 5
-                )
-                if _snip_cap > 0 and tool_outputs:
-                    from runtime.context_budget import try_snip_tool_outputs as _snip
-                    tool_outputs, _freed = _snip(
-                        tool_outputs,
-                        target_char_budget = _snip_cap,
-                        keep_recent        = _keep_recent,
-                    )
-                    # _freed > 0 is already logged by _snip itself.
-            except Exception as _snip_exc:
-                logger.debug("L2 Snip skipped in run() (%s) — non-fatal", _snip_exc)
-
-            # NOTE: We intentionally do NOT seed called_tools from memory context.
-            # Memory may mention a prior tool call on device X, but we still need
-            # to allow that tool to run for devices Y and Z in the current turn.
-            # Deduplication is by _call_key (name+args), so the same tool with
-            # different args is allowed; same call with same args is blocked.
-
-            # P2: skill catalog summary always prepended (cache-stable prefix)
-            skill_section = ""
-            if self._skill_catalog:
-                skill_section = self._skill_catalog.format_summary()
-
-            # Context assembly (Item 4 4c): unified legacy/priority path.
-            context_str = self._assemble_context(
-                memory_results=memory_results,
-                tool_outputs=tool_outputs,
-                confirmed_facts=state.confirmed_facts,
-                working_set=working_set,
-                env_context=env_ctx,
-                skill_section=skill_section,
-            )
-
-            # Attach live tool registry to state so _call_llm / llm_engine can
-            # inject it into the system prompt (shows uploaded tools to the LLM)
-            state._tool_registry = tool_reg  # type: ignore[attr-defined]
-            llm_response = await self._call_llm(query, context_str, state)
-            state.tokens_consumed += self._budget._estimate_tokens(context_str + llm_response)
-            state.record_response(llm_response)
-            chunks.append(llm_response)
-
-            # P1: detect SKILL_LOAD directives and expand detail on demand.
-            # Use centralized parser for whitespace tolerance.
-            _skill_loads_this_turn_r: set[str] = set()
-            from runtime.directive_parser import find_skill_load_names
-            for skill_id in find_skill_load_names(llm_response):
-                if skill_id in _skill_loads_this_turn_r:
-                    continue
-                # Cross-turn dedup: if a previous turn already loaded this
-                # skill, do NOT honor a repeat — the LLM is in a loop (it
-                # forgot the loaded detail because context_str is rebuilt
-                # every turn and the appended detail didn't survive).
-                if f"SKILL_LOAD:{skill_id}" in called_tools:
-                    logger.warning(
-                        "Turn %d: SKILL_LOAD:%s suppressed — already loaded "
-                        "in a prior turn this session (LLM is re-emitting)",
-                        state.turns, skill_id,
-                    )
-                    continue
-                _skill_loads_this_turn_r.add(skill_id)
-                called_tools.add(f"SKILL_LOAD:{skill_id}")
-                if self._skill_catalog:
-                    detail = self._skill_catalog.load_detail(skill_id)
-                    if detail:
-                        context_str += "\n\n" + detail
-                        # Persist as a confirmed fact so the NEXT turn's
-                        # rebuilt context still contains the skill detail
-                        # (without this, the LLM re-emits SKILL_LOAD endlessly
-                        # — the DC SKILL_LOAD death-loop bug).
-                        state.record_new_fact(
-                            f"[SKILL LOADED: {skill_id}]\n{detail}"
-                        )
-                        logger.debug("SkillCatalog: loaded detail for %s", skill_id)
-
-            # P1+: detect ALIAS directives. When the LLM discovers that the
-            # user's term doesn't match the real entity name (e.g. user said
-            # "core-01" but the actual device is "sw-acc-01"), it can emit
-            # `[ALIAS: user_term = system_term]` so the correction survives
-            # to subsequent turns. Without this, the LLM forgets in turn N+1
-            # and starts re-resolving from scratch, often regenerating bad
-            # configs against the user's wrong term.
-            #
-            # Stored as confirmed_facts entries; format kept stable so the
-            # next turn's prompt builder (see _format_confirmed_facts) can
-            # surface them prominently right after the user query.
-            _alias_re = re.compile(
-                r"\[ALIAS\s*:\s*([^=\]]+?)\s*=\s*([^\]]+?)\s*\]"
-            )
-            for _m in _alias_re.finditer(llm_response):
-                _user_term, _sys_term = _m.group(1).strip(), _m.group(2).strip()
-                # Skip degenerate / identical aliases
-                if not _user_term or not _sys_term or _user_term == _sys_term:
-                    continue
-                _alias_fact = f"ENTITY_ALIAS: '{_user_term}' actually refers to '{_sys_term}'"
-                # Dedup: if we've already recorded the same alias, skip
-                if not any(
-                    f == _alias_fact for f in state.confirmed_facts
-                ):
-                    state.confirmed_facts.append(_alias_fact)
-                    logger.info(
-                        "ALIAS recorded (turn=%d): %r → %r",
-                        state.turns, _user_term, _sys_term,
-                    )
-
-            # Execute tool calls — one per turn only
-            _single = self._parse_tool_call(llm_response)
-            tool_calls = [_single] if _single else []
-            new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
-
-            # Repeat-tool-call recovery (mirrors stream() path; see comment there).
-            # When the LLM re-requests an already-executed tool, dedup empties
-            # new_tool_calls and _is_complete would treat the prelude prose as
-            # a final answer. Force a nudge turn instead.
-            if tool_calls and not new_tool_calls and state.turns < 3:
-                dup_name, dup_args = tool_calls[0]
-                logger.warning(
-                    "run: LLM re-requested already-executed tool %s (turn=%d) — nudging",
-                    dup_name, state.turns,
-                )
-                if dup_name == "read_stored_result":
-                    _nudge = (
-                        "_NUDGE: You just requested read_stored_result with the same "
-                        f"ref_id+offset as a prior call ({dup_args}). That page is already "
-                        "in your context. ANALYSE what you can see, OR request a different "
-                        "offset. Do not re-emit the same read."
-                    )
-                else:
-                    _nudge = (
-                        f"_NUDGE: You just requested [TOOL:{dup_name}] with the same "
-                        "arguments as a prior call. Use the existing result already in "
-                        "your context; do not re-emit the same tool call."
-                    )
-                state.confirmed_facts.append(_nudge)
+        async for chunk in self.stream(
+            query=query, session_id=session_id, env_context=env_ctx,
+            confirmed_facts=confirmed_facts, working_set=working_set,
+            tool_registry=tool_registry, delegation_mode=delegation_mode,
+            parent_state=parent_state,
+        ):
+            if not isinstance(chunk, dict):
                 continue
+            tok = chunk.get("token")
+            if tok:
+                tokens.append(str(tok))
+            if chunk.get("type") == "llm_trace":
+                turns = max(turns, int(chunk.get("turn", 0) or 0))
+            if chunk.get("type") == "confirmed_facts":
+                facts  = list(chunk.get("confirmed_facts", facts))
+                t_summ = list(chunk.get("tool_summaries", []))
+                unres  = list(chunk.get("unresolved", []))
+                turns  = max(turns, int(chunk.get("turns", 0) or 0))
+            if chunk.get("stop_hitl"):
+                outcome  = StopOutcome.STOP_HITL
+                pending  = chunk
+                stop_msg = str(chunk.get("message") or chunk.get("summary") or "")
+            if chunk.get("type") == "cross_agent_parked":
+                outcome = StopOutcome.STOP_HITL
+                pending = chunk
+            # stop-policy terminal carries its outcome explicitly (additive
+            # field, 2026-06) — budget stops etc. map through faithfully.
+            if chunk.get("outcome") and chunk.get("node") == "runtime_loop":
+                try:
+                    outcome = StopOutcome(chunk["outcome"])
+                except ValueError:
+                    pass
+                if chunk.get("message"):
+                    stop_msg = str(chunk["message"])
 
-            for tool_name, tool_args in new_tool_calls:
-                state.record_tool_call(tool_name)
-                called_tools.add(_call_key(tool_name, tool_args))
-                _journal_tool_start_ts = (
-                    __import__("time").monotonic()
-                    if state._skill_journal is not None else None
-                )
-
-                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
-                # When a name exists in both catalogs (e.g. list_devices is both a skill
-                # description AND a callable tool), the tool takes priority.
-                _is_skill_only = False
-                if self._skill_catalog and tool_name not in tool_reg:
-                    try:
-                        _is_skill_only = any(
-                            s.skill_id == tool_name
-                            for s in self._skill_catalog.list_skills()
-                        )
-                    except Exception:
-                        pass
-                if _is_skill_only:
-                    raw = (
-                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
-                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
-                        f"then call the individual tools it describes."
-                    )
-                    logger.warning("run: LLM called skill-only '%s' as tool — injecting error", tool_name)
-                else:
-                    raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-                # Same exclusion as ToolRouter — don't double-store pagination
-                # outputs. The 'stored' label here is what the LLM sees in the
-                # next turn's context; for paged reads we want the LLM to see
-                # the actual page content, not yet another [STORED:] reference.
-                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
-                _is_page_or_ref = (
-                    raw.startswith("[STORED:")
-                    or raw.startswith("# Stored result ref_id=")
-                )
-                if tool_name in _SKIP_STORE or _is_page_or_ref:
-                    stored = raw   # pass page content through unchanged
-                else:
-                    stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
-                last_tool_result = raw
-
-                # P1: post-verification after each tool call
-                if self._cfg.enable_post_verification and tool_name != "read_stored_result":
-                    post = await self.post_verify(tool_name, raw, state.confirmed_facts)
-                    if not post.passed:
-                        logger.warning("Post-verify failed: %s", post.reason)
-                        state.unresolved_points.append(f"Post-verify failed: {post.reason}")
-
-            decision = self._policy.evaluate(state)
-            if decision.should_stop:
-                final = self._format_final(chunks, decision)
-                return LoopResult(
-                    outcome=decision.outcome,
-                    final_response=final,
-                    confirmed_facts=state.confirmed_facts,
-                    working_set=getattr(state, "working_set", []),
-                    unresolved=state.unresolved_points,
-                    tool_summaries=state.tool_summaries,
-                    turns_taken=state.turns,
-                )
-
-            if self._is_complete(llm_response, new_tool_calls,
-                                  skill_load_honored=bool(_skill_loads_this_turn_r)):
-                # tools), which means the task is done — use STOP_GRACEFUL, not
-                # CONTINUE. CONTINUE means "keep looping"; callers check this
-                # value to decide whether to trigger Hermes post-processing.
-                return LoopResult(
-                    outcome=StopOutcome.STOP_GRACEFUL,
-                    final_response="\n".join(chunks),
-                    confirmed_facts=state.confirmed_facts,
-                    working_set=getattr(state, "working_set", []),
-                    unresolved=state.unresolved_points,
-                    tool_summaries=state.tool_summaries,
-                    turns_taken=state.turns,
-                )
+        final = "".join(tokens).strip()
+        if not final:
+            final = stop_msg
+        result = LoopResult(
+            outcome=outcome,
+            final_response=final,
+            confirmed_facts=facts,
+            working_set=list(working_set or []),
+            unresolved=unres,
+            tool_summaries=t_summ,
+            turns_taken=turns,
+        )
+        if pending is not None:
+            # Attach the structured gate card for API callers; not a
+            # LoopResult field to keep the dataclass contract unchanged.
+            setattr(result, "pending_interaction", pending)
+        return result
 
     # ------------------------------------------------------------------
     # Priority context assembly (Tier 2 #3)
@@ -2295,12 +2103,17 @@ class AgentRuntimeLoop:
                     return
 
             # ── Type #3 CLARIFICATION gate (Item 4 4d → _run_clarification_gate) ──
-            async for _clar_chunk in self._run_clarification_gate(
-                ctx, memory_results, selected_skills,
-            ):
-                if _clar_chunk.get('_clarification_terminal'):
-                    return   # gate asked the operator; end this turn's stream
-                yield _clar_chunk
+            # _clarification_done (env_ctx["_clarification_resolved"]) was read
+            # at stream start but never consulted — dead flag, fixed 2026-06:
+            # callers (non-interactive run(), or a prior round that already
+            # asked) can now suppress the gate explicitly.
+            if not _clarification_done:
+                async for _clar_chunk in self._run_clarification_gate(
+                    ctx, memory_results, selected_skills,
+                ):
+                    if _clar_chunk.get('_clarification_terminal'):
+                        return   # gate asked the operator; end this turn's stream
+                    yield _clar_chunk
 
             yield {"node_step": f"Turn {state.turns}: analysing", "node": "runtime_loop"}
 
@@ -2874,13 +2687,17 @@ class AgentRuntimeLoop:
 
             decision = self._policy.evaluate(state)
             if decision.should_stop:
-                yield {"message": self._format_final([], decision), "node": "runtime_loop"}
+                yield {"message": self._format_final([], decision), "node": "runtime_loop",
+                       "outcome": decision.outcome.value}
                 # Write tool execution ledger into confirmed_facts for next-round reuse
                 _ledger = _build_tool_ledger(tool_outputs, tool_reg,
                                               getattr(state, "_tool_outputs_raw", {}))
                 # extend() on FactsLedger routes by prefix; on plain list it's native
                 state.confirmed_facts.extend(_ledger)
-                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts),
+                       "tool_summaries": list(state.tool_summaries),
+                       "unresolved": list(state.unresolved_points),
+                       "turns": state.turns}
                 return
 
             if _needs_synthesis_turn:
@@ -2962,7 +2779,10 @@ class AgentRuntimeLoop:
                 # NOTE: turn persistence (after_turn) is handled by the backend's
                 # post-turn hook in webui/backend.py:600 via dtm.after_turn(). Do NOT
                 # write here — it would create duplicate long_term_chunks entries.
-                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts),
+                       "tool_summaries": list(state.tool_summaries),
+                       "unresolved": list(state.unresolved_points),
+                       "turns": state.turns}
                 return
 
     async def _retrieve_memory(self, query: str, session_id: str) -> list[Any]:
