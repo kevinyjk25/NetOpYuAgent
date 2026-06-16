@@ -35,7 +35,11 @@ def _read(rel: str) -> str:
 class TestOutboundDispatcherTerminalState(unittest.TestCase):
     """Dispatcher must write a terminal state to the outbound task on
     stream end, in a try/finally so cancellation / exceptions still
-    update the row."""
+    update the row.
+
+    NOTE (2026-06): now the lightweight DELETION-GUARD layer. The actual
+    state-transition BEHAVIOR is verified by driving the real dispatch()
+    generator in test_delegation_dispatcher_behavior.py."""
 
     def setUp(self):
         self.src = _read("task/inter/coordinator.py")

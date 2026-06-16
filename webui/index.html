@@ -932,6 +932,7 @@ Type a query below. The agent will:
           <button onclick="evolutionSweep(true)" title="P1: detect recurring trajectories without generating" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🔍 P1 detect (dry-run)</button>
           <button onclick="evolutionSweep(false)" title="P1: detect AND solidify recurring trajectories into skills" style="background:none;border:1px solid var(--accent);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">⚙ P1 solidify</button>
           <button onclick="evolutionSpace()" title="Dump the CSI capability space (clusters + tool sets)" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--dim);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🗺 CSI space</button>
+          <button onclick="evolutionGaps()" title="Aggregate declared capability gaps — what the agent could NOT do (demand signal for new tools)" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--warn,#d98e00);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🕳 capability gaps</button>
         </div>
         <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
           <span style="font-size:10px;color:var(--dim);font-family:var(--mono)">P3 merge:</span>
@@ -4343,6 +4344,21 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
       const lines = ['CSI capability space — clusters:'];
       Object.entries(r.clusters || {}).forEach(([k, v]) =>
         lines.push(`  ${k}: ${(v.members||[]).length} member(s) [${(v.members||[]).slice(0,6).join(', ')}${(v.members||[]).length>6?'…':''}]`));
+      _evoShow(lines.join('\n') + '\n\n--- raw ---\n' + JSON.stringify(r, null, 2));
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+
+  async function evolutionGaps() {
+    _evoShow('Loading capability gaps…');
+    try {
+      const resp = await fetch('/webui/evolution/gaps');
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      const lines = [`Capability gaps — ${r.total_gap_events} event(s), ${r.distinct_gaps} distinct`,
+                     '(what the agent could NOT do — demand signal for new tools)'];
+      (r.gaps || []).forEach(g =>
+        lines.push(`  ×${g.count}  ${g.detail}${g.sample_query ? '   ‹' + g.sample_query + '›' : ''}`));
+      if (!(r.gaps || []).length) lines.push('  (none recorded yet)');
       _evoShow(lines.join('\n') + '\n\n--- raw ---\n' + JSON.stringify(r, null, 2));
     } catch (e) { _evoShow('Request failed: ' + e); }
   }

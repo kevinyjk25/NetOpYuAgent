@@ -2162,17 +2162,18 @@ class AgentRuntimeLoop:
                 strip_tool_batch_directives as _strip_batch,
                 strip_delegate_directives as _strip_delegate,
                 strip_skill_load_directives as _strip_skill,
+                strip_capability_gap as _strip_capgap,
             )
-            _visible = _strip_skill(
+            _visible = _strip_capgap(_strip_skill(
                 _strip_delegate(_strip_batch(_strip_tools(llm_response)))
-            ).strip()
+            )).strip()
             # Also drop any per-line residue (e.g. a bare "[TOOL:foo]"
             # with no args dict that the multi-strippers skipped because
             # the open-brace lookahead didn't fire).
             _visible_lines = [
                 ln for ln in _visible.splitlines()
                 if not re.match(
-                    r'\s*\[\s*(?:TOOL(?:_BATCH)?|DELEGATE|SKILL_LOAD)\s*:',
+                    r'\s*\[\s*(?:TOOL(?:_BATCH)?|DELEGATE|SKILL_LOAD|CAPABILITY_GAP)\s*:',
                     ln, re.IGNORECASE)
             ]
             _visible = "\n".join(_visible_lines).strip()
@@ -2184,6 +2185,38 @@ class AgentRuntimeLoop:
                     yield {"token": _visible[_i:_i+80]}
                     await asyncio.sleep(0)
             # If the entire response was tool calls (no prose), yield nothing —
+
+            # ── [CAPABILITY_GAP:] handling (C protocol) ──────────────────
+            # The LLM declared a required capability is missing (and not
+            # delegable). Record it structurally, surface it, and stop
+            # gracefully — do NOT let the loop spin trying alternatives.
+            from runtime.directive_parser import (
+                find_capability_gap as _find_cap_gap,
+            )
+            _cap_gap = _find_cap_gap(llm_response)
+            if _cap_gap is not None:
+                logger.info("Turn %d: CAPABILITY_GAP declared — %s",
+                            state.turns, _cap_gap[:160])
+                if state._skill_journal is not None:
+                    try:
+                        state._skill_journal.record_capability_gap(
+                            turn=state.turns, detail=_cap_gap, query=query)
+                    except Exception as _je:
+                        logger.debug("journal.record_capability_gap failed: %s", _je)
+                # record as a structured unresolved point (now a live field —
+                # _format_final surfaces "Still unresolved: ?")
+                state.unresolved_points.append(
+                    f"缺少能力: {_cap_gap}" if _cap_gap else "缺少完成请求所需的能力")
+                yield {"type": "capability_gap", "detail": _cap_gap,
+                       "node": "runtime_loop"}
+                await asyncio.sleep(0)
+                # terminal facts chunk so run()/UI can finalize
+                yield {"type": "confirmed_facts",
+                       "confirmed_facts": list(state.confirmed_facts),
+                       "tool_summaries": list(state.tool_summaries),
+                       "unresolved": list(state.unresolved_points),
+                       "turns": state.turns}
+                return
 
             # ── [DELEGATE:agent_id] handling (Phase 2B) ──────────────────
             # Delegation is MUTUALLY EXCLUSIVE with tool calls in one turn

@@ -1,7 +1,11 @@
 # NetOpYuAgent — 功能点 × 测试覆盖矩阵
 
 > 用途:盘清全部功能点 + 暴露测试盲区(供后续补齐)。
-> 生成日期:2026-06 · 基于 enterprise-dev 工作树代码事实(334 passed, 41 测试文件)。
+> 生成日期:2026-06 · 基于 enterprise-dev 工作树代码事实(376 passed, 48 测试文件)。
+> 更新(2026-06):补齐 6 个场景级盲区(S1/S2/S7/S8/S10/S12)+ webui backend 全栈集成测试。
+> 新增 6 个测试文件(scenario_*/config_consistency/backend_integration)。
+> backend SSE 包装层从"仅手动"升级为全栈 TestClient 行为测试(真实 executor+loop+fake LLM)。
+> 剩余盲区:前端零自动化、若干辅助模块(hitl_core/chunk_queue 看门狗、memory auto-consolidate、journal_consumer 后台消费)。
 
 ## 梳理层级说明
 
@@ -23,13 +27,13 @@
 
 ## S1 — 单 agent 诊断闭环(查询→检索→工具→HITL→答复)
 - **模块链**: webui/backend → runtime/loop → retrieval → integrations/router → hitl_core → memory
-- **测试**: 🟢 行为 — `test_run_wrapper.py`(graceful + 工具执行 + HITL拦截)、`test_handle_tools_phase.py`
-- **盲区**: 完整"检索→选工具→执行→记忆写回"的单一端到端行为测试缺失(各段分散在不同文件);**建议补 1 个贯穿测试**。
+- **测试**: 🟢 行为 — `test_scenario_diagnosis_loop.py`(工具→结果回注→合成,贯穿) + `test_run_wrapper.py`、`test_handle_tools_phase.py`
+- **盲区**: ✅ 已补贯穿测试(2026-06)。剩:真实 retrieval 后端注入的端到端(当前用 in-proc registry)。
 
 ## S2 — 破坏性工具 HITL 审批(拦截→卡片→批准→执行)
 - **模块链**: runtime/loop(watch-list gate)→ hitl_core/router → hitl_core/store → webui/routes_hitl
-- **测试**: 🟢 行为 — `test_run_wrapper.py::test_watchlisted_tool_returns_stop_hitl_not_executed`、`test_handle_tools_phase.py`、`test_production_safety.py`
-- **盲区**: 批准后的 follow-up turn(操作员 approve→LLM 用新结果续跑)端到端缺行为测试;`test_h2_async_*` 覆盖的是 H2 异步路径,非同步审批路径。
+- **测试**: 🟢 行为 — `test_run_wrapper.py::test_watchlisted_tool_returns_stop_hitl_not_executed`、`test_scenario_diagnosis_loop.py`(非HITL续跑链)、`test_handle_tools_phase.py`、`test_production_safety.py`
+- **盲区**: 同步审批的 approve→follow-up turn 端到端仍缺(`test_h2_async_*` 覆盖异步路径);非HITL多轮续跑链已补。
 
 ## S3 — 多目标破坏性批量 HITL([TOOL_BATCH]→N张卡片→批量批准)
 - **模块链**: runtime/loop → profiles/network_batch_resolver → hitl_core/batch
@@ -39,7 +43,7 @@
 ## S4 — 跨 agent 委派(LAN→DC,[DELEGATE]→A2A→结果回注)
 - **模块链**: runtime/loop → task/delegation → registry → A2A transport → 对端 hitl_core/executor
 - **测试**: 🟢 行为 — `test_delegation_e2e.py`、`test_delegation_wiring.py`、`test_delegation_a2a_unwrap.py`、`test_delegation_gate.py`;🟡 源码 — `test_delegation_provenance.py`、`test_delegation_outbound_state.py`、`test_delegation_no_double_count.py`
-- **盲区**: outbound_state / no_double_count / provenance 是**源码断言**,真实状态流转只在🔵双agent实跑验过 — 建议把这三个补成行为测试(用 fake dispatcher)。
+- **盲区**: ✅ 已补 `test_delegation_dispatcher_behavior.py`(fake _stream_request 驱动真实 dispatch,验三种终态+结果累积+no-double-count)+ provenance 改为直接 import 真函数。源码断言降级为 deletion-guard 层。
 
 ## S5 — 跨 agent HITL 透传(模式B:对端审批→回调→originator自动续跑)
 - **模块链**: task/delegation → A2A → 对端 hitl_core → task/inter/cross_agent_hitl → webui resume driver → /chat/resumptions
@@ -54,12 +58,12 @@
 ## S7 — 能力缺口诚实声明(C协议:[CAPABILITY_GAP]→记录→优雅停止→账本)
 - **模块链**: llm_engine(prompt铁律)→ runtime/loop → runtime/directive_parser → runtime/skill_journal → webui/routes_skills(/evolution/gaps)
 - **测试**: 🟢 行为 — `test_capability_gap.py`(解析/loop记录+停止+strip/stream事件/journal事件)
-- **盲区**: 🔴 **长链场景(n工具需求,k<n可用)未覆盖** — C只在LLM自报时触发;B/A方案(P2-1)未实现故无测试。/evolution/gaps 聚合端点🔴无测试。
+- **盲区**: 🟢 长链场景已补 `test_capability_gap.py::TestCapabilityGapLongChain`(做前缀→声明缺口的运行时安全网);结构性预检 B/A(P2-1)未实现。/evolution/gaps 聚合端点🔴仍无测试。
 
 ## S8 — 技能进化1:选择困难→学习→渐进自动
 - **模块链**: skills/catalog(歧义判定)→ runtime/loop(偏好召回+stage)→ skills/skill_preference → memory → hitl(选择卡)
-- **测试**: 🟢 行为 — `test_skill_preference.py`(12,含真实后端回归)
-- **盲区**: 🔴 **歧义→HITL选择卡的端到端触发未被行为测试**(我们发现实际走了"LLM从prompt候选自选"路径而非选择卡,这个张力P1-6待解决);loop里的偏好boost+stage注入只在skill_preference单测里,未在loop端到端验。
+- **测试**: 🟢 行为 — `test_scenario_skill_ambiguity.py`(歧义→选择卡触发 + non_interactive抑制) + `test_skill_preference.py`(12,含真实后端回归)
+- **盲区**: ✅ 选择卡门行为已补(2026-06,确认门逻辑正确,之前"实跑没出卡"是高置信LLM抢先自选,非门坏)。剩:HITL-vs-自选张力的产品决策(P1-6)。
 
 ## S9 — 技能进化P0/P1/P3:真实轨迹→固化/合并
 - **模块链**: runtime/skill_journal(extract_trajectory)→ skills/capability_index(CSI聚类)→ skills/trajectory_miner(P1)/append_merger(P3)→ skills/evolver → webui(/evolution/sweep)
@@ -68,7 +72,8 @@
 
 ## S10 — 用户中断(Stop按钮→中止流→保留部分答复)
 - **模块链**: webui前端(AbortController)→ backend SSE生成器 → runtime/loop(GeneratorExit清理)→ stop_policy(USER_CANCELLED)
-- **测试**: 🟡 部分 — `test_sprint3_pre.py`含相关;**🔴 中止行为本身无端到端测试**(前端abort→backend cancel→partial保留)。
+- **测试**: 🟢 行为 — `test_scenario_user_interrupt.py`(consumer中止→SESSION_END abort→partial保留 的 loop 级契约);前端abort→backend USER_CANCELLED 整链仍🔵手动。
+- **盲区**: webui SSE 包装层的 USER_CANCELLED 整链需全 app,仍手动验。
 
 ## S11 — 周期任务调度(schedule_create→tick→执行tool/query)
 - **模块链**: scheduler/service ← runtime/loop(tool_invoker/query_runner注入)→ webui/routes_schedule
@@ -77,8 +82,8 @@
 
 ## S12 — 配置驱动启停(profile选择→工具/技能/HITL名单加载)
 - **模块链**: config → profiles/base → ToolLoader/SkillLoader → policy_engine → main.py 装配
-- **测试**: 🟢 行为 — `test_profiles.py`(22)、`test_l0_l1_separation.py`、`test_multi_agent_identity.py`(🟡源码)
-- **盲区**: config三处一致性(dataclass/loader/yaml)无专门测试 — 我们已踩过2次"yaml键被静默丢弃"的坑,**强烈建议补一个config完整性测试**。
+- **测试**: 🟢 行为 — `test_config_consistency.py`(自动发现全部dataclass子配置,校验yaml键无静默丢弃 + 值映射) + `test_profiles.py`(22)、`test_l0_l1_separation.py`
+- **盲区**: ✅ config三处一致性已补(2026-06,通用自发现,新增配置节自动覆盖)。
 
 ---
 
@@ -138,22 +143,24 @@
 | 功能点 | 形态 | 测试文件 |
 |--------|------|----------|
 | delegation.py: build_delegate_fn + TaskStore门 | 🟢 行为 | test_delegation_gate, test_delegation_wiring |
-| delegation.py: outbound状态流转 | 🟡 源码 | test_delegation_outbound_state **建议补行为** |
+| delegation.py: outbound状态流转(RUNNING→COMPLETED/FAILED/AWAITING_PEER_HITL) | 🟢 行为 | test_delegation_dispatcher_behavior(驱动真实dispatch) |
 | inter/cross_agent_hitl.py: 跨agent HITL桥 | 🟢 行为 | test_cross_agent_hitl |
 | schemas.py: TaskDefinition/TaskState | 🟢 行为 | (经委派测试使用) |
 | A2A event unwrap | 🟢 行为 | test_delegation_a2a_unwrap |
 | 心跳防stall | 🟢 行为 | test_dispatcher_heartbeat, test_delegate_heartbeat_no_truncate |
 
-## retrieval/ — 检索
+## retrieval/ — 检索 (本轮全层补齐)
 | 功能点 | 形态 | 测试文件 |
 |--------|------|----------|
-| embedding.py: 向量检索 | 🔵 间接 | (经loop使用)**🔴 无直接单测** |
-| bm25.py / keyword.py: 关键词检索 | 🔴 | **🔴 无测试** |
-| hybrid.py: 混合检索 | 🔴 | **🔴 无测试** |
-| cache.py: 检索缓存 | 🔴 | **🔴 无测试** |
-| llm_judge.py: LLM重排 | 🔴 | **🔴 无测试** |
-| meta_tool.py: list_tools/list_skills/tool_details | 🟢 行为 | test_peers_section间接 **建议补** |
-| factory.py: 检索器装配 | 🟡 间接 | (启动时使用) |
+| bm25.py: BM25排序 + CJK分词(字符+bigram) | 🟢 行为 | test_retrieval_layer |
+| keyword.py: 子串匹配检索 | 🟢 行为 | test_retrieval_layer |
+| embedding.py: 向量检索(async) | 🟢 行为 | test_retrieval_layer(fake embedder) |
+| hybrid.py: 混合检索(weighted_sum + RRF) | 🟢 行为 | test_retrieval_layer |
+| cache.py: 检索缓存(hit/miss) | 🟢 行为 | test_retrieval_layer |
+| llm_judge.py: LLM重排 + 超时回退 | 🟢 行为 | test_retrieval_layer |
+| 共享过滤契约(require/exclude_tags/min_score/top_k) | 🟢 行为 | test_retrieval_layer |
+| factory.py: tools/skills→corpus + build_retriever降级 | 🟢 行为 | test_retrieval_layer |
+| meta_tool.py: 注册/注销/prompt section | 🟢 行为 | test_retrieval_layer |
 
 ## registry/ — agent注册发现
 | 功能点 | 形态 | 测试文件 |
@@ -197,9 +204,9 @@
 ## webui/ — 接口层
 | 功能点 | 形态 | 测试文件 |
 |--------|------|----------|
-| backend.py: /chat/stream SSE + P0/P1/P3钩子 | 🔵 手动 | **🔴 backend集成无测试**(经loop单测间接) |
+| backend.py: /chat/stream SSE + P0/P1/P3钩子 | 🟢 行为 | test_backend_integration.py(全栈TestClient) |
 | routes_hitl.py: HITL审批端点 | 🟢 行为 | test_production_safety |
-| routes_skills.py: /evolution/sweep,space,gaps + journal | 🟡 部分 | (sweep/space手动验过)**🔴 无自动测试** |
+| routes_skills.py: /evolution/sweep,space,gaps + journal | 🟡 部分 | gaps已覆盖(test_backend_integration);sweep/space仍手动 |
 | routes_schedule.py: schedule端点 | 🟢 行为 | test_scheduler间接 |
 | routes_system.py: wiring/peers/status | 🟢 行为 | test_peers_section |
 | index.html: 前端(全部) | 🔵 手动 | **🔴 前端零自动化测试**(仅node --check语法) |
@@ -209,15 +216,16 @@
 # 第三部分:测试盲区汇总(供补齐,按建议优先级)
 
 ## 高优先级(核心行为无验证 / 已踩坑)
-1. **🔴 config三处一致性测试** — dataclass/loader/yaml 键对齐。已踩2次"yaml键静默丢弃"坑。~半天。
-2. **🔴 长链能力缺口(k<n)** — 等B/A方案(P2-1)实现后补;C协议已覆盖单步自报。
-3. **🔴 webui backend集成测试** — /chat/stream端到端(含P0/P1/P3钩子触发);今天全靠loop单测间接+实跑。
-4. **🟡→🟢 委派状态流转** — outbound_state/no_double_count/provenance从源码断言升级为行为测试(fake dispatcher)。
-5. **🔴 用户中断端到端** — abort→cancel→partial保留。
-6. **🔴 进化1歧义→选择卡触发** — 当前是盲区,且与P1-6的HITL-vs-自选张力相关。
+1. ✅ **config三处一致性测试** — 已补 `test_config_consistency.py`(通用自发现,新节自动覆盖)。
+2. ✅ **长链能力缺口(k<n)运行时安全网** — 已补 `test_capability_gap.py::TestCapabilityGapLongChain`;结构性预检 B/A 仍待 P2-1。
+3. ✅ **webui backend集成测试** — 已补 `test_backend_integration.py`(全栈 create_webui_app + 真实 HitlExecutor + TestClient):happy path SSE 序列、破坏性工具 HITL 中断+不执行、capability_gap 经后端、/evolution/gaps 端点。**最大盲区已消除**。
+4. ✅ **委派状态流转** — 已补 `test_delegation_dispatcher_behavior.py`(5,真实dispatch+三终态)+ provenance 直接import(6)。源码断言保留为 deletion-guard。
+5. ✅ **用户中断** — 已补 `test_scenario_user_interrupt.py`(loop级契约:abort→SESSION_END→partial);webui SSE 整链仍手动。
+6. ✅ **进化1歧义→选择卡触发** — 已补 `test_scenario_skill_ambiguity.py`(门逻辑确认正确)。HITL-vs-自选张力是产品决策(P1-6)。
+7. ✅ **单agent诊断闭环贯穿** — 已补 `test_scenario_diagnosis_loop.py`(工具→结果回注→合成)。
 
 ## 中优先级(模块功能无直接测试)
-7. **🔴 retrieval/ 整层** — embedding/bm25/hybrid/cache/llm_judge 几乎无单测,只经loop间接。
+7. ✅ **retrieval/ 整层** — 已补 `test_retrieval_layer.py`(24):bm25+CJK分词/keyword/embedding/hybrid双融合/cache/llm_judge超时回退/factory/meta_tool/过滤契约。
 8. **🔴 /evolution/* 端点** — sweep/space/gaps 自动测试。
 9. **🔴 hitl_core/chunk_queue + audit** — 异步队列看门狗、审计日志。
 10. **🔴 工具not-found的difflib纠错** — 容易回归的纠错逻辑。
@@ -229,6 +237,6 @@
 14. 🟡 loop_helpers/loop_context 直接单测(目前间接覆盖)
 
 ## 结构性建议
-- **源码断言测试(🟡)逐步升级为行为测试** — 6个文件(repeat_guard/no_double_count/outbound_state/provenance/synthesis_no_delegate/hitl_submit_scope/multi_agent_identity)防的是结构回归,不验行为。它们有价值(防止有人删错代码),但应配一个行为测试做真覆盖。
+- **源码断言测试(🟡)逐步升级为行为测试** — 委派三件套(outbound_state/no_double_count/provenance)已升级:behavior 验工作 + grep 防删除两层并存。剩 repeat_guard/synthesis_no_delegate/hitl_submit_scope/multi_agent_identity 仍是纯结构守卫(可按需配行为测试)。
 - **前端零自动化** — index.html 仅 node --check 语法检查。若前端逻辑变重,考虑加 Playwright/最小 DOM 测试。
 - **🔵 手动验证项应固化为集成测试** — 双agent实跑验过的(S5/S9 backend钩子)随环境流失,CI无法保障。

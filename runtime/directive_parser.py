@@ -47,7 +47,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Iterable
+from typing import Iterable, Optional
 
 # ---------------------------------------------------------------------------
 # Compiled patterns
@@ -121,6 +121,36 @@ _DELEGATE_FULL_RE = re.compile(
     r"\[\s*DELEGATE\s*:\s*\*?[\w\-]+(?:\s*#\s*(?:forked|fresh))?\s*\][^\n]*",
     re.IGNORECASE,
 )
+
+# [CAPABILITY_GAP: <free text — which step / what capability is missing>]
+# Emitted by the LLM when it determines a step needed to complete the request
+# requires a tool/skill that is NOT available (and cannot be delegated). This
+# is a STRUCTURED honesty signal: it lets the loop record the gap and stop
+# gracefully instead of the LLM silently dropping the step or faking success.
+_CAPABILITY_GAP_RE = re.compile(
+    r"\[\s*CAPABILITY_GAP\s*:\s*(?P<detail>[^\]]*)\]",
+    re.IGNORECASE,
+)
+
+
+def find_capability_gap(text: str) -> Optional[str]:
+    """Return the gap detail if the response declares a [CAPABILITY_GAP:...],
+    else None. Detail is the free-text the LLM wrote (which step / what's
+    missing); empty string if the marker was emitted bare."""
+    if not text:
+        return None
+    m = _CAPABILITY_GAP_RE.search(text)
+    if not m:
+        return None
+    return (m.group("detail") or "").strip()
+
+
+def strip_capability_gap(text: str) -> str:
+    """Remove [CAPABILITY_GAP:...] markers from prose shown to the user (the
+    structured info is surfaced separately)."""
+    if not text:
+        return text
+    return _CAPABILITY_GAP_RE.sub("", text).strip()
 
 
 # ---------------------------------------------------------------------------

@@ -86,6 +86,7 @@ class SkillJournal:
     top_k:        list[tuple[str, float]] = field(default_factory=list)
     ambiguous:    bool = False
     loaded_skills: list[str] = field(default_factory=list)
+    capability_gaps: list[str] = field(default_factory=list)
     tool_calls:   list[dict[str, Any]] = field(default_factory=list)
     outcome:      Optional[str] = None
     total_turns:  int = 0
@@ -122,6 +123,22 @@ class SkillJournal:
             "skill_id": skill_id,
             "position": position,
             "score":    (round(float(score), 4) if score is not None else None),
+        })
+
+    def record_capability_gap(
+        self,
+        turn:   int,
+        detail: str,
+        query:  Optional[str] = None,
+    ) -> None:
+        """Record that the agent declared a capability gap (C protocol): a
+        required step could not be completed because the tool/skill is absent
+        and not delegable. This is the inverse signal of P1's solidify — it
+        tells operators what capability is MISSING and worth adding."""
+        self.capability_gaps.append(detail)
+        self._emit("capability_gap", turn, {
+            "detail": detail[:500] if detail else "",
+            "query":  (query or "")[:300],
         })
 
     def record_tool_call(
@@ -212,6 +229,7 @@ class SkillJournal:
             "top_k":          [{"id": sid, "score": round(float(sc), 4)} for sid, sc in self.top_k],
             "ambiguous":      self.ambiguous,
             "loaded_skills":  list(self.loaded_skills),
+            "capability_gaps": list(self.capability_gaps),
             "tool_calls":     list(self.tool_calls),
             "outcome":        self.outcome,
             "total_turns":    self.total_turns,

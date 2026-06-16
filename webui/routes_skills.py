@@ -143,6 +143,34 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
             logger.warning("/skill_journal/recent failed: %s", exc)
             raise HTTPException(500, str(exc))
 
+    @app.get("/evolution/gaps")
+    async def evolution_gaps(limit: int = 200):
+        """Aggregate declared CAPABILITY_GAP events from recent journal
+        entries — the 'missing capability ledger'. The inverse of P1's
+        solidify: P1 captures what the agent DOES repeatedly and worth
+        codifying; this captures what it CANNOT do and is worth adding."""
+        try:
+            from runtime.skill_journal import get_journal_store
+            store = get_journal_store()
+            counts: dict[str, int] = {}
+            samples: dict[str, str] = {}
+            total = 0
+            for e in store.list_recent(limit=limit):
+                for g in (e.get("capability_gaps") or []):
+                    total += 1
+                    counts[g] = counts.get(g, 0) + 1
+                    samples.setdefault(g, e.get("query", ""))
+            ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+            return JSONResponse(content={
+                "total_gap_events": total,
+                "distinct_gaps": len(counts),
+                "gaps": [{"detail": d, "count": c, "sample_query": samples.get(d, "")}
+                         for d, c in ranked],
+            })
+        except Exception as exc:
+            logger.warning("/evolution/gaps failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
     @app.get("/skill_journal/stats")
     async def skill_journal_stats():
         """Aggregate stats: outcomes, per-skill use count, dormancy."""
