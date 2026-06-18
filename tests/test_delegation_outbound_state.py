@@ -118,10 +118,12 @@ class TestDelegationResultRendering(unittest.TestCase):
     def test_frontend_renders_result_as_markdown(self):
         """Result text typically contains markdown (bullets, bold, code
         fences). Must use _renderMarkdown rather than escape-and-pre
-        — pre with escaped text strips formatting."""
+        — pre with escaped text strips formatting. (2026-06: the flat
+        list became a per-peer conversation view; the reply bubble now
+        renders via _renderMarkdown(replyText).)"""
         self.assertIn(
-            "_renderMarkdown(resultText)", self.front,
-            "Result section must use _renderMarkdown — pre+escape "
+            "_renderMarkdown(replyText)", self.front,
+            "Delegation reply bubble must use _renderMarkdown — pre+escape "
             "strips markdown formatting (bold / lists / code)",
         )
 
