@@ -21,6 +21,7 @@ With profiles:
   - `AGENT_PROFILE=default`  → no business tools/skills, just common meta tools
   - `AGENT_PROFILE=lan`      → enterprise LAN Cisco tools + LAN SOPs
   - `AGENT_PROFILE=dc`       → data-center fabric tools + DC SOPs
+  - `AGENT_PROFILE=wan`      → wide-area SD-WAN / transport tools + WAN SOPs
 …all from the SAME process image. Tool isolation between roles is then a
 natural consequence: a `lan` agent's registry simply doesn't contain the `dc`
 tools, so it physically cannot call them (it must delegate via A2A — Phase 2B).
@@ -114,7 +115,7 @@ class Profile:
 # in every business domain's dependencies. profiles/<id>/__init__.py must
 # expose a module-level `PROFILE: Profile`.
 
-_KNOWN_PROFILE_IDS = ("default", "lan", "dc")
+_KNOWN_PROFILE_IDS = ("default", "lan", "dc", "wan")
 _cache: dict[str, Profile] = {}
 
 
