@@ -452,6 +452,31 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 logger.info("backend: batch_resolver injected for profile=%s", _cfg_be.cfg.agent.profile)
         except Exception as _exc:
             logger.warning("backend: batch_resolver injection skipped: %s", _exc)
+        # peer_health_fn: sync snapshot of OFFLINE peer ids from the registry,
+        # for cross-agent skill degradation (peer-offline is the normal case).
+        # Reads the store's internal dict directly (same defensive pattern the
+        # peer-aware prompt uses) so prompt assembly stays sync. None-safe.
+        def _make_peer_health_fn(_reg):
+            if _reg is None:
+                return None
+            def _offline_peers():
+                try:
+                    store = getattr(_reg, "_store", None)
+                    entries = list(getattr(store, "_store", {}).values()) if store else []
+                    offline = set()
+                    for e in entries:
+                        h = getattr(e, "health", None)
+                        hs = getattr(h, "value", None) or (str(h) if h is not None else "")
+                        if str(hs).lower() in ("unhealthy", "down", "unreachable"):
+                            aid = getattr(e, "agent_id", None)
+                            if aid:
+                                offline.add(aid)
+                    return offline
+                except Exception:
+                    return set()
+            return _offline_peers
+        _peer_health_fn = _make_peer_health_fn(services.get("registry"))
+
         services["runtime_loop"] = AgentRuntimeLoop(
             memory_router=services.get("memory"),
             config=RuntimeConfig(hitl_tool_names=_hitl_tools, editable_hitl_tools=_editable_hitl),
@@ -459,6 +484,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             skill_catalog=services["skill_catalog"],
             delegate_fn=services.get("delegate_fn"),
             batch_resolver_fn=_batch_resolver,
+            peer_health_fn=_peer_health_fn,
         )
     else:
         # Re-inject tool store and catalog into existing loop

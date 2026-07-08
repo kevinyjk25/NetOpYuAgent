@@ -2,6 +2,13 @@
 name: app-access-troubleshoot
 description: 端到端排查用户无法访问数据中心应用的问题。LAN 侧确认网络准入并用脚本判定故障层,再委派 DC 侧排查应用权限与可达性。用于"用户 X 访问应用 Y 失败/很慢/时通时断"这类跨域诊断。
 allowed-tools: get_user_access, check_nac_policy, query_radius_logs
+delegates-to: dc-agent
+degraded-capability: |
+  DC 离线时:仍完成 LAN 准入层的完整诊断(RADIUS 认证、NAC 合规、VLAN、802.1X),
+  并用 step 2 脚本给出故障层判定。若判定为 lan_auth / lan_nac,诊断本就在本地闭环,
+  不受影响,正常交付。若判定为 delegate_dc(准入正常、疑似应用层),则如实告知:
+  "LAN 准入层正常,应用层(RBAC/可达性)诊断需 DC agent,当前 DC 离线,无法排查;
+  已排除准入层原因,建议 DC 恢复后重试应用层诊断。"绝不臆测应用层结论。
 metadata:
   skill_id: app_access_troubleshoot
   display_name: App Access Troubleshoot (cross-agent)

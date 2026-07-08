@@ -250,6 +250,7 @@ class AgentRuntimeLoop:
         llm_fn:          Optional[Any] = None,
         delegate_fn:     Optional[Any] = None,
         batch_resolver_fn: Optional[Any] = None,
+        peer_health_fn:  Optional[Any] = None,
     ) -> None:
         """
         Args:
@@ -281,6 +282,10 @@ class AgentRuntimeLoop:
         # domain-free default). Contract: (tool_name, tool_args, llm_response,
         # hitl_tool_names, confirmed_facts, all_parsed) -> Optional[list[(name,args)]].
         self._batch_resolver_fn = batch_resolver_fn
+        # peer_health_fn: () -> set[str] of OFFLINE peer ids. Used to degrade
+        # cross-agent skills when a declared peer is unreachable. None = assume
+        # all peers reachable (no degradation notices).
+        self._peer_health_fn = peer_health_fn
 
         # Context-budget strategy (Tier 2 #3): "legacy" (default) or "priority".
         # Read once at construction from the app config; falls back to legacy if
@@ -959,6 +964,66 @@ class AgentRuntimeLoop:
             ctx.last_recall_turn = state.turns
             ctx.last_facts_count = facts_now
         return ctx.cached_memory_results
+
+    def _build_degradation_notices(self, selected_skills, state):
+        """For each selected cross-agent skill whose declared peer is offline,
+        return (notice_text, events). notice_text is appended to the skill
+        section so the LLM knows its boundary UP FRONT (peer-offline is the
+        normal case here); events are capability_degraded dicts to stream +
+        journal. No-op when no peer_health_fn is wired or no skill degrades.
+        """
+        if self._peer_health_fn is None or not selected_skills or \
+                self._skill_catalog is None:
+            return "", []
+        try:
+            offline = set(self._peer_health_fn() or ())
+        except Exception as exc:
+            logger.debug("peer_health_fn failed: %s", exc)
+            return "", []
+        if not offline:
+            return "", []
+
+        notices, events = [], []
+        for entry in selected_skills:
+            sid = entry[0] if isinstance(entry, (tuple, list)) else entry
+            summary = self._skill_catalog.get_summary(sid)
+            if summary is None:
+                continue
+            declared = getattr(summary, "delegates_to", None) or []
+            if not declared:
+                continue
+            # a declared peer token matches an offline id if it equals it or is
+            # a '*capability' token the offline agent would serve. We match by
+            # substring/exact on the offline id set (ids like 'dc-agent'; a
+            # skill may declare 'dc' or 'dc-agent').
+            down = [p for p in declared
+                    if any(p == o or p in o or o.startswith(p) for o in offline)]
+            if not down:
+                continue
+            degraded = getattr(summary, "degraded_capability", "") or ""
+            notice = (f"⚠ 跨域能力降级 — 技能「{sid}」依赖的对端 {', '.join(down)} "
+                      f"当前离线。")
+            if degraded:
+                notice += f"边界能力:{degraded}"
+            else:
+                notice += ("请仅交付本地可完成的部分,并如实说明依赖对端的步骤"
+                           "因其离线而无法执行。")
+            notices.append(notice)
+            events.append({"type": "capability_degraded", "skill_id": sid,
+                           "offline_peers": down,
+                           "degraded_capability": degraded, "node": "runtime_loop"})
+            # journal the degradation as a structured signal
+            if state._skill_journal is not None:
+                try:
+                    state._skill_journal.record_capability_gap(
+                        turn=state.turns,
+                        detail=f"[degraded] {sid} — peer(s) offline: {', '.join(down)}",
+                        query=getattr(state, "query", ""))
+                except Exception:
+                    pass
+        if not notices:
+            return "", []
+        return "\n\n[跨域能力状态]\n" + "\n".join(notices), events
 
     def _refresh_skills(self, ctx: _LoopContext, skill_every: int):
         """Phase (Item 4 4b): conditional skill-selection refresh.
@@ -1937,6 +2002,22 @@ class AgentRuntimeLoop:
             # ── PERF-1: conditional skill-selection refresh ─────────────
             skill_section, skill_count, selected_skills, skill_ambiguous = \
                 self._refresh_skills(ctx, _skill_every)
+
+            # ── Cross-agent degradation (peer-offline is the normal case) ──
+            # If a selected cross-agent skill declares a peer that's currently
+            # offline, inject its degraded-capability boundary contract into
+            # the prompt so the LLM works within its boundary from the start,
+            # and surface a capability_degraded event once per stream.
+            if not getattr(ctx, "_degradation_emitted", False):
+                _deg_notice, _deg_events = self._build_degradation_notices(
+                    selected_skills, state)
+                if _deg_notice:
+                    skill_section = (skill_section or "") + _deg_notice
+                    ctx.cached_skill_section = skill_section
+                for _ev in _deg_events:
+                    yield _ev
+                if _deg_events:
+                    ctx._degradation_emitted = True
 
             # BUG-07 fix: use state.working_set (which may be updated mid-loop)
             # rather than the outer `working_set` variable (frozen at call start).

@@ -1433,6 +1433,10 @@ let flowEvents  = [];
 let _sessionFacts = [];   // confirmed_facts from last response, sent back next query
 let reqStart    = 0;
 let streamState = null;
+// Parked stream across a HITL pause: {sid, tokens}. Set at stop_hitl, consumed
+// when the resume stream's first token arrives so continuation renders into the
+// SAME bubble. Cleared after reattach or on a fresh main-stream start.
+let _parkedStream = null;
 
 function ts()   { return new Date().toLocaleTimeString('en-US',{hour12:false}); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1731,6 +1735,29 @@ function _renderMermaidIn(rootEl) {
 //     the fresh fact so the LLM can revise its previous answer.
 //   - [我已处理,忽略]   — acknowledges + collapses the card. The fact
 //     is still injected into confirmed_facts so future turns see it.
+function renderCapabilityDegraded(c) {
+  const skill    = c.skill_id || 'cross-agent skill';
+  const peers    = (c.offline_peers || []).join(', ') || '(unknown)';
+  const boundary = c.degraded_capability || '仅交付本地可完成的部分,依赖离线对端的步骤如实说明无法执行。';
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap';
+  wrap.innerHTML = `
+    <div class="avatar avatar-sys" style="background:#553;">⚠</div>
+    <div class="msg-body">
+      <div class="msg-meta">跨域能力降级 · ${esc(skill)} · ${ts()}</div>
+      <div class="bubble" style="border-left:4px solid #d97706; background:#1f1a12;">
+        <div class="metric-warn" style="font-weight:600; margin-bottom:6px;">⚠ 跨域能力降级运行</div>
+        <div style="margin-bottom:8px; font-size:13px; color:#cbd5e1;">
+          技能 <code>${esc(skill)}</code> 依赖的对端 <code>${esc(peers)}</code> 当前离线。
+          Agent 将在边界能力内运行:
+        </div>
+        <div style="padding:8px; background:#0f172a; border-radius:4px; font-size:12px; white-space:pre-wrap; color:#e2e8f0;">${esc(boundary)}</div>
+      </div>
+    </div>`;
+  const msgs = document.getElementById('messages');
+  if (msgs) { msgs.appendChild(wrap); msgs.scrollTop = msgs.scrollHeight; }
+}
+
 function renderAsyncHitlNotify(c) {
   const tool       = c.tool || 'async tool';
   const outcome    = c.outcome || '?';
@@ -1861,6 +1888,7 @@ function startStream() {
     </div>`;
   msgs.appendChild(wrap);
   msgs.scrollTop = msgs.scrollHeight;
+  _parkedStream = null;   // a new query supersedes any un-resumed HITL park
   streamState = {sid, tokens:[], toolCalls:0, skillLoads:0, hermesEvents:0};
 }
 
@@ -1916,7 +1944,40 @@ function addStep(type, label, detail='', expandData='', extra=null) {
   document.getElementById('messages').scrollTop = 99999;
 }
 
+function parkCurrentStream() {
+  // Capture the active bubble so a post-HITL resume streams continuation
+  // tokens back into it. Called from every pause path (awaiting_hitl,
+  // stop_hitl). Idempotent: if already parked for this pause, keep the first
+  // capture (it has the fuller token list from before finalizeStream ran).
+  if (_parkedStream) return;
+  if (streamState && streamState.sid) {
+    _parkedStream = {
+      sid:    streamState.sid,
+      tokens: streamState.tokens.slice(),
+    };
+  }
+}
+
 function appendToken(token) {
+  // Resume continuation: main stream ended at HITL (streamState nulled by
+  // finalizeStream), but the operator approved and the resumer is now
+  // streaming the rest of the SAME answer. Reattach to the parked bubble so
+  // it continues in place instead of being dropped.
+  if (!streamState && _parkedStream) {
+    const pbub = document.getElementById(_parkedStream.sid + '-bubble');
+    if (pbub) {
+      streamState = {
+        sid: _parkedStream.sid,
+        tokens: _parkedStream.tokens.slice(),
+        toolCalls: 0, skillLoads: 0, hermesEvents: 0,
+        resumed: true,
+      };
+      if (typeof closeDelegationView === 'function' && typeof _dlgViewOpen !== 'undefined' && _dlgViewOpen) closeDelegationView();
+      const msgs0 = document.getElementById('messages');
+      if (msgs0) msgs0.style.display = '';
+      _parkedStream = null;   // consumed
+    }
+  }
   if (!streamState) return;
   streamState.tokens.push(token);
   const bub = document.getElementById(streamState.sid+'-bubble');
@@ -2125,6 +2186,10 @@ function dispatchChunk(c, query, sid) {
     renderAsyncHitlNotify(c);
     return;
   }
+  if (c.type === 'capability_degraded') {
+    renderCapabilityDegraded(c);
+    return;
+  }
   if (c.type === 'cross_agent_parked') {
     // The request parked awaiting a peer's operator-approval HITL. The
     // final answer will arrive asynchronously after this SSE closes —
@@ -2322,6 +2387,11 @@ function dispatchChunk(c, query, sid) {
     if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
       _sessionFacts = c.confirmed_facts;
     }
+    // Park the original bubble so the post-decision resume (skill-choice /
+    // clarification / approval) streams its tokens back into the SAME bubble.
+    // This branch fires for skill-selection HITL — without parking here the
+    // resume tokens have no bubble and appendToken drops them.
+    parkCurrentStream();
     return;
   }
   if (c.type==='hermes_write') {
@@ -2364,6 +2434,7 @@ function dispatchChunk(c, query, sid) {
       streamState.paused = true;
       const lbl = document.getElementById(streamState.sid + '-label');
       if (lbl) lbl.textContent = 'Paused for HITL approval — continues after decision';
+      parkCurrentStream();
     }
     switchTab('hitl');
     refreshHitl(5);
@@ -2947,6 +3018,11 @@ function openHitlStream(interruptId) {
         // The /stream endpoint emits a synthetic {type:'done'} when the
         // resumer completes — that's our cue to close.
         if (chunk.type === 'done') {
+          // If we reattached to the parked bubble and streamed continuation
+          // tokens into it, finalize it (markdown render) now.
+          if (streamState && streamState.resumed) {
+            try { finalizeStream(); } catch(_) {}
+          }
           es.close();
           return;
         }

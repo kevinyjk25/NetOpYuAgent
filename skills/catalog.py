@@ -57,6 +57,10 @@ class SkillSummary:
     risk_level:  str           # low | medium | high | critical
     requires_hitl: bool = False
     tags:        list[str] = field(default_factory=list)
+    # cross-agent skill fields (2026-06): peers this skill delegates to +
+    # the free-text boundary contract when a peer is offline.
+    delegates_to:        list[str] = field(default_factory=list)
+    degraded_capability: str = ""
 
 
 @dataclass
@@ -121,6 +125,8 @@ class SkillCatalogService:
                 risk_level=defn.get("risk_level", "low"),
                 requires_hitl=defn.get("requires_hitl", False),
                 tags=defn.get("tags", []),
+                delegates_to=defn.get("delegates_to", []),
+                degraded_capability=defn.get("degraded_capability", ""),
             )
             detail = SkillDetail(
                 skill_id=skill_id,

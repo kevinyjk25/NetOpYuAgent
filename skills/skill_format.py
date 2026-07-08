@@ -57,7 +57,9 @@ except Exception as _exc:  # pragma: no cover - yaml is a hard dependency
 # Frontmatter keys allowed by the Anthropic standard. Anything else is a
 # validation failure — mirrors quick_validate.py ALLOWED_PROPERTIES.
 ALLOWED_FRONTMATTER_KEYS = frozenset(
-    {"name", "description", "license", "allowed-tools", "metadata", "compatibility"}
+    {"name", "description", "license", "allowed-tools", "metadata", "compatibility",
+     # cross-agent skill fields (2026-06): declare peer deps + offline boundary
+     "delegates-to", "degraded-capability"}
 )
 
 _NAME_RE = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
@@ -351,6 +353,27 @@ def to_flat_dict(
     else:
         allowed_tools = []
 
+    # delegates-to (cross-agent skills): the peer agent id(s) or *capability
+    # tokens this skill hands subtasks to via [DELEGATE:]. Declared SEPARATELY
+    # from allowed-tools so we don't conflate local tool deps with cross-domain
+    # delegation (the old allowed_tools ambiguity). Accepts YAML list or CSV.
+    _dt = fm.get("delegates-to")
+    if isinstance(_dt, str):
+        delegates_to = [x.strip() for x in _dt.split(",") if x.strip()]
+    elif isinstance(_dt, (list, tuple)):
+        delegates_to = [str(x).strip() for x in _dt if str(x).strip()]
+    else:
+        delegates_to = []
+
+    # degraded-capability (cross-agent skills): free-text boundary contract —
+    # what the skill can STILL deliver when a delegated peer is offline. Since
+    # peer availability is treated as the NORMAL case (agent environments are
+    # uncontrolled), this is injected into the prompt whenever a declared peer
+    # is unreachable so the LLM knows its boundary up front instead of
+    # improvising after a failed delegation. Free text (may be multiline).
+    _dc = fm.get("degraded-capability")
+    degraded_capability = (str(_dc).strip() if _dc is not None else "")
+
     # The description fed to the retriever/prompt is the full standard
     # description plus the body so retrieval keeps the rich SOP text the LAN
     # skills rely on. Steps (if any) are appended for prompt fidelity.
@@ -377,6 +400,8 @@ def to_flat_dict(
         "estimated_size": meta.get("estimated_size", "small"),
         "returns_large":  _meta_bool("returns_large"),
         "allowed_tools":  allowed_tools,
+        "delegates_to":       delegates_to,
+        "degraded_capability": degraded_capability,
         # Carry the standard fields through so callers that want the raw
         # standard view (webui, AgentCard) don't have to re-parse.
         "_std_name":        fm["name"],

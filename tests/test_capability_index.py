@@ -82,10 +82,13 @@ class TestRouteAndNearest(unittest.TestCase):
 
     def test_route_returns_topk_with_scores(self):
         hits = self.idx.route(tool_set=["get_user_access", "check_nac_policy"],
-                              kind="skill", top_k=3)
+                              kind="skill", top_k=5)
         self.assertTrue(hits)
         self.assertTrue(all(h.score >= 0 for h in hits))
-        # the LAN access diagnose skill should be among top hits
+        # the LAN access diagnose skill should be routable for these tools
+        # (top_k=5: other access skills legitimately share get_user_access /
+        # check_nac_policy now — cross-agent skills were added — so it need
+        # not be top-3, but must still surface).
         self.assertIn("lan_user_access_diagnose", [h.target for h in hits])
 
 
