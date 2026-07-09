@@ -1375,7 +1375,79 @@ class HitlExecutor:
             "Multi-mode HITL raised: id=%s kind=%s",
             payload.interrupt_id[:12], kind,
         )
+        # Option A: if this CLARIFICATION was raised while serving an inbound
+        # delegation, forward the question to the ORIGIN agent so it surfaces
+        # in the origin user's conversation (rather than only sitting on this
+        # peer's local queue where the user can't see it).
+        if kind == "clarification" and _src_agent and _src_session:
+            await self._forward_clarification_to_source(
+                interrupt_id=payload.interrupt_id,
+                source_agent=_src_agent,
+                source_session_id=_src_session,
+                clar_fields=clar_fields,
+                summary=chunk.get("summary", ""),
+            )
         return payload.interrupt_id
+
+    async def _forward_clarification_to_source(
+        self, *, interrupt_id: str, source_agent: str, source_session_id: str,
+        clar_fields: list, summary: str = "",
+    ) -> None:
+        """Option A: POST a clarification question to the origin agent's
+        /peer_clarification endpoint so it appears in the origin user's chat.
+        Mirrors _maybe_callback_source_agent's URL resolution. Failures are
+        logged, never raised — the local clarification card remains as a
+        fallback the peer's own operator could still answer."""
+        if self._peer_registry is None:
+            logger.warning("clarification forward: no peer registry — leaving "
+                           "clarification on local queue for interrupt=%s",
+                           interrupt_id[:12])
+            return
+        try:
+            agent = await self._peer_registry.get_agent(source_agent)
+            base_url = getattr(agent, "base_url", None) if agent else None
+        except Exception as exc:
+            logger.warning("clarification forward: registry resolve failed: %s", exc)
+            return
+        if not base_url:
+            logger.warning("clarification forward: no base_url for source=%s",
+                           source_agent)
+            return
+        # Record the correlation on the bridge so this peer can match the
+        # answer back to interrupt_id when it returns.
+        from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+        cid = get_cross_agent_hitl_bridge().record_inbound_hitl(
+            interrupt_id=interrupt_id, source_agent=source_agent,
+            source_session_id=source_session_id, source_query=summary,
+        )
+        # Serialize the clarification fields for the origin to render a card.
+        fields = []
+        for f in clar_fields:
+            fields.append({
+                "key":      getattr(f, "key", "") or (f.get("key") if isinstance(f, dict) else ""),
+                "prompt":   getattr(f, "prompt", "") or (f.get("prompt") if isinstance(f, dict) else ""),
+                "placeholder": getattr(f, "placeholder", "") or (f.get("placeholder") if isinstance(f, dict) else ""),
+                "required": getattr(f, "required", True) if not isinstance(f, dict) else f.get("required", True),
+            })
+        self_agent_id = getattr(self, "_self_agent_id", None) or "this-agent"
+        url = base_url.rstrip("/") + "/peer_clarification"
+        body = {
+            "peer_agent":         self_agent_id,   # who is asking (this peer)
+            "peer_interrupt_id":  interrupt_id,
+            "correlation_id":     cid,
+            "source_session_id":  source_session_id,
+            "summary":            summary,
+            "clarification_fields": fields,
+        }
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=body)
+            logger.info("clarification forward: POST %s → %s (cid=%s)",
+                        url, resp.status_code, cid)
+        except Exception as exc:
+            logger.warning("clarification forward: POST %s failed: %s — "
+                           "clarification stays on local queue", url, exc)
 
     async def _agent_loop_resumer(
         self, decision: HitlDecision, entry: CheckpointEntry,

@@ -762,10 +762,20 @@ class AgentRuntimeLoop:
                     tok = chunk.get("token") or chunk.get("message") or ""
                     if tok:
                         _result_parts.append(str(tok))
-                    yield chunk
+                    # Re-tag peer token chunks as 'delegated' so the origin UI
+                    # shows them as a distinct "result from <peer>" block in the
+                    # process area — NOT the origin's conclusion bubble. The
+                    # origin synthesizes its own final answer from the injected
+                    # [委派结果] context afterwards; THAT is the conclusion.
+                    if chunk.get("token"):
+                        yield {"type": "delegated", "delegated": str(chunk["token"]),
+                               "source_agent": target}
+                    else:
+                        yield chunk
                 else:
                     _result_parts.append(str(chunk))
-                    yield {"token": str(chunk), "source_agent": target}
+                    yield {"type": "delegated", "delegated": str(chunk),
+                           "source_agent": target}
         except Exception as exc:
             _ok = False
             logger.exception("Delegation to %s failed: %s", target, exc)
@@ -2248,6 +2258,24 @@ class AgentRuntimeLoop:
             _visible = _strip_capgap(_strip_skill(
                 _strip_delegate(_strip_batch(_strip_tools(llm_response)))
             )).strip()
+            # Separate the model's reasoning (<think>…</think>) from the
+            # conclusion. Reasoning is streamed as a distinct 'reasoning' chunk
+            # into the collapsible process area; only the clean conclusion goes
+            # to the answer bubble. Without this split, thinking-model output
+            # (qwen3/deepseek) leaks raw <think> text into the final answer,
+            # mixing process + conclusion.
+            import re as _re_think
+            _think_blocks = _re_think.findall(
+                r"<think>(.*?)</think>", _visible,
+                flags=_re_think.DOTALL | _re_think.IGNORECASE)
+            if _think_blocks:
+                _reasoning = "\n".join(b.strip() for b in _think_blocks if b.strip())
+                _visible = _re_think.sub(
+                    r"<think>.*?</think>", "", _visible,
+                    flags=_re_think.DOTALL | _re_think.IGNORECASE).strip()
+                if _reasoning:
+                    yield {"type": "reasoning", "reasoning": _reasoning,
+                           "turn": state.turns}
             # Also drop any per-line residue (e.g. a bare "[TOOL:foo]"
             # with no args dict that the multi-strippers skipped because
             # the open-brace lookahead didn't fire).
@@ -2259,12 +2287,35 @@ class AgentRuntimeLoop:
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
-                # Stream in 80-char chunks preserving newlines + whitespace.
-                # Frontend renders markdown after the stream completes, so block
-                # structure (\n\n, table rows, ```fences, ## headers) must survive.
-                for _i in range(0, len(_visible), 80):
-                    yield {"token": _visible[_i:_i+80]}
-                    await asyncio.sleep(0)
+                # Does THIS turn also call a tool? If so, its prose is interim
+                # narration ("let me check X"), not the conclusion — route it
+                # to the collapsible process area so the answer bubble holds
+                # only the final conclusion. The final turn (no tool call)
+                # streams to the bubble as the answer.
+                # Does THIS turn also call a tool / delegate / load a skill? If
+                # so, its prose is interim narration ("let me check X" / "I'll
+                # delegate to Y"), not the conclusion — route it to the process
+                # area so the answer bubble holds only the final conclusion.
+                from runtime.directive_parser import (
+                    find_delegate_directives as _find_deleg,
+                    find_skill_load_names as _find_skills,
+                )
+                _turn_has_tool = (
+                    _has_any_tool_directive(llm_response)
+                    or bool(_find_deleg(llm_response))
+                    or bool(_find_skills(llm_response))
+                )
+                if _turn_has_tool:
+                    yield {"type": "interim", "interim": _visible,
+                           "turn": state.turns}
+                else:
+                    # Stream in 80-char chunks preserving newlines + whitespace.
+                    # Frontend renders markdown after the stream completes, so
+                    # block structure (\n\n, tables, ```fences, ## headers) must
+                    # survive.
+                    for _i in range(0, len(_visible), 80):
+                        yield {"token": _visible[_i:_i+80]}
+                        await asyncio.sleep(0)
             # If the entire response was tool calls (no prose), yield nothing —
 
             # ── [CAPABILITY_GAP:] handling (C protocol) ──────────────────

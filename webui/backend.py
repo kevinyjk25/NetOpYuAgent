@@ -129,6 +129,66 @@ def register_resume_driver(fn) -> None:
     _resume_driver = fn
 
 
+# ── Option A: peer clarification round trip ──────────────────────────────
+# The origin agent pushes a peer's clarification into the user's live session;
+# the asking peer resolves its parked interrupt when the answer returns. Both
+# need the local hitl router + a way to reach the session SSE, published here
+# from create_webui_app so the a2a endpoints (which have no `services`) can use
+# them.
+_hitl_router_ref: "Optional[Any]" = None
+# session_id -> list of pending peer-clarification chunks not yet delivered on
+# an open SSE (delivered on next stream open or via poll).
+_pending_peer_clarifications: "dict[str, list]" = {}
+
+
+def register_hitl_router(router) -> None:
+    global _hitl_router_ref
+    _hitl_router_ref = router
+
+
+async def push_peer_clarification_to_session(
+    *, session_id: str, peer_agent: str, correlation_id: str,
+    question: str, clarification_fields: list,
+) -> bool:
+    """Origin side: surface a peer's clarification in the user's session. We
+    buffer it keyed by session; the /chat/stream SSE and a dedicated poll
+    endpoint both drain the buffer so the card appears in the user's chat
+    whether or not a stream is currently open. Returns True if buffered."""
+    chunk = {
+        "type":               "peer_clarification",
+        "peer_agent":         peer_agent,
+        "correlation_id":     correlation_id,
+        "question":           question,
+        "clarification_fields": clarification_fields,
+    }
+    _pending_peer_clarifications.setdefault(session_id, []).append(chunk)
+    logger.info("push_peer_clarification: buffered for session=%s from=%s cid=%s",
+                session_id[:12], peer_agent, correlation_id)
+    return True
+
+
+def drain_peer_clarifications(session_id: str) -> list:
+    """Return + clear any buffered peer clarifications for a session."""
+    return _pending_peer_clarifications.pop(session_id, [])
+
+
+async def resolve_peer_clarification_answer(
+    *, peer_interrupt_id: str, correlation_id: str, answers: dict,
+) -> Any:
+    """Asking-peer side: resolve the parked clarification interrupt with the
+    user's answers so this agent's agent_loop_resumer resumes."""
+    if _hitl_router_ref is None:
+        raise RuntimeError("no local HITL router registered")
+    from hitl_core.schema import HitlDecision, DecisionKind
+    decision = HitlDecision(
+        interrupt_id=peer_interrupt_id,
+        decision=DecisionKind.ANSWER,
+        operator_id=f"peer-clarification:{correlation_id or 'origin-user'}",
+        clarification_answers=answers or {},
+    )
+    return await _hitl_router_ref.deliver(decision)
+
+
 async def build_csi_from_profile(services: dict, *, cache_key: str = "_csi"):
     """Build (or return cached) a CapabilitySemanticIndex from the active
     profile's tool + skill metadata, using the real async embedder if available.
@@ -745,6 +805,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return True
 
     register_resume_driver(_drive_cross_agent_resume)
+    register_hitl_router(services.get("hitl_core_router"))
 
     @app.get("/chat/resumptions")
     async def get_resumptions(session_id: str) -> JSONResponse:
@@ -753,6 +814,69 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         clears the buffered items for the session."""
         items = _pending_resumptions.pop(session_id, [])
         return JSONResponse(content=items)
+
+    @app.get("/chat/peer_clarifications")
+    async def get_peer_clarifications(session_id: str) -> JSONResponse:
+        """Option A: frontend polls this to pick up clarification questions a
+        delegated peer bubbled up to this user. Returns + clears the buffer."""
+        items = drain_peer_clarifications(session_id)
+        return JSONResponse(content=items)
+
+    @app.post("/chat/peer_clarification/answer")
+    async def answer_peer_clarification(request: Request) -> JSONResponse:
+        """Option A: the origin user answers a peer's clarification here. We
+        look up the round-trip record by correlation_id and POST the answer to
+        the asking peer's /peer_clarification_answer so its loop resumes.
+        Body: {correlation_id, answers:{key:value}}
+        """
+        body = await request.json()
+        cid     = str(body.get("correlation_id") or "").strip()
+        answers = body.get("answers") or {}
+        if not cid:
+            raise HTTPException(status_code=400, detail="correlation_id required")
+
+        from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+        bridge = get_cross_agent_hitl_bridge()
+        rec = bridge.get_peer_clarification(cid)
+        if rec is None:
+            raise HTTPException(status_code=404,
+                                detail="unknown or expired clarification")
+        if rec.answered:
+            return JSONResponse(content={"ok": True, "already_answered": True})
+
+        # Resolve the peer's base URL from the registry, POST the answer back.
+        registry = services.get("registry")
+        base_url = None
+        if registry is not None:
+            try:
+                agent = await registry.get_agent(rec.peer_agent)
+                base_url = getattr(agent, "base_url", None) if agent else None
+            except Exception as exc:
+                logger.warning("answer_peer_clarification: registry resolve "
+                               "failed: %s", exc)
+        if not base_url:
+            raise HTTPException(
+                status_code=502,
+                detail=f"cannot resolve peer {rec.peer_agent} to return answer")
+
+        url = base_url.rstrip("/") + "/peer_clarification_answer"
+        payload = {"correlation_id": cid,
+                   "peer_interrupt_id": rec.peer_interrupt_id,
+                   "answers": answers}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=payload)
+            ok = resp.status_code == 200
+        except Exception as exc:
+            logger.warning("answer_peer_clarification: POST %s failed: %s",
+                           url, exc)
+            raise HTTPException(status_code=502,
+                                detail=f"failed to reach peer {rec.peer_agent}")
+        if ok:
+            bridge.resolve_peer_clarification(cid)
+        return JSONResponse(content={"ok": ok, "correlation_id": cid,
+                                     "peer_agent": rec.peer_agent})
 
     @app.post("/chat/stream")
     async def chat_stream(

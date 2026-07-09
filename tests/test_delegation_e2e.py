@@ -84,10 +84,12 @@ class TestDelegationE2E(unittest.TestCase):
             self.assertTrue(dlg_steps, "expected a delegate node_step chunk")
             self.assertEqual(dlg_steps[0]["source_agent"], "dc-agent")
 
-            # The peer token was forwarded (tagged).
+            # The peer output was forwarded as a 'delegated' chunk (rendered in
+            # the process area, separate from the origin's conclusion bubble).
             peer_toks = [c for c in chunks
-                         if c.get("token") and c.get("source_agent") == "dc-agent"]
-            self.assertTrue(peer_toks, "expected forwarded peer token")
+                         if c.get("type") == "delegated"
+                         and c.get("source_agent") == "dc-agent"]
+            self.assertTrue(peer_toks, "expected forwarded peer delegated chunk")
 
             # Turn 2's context contained the injected delegated result, so the
             # LLM could synthesize. Check the 2nd context the LLM saw.

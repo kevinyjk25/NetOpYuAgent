@@ -57,6 +57,20 @@ class AwaitingPeerRecord:
     resumed:            bool = False    # guard against double-resume
 
 
+@dataclass
+class PeerClarificationRecord:
+    """Origin side (Option A): a clarification question a peer asked us to put
+    to OUR user. When the user answers, we POST the answer back to the peer's
+    /peer_clarification_answer so the peer can resume its parked interrupt.
+    Keyed by correlation_id (stable across the round trip)."""
+    correlation_id:     str
+    peer_agent:         str            # who asked (e.g. "dc-agent")
+    peer_interrupt_id:  str            # the peer's parked interrupt to resolve
+    local_session_id:   str            # our user's session that should answer
+    question:           str = ""
+    answered:           bool = False
+
+
 class CrossAgentHitlBridge:
     """In-memory correlation store for cross-agent HITL (P3-b)."""
 
@@ -65,6 +79,9 @@ class CrossAgentHitlBridge:
         self._inbound: dict[str, PeerHitlRecord] = {}
         # delegating side: (peer_agent, peer_interrupt_id) -> AwaitingPeerRecord
         self._awaiting: dict[tuple[str, str], AwaitingPeerRecord] = {}
+        # origin side (Option A clarification): correlation_id -> record
+        self._peer_clarifications: dict[str, PeerClarificationRecord] = {}
+
 
     # ── delegated-to side (e.g. dc) ───────────────────────────────────
     def record_inbound_hitl(
@@ -166,6 +183,50 @@ class CrossAgentHitlBridge:
     def forget_awaiting(self, *, peer_agent: str, peer_interrupt_id: str) -> None:
         self._awaiting.pop((peer_agent, peer_interrupt_id), None)
 
+    # ── origin side (Option A): peer clarification round trip ──────────
+    def record_peer_clarification(
+        self, *, correlation_id: str, peer_agent: str, peer_interrupt_id: str,
+        local_session_id: str, question: str = "",
+    ) -> None:
+        """Origin agent records that a peer asked a clarification to surface to
+        OUR user. When the user answers, route_peer_answer() finds it by
+        correlation_id and returns where to POST the answer back."""
+        self._peer_clarifications[correlation_id] = PeerClarificationRecord(
+            correlation_id=correlation_id, peer_agent=peer_agent,
+            peer_interrupt_id=peer_interrupt_id,
+            local_session_id=local_session_id, question=question,
+        )
+        logger.info(
+            "CrossAgentHitlBridge: recorded peer clarification cid=%s from=%s "
+            "interrupt=%s session=%s",
+            correlation_id, peer_agent, peer_interrupt_id[:12],
+            local_session_id[:12],
+        )
+
+    def get_peer_clarification(
+        self, correlation_id: str,
+    ) -> Optional[PeerClarificationRecord]:
+        return self._peer_clarifications.get(correlation_id)
+
+    def peer_clarification_for_session(
+        self, local_session_id: str,
+    ) -> Optional[PeerClarificationRecord]:
+        """Find the most recent unanswered peer clarification for a session
+        (the origin user answers in their session, not by cid)."""
+        for rec in reversed(list(self._peer_clarifications.values())):
+            if rec.local_session_id == local_session_id and not rec.answered:
+                return rec
+        return None
+
+    def resolve_peer_clarification(
+        self, correlation_id: str,
+    ) -> Optional[PeerClarificationRecord]:
+        """Mark answered + return the record (kept for idempotency/audit)."""
+        rec = self._peer_clarifications.get(correlation_id)
+        if rec is None or rec.answered:
+            return None
+        rec.answered = True
+        return rec
 
 # Process-wide singleton (one agent per process). Persistence deferred to P3-d.
 _BRIDGE: Optional[CrossAgentHitlBridge] = None

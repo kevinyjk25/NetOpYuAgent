@@ -181,6 +181,15 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   background:var(--border2);border-radius:3px;padding:1px 6px;color:var(--dim);
 }
 .action-body{display:none;border-top:1px solid var(--border)}
+.reasoning-block{padding:8px 12px;border-left:2px solid rgba(148,163,184,.35);margin:6px 0 6px 8px;background:rgba(148,163,184,.05)}
+.reasoning-tag{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#94a3b8;margin-bottom:4px;font-weight:600}
+.reasoning-text{font-size:12px;line-height:1.55;color:#94a3b8;font-style:italic;white-space:pre-wrap}
+.interim-block{padding:8px 12px;border-left:2px solid rgba(56,189,248,.35);margin:6px 0 6px 8px;background:rgba(56,189,248,.04)}
+.interim-tag{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#7dd3fc;margin-bottom:4px;font-weight:600}
+.interim-text{font-size:12px;line-height:1.55;color:#cbd5e1;white-space:pre-wrap}
+.delegated-block{padding:8px 12px;border-left:2px solid rgba(0,212,170,.4);margin:6px 0 6px 8px;background:rgba(0,212,170,.04)}
+.delegated-tag{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--accent);margin-bottom:4px;font-weight:600}
+.delegated-text{font-size:12px;line-height:1.55;color:#cbd5e1;white-space:pre-wrap}
 .action-header.open+.action-body{display:block}
 
 .action-step{
@@ -1735,6 +1744,160 @@ function _renderMermaidIn(rootEl) {
 //     the fresh fact so the LLM can revise its previous answer.
 //   - [我已处理,忽略]   — acknowledges + collapses the card. The fact
 //     is still injected into confirmed_facts so future turns see it.
+// ── Option A: peer clarification bubbled up from a delegated agent ──────
+// A peer (e.g. dc-agent) we delegated to needs the user to answer a
+// clarifying question. It appears in THIS user's chat as a card; the answer
+// routes back to the peer so its parked task resumes. Transparent to the
+// user — feels like the agent asked.
+const _seenPeerClar = new Set();   // correlation_ids already rendered
+
+function renderDelegated(c) {
+  // A delegated peer's streamed sub-result. Accumulates into ONE "result from
+  // <peer>" block in the PROCESS area (not the conclusion bubble) — the origin
+  // synthesizes its own final answer from this afterwards. Keyed per peer per
+  // stream so multiple tokens append to the same block.
+  if (!streamState) return;
+  const body = document.getElementById(streamState.sid + '-body');
+  if (!body) return;
+  const peer = c.source_agent || 'peer';
+  const blockId = `${streamState.sid}-deleg-${peer.replace(/[^a-zA-Z0-9]/g,'')}`;
+  let textEl = document.getElementById(blockId + '-text');
+  if (!textEl) {
+    const block = document.createElement('div');
+    block.className = 'delegated-block';
+    block.innerHTML = `
+      <div class="delegated-tag">🤝 委派结果 · ${esc(peer)}</div>
+      <div class="delegated-text" id="${blockId}-text"></div>`;
+    body.appendChild(block);
+    textEl = document.getElementById(blockId + '-text');
+    const hdr = document.querySelector(`#${streamState.sid}-stream .action-header`);
+    if (hdr && !hdr.classList.contains('open')) hdr.classList.add('open');
+  }
+  textEl.textContent += (c.delegated || '');
+  const msgs = document.getElementById('messages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderInterim(c) {
+  // Intermediate-turn narration ("let me check X" before a tool call) goes to
+  // the PROCESS area — it's not the conclusion. Distinct from reasoning
+  // (which is <think> content): interim is the model's outward prose per turn.
+  if (!streamState) return;
+  const body = document.getElementById(streamState.sid + '-body');
+  if (!body) return;
+  const block = document.createElement('div');
+  block.className = 'interim-block';
+  block.innerHTML = `
+    <div class="interim-tag">↳ 过程 · Turn ${c.turn ?? '?'}</div>
+    <div class="interim-text">${esc(c.interim || '')}</div>`;
+  body.appendChild(block);
+  const hdr = document.querySelector(`#${streamState.sid}-stream .action-header`);
+  if (hdr && !hdr.classList.contains('open')) hdr.classList.add('open');
+  const msgs = document.getElementById('messages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderReasoning(c) {
+  // The model's reasoning (<think>) goes into the collapsible PROCESS area,
+  // kept visually distinct from the conclusion bubble. Multiple turns append
+  // multiple reasoning blocks.
+  if (!streamState) return;
+  const body = document.getElementById(streamState.sid + '-body');
+  if (!body) return;
+  const block = document.createElement('div');
+  block.className = 'reasoning-block';
+  block.innerHTML = `
+    <div class="reasoning-tag">💭 推理 · Turn ${c.turn ?? '?'}</div>
+    <div class="reasoning-text">${esc(c.reasoning || '')}</div>`;
+  body.appendChild(block);
+  // Make sure the process area is visible (it starts open).
+  const hdr = document.querySelector(`#${streamState.sid}-stream .action-header`);
+  if (hdr && !hdr.classList.contains('open')) hdr.classList.add('open');
+  const msgs = document.getElementById('messages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderPeerClarification(c) {
+  const cid = c.correlation_id || '';
+  if (cid && _seenPeerClar.has(cid)) return;   // dedup (SSE + poll overlap)
+  if (cid) _seenPeerClar.add(cid);
+  const peer     = c.peer_agent || 'peer agent';
+  const question = c.question || '需要补充信息';
+  const fields   = c.clarification_fields || [];
+  const fieldsHtml = (fields.length ? fields : [{key:'answer',prompt:question,required:true}])
+    .map(f => `
+      <div style="margin-bottom:6px">
+        <label style="display:block;font-size:11px;color:#cbd5e1;margin-bottom:2px">
+          ${esc(f.prompt||f.key)} ${f.required?'<span style="color:#f87171">*</span>':''}
+        </label>
+        <input type="text" data-pc-cid="${esc(cid)}" data-pc-key="${esc(f.key||'answer')}"
+          placeholder="${esc(f.placeholder||'')}"
+          style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid var(--border);border-radius:3px;padding:5px 7px;font-size:12px"/>
+      </div>`).join('');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap';
+  wrap.id = cid ? `pc-${cid}` : '';
+  wrap.innerHTML = `
+    <div class="avatar avatar-agent">AGT</div>
+    <div class="msg-body">
+      <div class="msg-meta">agent · 需要补充信息 · ${ts()}</div>
+      <div class="bubble" style="border-left:4px solid var(--accent);background:rgba(0,212,170,.05)">
+        <div style="font-size:11px;color:var(--accent);font-weight:600;letter-spacing:.4px;text-transform:uppercase;margin-bottom:6px">
+          ⇡ 来自 ${esc(peer)} 的澄清请求
+        </div>
+        <div style="font-size:13px;color:#e2e8f0;margin-bottom:8px;line-height:1.5">${esc(question)}</div>
+        ${fieldsHtml}
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-success btn-sm" onclick="submitPeerClarification('${esc(cid)}')">↪ 提交</button>
+        </div>
+      </div>
+    </div>`;
+  const msgs = document.getElementById('messages');
+  if (msgs) { msgs.appendChild(wrap); msgs.scrollTop = msgs.scrollHeight; }
+}
+
+async function submitPeerClarification(cid) {
+  const answers = {};
+  document.querySelectorAll(`[data-pc-cid="${cid}"][data-pc-key]`).forEach(el => {
+    const v = el.value.trim();
+    if (v) answers[el.dataset.pcKey] = v;
+  });
+  if (!Object.keys(answers).length) { alert('请填写答复'); return; }
+  // disable the card's inputs/button
+  document.querySelectorAll(`#pc-${cid} button, #pc-${cid} input`).forEach(e => e.disabled = true);
+  try {
+    const res = await fetch(`${BASE}/chat/peer_clarification/answer`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({correlation_id: cid, answers}),
+    });
+    const data = await res.json().catch(()=>({}));
+    const card = document.getElementById(`pc-${cid}`);
+    if (card) {
+      const bub = card.querySelector('.bubble');
+      if (bub) bub.innerHTML += `<div style="margin-top:8px;font-size:11px;color:var(--accent)">✓ 已回复 ${esc(data.peer_agent||'peer')},对方将继续处理。</div>`;
+    }
+  } catch (e) {
+    alert('提交失败: ' + (e.message||e));
+    document.querySelectorAll(`#pc-${cid} button, #pc-${cid} input`).forEach(el => el.disabled = false);
+  }
+}
+
+// Poll for peer clarifications that arrived when no SSE was open. Runs while
+// the page is active; cheap (returns [] when nothing pending).
+function startPeerClarificationPoll() {
+  setInterval(async () => {
+    const sid = (typeof getSession === 'function') ? getSession() : '';
+    if (!sid) return;
+    try {
+      const r = await fetch(`${BASE}/chat/peer_clarifications?session_id=${encodeURIComponent(sid)}`);
+      const items = await r.json().catch(()=>[]);
+      if (Array.isArray(items)) {
+        for (const it of items) { it.type = 'peer_clarification'; renderPeerClarification(it); }
+      }
+    } catch(_) {}
+  }, 4000);
+}
+
 function renderCapabilityDegraded(c) {
   const skill    = c.skill_id || 'cross-agent skill';
   const peers    = (c.offline_peers || []).join(', ') || '(unknown)';
@@ -2165,7 +2328,16 @@ function startResumptionPoll(sid) {
       if (_seenResumptions.has(key)) continue;
       _seenResumptions.add(key);
       const txt = (it.text || '').trim();
-      if (txt) addMessage('agent', txt);
+      // Route peer-HITL approval messages (the peer's post-approval reply)
+      // to the DELEGATION window, not the user's main chat. Those are the
+      // origin↔peer exchange and belong in the per-peer thread. The main
+      // chat only shows the origin's FINAL synthesis (terminal result).
+      const isPeerInterim = it.peer_agent && (phase === 'approval' || it.interim);
+      if (isPeerInterim) {
+        if (txt) routePeerMessageToDelegation(it.peer_agent, txt, it.correlation_id);
+      } else if (txt) {
+        addMessage('agent', txt);   // origin's final synthesis → user window
+      }
       // Only the terminal result stage ends the delegation; interim
       // (approval) notes must NOT stop the poll, or the final answer
       // never gets fetched.
@@ -2190,11 +2362,27 @@ function dispatchChunk(c, query, sid) {
     renderCapabilityDegraded(c);
     return;
   }
+  if (c.type === 'peer_clarification') {
+    renderPeerClarification(c);
+    return;
+  }
   if (c.type === 'cross_agent_parked') {
     // The request parked awaiting a peer's operator-approval HITL. The
     // final answer will arrive asynchronously after this SSE closes —
     // flag it so finalizeStream's caller starts the resumptions poll.
     if (streamState) streamState.parked = true;
+    return;
+  }
+  if (c.type==='reasoning') {
+    renderReasoning(c);
+    return;
+  }
+  if (c.type==='interim') {
+    renderInterim(c);
+    return;
+  }
+  if (c.type==='delegated') {
+    renderDelegated(c);
     return;
   }
   if (c.type==='llm_trace') {
@@ -3745,6 +3933,44 @@ function _delFmtTime(iso) {
 // asked us / left-aligned). Unread = a task whose state changed since the
 // operator last viewed that peer's thread.
 let _dlgRows = [];                 // latest fetched rows
+// Peer messages that arrived via the resume poll (post-approval replies).
+// Keyed by peer; rendered in the thread alongside task-store rows. These are
+// the "after human approval, subsequent messages" that belong in the
+// delegation window, not the user's main chat.
+let _dlgExtraMsgs = {};            // peer -> [{text, ts, correlation_id}]
+let _dlgTabUnread = 0;
+
+function routePeerMessageToDelegation(peer, text, correlationId) {
+  if (!peer) return;
+  (_dlgExtraMsgs[peer] = _dlgExtraMsgs[peer] || []).push({
+    text, ts: Date.now(), correlation_id: correlationId || '',
+  });
+  // Badge the Delegate tab so the user notices the peer replied.
+  _dlgTabUnread += 1;
+  _updateDelegateTabBadge();
+  // If the delegation view is open on this peer, render live.
+  if (_dlgViewOpen && _dlgActivePeer === peer) _renderDlgThread(peer);
+  // A lightweight breadcrumb in the activity flow so the user knows to look —
+  // but the actual content lives in the delegation window.
+  if (typeof flowEvent === 'function') {
+    flowEvent('delegate', `🤝 ${peer} 审批后已回复`, '见委派对话窗',
+      'peer post-approval reply routed to delegation window');
+  }
+}
+
+function _updateDelegateTabBadge() {
+  const tab = document.getElementById('tab-btn-delegations');
+  if (!tab) return;
+  let b = document.getElementById('dlg-tab-badge');
+  if (_dlgTabUnread <= 0) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('span');
+    b.id = 'dlg-tab-badge';
+    b.style.cssText = 'margin-left:5px;background:var(--accent);color:#00110d;border-radius:8px;padding:0 5px;font-size:9px;font-weight:700';
+    tab.appendChild(b);
+  }
+  b.textContent = _dlgTabUnread;
+}
 let _dlgActivePeer = null;         // currently open thread
 let _dlgSeenState = {};            // task_id -> last-seen state (unread calc)
 let _dlgViewOpen = false;
@@ -3753,6 +3979,8 @@ function _dlgPeerOf(r) { return r.peer_agent || r.target_agent || r.source_agent
 
 function openDelegationView() {
   _dlgViewOpen = true;
+  _dlgTabUnread = 0;
+  _updateDelegateTabBadge();
   // mark the right-panel tab button active for visual consistency
   document.querySelectorAll('.right-panel .tab').forEach(t => t.classList.remove('active'));
   const btn = document.getElementById('tab-btn-delegations');
@@ -3914,6 +4142,19 @@ function _renderDlgThread(peer) {
     }
     return html;
   }).join('');
+
+  // Append post-approval peer messages that arrived via the resume poll
+  // (may not be in the task store yet). These are the "subsequent messages
+  // after human approval" that belong in this window.
+  const extras = _dlgExtraMsgs[peer] || [];
+  if (extras.length) {
+    thread.innerHTML += extras.map(m => `
+      <div style="display:flex;justify-content:flex-start">
+        <div style="max-width:78%;background:var(--surface);border:1px solid var(--border);border-left:2px solid var(--accent);border-radius:8px;padding:8px 11px">
+          <div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-bottom:4px">← ${_delEsc(peer)} · 审批后回复 · ${_delFmtTime(new Date(m.ts).toISOString())}</div>
+          <div class="bubble agent" style="font-size:12px;color:var(--fg);line-height:1.5;background:none;border:none;padding:0">${_renderMarkdown(m.text)}</div>
+        </div></div>`).join('');
+  }
   thread.scrollTop = thread.scrollHeight;
 }
 
@@ -3937,7 +4178,7 @@ function startPeersPoll() {
 // Kick off the poller on page load; the WebUI is single-page so this
 // runs exactly once. addEventListener avoids clobbering any other
 // existing handler the page may register.
-document.addEventListener('DOMContentLoaded', () => { startPeersPoll(); });
+document.addEventListener('DOMContentLoaded', () => { startPeersPoll(); startPeerClarificationPoll(); });
 
 
 
