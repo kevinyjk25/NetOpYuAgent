@@ -181,6 +181,15 @@ main{grid-area:main;display:flex;flex-direction:column;overflow:hidden}
   background:var(--border2);border-radius:3px;padding:1px 6px;color:var(--dim);
 }
 .action-body{display:none;border-top:1px solid var(--border)}
+.reasoning-block{padding:8px 12px;border-left:2px solid rgba(148,163,184,.35);margin:6px 0 6px 8px;background:rgba(148,163,184,.05)}
+.reasoning-tag{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#94a3b8;margin-bottom:4px;font-weight:600}
+.reasoning-text{font-size:12px;line-height:1.55;color:#94a3b8;font-style:italic;white-space:pre-wrap}
+.interim-block{padding:8px 12px;border-left:2px solid rgba(56,189,248,.35);margin:6px 0 6px 8px;background:rgba(56,189,248,.04)}
+.interim-tag{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:#7dd3fc;margin-bottom:4px;font-weight:600}
+.interim-text{font-size:12px;line-height:1.55;color:#cbd5e1;white-space:pre-wrap}
+.delegated-block{padding:8px 12px;border-left:2px solid rgba(0,212,170,.4);margin:6px 0 6px 8px;background:rgba(0,212,170,.04)}
+.delegated-tag{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--accent);margin-bottom:4px;font-weight:600}
+.delegated-text{font-size:12px;line-height:1.55;color:#cbd5e1;white-space:pre-wrap}
 .action-header.open+.action-body{display:block}
 
 .action-step{
@@ -726,6 +735,29 @@ Type a query below. The agent will:
     </div>
   </div>
 
+  <!-- Delegation conversation view — A2A tasks as per-peer IM threads.
+       Hidden until the user opens Delegate; replaces #messages in <main>. -->
+  <div id="delegation-view" style="display:none;flex:1;overflow:hidden;flex-direction:row">
+    <!-- peer contact rail -->
+    <div id="dlg-contacts" style="width:200px;border-right:1px solid var(--border);overflow-y:auto;flex-shrink:0;background:var(--surface)">
+      <div style="padding:10px 12px;font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);display:flex;align-items:center">
+        Agents
+        <button onclick="refreshDelegations()" title="refresh" style="margin-left:auto;background:none;border:1px solid var(--border);border-radius:3px;color:var(--dim);font-size:10px;padding:1px 6px;cursor:pointer;font-family:var(--mono)">↻</button>
+      </div>
+      <div id="dlg-contact-list"></div>
+    </div>
+    <!-- thread area -->
+    <div style="flex:1;display:flex;flex-direction:column;overflow:hidden">
+      <div id="dlg-thread-header" style="padding:10px 14px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:12px;color:var(--fg);display:none"></div>
+      <div id="dlg-thread" style="flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:10px">
+        <div id="dlg-thread-empty" style="margin:auto;color:var(--dim);font-family:var(--mono);font-size:11px;text-align:center;line-height:1.8">
+          Select an agent on the left to view the delegation thread.<br>
+          <span style="font-size:10px;opacity:.6">Each <code>[DELEGATE:peer]</code> appears as a request→reply pair.</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div class="input-area">
     <div class="input-row">
       <textarea id="query-input" rows="1" placeholder="Query the agent… (Enter to send, Shift+Enter newline)"></textarea>
@@ -756,11 +788,12 @@ Type a query below. The agent will:
     <div class="tab active" onclick="switchTab('cache')" id="tab-btn-cache">Results</div>
     <div class="tab" onclick="switchTab('flow')"   id="tab-btn-flow">Flow</div>
     <div class="tab" onclick="switchTab('hitl')"   id="tab-btn-hitl">HITL</div>
-    <div class="tab" onclick="switchTab('delegations');refreshDelegations()" id="tab-btn-delegations">Delegate</div>
+    <div class="tab" onclick="openDelegationView()" id="tab-btn-delegations">Delegate</div>
     <div class="tab" onclick="switchTab('memory')" id="tab-btn-memory">Memory</div>
     <div class="tab" onclick="switchTab('stats')"  id="tab-btn-stats">Stats</div>
     <div class="tab" onclick="switchTab('peers');refreshPeers()" id="tab-btn-peers">Peers</div>
     <div class="tab" onclick="switchTab('journal');refreshJournal()" id="tab-btn-journal">Journal</div>
+    <div class="tab" onclick="switchTab('schedule');refreshSchedule()" id="tab-btn-schedule">Schedule</div>
   </div>
 
   <!-- Results tab — all tool calls grouped by turn -->
@@ -819,14 +852,8 @@ Type a query below. The agent will:
     </div>
   </div>
 
-  <!-- Delegations tab — every [DELEGATE:] dispatched in this session -->
-  <div class="tab-content" id="tab-delegations">
-    <div id="delegations-empty" style="color:var(--dim);font-family:var(--mono);font-size:11px;padding:16px 10px;text-align:center;line-height:1.8">
-      No delegations yet.<br>
-      <span style="font-size:10px;opacity:.6">When this agent emits <code>[DELEGATE:peer]</code>, the dispatch + result appear here.</span>
-    </div>
-    <div id="delegations-list" style="overflow-y:auto;flex:1;padding:6px;display:none"></div>
-  </div>
+  <!-- (Delegations now render in the main-area conversation view via
+       openDelegationView(), not as a right-panel tab pane.) -->
 
   <!-- Memory tab — Dual-Track Memory viewer -->
   <div class="tab-content" id="tab-memory">
@@ -910,15 +937,36 @@ Type a query below. The agent will:
           <thead>
             <tr style="color:var(--dim);text-align:left">
               <th style="padding:4px 6px;border-bottom:1px solid var(--border)">Skill</th>
+              <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:60px">Selected</th>
               <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:60px">Uses</th>
               <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:70px">Dormant</th>
               <th style="padding:4px 6px;border-bottom:1px solid var(--border);width:80px">Dormant %</th>
             </tr>
           </thead>
           <tbody id="journal-skill-tbody">
-            <tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>
+            <tr><td colspan="5" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>
           </tbody>
         </table>
+      </div>
+
+      <!-- Evolution controls — manual P1/P3 triggers + CSI space audit -->
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:8px">
+          Evolution — P1 / P3 / CSI <span style="color:var(--dim2);text-transform:none;letter-spacing:0">(manual triggers for verification)</span>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+          <button onclick="evolutionSweep(true)" title="P1: detect recurring trajectories without generating" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🔍 P1 detect (dry-run)</button>
+          <button onclick="evolutionSweep(false)" title="P1: detect AND solidify recurring trajectories into skills" style="background:none;border:1px solid var(--accent);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">⚙ P1 solidify</button>
+          <button onclick="evolutionSpace()" title="Dump the CSI capability space (clusters + tool sets)" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--dim);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🗺 CSI space</button>
+          <button onclick="evolutionGaps()" title="Aggregate declared capability gaps — what the agent could NOT do (demand signal for new tools)" style="background:none;border:1px solid var(--border);border-radius:3px;color:var(--warn,#d98e00);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🕳 capability gaps</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin-bottom:8px">
+          <span style="font-size:10px;color:var(--dim);font-family:var(--mono)">P3 merge:</span>
+          <input id="evo-p3-session" placeholder="session_id" style="background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--fg);font-size:10px;padding:3px 6px;font-family:var(--mono);width:130px">
+          <input id="evo-p3-append" placeholder="追加诉求 (append text)" style="background:var(--bg);border:1px solid var(--border);border-radius:3px;color:var(--fg);font-size:10px;padding:3px 6px;font-family:var(--mono);flex:1;min-width:160px">
+          <button onclick="evolutionP3()" title="P3: attribute the append to the in-use skill + merge" style="background:none;border:1px solid var(--accent);border-radius:3px;color:var(--accent);font-size:11px;padding:4px 10px;cursor:pointer;font-family:var(--mono)">🔗 P3 merge</button>
+        </div>
+        <pre id="evo-result" style="display:none;background:var(--bg);border:1px solid var(--border);border-radius:4px;padding:8px;margin:0;font-family:var(--mono);font-size:10px;color:var(--dim);white-space:pre-wrap;max-height:280px;overflow:auto"></pre>
       </div>
 
       <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
@@ -931,6 +979,30 @@ Type a query below. The agent will:
         </div>
       </div>
 
+    </div>
+  </div>
+
+  <div class="tab-content" id="tab-schedule" style="padding:0">
+    <div style="padding:10px 12px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1">
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
+          Scheduled jobs
+          <span id="schedule-count" style="color:var(--accent);margin-left:6px;font-family:var(--mono)">—</span>
+          <span style="color:var(--dim2);font-size:10px;text-transform:none;font-family:var(--mono);margin-left:6px">in-memory · lost on restart</span>
+        </div>
+        <div id="schedule-jobs" style="display:flex;flex-direction:column;gap:6px;font-family:var(--mono);font-size:12px">
+          <div style="color:var(--dim);font-style:italic">Loading…</div>
+        </div>
+      </div>
+      <div style="background:var(--bg2);border:1px solid var(--border);border-radius:6px;padding:10px 12px">
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px">
+          Run history
+          <span style="color:var(--dim2);font-size:10px;text-transform:none;font-family:var(--mono);margin-left:6px">most recent first</span>
+        </div>
+        <div id="schedule-history" style="display:flex;flex-direction:column;gap:4px;font-family:var(--mono);font-size:11px">
+          <div style="color:var(--dim);font-style:italic">No runs yet.</div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -1370,6 +1442,10 @@ let flowEvents  = [];
 let _sessionFacts = [];   // confirmed_facts from last response, sent back next query
 let reqStart    = 0;
 let streamState = null;
+// Parked stream across a HITL pause: {sid, tokens}. Set at stop_hitl, consumed
+// when the resume stream's first token arrives so continuation renders into the
+// SAME bubble. Cleared after reattach or on a fresh main-stream start.
+let _parkedStream = null;
 
 function ts()   { return new Date().toLocaleTimeString('en-US',{hour12:false}); }
 function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
@@ -1382,7 +1458,7 @@ function getSession() {
 }
 
 function switchTab(name) {
-  ['cache','flow','hitl','delegations','memory','stats','peers','journal'].forEach(n => {
+  ['cache','flow','hitl','memory','stats','peers','journal','schedule'].forEach(n => {
     const btn = document.getElementById('tab-btn-'+n);
     const pane = document.getElementById('tab-'+n);
     if (btn)  btn.classList.toggle('active', n===name);
@@ -1668,6 +1744,183 @@ function _renderMermaidIn(rootEl) {
 //     the fresh fact so the LLM can revise its previous answer.
 //   - [我已处理,忽略]   — acknowledges + collapses the card. The fact
 //     is still injected into confirmed_facts so future turns see it.
+// ── Option A: peer clarification bubbled up from a delegated agent ──────
+// A peer (e.g. dc-agent) we delegated to needs the user to answer a
+// clarifying question. It appears in THIS user's chat as a card; the answer
+// routes back to the peer so its parked task resumes. Transparent to the
+// user — feels like the agent asked.
+const _seenPeerClar = new Set();   // correlation_ids already rendered
+
+function renderDelegated(c) {
+  // A delegated peer's streamed sub-result. Accumulates into ONE "result from
+  // <peer>" block in the PROCESS area (not the conclusion bubble) — the origin
+  // synthesizes its own final answer from this afterwards. Keyed per peer per
+  // stream so multiple tokens append to the same block.
+  if (!streamState) return;
+  const body = document.getElementById(streamState.sid + '-body');
+  if (!body) return;
+  const peer = c.source_agent || 'peer';
+  const blockId = `${streamState.sid}-deleg-${peer.replace(/[^a-zA-Z0-9]/g,'')}`;
+  let textEl = document.getElementById(blockId + '-text');
+  if (!textEl) {
+    const block = document.createElement('div');
+    block.className = 'delegated-block';
+    block.innerHTML = `
+      <div class="delegated-tag">🤝 委派结果 · ${esc(peer)}</div>
+      <div class="delegated-text" id="${blockId}-text"></div>`;
+    body.appendChild(block);
+    textEl = document.getElementById(blockId + '-text');
+    const hdr = document.querySelector(`#${streamState.sid}-stream .action-header`);
+    if (hdr && !hdr.classList.contains('open')) hdr.classList.add('open');
+  }
+  textEl.textContent += (c.delegated || '');
+  const msgs = document.getElementById('messages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderInterim(c) {
+  // Intermediate-turn narration ("let me check X" before a tool call) goes to
+  // the PROCESS area — it's not the conclusion. Distinct from reasoning
+  // (which is <think> content): interim is the model's outward prose per turn.
+  if (!streamState) return;
+  const body = document.getElementById(streamState.sid + '-body');
+  if (!body) return;
+  const block = document.createElement('div');
+  block.className = 'interim-block';
+  block.innerHTML = `
+    <div class="interim-tag">↳ 过程 · Turn ${c.turn ?? '?'}</div>
+    <div class="interim-text">${esc(c.interim || '')}</div>`;
+  body.appendChild(block);
+  const hdr = document.querySelector(`#${streamState.sid}-stream .action-header`);
+  if (hdr && !hdr.classList.contains('open')) hdr.classList.add('open');
+  const msgs = document.getElementById('messages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderReasoning(c) {
+  // The model's reasoning (<think>) goes into the collapsible PROCESS area,
+  // kept visually distinct from the conclusion bubble. Multiple turns append
+  // multiple reasoning blocks.
+  if (!streamState) return;
+  const body = document.getElementById(streamState.sid + '-body');
+  if (!body) return;
+  const block = document.createElement('div');
+  block.className = 'reasoning-block';
+  block.innerHTML = `
+    <div class="reasoning-tag">💭 推理 · Turn ${c.turn ?? '?'}</div>
+    <div class="reasoning-text">${esc(c.reasoning || '')}</div>`;
+  body.appendChild(block);
+  // Make sure the process area is visible (it starts open).
+  const hdr = document.querySelector(`#${streamState.sid}-stream .action-header`);
+  if (hdr && !hdr.classList.contains('open')) hdr.classList.add('open');
+  const msgs = document.getElementById('messages');
+  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+}
+
+function renderPeerClarification(c) {
+  const cid = c.correlation_id || '';
+  if (cid && _seenPeerClar.has(cid)) return;   // dedup (SSE + poll overlap)
+  if (cid) _seenPeerClar.add(cid);
+  const peer     = c.peer_agent || 'peer agent';
+  const question = c.question || '需要补充信息';
+  const fields   = c.clarification_fields || [];
+  const fieldsHtml = (fields.length ? fields : [{key:'answer',prompt:question,required:true}])
+    .map(f => `
+      <div style="margin-bottom:6px">
+        <label style="display:block;font-size:11px;color:#cbd5e1;margin-bottom:2px">
+          ${esc(f.prompt||f.key)} ${f.required?'<span style="color:#f87171">*</span>':''}
+        </label>
+        <input type="text" data-pc-cid="${esc(cid)}" data-pc-key="${esc(f.key||'answer')}"
+          placeholder="${esc(f.placeholder||'')}"
+          style="width:100%;background:#0f172a;color:#e2e8f0;border:1px solid var(--border);border-radius:3px;padding:5px 7px;font-size:12px"/>
+      </div>`).join('');
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap';
+  wrap.id = cid ? `pc-${cid}` : '';
+  wrap.innerHTML = `
+    <div class="avatar avatar-agent">AGT</div>
+    <div class="msg-body">
+      <div class="msg-meta">agent · 需要补充信息 · ${ts()}</div>
+      <div class="bubble" style="border-left:4px solid var(--accent);background:rgba(0,212,170,.05)">
+        <div style="font-size:11px;color:var(--accent);font-weight:600;letter-spacing:.4px;text-transform:uppercase;margin-bottom:6px">
+          ⇡ 来自 ${esc(peer)} 的澄清请求
+        </div>
+        <div style="font-size:13px;color:#e2e8f0;margin-bottom:8px;line-height:1.5">${esc(question)}</div>
+        ${fieldsHtml}
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn btn-success btn-sm" onclick="submitPeerClarification('${esc(cid)}')">↪ 提交</button>
+        </div>
+      </div>
+    </div>`;
+  const msgs = document.getElementById('messages');
+  if (msgs) { msgs.appendChild(wrap); msgs.scrollTop = msgs.scrollHeight; }
+}
+
+async function submitPeerClarification(cid) {
+  const answers = {};
+  document.querySelectorAll(`[data-pc-cid="${cid}"][data-pc-key]`).forEach(el => {
+    const v = el.value.trim();
+    if (v) answers[el.dataset.pcKey] = v;
+  });
+  if (!Object.keys(answers).length) { alert('请填写答复'); return; }
+  // disable the card's inputs/button
+  document.querySelectorAll(`#pc-${cid} button, #pc-${cid} input`).forEach(e => e.disabled = true);
+  try {
+    const res = await fetch(`${BASE}/chat/peer_clarification/answer`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({correlation_id: cid, answers}),
+    });
+    const data = await res.json().catch(()=>({}));
+    const card = document.getElementById(`pc-${cid}`);
+    if (card) {
+      const bub = card.querySelector('.bubble');
+      if (bub) bub.innerHTML += `<div style="margin-top:8px;font-size:11px;color:var(--accent)">✓ 已回复 ${esc(data.peer_agent||'peer')},对方将继续处理。</div>`;
+    }
+  } catch (e) {
+    alert('提交失败: ' + (e.message||e));
+    document.querySelectorAll(`#pc-${cid} button, #pc-${cid} input`).forEach(el => el.disabled = false);
+  }
+}
+
+// Poll for peer clarifications that arrived when no SSE was open. Runs while
+// the page is active; cheap (returns [] when nothing pending).
+function startPeerClarificationPoll() {
+  setInterval(async () => {
+    const sid = (typeof getSession === 'function') ? getSession() : '';
+    if (!sid) return;
+    try {
+      const r = await fetch(`${BASE}/chat/peer_clarifications?session_id=${encodeURIComponent(sid)}`);
+      const items = await r.json().catch(()=>[]);
+      if (Array.isArray(items)) {
+        for (const it of items) { it.type = 'peer_clarification'; renderPeerClarification(it); }
+      }
+    } catch(_) {}
+  }, 4000);
+}
+
+function renderCapabilityDegraded(c) {
+  const skill    = c.skill_id || 'cross-agent skill';
+  const peers    = (c.offline_peers || []).join(', ') || '(unknown)';
+  const boundary = c.degraded_capability || '仅交付本地可完成的部分,依赖离线对端的步骤如实说明无法执行。';
+  const wrap = document.createElement('div');
+  wrap.className = 'msg-wrap';
+  wrap.innerHTML = `
+    <div class="avatar avatar-sys" style="background:#553;">⚠</div>
+    <div class="msg-body">
+      <div class="msg-meta">跨域能力降级 · ${esc(skill)} · ${ts()}</div>
+      <div class="bubble" style="border-left:4px solid #d97706; background:#1f1a12;">
+        <div class="metric-warn" style="font-weight:600; margin-bottom:6px;">⚠ 跨域能力降级运行</div>
+        <div style="margin-bottom:8px; font-size:13px; color:#cbd5e1;">
+          技能 <code>${esc(skill)}</code> 依赖的对端 <code>${esc(peers)}</code> 当前离线。
+          Agent 将在边界能力内运行:
+        </div>
+        <div style="padding:8px; background:#0f172a; border-radius:4px; font-size:12px; white-space:pre-wrap; color:#e2e8f0;">${esc(boundary)}</div>
+      </div>
+    </div>`;
+  const msgs = document.getElementById('messages');
+  if (msgs) { msgs.appendChild(wrap); msgs.scrollTop = msgs.scrollHeight; }
+}
+
 function renderAsyncHitlNotify(c) {
   const tool       = c.tool || 'async tool';
   const outcome    = c.outcome || '?';
@@ -1798,6 +2051,7 @@ function startStream() {
     </div>`;
   msgs.appendChild(wrap);
   msgs.scrollTop = msgs.scrollHeight;
+  _parkedStream = null;   // a new query supersedes any un-resumed HITL park
   streamState = {sid, tokens:[], toolCalls:0, skillLoads:0, hermesEvents:0};
 }
 
@@ -1853,7 +2107,40 @@ function addStep(type, label, detail='', expandData='', extra=null) {
   document.getElementById('messages').scrollTop = 99999;
 }
 
+function parkCurrentStream() {
+  // Capture the active bubble so a post-HITL resume streams continuation
+  // tokens back into it. Called from every pause path (awaiting_hitl,
+  // stop_hitl). Idempotent: if already parked for this pause, keep the first
+  // capture (it has the fuller token list from before finalizeStream ran).
+  if (_parkedStream) return;
+  if (streamState && streamState.sid) {
+    _parkedStream = {
+      sid:    streamState.sid,
+      tokens: streamState.tokens.slice(),
+    };
+  }
+}
+
 function appendToken(token) {
+  // Resume continuation: main stream ended at HITL (streamState nulled by
+  // finalizeStream), but the operator approved and the resumer is now
+  // streaming the rest of the SAME answer. Reattach to the parked bubble so
+  // it continues in place instead of being dropped.
+  if (!streamState && _parkedStream) {
+    const pbub = document.getElementById(_parkedStream.sid + '-bubble');
+    if (pbub) {
+      streamState = {
+        sid: _parkedStream.sid,
+        tokens: _parkedStream.tokens.slice(),
+        toolCalls: 0, skillLoads: 0, hermesEvents: 0,
+        resumed: true,
+      };
+      if (typeof closeDelegationView === 'function' && typeof _dlgViewOpen !== 'undefined' && _dlgViewOpen) closeDelegationView();
+      const msgs0 = document.getElementById('messages');
+      if (msgs0) msgs0.style.display = '';
+      _parkedStream = null;   // consumed
+    }
+  }
   if (!streamState) return;
   streamState.tokens.push(token);
   const bub = document.getElementById(streamState.sid+'-bubble');
@@ -1999,8 +2286,65 @@ async function streamQuery(query, sid, body) {
   } finally {
     _streamAbort = null;
   }
+  const _parked = !!(streamState && streamState.parked);
   finalizeStream();
   updateCacheBadge();
+  // ── Cross-agent HITL resumption poll (A2A Phase 3) ─────────────────
+  // When a delegated peer raised an operator-approval HITL, the request
+  // PARKS: this SSE stream ends now, and the final synthesis answer is
+  // produced later by an async result callback on the backend (buffered
+  // in _pending_resumptions). The closed SSE can't receive it, so poll
+  // for it and render it as a new agent message when it arrives. Only
+  // poll when we actually parked — normal queries finish on the SSE.
+  if (_parked) startResumptionPoll(sid);
+}
+
+// Tracks correlation_ids already rendered so the SSE-notify path and this
+// poll can't double-render the same synthesis answer.
+const _seenResumptions = new Set();
+
+function startResumptionPoll(sid) {
+  const session = (typeof getSession === 'function' ? getSession() : '') || '';
+  if (!session) return;
+  let _tries = 0;
+  const MAX_TRIES = 150;           // ~5 min at 2s interval
+  const _timer = setInterval(async () => {
+    _tries += 1;
+    if (_tries > MAX_TRIES) { clearInterval(_timer); return; }
+    let items = [];
+    try {
+      const r = await fetch(`${BASE}/chat/resumptions?session_id=${encodeURIComponent(session)}`);
+      items = await r.json().catch(() => []);
+    } catch (_) { return; }
+    if (!Array.isArray(items) || items.length === 0) return;
+    let _gotTerminal = false;
+    for (const it of items) {
+      // Dedup key MUST include phase: approval (interim) and result
+      // (final) share the same correlation_id. Keying on correlation_id
+      // alone would drop the final answer as a "duplicate" of the
+      // interim — the exact bug that left the UI stuck on "正在执行…".
+      const phase = it.phase || (it.interim ? 'approval' : 'result');
+      const key = (it.correlation_id || (it.text || '').slice(0, 40)) + ':' + phase;
+      if (_seenResumptions.has(key)) continue;
+      _seenResumptions.add(key);
+      const txt = (it.text || '').trim();
+      // Route peer-HITL approval messages (the peer's post-approval reply)
+      // to the DELEGATION window, not the user's main chat. Those are the
+      // origin↔peer exchange and belong in the per-peer thread. The main
+      // chat only shows the origin's FINAL synthesis (terminal result).
+      const isPeerInterim = it.peer_agent && (phase === 'approval' || it.interim);
+      if (isPeerInterim) {
+        if (txt) routePeerMessageToDelegation(it.peer_agent, txt, it.correlation_id);
+      } else if (txt) {
+        addMessage('agent', txt);   // origin's final synthesis → user window
+      }
+      // Only the terminal result stage ends the delegation; interim
+      // (approval) notes must NOT stop the poll, or the final answer
+      // never gets fetched.
+      if (phase === 'result' && !it.interim) _gotTerminal = true;
+    }
+    if (_gotTerminal) clearInterval(_timer);
+  }, 2000);
 }
 
 function dispatchChunk(c, query, sid) {
@@ -2012,6 +2356,33 @@ function dispatchChunk(c, query, sid) {
   // this new fact in mind.
   if (c.type === 'async_hitl_resolved') {
     renderAsyncHitlNotify(c);
+    return;
+  }
+  if (c.type === 'capability_degraded') {
+    renderCapabilityDegraded(c);
+    return;
+  }
+  if (c.type === 'peer_clarification') {
+    renderPeerClarification(c);
+    return;
+  }
+  if (c.type === 'cross_agent_parked') {
+    // The request parked awaiting a peer's operator-approval HITL. The
+    // final answer will arrive asynchronously after this SSE closes —
+    // flag it so finalizeStream's caller starts the resumptions poll.
+    if (streamState) streamState.parked = true;
+    return;
+  }
+  if (c.type==='reasoning') {
+    renderReasoning(c);
+    return;
+  }
+  if (c.type==='interim') {
+    renderInterim(c);
+    return;
+  }
+  if (c.type==='delegated') {
+    renderDelegated(c);
     return;
   }
   if (c.type==='llm_trace') {
@@ -2204,6 +2575,11 @@ function dispatchChunk(c, query, sid) {
     if (Array.isArray(c.confirmed_facts) && c.confirmed_facts.length) {
       _sessionFacts = c.confirmed_facts;
     }
+    // Park the original bubble so the post-decision resume (skill-choice /
+    // clarification / approval) streams its tokens back into the SAME bubble.
+    // This branch fires for skill-selection HITL — without parking here the
+    // resume tokens have no bubble and appendToken drops them.
+    parkCurrentStream();
     return;
   }
   if (c.type==='hermes_write') {
@@ -2246,6 +2622,7 @@ function dispatchChunk(c, query, sid) {
       streamState.paused = true;
       const lbl = document.getElementById(streamState.sid + '-label');
       if (lbl) lbl.textContent = 'Paused for HITL approval — continues after decision';
+      parkCurrentStream();
     }
     switchTab('hitl');
     refreshHitl(5);
@@ -2829,6 +3206,11 @@ function openHitlStream(interruptId) {
         // The /stream endpoint emits a synthetic {type:'done'} when the
         // resumer completes — that's our cue to close.
         if (chunk.type === 'done') {
+          // If we reattached to the parked bubble and streamed continuation
+          // tokens into it, finalize it (markdown render) now.
+          if (streamState && streamState.resumed) {
+            try { finalizeStream(); } catch(_) {}
+          }
           es.close();
           return;
         }
@@ -3418,6 +3800,79 @@ async function refreshPeers() {
   }
 }
 
+// ── Schedule tab ──────────────────────────────────────────────────────────
+function _schedEsc(s) {
+  return String(s == null ? '' : s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function _schedFmtTime(ts) {
+  if (!ts) return '—';
+  try { return new Date(ts * 1000).toLocaleTimeString(); } catch (_) { return '—'; }
+}
+async function cancelSchedule(jobId) {
+  try {
+    await fetch(`${BASE}/schedule/cancel`, {
+      method: 'POST', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({job_id: jobId}),
+    });
+  } catch (_) {}
+  refreshSchedule();
+}
+async function refreshSchedule() {
+  const jobsEl = document.getElementById('schedule-jobs');
+  const histEl = document.getElementById('schedule-history');
+  const countEl = document.getElementById('schedule-count');
+  if (!jobsEl || !histEl) return;
+  let data;
+  try {
+    const res = await fetch(`${BASE}/schedule`);
+    data = await res.json();
+  } catch (e) {
+    jobsEl.innerHTML = `<div style="color:#f87171">Network error: ${_schedEsc(e.message||e)}</div>`;
+    return;
+  }
+  const jobs = data.jobs || [];
+  const history = data.history || [];
+  if (countEl) countEl.textContent = jobs.filter(j => j.state === 'active').length + ' active';
+
+  if (jobs.length === 0) {
+    jobsEl.innerHTML = `<div style="color:var(--dim);font-style:italic">No scheduled jobs. Ask the agent to create one (e.g. "每 30 秒检查一次 alice 的接入状态").</div>`;
+  } else {
+    jobsEl.innerHTML = jobs.map(j => {
+      const tgt = j.mode === 'tool'
+        ? _schedEsc(j.payload.tool_name || '')
+        : _schedEsc((j.payload.query || '').slice(0, 60));
+      const sched = j.interval_s ? `every ${j.interval_s}s` : 'one-shot';
+      const stateColor = j.state === 'active' ? 'var(--accent)'
+        : (j.state === 'cancelled' ? '#f87171' : 'var(--dim)');
+      const okBadge = j.last_ok === true ? '✓' : (j.last_ok === false ? '✗' : '·');
+      const cancelBtn = j.state === 'active'
+        ? `<span onclick="cancelSchedule('${j.job_id}')" style="cursor:pointer;color:#f87171;margin-left:8px">[cancel]</span>`
+        : '';
+      return `<div style="border:1px solid var(--border);border-radius:4px;padding:6px 8px">
+        <div><span style="color:${stateColor}">[${j.state}]</span>
+          <span style="color:var(--accent)">${j.job_id}</span> · ${_schedEsc(j.name)}
+          <span style="color:var(--dim2)">(${j.mode} · ${sched} · runs=${j.runs} ${okBadge})</span>${cancelBtn}</div>
+        <div style="color:var(--dim);font-size:11px;margin-top:2px">→ ${tgt}</div>
+      </div>`;
+    }).join('');
+  }
+
+  if (history.length === 0) {
+    histEl.innerHTML = `<div style="color:var(--dim);font-style:italic">No runs yet.</div>`;
+  } else {
+    histEl.innerHTML = history.map(h => {
+      const ok = h.ok ? '<span style="color:var(--accent)">✓</span>' : '<span style="color:#f87171">✗</span>';
+      return `<div style="border-bottom:1px solid var(--border);padding:3px 0">
+        ${ok} <span style="color:var(--dim2)">${_schedFmtTime(h.started_at)}</span>
+        <span style="color:var(--accent)">${h.job_id}</span>
+        <span style="color:var(--dim)">(${h.duration_s}s)</span>
+        <div style="color:var(--dim);font-size:10px;white-space:pre-wrap;margin-top:1px">${_schedEsc((h.result_preview||'').slice(0,200))}</div>
+      </div>`;
+    }).join('');
+  }
+}
+
 function _peersHeartbeat() {
   // Pulse the indicator so the user can tell the poll is alive.
   const ind = document.getElementById('peers-poll-indicator');
@@ -3432,9 +3887,6 @@ function _peersHeartbeat() {
 // tab (and every 10s while it's the active tab). One row per dispatched
 // [DELEGATE:...] — newest first, expandable to show full subtask /
 // result / error.
-
-let _delegationsPollTimer = null;
-let _delegationsExpanded = {};   // task_id -> bool
 
 function _delEsc(s) {
   return String(s ?? '')
@@ -3474,179 +3926,241 @@ function _delFmtTime(iso) {
   } catch { return iso.slice(11, 19); }
 }
 
-function toggleDelegationDetail(taskId) {
-  _delegationsExpanded[taskId] = !_delegationsExpanded[taskId];
-  refreshDelegations();   // re-render
+// ── Delegation conversation view (A2A tasks as per-peer IM threads) ──────
+// Replaces the old flat right-panel list. Groups every inbound/outbound
+// delegation by peer agent into a chat thread; each task renders as a
+// request→reply pair (outbound: we asked / right-aligned; inbound: peer
+// asked us / left-aligned). Unread = a task whose state changed since the
+// operator last viewed that peer's thread.
+let _dlgRows = [];                 // latest fetched rows
+// Peer messages that arrived via the resume poll (post-approval replies).
+// Keyed by peer; rendered in the thread alongside task-store rows. These are
+// the "after human approval, subsequent messages" that belong in the
+// delegation window, not the user's main chat.
+let _dlgExtraMsgs = {};            // peer -> [{text, ts, correlation_id}]
+let _dlgTabUnread = 0;
+
+function routePeerMessageToDelegation(peer, text, correlationId) {
+  if (!peer) return;
+  (_dlgExtraMsgs[peer] = _dlgExtraMsgs[peer] || []).push({
+    text, ts: Date.now(), correlation_id: correlationId || '',
+  });
+  // Badge the Delegate tab so the user notices the peer replied.
+  _dlgTabUnread += 1;
+  _updateDelegateTabBadge();
+  // If the delegation view is open on this peer, render live.
+  if (_dlgViewOpen && _dlgActivePeer === peer) _renderDlgThread(peer);
+  // A lightweight breadcrumb in the activity flow so the user knows to look —
+  // but the actual content lives in the delegation window.
+  if (typeof flowEvent === 'function') {
+    flowEvent('delegate', `🤝 ${peer} 审批后已回复`, '见委派对话窗',
+      'peer post-approval reply routed to delegation window');
+  }
+}
+
+function _updateDelegateTabBadge() {
+  const tab = document.getElementById('tab-btn-delegations');
+  if (!tab) return;
+  let b = document.getElementById('dlg-tab-badge');
+  if (_dlgTabUnread <= 0) { if (b) b.remove(); return; }
+  if (!b) {
+    b = document.createElement('span');
+    b.id = 'dlg-tab-badge';
+    b.style.cssText = 'margin-left:5px;background:var(--accent);color:#00110d;border-radius:8px;padding:0 5px;font-size:9px;font-weight:700';
+    tab.appendChild(b);
+  }
+  b.textContent = _dlgTabUnread;
+}
+let _dlgActivePeer = null;         // currently open thread
+let _dlgSeenState = {};            // task_id -> last-seen state (unread calc)
+let _dlgViewOpen = false;
+
+function _dlgPeerOf(r) { return r.peer_agent || r.target_agent || r.source_agent || '?'; }
+
+function openDelegationView() {
+  _dlgViewOpen = true;
+  _dlgTabUnread = 0;
+  _updateDelegateTabBadge();
+  // mark the right-panel tab button active for visual consistency
+  document.querySelectorAll('.right-panel .tab').forEach(t => t.classList.remove('active'));
+  const btn = document.getElementById('tab-btn-delegations');
+  if (btn) btn.classList.add('active');
+  // swap main area: hide chat + composer, show delegation view
+  const msgs = document.getElementById('messages');
+  const view = document.getElementById('delegation-view');
+  const input = document.querySelector('.input-area');
+  if (msgs) msgs.style.display = 'none';
+  if (input) input.style.display = 'none';
+  if (view) view.style.display = 'flex';
+  refreshDelegations();
+}
+
+function closeDelegationView() {
+  _dlgViewOpen = false;
+  const msgs = document.getElementById('messages');
+  const view = document.getElementById('delegation-view');
+  const input = document.querySelector('.input-area');
+  if (view) view.style.display = 'none';
+  if (msgs) msgs.style.display = '';
+  if (input) input.style.display = '';
+}
+
+// Patch switchTab: opening ANY other right-panel tab leaves delegation view.
+const _origSwitchTab = switchTab;
+switchTab = function(name) {
+  if (_dlgViewOpen && name !== 'delegations') closeDelegationView();
+  _origSwitchTab(name);
+};
+
+function _dlgUnreadCount(peer) {
+  return _dlgRows.filter(r =>
+    _dlgPeerOf(r) === peer && _dlgSeenState[r.task_id] !== r.state).length;
+}
+
+function _dlgMarkPeerSeen(peer) {
+  _dlgRows.filter(r => _dlgPeerOf(r) === peer)
+          .forEach(r => { _dlgSeenState[r.task_id] = r.state; });
 }
 
 async function refreshDelegations() {
-  const empty = document.getElementById('delegations-empty');
-  const list  = document.getElementById('delegations-list');
-  if (!empty || !list) return;
-  // We always fetch INBOUND (all sessions — peer-initiated delegations
-  // keyed by the upstream agent's session_id, which the local operator
-  // doesn't know). OUTBOUND is fetched only when there's a local session.
-  // This way DC's operator can see "← lan-agent" rows even without any
-  // local activity.
+  if (!_dlgViewOpen) return;
   try {
     const fetches = [fetch(`${BASE}/delegations/inbound`)];
-    if (sessionId) {
-      fetches.push(fetch(`${BASE}/delegations/${encodeURIComponent(sessionId)}`));
-    }
+    if (sessionId) fetches.push(fetch(`${BASE}/delegations/${encodeURIComponent(sessionId)}`));
     const responses = await Promise.all(fetches);
-    const allRows = [];
-    for (const res of responses) {
-      if (!res.ok) {
-        console.warn('delegations fetch returned', res.status);
-        continue;
-      }
-      const rows = await res.json();
-      allRows.push(...rows);
-    }
-    // De-duplicate on task_id in case the same row appears in both feeds
-    // (shouldn't happen — inbound and outbound never overlap — but defensive).
-    const seen = new Set();
-    const rows = [];
-    for (const r of allRows) {
-      if (seen.has(r.task_id)) continue;
-      seen.add(r.task_id);
-      rows.push(r);
-    }
-    // Newest first across the union
-    rows.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    const all = [];
+    for (const res of responses) { if (res.ok) all.push(...await res.json()); }
+    const seen = new Set(); _dlgRows = [];
+    for (const r of all) { if (!seen.has(r.task_id)) { seen.add(r.task_id); _dlgRows.push(r); } }
+    _renderDlgContacts();
+    if (_dlgActivePeer) _renderDlgThread(_dlgActivePeer);
+  } catch (e) { console.warn('delegation refresh failed', e); }
+}
 
-    if (!rows.length) {
-      empty.style.display = 'block';
-      list.style.display = 'none';
-      empty.innerHTML = `No delegations yet.<br>
-        <span style="font-size:10px;opacity:.6">When this agent emits <code>[DELEGATE:peer]</code> or receives one from a peer, rows appear here.</span>`;
-      return;
-    }
-    empty.style.display = 'none';
-    list.style.display = 'block';
-    list.innerHTML = rows.map(r => {
-      const expanded = !!_delegationsExpanded[r.task_id];
-      const stateBadge = _delFmtState(r.state);
+function _renderDlgContacts() {
+  const box = document.getElementById('dlg-contact-list');
+  if (!box) return;
+  // group by peer; newest activity first
+  const byPeer = {};
+  for (const r of _dlgRows) {
+    const p = _dlgPeerOf(r);
+    (byPeer[p] = byPeer[p] || []).push(r);
+  }
+  const peers = Object.keys(byPeer).sort((a, b) => {
+    const la = Math.max(...byPeer[a].map(r => Date.parse(r.created_at || 0) || 0));
+    const lb = Math.max(...byPeer[b].map(r => Date.parse(r.created_at || 0) || 0));
+    return lb - la;
+  });
+  if (!peers.length) {
+    box.innerHTML = `<div style="padding:14px 12px;color:var(--dim);font-size:10px;font-family:var(--mono);line-height:1.7">No agent threads yet.<br>Delegations appear here per peer.</div>`;
+    return;
+  }
+  box.innerHTML = peers.map(p => {
+    const rows = byPeer[p];
+    const last = rows.reduce((a, b) => (Date.parse(b.created_at||0)||0) > (Date.parse(a.created_at||0)||0) ? b : a);
+    const dir = last.direction === 'inbound' ? '←' : '→';
+    const dirCol = last.direction === 'inbound' ? '#fbbf24' : 'var(--accent)';
+    const unread = _dlgUnreadCount(p);
+    const active = p === _dlgActivePeer;
+    const badge = unread > 0
+      ? `<span style="margin-left:auto;background:var(--accent);color:#000;border-radius:9px;font-size:9px;padding:1px 6px;font-family:var(--mono)">${unread}</span>` : '';
+    const lastState = _delFmtState(last.state);
+    return `<div onclick="_openDlgThread('${_delEsc(p)}')" style="padding:9px 12px;cursor:pointer;border-bottom:1px solid var(--border);display:flex;flex-direction:column;gap:3px;${active?'background:var(--bg2)':''}">
+      <div style="display:flex;align-items:center;gap:6px;font-family:var(--mono);font-size:12px;color:var(--fg)">
+        <span style="color:${dirCol}">${dir}</span>${_delEsc(p)}${badge}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:9px;color:var(--dim)">
+        ${lastState}<span style="opacity:.6">${rows.length} task${rows.length>1?'s':''}</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function _openDlgThread(peer) {
+  _dlgActivePeer = peer;
+  _dlgMarkPeerSeen(peer);
+  _renderDlgContacts();
+  _renderDlgThread(peer);
+}
+
+function _renderDlgThread(peer) {
+  const thread = document.getElementById('dlg-thread');
+  const header = document.getElementById('dlg-thread-header');
+  const empty = document.getElementById('dlg-thread-empty');
+  if (!thread) return;
+  if (empty) empty.style.display = 'none';
+  const rows = _dlgRows.filter(r => _dlgPeerOf(r) === peer)
+                       .sort((a, b) => (Date.parse(a.created_at||0)||0) - (Date.parse(b.created_at||0)||0));
+  if (header) {
+    header.style.display = 'block';
+    header.innerHTML = `Delegation thread · <strong>${_delEsc(peer)}</strong>
+      <span style="color:var(--dim);font-size:10px;margin-left:8px">→ outbound (we asked) · ← inbound (they asked)</span>`;
+  }
+  // each task = a request bubble + (when resolved) a reply bubble
+  thread.innerHTML = rows.map(r => {
+    const outbound = r.direction !== 'inbound';
+    // request side
+    const reqSide = outbound ? 'flex-end' : 'flex-start';
+    const reqCol = outbound ? 'var(--accent)' : '#fbbf24';
+    const reqLabel = outbound ? `→ to ${_delEsc(peer)}` : `← from ${_delEsc(peer)}`;
+    const t = _delFmtTime(r.created_at);
+    const fork = r.forked ? ` · #forked·${r.shared_facts_count||0}` : '';
+    let html = `<div style="display:flex;justify-content:${reqSide}">
+      <div style="max-width:78%;background:var(--bg2);border:1px solid var(--border);border-left:2px solid ${reqCol};border-radius:8px;padding:8px 11px">
+        <div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-bottom:4px">${reqLabel} · ${t}${fork}</div>
+        <div style="font-size:12px;color:var(--fg);line-height:1.5">${_delEsc(r.description||'(no description)')}</div>
+      </div></div>`;
+    // reply side — only when there's a result / error / terminal state
+    const hasReply = r.result || r.error || ['completed','failed'].includes(r.state);
+    if (hasReply) {
+      const replySide = outbound ? 'flex-start' : 'flex-end';
+      let replyText = '', replyCol = 'var(--border2)', isErr = false;
+      if (r.error) { replyText = '⚠ ' + r.error; replyCol = '#f87171'; isErr = true; }
+      else if (r.result) {
+        replyText = (typeof r.result === 'object')
+          ? (r.result.text || JSON.stringify(r.result)) : String(r.result);
+        replyCol = '#34d399';
+      } else { replyText = '(completed, no text returned)'; }
       const lat = _delFmtLatency(r.latency_ms);
-      const t   = _delFmtTime(r.created_at);
-      // direction-aware label:
-      //   outbound  →  "→ dc-agent"  (this agent dispatched to peer)
-      //   inbound   ←  "← lan-agent" (peer dispatched to this agent)
-      const isInbound = r.direction === 'inbound';
-      const arrow     = isInbound ? '←' : '→';
-      const arrowCol  = isInbound ? '#fbbf24' : 'var(--accent)';
-      const peer      = _delEsc(r.peer_agent || r.target_agent || '?');
-      const desc      = _delEsc(r.description || '');
-      const errBadge = r.error
-        ? `<span style="color:#f87171;font-family:var(--mono);font-size:9px;margin-left:6px">⚠ ${_delEsc(String(r.error).slice(0,40))}${String(r.error).length>40?'…':''}</span>`
-        : '';
-      const forkedBadge = r.forked
-        ? `<span style="color:var(--accent);font-family:var(--mono);font-size:9px;margin-left:4px;opacity:.7">#forked·${r.shared_facts_count||0}</span>`
-        : '';
-      const hitlBadge = r.awaiting_hitl_id
-        ? `<span style="color:#fbbf24;font-family:var(--mono);font-size:9px;margin-left:4px">⚠ awaiting local HITL</span>`
-        : '';
-      // A2A Phase 3 (mode B): outbound delegation blocked on the PEER's
-      // operator. Read-only — approval happens on the peer's console, not
-      // here. Distinct wording from "awaiting local HITL" so the operator
-      // knows NOT to look for an approve button locally.
-      const peerHitlBadge = (r.peer_hitl_pending || r.state === 'awaiting_peer_hitl')
-        ? `<span style="color:#a78bfa;font-family:var(--mono);font-size:9px;margin-left:4px" title="Approve on ${peer}'s console — this delegation will resume automatically once ${peer}'s operator decides">⏳ awaiting ${peer} approval</span>`
-        : '';
+      // Peer results often contain markdown (bullets/bold/code fences) — render
+      // it. Errors stay plain-escaped (no markdown in an error string).
+      const replyBody = isErr
+        ? `<span style="white-space:pre-wrap">${_delEsc(replyText)}</span>`
+        : _renderMarkdown(replyText);
+      html += `<div style="display:flex;justify-content:${replySide}">
+        <div style="max-width:78%;background:var(--surface);border:1px solid var(--border);border-left:2px solid ${replyCol};border-radius:8px;padding:8px 11px">
+          <div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-bottom:4px">${outbound?'← reply from '+_delEsc(peer):'→ our reply'} ${lat?'· '+lat:''}</div>
+          <div class="bubble agent" style="font-size:12px;color:var(--fg);line-height:1.5;background:none;border:none;padding:0">${replyBody}</div>
+        </div></div>`;
+    } else {
+      // pending — show a status pill aligned to the reply side
+      const replySide = outbound ? 'flex-start' : 'flex-end';
+      const pend = (r.peer_hitl_pending || r.state==='awaiting_peer_hitl')
+        ? `⏳ awaiting ${_delEsc(peer)} approval` : _delFmtState(r.state);
+      html += `<div style="display:flex;justify-content:${replySide}">
+        <div style="font-size:10px;color:var(--dim);font-family:var(--mono);padding:4px 8px">${pend}</div></div>`;
+    }
+    return html;
+  }).join('');
 
-      // Detail panel — only render when expanded (avoids cluttering scan view)
-      let detailHtml = '';
-      if (expanded) {
-        // The peer returns result either as {text: "..."} (the common case,
-        // written by HitlExecutor._complete_inbound_delegation) or as a raw
-        // string (legacy). Show the text directly when we can; only fall
-        // back to JSON dump when the shape is unexpected — a raw JSON blob
-        // is unreadable for an operator who just wants to see the answer.
-        let resultText = '';
-        if (r.result) {
-          if (typeof r.result === 'string') {
-            resultText = r.result;
-          } else if (typeof r.result === 'object' && typeof r.result.text === 'string') {
-            resultText = r.result.text;
-          } else {
-            // Unknown shape — fall back to pretty-printed JSON so the
-            // operator at least sees the data, even if not formatted well.
-            try { resultText = JSON.stringify(r.result, null, 2); }
-            catch { resultText = String(r.result); }
-          }
-        }
-        const dirLabel = isInbound
-          ? `<span style="color:#fbbf24">Received from</span> <span style="color:var(--accent);font-family:var(--mono)">${peer}</span>`
-          : `<span style="color:var(--accent)">Sent to</span> <span style="color:var(--accent);font-family:var(--mono)">${peer}</span>`;
-        detailHtml = `
-          <div style="margin-top:6px;padding:8px;background:var(--card);border:1px solid var(--border);border-radius:4px;font-family:var(--mono);font-size:10px;line-height:1.5">
-            <div style="margin-bottom:4px">${dirLabel}</div>
-            <div style="color:var(--dim);margin-bottom:4px">
-              task_id: <span style="color:var(--mid)">${_delEsc(r.task_id)}</span>
-            </div>
-            <div style="color:var(--dim);margin-bottom:4px">
-              created: <span style="color:var(--mid)">${_delEsc(r.created_at || '—')}</span>
-              ${r.completed_at ? ` · completed: <span style="color:var(--mid)">${_delEsc(r.completed_at)}</span>` : ''}
-            </div>
-            ${r.source_query ? `
-              <div style="margin:6px 0 4px 0">
-                <div style="color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.4px">Original user query</div>
-                <div style="color:var(--text);font-style:italic;margin-top:2px">"${_delEsc(r.source_query)}"</div>
-              </div>` : ''}
-            <div style="margin:6px 0 4px 0">
-              <div style="color:var(--dim);font-size:9px;text-transform:uppercase;letter-spacing:.4px">Subtask</div>
-              <div style="color:var(--text);margin-top:2px;white-space:pre-wrap;word-break:break-word">${_delEsc(r.description)}</div>
-            </div>
-            ${r.error ? `
-              <div style="margin:6px 0 4px 0">
-                <div style="color:#f87171;font-size:9px;text-transform:uppercase;letter-spacing:.4px">Error</div>
-                <pre style="color:#fda4a4;margin:2px 0 0 0;white-space:pre-wrap;word-break:break-word;font-size:10px">${_delEsc(r.error)}</pre>
-              </div>` : ''}
-            ${resultText ? `
-              <div style="margin:6px 0 4px 0">
-                <div style="color:var(--accent);font-size:9px;text-transform:uppercase;letter-spacing:.4px">Result</div>
-                <div style="color:var(--text);margin-top:4px;font-size:11px;line-height:1.6;font-family:inherit;max-height:380px;overflow-y:auto;padding:8px;background:var(--bg);border-radius:3px">${_renderMarkdown(resultText)}</div>
-              </div>` : ''}
-          </div>`;
-      }
-
-      return `
-        <div style="border:1px solid var(--border);border-radius:6px;padding:6px 8px;margin-bottom:6px;background:var(--card);cursor:pointer"
-             onclick="toggleDelegationDetail('${_delEsc(r.task_id)}')">
-          <div style="display:flex;align-items:center;gap:8px;font-size:11px">
-            <span style="color:var(--dim);font-family:var(--mono);font-size:9px;min-width:60px">${_delEsc(t)}</span>
-            <span style="color:${arrowCol};font-family:var(--mono)">${arrow} ${peer}</span>
-            ${forkedBadge}
-            ${hitlBadge}
-            ${peerHitlBadge}
-            <span style="flex:1;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${desc}</span>
-            ${stateBadge}
-            <span style="color:var(--dim);font-family:var(--mono);font-size:9px;min-width:42px;text-align:right">${lat}</span>
-            <span style="color:var(--dim);font-size:10px">${expanded ? '▾' : '▸'}</span>
-          </div>
-          ${errBadge && !expanded ? `<div style="margin-top:2px;font-family:var(--mono);font-size:9px">${errBadge}</div>` : ''}
-          ${detailHtml}
-        </div>`;
-    }).join('');
-  } catch (e) {
-    empty.style.display = 'block';
-    list.style.display = 'none';
-    empty.innerHTML = `<span style="color:#f87171;font-family:var(--mono);font-size:10px">
-      Network error: ${_delEsc(e.message || e)}</span>`;
+  // Append post-approval peer messages that arrived via the resume poll
+  // (may not be in the task store yet). These are the "subsequent messages
+  // after human approval" that belong in this window.
+  const extras = _dlgExtraMsgs[peer] || [];
+  if (extras.length) {
+    thread.innerHTML += extras.map(m => `
+      <div style="display:flex;justify-content:flex-start">
+        <div style="max-width:78%;background:var(--surface);border:1px solid var(--border);border-left:2px solid var(--accent);border-radius:8px;padding:8px 11px">
+          <div style="font-size:9px;color:var(--dim);font-family:var(--mono);margin-bottom:4px">← ${_delEsc(peer)} · 审批后回复 · ${_delFmtTime(new Date(m.ts).toISOString())}</div>
+          <div class="bubble agent" style="font-size:12px;color:var(--fg);line-height:1.5;background:none;border:none;padding:0">${_renderMarkdown(m.text)}</div>
+        </div></div>`).join('');
   }
+  thread.scrollTop = thread.scrollHeight;
 }
 
-// Poll delegations while the tab is active. Stop polling when user switches
-// away — there's no point waking the backend if the operator isn't watching.
-function _delegationsTabActive() {
-  const pane = document.getElementById('tab-delegations');
-  return pane && pane.classList.contains('active');
-}
-
+// Poll while the delegation view is open (unread badges update live).
 setInterval(() => {
-  if (_delegationsTabActive()) {
-    refreshDelegations();
-  }
+  if (_dlgViewOpen) refreshDelegations();
 }, 10000);
 
 
@@ -3664,7 +4178,7 @@ function startPeersPoll() {
 // Kick off the poller on page load; the WebUI is single-page so this
 // runs exactly once. addEventListener avoids clobbering any other
 // existing handler the page may register.
-document.addEventListener('DOMContentLoaded', () => { startPeersPoll(); });
+document.addEventListener('DOMContentLoaded', () => { startPeersPoll(); startPeerClarificationPoll(); });
 
 
 
@@ -4108,6 +4622,87 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
 
 
   // ── Journal tab ──────────────────────────────────────────────
+  // ── Evolution controls (P1/P3/CSI manual triggers) ───────────────
+  function _evoShow(obj) {
+    const el = document.getElementById('evo-result');
+    el.style.display = 'block';
+    el.textContent = (typeof obj === 'string') ? obj : JSON.stringify(obj, null, 2);
+  }
+  function _evoSummary(r) {
+    // Build a readable summary on top of the raw JSON.
+    const lines = [];
+    if (r.embedder) lines.push('embedder: ' + r.embedder);
+    if (r.p1) {
+      const cl = r.p1.recurring_clusters || [];
+      lines.push(`P1: ${cl.length} recurring cluster(s) ≥ threshold ${r.p1.threshold}`);
+      cl.forEach(c => lines.push(
+        `  • size=${c.size} tools=[${(c.tools||[]).join(', ')}]` +
+        (c.covered_by_skill ? ` (covered by ${c.covered_by_skill} → skipped, P3 territory)` : '')));
+      if (r.p1.solidified) lines.push(`  solidified → ${r.p1.solidified.join(', ') || '(none)'}`);
+    }
+    if (r.p3) {
+      lines.push(`P3: active_skill=${r.p3.active_skill || '(none)'} merged=${r.p3.merged} ` +
+                 `skill=${r.p3.skill_id || '-'} sim=${r.p3.similarity}`);
+      lines.push(`  reason: ${r.p3.reason}`);
+    }
+    return lines.join('\n') + '\n\n--- raw ---\n' + JSON.stringify(r, null, 2);
+  }
+  async function evolutionSweep(dryRun) {
+    _evoShow(dryRun ? 'Detecting recurring trajectories…' : 'Mining + solidifying…');
+    try {
+      const resp = await fetch('/webui/evolution/sweep', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ dry_run: !!dryRun, limit: 200 }),
+      });
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      _evoShow(_evoSummary(r));
+      if (!dryRun) refreshJournal();
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+  async function evolutionP3() {
+    const session_id = document.getElementById('evo-p3-session').value.trim();
+    const append_text = document.getElementById('evo-p3-append').value.trim();
+    if (!session_id || !append_text) { _evoShow('Need both session_id and append text.'); return; }
+    _evoShow('Attributing append + merging…');
+    try {
+      const resp = await fetch('/webui/evolution/sweep', {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ session_id, append_text, dry_run: true }),
+      });
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      _evoShow(_evoSummary(r));
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+  async function evolutionSpace() {
+    _evoShow('Loading CSI capability space…');
+    try {
+      const resp = await fetch('/webui/evolution/space');
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      const lines = ['CSI capability space — clusters:'];
+      Object.entries(r.clusters || {}).forEach(([k, v]) =>
+        lines.push(`  ${k}: ${(v.members||[]).length} member(s) [${(v.members||[]).slice(0,6).join(', ')}${(v.members||[]).length>6?'…':''}]`));
+      _evoShow(lines.join('\n') + '\n\n--- raw ---\n' + JSON.stringify(r, null, 2));
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+
+  async function evolutionGaps() {
+    _evoShow('Loading capability gaps…');
+    try {
+      const resp = await fetch('/webui/evolution/gaps');
+      const r = await resp.json();
+      if (!resp.ok) { _evoShow('Error ' + resp.status + ': ' + (r.detail || '')); return; }
+      const lines = [`Capability gaps — ${r.total_gap_events} event(s), ${r.distinct_gaps} distinct`,
+                     '(what the agent could NOT do — demand signal for new tools)'];
+      (r.gaps || []).forEach(g =>
+        lines.push(`  ×${g.count}  ${g.detail}${g.sample_query ? '   ‹' + g.sample_query + '›' : ''}`));
+      if (!(r.gaps || []).length) lines.push('  (none recorded yet)');
+      _evoShow(lines.join('\n') + '\n\n--- raw ---\n' + JSON.stringify(r, null, 2));
+    } catch (e) { _evoShow('Request failed: ' + e); }
+  }
+
   async function refreshJournal() {
     try {
       const [statsResp, recentResp] = await Promise.all([
@@ -4139,26 +4734,32 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
       // Per-skill table
       const useCount     = stats.skill_use_count || {};
       const dormantCount = stats.skill_dormant_count || {};
+      const selCount     = stats.skill_selected_count || {};
       const allSkills = new Set([
           ...Object.keys(useCount),
           ...Object.keys(dormantCount),
+          ...Object.keys(selCount),
       ]);
       const tbody = document.getElementById('journal-skill-tbody');
       if (allSkills.size === 0) {
-        tbody.innerHTML = '<tr><td colspan="4" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="5" style="padding:8px;color:var(--dim);font-style:italic">No data yet — run some queries.</td></tr>';
       } else {
         const rows = Array.from(allSkills).map(sid => {
+          const sel     = selCount[sid] || 0;
           const uses    = useCount[sid] || 0;
           const dormant = dormantCount[sid] || 0;
           const rate    = uses ? (dormant / uses) : 0;
-          const flag    = (rate > 0.3 && uses >= 3) ? ' ⚠' : '';
-          const rateColor = rate > 0.5 ? '#e74c3c' : (rate > 0.3 ? '#f39c12' : 'var(--dim)');
-          return [sid, uses, dormant, rate, flag, rateColor];
+          // ⚠ selected but never loaded = model picked it then answered directly
+          const neverLoaded = (sel > 0 && uses === 0);
+          const flag    = neverLoaded ? ' ⚠never-loaded' : ((rate > 0.3 && uses >= 3) ? ' ⚠' : '');
+          const rateColor = neverLoaded ? '#e74c3c' : (rate > 0.5 ? '#e74c3c' : (rate > 0.3 ? '#f39c12' : 'var(--dim)'));
+          return [sid, sel, uses, dormant, rate, flag, rateColor];
         });
-        rows.sort((a, b) => b[3] - a[3] || b[1] - a[1]);
-        tbody.innerHTML = rows.map(([sid, uses, dormant, rate, flag, rateColor]) =>
+        rows.sort((a, b) => b[4] - a[4] || b[2] - a[2] || b[1] - a[1]);
+        tbody.innerHTML = rows.map(([sid, sel, uses, dormant, rate, flag, rateColor]) =>
             '<tr>' +
               '<td style="padding:4px 6px;color:var(--text)">' + sid + flag + '</td>' +
+              '<td style="padding:4px 6px;color:var(--dim)">' + sel + '</td>' +
               '<td style="padding:4px 6px;color:var(--accent)">' + uses + '</td>' +
               '<td style="padding:4px 6px;color:' + rateColor + '">' + dormant + '</td>' +
               '<td style="padding:4px 6px;color:' + rateColor + '">' + Math.round(rate * 100) + '%</td>' +
@@ -4186,18 +4787,44 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
           const ambBadge = e.ambiguous ?
               ' <span style="color:#f39c12;font-size:9px;border:1px solid #f39c12;padding:0 4px;border-radius:2px">ambig</span>' :
               '';
+          const runningBadge = (e._complete === false) ?
+              ' <span style="color:#2dd4bf;font-size:9px;border:1px solid #2dd4bf;padding:0 4px;border-radius:2px">● running</span>' :
+              '';
+          // Live event trail — lets you watch the skill-runtime flow as it
+          // happens (selection → skill_load → tool_call), not just the
+          // post-hoc attribution summary.
+          let evLines = '';
+          for (const ev of (e.events || [])) {
+            const p = ev.payload || {};
+            let label = ev.type;
+            if (ev.type === 'selection') {
+              const top = (p.top_k || []).map(t => Array.isArray(t) ? t[0] : t).slice(0,2).join(', ');
+              label = 'select: ' + top + (p.ambiguous ? ' (ambiguous)' : '');
+            } else if (ev.type === 'load') {
+              label = 'load: ' + (p.skill_id || '');
+            } else if (ev.type === 'tool_call') {
+              label = 'tool: ' + (p.tool_name || '') + (p.ok === false ? ' ✗' : ' ✓');
+            } else if (ev.type === 'completion') {
+              label = 'done: ' + (p.outcome || '');
+            } else if (ev.type === 'preference_auto_select') {
+              label = '⭐ auto-selected: ' + (p.skill_id || '') + ' (conf ' + (p.confidence || '?') + ')';
+            }
+            evLines += '<div style="padding-left:14px;color:var(--dim2);font-size:10px">' +
+                       'T' + (ev.turn || 0) + ' · ' + label + '</div>';
+          }
           return (
             '<div style="border-left:2px solid var(--border);padding:4px 8px">' +
               '<div style="display:flex;justify-content:space-between">' +
-                '<span style="color:var(--text)">' + queryEsc.substring(0, 80) + '</span>' +
+                '<span style="color:var(--text)">' + queryEsc.substring(0, 80) + runningBadge + '</span>' +
                 '<span style="color:var(--dim);font-size:10px">' + ts + '</span>' +
               '</div>' +
               '<div style="color:var(--dim2);font-size:10px;margin-top:2px">' +
-                '<span style="color:' + outcomeColor + '">' + (e.outcome || 'unknown') + '</span>' +
+                '<span style="color:' + outcomeColor + '">' + (e.outcome || (e._complete === false ? 'running' : 'unknown')) + '</span>' +
                 '  · ' + (e.total_turns || 0) + ' turns' +
                 '  · ' + (e.duration_s || 0) + 's' +
                 ambBadge +
               '</div>' +
+              evLines +
               attrLines +
             '</div>'
           );
@@ -4208,13 +4835,14 @@ restoreLastSession(); loadSkills(); loadTools(); refreshStats();
     }
   }
 
-  // Auto-refresh when Journal tab visible
+  // Auto-refresh when Journal tab visible. 3s so live (in-progress) entries
+  // and their event trail update promptly while a stream is still running.
   setInterval(() => {
     const journalTab = document.getElementById('tab-journal');
     if (journalTab && journalTab.classList.contains('active')) {
       refreshJournal();
     }
-  }, 10000);
+  }, 3000);
 
 </script>
 </body>

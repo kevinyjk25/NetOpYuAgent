@@ -25,6 +25,7 @@
 | `a2a/` | ~1200 | A2A 协议层(inbound JSON-RPC + SSE 流 + AgentCard + EventQueue) | — (轻量,本文档 §11) |
 | `registry/` | ~900 | Agent registry — 自注册、peer discovery、health check、load balance | — (轻量,本文档 §11) |
 | `task/` | ~1600 | Task graph + 跨 agent dispatcher(`A2ATaskDispatcher`)+ `delegation.py` 委派工厂(Phase 2B 已接线)| — |
+| `scheduler/` | ~400 | 内存周期任务调度器(Phase 4)——`SchedulerService` + 3 个 agent 工具(`schedule_create/list/cancel`),tick loop 到期跑 tool/query | `scheduler/`(轻量,本文档 §8.10）|
 
 ---
 
@@ -397,7 +398,7 @@ config.yaml
 - ❌ 任何形式的 cross-agent dispatch — `A2ATaskDispatcher` 已经在,但**没有任何运行时代码 call 它**
 - ❌ PolicyEngine 不知道 peer 存在 — 仍然只分类 read_only/destructive
 - ❌ Capability matching(query → 哪个 peer 处理)— 留给 Phase 2 的 `peer_router.py`
-- ❌ 跨 agent HITL — Phase 3
+- ✅ 跨 agent HITL(mode B)— Phase 3 已落地(见 §8.8);mode C 透传 + 故障硬化待做
 
 **两端启动验证**:
 
@@ -574,6 +575,25 @@ curl http://localhost:8001/webui/system/peers | jq
 
 **测试**:`test_delegate_directive.py`(12,解析)+ `test_delegation_wiring.py`(11:explicit/capability resolution、fresh/forked facts、4 类降级、task-load 括号、loop-side source_agent 标记 + 注入 + peer-HITL 提示)。
 
+### 8.8 Phase 3 — 跨 agent HITL(mode B,2026-05)
+
+Phase 2B 的委派只覆盖 case1(peer 自主完成)。Phase 3 加入 case2(peer 侧需操作员审批),并把委派固化为**有身份、有生命周期、被 TaskStore 持久跟踪的任务**。委派身份 = `(session_id, target_agent)`。
+
+落地经多轮实战(LAN↔DC,qwen3.5:27b)收敛到四层防风暴 + 两阶段回调 + 前端送达:
+
+| 层 | 位置 | 作用 |
+|----|------|------|
+| 单一委派闸门 | `task/delegation.py delegate_fn` | 查 TaskStore,该 peer 有非终态 `scope==INTER` 出站任务则抑制(取代早期三个 per-`execute_query` env_ctx 守卫) |
+| park | `runtime/loop.py` | case2 peer HITL → 发 `cross_agent_parked` marker + 中间答复 → return;等异步 result 回调,不空转 |
+| per-request 阻断 | `runtime/loop.py` | `_delegated_targets_this_request` 挡 case1 同步返回后的重委派 |
+| 综合轮硬禁 | `runtime/loop.py` | `_cross_agent_resume` 标志,综合轮丢弃任何 DELEGATE |
+| 两阶段回调 | `hitl_executor.py` + `webui/backend.py` | approval 推中间状态不转任务态;result 才 AWAITING_PEER_HITL→COMPLETED + 驱动综合轮 |
+| 前端送达 | `webui/index.html` | park 后 SSE 已关,综合答复经 `/chat/resumptions` 轮询取;去重 key 含 phase、只在 result 终态停 |
+
+**核心不变量**:闸门读 UI 同一个 TaskStore → 状态不一致从构造上不可能;终态 = {COMPLETED, FAILED, CANCELLED},其余皆在途;case2 的 approval 推送**不得**转任务态(只有 result 终态才完成)。详见 `PHASE_2B_DESIGN.md §7`、`runtime/DESIGN.md §4.10`、TODO.md Phase 3 段。
+
+**测试**:`test_delegation_gate.py`(6)、`test_delegation_park_on_peer_hitl.py`(park + case1 不重委派)、`test_cross_agent_hitl.py`。仍未做:P3-c(correlation audit join)、P3-d(passthrough mode C + 故障硬化 + 持久化 + 鉴权)。
+
 **CI**:7/7 audits + 128 tests(117 baseline + 11 delegation)。
 
 ### 8.8 Phase 3 — 跨 agent HITL passthrough,mode B(2026-05,P3-a + P3-b 完成)
@@ -670,6 +690,28 @@ C. **动态实体名提取** — 给每个 peer 行加 `owns: ...` 行,从该 pe
 Regression tests:`tests/test_dispatcher_heartbeat.py` 6 个 — 慢上游注入 heartbeat、快上游不注入、heartbeat 不带 token/message、空流、单 chunk 流、异常 propagate。
 
 **CI**:7/7 audits + 145 tests(原 139 + 6 heartbeat)。
+
+---
+
+### 8.10 Phase 4 — 周期任务调度器(2026-05,原型)
+
+用户提问可触发 LLM 创建一个**周期任务**,到期自动跑某个工具或对本 agent 发一条 query。调度器注册成 agent 可用的工具。
+
+**三个产品决策**:(1) 双模式 —— 注册时选 `mode="tool"`(调本地工具)或 `mode="query"`(对本 agent 发 query,跑完整 LLM 循环);(2) 内存态 —— 重启丢失(原型范围);(3) 结果不主动送达用户,只在 SCHEDULE tab 列执行历史。
+
+**核心** `scheduler/SchedulerService`:内存 `_jobs` + `_history`(环形缓冲 200)+ 单个 `asyncio` tick loop(每 2s,复用 `SkillJournalConsumer` 的 `start()`/`_run_loop()` 范式)。`tick_once()` 公开供测试。`ScheduledJob`(mode/payload/interval_s/next_run_at/runs/last_ok/cancelled/done)。护栏:`MIN_INTERVAL_S=5`/`MAX_JOBS=100`/`MAX_HISTORY=200`。`_fire`:tool 模式 → 注入的 `tool_invoker(name,args)`;query 模式 → 注入的 `query_runner(query,session_id)`,每次 fire 用独立 session(`sched-{job_id}-{runs}`)避免周期 query 堆进一个会话。所有执行错误记进 history,不抛出。
+
+**三个 agent 工具**(`build_scheduler_tools`):`schedule_create`/`schedule_list`/`schedule_cancel`,与所有本地工具一样的 `async (args: dict) -> str` 契约。
+
+**让 LLM 发现工具的关键**:`register_local` 只让工具**可被调用**,但 LLM 只看得到进了检索语料的工具。`SCHEDULER_TOOL_METADATA` 合并进 `_tool_meta`(检索器索引)+ 加进 `always_inject_extra_tools`,让"定时/周期"类提问稳定召回。
+
+**接线**(`main.py`):工具经 `router.register_local` 与 meta-tools 并列注册;`tool_invoker`(闭包 over 刷新后的工具 registry)+ `query_runner`(闭包 over `executor.execute_query`)在 registry refresh 后注入;tick loop 在 startup 启动。
+
+**UI**:`webui/routes_schedule.py`(`GET /webui/schedule` jobs+history、`POST /webui/schedule/cancel`)+ `webui/index.html` SCHEDULE tab(`refreshSchedule`)。
+
+**L0/L1 解耦**:`scheduler/` 不 import runtime/webui/task —— 行为全靠两个注入的 callable(precedent:`delegate_fn`/`batch_resolver_fn`),`audit_module_independence` 持续绿。
+
+**测试**:`tests/test_scheduler.py`(10)。**未做**(非原型范围):持久化、cron 式调度、并发 fire、结果推送、per-job 鉴权/配额 —— 详见 TODO.md Phase 4 段。
 
 ---
 

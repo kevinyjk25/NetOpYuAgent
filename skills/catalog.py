@@ -57,6 +57,10 @@ class SkillSummary:
     risk_level:  str           # low | medium | high | critical
     requires_hitl: bool = False
     tags:        list[str] = field(default_factory=list)
+    # cross-agent skill fields (2026-06): peers this skill delegates to +
+    # the free-text boundary contract when a peer is offline.
+    delegates_to:        list[str] = field(default_factory=list)
+    degraded_capability: str = ""
 
 
 @dataclass
@@ -121,6 +125,8 @@ class SkillCatalogService:
                 risk_level=defn.get("risk_level", "low"),
                 requires_hitl=defn.get("requires_hitl", False),
                 tags=defn.get("tags", []),
+                delegates_to=defn.get("delegates_to", []),
+                degraded_capability=defn.get("degraded_capability", ""),
             )
             detail = SkillDetail(
                 skill_id=skill_id,
@@ -242,47 +248,39 @@ class SkillCatalogService:
 
     def as_markdown(self, skill_id: str) -> Optional[str]:
         """
-        Return the full markdown content of a skill in IT-ops skill format.
-        Works for both built-in skills (synthesised from catalog detail)
-        and evolved/uploaded skills whose .md source is stored in detail.description.
+        Return the skill as a standard Anthropic SKILL.md (YAML frontmatter +
+        markdown body). Works for built-in skills (synthesised from the catalog
+        detail) and evolved/uploaded skills.
         """
         skill = self._skills.get(skill_id)
         if skill is None:
             return None
         s, d = skill.summary, skill.detail
 
-        # If the description already looks like markdown (starts with #), return it directly
-        if d.description.strip().startswith("#"):
+        # Reconstruct the flat-dict shape skill_format expects, then serialise.
+        defn = {
+            "name":          s.name,
+            "purpose":       s.purpose,
+            "risk_level":    s.risk_level,
+            "requires_hitl": s.requires_hitl,
+            "tags":          list(s.tags),
+            "description":   d.description,
+            "parameters":    dict(d.parameters),
+            "returns":       d.returns,
+            "examples":      list(d.examples),
+            "constraints":   list(d.constraints),
+            "estimated_size": d.estimated_size,
+            "returns_large":  d.returns_large,
+        }
+        # If the description already IS a standard SKILL.md (uploaded verbatim),
+        # return it unchanged.
+        try:
+            from skills.skill_format import flat_dict_to_skill_md, has_frontmatter
+            if has_frontmatter(d.description.strip()):
+                return d.description
+            return flat_dict_to_skill_md(skill_id, defn)
+        except Exception:  # noqa: BLE001 - never break the read path
             return d.description
-
-        # Synthesise clean markdown from the structured detail
-        hitl_str = "yes" if s.requires_hitl else "no"
-        lines = [
-            f"# {s.name}",
-            f"**Purpose:** {s.purpose}",
-            f"**Tags:** [{', '.join(s.tags)}]",
-            f"**Risk:** {s.risk_level}",
-            f"**HITL:** {hitl_str}",
-            "",
-        ]
-        if d.description and d.description != s.purpose:
-            lines += ["## Description", d.description, ""]
-        if d.parameters:
-            lines.append("## Parameters")
-            for pname, pdesc in d.parameters.items():
-                lines.append(f"- `{pname}`: {pdesc}")
-            lines.append("")
-        if d.examples:
-            lines.append("## Examples")
-            for ex in d.examples:
-                lines.append(f"    {ex}")
-            lines.append("")
-        if d.constraints:
-            lines.append("## Constraints")
-            for c in d.constraints:
-                lines.append(f"- {c}")
-            lines.append("")
-        return "\n".join(lines)
 
     def _legacy_score(
         self,
@@ -413,6 +411,9 @@ class SkillCatalogService:
           cfg.skill_orchestration (ambiguity_gap_threshold / ambiguity_floor).
         """
         # Load thresholds from config when not explicitly supplied
+        _weak_floor = 0.08
+        _weak_gap = 0.05
+        _weak_min = 2
         if ambiguity_threshold is None or ambiguity_floor is None:
             try:
                 from config import cfg as _app_cfg
@@ -421,11 +422,23 @@ class SkillCatalogService:
                     ambiguity_threshold = float(getattr(_so_cfg, "ambiguity_gap_threshold", 0.08))
                 if ambiguity_floor is None:
                     ambiguity_floor = float(getattr(_so_cfg, "ambiguity_floor", 0.40))
+                _weak_floor = float(getattr(_so_cfg, "weak_ambiguity_floor", 0.08))
+                _weak_gap = float(getattr(_so_cfg, "weak_ambiguity_gap", 0.05))
+                _weak_min = int(getattr(_so_cfg, "weak_ambiguity_min_candidates", 2))
             except Exception:
                 if ambiguity_threshold is None:
                     ambiguity_threshold = 0.08
                 if ambiguity_floor is None:
                     ambiguity_floor = 0.40
+        else:
+            try:
+                from config import cfg as _app_cfg
+                _so_cfg = getattr(_app_cfg, "skill_orchestration", None)
+                _weak_floor = float(getattr(_so_cfg, "weak_ambiguity_floor", 0.08))
+                _weak_gap = float(getattr(_so_cfg, "weak_ambiguity_gap", 0.05))
+                _weak_min = int(getattr(_so_cfg, "weak_ambiguity_min_candidates", 2))
+            except Exception:
+                pass
 
         import re as _re
         query_words = set(_re.findall(r'\b\w{2,}\b', query.lower()))
@@ -481,6 +494,21 @@ class SkillCatalogService:
             and abs(top[0][0] - top[1][0]) < ambiguity_threshold
         )
 
+        # Second ambiguity type — WEAK match: no skill is a strong fit (top <
+        # floor) but several candidates cluster together above a weak floor.
+        # This is the "several skills all sort of match but none clearly wins"
+        # case (e.g. top=0.12, second=0.08 for a CN query against EN skill
+        # descriptions). The LLM picking unaided here tends to either load the
+        # wrong skill or load none at all — so it's worth asking the operator.
+        ambiguous_weak = (
+            not ambiguous
+            and len(top) >= _weak_min
+            and top[0][0] >= _weak_floor
+            and top[0][0] < ambiguity_floor
+            and abs(top[0][0] - top[1][0]) < _weak_gap
+        )
+        ambiguous_kind = "strong" if ambiguous else ("weak" if ambiguous_weak else None)
+
         meaningful = [(sc, sid) for sc, sid in top if sc >= 0.01]
         if not meaningful:
             summary  = self.format_summary()
@@ -500,7 +528,8 @@ class SkillCatalogService:
 
         return SkillSelectionResult(
             selected=selected,
-            ambiguous=ambiguous,
+            ambiguous=(ambiguous or ambiguous_weak),
+            ambiguous_kind=ambiguous_kind,
             summary=summary,
             top_score=top[0][0] if top else 0.0,
             second_score=top[1][0] if len(top) > 1 else 0.0,
@@ -516,10 +545,11 @@ from dataclasses import dataclass as _dc
 @_dc
 class SkillSelectionResult:
     selected:     list   # [(skill_id, score), ...] sorted descending
-    ambiguous:    bool   # top-2 scores within ambiguity_threshold of each other
+    ambiguous:    bool   # True when strong OR weak ambiguity fired
     summary:      str    # Level-1 prompt string containing only matched skills
     top_score:    float
     second_score: float
+    ambiguous_kind: str = None   # "strong" | "weak" | None
 
 
 # ---------------------------------------------------------------------------
@@ -531,8 +561,6 @@ class SkillSelectionResult:
 # ---------------------------------------------------------------------------
 # Query-matched skill selection (Q4)
 # --------------------------------------------------------------------------
-# DEFAULT_SKILL_DEFINITIONS removed — use ToolLoader.skill_definitions() instead.
-# Skills are now in:
-#   skills/builtin/registry.py   (always-available)
-#   skills/mock/registry.py      (mock mode)
-#   skills/pragmatic/registry.py (pragmatic mode)
+# DEFAULT_SKILL_DEFINITIONS removed — use SkillLoader.skill_definitions() instead.
+# Skills now live as Anthropic-standard SKILL.md folders (builtin / pragmatic /
+# profiles/<id>/skills), loaded by skills.loader.SkillLoader.

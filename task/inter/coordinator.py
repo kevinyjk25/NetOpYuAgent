@@ -279,6 +279,7 @@ class A2ATaskDispatcher:
                                 peer_interrupt_id=_peer_interrupt_id,
                                 correlation_id=task.metadata.get("correlation_id", ""),
                                 original_query=task.metadata.get("source_query", ""),
+                                outbound_task_id=task.task_id,
                             )
                         except Exception as _br_exc:
                             logger.debug("awaiting-peer record skipped: %s", _br_exc)

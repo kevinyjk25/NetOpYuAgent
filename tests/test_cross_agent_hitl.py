@@ -130,7 +130,8 @@ class TestResumeDriverContract(unittest.TestCase):
             raise unittest.SkipTest(f"webui.backend import needs fastapi: {e}")
 
         async def _slow_driver(*, local_session_id, peer_agent, result_text,
-                               decision, correlation_id=""):
+                               decision, correlation_id="", phase="result",
+                               outbound_task_id=""):
             await asyncio.sleep(1.5)   # simulate a long synthesis turn
             be._pending_resumptions.setdefault(local_session_id, []).append(
                 {"text": "final synthesized answer", "driven": True,
@@ -165,6 +166,61 @@ class TestResumeDriverContract(unittest.TestCase):
         finally:
             be._resume_driver = saved
             be._pending_resumptions.pop("s-fast", None)
+
+
+class TestTwoPhasePassback(unittest.TestCase):
+    """A2A Phase 3 case-3: HITL with async follow-up sends TWO callbacks
+    (approval then result). The bridge must keep the record alive across the
+    intermediate approval push and only consume it on the terminal result."""
+
+    def _fresh_bridge(self):
+        from task.inter import cross_agent_hitl as m
+        m._BRIDGE = None
+        return m.get_cross_agent_hitl_bridge()
+
+    def test_inbound_peek_keeps_record_pop_consumes(self):
+        b = self._fresh_bridge()
+        b.record_inbound_hitl(
+            interrupt_id="int-1", source_agent="lan-agent",
+            source_session_id="s-lan", correlation_id="cid-1",
+        )
+        self.assertIsNotNone(b.peek_inbound_hitl("int-1"))
+        self.assertIsNotNone(b.peek_inbound_hitl("int-1"))   # still there
+        self.assertIsNotNone(b.pop_inbound_hitl("int-1"))
+        self.assertIsNone(b.peek_inbound_hitl("int-1"))      # consumed
+
+    def test_awaiting_resolve_nonterminal_then_terminal(self):
+        b = self._fresh_bridge()
+        b.record_awaiting_peer(
+            local_session_id="s-lan", peer_agent="dc-agent",
+            peer_interrupt_id="int-1", correlation_id="cid-1",
+        )
+        rec1 = b.resolve_awaiting_peer(
+            peer_agent="dc-agent", peer_interrupt_id="int-1", terminal=False,
+        )
+        self.assertIsNotNone(rec1)
+        self.assertEqual(rec1.local_session_id, "s-lan")
+        rec2 = b.resolve_awaiting_peer(
+            peer_agent="dc-agent", peer_interrupt_id="int-1", terminal=True,
+        )
+        self.assertIsNotNone(rec2)
+        rec3 = b.resolve_awaiting_peer(
+            peer_agent="dc-agent", peer_interrupt_id="int-1", terminal=True,
+        )
+        self.assertIsNone(rec3)   # duplicate terminal rejected
+
+    def test_case2_single_terminal_push_still_works(self):
+        b = self._fresh_bridge()
+        b.record_awaiting_peer(
+            local_session_id="s-lan", peer_agent="dc-agent",
+            peer_interrupt_id="int-2", correlation_id="cid-2",
+        )
+        self.assertIsNotNone(b.resolve_awaiting_peer(
+            peer_agent="dc-agent", peer_interrupt_id="int-2", terminal=True,
+        ))
+        self.assertIsNone(b.resolve_awaiting_peer(
+            peer_agent="dc-agent", peer_interrupt_id="int-2", terminal=True,
+        ))
 
 
 if __name__ == "__main__":

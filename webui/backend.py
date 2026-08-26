@@ -129,9 +129,94 @@ def register_resume_driver(fn) -> None:
     _resume_driver = fn
 
 
+# ── Option A: peer clarification round trip ──────────────────────────────
+# The origin agent pushes a peer's clarification into the user's live session;
+# the asking peer resolves its parked interrupt when the answer returns. Both
+# need the local hitl router + a way to reach the session SSE, published here
+# from create_webui_app so the a2a endpoints (which have no `services`) can use
+# them.
+_hitl_router_ref: "Optional[Any]" = None
+# session_id -> list of pending peer-clarification chunks not yet delivered on
+# an open SSE (delivered on next stream open or via poll).
+_pending_peer_clarifications: "dict[str, list]" = {}
+
+
+def register_hitl_router(router) -> None:
+    global _hitl_router_ref
+    _hitl_router_ref = router
+
+
+async def push_peer_clarification_to_session(
+    *, session_id: str, peer_agent: str, correlation_id: str,
+    question: str, clarification_fields: list,
+) -> bool:
+    """Origin side: surface a peer's clarification in the user's session. We
+    buffer it keyed by session; the /chat/stream SSE and a dedicated poll
+    endpoint both drain the buffer so the card appears in the user's chat
+    whether or not a stream is currently open. Returns True if buffered."""
+    chunk = {
+        "type":               "peer_clarification",
+        "peer_agent":         peer_agent,
+        "correlation_id":     correlation_id,
+        "question":           question,
+        "clarification_fields": clarification_fields,
+    }
+    _pending_peer_clarifications.setdefault(session_id, []).append(chunk)
+    logger.info("push_peer_clarification: buffered for session=%s from=%s cid=%s",
+                session_id[:12], peer_agent, correlation_id)
+    return True
+
+
+def drain_peer_clarifications(session_id: str) -> list:
+    """Return + clear any buffered peer clarifications for a session."""
+    return _pending_peer_clarifications.pop(session_id, [])
+
+
+async def resolve_peer_clarification_answer(
+    *, peer_interrupt_id: str, correlation_id: str, answers: dict,
+) -> Any:
+    """Asking-peer side: resolve the parked clarification interrupt with the
+    user's answers so this agent's agent_loop_resumer resumes."""
+    if _hitl_router_ref is None:
+        raise RuntimeError("no local HITL router registered")
+    from hitl_core.schema import HitlDecision, DecisionKind
+    decision = HitlDecision(
+        interrupt_id=peer_interrupt_id,
+        decision=DecisionKind.ANSWER,
+        operator_id=f"peer-clarification:{correlation_id or 'origin-user'}",
+        clarification_answers=answers or {},
+    )
+    return await _hitl_router_ref.deliver(decision)
+
+
+async def build_csi_from_profile(services: dict, *, cache_key: str = "_csi"):
+    """Build (or return cached) a CapabilitySemanticIndex from the active
+    profile's tool + skill metadata, using the real async embedder if available.
+
+    Lives in the webui layer (not skills/) so capability_index.py stays
+    decoupled from tools/ (module-independence). Shared by the P1/P3 backend
+    hooks and the /evolution/sweep endpoint. Caches on services[cache_key].
+    """
+    csi = services.get(cache_key)
+    if csi is not None:
+        return csi
+    import config as _cfg
+    from tools.loader import ToolLoader as _TL
+    from skills import SkillLoader as _SL
+    from skills.capability_index import CapabilitySemanticIndex
+    emb = services.get("embedder")
+    csi = CapabilitySemanticIndex()
+    tool_md = _TL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile).build_metadata()
+    sk_defs = _SL(mode=_cfg.cfg.mode, profile=_cfg.cfg.agent.profile).skill_definitions()
+    await csi.build_async(tool_md, sk_defs, async_embed=(emb.embed if emb else None))
+    services[cache_key] = csi
+    return csi
+
+
 async def handle_cross_agent_resume(
     *, local_session_id: str, peer_agent: str, result_text: str,
-    decision: str, correlation_id: str = "",
+    decision: str, correlation_id: str = "", phase: str = "result",
+    outbound_task_id: str = "",
 ) -> bool:
     """Entry point invoked by the a2a /hitl_resolved endpoint.
 
@@ -168,7 +253,8 @@ async def handle_cross_agent_resume(
             await _resume_driver(
                 local_session_id=local_session_id, peer_agent=peer_agent,
                 result_text=result_text, decision=decision,
-                correlation_id=correlation_id,
+                correlation_id=correlation_id, phase=phase,
+                outbound_task_id=outbound_task_id,
             )
         except Exception as exc:  # never let a detached task die silently
             logger.exception(
@@ -426,6 +512,31 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                 logger.info("backend: batch_resolver injected for profile=%s", _cfg_be.cfg.agent.profile)
         except Exception as _exc:
             logger.warning("backend: batch_resolver injection skipped: %s", _exc)
+        # peer_health_fn: sync snapshot of OFFLINE peer ids from the registry,
+        # for cross-agent skill degradation (peer-offline is the normal case).
+        # Reads the store's internal dict directly (same defensive pattern the
+        # peer-aware prompt uses) so prompt assembly stays sync. None-safe.
+        def _make_peer_health_fn(_reg):
+            if _reg is None:
+                return None
+            def _offline_peers():
+                try:
+                    store = getattr(_reg, "_store", None)
+                    entries = list(getattr(store, "_store", {}).values()) if store else []
+                    offline = set()
+                    for e in entries:
+                        h = getattr(e, "health", None)
+                        hs = getattr(h, "value", None) or (str(h) if h is not None else "")
+                        if str(hs).lower() in ("unhealthy", "down", "unreachable"):
+                            aid = getattr(e, "agent_id", None)
+                            if aid:
+                                offline.add(aid)
+                    return offline
+                except Exception:
+                    return set()
+            return _offline_peers
+        _peer_health_fn = _make_peer_health_fn(services.get("registry"))
+
         services["runtime_loop"] = AgentRuntimeLoop(
             memory_router=services.get("memory"),
             config=RuntimeConfig(hitl_tool_names=_hitl_tools, editable_hitl_tools=_editable_hitl),
@@ -433,6 +544,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             skill_catalog=services["skill_catalog"],
             delegate_fn=services.get("delegate_fn"),
             batch_resolver_fn=_batch_resolver,
+            peer_health_fn=_peer_health_fn,
         )
     else:
         # Re-inject tool store and catalog into existing loop
@@ -544,13 +656,103 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # merges it into confirmed_facts before assembling the synthesis prompt.
     async def _drive_cross_agent_resume(
         *, local_session_id: str, peer_agent: str, result_text: str,
-        decision: str, correlation_id: str = "",
+        decision: str, correlation_id: str = "", phase: str = "result",
+        outbound_task_id: str = "",
     ) -> bool:
         _executor = services.get("executor")
         if _executor is None or not local_session_id:
             logger.warning("cross-agent resume: no executor / session — skip")
             return False
-        # 1. Inject the peer's result as a confirmed fact (H2 reuse).
+
+        # ── case3 phase 1 — intermediate approval ─────────────────────────
+        # The peer's operator approved; the tool is executing. Surface an
+        # interim status to the frontend WITHOUT burning an LLM synthesis turn
+        # (per design: only the terminal result stage synthesizes). Inject the
+        # interim note as a fact too, so the eventual synthesis turn has the
+        # full timeline.
+        if phase == "approval":
+            try:
+                from runtime.loop import enqueue_async_inject
+                enqueue_async_inject(
+                    local_session_id,
+                    f"[跨 Agent 委派中间状态 from {peer_agent} — operator {decision}] "
+                    f"{result_text}".strip(),
+                )
+            except Exception as _inj_exc:
+                logger.warning("cross-agent resume(approval): inject failed: %s",
+                               _inj_exc)
+            _interim = f"✓ {peer_agent}：{result_text}"
+            _pending_resumptions.setdefault(local_session_id, []).append({
+                "text": _interim, "peer_agent": peer_agent,
+                "correlation_id": correlation_id, "decision": decision,
+                "phase": "approval", "driven": True, "interim": True,
+            })
+            try:
+                emit_async_hitl_notify(local_session_id, {
+                    "type": "cross_agent_resume_interim", "peer_agent": peer_agent,
+                    "text": _interim, "correlation_id": correlation_id,
+                })
+            except Exception:
+                pass
+            logger.info(
+                "cross-agent resume: phase=approval interim pushed for "
+                "session=%s peer=%s (no synthesis turn)",
+                local_session_id[:12], peer_agent,
+            )
+            return True
+
+        # ── case3 phase 2 (or case1/2 single push) — terminal result ──────
+        # 1a. CRITICAL: transition the LAN outbound delegation task from
+        # AWAITING_PEER_HITL → COMPLETED. Without this, the UI keeps showing
+        # "PEER HITL awaiting" forever even though DC has already approved &
+        # executed, AND the next LLM turn might re-delegate because it sees
+        # a still-pending outbound. This is the state-disagree the user kept
+        # seeing in the DELEG panel (LAN side stuck while DC was done).
+        if outbound_task_id:
+            try:
+                _task_system = services.get("task_system")
+                _store = getattr(_task_system, "store", None) if _task_system else None
+                if _store is not None:
+                    _task = await _store.get(outbound_task_id)
+                    if _task is not None:
+                        from task.schemas import TaskState
+                        from datetime import datetime, timezone
+                        if _task.state == TaskState.AWAITING_PEER_HITL:
+                            _task.state = (TaskState.COMPLETED
+                                           if decision == "approve"
+                                           else TaskState.FAILED)
+                            _task.result = {"text": result_text}
+                            _task.metadata["peer_hitl_pending"] = False
+                            _task.metadata["peer_decision"] = decision
+                            _task.completed_at = datetime.now(
+                                timezone.utc).isoformat()
+                            await _store.save(_task)
+                            logger.info(
+                                "cross-agent resume: transitioned outbound "
+                                "task %s AWAITING_PEER_HITL → %s "
+                                "(session=%s peer=%s)",
+                                outbound_task_id[:12], _task.state.value,
+                                local_session_id[:12], peer_agent,
+                            )
+                        else:
+                            logger.debug(
+                                "cross-agent resume: outbound task %s already "
+                                "in state %s, not transitioning",
+                                outbound_task_id[:12], _task.state.value,
+                            )
+                    else:
+                        logger.warning(
+                            "cross-agent resume: outbound task %s not found "
+                            "in store — UI state may be stale",
+                            outbound_task_id[:12],
+                        )
+            except Exception as _tx_exc:
+                logger.exception(
+                    "cross-agent resume: task state transition failed: %s",
+                    _tx_exc,
+                )
+
+        # 1b. Inject the peer's result as a confirmed fact (H2 reuse).
         try:
             from runtime.loop import enqueue_async_inject
             _fact = (
@@ -567,8 +769,9 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
             if tok:
                 _parts.append(str(tok))
         _synth_q = (
-            f"[系统] 委派到 {peer_agent} 的人在环审批已完成,结果已注入上下文。"
-            f"请综合本地已有信息与该结果,给出针对原始请求的最终完整回答。"
+            f"[系统] 委派到 {peer_agent} 的人在环审批已完成,结果已注入上下文（见 [跨 Agent 委派结果] 事实）。"
+            f"⚠ 这是综合答复阶段：禁止再发出任何 [DELEGATE:...] 或 [TOOL:...] 指令。"
+            f"请基于本地已有信息与该结果，直接用自然语言给出针对原始请求的最终完整回答。"
         )
         try:
             await _executor.execute_query(
@@ -586,7 +789,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         _pending_resumptions.setdefault(local_session_id, []).append({
             "text": _answer, "peer_agent": peer_agent,
             "correlation_id": correlation_id, "decision": decision,
-            "driven": True,
+            "phase": "result", "driven": True,
         })
         try:
             emit_async_hitl_notify(local_session_id, {
@@ -602,6 +805,7 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         return True
 
     register_resume_driver(_drive_cross_agent_resume)
+    register_hitl_router(services.get("hitl_core_router"))
 
     @app.get("/chat/resumptions")
     async def get_resumptions(session_id: str) -> JSONResponse:
@@ -610,6 +814,69 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
         clears the buffered items for the session."""
         items = _pending_resumptions.pop(session_id, [])
         return JSONResponse(content=items)
+
+    @app.get("/chat/peer_clarifications")
+    async def get_peer_clarifications(session_id: str) -> JSONResponse:
+        """Option A: frontend polls this to pick up clarification questions a
+        delegated peer bubbled up to this user. Returns + clears the buffer."""
+        items = drain_peer_clarifications(session_id)
+        return JSONResponse(content=items)
+
+    @app.post("/chat/peer_clarification/answer")
+    async def answer_peer_clarification(request: Request) -> JSONResponse:
+        """Option A: the origin user answers a peer's clarification here. We
+        look up the round-trip record by correlation_id and POST the answer to
+        the asking peer's /peer_clarification_answer so its loop resumes.
+        Body: {correlation_id, answers:{key:value}}
+        """
+        body = await request.json()
+        cid     = str(body.get("correlation_id") or "").strip()
+        answers = body.get("answers") or {}
+        if not cid:
+            raise HTTPException(status_code=400, detail="correlation_id required")
+
+        from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+        bridge = get_cross_agent_hitl_bridge()
+        rec = bridge.get_peer_clarification(cid)
+        if rec is None:
+            raise HTTPException(status_code=404,
+                                detail="unknown or expired clarification")
+        if rec.answered:
+            return JSONResponse(content={"ok": True, "already_answered": True})
+
+        # Resolve the peer's base URL from the registry, POST the answer back.
+        registry = services.get("registry")
+        base_url = None
+        if registry is not None:
+            try:
+                agent = await registry.get_agent(rec.peer_agent)
+                base_url = getattr(agent, "base_url", None) if agent else None
+            except Exception as exc:
+                logger.warning("answer_peer_clarification: registry resolve "
+                               "failed: %s", exc)
+        if not base_url:
+            raise HTTPException(
+                status_code=502,
+                detail=f"cannot resolve peer {rec.peer_agent} to return answer")
+
+        url = base_url.rstrip("/") + "/peer_clarification_answer"
+        payload = {"correlation_id": cid,
+                   "peer_interrupt_id": rec.peer_interrupt_id,
+                   "answers": answers}
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=payload)
+            ok = resp.status_code == 200
+        except Exception as exc:
+            logger.warning("answer_peer_clarification: POST %s failed: %s",
+                           url, exc)
+            raise HTTPException(status_code=502,
+                                detail=f"failed to reach peer {rec.peer_agent}")
+        if ok:
+            bridge.resolve_peer_clarification(cid)
+        return JSONResponse(content={"ok": ok, "correlation_id": cid,
+                                     "peer_agent": rec.peer_agent})
 
     @app.post("/chat/stream")
     async def chat_stream(
@@ -999,16 +1266,99 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
                             logger.debug("User model skipped: %s", _e)
 
                     if evolver and decision and decision.complexity.value == "complex":
+                        from runtime.skill_journal import get_journal_store as _gjs
+                        # P0 / P1 / P3 are SIBLING blocks, each with its own
+                        # try/except — a P0 failure must not silently skip
+                        # P1/P3 (nor stall P1's every-N cadence counter).
                         try:
+                            # P0: pull the REAL execution trajectory from the
+                            # journal (ordered steps + tools + observations)
+                            # instead of solution_steps=[]. The skill is now
+                            # distilled from what actually ran.
+                            _traj = _gjs().extract_trajectory(session_id)
+                            _real_tools = _traj["tools"] or [t["tool"] for t in tc]
+                            _real_complexity = 5.0 + min(len(_traj["steps"]), 10) * 0.5
                             proposal = await evolver.after_task(
                                 task_description=req.query, solution_summary=full_text[:400],
-                                tools_used=[t["tool"] for t in tc], solution_steps=[],
-                                key_observations=[], complexity=7.0, session_id=session_id,
+                                tools_used=_real_tools,
+                                solution_steps=_traj["steps"],
+                                key_observations=_traj["observations"],
+                                complexity=(_real_complexity if _traj["steps"] else 7.0),
+                                session_id=session_id,
                             )
                             yield f"data: {json.dumps({'type':'hermes_skill','created':proposal is not None,'skill_id':proposal.skill_id if proposal else None})}\n\n"
                             await asyncio.sleep(0)
                         except Exception as _e:
-                            logger.debug("Skill evolver skipped: %s", _e)
+                            logger.debug("Skill evolver (P0) skipped: %s", _e)
+
+                        # P1: periodically mine the journal for RECURRING
+                        # trajectories and solidify them (single-run→generate
+                        # becomes repeated→solidify). Lazy CSI build with the
+                        # real async embedder; runs every N complex tasks to
+                        # bound cost.
+                        try:
+                            _p1n = services.setdefault("_p1_complex_count", [0])
+                            _p1n[0] += 1
+                            _p1_every = 5
+                            if _p1n[0] % _p1_every == 0:
+                                from skills.trajectory_miner import TrajectoryMiner
+                                _csi = await build_csi_from_profile(services)
+                                async def _evolve_cb(**kw):
+                                    return await evolver.after_task(
+                                        task_description=kw["task_description"],
+                                        solution_summary=kw["task_description"][:200],
+                                        tools_used=kw["tools_used"],
+                                        solution_steps=kw["solution_steps"],
+                                        key_observations=kw["key_observations"],
+                                        complexity=kw["complexity"],
+                                        session_id=kw["session_id"])
+                                _miner = TrajectoryMiner(_gjs(), _csi, _evolve_cb)
+                                _props = await _miner.sweep()
+                                if _props:
+                                    logger.info("P1: solidified %d recurring trajectory(ies)", len(_props))
+                        except Exception as _p1e:
+                            logger.debug("P1 trajectory mining skipped: %s", _p1e)
+
+                        # P3: if this session previously loaded+executed a
+                        # skill, treat the current query as a possible APPEND
+                        # and merge its delta into that in-use skill (targeted,
+                        # not a fuzzy new-skill match).
+                        # GATE: the journal supersedes per session, so it can't
+                        # by itself tell "first use" from "follow-up append".
+                        # Require an explicit append marker to avoid merging the
+                        # ORIGINAL query back into the skill on first use. (A
+                        # loop-tracked "skill loaded in a PRIOR request" signal
+                        # would let us drop this heuristic — future work.)
+                        _APPEND_MARKERS = ("还要", "还需", "再加", "顺便", "另外",
+                                           "追加", "补充", "除此", "并且", "append",
+                                           "also", "additionally")
+                        _looks_append = any(m in (req.query or "") for m in _APPEND_MARKERS)
+                        try:
+                            _traj_p3 = _gjs().extract_trajectory(session_id) if _looks_append else None
+                            _active = (_traj_p3.get("loaded_skills") or [None])[0] if _traj_p3 else None
+                            if _active:
+                                from skills.append_merger import AppendMerger
+                                _csi3 = services.get("_csi")
+                                async def _merge_cb(*, skill_id, append_text, session_id, tools):
+                                    fb = await evolver._merge_into_existing_skill(
+                                        existing_id=skill_id,
+                                        task_description=append_text,
+                                        solution_steps=_traj_p3.get("steps", []),
+                                        tools_used=tools,
+                                        key_observations=_traj_p3.get("observations", []),
+                                        operator_prefs="")
+                                    return fb is not None
+                                _merger = AppendMerger(_csi3, _merge_cb)
+                                _mres = await _merger.maybe_merge(
+                                    append_text=req.query, session_id=session_id,
+                                    active_skill=_active,
+                                    session_tools=_traj_p3.get("tools", []))
+                                if _mres.merged:
+                                    logger.info("P3: merged append into skill '%s'", _mres.skill_id)
+                                    yield f"data: {json.dumps({'type':'skill_merged','skill_id':_mres.skill_id})}\n\n"
+                                    await asyncio.sleep(0)
+                        except Exception as _p3e:
+                            logger.debug("P3 append merge skipped: %s", _p3e)
 
                 # Include confirmed_facts so frontend can carry them to next query
                 _done_facts = getattr(loop, '_last_confirmed_facts', []) or []
@@ -1313,6 +1663,10 @@ def create_webui_app(services: dict[str, Any]) -> FastAPI:
     # ==================================================================
     from webui.routes_skills import register_skills_routes
     register_skills_routes(app, services)
+
+    # Scheduler (SCHEDULE tab) endpoints — webui/routes_schedule.py
+    from webui.routes_schedule import register_schedule_routes
+    register_schedule_routes(app, services)
 
 
     @app.get("/tools")
@@ -1883,6 +2237,33 @@ async def _submit_hitl_decision(
         except Exception as exc:
             logger.debug("batch_pending detection failed: %s", exc)
 
+        # ── B1: record skill-choice preference ───────────────────────────
+        # If this resolved interrupt was a skill-ambiguity user_choice, write
+        # (or boost) a skill_preference fact so future similar queries can be
+        # recommended / auto-selected.
+        try:
+            _mem_pref = services.get("memory")
+            if _mem_pref is not None and entry is not None:
+                _pm = (entry.payload.context_snapshot or {}).get("_pref_meta")
+                if _pm and req.selected_choice_id is not None:
+                    _chosen = req.selected_choice_id
+                    _chosen_skill = None if _chosen == "__none__" else _chosen
+                    from skills.skill_preference import SkillPreferenceService
+                    _svc = SkillPreferenceService(_mem_pref)
+                    if _svc.cfg.enabled:
+                        await _svc.record_choice(
+                            user_id=_pm.get("user_id", "system"),
+                            session_id=entry.payload.thread_id or "default",
+                            query=_pm.get("query", ""),
+                            chosen_skill_id=_chosen_skill,
+                            candidates=_pm.get("candidates", []),
+                        )
+                        logger.info(
+                            "Skill preference: recorded choice=%s for user=%s",
+                            _chosen, _pm.get("user_id", "system"))
+        except Exception as exc:
+            logger.debug("skill preference record failed: %s", exc)
+
         if isinstance(_raw_result, dict):
             _tool_result_str = (
                 _raw_result.get("tool_result")
@@ -2037,7 +2418,11 @@ async def _submit_hitl_decision(
                     _followup = await _runtime_loop.run(
                         query           = _followup_query,
                         session_id      = _session_for_followup,
-                        env_context     = {},
+                        # Synthesis turn: hard-block [DELEGATE:] (must compose
+                        # from the injected facts) — same flag the cross-agent
+                        # resume driver uses. Choice/clarification gates are
+                        # suppressed by run()'s non_interactive default.
+                        env_context     = {"_cross_agent_resume": True},
                         confirmed_facts = [],            # facts come from inject queue
                         working_set     = None,
                         tool_registry   = services.get("tool_registry") or {},

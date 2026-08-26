@@ -251,10 +251,20 @@ class HitlExecutor:
 
     async def _maybe_callback_source_agent(
         self, *, interrupt_id: str, result_text: str, decision: str,
+        phase: str = "result",
     ) -> None:
         """If `interrupt_id` was a HITL raised while serving an inbound
         delegation, POST the resolution back to the originating agent's
         /hitl_resolved endpoint so it can resume (A2A Phase 3 mode B).
+
+        A2A Phase 3 case-3 (HITL with async follow-up) sends TWO pushes:
+          • phase="approval": the operator approved; the tool is about to run.
+            Sent immediately so the originator can show an interim
+            "approved, executing…" status. Uses PEEK so the bridge record is
+            KEPT for the later result push.
+          • phase="result": terminal (tool finished, or rejected). Uses POP to
+            consume the record.
+        case-1/2 (no async follow-up) send only the single phase="result".
 
         No-op when: the interrupt wasn't cross-agent (no bridge record), or no
         peer registry is wired, or the source agent's URL can't be resolved.
@@ -265,7 +275,11 @@ class HitlExecutor:
             return
         try:
             from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
-            rec = get_cross_agent_hitl_bridge().pop_inbound_hitl(interrupt_id)
+            _bridge = get_cross_agent_hitl_bridge()
+            if phase == "approval":
+                rec = _bridge.peek_inbound_hitl(interrupt_id)   # keep for result push
+            else:
+                rec = _bridge.pop_inbound_hitl(interrupt_id)    # terminal: consume
         except Exception as exc:
             logger.debug("cross-agent callback: bridge lookup failed: %s", exc)
             return
@@ -296,6 +310,7 @@ class HitlExecutor:
             "interrupt_id":   interrupt_id,
             "result":         result_text,
             "decision":       decision,
+            "phase":          phase,           # "approval" | "result"
             "correlation_id": rec.correlation_id,
             "source_session_id": rec.source_session_id,
         }
@@ -1180,7 +1195,7 @@ class HitlExecutor:
                 await self._maybe_callback_source_agent(
                     interrupt_id=_interrupt_id,
                     result_text=f"操作员拒绝了工具调用 `{tool_name}`,未执行。",
-                    decision="reject",
+                    decision="reject", phase="result",
                 )
                 await self._complete_inbound_by_interrupt(
                     interrupt_id=_interrupt_id, decision="reject", result_text="",
@@ -1214,6 +1229,15 @@ class HitlExecutor:
                 "node":      "tool_call",
                 "node_step": f"Calling tool: {tool_name}",
             })
+            # A2A Phase 3 (case3, push #1 — intermediate): notify the originator
+            # the operator approved and execution is starting, BEFORE the
+            # (possibly slow) tool runs. peek keeps the bridge record for the
+            # terminal result push below.
+            await self._maybe_callback_source_agent(
+                interrupt_id=_interrupt_id,
+                result_text=f"操作员已批准工具 `{tool_name}`，正在执行…",
+                decision="approve", phase="approval",
+            )
             try:
                 result = await self._tool_registry[tool_name](tool_args)
             except Exception as exc:
@@ -1235,11 +1259,12 @@ class HitlExecutor:
                 f"[HITL APPROVED & COMPLETED — {tool_name}] {result_text}",
                 session_id,
             )
-            # A2A Phase 3 (P3-b): if this HITL was raised serving an inbound
-            # delegation, call the originator back so it can resume (mode B).
+            # A2A Phase 3 (case3, push #2 — terminal): tool finished; push the
+            # result so the originator can supplement its answer. phase=result
+            # pops the bridge record (delegation fully resolved).
             await self._maybe_callback_source_agent(
                 interrupt_id=_interrupt_id, result_text=result_text,
-                decision="approve",
+                decision="approve", phase="result",
             )
             await self._complete_inbound_by_interrupt(
                 interrupt_id=_interrupt_id, decision="approve",
@@ -1328,6 +1353,11 @@ class HitlExecutor:
             source_session_id = _src_session,
             source_query      = _src_query,
         )
+        # Carry preference-learning metadata so the resolution handler can
+        # record a skill_preference fact (B1).
+        _pm = chunk.get("_pref_meta")
+        if _pm:
+            payload.context_snapshot["_pref_meta"] = _pm
         entry = CheckpointEntry(
             interrupt_id=payload.interrupt_id,
             payload=payload,
@@ -1345,7 +1375,79 @@ class HitlExecutor:
             "Multi-mode HITL raised: id=%s kind=%s",
             payload.interrupt_id[:12], kind,
         )
+        # Option A: if this CLARIFICATION was raised while serving an inbound
+        # delegation, forward the question to the ORIGIN agent so it surfaces
+        # in the origin user's conversation (rather than only sitting on this
+        # peer's local queue where the user can't see it).
+        if kind == "clarification" and _src_agent and _src_session:
+            await self._forward_clarification_to_source(
+                interrupt_id=payload.interrupt_id,
+                source_agent=_src_agent,
+                source_session_id=_src_session,
+                clar_fields=clar_fields,
+                summary=chunk.get("summary", ""),
+            )
         return payload.interrupt_id
+
+    async def _forward_clarification_to_source(
+        self, *, interrupt_id: str, source_agent: str, source_session_id: str,
+        clar_fields: list, summary: str = "",
+    ) -> None:
+        """Option A: POST a clarification question to the origin agent's
+        /peer_clarification endpoint so it appears in the origin user's chat.
+        Mirrors _maybe_callback_source_agent's URL resolution. Failures are
+        logged, never raised — the local clarification card remains as a
+        fallback the peer's own operator could still answer."""
+        if self._peer_registry is None:
+            logger.warning("clarification forward: no peer registry — leaving "
+                           "clarification on local queue for interrupt=%s",
+                           interrupt_id[:12])
+            return
+        try:
+            agent = await self._peer_registry.get_agent(source_agent)
+            base_url = getattr(agent, "base_url", None) if agent else None
+        except Exception as exc:
+            logger.warning("clarification forward: registry resolve failed: %s", exc)
+            return
+        if not base_url:
+            logger.warning("clarification forward: no base_url for source=%s",
+                           source_agent)
+            return
+        # Record the correlation on the bridge so this peer can match the
+        # answer back to interrupt_id when it returns.
+        from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+        cid = get_cross_agent_hitl_bridge().record_inbound_hitl(
+            interrupt_id=interrupt_id, source_agent=source_agent,
+            source_session_id=source_session_id, source_query=summary,
+        )
+        # Serialize the clarification fields for the origin to render a card.
+        fields = []
+        for f in clar_fields:
+            fields.append({
+                "key":      getattr(f, "key", "") or (f.get("key") if isinstance(f, dict) else ""),
+                "prompt":   getattr(f, "prompt", "") or (f.get("prompt") if isinstance(f, dict) else ""),
+                "placeholder": getattr(f, "placeholder", "") or (f.get("placeholder") if isinstance(f, dict) else ""),
+                "required": getattr(f, "required", True) if not isinstance(f, dict) else f.get("required", True),
+            })
+        self_agent_id = getattr(self, "_self_agent_id", None) or "this-agent"
+        url = base_url.rstrip("/") + "/peer_clarification"
+        body = {
+            "peer_agent":         self_agent_id,   # who is asking (this peer)
+            "peer_interrupt_id":  interrupt_id,
+            "correlation_id":     cid,
+            "source_session_id":  source_session_id,
+            "summary":            summary,
+            "clarification_fields": fields,
+        }
+        try:
+            import httpx
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                resp = await client.post(url, json=body)
+            logger.info("clarification forward: POST %s → %s (cid=%s)",
+                        url, resp.status_code, cid)
+        except Exception as exc:
+            logger.warning("clarification forward: POST %s failed: %s — "
+                           "clarification stays on local queue", url, exc)
 
     async def _agent_loop_resumer(
         self, decision: HitlDecision, entry: CheckpointEntry,

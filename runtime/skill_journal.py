@@ -86,9 +86,15 @@ class SkillJournal:
     top_k:        list[tuple[str, float]] = field(default_factory=list)
     ambiguous:    bool = False
     loaded_skills: list[str] = field(default_factory=list)
+    capability_gaps: list[str] = field(default_factory=list)
     tool_calls:   list[dict[str, Any]] = field(default_factory=list)
     outcome:      Optional[str] = None
     total_turns:  int = 0
+
+    # Optional live-observability hook: a zero-arg callable invoked after each
+    # recorded event (set by the runtime loop to upsert a snapshot into the
+    # global store). None = no live push.
+    on_event:     Optional[Any] = None
 
     # ── Recording (thread-safe enough — runtime loop is single-task per journal) ──
 
@@ -117,6 +123,22 @@ class SkillJournal:
             "skill_id": skill_id,
             "position": position,
             "score":    (round(float(score), 4) if score is not None else None),
+        })
+
+    def record_capability_gap(
+        self,
+        turn:   int,
+        detail: str,
+        query:  Optional[str] = None,
+    ) -> None:
+        """Record that the agent declared a capability gap (C protocol): a
+        required step could not be completed because the tool/skill is absent
+        and not delegable. This is the inverse signal of P1's solidify — it
+        tells operators what capability is MISSING and worth adding."""
+        self.capability_gaps.append(detail)
+        self._emit("capability_gap", turn, {
+            "detail": detail[:500] if detail else "",
+            "query":  (query or "")[:300],
         })
 
     def record_tool_call(
@@ -207,6 +229,7 @@ class SkillJournal:
             "top_k":          [{"id": sid, "score": round(float(sc), 4)} for sid, sc in self.top_k],
             "ambiguous":      self.ambiguous,
             "loaded_skills":  list(self.loaded_skills),
+            "capability_gaps": list(self.capability_gaps),
             "tool_calls":     list(self.tool_calls),
             "outcome":        self.outcome,
             "total_turns":    self.total_turns,
@@ -225,6 +248,15 @@ class SkillJournal:
             ts=time.monotonic() - self._t0,
             payload=payload,
         ))
+        # Optional live-observability hook (set by the runtime loop). Pushes
+        # a snapshot to the global store so the JOURNAL tab can watch an
+        # in-progress stream. Never raises into the record path.
+        _cb = getattr(self, "on_event", None)
+        if _cb is not None:
+            try:
+                _cb()
+            except Exception:
+                pass
 
 
 # ---------------------------------------------------------------------------
@@ -245,7 +277,19 @@ class SkillJournalStore:
 
     def append(self, journal_dict: dict[str, Any]) -> None:
         with self._lock:
-            self._entries.append(journal_dict)
+            # If a live (in-progress) entry exists for this session, replace
+            # it in place so the completed journal supersedes the running
+            # snapshot rather than duplicating it.
+            sid = journal_dict.get("session_id")
+            replaced = False
+            if sid:
+                for i, e in enumerate(self._entries):
+                    if e.get("session_id") == sid and not e.get("_complete", True):
+                        self._entries[i] = journal_dict
+                        replaced = True
+                        break
+            if not replaced:
+                self._entries.append(journal_dict)
             while len(self._entries) > self._max:
                 self._entries.pop(0)
             # Persist under the same lock — without this, two threads
@@ -263,9 +307,93 @@ class SkillJournalStore:
                         exc,
                     )
 
+    def upsert_live(self, journal_dict: dict[str, Any]) -> None:
+        """Insert or replace an IN-PROGRESS journal keyed by session_id.
+
+        Lets the JOURNAL tab observe a stream while it's still running. The
+        entry carries `_complete=False`; the final `append()` at stream end
+        replaces it with the completed journal. Never persisted to disk (only
+        completed journals are), to avoid JSONL churn."""
+        sid = journal_dict.get("session_id")
+        if not sid:
+            return
+        journal_dict = dict(journal_dict)
+        journal_dict["_complete"] = False
+        with self._lock:
+            for i, e in enumerate(self._entries):
+                if e.get("session_id") == sid and not e.get("_complete", True):
+                    self._entries[i] = journal_dict
+                    return
+            self._entries.append(journal_dict)
+            while len(self._entries) > self._max:
+                self._entries.pop(0)
+
     def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
         with self._lock:
             return list(reversed(self._entries[-limit:]))
+
+    def extract_trajectory(self, session_id: str) -> dict[str, Any]:
+        """Reconstruct a real execution trajectory for a session from its
+        journal events — the P0 input the evolver needs (it was getting
+        solution_steps=[] before).
+
+        Returns {steps: [str], tools: [str], observations: [str],
+                 loaded_skills: [str], turns: int} — empty lists if no journal.
+        """
+        entry = None
+        with self._lock:
+            # Prefer the most recent entry for this session (completed wins
+            # over live since append supersedes the live copy).
+            for e in reversed(self._entries):
+                if e.get("session_id") == session_id:
+                    entry = e
+                    break
+        if entry is None:
+            return {"steps": [], "tools": [], "observations": [],
+                    "loaded_skills": [], "turns": 0}
+
+        steps: list[str] = []
+        tools: list[str] = []
+        observations: list[str] = []
+        for ev in entry.get("events", []):
+            t = ev.get("type")
+            p = ev.get("payload") or {}
+            turn = ev.get("turn", 0)
+            if t == "load":
+                steps.append(f"[T{turn}] 加载 skill: {p.get('skill_id','')}")
+            elif t == "tool_call":
+                name = p.get("tool_name", "")
+                ok = p.get("ok")
+                argk = ",".join(p.get("arg_keys", []) or [])
+                steps.append(
+                    f"[T{turn}] 调用工具: {name}"
+                    + (f"({argk})" if argk else "")
+                    + ("" if ok is not False else " [失败]")
+                )
+                if name:
+                    tools.append(name)
+            elif t == "selection":
+                topk = []
+                for s in (p.get("top_k") or [])[:3]:
+                    if isinstance(s, dict):
+                        topk.append(s.get("id"))
+                    elif isinstance(s, (list, tuple)):
+                        topk.append(s[0])
+                    else:
+                        topk.append(s)
+                topk = [x for x in topk if x]
+                if topk:
+                    observations.append(f"候选 skill: {', '.join(topk)}")
+        # de-dup tools, preserve order
+        seen = set()
+        tools = [x for x in tools if not (x in seen or seen.add(x))]
+        return {
+            "steps": steps,
+            "tools": tools or list(entry.get("tool_calls", [])),
+            "observations": observations,
+            "loaded_skills": list(entry.get("loaded_skills", [])),
+            "turns": int(entry.get("total_turns", 0)),
+        }
 
     def filter(self, *, skill_id: Optional[str] = None, outcome: Optional[str] = None,
                ambiguous: Optional[bool] = None, limit: int = 50) -> list[dict[str, Any]]:
@@ -293,12 +421,25 @@ class SkillJournalStore:
             outcomes:   dict[str, int] = {}
             skill_use:  dict[str, int] = {}
             skill_dormant: dict[str, int] = {}
+            skill_selected: dict[str, int] = {}
             ambiguous_count = 0
 
             for e in self._entries:
                 outcomes[e.get("outcome") or "unknown"] = outcomes.get(e.get("outcome") or "unknown", 0) + 1
                 if e.get("ambiguous"):
                     ambiguous_count += 1
+                # Count selections (top_k) so a skill that is repeatedly
+                # SELECTED but never LOADED is visible — otherwise it's a
+                # blind spot (the model answered directly without loading).
+                for sel in e.get("top_k", []):
+                    if isinstance(sel, dict):
+                        sid = sel.get("id")
+                    elif isinstance(sel, (list, tuple)):
+                        sid = sel[0]
+                    else:
+                        sid = sel
+                    if sid:
+                        skill_selected[sid] = skill_selected.get(sid, 0) + 1
                 for attr in e.get("attribution", []):
                     sid = attr["skill_id"]
                     skill_use[sid] = skill_use.get(sid, 0) + 1
@@ -311,6 +452,7 @@ class SkillJournalStore:
                 "ambiguous_rate":   round(ambiguous_count / n, 3),
                 "skill_use_count":  skill_use,
                 "skill_dormant_count": skill_dormant,
+                "skill_selected_count": skill_selected,
             }
 
 

@@ -598,6 +598,22 @@ class SkillOrchestrationConfig:
     # Lower = stricter (only very-close-tie triggers HITL).
     # Higher = looser (more situations trigger operator pick).
     ambiguity_gap_threshold:  float = 0.08
+    # ── Weak-match ambiguity ──
+    # No strong match (top < ambiguity_floor) but candidates cluster together.
+    weak_ambiguity_floor:          float = 0.08
+    weak_ambiguity_gap:            float = 0.05
+    weak_ambiguity_min_candidates: int   = 2
+    # ── Skill-preference learning (choice → fact → progressive auto) ──
+    preference_learning_enabled:   bool  = True
+    preference_recommend_floor:    float = 0.50
+    preference_auto_threshold:     float = 0.85
+    preference_initial_confidence: float = 0.60
+    preference_ttl_days:           float = 90.0
+    preference_auto_exclude_hitl:  bool  = True
+    # ── P1 trajectory mining / P3 append merge ──
+    trajectory_recurrence_threshold: int   = 3
+    trajectory_similarity_threshold: float = 0.5
+    append_attribution_floor:        float = 0.45
     # Maximum number of choices to surface to the operator.
     ambiguity_max_choices:    int   = 5
 
@@ -1172,6 +1188,18 @@ def _load_skill_orchestration_config(s: dict) -> "SkillOrchestrationConfig":
         scoring                 = _load_skill_scoring_config(s.get("scoring", {})),
         ambiguity_floor         = _env_float("SKILL_AMBIGUITY_FLOOR",         s.get("ambiguity_floor",         0.40)),
         ambiguity_gap_threshold = _env_float("SKILL_AMBIGUITY_GAP",           s.get("ambiguity_gap_threshold", 0.08)),
+        weak_ambiguity_floor          = _env_float("SKILL_WEAK_AMBIGUITY_FLOOR", s.get("weak_ambiguity_floor",          0.08)),
+        weak_ambiguity_gap            = _env_float("SKILL_WEAK_AMBIGUITY_GAP",   s.get("weak_ambiguity_gap",            0.05)),
+        weak_ambiguity_min_candidates = _env_int  ("SKILL_WEAK_AMBIGUITY_MIN",   s.get("weak_ambiguity_min_candidates",   2)),
+        preference_learning_enabled   = _env_bool ("SKILL_PREF_LEARNING",        s.get("preference_learning_enabled",  True)),
+        preference_recommend_floor    = _env_float("SKILL_PREF_RECOMMEND_FLOOR", s.get("preference_recommend_floor",   0.50)),
+        preference_auto_threshold     = _env_float("SKILL_PREF_AUTO_THRESHOLD",  s.get("preference_auto_threshold",    0.85)),
+        preference_initial_confidence = _env_float("SKILL_PREF_INIT_CONF",       s.get("preference_initial_confidence",0.60)),
+        preference_ttl_days           = _env_float("SKILL_PREF_TTL_DAYS",        s.get("preference_ttl_days",          90.0)),
+        preference_auto_exclude_hitl  = _env_bool ("SKILL_PREF_AUTO_EXCL_HITL",  s.get("preference_auto_exclude_hitl", True)),
+        trajectory_recurrence_threshold = _env_int  ("SKILL_TRAJ_RECURRENCE",     s.get("trajectory_recurrence_threshold", 3)),
+        trajectory_similarity_threshold = _env_float("SKILL_TRAJ_SIMILARITY",     s.get("trajectory_similarity_threshold", 0.5)),
+        append_attribution_floor        = _env_float("SKILL_APPEND_ATTR_FLOOR",   s.get("append_attribution_floor",        0.45)),
         ambiguity_max_choices   = _env_int  ("SKILL_AMBIGUITY_MAX_CHOICES",   s.get("ambiguity_max_choices",      5)),
         journal_enabled         = _env_bool ("SKILL_JOURNAL_ENABLED",         s.get("journal_enabled",         True)),
         journal_max_entries     = _env_int  ("SKILL_JOURNAL_MAX_ENTRIES",     s.get("journal_max_entries",      200)),

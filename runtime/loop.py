@@ -250,6 +250,7 @@ class AgentRuntimeLoop:
         llm_fn:          Optional[Any] = None,
         delegate_fn:     Optional[Any] = None,
         batch_resolver_fn: Optional[Any] = None,
+        peer_health_fn:  Optional[Any] = None,
     ) -> None:
         """
         Args:
@@ -281,6 +282,10 @@ class AgentRuntimeLoop:
         # domain-free default). Contract: (tool_name, tool_args, llm_response,
         # hitl_tool_names, confirmed_facts, all_parsed) -> Optional[list[(name,args)]].
         self._batch_resolver_fn = batch_resolver_fn
+        # peer_health_fn: () -> set[str] of OFFLINE peer ids. Used to degrade
+        # cross-agent skills when a declared peer is unreachable. None = assume
+        # all peers reachable (no degradation notices).
+        self._peer_health_fn = peer_health_fn
 
         # Context-budget strategy (Tier 2 #3): "legacy" (default) or "priority".
         # Read once at construction from the app config; falls back to legacy if
@@ -757,10 +762,20 @@ class AgentRuntimeLoop:
                     tok = chunk.get("token") or chunk.get("message") or ""
                     if tok:
                         _result_parts.append(str(tok))
-                    yield chunk
+                    # Re-tag peer token chunks as 'delegated' so the origin UI
+                    # shows them as a distinct "result from <peer>" block in the
+                    # process area — NOT the origin's conclusion bubble. The
+                    # origin synthesizes its own final answer from the injected
+                    # [委派结果] context afterwards; THAT is the conclusion.
+                    if chunk.get("token"):
+                        yield {"type": "delegated", "delegated": str(chunk["token"]),
+                               "source_agent": target}
+                    else:
+                        yield chunk
                 else:
                     _result_parts.append(str(chunk))
-                    yield {"token": str(chunk), "source_agent": target}
+                    yield {"type": "delegated", "delegated": str(chunk),
+                           "source_agent": target}
         except Exception as exc:
             _ok = False
             logger.exception("Delegation to %s failed: %s", target, exc)
@@ -770,10 +785,14 @@ class AgentRuntimeLoop:
         _result_text = "".join(_result_parts).strip()
         if _peer_hitl:
             yield {"_inject_context":
-                   f"[委派部分完成] {target} 需要操作员审批才能继续。"
-                   f"请告知用户到 {target} 的控制台处理审批，"
-                   f"并基于已获得的信息给出当前可行的回答。\n"
-                   f"已获得：{_result_text[:1500]}"}
+                   f"[委派进行中 — 等待 {target} 异步审批] "
+                   f"已将任务委派给 {target}，对方已提交操作员审批，正在等待。"
+                   f"审批通过及工具执行结果将稍后通过异步回调自动补充，无需你再次委派。"
+                   f"⚠ 禁止再次发出 [DELEGATE:{target}] 指令。"
+                   f"请基于当前已获得的信息给出一个简短的中间答复（说明已委派、等待审批中），"
+                   f"不要编造最终结果。\n"
+                   f"已获得的中间信息：{_result_text[:1500]}",
+                   "_peer_hitl_pending": True}
         elif _ok and _result_text:
             yield {"_inject_context":
                    f"[委派结果 from {target}] 任务={task!r}\n"
@@ -831,278 +850,104 @@ class AgentRuntimeLoop:
         tool_registry:   Optional[dict[str, Any]] = None,
         delegation_mode: DelegationMode = DelegationMode.FRESH,
         parent_state:    Optional[LoopState] = None,
+        non_interactive: bool = True,
     ) -> LoopResult:
-        env_ctx  = env_context or {}
-        tool_reg = tool_registry or {}
+        """Non-streaming entry point — a thin COLLECTOR over stream().
 
-        # P1: forked delegation — inherit parent context
-        if delegation_mode == DelegationMode.FORKED and parent_state is not None:
-            fork_ctx      = self.build_fork_context(parent_state, self._cfg.default_fork_context)
-            confirmed_facts = fork_ctx.get("confirmed_facts", confirmed_facts or [])
-            if not working_set:
-                working_set = fork_ctx.get("working_set", [])
-            logger.info(
-                "RuntimeLoop: forked delegation — inheriting %d facts from parent",
-                len(confirmed_facts),
-            )
+        DESIGN (2026-06, replaces the former ~300-line duplicated loop):
+        run() used to carry its own copy of the turn loop, which drifted from
+        _stream_impl as features landed there — by audit time it lacked
+        preference learning, ambiguity HITL, journal, DELEGATE handling, and
+        critically the **hitl_tool_names watch-list gate**, meaning the
+        non-streaming path could execute destructive tools WITHOUT operator
+        approval. Wrapping stream() removes the entire drift class: every
+        feature and every safety gate applies identically to both paths.
 
-        state = LoopState()
-        # Stash the original user query on the state so handlers further
-        # down (notably _handle_delegate, which builds the task to send
-        # to a peer agent) can reach it without changing every helper's
-        # signature. Peer-side HITL cards use this as `source_query` so
-        # the peer operator sees what the original user asked.
-        setattr(state, "user_query", query)
-        # DESIGN-06: seed the FactsLedger from any prior confirmed_facts list
-        from runtime.stop_policy import FactsLedger as _FL
-        state.confirmed_facts = _FL.from_list(list(confirmed_facts or []))
-        setattr(state, "working_set", list(working_set or []))
+        Non-streaming interaction semantics:
+          * Tool-approval HITL (watch-listed destructive tool, or a skill
+            with requires_hitl): NEVER suppressed. The stream ends with a
+            stop_hitl chunk; run() returns outcome=STOP_HITL with the gate
+            message as final_response and the structured card in
+            `pending_interaction` (attached attribute) so API callers can
+            surface it. The action is NOT executed.
+          * Skill-ambiguity choice card + clarification question: with
+            non_interactive=True (default) these are suppressed via env
+            flags — an API caller cannot click a card; the LLM proceeds
+            with its best judgment (equivalent to the operator choosing
+            "no specific skill"). Pass non_interactive=False to receive
+            them: ambiguity then also surfaces as STOP_HITL, and a
+            clarification question becomes the (graceful) response text —
+            the caller answers in its next run() call.
+          * Cross-agent park (peer raised an async HITL): returns
+            outcome=STOP_HITL with the interim message; the stage-2 result
+            callback delivers the final answer via the resumption channel.
+        """
+        env_ctx = dict(env_context or {})
+        if non_interactive:
+            env_ctx.setdefault("_skill_choice_resolved", True)   # no choice card
+            env_ctx.setdefault("_clarification_resolved", True)  # no chat-turn question
 
-        chunks: list[str] = []
-        last_tool_result  = ""
-        tool_outputs: dict[str, str] = {}   # persists across turns — tool results feed next LLM call
-        # Seed called_tools from any prior tool calls visible in memory context.
-        # This prevents the LLM from re-calling the same tool+args when memory
-        # already has the result from a previous stream() invocation.
-        # called_tools uses _call_key(name, args) fingerprints — not bare names.
-        # Also seeded from TOOL_EXEC ledger in confirmed_facts (from prior HTTP requests)
-        # so tools that ran in previous rounds are not re-executed.
-        called_tools: set[str] = set()
-        _known_stores: dict[str, str] = {}  # ref_id → tool_name (for context injection)
-        import re as _re2
-        for _fact in (list(confirmed_facts) if confirmed_facts is not None else []):
-            if _fact.startswith("TOOL_EXEC: "):
-                # Parse: "TOOL_EXEC: tool_name|{args} → ref=abc size=N"
-                _body = _fact[len("TOOL_EXEC: "):]
-                _arrow = _body.find(" → ")
-                if _arrow > 0:
-                    _call_part = _body[:_arrow].strip()
-                    _info_part = _body[_arrow+3:].strip()
-                    # Seed called_tools with the _call_key fingerprint
-                    called_tools.add(_call_part)
-                    # Extract ref_id if present
-                    _ref_m = _re2.search(r"ref=(\w+)", _info_part)
-                    if _ref_m:
-                        _tool_n = _call_part.split("|")[0]
-                        _known_stores[_ref_m.group(1)] = _tool_n
-        if called_tools:
-            logger.info("stream: seeded %d prior tool calls from ledger; %d known stores",
-                        len(called_tools), len(_known_stores))
+        tokens:   list[str] = []
+        facts:    list[str] = list(confirmed_facts or [])
+        t_summ:   list[str] = []
+        unres:    list[str] = []
+        turns                = 0
+        outcome              = StopOutcome.STOP_GRACEFUL
+        stop_msg             = ""
+        pending: Optional[dict[str, Any]] = None
 
-        while True:
-            state.turns += 1
-            memory_results = await self._retrieve_memory(query, session_id)
-
-            # ── L2 Snip (Claude-Code-inspired, added 2026-05) ──────────────
-            # See stream() copy of this block (~line 1300) for full rationale.
-            # Note: run() does not yield SSE chunks, so we only log the snip
-            # event — it shows up in the audit log via the snip function's
-            # logger.info() call.
-            try:
-                _budget = getattr(self._cfg, "budget", None)
-                _snip_cap = (
-                    getattr(_budget, "snip_tool_outputs_char_budget", 0)
-                    if _budget else 0
-                )
-                _keep_recent = (
-                    getattr(_budget, "snip_keep_recent", 5)
-                    if _budget else 5
-                )
-                if _snip_cap > 0 and tool_outputs:
-                    from runtime.context_budget import try_snip_tool_outputs as _snip
-                    tool_outputs, _freed = _snip(
-                        tool_outputs,
-                        target_char_budget = _snip_cap,
-                        keep_recent        = _keep_recent,
-                    )
-                    # _freed > 0 is already logged by _snip itself.
-            except Exception as _snip_exc:
-                logger.debug("L2 Snip skipped in run() (%s) — non-fatal", _snip_exc)
-
-            # NOTE: We intentionally do NOT seed called_tools from memory context.
-            # Memory may mention a prior tool call on device X, but we still need
-            # to allow that tool to run for devices Y and Z in the current turn.
-            # Deduplication is by _call_key (name+args), so the same tool with
-            # different args is allowed; same call with same args is blocked.
-
-            # P2: skill catalog summary always prepended (cache-stable prefix)
-            skill_section = ""
-            if self._skill_catalog:
-                skill_section = self._skill_catalog.format_summary()
-
-            # Context assembly (Item 4 4c): unified legacy/priority path.
-            context_str = self._assemble_context(
-                memory_results=memory_results,
-                tool_outputs=tool_outputs,
-                confirmed_facts=state.confirmed_facts,
-                working_set=working_set,
-                env_context=env_ctx,
-                skill_section=skill_section,
-            )
-
-            # Attach live tool registry to state so _call_llm / llm_engine can
-            # inject it into the system prompt (shows uploaded tools to the LLM)
-            state._tool_registry = tool_reg  # type: ignore[attr-defined]
-            llm_response = await self._call_llm(query, context_str, state)
-            state.tokens_consumed += self._budget._estimate_tokens(context_str + llm_response)
-            state.record_response(llm_response)
-            chunks.append(llm_response)
-
-            # P1: detect SKILL_LOAD directives and expand detail on demand.
-            # Use centralized parser for whitespace tolerance.
-            _skill_loads_this_turn_r: set[str] = set()
-            from runtime.directive_parser import find_skill_load_names
-            for skill_id in find_skill_load_names(llm_response):
-                if skill_id in _skill_loads_this_turn_r:
-                    continue
-                _skill_loads_this_turn_r.add(skill_id)
-                called_tools.add(f"SKILL_LOAD:{skill_id}")
-                if self._skill_catalog:
-                    detail = self._skill_catalog.load_detail(skill_id)
-                    if detail:
-                        context_str += "\n\n" + detail
-                        logger.debug("SkillCatalog: loaded detail for %s", skill_id)
-
-            # P1+: detect ALIAS directives. When the LLM discovers that the
-            # user's term doesn't match the real entity name (e.g. user said
-            # "core-01" but the actual device is "sw-acc-01"), it can emit
-            # `[ALIAS: user_term = system_term]` so the correction survives
-            # to subsequent turns. Without this, the LLM forgets in turn N+1
-            # and starts re-resolving from scratch, often regenerating bad
-            # configs against the user's wrong term.
-            #
-            # Stored as confirmed_facts entries; format kept stable so the
-            # next turn's prompt builder (see _format_confirmed_facts) can
-            # surface them prominently right after the user query.
-            _alias_re = re.compile(
-                r"\[ALIAS\s*:\s*([^=\]]+?)\s*=\s*([^\]]+?)\s*\]"
-            )
-            for _m in _alias_re.finditer(llm_response):
-                _user_term, _sys_term = _m.group(1).strip(), _m.group(2).strip()
-                # Skip degenerate / identical aliases
-                if not _user_term or not _sys_term or _user_term == _sys_term:
-                    continue
-                _alias_fact = f"ENTITY_ALIAS: '{_user_term}' actually refers to '{_sys_term}'"
-                # Dedup: if we've already recorded the same alias, skip
-                if not any(
-                    f == _alias_fact for f in state.confirmed_facts
-                ):
-                    state.confirmed_facts.append(_alias_fact)
-                    logger.info(
-                        "ALIAS recorded (turn=%d): %r → %r",
-                        state.turns, _user_term, _sys_term,
-                    )
-
-            # Execute tool calls — one per turn only
-            _single = self._parse_tool_call(llm_response)
-            tool_calls = [_single] if _single else []
-            new_tool_calls = [(n, a) for n, a in tool_calls if _call_key(n, a) not in called_tools]
-
-            # Repeat-tool-call recovery (mirrors stream() path; see comment there).
-            # When the LLM re-requests an already-executed tool, dedup empties
-            # new_tool_calls and _is_complete would treat the prelude prose as
-            # a final answer. Force a nudge turn instead.
-            if tool_calls and not new_tool_calls and state.turns < 3:
-                dup_name, dup_args = tool_calls[0]
-                logger.warning(
-                    "run: LLM re-requested already-executed tool %s (turn=%d) — nudging",
-                    dup_name, state.turns,
-                )
-                if dup_name == "read_stored_result":
-                    _nudge = (
-                        "_NUDGE: You just requested read_stored_result with the same "
-                        f"ref_id+offset as a prior call ({dup_args}). That page is already "
-                        "in your context. ANALYSE what you can see, OR request a different "
-                        "offset. Do not re-emit the same read."
-                    )
-                else:
-                    _nudge = (
-                        f"_NUDGE: You just requested [TOOL:{dup_name}] with the same "
-                        "arguments as a prior call. Use the existing result already in "
-                        "your context; do not re-emit the same tool call."
-                    )
-                state.confirmed_facts.append(_nudge)
+        async for chunk in self.stream(
+            query=query, session_id=session_id, env_context=env_ctx,
+            confirmed_facts=confirmed_facts, working_set=working_set,
+            tool_registry=tool_registry, delegation_mode=delegation_mode,
+            parent_state=parent_state,
+        ):
+            if not isinstance(chunk, dict):
                 continue
+            tok = chunk.get("token")
+            if tok:
+                tokens.append(str(tok))
+            if chunk.get("type") == "llm_trace":
+                turns = max(turns, int(chunk.get("turn", 0) or 0))
+            if chunk.get("type") == "confirmed_facts":
+                facts  = list(chunk.get("confirmed_facts", facts))
+                t_summ = list(chunk.get("tool_summaries", []))
+                unres  = list(chunk.get("unresolved", []))
+                turns  = max(turns, int(chunk.get("turns", 0) or 0))
+            if chunk.get("stop_hitl"):
+                outcome  = StopOutcome.STOP_HITL
+                pending  = chunk
+                stop_msg = str(chunk.get("message") or chunk.get("summary") or "")
+            if chunk.get("type") == "cross_agent_parked":
+                outcome = StopOutcome.STOP_HITL
+                pending = chunk
+            # stop-policy terminal carries its outcome explicitly (additive
+            # field, 2026-06) — budget stops etc. map through faithfully.
+            if chunk.get("outcome") and chunk.get("node") == "runtime_loop":
+                try:
+                    outcome = StopOutcome(chunk["outcome"])
+                except ValueError:
+                    pass
+                if chunk.get("message"):
+                    stop_msg = str(chunk["message"])
 
-            for tool_name, tool_args in new_tool_calls:
-                state.record_tool_call(tool_name)
-                called_tools.add(_call_key(tool_name, tool_args))
-                _journal_tool_start_ts = (
-                    __import__("time").monotonic()
-                    if state._skill_journal is not None else None
-                )
-
-                # Skill-as-tool guard: only block if the name is a skill AND NOT a real tool.
-                # When a name exists in both catalogs (e.g. list_devices is both a skill
-                # description AND a callable tool), the tool takes priority.
-                _is_skill_only = False
-                if self._skill_catalog and tool_name not in tool_reg:
-                    try:
-                        _is_skill_only = any(
-                            s.skill_id == tool_name
-                            for s in self._skill_catalog.list_skills()
-                        )
-                    except Exception:
-                        pass
-                if _is_skill_only:
-                    raw = (
-                        f"[ERROR] '{tool_name}' is a SKILL description, not a callable tool. "
-                        f"Use [SKILL_LOAD:{tool_name}] to read its steps, "
-                        f"then call the individual tools it describes."
-                    )
-                    logger.warning("run: LLM called skill-only '%s' as tool — injecting error", tool_name)
-                else:
-                    raw = await self._execute_tool(tool_name, tool_args, tool_reg)
-                # Same exclusion as ToolRouter — don't double-store pagination
-                # outputs. The 'stored' label here is what the LLM sees in the
-                # next turn's context; for paged reads we want the LLM to see
-                # the actual page content, not yet another [STORED:] reference.
-                _SKIP_STORE = {"read_stored_result", "process_stored_chunks"}
-                _is_page_or_ref = (
-                    raw.startswith("[STORED:")
-                    or raw.startswith("# Stored result ref_id=")
-                )
-                if tool_name in _SKIP_STORE or _is_page_or_ref:
-                    stored = raw   # pass page content through unchanged
-                else:
-                    stored = self._budget.store_tool_result(tool_name, raw)
-                tool_outputs[_call_key(tool_name, tool_args)] = stored   # accumulate ALL results
-                last_tool_result = raw
-
-                # P1: post-verification after each tool call
-                if self._cfg.enable_post_verification and tool_name != "read_stored_result":
-                    post = await self.post_verify(tool_name, raw, state.confirmed_facts)
-                    if not post.passed:
-                        logger.warning("Post-verify failed: %s", post.reason)
-                        state.unresolved_points.append(f"Post-verify failed: {post.reason}")
-
-            decision = self._policy.evaluate(state)
-            if decision.should_stop:
-                final = self._format_final(chunks, decision)
-                return LoopResult(
-                    outcome=decision.outcome,
-                    final_response=final,
-                    confirmed_facts=state.confirmed_facts,
-                    working_set=getattr(state, "working_set", []),
-                    unresolved=state.unresolved_points,
-                    tool_summaries=state.tool_summaries,
-                    turns_taken=state.turns,
-                )
-
-            if self._is_complete(llm_response, new_tool_calls):
-                # BUG-04 fix: the loop completed normally (LLM stopped calling
-                # tools), which means the task is done — use STOP_GRACEFUL, not
-                # CONTINUE. CONTINUE means "keep looping"; callers check this
-                # value to decide whether to trigger Hermes post-processing.
-                return LoopResult(
-                    outcome=StopOutcome.STOP_GRACEFUL,
-                    final_response="\n".join(chunks),
-                    confirmed_facts=state.confirmed_facts,
-                    working_set=getattr(state, "working_set", []),
-                    unresolved=state.unresolved_points,
-                    tool_summaries=state.tool_summaries,
-                    turns_taken=state.turns,
-                )
+        final = "".join(tokens).strip()
+        if not final:
+            final = stop_msg
+        result = LoopResult(
+            outcome=outcome,
+            final_response=final,
+            confirmed_facts=facts,
+            working_set=list(working_set or []),
+            unresolved=unres,
+            tool_summaries=t_summ,
+            turns_taken=turns,
+        )
+        if pending is not None:
+            # Attach the structured gate card for API callers; not a
+            # LoopResult field to keep the dataclass contract unchanged.
+            setattr(result, "pending_interaction", pending)
+        return result
 
     # ------------------------------------------------------------------
     # Priority context assembly (Tier 2 #3)
@@ -1129,6 +974,66 @@ class AgentRuntimeLoop:
             ctx.last_recall_turn = state.turns
             ctx.last_facts_count = facts_now
         return ctx.cached_memory_results
+
+    def _build_degradation_notices(self, selected_skills, state):
+        """For each selected cross-agent skill whose declared peer is offline,
+        return (notice_text, events). notice_text is appended to the skill
+        section so the LLM knows its boundary UP FRONT (peer-offline is the
+        normal case here); events are capability_degraded dicts to stream +
+        journal. No-op when no peer_health_fn is wired or no skill degrades.
+        """
+        if self._peer_health_fn is None or not selected_skills or \
+                self._skill_catalog is None:
+            return "", []
+        try:
+            offline = set(self._peer_health_fn() or ())
+        except Exception as exc:
+            logger.debug("peer_health_fn failed: %s", exc)
+            return "", []
+        if not offline:
+            return "", []
+
+        notices, events = [], []
+        for entry in selected_skills:
+            sid = entry[0] if isinstance(entry, (tuple, list)) else entry
+            summary = self._skill_catalog.get_summary(sid)
+            if summary is None:
+                continue
+            declared = getattr(summary, "delegates_to", None) or []
+            if not declared:
+                continue
+            # a declared peer token matches an offline id if it equals it or is
+            # a '*capability' token the offline agent would serve. We match by
+            # substring/exact on the offline id set (ids like 'dc-agent'; a
+            # skill may declare 'dc' or 'dc-agent').
+            down = [p for p in declared
+                    if any(p == o or p in o or o.startswith(p) for o in offline)]
+            if not down:
+                continue
+            degraded = getattr(summary, "degraded_capability", "") or ""
+            notice = (f"⚠ 跨域能力降级 — 技能「{sid}」依赖的对端 {', '.join(down)} "
+                      f"当前离线。")
+            if degraded:
+                notice += f"边界能力:{degraded}"
+            else:
+                notice += ("请仅交付本地可完成的部分,并如实说明依赖对端的步骤"
+                           "因其离线而无法执行。")
+            notices.append(notice)
+            events.append({"type": "capability_degraded", "skill_id": sid,
+                           "offline_peers": down,
+                           "degraded_capability": degraded, "node": "runtime_loop"})
+            # journal the degradation as a structured signal
+            if state._skill_journal is not None:
+                try:
+                    state._skill_journal.record_capability_gap(
+                        turn=state.turns,
+                        detail=f"[degraded] {sid} — peer(s) offline: {', '.join(down)}",
+                        query=getattr(state, "query", ""))
+                except Exception:
+                    pass
+        if not notices:
+            return "", []
+        return "\n\n[跨域能力状态]\n" + "\n".join(notices), events
 
     def _refresh_skills(self, ctx: _LoopContext, skill_every: int):
         """Phase (Item 4 4b): conditional skill-selection refresh.
@@ -1814,6 +1719,31 @@ class AgentRuntimeLoop:
             except Exception as _h_exc:
                 logger.debug("SESSION_END hook block failed: %s", _h_exc)
 
+            # Flush the per-stream SkillJournal into the global store so the
+            # /skill_journal/* endpoints + JOURNAL tab can observe it. The
+            # journal is populated during the stream (record_selection /
+            # record_skill_load / record_tool_call) but is only persisted
+            # here, at stream end.
+            try:
+                _pj = getattr(self, "_pending_journals", {}).pop(session_id, None)
+                if _pj is not None:
+                    try:
+                        _pj.record_completion(
+                            outcome=_stats.get("outcome", "unknown"),
+                            total_turns=_stats.get("total_turns", 0),
+                        )
+                    except Exception:
+                        pass
+                    from config import cfg as _app_cfg
+                    _so = getattr(_app_cfg, "skill_orchestration", None)
+                    if _so is None or getattr(_so, "journal_api_enabled", True):
+                        from runtime.skill_journal import get_journal_store
+                        _final = _pj.to_dict()
+                        _final["_complete"] = True
+                        get_journal_store().append(_final)
+            except Exception as _jf_exc:
+                logger.debug("SkillJournal flush failed: %s", _jf_exc)
+
     async def _stream_impl(
         self,
         query:           str,
@@ -1884,6 +1814,30 @@ class AgentRuntimeLoop:
                     session_id=session_id,
                     query=query,
                 )
+                # Live observability: push a snapshot to the global store
+                # after each recorded event so the JOURNAL tab can watch the
+                # stream WHILE it runs (not only after it completes). The
+                # final flush in stream()'s finally replaces this live entry
+                # with the completed journal.
+                try:
+                    from runtime.skill_journal import get_journal_store as _gjs
+                    _live_store = _gjs()
+                    _live_journal = state._skill_journal
+                    def _on_journal_event(_j=_live_journal, _s=_live_store):
+                        try:
+                            _s.upsert_live(_j.to_dict())
+                        except Exception:
+                            pass
+                    state._skill_journal.on_event = _on_journal_event
+                except Exception:
+                    pass
+                # Stash so the stream() wrapper's finally can flush this
+                # per-stream journal into the global SkillJournalStore (which
+                # the /skill_journal/* API + JOURNAL tab read). Without this
+                # the journal records events but is never persisted.
+                if not hasattr(self, "_pending_journals"):
+                    self._pending_journals = {}
+                self._pending_journals[session_id] = state._skill_journal
         except Exception as _jexc:
             logger.debug("SkillJournal init skipped: %s", _jexc)
 
@@ -1948,6 +1902,21 @@ class AgentRuntimeLoop:
             _recall_every, _skill_every, _facts_growth = 3, 5, 3
             _emit_skills_only_on_change = True
 
+
+        # Peers already delegated to during THIS user request (this stream).
+        # Per the A2A contract (spec point 3): the same decomposed task must
+        # not be re-delegated to the same agent. After a delegation to a peer
+        # returns — even a case1 synchronous result that the LLM reads as
+        # "inconclusive" (e.g. the peer diagnosed but asked "shall I grant?"
+        # instead of acting) — the LLM tends to re-delegate the same task to
+        # the same peer, spawning duplicate inbound tasks; the peer then re-
+        # diagnoses against now-mutated state and returns a contradictory
+        # answer (the storm). The in-flight TaskStore gate can't catch this
+        # because a case1 task is already terminal. Per-stream scope is
+        # correct: a later user query starts a fresh stream with a fresh set,
+        # so legitimate re-use of the same peer across requests still works.
+        _delegated_targets_this_request: set[str] = set()
+        _needs_synthesis_turn = False   # set when a re-delegate is suppressed
 
         while True:
             state.turns += 1
@@ -2044,6 +2013,22 @@ class AgentRuntimeLoop:
             skill_section, skill_count, selected_skills, skill_ambiguous = \
                 self._refresh_skills(ctx, _skill_every)
 
+            # ── Cross-agent degradation (peer-offline is the normal case) ──
+            # If a selected cross-agent skill declares a peer that's currently
+            # offline, inject its degraded-capability boundary contract into
+            # the prompt so the LLM works within its boundary from the start,
+            # and surface a capability_degraded event once per stream.
+            if not getattr(ctx, "_degradation_emitted", False):
+                _deg_notice, _deg_events = self._build_degradation_notices(
+                    selected_skills, state)
+                if _deg_notice:
+                    skill_section = (skill_section or "") + _deg_notice
+                    ctx.cached_skill_section = skill_section
+                for _ev in _deg_events:
+                    yield _ev
+                if _deg_events:
+                    ctx._degradation_emitted = True
+
             # BUG-07 fix: use state.working_set (which may be updated mid-loop)
             # rather than the outer `working_set` variable (frozen at call start).
             _current_working_set = getattr(state, "working_set", None) or working_set or []
@@ -2096,23 +2081,75 @@ class AgentRuntimeLoop:
                     _hitl_on_ambig = _env_val.lower() != "false"
 
                 _ambig_already_resolved = bool(env_ctx.get("_skill_choice_resolved"))
+
+                # ── B: skill-preference learning ──────────────────────────
+                # Recall this user's past choices for similar queries, boost
+                # the selection, and decide stage (learn/recommend/auto).
+                _pref_stage, _pref_skill, _pref_hits = "learn", None, []
+                if not _ambig_already_resolved and self._memory is not None:
+                    try:
+                        from skills.skill_preference import SkillPreferenceService
+                        _uid = (env_ctx.get("user_id") or env_ctx.get("operator")
+                                or "system")
+                        _pref = SkillPreferenceService(self._memory)
+                        if _pref.cfg.enabled:
+                            _pref_hits = await _pref.recall(user_id=_uid, query=query)
+                            if _pref_hits:
+                                selected_skills = _pref.apply_boost(selected_skills, _pref_hits)
+                                def _req_hitl(sid):
+                                    try:
+                                        s = self._skill_catalog.get_summary(sid)
+                                        return bool(s and s.requires_hitl)
+                                    except Exception:
+                                        return False
+                                _pref_stage, _pref_skill = _pref.stage_for(
+                                    _pref_hits, skill_requires_hitl=_req_hitl)
+                    except Exception as _pe:
+                        logger.debug("preference recall/boost failed: %s", _pe)
+
+                # AUTO stage: skip HITL, load the preferred skill directly.
+                if (_pref_stage == "auto" and _pref_skill
+                        and not _ambig_already_resolved):
+                    env_ctx["_skill_choice_resolved"] = True
+                    env_ctx["_selected_skills"] = [_pref_skill]
+                    if state._skill_journal is not None:
+                        try:
+                            state._skill_journal._emit(
+                                "preference_auto_select", state.turns,
+                                {"skill_id": _pref_skill,
+                                 "confidence": round(max(h.confidence for h in _pref_hits), 3)})
+                        except Exception:
+                            pass
+                    logger.info(
+                        "Skill preference: AUTO-selected %s for user (session=%s)",
+                        _pref_skill, session_id)
+
                 if (
                     skill_ambiguous
+                    and _pref_stage != "auto"
                     and not _ambig_already_resolved
                     and _hitl_on_ambig
                 ):
                     # Build choices from top candidates + a "none" option.
+                    # Recommend stage: pin the preferred skill first + mark it.
+                    _ordered = list(selected_skills[:_max_choices])
+                    if _pref_stage == "recommend" and _pref_skill:
+                        _ordered.sort(key=lambda t: (t[0] != _pref_skill,))
                     _choices = []
-                    for sid, score in selected_skills[:_max_choices]:
+                    for sid, score in _ordered:
                         summary = None
                         if self._skill_catalog is not None:
                             try:
                                 summary = self._skill_catalog.get_summary(sid)
                             except Exception:
                                 summary = None
+                        _is_pref = (_pref_stage == "recommend" and sid == _pref_skill)
+                        _label = (summary.name if summary else sid)
+                        if _is_pref:
+                            _label = "⭐ " + _label + "（上次你选了这个）"
                         _choices.append({
                             "id":       sid,
-                            "label":    (summary.name if summary else sid),
+                            "label":    _label,
                             "description": (
                                 f"{(summary.purpose if summary else '')[:120]}"
                                 + (f" · {summary.risk_level}" if summary and summary.risk_level else "")
@@ -2121,6 +2158,7 @@ class AgentRuntimeLoop:
                                 "skill_id": sid,
                                 "score":    round(float(score), 3),
                                 "tags":     (summary.tags[:4] if summary else []),
+                                "recommended": _is_pref,
                             },
                         })
                     # Always offer a "do not use any skill" option so
@@ -2145,16 +2183,28 @@ class AgentRuntimeLoop:
                         "summary":        f"找到多个匹配的 skill，请选择要使用的具体 skill (或选择不使用)：",
                         "choices":        _choices,
                         "top_skills":     [c["id"] for c in _choices[:3] if c["id"] != "__none__"],
+                        # For preference learning (B1): the resolution handler
+                        # writes a skill_preference fact from these.
+                        "_pref_meta": {
+                            "query":       query,
+                            "user_id":     (env_ctx.get("user_id") or env_ctx.get("operator") or "system"),
+                            "candidates":  [c["id"] for c in _choices if c["id"] != "__none__"],
+                        },
                     }
                     return
 
             # ── Type #3 CLARIFICATION gate (Item 4 4d → _run_clarification_gate) ──
-            async for _clar_chunk in self._run_clarification_gate(
-                ctx, memory_results, selected_skills,
-            ):
-                if _clar_chunk.get('_clarification_terminal'):
-                    return   # gate asked the operator; end this turn's stream
-                yield _clar_chunk
+            # _clarification_done (env_ctx["_clarification_resolved"]) was read
+            # at stream start but never consulted — dead flag, fixed 2026-06:
+            # callers (non-interactive run(), or a prior round that already
+            # asked) can now suppress the gate explicitly.
+            if not _clarification_done:
+                async for _clar_chunk in self._run_clarification_gate(
+                    ctx, memory_results, selected_skills,
+                ):
+                    if _clar_chunk.get('_clarification_terminal'):
+                        return   # gate asked the operator; end this turn's stream
+                    yield _clar_chunk
 
             yield {"node_step": f"Turn {state.turns}: analysing", "node": "runtime_loop"}
 
@@ -2201,25 +2251,104 @@ class AgentRuntimeLoop:
             from runtime.directive_parser import (
                 strip_tool_directives as _strip_tools,
                 strip_tool_batch_directives as _strip_batch,
+                strip_delegate_directives as _strip_delegate,
+                strip_skill_load_directives as _strip_skill,
+                strip_capability_gap as _strip_capgap,
             )
-            _visible = _strip_batch(_strip_tools(llm_response)).strip()
+            _visible = _strip_capgap(_strip_skill(
+                _strip_delegate(_strip_batch(_strip_tools(llm_response)))
+            )).strip()
+            # Separate the model's reasoning (<think>…</think>) from the
+            # conclusion. Reasoning is streamed as a distinct 'reasoning' chunk
+            # into the collapsible process area; only the clean conclusion goes
+            # to the answer bubble. Without this split, thinking-model output
+            # (qwen3/deepseek) leaks raw <think> text into the final answer,
+            # mixing process + conclusion.
+            import re as _re_think
+            _think_blocks = _re_think.findall(
+                r"<think>(.*?)</think>", _visible,
+                flags=_re_think.DOTALL | _re_think.IGNORECASE)
+            if _think_blocks:
+                _reasoning = "\n".join(b.strip() for b in _think_blocks if b.strip())
+                _visible = _re_think.sub(
+                    r"<think>.*?</think>", "", _visible,
+                    flags=_re_think.DOTALL | _re_think.IGNORECASE).strip()
+                if _reasoning:
+                    yield {"type": "reasoning", "reasoning": _reasoning,
+                           "turn": state.turns}
             # Also drop any per-line residue (e.g. a bare "[TOOL:foo]"
             # with no args dict that the multi-strippers skipped because
             # the open-brace lookahead didn't fire).
             _visible_lines = [
                 ln for ln in _visible.splitlines()
-                if not re.match(r'\s*\[\s*TOOL(?:_BATCH)?\s*:\s*\w+\s*\]\s*$',
-                                ln, re.IGNORECASE)
+                if not re.match(
+                    r'\s*\[\s*(?:TOOL(?:_BATCH)?|DELEGATE|SKILL_LOAD|CAPABILITY_GAP)\s*:',
+                    ln, re.IGNORECASE)
             ]
             _visible = "\n".join(_visible_lines).strip()
             if _visible:
-                # Stream in 80-char chunks preserving newlines + whitespace.
-                # Frontend renders markdown after the stream completes, so block
-                # structure (\n\n, table rows, ```fences, ## headers) must survive.
-                for _i in range(0, len(_visible), 80):
-                    yield {"token": _visible[_i:_i+80]}
-                    await asyncio.sleep(0)
+                # Does THIS turn also call a tool? If so, its prose is interim
+                # narration ("let me check X"), not the conclusion — route it
+                # to the collapsible process area so the answer bubble holds
+                # only the final conclusion. The final turn (no tool call)
+                # streams to the bubble as the answer.
+                # Does THIS turn also call a tool / delegate / load a skill? If
+                # so, its prose is interim narration ("let me check X" / "I'll
+                # delegate to Y"), not the conclusion — route it to the process
+                # area so the answer bubble holds only the final conclusion.
+                from runtime.directive_parser import (
+                    find_delegate_directives as _find_deleg,
+                    find_skill_load_names as _find_skills,
+                )
+                _turn_has_tool = (
+                    _has_any_tool_directive(llm_response)
+                    or bool(_find_deleg(llm_response))
+                    or bool(_find_skills(llm_response))
+                )
+                if _turn_has_tool:
+                    yield {"type": "interim", "interim": _visible,
+                           "turn": state.turns}
+                else:
+                    # Stream in 80-char chunks preserving newlines + whitespace.
+                    # Frontend renders markdown after the stream completes, so
+                    # block structure (\n\n, tables, ```fences, ## headers) must
+                    # survive.
+                    for _i in range(0, len(_visible), 80):
+                        yield {"token": _visible[_i:_i+80]}
+                        await asyncio.sleep(0)
             # If the entire response was tool calls (no prose), yield nothing —
+
+            # ── [CAPABILITY_GAP:] handling (C protocol) ──────────────────
+            # The LLM declared a required capability is missing (and not
+            # delegable). Record it structurally, surface it, and stop
+            # gracefully — do NOT let the loop spin trying alternatives.
+            from runtime.directive_parser import (
+                find_capability_gap as _find_cap_gap,
+            )
+            _cap_gap = _find_cap_gap(llm_response)
+            if _cap_gap is not None:
+                logger.info("Turn %d: CAPABILITY_GAP declared — %s",
+                            state.turns, _cap_gap[:160])
+                if state._skill_journal is not None:
+                    try:
+                        state._skill_journal.record_capability_gap(
+                            turn=state.turns, detail=_cap_gap, query=query)
+                    except Exception as _je:
+                        logger.debug("journal.record_capability_gap failed: %s", _je)
+                # record as a structured unresolved point (now a live field —
+                # _format_final surfaces "Still unresolved: ?")
+                state.unresolved_points.append(
+                    f"缺少能力: {_cap_gap}" if _cap_gap else "缺少完成请求所需的能力")
+                yield {"type": "capability_gap", "detail": _cap_gap,
+                       "node": "runtime_loop"}
+                await asyncio.sleep(0)
+                # terminal facts chunk so run()/UI can finalize
+                yield {"type": "confirmed_facts",
+                       "confirmed_facts": list(state.confirmed_facts),
+                       "tool_summaries": list(state.tool_summaries),
+                       "unresolved": list(state.unresolved_points),
+                       "turns": state.turns}
+                return
 
             # ── [DELEGATE:agent_id] handling (Phase 2B) ──────────────────
             # Delegation is MUTUALLY EXCLUSIVE with tool calls in one turn
@@ -2245,31 +2374,129 @@ class AgentRuntimeLoop:
                 )
                 _delegates = []   # suppress for this turn
             if _delegates:
-                # Honor only the first delegate (one per turn).
                 _dlg = _delegates[0]
-                if len(_delegates) > 1:
+                # ── Synthesis-turn hard-block (A2A Phase 3) ───────────────
+                # A cross-agent resume synthesis turn exists solely to compose
+                # a final answer from the peer result already injected as a
+                # fact. Delegating here is categorically wrong and the in-flight
+                # gate can't catch it (the outbound task is already COMPLETED by
+                # the time the result callback drives this turn). _cross_agent_
+                # resume is set fresh per synthesis execute_query by the resume
+                # driver — a per-turn role flag, NOT the fragile cross-turn
+                # count guard removed earlier. Drop the directive and fall
+                # through to normal turn handling (the response text becomes the
+                # answer).
+                if (env_ctx or {}).get("_cross_agent_resume"):
                     logger.warning(
-                        "Turn %d emitted %d [DELEGATE:] directives — only the "
-                        "first (%s) is honored this turn",
-                        state.turns, len(_delegates), _dlg.target,
+                        "Turn %d: DELEGATE to %s dropped — this is a cross-agent "
+                        "resume synthesis turn (must synthesize, not delegate) "
+                        "(session=%s).",
+                        state.turns, _dlg.target, session_id,
                     )
-                async for _chunk in self._handle_delegate(_dlg, state, session_id):
-                    # Inject the delegated result as a confirmed fact so it
-                    # survives into the NEXT turn's prompt (context_str is
-                    # rebuilt each turn via budget.assemble, which includes
-                    # confirmed_facts — appending to context_str here would be
-                    # overwritten). Forward streaming chunks (tagged
-                    # source_agent) to the user.
-                    if _chunk.get("_inject_context"):
-                        state.record_new_fact(_chunk["_inject_context"])
-                    else:
-                        yield _chunk
-                # A delegate fully occupies the turn; continue the loop so the
-                # next LLM turn synthesizes the final answer from the injected
-                # delegated result. (The while-loop top increments state.turns,
-                # so we must NOT increment here.)
-                called_tools.add(f"DELEGATE:{_dlg.target}")
-                continue
+                    context_str += (
+                        f"\n\n_SYSTEM: 本轮是综合答复阶段，{_dlg.target} 的结果已在"
+                        f"上下文中。禁止再委派。请直接基于已有信息给出最终回答。"
+                    )
+                    _delegates = []
+                    # Fall through to normal (non-delegate) turn handling.
+                if _delegates:
+                    # Honor only the first delegate (one per turn). The
+                    # duplicate-delegation gate lives in delegate_fn
+                    # (task/delegation.py), keyed on TaskStore state — durable
+                    # across turns AND streams. If a delegation to this peer is
+                    # already in flight, delegate_fn creates no task and yields
+                    # a suppression note (_delegation_suppressed) injected below.
+
+                    # ── Per-request re-delegation block (spec point 3) ────
+                    # Already delegated this task to this peer in THIS request.
+                    # Re-delegating the same (task, peer) is never the right
+                    # move — per spec point 2 the LLM must instead synthesize a
+                    # final answer or degrade (different peer / summarize). This
+                    # stops the case1 storm the in-flight gate can't (the prior
+                    # task is already terminal).
+                    if _dlg.target in _delegated_targets_this_request:
+                        logger.warning(
+                            "Turn %d: DELEGATE to %s suppressed — already "
+                            "delegated to it this request; the result is in "
+                            "context. Synthesize or degrade, do NOT re-delegate "
+                            "(session=%s).",
+                            state.turns, _dlg.target, session_id,
+                        )
+                        # Inject the synthesis instruction as a DURABLE fact —
+                        # context_str is rebuilt each turn via _assemble_context
+                        # (line ~2136), so a context_str += here would be lost
+                        # before the forced synthesis turn runs. record_new_fact
+                        # routes into state.confirmed_facts which _assemble_context
+                        # reads, so it survives into the next turn's prompt.
+                        state.record_new_fact(
+                            f"[需要综合答复] 你本轮请求已委派过 {_dlg.target}，其结果已在"
+                            f"上下文中（见 [委派结果]/[委派进行中] 事实）。⚠ 禁止再次委派 "
+                            f"{_dlg.target}。请合并分析已有结果：若已能回答用户请求则直接给出"
+                            f"最终综合答复；若 {_dlg.target} 的结果不足以完成请求，则如实总结"
+                            f"当前结论与缺口（不要重复委派同一个 agent）。"
+                        )
+                        _delegates = []
+                        _needs_synthesis_turn = True
+                        # Fall through to normal (non-delegate) turn handling.
+                if _delegates:
+                    if len(_delegates) > 1:
+                        logger.warning(
+                            "Turn %d emitted %d [DELEGATE:] directives — only "
+                            "the first (%s) is honored this turn",
+                            state.turns, len(_delegates), _dlg.target,
+                        )
+                    _delegated_targets_this_request.add(_dlg.target)
+                    _parked_peer_hitl = False
+                    async for _chunk in self._handle_delegate(
+                        _dlg, state, session_id
+                    ):
+                        # Inject the delegated result as a confirmed fact so it
+                        # survives into the NEXT turn's prompt (context_str is
+                        # rebuilt each turn via budget.assemble). Forward
+                        # streaming chunks (tagged source_agent) to the user.
+                        if _chunk.get("_inject_context"):
+                            state.record_new_fact(_chunk["_inject_context"])
+                            if _chunk.get("_peer_hitl_pending"):
+                                _parked_peer_hitl = True
+                        else:
+                            yield _chunk
+                    called_tools.add(f"DELEGATE:{_dlg.target}")
+
+                    # ── PARK on case2 peer HITL ───────────────────────────
+                    # The peer raised an operator-approval HITL: per the A2A
+                    # contract, this delegated task is NOT complete until the
+                    # stage-2 tool result arrives. We must WAIT for that async
+                    # callback, not busy-loop. Busy-looping here races with the
+                    # result callback: the instant it flips the outbound task to
+                    # COMPLETED, the in-flight gate releases and the next loop
+                    # turn re-delegates → duplicate inbound task on the peer →
+                    # the peer re-diagnoses against now-mutated state and returns
+                    # a contradictory answer (the storm the user observed).
+                    # End the stream with a deterministic interim; the result
+                    # callback's synthesis turn delivers the final answer via
+                    # the resumption channel.
+                    if _parked_peer_hitl:
+                        logger.info(
+                            "Turn %d: parking request — %s raised an async "
+                            "operator-approval HITL; awaiting stage-2 result "
+                            "callback (session=%s).",
+                            state.turns, _dlg.target, session_id,
+                        )
+                        yield {
+                            "type": "cross_agent_parked",
+                            "peer_agent": _dlg.target,
+                        }
+                        yield {
+                            "token":
+                                f"\n\n已将该任务委派给 {_dlg.target}，对方需要操作员审批。"
+                                f"审批与执行结果完成后会自动补充最终答复，无需重复提交。",
+                        }
+                        return
+                    # No peer HITL → a normal delegate fully occupies the turn;
+                    # continue so the next LLM turn synthesizes from the
+                    # injected delegated result. (The while-loop top increments
+                    # state.turns, so do NOT increment here.)
+                    continue
 
             # the tool result will be injected in the next turn's context and
             # the LLM will produce a proper prose answer then.
@@ -2278,6 +2505,16 @@ class AgentRuntimeLoop:
             for skill_id in find_skill_load_names(llm_response):
                 if skill_id in _skill_loads_this_turn:
                     continue   # deduplicate within a single response
+                # Cross-turn dedup (mirror of run() path): suppress if already
+                # loaded in a prior turn — prevents the LLM looping on
+                # SKILL_LOAD when the detail was lost from rebuilt context.
+                if f"SKILL_LOAD:{skill_id}" in called_tools:
+                    logger.warning(
+                        "Turn %d: SKILL_LOAD:%s suppressed — already loaded "
+                        "in a prior turn (LLM is in a re-emit loop)",
+                        state.turns, skill_id,
+                    )
+                    continue
                 _skill_loads_this_turn.add(skill_id)
                 # Mark as "called" so dedup blocks repeated SKILL_LOAD across turns
                 called_tools.add(f"SKILL_LOAD:{skill_id}")
@@ -2285,6 +2522,13 @@ class AgentRuntimeLoop:
                     detail = self._skill_catalog.load_detail(skill_id)
                     if detail:
                         context_str += "\n\n" + detail   # inject for next turn
+                        # Also persist as a confirmed fact so the skill detail
+                        # survives the next turn's context rebuild — without
+                        # this the LLM forgets and re-emits SKILL_LOAD forever
+                        # (the DC SKILL_LOAD death-loop bug).
+                        state.record_new_fact(
+                            f"[SKILL LOADED: {skill_id}]\n{detail}"
+                        )
                         yield {"node_step": f"Loading skill details: {skill_id}", "node": "skill_load"}
                         # Journal: record the load with position+score from top-k
                         if state._skill_journal is not None:
@@ -2608,17 +2852,30 @@ class AgentRuntimeLoop:
 
             decision = self._policy.evaluate(state)
             if decision.should_stop:
-                yield {"message": self._format_final([], decision), "node": "runtime_loop"}
+                yield {"message": self._format_final([], decision), "node": "runtime_loop",
+                       "outcome": decision.outcome.value}
                 # Write tool execution ledger into confirmed_facts for next-round reuse
                 _ledger = _build_tool_ledger(tool_outputs, tool_reg,
                                               getattr(state, "_tool_outputs_raw", {}))
                 # extend() on FactsLedger routes by prefix; on plain list it's native
                 state.confirmed_facts.extend(_ledger)
-                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts),
+                       "tool_summaries": list(state.tool_summaries),
+                       "unresolved": list(state.unresolved_points),
+                       "turns": state.turns}
                 return
 
-            if self._is_complete(llm_response, new_tool_calls):
-                # Guard: never exit with empty or trivial response when we have context.
+            if _needs_synthesis_turn:
+                # A re-delegate was just suppressed; the system note asking the
+                # LLM to synthesize from the delegated result is now in
+                # context_str. Force one more turn to deliver that synthesis —
+                # do NOT let the empty-tool-call response end the loop here.
+                _needs_synthesis_turn = False
+                logger.info(
+                    "stream: forcing synthesis turn after suppressed re-delegate "
+                    "(session=%s, turn=%d)", session_id, state.turns)
+            elif self._is_complete(llm_response, new_tool_calls,
+                                  skill_load_honored=bool(_skill_loads_this_turn)):
                 # Also fires when LLM returns a very short response after tool errors/empty
                 # results — it should tell the user something meaningful, not go silent.
                 _resp_stripped = llm_response.strip()
@@ -2687,7 +2944,10 @@ class AgentRuntimeLoop:
                 # NOTE: turn persistence (after_turn) is handled by the backend's
                 # post-turn hook in webui/backend.py:600 via dtm.after_turn(). Do NOT
                 # write here — it would create duplicate long_term_chunks entries.
-                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts)}
+                yield {"type": "confirmed_facts", "confirmed_facts": list(state.confirmed_facts),
+                       "tool_summaries": list(state.tool_summaries),
+                       "unresolved": list(state.unresolved_points),
+                       "turns": state.turns}
                 return
 
     async def _retrieve_memory(self, query: str, session_id: str) -> list[Any]:
@@ -2976,9 +3236,9 @@ class AgentRuntimeLoop:
         return _helpers.skill_loads_in(response)
 
     @staticmethod
-    def _is_complete(response: str, tool_calls: list) -> bool:
+    def _is_complete(response: str, tool_calls: list, skill_load_honored: bool = True) -> bool:
         """Thin wrapper → runtime.loop_helpers.is_complete (Item 4)."""
-        return _helpers.is_complete(response, tool_calls)
+        return _helpers.is_complete(response, tool_calls, skill_load_honored)
 
     @staticmethod
     def _format_final(chunks: list[str], decision: StopDecision) -> str:

@@ -35,7 +35,7 @@ def _read(rel: str) -> str:
 
 
 class TestNoDoubleCount(unittest.TestCase):
-    """Verify the protective code paths in hitl_executor.execute."""
+    """[deletion-guard layer; behavior in test_delegation_dispatcher_behavior.py] Verify the protective code paths in hitl_executor.execute."""
 
     def setUp(self):
         self.src = _read("integrations/adapters/hitl_executor.py")

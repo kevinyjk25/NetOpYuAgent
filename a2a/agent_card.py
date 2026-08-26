@@ -63,6 +63,35 @@ SKILLS: list[dict[str, Any]] = [
 # AgentCard builder
 # ---------------------------------------------------------------------------
 
+def _profile_capabilities_as_skills(profile_id: str) -> "list[dict[str, Any]]":
+    """Return a profile's capabilities formatted as AgentCard skills, so an
+    agent auto-advertises its domain capabilities to peers. Empty list on any
+    failure (unknown profile, import error) — the caller then falls back to
+    the legacy SKILLS list. Kept defensive so a card build never crashes boot.
+    """
+    pid = (profile_id or "").strip().lower()
+    if not pid or pid == "default":
+        return []
+    try:
+        from profiles.base import load_profile
+        prof = load_profile(pid)
+        out: list[dict[str, Any]] = []
+        for cap in (prof.capabilities or []):
+            sid = cap.get("skill_id") or cap.get("id")
+            if not sid:
+                continue
+            out.append({
+                "id":          sid,
+                "name":        cap.get("name", sid),
+                "description": cap.get("description", ""),
+                "tags":        list(cap.get("tags", [])),
+                "examples":    list(cap.get("examples", [])),
+            })
+        return out
+    except Exception:
+        return []
+
+
 def get_agent_card(
     base_url: str,
     identity: "Optional[AgentIdentityConfigLike]" = None,
@@ -93,7 +122,9 @@ def get_agent_card(
         agent_id         = identity.agent_id
 
         # Build skills list from identity.capabilities if any, else fall
-        # back to legacy SKILLS so historic deployments don't lose them.
+        # back to the agent's PROFILE capabilities (so AGENT_PROFILE=wan/lan/dc
+        # auto-advertises its domain capabilities to peers without duplicating
+        # them in yaml), else the legacy static SKILLS list.
         if identity.capabilities:
             skills = [
                 {
@@ -106,7 +137,8 @@ def get_agent_card(
                 for cap in identity.capabilities
             ]
         else:
-            skills = SKILLS
+            skills = _profile_capabilities_as_skills(
+                getattr(identity, "profile", "")) or SKILLS
     else:
         # Legacy single-agent path.
         card_name        = "IT Ops Monitoring Agent"

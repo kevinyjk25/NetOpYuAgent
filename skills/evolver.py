@@ -75,6 +75,12 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Awaitable, Callable, Optional
 
+from skills.skill_format import (
+    flat_dict_to_skill_md,
+    has_frontmatter,
+    strip_frontmatter,
+)
+
 logger = logging.getLogger(__name__)
 
 
@@ -898,21 +904,66 @@ class SkillEvolver:
         self._save_skill_to_disk(proposal.skill_id, proposal.markdown_content)
 
     def _save_skill_to_disk(self, skill_id: str, content: str) -> None:
-        """Write skill markdown to HERMES_DATA_DIR/skills/<skill_id>.md"""
+        """Persist a skill as a standard SKILL.md folder.
+
+        Layout: HERMES_DATA_DIR/skills/<kebab-name>/SKILL.md
+
+        ``content`` may be a bare markdown body (the evolver's LLM output) or a
+        full SKILL.md. We normalise to a standard SKILL.md: the frontmatter is
+        always (re)generated programmatically from the parsed definition so the
+        ``name`` is guaranteed kebab-case and ``metadata.skill_id`` anchors the
+        snake_case id — the LLM never gets to write invalid frontmatter.
+        """
         if not self._skills_dir:
             return
         try:
-            path = self._skills_dir / f"{skill_id}.md"
-            path.write_text(content, encoding="utf-8")
-            logger.info("SkillEvolver: saved skill to %s", path)
+            from skills.skill_format import skill_id_to_name
+
+            defn = self._parse_markdown_to_definition(skill_id, content)
+            # Preserve the human-written body when there's no frontmatter, so
+            # the LLM's prose/notes survive verbatim.
+            if not has_frontmatter(content):
+                defn.setdefault("_raw_body", content.strip())
+            std_md = flat_dict_to_skill_md(skill_id, defn)
+
+            skill_dir = self._skills_dir / skill_id_to_name(skill_id)
+            skill_dir.mkdir(parents=True, exist_ok=True)
+            path = skill_dir / "SKILL.md"
+            path.write_text(std_md, encoding="utf-8")
+            logger.info("SkillEvolver: saved standard SKILL.md to %s", path)
         except Exception as exc:
             logger.warning("SkillEvolver: disk save failed for %s: %s", skill_id, exc)
 
     def _load_skills_from_disk(self) -> None:
-        """Load all .md files from skills_dir into the catalog on startup."""
+        """Load persisted skills into the catalog on startup.
+
+        Reads the standard layout (``<name>/SKILL.md``) and is backward
+        compatible with the legacy flat layout (``<skill_id>.md``) so existing
+        deployments don't lose evolved skills on upgrade.
+        """
         if not self._skills_dir or not self._skills_dir.exists():
             return
         loaded = 0
+
+        # Standard layout: <name>/SKILL.md
+        for md in sorted(self._skills_dir.glob("*/SKILL.md")):
+            try:
+                content = md.read_text(encoding="utf-8")
+                hint = md.parent.name.replace("-", "_")
+                parsed = self._parse_markdown_to_definition(hint, content)
+                skill_id = (
+                    parsed.get("_std_name", "").replace("-", "_") or hint
+                )
+                # Prefer metadata.skill_id when the parser surfaced it.
+                from skills.skill_format import load_skill_md, has_frontmatter as _hf
+                if _hf(content):
+                    skill_id, parsed = load_skill_md(content, skill_id_hint=hint)
+                self._catalog.register_all({skill_id: parsed})
+                loaded += 1
+            except Exception as exc:
+                logger.warning("SkillEvolver: failed to load %s: %s", md, exc)
+
+        # Legacy layout: <skill_id>.md (pre-standardization)
         for path in sorted(self._skills_dir.glob("*.md")):
             skill_id = path.stem
             try:
@@ -921,9 +972,13 @@ class SkillEvolver:
                 self._catalog.register_all({skill_id: parsed})
                 loaded += 1
             except Exception as exc:
-                logger.warning("SkillEvolver: failed to load %s: %s", path, exc)
+                logger.warning("SkillEvolver: failed to load legacy %s: %s", path, exc)
+
         if loaded:
-            logger.info("SkillEvolver: loaded %d persisted skill(s) from %s", loaded, self._skills_dir)
+            logger.info(
+                "SkillEvolver: loaded %d persisted skill(s) from %s",
+                loaded, self._skills_dir,
+            )
 
     async def _update_catalog_from_markdown(
         self, skill_id: str, markdown: str
@@ -1045,8 +1100,26 @@ class SkillEvolver:
     @staticmethod
     def _parse_markdown_to_definition(skill_id: str, content: str) -> dict:
         """
-        Parse agentskills.io-format markdown into a SkillCatalogService definition dict.
+        Parse a skill markdown body into a SkillCatalogService definition dict.
+
+        Accepts both bare "agentskills.io"-style body markdown AND a full
+        standard SKILL.md (YAML frontmatter + body). When frontmatter is
+        present we delegate to skill_format so the standard fields (name,
+        description, metadata.*) are honoured; otherwise we fall back to the
+        historical body-only parser below.
         """
+        if has_frontmatter(content):
+            try:
+                from skills.skill_format import load_skill_md
+                _sid, defn = load_skill_md(content, skill_id_hint=skill_id)
+                return defn
+            except Exception as exc:  # noqa: BLE001 - fall back to legacy parse
+                logger.warning(
+                    "SkillEvolver: frontmatter parse failed for %s (%s); "
+                    "falling back to body parser", skill_id, exc,
+                )
+                content = strip_frontmatter(content)
+
         lines = content.splitlines()
         defn: dict[str, Any] = {
             "name":          skill_id.replace("_", " ").title(),

@@ -231,8 +231,10 @@ class TestHandleDelegateLoopSide(unittest.TestCase):
             from runtime.stop_policy import LoopState
             d = _directive("[DELEGATE:dc-agent] check spine-1")
             out = await _drain(loop._handle_delegate(d, LoopState(), "sess-1"))
-            # forwarded chunks tagged source_agent=dc-agent
-            tok_chunks = [c for c in out if c.get("token")]
+            # forwarded peer output now comes as 'delegated' chunks (routed to
+            # the process area, not the origin conclusion bubble), tagged with
+            # source_agent
+            tok_chunks = [c for c in out if c.get("type") == "delegated"]
             self.assertTrue(tok_chunks)
             for c in tok_chunks:
                 self.assertEqual(c.get("source_agent"), "dc-agent")

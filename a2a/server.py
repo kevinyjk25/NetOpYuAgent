@@ -204,15 +204,18 @@ def create_a2a_app(
         interrupt_id  = str(body.get("interrupt_id") or "").strip()
         result_text   = str(body.get("result") or "")
         decision      = str(body.get("decision") or "approve")
+        phase         = str(body.get("phase") or "result").strip()
         correlation_id = str(body.get("correlation_id") or "")
         if not peer_agent or not interrupt_id:
             raise HTTPException(status_code=400,
                                 detail="peer_agent and interrupt_id required")
+        _is_terminal = (phase != "approval")
 
         from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
         bridge = get_cross_agent_hitl_bridge()
         rec = bridge.resolve_awaiting_peer(
             peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
+            terminal=_is_terminal,
         )
         if rec is None:
             # Unknown or already-resumed — reject so the caller can log/retry
@@ -232,15 +235,101 @@ def create_a2a_app(
                 result_text=result_text,
                 decision=decision,
                 correlation_id=correlation_id or rec.correlation_id,
+                phase=phase,
+                outbound_task_id=rec.outbound_task_id,
             )
         except Exception as exc:
             logger.exception("hitl_resolved: resume failed: %s", exc)
             raise HTTPException(status_code=500, detail="resume failed")
         finally:
-            bridge.forget_awaiting(
-                peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
-            )
+            # Only drop the awaiting record on the TERMINAL push; the
+            # intermediate approval push must keep it for the result push.
+            if _is_terminal:
+                bridge.forget_awaiting(
+                    peer_agent=peer_agent, peer_interrupt_id=interrupt_id,
+                )
         return JSONResponse(content={"ok": True, "resumed": bool(driven),
+                                     "phase": phase,
                                      "session": rec.local_session_id})
+
+    @a2a.post("/peer_clarification", tags=["A2A"])
+    async def peer_clarification(request: Request) -> JSONResponse:
+        """Option A: a peer we delegated to needs a clarification answered by
+        OUR user. It POSTs the question here; we record the round-trip on the
+        bridge and push a clarification card into the user's live session so
+        they answer it in their own conversation. Body:
+          {peer_agent, peer_interrupt_id, correlation_id, source_session_id,
+           summary, clarification_fields:[{key,prompt,placeholder,required}]}
+        """
+        body = await _parse_body(request)
+        peer_agent   = str(body.get("peer_agent") or "").strip()
+        peer_int_id  = str(body.get("peer_interrupt_id") or "").strip()
+        cid          = str(body.get("correlation_id") or "").strip()
+        session_id   = str(body.get("source_session_id") or "").strip()
+        summary      = str(body.get("summary") or "")
+        fields       = body.get("clarification_fields") or []
+        if not peer_agent or not peer_int_id or not cid or not session_id:
+            raise HTTPException(
+                status_code=400,
+                detail="peer_agent, peer_interrupt_id, correlation_id, "
+                       "source_session_id required")
+
+        from task.inter.cross_agent_hitl import get_cross_agent_hitl_bridge
+        bridge = get_cross_agent_hitl_bridge()
+        # Compose a readable question from the fields for the record.
+        q_text = summary or "; ".join(
+            str(f.get("prompt", "")) for f in fields if f.get("prompt"))
+        bridge.record_peer_clarification(
+            correlation_id=cid, peer_agent=peer_agent,
+            peer_interrupt_id=peer_int_id, local_session_id=session_id,
+            question=q_text)
+
+        # Push a clarification card into the user's live session SSE so it
+        # appears in their chat as if this agent asked. Best-effort: if the
+        # session stream isn't open, the record persists and the UI's
+        # peer-clarification poll picks it up.
+        pushed = False
+        try:
+            from webui.backend import push_peer_clarification_to_session
+            pushed = await push_peer_clarification_to_session(
+                session_id=session_id, peer_agent=peer_agent,
+                correlation_id=cid, question=q_text,
+                clarification_fields=fields)
+        except Exception as exc:
+            logger.warning("peer_clarification: push failed: %s", exc)
+
+        return JSONResponse(content={"ok": True, "recorded": True,
+                                     "pushed": bool(pushed),
+                                     "correlation_id": cid})
+
+    @a2a.post("/peer_clarification_answer", tags=["A2A"])
+    async def peer_clarification_answer(request: Request) -> JSONResponse:
+        """Option A: the ASKING peer receives the user's answer here and
+        resolves its parked clarification interrupt so its loop resumes. Body:
+          {correlation_id, peer_interrupt_id, answers:{key:value}}
+        """
+        body = await _parse_body(request)
+        cid          = str(body.get("correlation_id") or "").strip()
+        peer_int_id  = str(body.get("peer_interrupt_id") or "").strip()
+        answers      = body.get("answers") or {}
+        if not peer_int_id:
+            raise HTTPException(status_code=400,
+                                detail="peer_interrupt_id required")
+
+        # Resolve the parked clarification interrupt with the operator's
+        # answers so THIS agent's agent_loop_resumer continues.
+        try:
+            from webui.backend import resolve_peer_clarification_answer
+            outcome = await resolve_peer_clarification_answer(
+                peer_interrupt_id=peer_int_id,
+                correlation_id=cid,
+                answers=answers)
+        except Exception as exc:
+            logger.exception("peer_clarification_answer: resolve failed: %s", exc)
+            raise HTTPException(status_code=500, detail="resolve failed")
+        return JSONResponse(content={"ok": True,
+                                     "resolved": True,
+                                     "interrupt_id": peer_int_id,
+                                     "outcome": str(getattr(outcome, "decision", outcome))})
 
     return a2a

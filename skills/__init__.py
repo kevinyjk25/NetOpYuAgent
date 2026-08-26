@@ -3,13 +3,13 @@ skills/
 ────────
 Skill definitions for mock and pragmatic modes.
 
-Entry point: tools.loader.ToolLoader.skill_definitions()
+Entry point: skills.loader.SkillLoader.skill_definitions()
   Returns the correct set for the running mode — no filtering needed.
 
 Implementation:
-  skills/builtin/registry.py     — always-available skills
-  profiles/<id>/skills.py        — business skills (lan, dc, …)
-  skills/pragmatic/registry.py   — pragmatic-mode skills
+  skills/builtin/<name>/SKILL.md — always-available skills (standard format)
+  profiles/<id>/skills/<name>/SKILL.md — business skills (lan, dc, …)
+  skills/pragmatic/<name>/SKILL.md — pragmatic-mode skills (standard format)
   skills/catalog.py              — SkillCatalogService (register, load, format)
   skills/evolver.py              — runtime skill creation from LLM
 """

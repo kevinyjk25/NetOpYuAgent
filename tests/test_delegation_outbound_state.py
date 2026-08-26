@@ -35,7 +35,11 @@ def _read(rel: str) -> str:
 class TestOutboundDispatcherTerminalState(unittest.TestCase):
     """Dispatcher must write a terminal state to the outbound task on
     stream end, in a try/finally so cancellation / exceptions still
-    update the row."""
+    update the row.
+
+    NOTE (2026-06): now the lightweight DELETION-GUARD layer. The actual
+    state-transition BEHAVIOR is verified by driving the real dispatch()
+    generator in test_delegation_dispatcher_behavior.py."""
 
     def setUp(self):
         self.src = _read("task/inter/coordinator.py")
@@ -114,10 +118,12 @@ class TestDelegationResultRendering(unittest.TestCase):
     def test_frontend_renders_result_as_markdown(self):
         """Result text typically contains markdown (bullets, bold, code
         fences). Must use _renderMarkdown rather than escape-and-pre
-        — pre with escaped text strips formatting."""
+        — pre with escaped text strips formatting. (2026-06: the flat
+        list became a per-peer conversation view; the reply bubble now
+        renders via _renderMarkdown(replyText).)"""
         self.assertIn(
-            "_renderMarkdown(resultText)", self.front,
-            "Result section must use _renderMarkdown — pre+escape "
+            "_renderMarkdown(replyText)", self.front,
+            "Delegation reply bubble must use _renderMarkdown — pre+escape "
             "strips markdown formatting (bold / lists / code)",
         )
 

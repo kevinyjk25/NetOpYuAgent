@@ -29,10 +29,45 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")
 class TestProfileLoading(unittest.TestCase):
     def test_all_known_profiles_load(self):
         from profiles import load_profile, available_profiles
-        self.assertEqual(set(available_profiles()), {"default", "lan", "dc"})
+        self.assertEqual(set(available_profiles()), {"default", "lan", "dc", "wan"})
         for pid in available_profiles():
             p = load_profile(pid)
             self.assertEqual(p.profile_id, pid)
+
+    def test_wan_profile_tools_and_disjoint(self):
+        """WAN is a real third role: has its own tools, disjoint from LAN/DC."""
+        from profiles import load_profile
+        wan = load_profile("wan")
+        lan = load_profile("lan")
+        dc  = load_profile("dc")
+        wan_tools = set(wan.tool_callables)
+        self.assertIn("wan_path_sla", wan_tools)
+        self.assertIn("wan_tunnel_status", wan_tools)
+        # tool isolation — cross-domain work must go through delegation
+        self.assertEqual(wan_tools & set(lan.tool_callables), set())
+        self.assertEqual(wan_tools & set(dc.tool_callables), set())
+        # a destructive WAN tool exists and is HITL-gated
+        self.assertTrue(wan.tool_metadata["wan_failover_path"]["hitl"])
+
+    def test_profile_capabilities_auto_advertise_in_card(self):
+        """Peer-sensing depends on this: an agent with a profile but EMPTY
+        yaml capabilities must still advertise its PROFILE capabilities in the
+        AgentCard, so peers discover what it can do. Regression lock for the
+        card fallback."""
+        from a2a.agent_card import get_agent_card
+        from types import SimpleNamespace
+        for pid, expect in (
+            ("wan", "wan_transport_diagnose"),
+            ("lan", "lan_diagnose"),
+            ("dc",  "dc_fabric_diagnose"),
+        ):
+            ident = SimpleNamespace(agent_id=f"{pid}-agent",
+                                    display_name=f"{pid} agent",
+                                    description="", capabilities=[], profile=pid)
+            card = get_agent_card(f"http://localhost:9/{pid}", identity=ident)
+            ids = [s["id"] for s in card["skills"]]
+            self.assertIn(expect, ids,
+                          f"{pid} agent must advertise its profile capability {expect}")
 
     def test_default_profile_has_no_business(self):
         """The whole point: default = framework only, zero business logic."""

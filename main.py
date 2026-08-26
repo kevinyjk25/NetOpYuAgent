@@ -658,6 +658,21 @@ async def build_services() -> dict[str, Any]:
             logger.info(
                 "SkillCatalog[%s]: %d skills registered", cfg.mode, len(_skill_catalog._skills)
             )
+            # Anthropic-standard skill scripts → tools (缺口B, script-as-tool).
+            # Each skill's scripts/*.py exposing run(inputs)->dict is AST-
+            # validated and registered as a local tool <skill_id>__<script>.
+            try:
+                from skills.script_runner import build_all_script_tools
+                _script_tools = build_all_script_tools(_skill_defs)
+                services["skill_script_tools"] = _script_tools
+                if _script_tools:
+                    logger.info(
+                        "Skill scripts: %d script tool(s) registered (%s)",
+                        len(_script_tools), ", ".join(sorted(_script_tools)),
+                    )
+            except Exception as _sst_exc:
+                logger.warning("Skill scripts: setup failed: %s", _sst_exc)
+                services["skill_script_tools"] = {}
         except Exception as _sc_exc:
             logger.warning("SkillCatalog: build failed (%s) — catalog unavailable", _sc_exc)
 
@@ -1103,6 +1118,23 @@ async def build_services() -> dict[str, Any]:
             # used at startup; skill defs come from the same source.
             from tools.loader import ToolLoader as _TL
             _tool_meta = _TL(mode=cfg.mode, profile=cfg.agent.profile).build_metadata()
+            # Phase 4: the scheduler tools are registered as local callables
+            # (register_local) so they're DISPATCHABLE, but the LLM only
+            # discovers tools that are in the retriever corpus. Add their
+            # metadata here so they're indexed + selectable, and mark them
+            # always-inject so a scheduling-intent query reliably surfaces them.
+            try:
+                from scheduler import SCHEDULER_TOOL_METADATA
+                _tool_meta.update(SCHEDULER_TOOL_METADATA)
+                _extra = list(getattr(cfg.retrieval, "always_inject_extra_tools", []) or [])
+                for _sn in SCHEDULER_TOOL_METADATA:
+                    if _sn not in _extra:
+                        _extra.append(_sn)
+                cfg.retrieval.always_inject_extra_tools = _extra
+                logger.info("Scheduler: %d tool(s) added to retriever corpus + always-inject",
+                            len(SCHEDULER_TOOL_METADATA))
+            except Exception as _sm_exc:
+                logger.warning("Scheduler: metadata merge failed: %s", _sm_exc)
             from skills import SkillLoader as _SL
             _skill_defs = _SL(mode=cfg.mode, profile=cfg.agent.profile).skill_definitions()
 
@@ -1290,6 +1322,36 @@ async def build_services() -> dict[str, Any]:
                         "Meta-tools wired into ToolRouter: %d callable(s)", len(mt_reg)
                     )
 
+                    # ── Scheduler (Phase 4, 2026-05) ──────────────────────
+                    # Register schedule_create / schedule_list / schedule_cancel
+                    # as ordinary local tools so the agent can create periodic
+                    # jobs. The service runs an in-memory tick loop (started on
+                    # app startup). tool_invoker / query_runner are injected
+                    # below after the registry refresh + executor are settled.
+                    try:
+                        from scheduler import SchedulerService, build_scheduler_tools
+                        _scheduler = SchedulerService()
+                        router.register_local(build_scheduler_tools(_scheduler))
+                        services["scheduler"] = _scheduler
+                        logger.info("Scheduler: 3 tool(s) registered "
+                                    "(schedule_create/list/cancel)")
+                    except Exception as _sched_exc:
+                        logger.warning("Scheduler: setup failed: %s", _sched_exc)
+                        _scheduler = None
+
+                    # Skill script tools (缺口B): register <skill_id>__<script>
+                    # callables built from skills' scripts/*.py so they're
+                    # dispatchable by the runtime (invoked by name from a skill,
+                    # NOT surfaced to the LLM's free tool selection).
+                    try:
+                        _sst = services.get("skill_script_tools") or {}
+                        if _sst:
+                            router.register_local(_sst)
+                            logger.info("Skill scripts: %d tool(s) wired into ToolRouter",
+                                        len(_sst))
+                    except Exception as _sst_w_exc:
+                        logger.warning("Skill scripts: ToolRouter wiring failed: %s", _sst_w_exc)
+
                     # IMPORTANT: real_registry was snapshotted earlier from
                     # router.registry. The snapshot is a fresh dict — additions
                     # to the router AFTER that point don't propagate. Now that
@@ -1311,6 +1373,32 @@ async def build_services() -> dict[str, Any]:
                             "now %d callable(s) including meta-tools",
                             len(_refreshed_registry),
                         )
+                        # ── Wire scheduler invoker/runner (Phase 4) ────────
+                        # tool_invoker dispatches a periodic tool job through
+                        # the SAME refreshed registry the loop uses; query_runner
+                        # drives the executor's full agent loop for query jobs.
+                        _sched = services.get("scheduler")
+                        if _sched is not None:
+                            _sched_registry = _refreshed_registry
+
+                            async def _sched_tool_invoker(tool_name, args, _reg=_sched_registry):
+                                fn = _reg.get(tool_name)
+                                if fn is None:
+                                    return f"ERROR: tool {tool_name!r} not registered"
+                                return str(await fn(args or {}))
+
+                            async def _sched_query_runner(query, session_id):
+                                _ex = services.get("executor")
+                                if _ex is None:
+                                    return "ERROR: executor not available"
+                                out = await _ex.execute_query(
+                                    query=query, session_id=session_id,
+                                )
+                                return (out or {}).get("text", "") if isinstance(out, dict) else str(out)
+
+                            _sched.set_tool_invoker(_sched_tool_invoker)
+                            _sched.set_query_runner(_sched_query_runner)
+                            logger.info("Scheduler: tool_invoker + query_runner wired")
                     except Exception as _refresh_exc:
                         logger.warning(
                             "Tool registry refresh failed (meta-tools may not "
@@ -1477,6 +1565,14 @@ async def lifespan(app: FastAPI):
             await _start()
     except Exception as _jc_exc:
         logger.warning("SkillJournalConsumer start failed: %s", _jc_exc)
+
+    # Start the scheduler tick loop (Phase 4) — fires due periodic jobs.
+    try:
+        _sched = _services.get("scheduler")
+        if _sched is not None:
+            await _sched.start()
+    except Exception as _sched_exc:
+        logger.warning("Scheduler start failed: %s", _sched_exc)
 
     # Start HITL chunk-queue idle watchdog — auto-completes streams that
     # have gone silent for > idle_timeout seconds. Prevents a hung HITL

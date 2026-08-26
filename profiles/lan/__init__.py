@@ -10,7 +10,12 @@ from __future__ import annotations
 from profiles.base import Profile
 from profiles.lan import tools as _tools
 from profiles.lan.tool_meta import TOOLS as _TOOL_META
-from profiles.lan.skills import SKILLS as _SKILLS
+
+# Business skills are now loaded from Anthropic-standard SKILL.md folders
+# under profiles/lan/skills/<name>/SKILL.md (Anthropic-standard format).
+# The loader returns the internal flat-dict shape.
+from skills.loader import SkillLoader as _SkillLoader
+_SKILLS = _SkillLoader().profile_skill_definitions("lan")
 
 # Map tool name → callable. The names MUST match _TOOL_META keys.
 _CALLABLES = {

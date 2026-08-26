@@ -62,5 +62,6 @@ class _LoopContext:
     cached_skill_ambiguous:  bool = False
     last_recall_turn:        int  = -1
     last_skill_turn:         int  = -1
+    _degradation_emitted:    bool = False
     last_facts_count:        int  = -1
     last_emitted_skill_sig:  str  = ""

@@ -70,7 +70,7 @@ def skill_loads_in(response: str) -> set:
     return set(find_skill_load_names(response))
 
 
-def is_complete(response: str, tool_calls: list) -> bool:
+def is_complete(response: str, tool_calls: list, skill_load_honored: bool = True) -> bool:
     # If the LLM emitted a SKILL_LOAD directive, it needs one more turn
     # to read the loaded detail and then call the actual tools.
     # A pure SKILL_LOAD response (no prose, no tool calls) means the model
@@ -79,13 +79,20 @@ def is_complete(response: str, tool_calls: list) -> bool:
     # model produced real prose + tool calls alongside the SKILL_LOAD.
     from runtime.directive_parser import find_skill_load_names, strip_skill_load_directives
     skill_loads = find_skill_load_names(response)
-    if skill_loads:
-        stripped = strip_skill_load_directives(response).strip()
-        if len(stripped) == 0 and len(tool_calls) == 0:
-            # Pure SKILL_LOAD — keep looping so next turn sees the detail
-            return False
-        # SKILL_LOAD plus other content — completion follows the tool-call rule
-        return len(tool_calls) == 0
+    if skill_loads and skill_load_honored:
+        # ANY honored SKILL_LOAD means the model asked for skill detail and
+        # must get one more turn to read it and then call the tools the skill
+        # describes. This holds even when the SKILL_LOAD is accompanied by
+        # prose (e.g. "I'll load the SOP first: [SKILL_LOAD:...]") — that
+        # prose is a preamble, NOT a final answer. Marking such a turn
+        # complete ends the loop right after loading, so the skill is loaded
+        # but its procedure never runs (the dormant-skill symptom).
+        #
+        # If the load was NOT honored (suppressed re-emit of an
+        # already-loaded skill), fall through to the normal tool-call rule so
+        # a model stuck re-emitting the same directive still terminates
+        # instead of looping forever.
+        return False
     return len(tool_calls) == 0
 
 

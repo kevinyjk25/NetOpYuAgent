@@ -27,6 +27,105 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
     # Late import to avoid circular dependency on backend.py at module load
     from webui.backend import _identity   # noqa: F401 (used in some routes)
 
+    @app.post("/evolution/sweep")
+    async def evolution_sweep(request: Request):
+        """Manually trigger P1 (recurring-trajectory mining) and optionally P3
+        (append merge), for verification — bypasses the every-N-tasks counter
+        and the append-marker gate.
+
+        Body (all optional):
+          { "limit": 200, "session_id": "...", "append_text": "...",
+            "dry_run": true }
+        Returns what fired + why, so you can see the mechanism, not just results.
+        """
+        try:
+            body = {}
+            try:
+                body = await request.json()
+            except Exception:
+                pass
+            limit       = int(body.get("limit", 200))
+            session_id  = body.get("session_id")
+            append_text = body.get("append_text")
+            dry_run     = bool(body.get("dry_run", False))
+
+            evolver = services.get("skill_evolver")
+            if evolver is None:
+                raise HTTPException(503, "skill_evolver not available")
+
+            from webui.backend import build_csi_from_profile
+            from skills.trajectory_miner import TrajectoryMiner
+            from runtime.skill_journal import get_journal_store
+            jstore = get_journal_store()
+            csi = await build_csi_from_profile(services)
+
+            result: dict[str, Any] = {"embedder": (
+                "real" if services.get("embedder") else "none(tag+tool_set only)")}
+
+            async def _evolve_cb(**kw):
+                return await evolver.after_task(
+                    task_description=kw["task_description"],
+                    solution_summary=kw["task_description"][:200],
+                    tools_used=kw["tools_used"], solution_steps=kw["solution_steps"],
+                    key_observations=kw["key_observations"],
+                    complexity=kw["complexity"], session_id=kw["session_id"])
+            miner = TrajectoryMiner(jstore, csi, _evolve_cb)
+            clusters = miner.find_recurring(limit=limit)
+            result["p1"] = {
+                "recurring_clusters": [
+                    {"size": c.size, "tools": sorted(c.rep_tools),
+                     "sample_query": c.sample_query,
+                     "covered_by_skill": c.covered_by_skill}
+                    for c in clusters
+                ],
+                "threshold": miner.cfg.recurrence_threshold,
+            }
+            if not dry_run:
+                solidified = []
+                for c in clusters:
+                    p = await miner.solidify(c)
+                    if p:
+                        solidified.append(getattr(p, "skill_id", str(p)))
+                result["p1"]["solidified"] = solidified
+
+            if session_id and append_text:
+                from skills.append_merger import AppendMerger
+                traj = jstore.extract_trajectory(session_id)
+                active = (traj.get("loaded_skills") or [None])[0]
+                async def _merge_cb(*, skill_id, append_text, session_id, tools):
+                    fb = await evolver._merge_into_existing_skill(
+                        existing_id=skill_id, task_description=append_text,
+                        solution_steps=traj.get("steps", []), tools_used=tools,
+                        key_observations=traj.get("observations", []), operator_prefs="")
+                    return fb is not None
+                merger = AppendMerger(csi, _merge_cb)
+                mres = await merger.maybe_merge(
+                    append_text=append_text, session_id=session_id,
+                    active_skill=active, session_tools=traj.get("tools", []))
+                result["p3"] = {
+                    "active_skill": active, "merged": mres.merged,
+                    "skill_id": mres.skill_id, "reason": mres.reason,
+                    "similarity": round(mres.similarity, 3),
+                }
+            return JSONResponse(content=result)
+        except HTTPException:
+            raise
+        except Exception as exc:
+            logger.warning("/evolution/sweep failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/evolution/space")
+    async def evolution_space():
+        """Dump the CSI capability space (clusters + per-capability domain/
+        tool_set) for auditing — the interpretable index, not a black box."""
+        try:
+            from webui.backend import build_csi_from_profile
+            csi = await build_csi_from_profile(services)
+            return JSONResponse(content=csi.export_space())
+        except Exception as exc:
+            logger.warning("/evolution/space failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
     @app.get("/skill_journal/recent")
     async def skill_journal_recent(limit: int = 20):
         """Return the most recent SkillJournal entries (newest first)."""
@@ -42,6 +141,34 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
             raise
         except Exception as exc:
             logger.warning("/skill_journal/recent failed: %s", exc)
+            raise HTTPException(500, str(exc))
+
+    @app.get("/evolution/gaps")
+    async def evolution_gaps(limit: int = 200):
+        """Aggregate declared CAPABILITY_GAP events from recent journal
+        entries — the 'missing capability ledger'. The inverse of P1's
+        solidify: P1 captures what the agent DOES repeatedly and worth
+        codifying; this captures what it CANNOT do and is worth adding."""
+        try:
+            from runtime.skill_journal import get_journal_store
+            store = get_journal_store()
+            counts: dict[str, int] = {}
+            samples: dict[str, str] = {}
+            total = 0
+            for e in store.list_recent(limit=limit):
+                for g in (e.get("capability_gaps") or []):
+                    total += 1
+                    counts[g] = counts.get(g, 0) + 1
+                    samples.setdefault(g, e.get("query", ""))
+            ranked = sorted(counts.items(), key=lambda kv: kv[1], reverse=True)
+            return JSONResponse(content={
+                "total_gap_events": total,
+                "distinct_gaps": len(counts),
+                "gaps": [{"detail": d, "count": c, "sample_query": samples.get(d, "")}
+                         for d, c in ranked],
+            })
+        except Exception as exc:
+            logger.warning("/evolution/gaps failed: %s", exc)
             raise HTTPException(500, str(exc))
 
     @app.get("/skill_journal/stats")
@@ -92,12 +219,17 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
         skill_evol = services.get("skill_evolver")
         import pathlib as _pl
 
-        # Which skills live on disk (evolved / uploaded — not just built-in)
+        # Which skills live on disk (evolved / uploaded — not just built-in).
+        # Standard layout: <kebab-name>/SKILL.md (metadata.skill_id is the id);
+        # legacy flat layout: <skill_id>.md.
         evolved_ids: set = set()
         if skill_evol and getattr(skill_evol, "_skills_dir", None):
             skills_dir = _pl.Path(skill_evol._skills_dir)
             if skills_dir.exists():
-                evolved_ids = {p.stem for p in skills_dir.glob("*.md")}
+                for md in skills_dir.glob("*/SKILL.md"):
+                    evolved_ids.add(md.parent.name.replace("-", "_"))
+                # Legacy flat files
+                evolved_ids |= {p.stem for p in skills_dir.glob("*.md")}
 
         return JSONResponse(content=[
             {
@@ -167,6 +299,9 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
 
         filename  = getattr(upload, "filename", None) or "uploaded_skill"
         skill_id  = filename.removesuffix(".md").removesuffix(".json")
+        # SKILL.md uploads carry the id in metadata, not the filename.
+        if skill_id.upper() == "SKILL":
+            skill_id = "uploaded_skill"
         # Sanitise: only alphanumeric + underscore
         import re as _re
         skill_id  = _re.sub(r"[^a-zA-Z0-9_]", "_", skill_id).strip("_") or "uploaded_skill"
@@ -183,26 +318,46 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
             except Exception as exc:
                 raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
         else:
-            # Markdown — use SkillEvolver parser if available, else minimal parse
-            if skill_evol and hasattr(skill_evol, "_parse_markdown_to_definition"):
-                defn = skill_evol._parse_markdown_to_definition(skill_id, content)
+            # Markdown upload. Standard SKILL.md (with YAML frontmatter) is the
+            # preferred form; bare-body markdown is still accepted. Both route
+            # through skill_format / the evolver parser so the resulting
+            # definition is identical to a freshly-loaded standard skill.
+            from skills.skill_format import (
+                SkillFormatError,
+                has_frontmatter as _has_fm,
+                load_skill_md as _load_md,
+            )
+            try:
+                if _has_fm(content):
+                    # Standard format — metadata.skill_id is authoritative.
+                    skill_id, defn = _load_md(content, skill_id_hint=skill_id)
+                elif skill_evol and hasattr(skill_evol, "_parse_markdown_to_definition"):
+                    defn = skill_evol._parse_markdown_to_definition(skill_id, content)
+                else:
+                    # Minimal fallback: register with raw content as description.
+                    defn = {
+                        "name":          skill_id.replace("_", " ").title(),
+                        "purpose":       content.split("\n")[0].lstrip("# ").strip()[:200],
+                        "description":   content,
+                        "risk_level":    "low",
+                        "requires_hitl": False,
+                        "tags":          [],
+                        "parameters":    {},
+                        "returns":       "string",
+                        "examples":      [],
+                        "constraints":   [],
+                        "estimated_size": "small",
+                        "returns_large":  False,
+                    }
+            except SkillFormatError as exc:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid SKILL.md format: {exc}",
+                )
+            try:
                 catalog.register_all({skill_id: defn})
-            else:
-                # Minimal fallback: register with raw content as description
-                catalog.register_all({skill_id: {
-                    "name":          skill_id.replace("_", " ").title(),
-                    "purpose":       content.split("\n")[0].lstrip("# ").strip()[:200],
-                    "description":   content,
-                    "risk_level":    "low",
-                    "requires_hitl": False,
-                    "tags":          [],
-                    "parameters":    {},
-                    "returns":       "string",
-                    "examples":      [],
-                    "constraints":   [],
-                    "estimated_size": "small",
-                    "returns_large":  False,
-                }})
+            except Exception as exc:
+                raise HTTPException(status_code=500, detail=f"Registration failed: {exc}")
 
         # Persist to disk via SkillEvolver if available
         if skill_evol and hasattr(skill_evol, "_save_skill_to_disk"):
@@ -406,12 +561,19 @@ def register_skills_routes(app: FastAPI, services: dict[str, Any]) -> None:
         raw_content = None
         source = "unknown"
 
-        # 1. Try disk file first (evolved / uploaded skills)
+        # 1. Try disk file first (evolved / uploaded skills). Prefer the
+        #    standard layout <kebab-name>/SKILL.md, fall back to legacy <id>.md.
         if skill_evol and getattr(skill_evol, "_skills_dir", None):
             import pathlib as _pl
-            path = _pl.Path(skill_evol._skills_dir) / f"{skill_id}.md"
-            if path.exists():
-                raw_content = path.read_text(encoding="utf-8")
+            from skills.skill_format import skill_id_to_name as _to_name
+            base = _pl.Path(skill_evol._skills_dir)
+            std_path = base / _to_name(skill_id) / "SKILL.md"
+            legacy_path = base / f"{skill_id}.md"
+            if std_path.exists():
+                raw_content = std_path.read_text(encoding="utf-8")
+                source = "disk"
+            elif legacy_path.exists():
+                raw_content = legacy_path.read_text(encoding="utf-8")
                 source = "disk"
 
         # 2. Fall back to catalog.as_markdown() — works for built-in skills too
