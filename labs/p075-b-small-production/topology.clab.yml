@@ -1,0 +1,186 @@
+name: netopyu-small-production
+
+topology:
+  defaults:
+    kind: linux
+  nodes:
+    access-wired-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/ospf-daemons:/etc/frr/daemons
+        - access-wired-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    access-wireless-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/ospf-daemons:/etc/frr/daemons
+        - access-wireless-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    campus-core-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/ospf-daemons:/etc/frr/daemons
+        - campus-core-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    campus-core-2:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/ospf-daemons:/etc/frr/daemons
+        - campus-core-2/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    security-edge-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/bgp-daemons:/etc/frr/daemons
+        - security-edge-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    security-edge-2:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/bgp-daemons:/etc/frr/daemons
+        - security-edge-2/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    idc-leaf-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/ospf-daemons:/etc/frr/daemons
+        - idc-leaf-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    dmz-leaf-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/ospf-daemons:/etc/frr/daemons
+        - dmz-leaf-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    isp-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/bgp-daemons:/etc/frr/daemons
+        - isp-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    isp-2:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/bgp-daemons:/etc/frr/daemons
+        - isp-2/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+
+    erin-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.20.10/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.20.1
+        - ip route add 198.51.100.0/24 via 10.10.20.1
+        - ip link set dev eth1 down
+    bob-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.30.10/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.30.1
+        - ip route add 198.51.100.0/24 via 10.10.30.1
+    carol-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.50.10/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.50.1
+        - ip route add 198.51.100.0/24 via 10.10.50.1
+    guest-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.40.10/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.40.1
+        - ip route add 198.51.100.0/24 via 10.10.40.1
+    ops-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.60.10/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.10.60.1
+        - ip route add 198.51.100.0/24 via 10.10.60.1
+    crm-server:
+      image: alpine:3.21
+      binds: [crm-server/serve.sh:/serve.sh]
+      cmd: nc -lk -p 8080 -e /serve.sh
+      exec:
+        - ip address add 10.20.10.20/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.20.10.1
+        - ip route add blackhole 10.10.20.10/32
+        - ip route add blackhole 10.10.40.10/32
+        - ip route add blackhole 198.51.100.0/24
+    wiki-server:
+      image: alpine:3.21
+      binds: [wiki-server/serve.sh:/serve.sh]
+      cmd: nc -lk -p 8080 -e /serve.sh
+      exec:
+        - ip address add 10.20.20.20/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.20.20.1
+        - ip route add blackhole 10.10.40.10/32
+        - ip route add blackhole 198.51.100.0/24
+    infra-server:
+      image: alpine:3.21
+      binds: [infra-server/serve.sh:/serve.sh]
+      cmd: nc -lk -p 8080 -e /serve.sh
+      exec:
+        - ip address add 10.20.30.20/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.20.30.1
+        - ip route add blackhole 10.10.20.10/32
+        - ip route add blackhole 10.10.30.10/32
+        - ip route add blackhole 10.10.40.10/32
+        - ip route add blackhole 10.10.50.10/32
+        - ip route add blackhole 198.51.100.0/24
+    public-web:
+      image: alpine:3.21
+      binds: [public-web/serve.sh:/serve.sh]
+      cmd: nc -lk -p 8080 -e /serve.sh
+      exec:
+        - ip address add 10.30.10.20/24 dev eth1
+        - ip route add 10.0.0.0/8 via 10.30.10.1
+        - ip route add 198.51.100.0/24 via 10.30.10.1
+    internet-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 198.51.100.100/24 dev eth1
+        - ip route add 10.0.0.0/8 via 198.51.100.1
+
+  links:
+    - endpoints: [erin-client:eth1, access-wired-1:eth1]
+    - endpoints: [bob-client:eth1, access-wired-1:eth2]
+    - endpoints: [ops-client:eth1, access-wired-1:eth3]
+    - endpoints: [access-wired-1:eth4, campus-core-1:eth1]
+    - endpoints: [access-wired-1:eth5, campus-core-2:eth1]
+    - endpoints: [carol-client:eth1, access-wireless-1:eth1]
+    - endpoints: [guest-client:eth1, access-wireless-1:eth2]
+    - endpoints: [access-wireless-1:eth3, campus-core-1:eth2]
+    - endpoints: [access-wireless-1:eth4, campus-core-2:eth2]
+    - endpoints: [campus-core-1:eth3, campus-core-2:eth3]
+    - endpoints: [campus-core-1:eth4, security-edge-1:eth2]
+    - endpoints: [campus-core-2:eth4, security-edge-1:eth3]
+    - endpoints: [campus-core-1:eth5, security-edge-2:eth2]
+    - endpoints: [campus-core-2:eth5, security-edge-2:eth3]
+    - endpoints: [campus-core-1:eth6, idc-leaf-1:eth1]
+    - endpoints: [campus-core-2:eth6, idc-leaf-1:eth2]
+    - endpoints: [campus-core-1:eth7, dmz-leaf-1:eth1]
+    - endpoints: [campus-core-2:eth7, dmz-leaf-1:eth2]
+    - endpoints: [crm-server:eth1, idc-leaf-1:eth3]
+    - endpoints: [wiki-server:eth1, idc-leaf-1:eth4]
+    - endpoints: [infra-server:eth1, idc-leaf-1:eth5]
+    - endpoints: [public-web:eth1, dmz-leaf-1:eth3]
+    - endpoints: [security-edge-1:eth1, isp-1:eth1]
+    - endpoints: [security-edge-2:eth1, isp-2:eth1]
+    - endpoints: [isp-1:eth2, isp-2:eth2]
+    - endpoints: [internet-client:eth1, isp-1:eth3]
