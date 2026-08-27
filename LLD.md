@@ -33,6 +33,9 @@
 | `network_runtime/compensators.py` | 逆操作和补偿结果 registry |
 | `network_runtime/workflows.py` | reviewed L1 workflow template 与阶段约束 |
 | `network_runtime/journal.py` | SQLite 状态、nonce、事件哈希链和审计 |
+| `network_lab/manifest.py` | schema-v1 lab 目标权威与路径/标识校验 |
+| `network_lab/containerlab.py` | 无 shell 生命周期、FRR CLI、probe、fault 和快照恢复 |
+| `network_lab/tools.py` | lab 节点到 pragmatic 工具合同的投影 |
 | `runtime/tool_results.py` | durable 大结果外置与引用解析 |
 | `profiles/` | LAN/DC/WAN/mock callables、metadata 和 L1 Skills |
 | `tools/` | 公共分页和 pragmatic network tools |
@@ -302,6 +305,41 @@ event_hash = SHA256(canonical(event_without_hash) + prev_event_hash)
 
 增加写能力必须同时提交：工具 metadata、L0 Skill、ToolContract、目标/参数规则、preflight、verifier、必要的 compensator、profile 映射、测试和双语文档更新。只增加 callable 或 Skill prompt 不构成可执行写能力。
 
+### 18. P0.75-A Provider 细节
+
+`LabManifest` 只接受 schema v1、manifest 目录内 topology、唯一节点名、FRR device、IP literal probe 和 `eth1+` fault target。`ContainerlabProvider` 使用 `create_subprocess_exec` argv，不调用 shell；read command 只能匹配单行 `show`，config line 必须匹配固定 FRR 白名单。
+
+`apply_config` 在同一 backend session 保存规范化 running-config，然后发送一次 `vtysh` 命令序列。`device-config-snapshot-v1` compensator 调用 `frr-reload.py --reload`，之后通过 `get_device_config` 比较规范化摘要。带 `verification_probe_id` 的 plan 还必须得到 transmitted=received 的 manifest probe evidence。Provider snapshot 只在 execution session 内可用；进程崩溃后的不确定写禁止重放并进入人工处置。
+
+Access manifest 额外解析 `LabUser` 与 `LabApplication`。`set_user_admission` 仅操作固定
+endpoint/interface，并恢复 manifest 中的固定应用路由；`set_application_access` 仅增加或删除
+应用容器内固定用户 `/32` blackhole。`application_probe` 使用 argv 形式从固定用户容器执行
+`wget` 到固定 URL。LAN/DC grant 的 verifier fresh-read 同一实际状态；失败由 inverse-tool
+恢复 preflight typed evidence。
+
+### 19. P0.75-B 清单与验收细节
+
+`LabDevice.expected_bgp_neighbors` 为可选非负整数；`verify` 只把 BGP summary 中
+`State/PfxRcd` 为数字的邻居计为 Established。控制面验证最多等待 30 秒收敛，再执行
+数据面探测。`LabUser.route_prefixes` 是 1–16 个归一化 CIDR，必须包含 legacy
+`application_prefix`；准入恢复逐条执行 `ip route replace`，因此接口 down/up 后不会遗漏
+已审核的 Internet 或业务前缀。
+
+`small_production_lab.py` 对基线 HTTP、主出口路由和企业 BGP 聚合做额外断言。故障流程
+只允许 manifest 中的 `primary-internet-uplink`，先证明 Core1 → Core2 → Edge2，再恢复
+接口并证明 Core1 → Edge1 回切。
+
+`LabLink` 为每条链路保存两个 `LabLinkMember(node, interface, address)`、relationship 和
+path_role。加载器拒绝重复接口/地址、不同子网、未知节点及与 `topology.clab.yml` 不完全
+相等的 wiring。`address_index` 将 hop IP 映射到 node/interface/link。
+
+`trace_path` 只接受精确 endpoint ID，执行固定 argv 的
+`traceroute -n -m 16 -w 2 -q 1`。解析器逐跳验证地址存在、当前节点与上一节点同属返回
+链路、最终地址属于目标 endpoint；任何 `*`、未知 IP、断裂 adjacency 或未到达目标均返回
+非成功和 `fail_closed=true`。`enforcement_path` fresh-read 用户 endpoint operstate 与应用
+服务器源 `/32` route，只在两者允许时运行路径验证。四个工具均为 read-only，LAN/DC
+profile 共同可见；只有带 typed links 的 manifest 才投影这些工具和对应 Skill。
+
 ---
 
 ## English
@@ -309,6 +347,13 @@ event_hash = SHA256(canonical(event_without_hash) + prev_event_hash)
 ### 1. Scope
 
 This document defines implementation contracts for the DSH and Hermes harness adapters, shared Python bridge/Worker, Network Runtime, L0 Skills, backends, A2A, and persistence. “Must” denotes a fail-closed requirement.
+
+The access-lab implementation parses typed `LabUser` and `LabApplication`
+entities. Admission can touch only the declared endpoint/interface and route;
+application access can touch only the declared user's `/32` policy. The HTTP
+probe executes an argv-only `wget` from the declared user container to the
+declared URL. Grant verification uses fresh state and inverse-tool compensation
+must reproduce the typed preflight evidence.
 
 ### 2. Module map
 
@@ -332,6 +377,9 @@ This document defines implementation contracts for the DSH and Hermes harness ad
 | `network_runtime/validation.py` | Normalization, schema, provenance, entity, and risk validation |
 | `network_runtime/policies.py` | Tool, preflight, verifier, and compensator contracts |
 | `network_runtime/journal.py` | State, nonces, hash-chain events, audit |
+| `network_lab/manifest.py` | Strict schema-v1 lab target authority |
+| `network_lab/containerlab.py` | Shell-free lifecycle, FRR CLI, probes, faults, snapshot restore |
+| `network_lab/tools.py` | Pragmatic tool-contract projection for lab nodes |
 | `runtime/tool_results.py` | Durable oversized-result storage |
 | `profiles/`, `tools/`, `integrations/` | Domain tools and mock/pragmatic adapters |
 
@@ -380,3 +428,29 @@ Incomplete intent, unknown contracts, missing backends, rejected approval, token
 ### 9. Extension rule
 
 A new mutating capability must include metadata, an L0 Skill, a ToolContract, parameter/target policy, preflight, verifier, optional compensator, profile projection, tests, and bilingual documentation. A callable or prompt alone is never an executable mutation capability.
+
+### 10. P0.75-A provider
+
+The schema-v1 manifest accepts only an in-directory topology, unique declared nodes, FRR devices, literal-IP probes, and non-management fault interfaces. Subprocesses use exact argv without a shell. FRR reads are single `show` commands and writes use a reviewed allowlist. `apply_config` captures a session snapshot; `device-config-snapshot-v1` uses `frr-reload.py --reload` and compares a fresh normalized configuration digest. A plan carrying `verification_probe_id` also requires lossless typed traffic evidence. A process crash never replays an uncertain write.
+
+### 11. P0.75-B manifest and verification
+
+Devices may declare an expected BGP-neighbor count; only summary rows with a
+numeric `State/PfxRcd` count as Established. Verification waits up to 30 seconds
+for OSPF/eBGP convergence before data probes. Users may declare 1–16 normalized
+`route_prefixes`, including the legacy application prefix, and admission
+reinstalls every reviewed route after an interface transition. The
+small-production failover gate proves Core1→Core2→Edge2 forwarding and
+subsequent Core1→Edge1 restoration.
+
+Each `LabLink` contains two `LabLinkMember(node, interface, address)` values plus
+relationship and path role. Loading rejects duplicate interfaces/addresses,
+different subnets, unknown nodes, and any graph whose link set differs from the
+Containerlab topology. The address index resolves hop IP to node/interface/link.
+`trace_path` accepts exact endpoint IDs and runs the fixed argv
+`traceroute -n -m 16 -w 2 -q 1`. Every address and adjacency plus the final
+destination must resolve; timeouts, unknown IPs, broken adjacency, or incomplete
+traces return `fail_closed=true`. `enforcement_path` fresh-reads endpoint
+operstate and the application server's source `/32` route before tracing. These
+read-only tools and their Skill are projected to LAN/DC only when typed links
+exist.

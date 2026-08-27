@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
@@ -103,7 +104,15 @@ def _known_entities(profile: str, mode: str) -> dict[str, set[str]]:
     if mode == "pragmatic":
         from config import load
 
-        devices = {device.id for device in load().pragmatic.device_inventory if device.id}
+        pragmatic = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml")).pragmatic
+        devices = {device.id for device in pragmatic.device_inventory if device.id}
+        if pragmatic.lab.enabled:
+            from network_lab import load_manifest
+
+            manifest = load_manifest(pragmatic.lab.manifest)
+            devices.update(manifest.devices)
+            entities["user_id"] = set(manifest.users)
+            entities["app_id"] = set(manifest.applications)
         entities["device_id"] = devices
         return entities
     if profile == "lan":

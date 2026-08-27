@@ -28,10 +28,20 @@ class BackendSession:
     report: dict[str, Any]
     _mcp_clients: list[Any] = field(default_factory=list)
     _openapi_clients: list[Any] = field(default_factory=list)
+    _lab_providers: list[Any] = field(default_factory=list)
     _tool_store: Any | None = None
 
     async def close(self) -> None:
         errors: list[str] = []
+        for provider in reversed(self._lab_providers):
+            try:
+                close = getattr(provider, "close", None)
+                if close is not None:
+                    value = close()
+                    if hasattr(value, "__await__"):
+                        await value
+            except Exception as error:  # pragma: no cover - defensive cleanup
+                errors.append(f"lab cleanup: {error}")
         for client in reversed(self._openapi_clients):
             try:
                 await client.unload()
@@ -237,12 +247,52 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
     }
     if valid_devices and not drivers["netmiko"]:
         raise RuntimeError("pragmatic device inventory requires the netmiko package")
+    if cfg.pragmatic.lab.enabled and cfg.pragmatic.device_inventory:
+        raise ValueError(
+            "pragmatic.lab and pragmatic.device_inventory cannot be enabled together; "
+            "separate lab and real-device runtimes to preserve target identity"
+        )
     reset_devices()
     register_devices(valid_devices)
 
     loader = ToolLoader(mode="pragmatic", profile=profile_id)
-    local_callables = loader.build_callables()
-    metadata = loader.build_metadata()
+    lab_providers: list[Any] = []
+    if cfg.pragmatic.lab.enabled:
+        if cfg.pragmatic.lab.provider != "containerlab":
+            raise ValueError("the local lab supports only pragmatic.lab.provider=containerlab")
+        if not 1 <= cfg.pragmatic.lab.command_timeout <= 300:
+            raise ValueError("pragmatic.lab.command_timeout must be between 1 and 300")
+        from network_lab import ContainerlabProvider, load_manifest
+        from network_lab.tools import LabToolAdapter, lab_tool_metadata
+        from tools.pragmatic.registry import TOOLS as PRAGMATIC_METADATA
+
+        manifest = load_manifest(cfg.pragmatic.lab.manifest)
+        provider = ContainerlabProvider(
+            manifest, command_timeout=cfg.pragmatic.lab.command_timeout,
+        )
+        adapter = LabToolAdapter(provider)
+        local_callables = adapter.callables(profile_id)
+        metadata = {
+            name: dict(PRAGMATIC_METADATA[name])
+            for name in local_callables if name in PRAGMATIC_METADATA
+        }
+        edit_metadata = metadata.get("edit_device_config")
+        if edit_metadata is not None:
+            edit_metadata["parameters"] = {
+                **dict(edit_metadata.get("parameters") or {}),
+                "verification_probe_id": (
+                    "Optional exact manifest probe that must pass after the configuration write"
+                ),
+            }
+        metadata.update(lab_tool_metadata(
+            profile_id,
+            access_enabled=bool(manifest.users and manifest.applications),
+            topology_enabled=bool(manifest.links),
+        ))
+        lab_providers.append(provider)
+    else:
+        local_callables = loader.build_callables()
+        metadata = loader.build_metadata()
     router = ToolRouter(default_timeout=float(
         os.environ.get("NETOPYU_TOOL_TIMEOUT")
         or os.environ.get("NETOPYU_DSH_TOOL_TIMEOUT", "90")
@@ -313,21 +363,28 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
     callables = router.registry
     tool_rows = router.get_tool_list()
     sources = {
-        row["name"]: "pragmatic-device" if row["source"] == "local" else row["source"]
+        row["name"]: (
+            "network-lab" if row["source"] == "local" and cfg.pragmatic.lab.enabled
+            else "pragmatic-device" if row["source"] == "local"
+            else row["source"]
+        )
         for row in tool_rows
     }
     tool_store = _attach_common_tools(callables, metadata, sources)
     source_counts = router.tool_count()
     source_counts["netopyu-runtime"] = 2
     if "local" in source_counts:
-        source_counts["pragmatic-device"] = source_counts.pop("local")
+        source_counts[
+            "network-lab" if cfg.pragmatic.lab.enabled else "pragmatic-device"
+        ] = source_counts.pop("local")
     configured_sources = (
         len(valid_devices)
+        + (1 if cfg.pragmatic.lab.enabled else 0)
         + len(mcp_config)
         + (1 if openapi_configured else 0)
     )
     warnings: list[str] = []
-    if not cfg.pragmatic.device_inventory:
+    if not cfg.pragmatic.device_inventory and not cfg.pragmatic.lab.enabled:
         warnings.append("pragmatic.device_inventory is empty")
     if invalid_devices:
         warnings.append(
@@ -336,6 +393,10 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
         )
     if configured_sources == 0:
         warnings.append("No real device, MCP, or OpenAPI source is configured")
+    if cfg.pragmatic.lab.enabled:
+        warnings.append(
+            "Local network simulation is enabled; results are not evidence of hardware/RF behavior"
+        )
 
     return BackendSession(
         mode=mode,
@@ -348,6 +409,13 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
             "ready": configured_sources > 0,
             "profile": profile_id,
             "device_count": len(valid_devices),
+            "lab_enabled": cfg.pragmatic.lab.enabled,
+            "lab_name": (
+                lab_providers[0].manifest.name if lab_providers else None
+            ),
+            "lab_device_count": (
+                len(lab_providers[0].manifest.devices) if lab_providers else 0
+            ),
             "invalid_device_count": len(invalid_devices),
             "drivers": drivers,
             "mcp_server_count": len(mcp_config),
@@ -357,5 +425,6 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
         },
         _mcp_clients=mcp_clients,
         _openapi_clients=openapi_clients,
+        _lab_providers=lab_providers,
         _tool_store=tool_store,
     )

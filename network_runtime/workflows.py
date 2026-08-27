@@ -113,6 +113,16 @@ _REVIEWED: dict[str, dict[str, Any]] = {
         ),
         "writes": {"edit_device_config": ()},
     },
+    "lab_ospf_path_remediation": {
+        "version": "1.0.0", "allowed": (
+            "get_device_config", "get_ospf_neighbors", "lab_probe", "edit_device_config",
+        ),
+        "writes": {"edit_device_config": (
+            _require("get_device_config", "device_id", config_readable=True),
+            _require("get_ospf_neighbors", "device_id", full_neighbors=2),
+            _require("lab_probe", probe_id="branch-to-dc", probe_ok=True),
+        )},
+    },
     "lan_new_employee_onboarding_access": {
         "version": "1.0.0", "allowed": (
             "list_users", "get_user_access", "check_nac_policy", "grant_user_access",
@@ -206,6 +216,19 @@ def _extract_facts(tool_name: str, arguments: dict[str, Any], result: str) -> di
         return {"allowed": "✅ ALLOWED" in result}
     if tool_name == "dc_get_app_acl":
         return {"acl_loaded": result.startswith("Access control for application")}
+    if tool_name == "get_device_config":
+        return {"config_readable": bool(result.strip()) and "[Error]" not in result}
+    if tool_name == "get_ospf_neighbors":
+        return {"full_neighbors": result.lower().count("full")}
+    if tool_name == "lab_probe":
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            return {"probe_id": None, "probe_ok": False}
+        return {
+            "probe_id": payload.get("probe_id"),
+            "probe_ok": payload.get("ok") is True,
+        }
     return {"completed": True}
 
 

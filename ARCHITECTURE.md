@@ -35,7 +35,7 @@ NetOpYuAgent 是 **Harness 可适配的网络领域插件**。DSH 是主平台�
                              │ adapter contracts
 ┌────────────────────────────▼─────────────────────────────────┐
 │ Backends                                                     │
-│ Profile mock · pragmatic local · MCP · OpenAPI · A2A peers  │
+│ Profile mock · pragmatic local/lab · MCP · OpenAPI · A2A   │
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -56,6 +56,9 @@ Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“�
 
 - `dsh_adapter/`：把 Python 领域能力投影为 DSH 可消费的 manifest/commands。
 - `network_runtime/`：所有可变更效果的唯一执行入口。
+- `network_lab/`：P0.75-A manifest、Containerlab provider、FRR 命令白名单、探测与故障注入。
+- `labs/p075-a-frr/`：可重建的 OSPF 主备路径实验拓扑和基线配置。
+- `labs/p075-b-small-production/`：20 节点小型现网基准，覆盖园区、IDC、DMZ、双 ISP、OSPF/eBGP 与安全分区路径。
 - `profiles/`：域隔离的 mock capability 与 canonical L1 Skill。
 - `skills/`：common/pragmatic canonical Skill。
 
@@ -216,6 +219,24 @@ evaluation -> public manifests / retrieval / test data
 
 所有主文档采用同文件双语结构，中文在前、英文在后。历史迁移过程不再作为当前架构文档保留；Git 历史承担追溯职责。
 
+### 9. P0.75-A 实验边界与决策
+
+- **ADR-009：** Network Lab 是 pragmatic backend 的受限 provider，不是第三个 Harness 或 mock。
+- lab 与真实 `device_inventory` 在同一进程中互斥，防止相同 `device_id` 指向不同信任域。
+- `lab.yaml` 是设备、容器、探测和故障接口的唯一目标源；自然语言不能扩展 blast radius。
+- 读写使用无 shell 参数数组；FRR 写入只接受审核白名单，`eth0` 管理口禁止变更。
+- lab L0 成功要求 fresh running-config 以及计划绑定的预声明流量 probe；失败使用 provider 会话快照恢复并重新验证。
+- Apple Silicon 上 Containerlab 运行在 Linux devcontainer/VM；P0.75-A 不证明厂商 CLI、ASIC、性能、硬件故障或无线 RF。
+- **ADR-010：** 园区/IDC access lab 复用同一 pragmatic provider；用户、接口、地址、应用、端口、路径和角色均由 manifest 固定。LAN 与 DC 工具按 profile 隔离，只有 `network-lab` source 能取得这些 access 写合同。
+
+### 10. P0.75-B 小型现网基准
+
+- **ADR-011：** 完整现网实验仍是 `network-lab` pragmatic provider，不新增框架层或绕开 Network Runtime。
+- Manifest 同时声明 OSPF/BGP 邻居期望、多前缀用户路由、允许/拒绝 probe 和故障目标；Runtime 只能执行这些预审对象。
+- OOB Docker 管理网与业务路由分离。企业侧 OSPF、外部 eBGP、双出口回切、IDC/DMZ/访客分区和 HTTP 应用证据均在容器数据面实际运行。
+- `secure-wan-edge` 是安全域路由角色。源 `/32` 黑洞表示本地 RBAC/微隔离 enforcement；不等同于状态防火墙、NAT、IPS 或厂商设备。
+- **ADR-012：** 拓扑问答以 typed manifest graph 为唯一静态事实源，以 manifest-bound traceroute 为唯一运行路径证据。清单链路必须与 Containerlab wiring 精确相等；未知 hop、未证明 adjacency 或未到达目标一律 fail closed。端点不能传给设备工具，模拟准入/应用策略必须按真实实现命名。
+
 ---
 
 ## English
@@ -225,6 +246,11 @@ evaluation -> public manifests / retrieval / test data
 NetOpYuAgent is a **harness-adaptable network-domain plugin**. DSH is the primary platform and Hermes is an optional adapter. Both enter the same Network Runtime through narrow public plugin and Worker contracts. This repository does not implement a general agent harness.
 
 The architecture forbids a custom agent loop or model client, a standalone Web UI, parallel session/approval/subagent frameworks, direct mutations outside Network Runtime, and automatic activation of learned Skills.
+
+**ADR-010:** The campus/IDC access lab reuses the pragmatic provider. Users,
+interfaces, addresses, applications, ports, paths, and roles are fixed by the
+manifest. LAN and DC tools are profile-isolated, and only the `network-lab`
+source may receive the lab access write contracts.
 
 ### 2. Layers
 
@@ -241,6 +267,9 @@ Domain L1 Skills are model-assisted business orchestration. Network L0 Skills ar
 - `hermes-plugin-netopyu/` and `hermes_adapter/` implement the official Hermes plugin boundary, process-local approval binding, and Worker client.
 - `dsh_adapter/` projects Python domain capabilities into typed bridge commands.
 - `network_runtime/` is the only mutation execution path.
+- `network_lab/` owns the reviewed P0.75-A manifest, Containerlab provider, FRR command allowlist, probes, and fault injection.
+- `labs/p075-a-frr/` is the reproducible redundant-OSPF topology and baseline.
+- `labs/p075-b-small-production/` owns the 20-node campus/IDC/DMZ/dual-ISP OSPF/eBGP reference topology.
 - `profiles/` and `skills/` contain isolated capabilities and canonical L1 Skills.
 - `tools/` and `integrations/` provide local, MCP, and OpenAPI adapters.
 - `registry/` is outbound A2A discovery only.
@@ -275,6 +304,10 @@ Network Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Tools 
 - **ADR-006:** A2A sends self-contained tasks and explicit delegation chains.
 - **ADR-007:** oversized tool output is stored durably and paged.
 - **ADR-008:** Hermes mutations prepare only; an exact user slash command consumes a process-local nonce binding.
+- **ADR-009:** the local lab is a constrained pragmatic provider, never another harness or mock fallback. Its manifest is the sole target authority; lab and real inventory are isolated, writes use shell-free argv plus an FRR allowlist, and success can bind both configuration and predeclared traffic evidence.
+- **ADR-010:** the campus/IDC access lab binds users, endpoints, applications, roles, and HTTP evidence to the same manifest while preserving LAN/DC tool isolation.
+- **ADR-011:** the complete small-production topology remains behind the same provider and Network Runtime. It adds typed OSPF/eBGP expectations, reviewed multi-prefix endpoint routes, dual-ISP failover, DMZ/guest segmentation, and HTTP evidence without claiming stateful-firewall or vendor emulation.
+- **ADR-012:** topology answers use the typed manifest graph as their only static source and manifest-bound traceroute as their only observed path evidence. Typed links must exactly equal Containerlab wiring. Unknown hops, unproved adjacency, or an unverified destination fail closed. Endpoints are never passed to device tools, and simulated enforcement is named by its actual implementation.
 
 ### 7. Clean-code and extension policy
 

@@ -32,7 +32,17 @@ def bounded(value: str, limit: int = 4096) -> str:
 def typed_evidence(tool_name: str, rendered: str) -> dict[str, Any]:
     """Return bounded typed facts and a digest; rendered prose is never proof."""
     facts: dict[str, Any] = {}
-    if tool_name == "get_user_access":
+    if tool_name == "get_device_config":
+        # Configuration preflight comparisons must ignore volatile headers but
+        # must remain sensitive to every effective configuration line.
+        from network_lab.containerlab import normalize_frr_config
+
+        normalized = normalize_frr_config(rendered)
+        facts = {
+            "normalized_config_digest": sha256_json(normalized),
+            "normalized_line_count": len(normalized.splitlines()),
+        }
+    elif tool_name == "get_user_access":
         fields = {
             key: match.group(1).strip()
             for key, pattern in {

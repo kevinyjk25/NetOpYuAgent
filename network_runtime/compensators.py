@@ -70,6 +70,58 @@ async def compensate_operation(
     ))
 
 
+@REGISTRY.register("device-config-snapshot-v1")
+async def _restore_device_snapshot(context: CompensationContext) -> CompensationResult:
+    """Restore the provider-owned execution snapshot and prove exact state."""
+    plan, contract = context.plan, context.contract
+    if not contract.rollback_tool or not contract.preflight_tool or not plan.preflight:
+        raise RuntimeError("device snapshot compensation contract is incomplete")
+    restore = context.backend.callables.get(contract.rollback_tool)
+    preflight = context.backend.callables.get(contract.preflight_tool)
+    if restore is None or preflight is None:
+        raise RuntimeError("device provider does not expose reviewed snapshot restoration")
+    rollback_args = project_arguments(plan.arguments, contract.rollback_fields)
+    rollback_result = render(await asyncio.wait_for(
+        restore(rollback_args), timeout=context.timeout_seconds,
+    ))
+    if failed_output(rollback_result):
+        raise RuntimeError(rollback_result)
+    read_args = project_arguments(plan.arguments, contract.preflight_fields)
+    read_result = render(await preflight(read_args))
+    after = typed_evidence(contract.preflight_tool, read_result)
+    before = plan.preflight[0].value
+    restored = isinstance(before, dict) and same_snapshot(before, after)
+    evidence = (
+        Evidence(
+            evidence_type="rollback",
+            source=contract.rollback_tool,
+            target=canonical_json(rollback_args),
+            observed_at=utc_now(),
+            value={
+                "digest": sha256_json(rollback_result),
+                "bytes": len(rollback_result),
+                "facts": {"snapshot_restore_completed": True},
+            },
+            passed=True,
+            predicate="reviewed provider snapshot restore completed",
+            expected=True,
+        ),
+        Evidence(
+            evidence_type="rollback_postcondition",
+            source=contract.preflight_tool,
+            target=canonical_json(read_args),
+            observed_at=utc_now(),
+            value=after,
+            passed=restored,
+            predicate="fresh normalized configuration exactly matches approved preflight",
+            expected=before,
+        ),
+    )
+    if not restored:
+        raise RuntimeError("snapshot restore completed but exact preflight state was not restored")
+    return CompensationResult(rollback_result, evidence)
+
+
 @REGISTRY.register("inverse-tool-v1")
 async def _inverse_tool(context: CompensationContext) -> CompensationResult:
     plan, contract = context.plan, context.contract

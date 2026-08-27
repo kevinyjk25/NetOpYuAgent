@@ -12,7 +12,7 @@
 2. 在网络领域保留比普通 tool call 更严格的确定性效果层。
 3. 将模型限制在候选意图、诊断和编排位置，不允许模型绕过 L0 合同直接执行写操作。
 4. 对每个变更建立可重放检查但不可重放授权的完整审计证据。
-5. 同时支持本地 mock 验证和显式配置的 pragmatic 真实适配器。
+5. 同时支持本地 mock、显式 pragmatic 真实适配器和受限 P0.75-A FRR 实验 provider。
 6. 支持 LAN、DC、WAN 的能力隔离以及受控 A2A 跨域协作。
 
 ### 3. 非目标
@@ -51,7 +51,7 @@ flowchart LR
 | Shared Python Worker | 持久化 Unix Socket 调用、隔离异常、降低进程开销 | 受控执行入口 |
 | Network Runtime | 编译 Intent、生成计划、状态机、执行、验证、补偿和审计 | 领域效果控制面 |
 | Network L0 Skill Registry | 固定步骤、目标字段、工具合同、验证/回滚策略 | 版本化策略根 |
-| Backend | mock profile，或 pragmatic device/MCP/OpenAPI 路由 | 数据/效果适配层 |
+| Backend | mock profile，或 pragmatic device/lab/MCP/OpenAPI 路由 | 数据/效果适配层 |
 | Scoped Services | 作用域记忆、能力检索、大结果分页 | 只读辅助层 |
 | A2A Provider | AgentCard 发现、选择、SSE 委派、continuation | 跨域边界 |
 | SQLite Stores | 计划、事件、审批、grant、continuation、轨迹和大结果 | 持久化证据层 |
@@ -101,7 +101,7 @@ sequenceDiagram
 3. 委派链记录 agent id；超过最大深度或检测到循环时拒绝。
 4. peer 通过 SSE 返回消息、失败或 `input-required`。
 5. `input-required` 被保存为 continuation；DSH 使用新卡片，Hermes 使用包含远端 plan hash 的用户 slash command。
-6. 本地 DC peer 仅绑定 loopback、仅允许 mock，用于协议与工作流验证，不代表生产多 Agent 部署。
+6. 本地 DC peer 仅绑定 loopback，支持 mock 与显式配置的 pragmatic lab，用于协议与工作流验证，不代表生产多 Agent 部署。
 
 ### 9. 部署设计
 
@@ -165,6 +165,31 @@ sequenceDiagram
 
 P0.5 在本地 mock 范围完成；新增 Hermes Adapter 后，DSH 与 Hermes 的等价写请求具有相同 L0/Intent/风险/验证/回滚合同，并都达到 `verified_success` 与有效 hash-chain audit。Hermes 模型不可见 nonce，错误 hash、重复命令和进程重启后的旧批准均 fail closed。仍未完成的 P1 工作包括真实网络适配器逐项资格认证、Hermes Gateway 审批人身份不可抵赖、企业审批、生产故障注入、HA/DR、长期负载、真实 rollback 演练和变更治理。
 
+### 13. P0.75-A 部署与数据流
+
+P0.75-A 的 Linux 执行平面运行 Containerlab、FRR 和 Alpine endpoints；macOS DSH/Hermes、Worker 和 Runtime 保持不变。`config.lab.yaml` 选择 pragmatic lab provider，`lab.yaml` 固定目标。L1 Skill 必须先读取配置、OSPF 邻居和基线 probe；L0 plan 经人工审批后仅执行一次，随后读取 running-config 和 endpoint probe。验证失败进入 provider 快照补偿与独立恢复验证。
+
+验收分两层：无 Docker 时，manifest、命令边界、workflow、L0/补偿和 fail-closed 由单元测试覆盖；Linux lab 就绪后，`verify` 与 `exercise-failover` 负责协议、转发、收敛和恢复证据。
+
+园区 + IDC 扩展在相同 provider 内增加 manifest-bound user/application 实体。LAN L0 只改变
+用户 endpoint 的固定接口并读回准入状态；DC L0 只改变应用 endpoint 上该用户固定 `/32`
+策略并通过反向工具补偿。L1 通过 loopback A2A peer 跨域委派，完成条件是实际 HTTP probe，
+而不是写工具的成功文本。
+
+### 14. P0.75-B 典型小型现网部署
+
+`config.small-production-lab.yaml` 将同一 DSH + Network Runtime 绑定到 20 节点实验。
+内部 OSPF 与双 ISP eBGP 共同提供真实控制面；有线、无线、访客、运维、IDC、DMZ 和
+Internet endpoint 提供真实数据面。部署验收分四层：节点存活、OSPF/BGP 邻居、清单
+允许/拒绝探测、应用 HTTP；故障验收额外要求主出口切换至 Core2/Edge2 并在链路恢复后
+回切。L1/L0 onboarding 和失败回滚继续复用同一 Runtime，不创建实验旁路。
+
+拓扑查询数据流为 `DSH Skill → 只读 Lab Tool → typed manifest graph`；路径查询数据流为
+`declared source/destination → bounded traceroute → hop IP index → link adjacency verifier`。
+只有所有跳点解析、相邻关系成立且目标 endpoint 到达时才返回成功。用户到应用查询还会
+合并 endpoint 接口状态和应用服务器 `/32` blackhole 状态，明确指出它们不是真实
+RADIUS/802.1X、叶节点 ACL、状态防火墙或应用 IAM。
+
 ---
 
 ## English
@@ -179,7 +204,7 @@ This document defines the system boundary, logical components, deployment topolo
 2. Preserve a deterministic network effect layer that is stricter than ordinary tool calling.
 3. Restrict the model to candidate intent, diagnosis, and orchestration; it cannot bypass L0 contracts.
 4. Produce replay-checkable evidence without replayable authorization.
-5. Support local mock validation and explicitly configured pragmatic adapters.
+5. Support local mock validation, explicitly configured pragmatic adapters, and the constrained P0.75-A FRR lab provider.
 6. Isolate LAN, DC, and WAN capabilities while enabling controlled A2A collaboration.
 
 ### 3. Non-goals
@@ -200,7 +225,7 @@ This document defines the system boundary, logical components, deployment topolo
 | Shared Python Worker | Persistent Unix-socket invocation and fault isolation | Controlled execution entry |
 | Network Runtime | Intent compilation, plans, state machine, execution, verification, compensation, audit | Domain effect control plane |
 | Network L0 Registry | Fixed steps, target fields, tool/verifier/rollback contracts | Versioned policy root |
-| Backend | Mock profiles or pragmatic device/MCP/OpenAPI routing | Data/effect adapter |
+| Backend | Mock profiles or pragmatic device/lab/MCP/OpenAPI routing | Data/effect adapter |
 | Scoped Services | Memory, capability retrieval, large-result paging | Read-only auxiliary layer |
 | A2A Provider | AgentCard discovery, peer selection, SSE delegation, continuations | Cross-domain boundary |
 | SQLite Stores | Plans, events, approvals, grants, continuations, trajectories, results | Persistent evidence layer |
@@ -240,3 +265,29 @@ Hermes does not change the L0 registry, ToolContracts, compilation, intent/risk/
 ### 9. P0.5 acceptance
 
 P0.5 is complete for local simulation. Equivalent DSH and Hermes requests retain the same L0, intent, risk, verifier, rollback, terminal-state, and audit invariants. Hermes hides the nonce from the model and blocks wrong hashes, duplicates, and approvals lost on restart. P1 still requires real-adapter qualification, non-repudiable Hermes gateway identity, enterprise approval, HA/DR, long-duration load, real rollback exercises, and formal change governance.
+
+### 10. P0.75-A lab deployment
+
+The Linux execution plane runs Containerlab, FRR, and Alpine endpoints while the macOS harness and shared Runtime remain unchanged. `config.lab.yaml` selects the pragmatic lab provider and the manifest fixes all targets. The reviewed L1 workflow requires configuration, OSPF-neighbor, and baseline-probe observations before an L0 plan can be approved. A successful write requires both fresh configuration and predeclared traffic evidence; failure invokes provider snapshot compensation and exact restoration verification. Unit tests cover the boundary without Docker, while `verify` and `exercise-failover` certify an actually deployed lab.
+
+The campus + IDC extension adds manifest-bound users and applications to the
+same provider. LAN L0 mutates only a fixed endpoint interface; DC L0 mutates
+only the user's fixed source `/32` policy on the application endpoint. L1 uses
+the loopback A2A peer for cross-domain delegation, and completion requires a
+real HTTP probe rather than trusting write output.
+
+### 11. P0.75-B typical small-production deployment
+
+`config.small-production-lab.yaml` binds the same DSH and Network Runtime to the
+20-node reference network. Acceptance proceeds through node health, OSPF/eBGP
+adjacency, manifest-declared positive and negative paths, and real HTTP evidence.
+The failover gate proves Core2/Edge2 forwarding after the primary ISP link fails
+and primary-path restoration after recovery. L1/L0 onboarding and verified
+rollback reuse the normal Runtime path without a lab-only bypass.
+
+Topology reads flow from the DSH Skill through read-only lab tools to the typed
+manifest graph. Path reads bind declared endpoints, run bounded traceroute,
+resolve hop IPs, and verify every link adjacency. Success requires every hop
+and the destination to be proved. User/application queries additionally join
+the endpoint interface state and server `/32` blackhole state while explicitly
+stating that they are not RADIUS/802.1X, leaf ACLs, stateful firewall, or IAM.

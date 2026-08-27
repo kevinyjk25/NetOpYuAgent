@@ -61,9 +61,9 @@ Commands:
   worker-start  Start the persistent Python bridge worker
   worker-stop   Stop the managed persistent Python bridge worker
   worker-status Show worker process/socket status
-  dc-peer-start Start the loopback-only mock DC A2A peer
-  dc-peer-stop  Stop the managed local mock DC A2A peer
-  dc-peer-status Show local mock DC A2A peer status
+  dc-peer-start Start the loopback-only DC A2A peer for the active backend
+  dc-peer-stop  Stop the managed local DC A2A peer
+  dc-peer-status Show local DC A2A peer status
   logs          Follow the DSH Web log
   dump-config   Print the composed DSH Web configuration and exit
   models        Show the configured default and NetOpYu Ollama models
@@ -401,8 +401,13 @@ show_worker_status() {
 
 local_dc_peer_is_reachable() {
   curl --silent --fail --max-time 1 "http://$LOCAL_DC_HOST:$LOCAL_DC_PORT/health" 2>/dev/null |
-    "$PYTHON_BIN" -c 'import json,sys; r=json.load(sys.stdin); raise SystemExit(0 if r.get("ok") and r.get("agent_id")=="dc-agent" and r.get("mode")=="mock" else 1)' \
+    "$PYTHON_BIN" -c 'import json,sys; r=json.load(sys.stdin); raise SystemExit(0 if r.get("ok") and r.get("agent_id")=="dc-agent" and r.get("mode") in {"mock","pragmatic"} else 1)' \
     >/dev/null 2>&1
+}
+
+local_dc_peer_mode() {
+  curl --silent --fail --max-time 1 "http://$LOCAL_DC_HOST:$LOCAL_DC_PORT/health" 2>/dev/null |
+    "$PYTHON_BIN" -c 'import json,sys; print(json.load(sys.stdin).get("mode","unknown"))' 2>/dev/null
 }
 
 local_dc_peer_pid_is_running() {
@@ -416,7 +421,8 @@ local_dc_peer_pid_is_running() {
 start_local_dc_peer() {
   check_python || return 1
   if local_dc_peer_pid_is_running && local_dc_peer_is_reachable; then
-    printf 'Local mock dc-agent is already running (PID %s, http://%s:%s).\n' \
+    printf 'Local %s dc-agent is already running (PID %s, http://%s:%s).\n' \
+      "$(local_dc_peer_mode)" \
       "$(<"$LOCAL_DC_PID_FILE")" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
     return 0
   fi
@@ -426,7 +432,6 @@ start_local_dc_peer() {
   fi
   mkdir -p "$RUNTIME_ROOT" "$LOG_DIR" "$(dirname "$LOCAL_DC_STATE")"
   runtime_env
-  export NETOPYU_DSH_BACKEND=mock
   export NETOPYU_DSH_LOCAL_DC_STATE="$LOCAL_DC_STATE"
   cd "$PROJECT_ROOT" || return 1
   nohup "$PYTHON_BIN" -m dsh_adapter.local_dc_peer \
@@ -443,8 +448,8 @@ start_local_dc_peer() {
       return 1
     fi
     if local_dc_peer_is_reachable; then
-      printf 'Local mock dc-agent is running: http://%s:%s (PID %s).\n' \
-        "$LOCAL_DC_HOST" "$LOCAL_DC_PORT" "$peer_pid"
+      printf 'Local %s dc-agent is running: http://%s:%s (PID %s).\n' \
+        "$(local_dc_peer_mode)" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT" "$peer_pid"
       return 0
     fi
     sleep 0.1
@@ -455,7 +460,7 @@ start_local_dc_peer() {
 stop_local_dc_peer() {
   if ! local_dc_peer_pid_is_running; then
     rm -f "$LOCAL_DC_PID_FILE"
-    printf 'Local mock dc-agent is not running.\n'
+    printf 'Local dc-agent is not running.\n'
     return 0
   fi
   local peer_pid attempt
@@ -464,7 +469,7 @@ stop_local_dc_peer() {
   for attempt in {1..50}; do
     if ! kill -0 "$peer_pid" 2>/dev/null; then
       rm -f "$LOCAL_DC_PID_FILE"
-      printf 'Local mock dc-agent stopped.\n'
+      printf 'Local dc-agent stopped.\n'
       return 0
     fi
     sleep 0.1
@@ -474,10 +479,11 @@ stop_local_dc_peer() {
 
 show_local_dc_peer_status() {
   if local_dc_peer_pid_is_running && local_dc_peer_is_reachable; then
-    printf 'RUNNING pid=%s url=http://%s:%s mode=mock\n' \
-      "$(<"$LOCAL_DC_PID_FILE")" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+    printf 'RUNNING pid=%s url=http://%s:%s mode=%s\n' \
+      "$(<"$LOCAL_DC_PID_FILE")" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT" "$(local_dc_peer_mode)"
   elif local_dc_peer_is_reachable; then
-    printf 'UNMANAGED_PEER url=http://%s:%s mode=mock\n' "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+    printf 'UNMANAGED_PEER url=http://%s:%s mode=%s\n' \
+      "$LOCAL_DC_HOST" "$LOCAL_DC_PORT" "$(local_dc_peer_mode)"
     return 2
   else
     printf 'STOPPED url=http://%s:%s\n' "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"

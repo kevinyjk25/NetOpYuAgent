@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable
@@ -127,7 +128,41 @@ async def _device_config(context: VerificationContext) -> VerificationResult:
         value=value, passed=passed,
         predicate="running config reflects every compiled change", expected=True,
     )
-    return _result(evidence, passed, None if passed else "running config does not prove requested change")
+    evidence_items = [evidence]
+    probe_id = plan.arguments.get("verification_probe_id")
+    if probe_id:
+        probe_tool = context.backend.callables.get("lab_probe")
+        if probe_tool is None:
+            return VerificationResult(
+                tuple(evidence_items), False,
+                error="verification probe requested but lab_probe is unavailable",
+            )
+        probe_output = render(await probe_tool({"probe_id": str(probe_id)}))
+        try:
+            probe_value = json.loads(probe_output)
+        except json.JSONDecodeError:
+            probe_value = {"ok": False, "invalid_json": True}
+        probe_passed = (
+            probe_value.get("ok") is True
+            and probe_value.get("probe_id") == str(probe_id)
+            and int(probe_value.get("transmitted", 0)) > 0
+            and probe_value.get("received") == probe_value.get("transmitted")
+        )
+        evidence_items.append(Evidence(
+            evidence_type="traffic_postcondition",
+            source="lab_probe",
+            target=str(probe_id),
+            observed_at=utc_now(),
+            value=probe_value,
+            passed=probe_passed,
+            predicate="predeclared independent traffic probe has zero packet loss",
+            expected=True,
+        ))
+        passed = passed and probe_passed
+    return VerificationResult(
+        tuple(evidence_items), passed,
+        error=None if passed else "running config or independent traffic probe did not prove the change",
+    )
 
 
 @REGISTRY.register("lan-access-granted")

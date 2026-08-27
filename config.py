@@ -55,9 +55,18 @@ class PragmaticMCPServer:
 
 
 @dataclass
+class PragmaticLabConfig:
+    enabled: bool = False
+    provider: str = "containerlab"
+    manifest: str = "labs/p075-a-frr/lab.yaml"
+    command_timeout: float = 30.0
+
+
+@dataclass
 class PragmaticConfig:
     device_inventory: list[PragmaticDevice] = field(default_factory=list)
     mcp_servers: list[PragmaticMCPServer] = field(default_factory=list)
+    lab: PragmaticLabConfig = field(default_factory=PragmaticLabConfig)
     napalm_getters: list[str] = field(default_factory=lambda: [
         "get_facts", "get_interfaces", "get_interfaces_counters",
     ])
@@ -154,6 +163,7 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
     mcp_raw = _mapping(tools_raw.get("mcp"))
     openapi_raw = _mapping(tools_raw.get("openapi"))
     pragmatic_raw = _mapping(raw.get("pragmatic"))
+    lab_raw = _mapping(pragmatic_raw.get("lab"))
     agent_raw = _mapping(raw.get("agent"))
     retrieval_raw = _mapping(raw.get("retrieval"))
     cache_raw = _mapping(retrieval_raw.get("cache"))
@@ -212,6 +222,12 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
         pragmatic=PragmaticConfig(
             device_inventory=devices,
             mcp_servers=servers,
+            lab=PragmaticLabConfig(
+                enabled=bool(lab_raw.get("enabled", False)),
+                provider=str(lab_raw.get("provider", "containerlab")).strip().lower(),
+                manifest=str(lab_raw.get("manifest", "labs/p075-a-frr/lab.yaml")).strip(),
+                command_timeout=float(lab_raw.get("command_timeout", 30)),
+            ),
             napalm_getters=[str(item) for item in _list(pragmatic_raw.get("napalm_getters"))]
                 or PragmaticConfig().napalm_getters,
         ),

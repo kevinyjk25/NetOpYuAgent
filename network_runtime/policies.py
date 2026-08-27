@@ -20,6 +20,7 @@ class ToolContract:
 _CONTRACTS: dict[str, ToolContract] = {
     "edit_device_config": ToolContract(
         "device-config-v1", "get_device_config", ("device_id", "section"), "device-config",
+        "restore_device_config", ("device_id",), "device-config-snapshot-v1",
     ),
     "push_config": ToolContract(
         "mock-config-push-v1", "get_device_config", ("device_id",), "device-config",
@@ -80,12 +81,19 @@ def resolve_contract(
     if contract is None:
         return None
     # External MCP/OpenAPI writes cannot inherit a same-name local contract.
-    if source not in {"profile-mock", "pragmatic-device"}:
+    if source not in {"profile-mock", "pragmatic-device", "network-lab"}:
         return None
-    # Only the pragmatic edit tool currently owns verified snapshot/rollback
-    # semantics. Other pragmatic writes must add an explicit contract first.
+    # Pragmatic writes are fail-closed. The local lab may additionally expose
+    # manifest-bound access controls whose verifiers and inverse operations are
+    # implemented by the same provider. Real-device adapters cannot inherit
+    # those simulator contracts merely by reusing a tool name.
+    pragmatic_lab_writes = {
+        "grant_user_access", "revoke_user_access",
+        "dc_grant_app_access", "dc_revoke_app_access",
+    }
     if mode == "pragmatic" and tool_name != "edit_device_config":
-        return None
+        if source != "network-lab" or tool_name not in pragmatic_lab_writes:
+            return None
     return contract
 
 

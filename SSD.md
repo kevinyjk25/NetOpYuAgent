@@ -26,6 +26,10 @@
 | F-14 | 离线学习只能生成 proposal，不能自动启用 Skill。 |
 | F-15 | DSH 与 Hermes 必须共享同一 L0 注册表、Network Runtime、verifier、compensator 和 journal 合同。 |
 | F-16 | Hermes 写工具不得向模型暴露 execution nonce；只有用户 slash command 可消费进程内 plan binding。 |
+| F-17 | P0.75-A lab 的设备、probe 和 fault target 必须来自版本化 manifest，模型不得构造任意容器或接口。 |
+| F-18 | Lab 配置写必须使用 FRR 白名单和无 shell argv；成功必须满足配置证据及显式绑定的流量 probe。 |
+| F-19 | 小型现网必须验证 OSPF/eBGP 邻居、正负路径、HTTP、双 ISP 切换/回切，并保持 L1/L0 Runtime 不变量。 |
+| F-20 | 拓扑和路径回答必须来自与 Containerlab wiring 精确匹配的 typed graph 和完全解析的 observed traceroute；未知跳点或相邻关系必须失败关闭。 |
 
 ### 3. 可靠性规格
 
@@ -125,6 +129,12 @@
 - P0.5 假设：本地 Hermes 用户、插件进程、其他已安装插件和 OS account 可信，Gateway 已配置用户 allowlist。
 - 剩余风险：当前 Hermes slash command handler 不提供可验证的发送者身份，配置的 operator id 不等同于不可抵赖身份；Hermes 插件在进程内运行也不是安全沙箱。P1 必须增加企业身份上下文、独立审批服务、Worker 服务身份/进程隔离，并限制模型终端与代码执行面。
 
+#### T-12 Lab provider 命令注入或目标扩张
+
+- 风险：模型通过 CLI 参数执行 shell、修改管理口、访问未声明容器或把故障注入扩展到宿主机。
+- 控制：严格 manifest、路径归属检查、标识符/IP/interface 校验、无 shell argv、read/config 白名单、`eth0` 禁止、预声明 probe/fault、lab 与真实 inventory 互斥、显式本地 lab 授权。
+- 剩余风险：Containerlab/Docker 具有高权限，宿主 Docker daemon 与 manifest 属于可信运维边界；本 provider 不是多租户安全沙箱。
+
 ### 7. 审批规格
 
 审批摘要至少包含：
@@ -211,6 +221,27 @@ scripts/netopyu-dsh retirement
 - HA/DR、备份恢复演练与长期 chaos；
 - 生产模型/Skill 的版本发布、canary 和回退机制。
 
+### 13. P0.75-A 验收补充
+
+代码门禁必须验证 manifest 逃逸、shell/多行命令、未知设备、灾难性配置、exact snapshot 补偿、双重后置条件和 workflow 前置证据。实际实验门禁必须验证全部节点运行、两个 OSPF Full 邻居、双向 probe、主路径选择、主链路中断后的备路径以及主链路恢复。缺少 Docker/Containerlab 时必须返回结构化失败，不能回退 mock。
+
+园区/IDC access 验收还必须证明：LAN/DC profile 不交叉暴露写工具；未知 user/app/role
+fail closed；控制用户基线成功、目标用户基线失败；LAN 与 DC L0 分别持有独立审批和有效
+hash-chain audit；最终 HTTP probe 成功；测试清理后双层拒绝状态恢复。
+
+### 14. P0.75-B 验收补充
+
+完整小型现网的强制门禁为：20 节点运行；所有清单 OSPF/BGP 邻居达到期望；11 条
+ICMP 允许/拒绝结果匹配；Bob→CRM、Carol→Wiki、Guest→Portal 成功且 Guest/Erin→CRM
+失败；主 ISP 故障后数据面经 Core2/Edge2 可用并恢复主路径；Erin L1 + LAN/DC L0 成功；
+强制 HTTP 后置条件失败后为 `rollback_verified`。FRR 安全角色模拟的剩余风险必须在文档
+显式披露。
+
+拓扑/路径附加门禁为：26 条 typed links 与 topology wiring 集合相等；52 个接口地址唯一；
+endpoint 不进入 device API；已知路径的每个 hop 能解析到 node/interface/link 且 adjacency
+为真；注入未知 hop 时返回 `fail_closed=true`；执行点输出明确否认真实 RADIUS/802.1X、
+leaf ACL/IAM 和 stateful firewall。
+
 ---
 
 ## English
@@ -239,6 +270,10 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-14 | Offline learning may create proposals but may not activate Skills. |
 | F-15 | DSH and Hermes must share one L0 registry, Network Runtime, verifier, compensator, and journal contract. |
 | F-16 | Hermes must not expose execution nonces to the model; only a user slash command may consume the process-local binding. |
+| F-17 | P0.75-A devices, probes, and fault targets must come from the versioned manifest; the model cannot invent containers or interfaces. |
+| F-18 | Lab writes must use shell-free argv and the reviewed FRR allowlist; success requires configuration evidence and any explicitly bound traffic probe. |
+| F-19 | The small-production lab must verify OSPF/eBGP, positive and negative paths, HTTP, dual-ISP failover/recovery, and unchanged L1/L0 Runtime invariants. |
+| F-20 | Topology and path answers must come from a typed graph that exactly matches Containerlab wiring and a fully resolved observed traceroute; unknown hops or adjacency must fail closed. |
 
 ### 3. Security objectives
 
@@ -257,6 +292,7 @@ The system must provide exact authorization, effect integrity, evidence-based ou
 - **A2A loops/history leakage:** hop/chain controls and self-contained delegation.
 - **Audit tampering:** per-plan event hash chains; P1 still requires an external append-only copy.
 - **Hermes model-as-approver confusion:** prepare-only write handlers, nonce removal, exact user slash commands, process-local one-shot bindings, and safe loss on restart. P0.5 still trusts the local account and Hermes gateway allowlist; production requires authenticated sender identity and process isolation.
+- **Lab command/target expansion:** strict manifests, path and identifier validation, shell-free argv, FRR read/write allowlists, management-interface exclusion, predeclared probes/faults, and process isolation from real inventory. Docker remains a trusted privileged boundary, not a multi-tenant sandbox.
 
 ### 5. Approval and model policy
 
@@ -281,3 +317,27 @@ scripts/netopyu-dsh retirement
 ### 8. P1 gaps
 
 P1 must add enterprise identity and non-repudiation—including a strong Hermes gateway sender-to-approval-actor binding—mTLS and egress controls, centralized secrets and encryption, external immutable audit, real-adapter command certification, change-window/ticket/two-person policy, HA/DR and long-duration chaos, and controlled model/Skill release with canary and rollback. Hermes plugins are in-process, not a sandbox; production must also isolate the Worker and restrict model terminal/code execution authority.
+
+### 9. P0.75-A acceptance supplement
+
+The code gate covers manifest traversal, shell/multiline injection, unknown targets, catastrophic commands, exact snapshot compensation, dual postconditions, and reviewed workflow prerequisites. The deployed-lab gate requires all nodes, two Full OSPF adjacencies, bidirectional probes, primary-route selection, backup forwarding after a primary-link fault, and primary recovery. Missing Docker/Containerlab is a structured failure and never triggers mock fallback.
+
+Campus/IDC access acceptance additionally proves LAN/DC write-tool isolation,
+fail-closed unknown users/apps/roles, a passing control-user baseline, a denied
+target-user baseline, separately approved and audited LAN/DC L0 plans, a real
+successful HTTP probe, and restoration of both denial layers after cleanup.
+
+### 10. P0.75-B acceptance supplement
+
+The complete-lab gate requires all 20 nodes, every declared OSPF/BGP adjacency,
+eleven matching positive/negative ICMP paths, reviewed HTTP allow/deny outcomes,
+Core2/Edge2 ISP failover and primary recovery, successful Erin L1 plus LAN/DC
+L0 execution, and `rollback_verified` after a forced HTTP postcondition failure.
+Documentation must retain the limitation that FRR security roles are not
+stateful-firewall or vendor emulation.
+
+The topology/path gate additionally proves exact equality for 26 typed links,
+52 unique interface addresses, endpoint/device API separation, complete
+node/interface/link and adjacency resolution for a known trace, fail-closed
+behavior for an injected unknown hop, and truthful enforcement labels that deny
+real RADIUS/802.1X, leaf ACL/IAM, and stateful-firewall semantics.
