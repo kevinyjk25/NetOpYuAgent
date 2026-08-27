@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "dsh": {
+    "tested": ["0.1.1-rc.2"],
+    "default": "0.1.1-rc.2"
+  },
+  "node": {
+    "tested": ["22.19.0", "24.x"],
+    "engines": "^22.19.0 || >=24.0.0"
+  },
+  "python": {
+    "tested": ["3.11", "3.12"],
+    "requires": ">=3.11,<3.13"
+  }
+}
