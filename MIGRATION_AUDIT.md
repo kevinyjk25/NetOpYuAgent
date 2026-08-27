@@ -17,13 +17,16 @@ architecture audit prevents retired imports and paths from returning.
 ## Final evidence
 
 - `scripts/netopyu-dsh retirement`: PASS.
+- GitHub Actions runs the same clean-checkout DSH-only retirement gate; no
+  retired scripts, runtime installation, Ollama model or network endpoint is
+  required.
 - Retained DSH/domain suite: 92 tests plus 4 profile subtests pass.
 - DSH-only architecture audit: PASS.
 - Node syntax and the combined 39-tool HITL/A2A/memory/trajectory smoke: PASS.
 - Runtime skill projection: default 1, LAN 12, DC 5, WAN 1.
 - Retrieval gate: Recall@3 1.00, MRR 0.95, zero failures.
-- Local reliability: 24 requests at concurrency 8, p95 28.46 ms,
-  maximum 29.16 ms.
+- Clean-runtime local reliability: 24 requests at concurrency 8, p95 23.13 ms,
+  maximum 23.18 ms.
 - Malformed requests are isolated and the Worker remains healthy.
 - Worker stop/start recovery succeeds and removes its Unix Socket cleanly.
 - Ambient `NETOPYU_DSH_ALLOW_DESTRUCTIVE=1` cannot bypass an explicit

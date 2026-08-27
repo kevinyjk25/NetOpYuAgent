@@ -651,7 +651,10 @@ run_reliability() {
 }
 
 run_e2e() {
-  check_node && check_python && check_runtime || return 1
+  # The retirement gate must run from a clean checkout in CI. It validates
+  # the plugin and bridge directly and does not require an installed DSH Web
+  # runtime, settings file, Ollama model, or live network endpoint.
+  check_node && check_python || return 1
   runtime_env
   cd "$PROJECT_ROOT" || return 1
   printf '1/7 Python full suite\n'
