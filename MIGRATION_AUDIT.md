@@ -20,13 +20,14 @@ architecture audit prevents retired imports and paths from returning.
 - GitHub Actions runs the same clean-checkout DSH-only retirement gate; no
   retired scripts, runtime installation, Ollama model or network endpoint is
   required.
-- Retained DSH/domain suite: 92 tests plus 4 profile subtests pass.
+- Retained DSH/domain suite: 97 tests plus 4 profile subtests pass.
 - DSH-only architecture audit: PASS.
 - Node syntax and the combined 39-tool HITL/A2A/memory/trajectory smoke: PASS.
 - Runtime skill projection: default 1, LAN 12, DC 5, WAN 1.
-- Retrieval gate: Recall@3 1.00, MRR 0.95, zero failures.
-- Clean-runtime local reliability: 24 requests at concurrency 8, p95 23.13 ms,
-  maximum 23.18 ms.
+- Retrieval gate: 100 balanced LAN cases, Recall@3 1.00, MRR 0.915,
+  zero failures.
+- Local reliability: 24 requests at concurrency 8, p95 23.81 ms,
+  maximum 24.15 ms.
 - Malformed requests are isolated and the Worker remains healthy.
 - Worker stop/start recovery succeeds and removes its Unix Socket cleanly.
 - Ambient `NETOPYU_DSH_ALLOW_DESTRUCTIVE=1` cannot bypass an explicit
@@ -34,8 +35,13 @@ architecture audit prevents retired imports and paths from returning.
   remains functional.
 - Retired harness surfaces are absent and the DSH launcher is present.
 - Reliability reports `real_network_actions: 0` and removes temporary state.
-- Port 3080 remains HTTP 200 under its existing externally managed process; it
-  was not stopped or restarted during source retirement.
+- Port 3080 is HTTP 200 and its PID is tracked by `scripts/netopyu-dsh`.
+  Launcher startup manages the optional persistent Python bridge Worker; the
+  complete gate verifies its Socket protocol and restart recovery in isolation.
+- P0 compatibility is explicit and tested: DSH `0.1.1-rc.2`, Node 22.19/24,
+  Python 3.11/3.12. CI runs all four Node/Python combinations.
+- Runtime dependencies are split into core, pragmatic, observability and
+  development groups.
 
 ## Removed surface
 

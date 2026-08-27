@@ -13,6 +13,67 @@ from retrieval.factory import skills_to_corpus, tools_to_corpus
 from .backend import open_backend, resolve_backend_mode
 
 
+# Curated network-operations vocabulary used only as retrieval evidence. It
+# does not execute tools or infer arguments. Keeping the aliases explicit makes
+# capability routing deterministic and reviewable across English/Chinese
+# operator language instead of relying on an LLM to guess the intended skill.
+_SKILL_ALIASES: dict[str, str] = {
+    "read_stored_result": (
+        "stored reference stored id durable result page pagination offset chunk "
+        "truncated output load more 大结果 落盘 分页 下一页 结果片段 继续读取"
+    ),
+    "alert_summary": (
+        "active alert warning critical event severity grouped alert table "
+        "告警汇总 监控告警 严重级别 告警统计 活跃告警"
+    ),
+    "app_access_troubleshoot": (
+        "cross domain application access troubleshoot LAN admission then DC permission "
+        "RADIUS NAC VLAN 802.1X application RBAC intermittent app failure "
+        "端到端应用访问 跨域诊断 LAN准入 DC权限 应用访问失败 时断时续"
+    ),
+    "branch_app_reachability": (
+        "branch office remote office branch to DC WAN circuit tunnel SLA headquarters "
+        "three domain LAN WAN DC transport fabric path "
+        "分支机构 分公司 总部应用 分支到DC 电路 隧道 传输路径 三域"
+    ),
+    "lan_new_employee_onboarding_access": (
+        "new employee new hire new starter onboarding provision access grant and verify "
+        "network admission application role RBAC "
+        "新员工 新入职 新人 开通权限 端到端开通 准入和应用权限"
+    ),
+    "lan_user_access_diagnose": (
+        "user identity network access denied LAN-side admission RADIUS NAC VLAN "
+        "classify LAN versus application permission "
+        "用户网络权限 身份准入 访问被拒绝 NAC策略 VLAN准入 LAN问题"
+    ),
+    "netflow_analysis": (
+        "netflow flow records traffic spike bandwidth top talkers source destination "
+        "network conversations bytes east west suspicious traffic "
+        "流量分析 异常流量 带宽占用 通信双方 流量排行"
+    ),
+    "prometheus_query": (
+        "prometheus promql metrics time series rate cpu memory packet loss interface errors "
+        "监控指标 时间序列 接口错误率 CPU指标 内存指标 丢包"
+    ),
+    "restart_service": (
+        "restart service rolling restart graceful restart recycle replicas controlled restart "
+        "滚动重启 逐个重启 服务重启 副本重启"
+    ),
+    "rollback_service": (
+        "rollback service roll back revert restore previous version undo deployment "
+        "回滚服务 恢复版本 撤销变更 上一版本 失败变更"
+    ),
+    "service_health": (
+        "service health healthy degraded status latency uptime replicas database api "
+        "服务健康 服务状态 延迟 副本 数据库健康 是否降级"
+    ),
+    "syslog_search": (
+        "syslog device logs router logs switch logs interface flap link down log severity "
+        "设备日志 网络日志 交换机日志 端口抖动 链路中断 日志过滤"
+    ),
+}
+
+
 def _bounded_int(value: Any, default: int, low: int, high: int) -> int:
     try:
         parsed = int(value)
@@ -99,6 +160,10 @@ async def search_capabilities(
             definitions = SkillLoader(mode=backend_mode, profile=profile_id).skill_definitions()
             for item in skills_to_corpus(definitions):
                 item = dict(item)
+                item["text"] = " ".join((
+                    item.get("text", ""),
+                    _SKILL_ALIASES.get(str(item.get("id", "")), ""),
+                )).strip()
                 item["id"] = f"skill:{item['id']}"
                 item["kind"] = "skill"
                 item["source"] = "netopyu-skill"

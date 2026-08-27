@@ -129,8 +129,17 @@ check_python() {
 }
 
 check_runtime() {
+  local installed_version
   [[ -x "$DSH_BIN" ]] || {
     fail 'DSH is not installed locally. Run: scripts/netopyu-dsh install'
+    return 1
+  }
+  installed_version="$("$DSH_BIN" --version 2>/dev/null | head -n 1)" || {
+    fail 'Unable to read the installed DSH version.'
+    return 1
+  }
+  [[ "$installed_version" == "$DSH_VERSION" ]] || {
+    fail "Installed DSH $installed_version does not match tested version $DSH_VERSION. Run: scripts/netopyu-dsh install"
     return 1
   }
   [[ -f "$DSH_HOME_DIR/settings.yaml" ]] || {
@@ -245,10 +254,17 @@ runtime_env() {
 
 worker_pid_is_running() {
   [[ -f "$WORKER_PID_FILE" ]] || return 1
-  local worker_pid
+  local worker_pid reported_pid
   worker_pid="$(<"$WORKER_PID_FILE")"
   [[ "$worker_pid" =~ ^[0-9]+$ ]] || return 1
-  kill -0 "$worker_pid" 2>/dev/null
+  if kill -0 "$worker_pid" 2>/dev/null; then
+    return 0
+  fi
+  # Same restricted-process fallback as the Web PID check, strengthened by a
+  # live Socket ping that reports the Worker's own PID.
+  worker_is_reachable || return 1
+  reported_pid="$(worker_reported_pid 2>/dev/null || true)"
+  [[ "$reported_pid" == "$worker_pid" ]]
 }
 
 worker_is_reachable() {
@@ -467,10 +483,18 @@ doctor() {
 
 pid_is_running() {
   [[ -f "$PID_FILE" ]] || return 1
-  local pid
+  local pid identity
   pid="$(<"$PID_FILE")"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  kill -0 "$pid" 2>/dev/null
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+  # Sandboxed operators may be allowed to inspect a process but not signal it,
+  # including `kill -0`. In that case accept only a strong lsof identity match:
+  # the PID must have files under this DSH runtime and own the configured port.
+  command -v lsof >/dev/null 2>&1 || return 1
+  identity="$(lsof -nP -p "$pid" 2>/dev/null || true)"
+  [[ "$identity" == *"$RUNTIME_ROOT"* && "$identity" == *"TCP $WEB_HOST:$WEB_PORT (LISTEN)"* ]]
 }
 
 port_is_listening() {
@@ -499,6 +523,9 @@ run_foreground() {
 
 start_background() {
   if pid_is_running; then
+    # Reconcile the companion Worker as well; an already-running Web process
+    # must not cause `start` to skip recovery of a missing bridge Worker.
+    start_worker || return 1
     printf 'NetOpYu DSH is already running (PID %s).\n' "$(<"$PID_FILE")"
     return 0
   fi

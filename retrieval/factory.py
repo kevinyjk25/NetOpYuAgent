@@ -194,9 +194,13 @@ def skills_to_corpus(skill_definitions: dict[str, dict[str, Any]]) -> list[dict[
         summary = defn.get("summary") if isinstance(defn.get("summary"), dict) else {}
         detail  = defn.get("detail")  if isinstance(defn.get("detail"),  dict) else {}
 
-        name        = defn.get("name")        or summary.get("name", "")        or ""
+        # SKILL.md parsing keeps the exact frontmatter values in `_std_*`.
+        # Prefer those for routing: `description` may also contain the full
+        # procedural body, which overwhelms short capability cards with common
+        # words and makes closely-related network workflows rank unpredictably.
+        name        = defn.get("_std_name")    or defn.get("name") or summary.get("name", "") or ""
         purpose     = defn.get("purpose")     or summary.get("purpose", "")     or ""
-        description = defn.get("description") or detail.get("description", "")  or ""
+        description = defn.get("_std_description") or defn.get("description") or detail.get("description", "") or ""
         tags        = list(defn.get("tags") or summary.get("tags") or detail.get("tags") or [])
         parameters  = defn.get("parameters")  or detail.get("parameters", {})   or {}
 

@@ -12,7 +12,42 @@ concurrency:
 
 jobs:
   retirement:
-    name: DSH retirement gate
+    name: Python ${{ matrix.python }} / Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+        node: ["22.19.0", "24"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Create the project environment
+        run: |
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements-dev.txt
+
+      - name: Run the complete local DSH-only gate
+        env:
+          NETOPYU_DSH_BACKEND: mock
+        run: scripts/netopyu-dsh retirement
+
+  pragmatic-dependencies:
+    name: Pragmatic dependency contract
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -23,20 +58,16 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-*.txt
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "24"
+      - name: Install all runtime dependency groups
+        run: python -m pip install -r requirements.txt
 
-      - name: Create the project environment
+      - name: Import pragmatic and observability adapters
         run: |
-          python -m venv .venv
-          .venv/bin/python -m pip install --upgrade pip
-          .venv/bin/python -m pip install \
-            pydantic httpx pyyaml pytest pytest-asyncio
-
-      - name: Run the complete local DSH-only gate
-        env:
-          NETOPYU_DSH_BACKEND: mock
-        run: scripts/netopyu-dsh retirement
+          python -c "import netmiko, napalm, nornir"
+          python -c "import opentelemetry.trace, opentelemetry.sdk.trace"
+          NETOPYU_DSH_BACKEND=pragmatic python -c \
+            "from tools.loader import ToolLoader; assert ToolLoader(mode='pragmatic').build_callables()"

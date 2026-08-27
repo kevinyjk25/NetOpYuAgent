@@ -6,7 +6,8 @@
   "main": "./src/index.js",
   "files": [
     "src/*.js",
-    "cordis.patch.yml"
+    "cordis.patch.yml",
+    "compatibility.json"
   ],
   "dsh": {
     "bundle": {

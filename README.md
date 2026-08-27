@@ -49,6 +49,18 @@ scripts/netopyu-dsh start
 
 Open <http://127.0.0.1:3080/>.
 
+For mock-mode development and CI without device drivers:
+
+```bash
+pip install -r requirements-dev.txt
+```
+
+Dependency groups are intentionally separated: `requirements-core.txt` for
+the DSH bridge, `requirements-pragmatic.txt` for real network drivers,
+`requirements-observability.txt` for tracing, and `requirements-dev.txt` for
+the test gate. The supported runtime matrix is recorded in
+`dsh-plugin-netopyu/compatibility.json`.
+
 For lower-latency network sessions:
 
 ```bash
@@ -77,6 +89,10 @@ scripts/netopyu-dsh retirement
 The launcher stores mutable runtime state under
 `~/Library/Application Support/NetOpYuAgent/dsh-runtime` by default.
 Use `NETOPYU_DSH_RUNTIME` to override it.
+
+The launcher PID file and runtime/port identity are cross-checked. Status still
+works in restricted environments where process inspection is allowed but
+`kill -0` is denied.
 
 ## Safety
 
@@ -132,3 +148,8 @@ remain absent.
 
 See `DSH_MIGRATION.md` for detailed runtime behavior and
 `MIGRATION_AUDIT.md` for the latest evidence.
+
+The next architecture layer is the deterministic L1 Network Runtime described
+in `NETWORK_RUNTIME.md`. DSH remains L0; network parameter compilation,
+preflight, plan-bound execution, independent verification and rollback belong
+to L1.
