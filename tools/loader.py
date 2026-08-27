@@ -17,7 +17,6 @@ Usage (from the DSH backend)
     loader = ToolLoader(mode="pragmatic")          # or "mock"
     callables = loader.build_callables()           # {name: async_fn}
     metadata  = loader.build_metadata()            # {name: {description, parameters, ...}}
-    skill_defs = loader.skill_definitions()        # {skill_id: {...}} for SkillCatalogService
 """
 from __future__ import annotations
 
@@ -52,12 +51,12 @@ class ToolLoader:
         mode + profile. Includes: common tools + profile business tools.
 
         Does NOT include read_stored_result/process_stored_chunks — these are
-        injected later by build_services() after ToolResultStore is initialised.
+        injected later by the DSH backend after ToolResultStore is initialised.
 
         mock mode      → common + profile.tool_callables (business)
         pragmatic mode → common + real pragmatic tools (profile-independent
                          for now; pragmatic device tooling isn't split by
-                         profile yet — tracked in TODO.md)
+                         profile yet)
         """
         callables: dict[str, Callable] = {}
 
@@ -81,8 +80,7 @@ class ToolLoader:
         Return {tool_name: {description, parameters, returns, hitl, tags}}
         for all tools active in this mode + profile.
 
-        This dict is the ONLY source used to build the agent's tool section
-        in the system prompt. No tool name is hardcoded in llm_engine.py.
+        This dictionary is the canonical source for DSH tool projection.
 
         Always includes the common builtin tools (read_stored_result etc.);
         adds the active profile's business tool metadata (mock) or the
@@ -106,27 +104,6 @@ class ToolLoader:
             self._mode, self._profile_id, len(meta),
         )
         return meta
-
-    def skill_definitions(self) -> dict[str, dict[str, Any]]:
-        """DEPRECATED — use skills.SkillLoader(mode).skill_definitions() instead.
-
-        Tools module should not depend on skills module. This method is a
-        backwards-compatible shim that forwards to SkillLoader; existing
-        callers will keep working but emit a deprecation warning.
-
-        Will be removed in a future release.
-        """
-        import warnings
-        warnings.warn(
-            "ToolLoader.skill_definitions() is deprecated. "
-            "Use skills.SkillLoader(mode).skill_definitions() — tools should "
-            "not import skills.",
-            DeprecationWarning, stacklevel=2,
-        )
-        # Forward without breaking — but go through SkillLoader so the
-        # actual skill-loading code lives in one place.
-        from skills.loader import SkillLoader  # ← DEPRECATED SHIM: see method docstring
-        return SkillLoader(mode=self._mode, profile=self._profile_id).skill_definitions()
 
     def tool_section_for_prompt(self) -> str:
         """

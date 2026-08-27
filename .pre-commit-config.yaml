@@ -1,23 +1,12 @@
-# pre-commit framework config — install once per dev machine:
-#   pip install pre-commit
-#   pre-commit install
-#
-# Runs audits before each `git commit` so bad code never enters the
-# repo locally. Same checks the CI enforces, just earlier.
-#
-# `pre-commit run --all-files` runs against the whole repo on demand.
+# Install once per development machine with `pre-commit install`.
+# The local hook intentionally runs the same retirement gate as CI.
 
 repos:
   - repo: local
     hooks:
-      - id: static-audits
-        name: Static audits (syntax + imports + wiring + directive parsing)
-        # We invoke the precheck script with --audits so the SAME entry
-        # point runs locally and in CI. Diverging the two leads to
-        # "passes locally, fails CI" frustration.
-        entry: bash scripts/precheck.sh --audits
+      - id: retirement-gate
+        name: NetOpYu DSH retirement gate
+        entry: scripts/netopyu-dsh retirement
         language: system
-        # Audits read .py files anywhere; trigger on any python change.
-        files: \.py$
-        # Run once for the whole commit, not per-file.
+        always_run: true
         pass_filenames: false

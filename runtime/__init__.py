@@ -1,6 +1,5 @@
-"""DSH-compatible large-result context budgeting primitives."""
-from .context_budget import BudgetConfig, ContextBudgetManager, DeviceRef, ResourceRef, ToolResultStore
+"""DSH-compatible durable tool-result storage."""
 
-__all__ = [
-    "ContextBudgetManager", "BudgetConfig", "ToolResultStore", "ResourceRef", "DeviceRef",
-]
+from .tool_results import ToolResultStore
+
+__all__ = ["ToolResultStore"]

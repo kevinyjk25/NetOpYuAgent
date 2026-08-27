@@ -261,7 +261,7 @@ async def build_tool_retriever_async(
 ) -> Retriever:
     """Async batch-indexed tool retriever.
 
-    Use this from FastAPI startup or any async context — it embeds in batches
+    Use this from DSH domain startup or any async context — it embeds in batches
     with bounded concurrency, avoiding the thread-per-item cost of the sync
     path. Drops indexing time on a 30-tool corpus from ~5-10s to ~1-2s.
 

@@ -56,13 +56,17 @@ def _attach_common_tools(
     metadata: dict[str, dict[str, Any]],
     sources: dict[str, str],
 ) -> Any:
-    """Bind the legacy large-result paging tools to DSH's durable store."""
+    """Bind the shared large-result paging tools to DSH's durable store."""
     from runtime import ToolResultStore
     from tools import make_read_stored_result_tool
     from tools.builtin.registry import TOOLS as BUILTIN_TOOLS
 
     configured = os.environ.get("NETOPYU_DSH_TOOL_RESULT_STORE")
-    database = Path(configured).expanduser() if configured else Path("data/tool_results.db")
+    database = (
+        Path(configured).expanduser()
+        if configured
+        else Path("data/tool_results.sqlite")
+    )
     database.parent.mkdir(parents=True, exist_ok=True)
     store = ToolResultStore(db_path=str(database))
     read_result, process_chunks = make_read_stored_result_tool(store)

@@ -1,12 +1,12 @@
 """
 evaluation/cli.py
 -----------------
-CLI runner — independent of the FastAPI app. Useful for:
+Offline CLI runner, independent of the DSH Web process. Useful for:
   - CI checks: `python -m evaluation.cli --golden data/golden_set.jsonl`
   - Pre-merge gates: `--fail-below-mrr 0.5`
   - Comparing backends: `--backend bm25` then `--backend hybrid`
 
-Doesn't import main.py or webui — only depends on the retrieval framework
+It depends only on the retrieval framework
 and the eval module.
 """
 from __future__ import annotations

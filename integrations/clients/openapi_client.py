@@ -45,7 +45,7 @@ Usage
     # Execute a specific operation
     result = await client.call("GET_/devices/{device_id}", {"device_id": "ap-01"})
 
-    # Get as tool_registry dict for AgentRuntimeLoop
+    # Get as a callable dictionary for the DSH bridge.
     registry = client.as_tool_registry()
 """
 from __future__ import annotations
@@ -477,7 +477,7 @@ class OpenAPIClient:
         return json.dumps({"status": "ok", "operation": op.operation_id, "args": args}, indent=2)
 
     def as_tool_registry(self) -> dict[str, Any]:
-        """Return tool_registry dict for AgentRuntimeLoop."""
+        """Return a callable dictionary for the DSH bridge."""
         registry = {}
         for op in self._operations:
             tname = op.tool_name()

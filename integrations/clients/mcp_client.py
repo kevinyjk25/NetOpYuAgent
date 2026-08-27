@@ -28,7 +28,7 @@ MCP transport modes supported
 
 Integration with existing system
 ----------------------------------
-MCPClient feeds into ToolRouter, which is called by AgentRuntimeLoop
+MCPClient feeds into ToolRouter, which is called by the DSH Python bridge
 and TaskExecutor. No changes needed to any existing module.
 
 Usage
@@ -505,7 +505,7 @@ class MCPClient:
 
     def as_tool_registry(self) -> dict[str, Any]:
         """
-        Return a dict compatible with AgentRuntimeLoop's tool_registry.
+        Return a callable dictionary compatible with the DSH bridge.
         Each value is an async callable(args: dict) -> str.
         """
         registry = {}

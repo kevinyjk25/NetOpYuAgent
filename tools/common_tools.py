@@ -22,6 +22,8 @@ import json
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from runtime.tool_results import normalize_result_reference
+
 
 def _ts(offset_minutes: int = 0) -> str:
     """UTC timestamp 'Mon DD HH:MM:SS', offset minutes into the past."""
@@ -50,8 +52,7 @@ def make_read_stored_result_tool(tool_store):
             return "[Error: ref_id is required]"
 
         # The LLM may copy the full label and its trailing preview text.
-        from runtime.context_budget import _normalise_result_ref
-        ref_id = _normalise_result_ref(ref_id)
+        ref_id = normalize_result_reference(ref_id)
 
         chunk = tool_store.read(ref_id, offset=offset, length=length)
         if chunk is None:
@@ -118,10 +119,9 @@ def make_read_stored_result_tool(tool_store):
         if not ref_id:
             return "[Error: ref_id is required]"
 
-        from runtime.context_budget import _normalise_result_ref
-        ref_id = _normalise_result_ref(ref_id)
+        ref_id = normalize_result_reference(ref_id)
 
-        full = tool_store._store.get(ref_id)
+        full = tool_store._store.get(ref_id, None)
         if full is None:
             return f"[Error: no stored result for ref_id={ref_id!r}]"
 

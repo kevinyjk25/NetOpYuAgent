@@ -1,16 +1,15 @@
 """
 tools/
 ──────
-Common (profile-independent) tool infrastructure for the agent framework.
+Common profile-independent tool infrastructure for the DSH domain bridge.
 
 Business tools live in the profiles/ package (profiles/lan, profiles/dc, …),
 NOT here. This package holds only what every profile shares:
 
 Entry point: tools.loader.ToolLoader
   ToolLoader(mode="mock" | "pragmatic", profile="default" | "lan" | "dc")
-    .build_callables()           -> {name: async_fn}   (used by runtime loop)
-    .build_metadata()            -> {name: {...}}       (used by llm_engine prompt)
-    .tool_section_for_prompt()   -> str                 (injected into system prompt)
+    .build_callables()           -> {name: async_fn}
+    .build_metadata()            -> {name: {...}}
 
 Common implementation files:
   tools/common_tools.py          — profile-independent tools (read_stored_result,
