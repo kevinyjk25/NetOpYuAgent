@@ -48,7 +48,7 @@ export async function resolvePython(projectRoot) {
   }
 }
 
-export async function callBridge({ projectRoot, python, profile, command, tool, args, signal, includeDestructive = false, allowDestructive = false, correlationId }) {
+export async function callBridge({ projectRoot, python, profile, command, tool, args, signal, includeDestructive = false, allowDestructive = false, correlationId, sessionId, l0SkillId }) {
   const requestId = randomUUID()
   const bridgeCorrelationId = String(correlationId ?? requestId)
   const workerSocket = process.env.NETOPYU_DSH_WORKER_SOCKET
@@ -56,7 +56,8 @@ export async function callBridge({ projectRoot, python, profile, command, tool, 
     try {
       return await callPersistentWorker(workerSocket, {
         id: requestId, correlation_id: bridgeCorrelationId,
-        profile, command, tool, args: args ?? {},
+        profile, command, tool, args: args ?? {}, session_id: sessionId,
+        l0_skill_id: l0SkillId,
         include_destructive: includeDestructive,
         allow_destructive: allowDestructive,
       }, signal)
@@ -66,6 +67,8 @@ export async function callBridge({ projectRoot, python, profile, command, tool, 
   }
   const commandArgs = ['-m', 'dsh_adapter.cli', command, '--profile', profile]
   if (tool !== undefined) commandArgs.push('--tool', tool)
+  if (command === 'runtime-prepare' && sessionId !== undefined) commandArgs.push('--session', String(sessionId))
+  if (command === 'runtime-prepare' && l0SkillId !== undefined) commandArgs.push('--l0-skill', String(l0SkillId))
   if (command === 'manifest' && includeDestructive) commandArgs.push('--include-destructive')
   const child = spawn(python, commandArgs, {
     cwd: projectRoot,
@@ -109,5 +112,3 @@ function callPersistentWorker(socketPath, request, signal) {
     })
   })
 }
-
-

@@ -28,6 +28,11 @@ from tools.common_tools import _ts
 
 logger = logging.getLogger(__name__)
 
+# Durable for the lifetime of the local simulator process and read through a
+# separate status callable. Network Runtime verification never trusts the
+# mutating function's human success message.
+_MOCK_OPERATION_STATE: dict[tuple[str, str], dict[str, Any]] = {}
+
 
 async def syslog_search(args: dict[str, Any]) -> str:
     """
@@ -275,8 +280,10 @@ async def service_health(args: dict[str, Any]) -> str:
     """Check service health endpoint — small, returned inline."""
     service = args.get("service", "payments-service")
     await asyncio.sleep(0.01)
-    statuses = ["healthy", "degraded", "healthy", "healthy"]
-    s = random.choice(statuses)
+    # Deterministic simulator state: fault injection belongs in the Network
+    # Runtime test harness, not in verification reads that could randomly
+    # turn the same approved plan into success or failure.
+    s = "healthy"
     return (
         f"Health check: {service}\n"
         f"  Status:      {s}\n"
@@ -353,6 +360,14 @@ def _apply_config_lines_to_state(device_id: str, config_lines: list[str]) -> dic
     overlay = _DEVICE_STATE.setdefault(device_id, {})
     recognised: dict[str, Any] = {}
 
+    def ntp_servers() -> list[str]:
+        if "ntp_servers" not in overlay:
+            import hashlib as _hashlib
+
+            seed = int(_hashlib.md5(device_id.encode()).hexdigest()[:4], 16)
+            overlay["ntp_servers"] = [] if seed % 4 == 0 else ["10.0.1.5", "10.0.1.6"]
+        return overlay["ntp_servers"]
+
     for raw in config_lines:
         line = (raw or "").strip().lower()
         if not line:
@@ -367,14 +382,25 @@ def _apply_config_lines_to_state(device_id: str, config_lines: list[str]) -> dic
                 recognised["radius_timeout"] = int(m.group(1))
                 continue
 
-        # ntp server <ip>    →    ntp_configured = True
+        # Preserve the concrete server list so the Network Runtime can prove
+        # the exact approved command through an independent config read.
         if line.startswith("ntp server "):
+            server = line.removeprefix("ntp server ").strip()
+            servers = ntp_servers()
+            if server and server not in servers:
+                servers.append(server)
             overlay["ntp_configured"] = True
-            recognised["ntp_configured"] = True
+            recognised["ntp_servers"] = list(servers)
             continue
         if line.startswith("no ntp server"):
-            overlay["ntp_configured"] = False
-            recognised["ntp_configured"] = False
+            server = line.removeprefix("no ntp server").strip()
+            servers = ntp_servers()
+            if server:
+                overlay["ntp_servers"] = [item for item in servers if item != server]
+            else:
+                overlay["ntp_servers"] = []
+            overlay["ntp_configured"] = bool(overlay["ntp_servers"])
+            recognised["ntp_servers"] = list(overlay["ntp_servers"])
             continue
 
         # access-list / ip access-group — heuristic: any ACL line applied
@@ -517,6 +543,11 @@ async def get_device_config(args: dict[str, Any]) -> str:
         ntp_missing = not overlay["ntp_configured"]
     if "vlan_acl_applied" in overlay:
         vlan_acl_ok = overlay["vlan_acl_applied"]
+    ntp_servers = overlay.get("ntp_servers")
+    if ntp_servers is None:
+        ntp_servers = [] if ntp_missing else ["10.0.1.5", "10.0.1.6"]
+    ntp_block = "".join(f"ntp server {server}\n" for server in ntp_servers)
+    extra_block = "".join(f"{line}\n" for line in overlay.get("_unparsed_lines", []))
 
     if dev["type"] == "wireless_ap":
         if section == "radius":
@@ -526,16 +557,17 @@ async def get_device_config(args: dict[str, Any]) -> str:
                     + ("   ! WARNING: recommend <=3s\n" if radius_timeout > 3 else "\n"))
         if section == "ntp":
             return (f"# NTP config for {device_id}\n"
-                    + ("! NTP NOT CONFIGURED\n" if ntp_missing else "ntp server 10.0.1.5\nntp server 10.0.1.6\n"))
+                    + ("! NTP NOT CONFIGURED\n" if not ntp_servers else ntp_block))
         return (
             f"! Configuration for {device_id} ({dev['model']}) — site {dev['site']}\n"
             f"hostname {device_id}\n!\n"
             f"interface GigabitEthernet0\n ip address {ip} 255.255.255.0\n no shutdown\n!\n"
             f"dot11 ssid corp-wifi\n vlan 20\n authentication key-management wpa version 2\n!\n"
-            + ("! NTP NOT CONFIGURED — clock drift risk!\n" if ntp_missing else f"ntp server 10.0.1.5\nntp server 10.0.1.6\n")
+            + ("! NTP NOT CONFIGURED — clock drift risk!\n" if not ntp_servers else ntp_block)
             + f"!\nradius-server host 10.0.1.100 auth-port 1812\n timeout {radius_timeout}"
             + ("   ! WARNING: recommend <=3s\n" if radius_timeout > 3 else "\n")
             + ("!\n! ACL NOT APPLIED to mgmt VLAN — security gap!\n" if not vlan_acl_ok else "!\nip access-list extended MGMT\n permit tcp 10.0.0.0 0.255.255.255 any\n deny ip any any log\n")
+            + (f"!\n{extra_block}" if extra_block else "")
             + "!\nend"
         )
     if dev["type"] == "switch":
@@ -543,10 +575,11 @@ async def get_device_config(args: dict[str, Any]) -> str:
             f"! Configuration for {device_id} ({dev['model']})\n"
             f"hostname {device_id}\n!\nspanning-tree mode rapid-pvst\n!\n"
             f"interface Vlan10\n ip address {ip} 255.255.255.0\n!\n"
-            f"ntp server 10.0.1.5\nntp server 10.0.1.6\n!\n"
+            f"{ntp_block}!\n"
             f"radius-server host 10.0.1.100 timeout 3\n!\nend"
+            + (f"\n{extra_block}" if extra_block else "")
         )
-    return f"! Configuration for {device_id}\nhostname {device_id}\n!\nend"
+    return f"! Configuration for {device_id}\nhostname {device_id}\n!\n{extra_block}end"
 
 
 # ---------------------------------------------------------------------------
@@ -872,6 +905,8 @@ async def push_config(args: dict[str, Any]) -> str:
     dry_run    = bool(args.get("dry_run", False))
     await asyncio.sleep(0.1)
     n_lines = len([l for l in config_text.split("\n") if l.strip()]) or 12
+    config_lines = [line for line in config_text.split("\n") if line.strip()]
+    state_changes = {} if dry_run else _apply_config_lines_to_state(device_id, config_lines)
     mode = "DRY RUN" if dry_run else "APPLIED"
     return (
         f"# push_config — {device_id} ({mode})\n"
@@ -879,6 +914,7 @@ async def push_config(args: dict[str, Any]) -> str:
         f"  Config lines processed: {n_lines}\n"
         f"  Errors: 0  |  Warnings: 0\n"
         f"# Status: {'Validation complete — no changes written' if dry_run else 'Applied to running-config'}\n"
+        f"# State evidence: {json.dumps(state_changes, sort_keys=True)}\n"
         f"# Note: Diff vs startup-config available via diff_device_config"
     )
 
@@ -888,6 +924,9 @@ async def rollback_deploy(args: dict[str, Any]) -> str:
     deploy_id = args.get("deploy_id", "unknown")
     scope     = args.get("scope", "all")
     await asyncio.sleep(0.1)
+    _MOCK_OPERATION_STATE[("rollback_deploy", deploy_id)] = {
+        "rolled_back": True, "scope": scope, "services_healthy": True,
+    }
     return (
         f"# rollback_deploy — {deploy_id} (scope={scope})\n"
         f"# {'─'*60}\n"
@@ -903,6 +942,9 @@ async def drain_node(args: dict[str, Any]) -> str:
     node_id    = args.get("node_id", "unknown")
     grace_s    = int(args.get("grace_period_s", 60))
     await asyncio.sleep(0.1)
+    _MOCK_OPERATION_STATE[("drain_node", node_id)] = {
+        "drained": True, "schedulable": False, "pending": 0, "failed": 0,
+    }
     return (
         f"# drain_node — {node_id} (grace={grace_s}s)\n"
         f"# {'─'*60}\n"
@@ -918,6 +960,9 @@ async def failover(args: dict[str, Any]) -> str:
     resource = args.get("resource_id", "unknown")
     target   = args.get("target", "auto-selected-replica")
     await asyncio.sleep(0.1)
+    _MOCK_OPERATION_STATE[("failover", resource)] = {
+        "primary": target, "healthy": True, "replication_lag_seconds": 0.2,
+    }
     return (
         f"# failover — {resource} → {target}\n"
         f"# {'─'*60}\n"
@@ -933,6 +978,9 @@ async def delete_resource(args: dict[str, Any]) -> str:
     resource = args.get("resource_id", "unknown")
     force    = bool(args.get("force", False))
     await asyncio.sleep(0.1)
+    _MOCK_OPERATION_STATE[("delete_resource", resource)] = {
+        "exists": False, "force": force,
+    }
     return (
         f"# delete_resource — {resource} (force={force})\n"
         f"# {'─'*60}\n"
@@ -940,6 +988,27 @@ async def delete_resource(args: dict[str, Any]) -> str:
         f"# Status: Resource deleted\n"
         f"# Note: Operation is irreversible without backup"
     )
+
+
+async def mock_operation_status(args: dict[str, Any]) -> str:
+    """Independent structured read for the local destructive-operation lab."""
+    await asyncio.sleep(0)
+    resource_id = str(
+        args.get("resource_id") or args.get("deploy_id") or args.get("node_id") or ""
+    ).strip()
+    operation = str(args.get("operation") or "").strip()
+    if not resource_id:
+        return "[Error: mock_operation_status requires a resource identifier.]"
+    names = (operation,) if operation else (
+        "rollback_deploy", "drain_node", "failover", "delete_resource",
+    )
+    return json.dumps({
+        "resource_id": resource_id,
+        "operations": {
+            name: _MOCK_OPERATION_STATE.get((name, resource_id), {"observed": False})
+            for name in names if name
+        },
+    }, sort_keys=True)
 
 
 async def diff_device_config(args: dict[str, Any]) -> str:
@@ -987,7 +1056,7 @@ _LAN_USERS = [
     {"id": "bob", "name": "Bob Ramirez", "dept": "sales", "status": "active"},
     {"id": "carol", "name": "Carol Singh", "dept": "support", "status": "active"},
     {"id": "dave", "name": "Dave Okafor", "dept": "finance", "status": "active"},
-    {"id": "erin", "name": "Erin Lopez", "dept": "finance", "status": "suspended"},
+    {"id": "erin", "name": "Erin Lopez", "dept": "finance", "status": "active"},
 ]
 
 _LAN_USER_ACCESS: dict[str, dict[str, Any]] = {

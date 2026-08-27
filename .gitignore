@@ -11,6 +11,7 @@ __pycache__/
 .venv/
 data/agents/
 data/dsh_hitl.sqlite
+data/network_runtime.sqlite
 
 # Generated local test/runtime artifacts
 *.sqlite-shm

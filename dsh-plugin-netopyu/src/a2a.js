@@ -115,7 +115,7 @@ export class NetOpYuA2AProvider {
   }
 }
 
-export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, toolGuard) {
+export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, toolGuard, bindingByToken) {
   const output = {
     schema: { type: 'string' },
     render: (_args, value) => [{ type: 'text', text: value }],
@@ -150,6 +150,10 @@ export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, t
           capability: { type: 'string', description: 'Optional advertised peer skill, tag, or capability query.' },
         },
         required: ['description', 'prompt'],
+        anyOf: [
+          { required: ['target'] },
+          { required: ['capability'] },
+        ],
         additionalProperties: false,
       },
       output,
@@ -202,7 +206,8 @@ export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, t
       output,
       presentCall: args => ({ card: 'generic', title: `${args.decision} remote A2A continuation`, kind: 'write', rawInput: JSON.stringify(args) }),
       async execute(args, execution) {
-        if (!toolGuard.consume(execution.token, 'netopyu_a2a_hitl_resume')) {
+        const binding = bindingByToken.get(execution.token)
+        if (!toolGuard.consume(execution.token, 'netopyu_a2a_hitl_resume', binding?.bindingHash)) {
           throw new Error('netopyu_a2a_hitl_resume requires a fresh one-shot DSH approval')
         }
         const continuation = hitlStore.a2aContinuation(args.continuation_id)
@@ -243,5 +248,3 @@ export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, t
     },
   ]
 }
-
-

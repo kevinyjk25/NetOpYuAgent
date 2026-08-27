@@ -24,6 +24,7 @@ _CALLABLES = {
     "dc_fabric_path_trace":  _tools.dc_fabric_path_trace,
     "dc_evpn_route_lookup":  _tools.dc_evpn_route_lookup,
     "dc_config_push":        _tools.dc_config_push,
+    "dc_get_applied_config": _tools.dc_get_applied_config,
     "dc_list_apps":             _tools.dc_list_apps,
     "dc_get_app_acl":           _tools.dc_get_app_acl,
     "dc_check_user_app_access": _tools.dc_check_user_app_access,

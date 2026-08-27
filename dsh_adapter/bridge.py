@@ -6,13 +6,16 @@ import asyncio
 import os
 from typing import Any
 
-from .backend import open_backend
+from .backend import open_backend, resolve_backend_mode
+from network_runtime.engine import NetworkRuntime, default_journal_path
+from network_runtime.l0_skills import REGISTRY as L0_SKILLS
+from network_runtime.workflows import WorkflowRuntime
 
 
 _INTEGER_KEYS = {
-    "flows", "grace_period_s", "lines", "minutes", "range_minutes", "top_n",
+    "flows", "grace_period_s", "length", "lines", "minutes", "offset", "range_minutes", "top_n", "vni",
 }
-_BOOLEAN_KEYS = {"dry_run", "force", "graceful"}
+_BOOLEAN_KEYS = {"dry_run", "force", "graceful", "rolling"}
 _ARRAY_KEYS = {"config_lines", "device_ids"}
 _JSON_KEYS = {"changes"}
 
@@ -33,7 +36,7 @@ def _parameter_schema(name: str, definition: Any, required: bool) -> dict[str, A
     elif name in _ARRAY_KEYS:
         schema = {"type": "array", "items": {"type": "string"}}
     elif name in _JSON_KEYS:
-        schema = {}
+        schema = {"type": "object"}
     else:
         schema = {"type": "string"}
     schema["description"] = description
@@ -49,6 +52,7 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
     app_config = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
     editable_tools = app_config.tools.editable_hitl_tools
     tools: list[dict[str, Any]] = []
+    l0_skills: dict[str, dict[str, Any]] = {}
     try:
         for name, metadata in sorted(backend.metadata.items()):
             action_type = str(metadata.get("action_type", "read_only"))
@@ -63,7 +67,12 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
             editable_parameters = [
                 key for key in editable_tools.get(name, []) if key in parameters
             ]
-            tools.append({
+            l0_contract = L0_SKILLS.for_tool(backend.profile_id, name) if destructive else None
+            if destructive and l0_contract is None:
+                raise RuntimeError(
+                    f"mutating tool {name!r} has no Network L0 Skill contract; fail closed"
+                )
+            declaration = {
                 "name": name,
                 "description": str(metadata.get("description", name)),
                 "parameters": parameters,
@@ -72,13 +81,22 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
                 "editable_parameters": editable_parameters,
                 "source": backend.sources.get(name, "unknown"),
                 "tags": list(metadata.get("tags", [])),
-            })
+            }
+            if l0_contract is not None:
+                declaration["l0_skill_id"] = l0_contract.skill_id
+                declaration["l0_skill_version"] = l0_contract.version
+                declaration["l0_contract_hash"] = l0_contract.contract_hash
+                declaration["intent_kind"] = l0_contract.intent_kind
+                declaration["execution_boundary"] = "network_l0_skill"
+                l0_skills[l0_contract.skill_id] = l0_contract.to_dict()
+            tools.append(declaration)
         return {
             "profile": backend.profile_id,
             "display_name": "Enterprise LAN Agent" if backend.profile_id == "lan" else backend.profile_id,
             "description": f"NetOpYu {backend.profile_id} tools via {backend.mode} backend",
             "backend": backend.report,
             "tools": tools,
+            "l0_skills": [l0_skills[key] for key in sorted(l0_skills)],
         }
     finally:
         await backend.close()
@@ -87,6 +105,15 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
 def build_manifest(profile_id: str = "lan", *, include_destructive: bool = False) -> dict[str, Any]:
     """Return DSH-facing declarations, including dynamically discovered tools."""
     return asyncio.run(_build_manifest(profile_id, include_destructive=include_destructive))
+
+
+def build_l0_skill_catalog(profile_id: str = "lan") -> dict[str, Any]:
+    manifest = build_manifest(profile_id, include_destructive=True)
+    return {
+        "profile": manifest["profile"],
+        "backend": manifest["backend"],
+        "l0_skills": manifest["l0_skills"],
+    }
 
 
 async def backend_report(profile_id: str = "lan") -> dict[str, Any]:
@@ -104,32 +131,98 @@ async def invoke_tool(
     *,
     allow_destructive: bool | None = None,
 ) -> str:
-    """Invoke one profile tool, retaining a hard gate around mutating operations."""
+    """Invoke a strictly validated read.
+
+    ``allow_destructive`` is retained only for wire compatibility.  It can no
+    longer bypass the plan/approval/evidence runtime.
+    """
+    del allow_destructive
+    return await NetworkRuntime().invoke_read(profile_id, tool_name, arguments)
+
+
+async def prepare_network_plan(
+    profile_id: str,
+    tool_name: str,
+    arguments: dict[str, Any],
+    *,
+    session_id: str | None = None,
+    l0_skill_id: str | None = None,
+) -> dict[str, Any]:
+    return await NetworkRuntime().prepare(
+        profile_id, tool_name, arguments,
+        session_id=session_id, l0_skill_id=l0_skill_id,
+    )
+
+
+async def execute_network_plan(arguments: dict[str, Any], *, allow_destructive: bool) -> dict[str, Any]:
+    required = {
+        "plan_id", "plan_hash", "execution_nonce", "approval_request_id", "approval_actor",
+    }
+    missing = sorted(name for name in required if not str(arguments.get(name, "")).strip())
+    if missing:
+        raise ValueError("runtime execute missing fields: " + ", ".join(missing))
+    outcome = await NetworkRuntime().execute(
+        plan_id=str(arguments["plan_id"]),
+        plan_hash=str(arguments["plan_hash"]),
+        execution_nonce=str(arguments["execution_nonce"]),
+        approval_request_id=str(arguments["approval_request_id"]),
+        approval_actor=str(arguments["approval_actor"]),
+        allow_destructive=allow_destructive,
+    )
+    return outcome.to_dict()
+
+
+def inspect_network_plan(plan_id: str) -> dict[str, Any]:
+    return NetworkRuntime().inspect(plan_id)
+
+
+def audit_network_plan(plan_id: str) -> dict[str, Any]:
+    return NetworkRuntime().audit(plan_id)
+
+
+def recent_network_plans(limit: int = 20) -> list[dict[str, Any]]:
+    return NetworkRuntime().recent(limit)
+
+
+def reject_network_plan(arguments: dict[str, Any]) -> dict[str, Any]:
+    return NetworkRuntime().reject(
+        plan_id=str(arguments.get("plan_id", "")),
+        plan_hash=str(arguments.get("plan_hash", "")),
+        reason=str(arguments.get("reason", "approval was not granted")),
+    )
+
+
+def start_network_workflow(profile_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    with WorkflowRuntime(default_journal_path()) as runtime:
+        return runtime.start(
+            session_id=str(arguments.get("session_id", "")),
+            profile=profile_id,
+            mode=resolve_backend_mode(),
+            skill_name=str(arguments.get("skill_name", "")),
+        )
+
+
+async def observe_network_workflow(profile_id: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    session_id = str(arguments.get("session_id", ""))
+    tool_name = str(arguments.get("tool_name", ""))
+    tool_arguments = arguments.get("tool_arguments") or {}
+    if not session_id or not tool_name or not isinstance(tool_arguments, dict):
+        raise ValueError("workflow observation requires session_id, tool_name and object tool_arguments")
     backend = await open_backend(profile_id)
     try:
-        tool = backend.callables.get(tool_name)
         metadata = backend.metadata.get(tool_name)
-        if tool is None or metadata is None:
-            raise KeyError(f"unknown tool {tool_name!r} in {backend.mode} backend")
-
-        action_type = str(metadata.get("action_type", "read_only"))
-        destructive = bool(metadata.get("hitl")) or action_type != "read_only"
-        destructive_allowed = (
-            os.environ.get("NETOPYU_DSH_ALLOW_DESTRUCTIVE") == "1"
-            if allow_destructive is None
-            else allow_destructive
-        )
-        if destructive and not destructive_allowed:
-            raise PermissionError(
-                f"{tool_name} is {action_type} and remains disabled until the durable HITL plugin is active"
-            )
-        result = await tool(arguments)
-        rendered = result if isinstance(result, str) else str(result)
-        # Preserve the legacy context-budget contract under DSH: large tool
-        # payloads become durable references that the two common paging tools
-        # can read in later bridge processes. Never re-store paging output.
-        if tool_name not in {"read_stored_result", "process_stored_chunks"}:
-            rendered = backend._tool_store.store(tool_name, rendered)
-        return rendered
+        if metadata is None:
+            return {"recorded": False, "reason": "tool is not a profile network tool"}
+        action = str(metadata.get("action_type", "read_only"))
+        mutating = bool(metadata.get("hitl")) or action != "read_only"
     finally:
         await backend.close()
+    with WorkflowRuntime(default_journal_path()) as runtime:
+        return runtime.observe(
+            session_id=session_id,
+            tool_name=tool_name,
+            arguments=tool_arguments,
+            result=str(arguments.get("result", "")),
+            success=bool(arguments.get("success")),
+            mutating=mutating,
+        )

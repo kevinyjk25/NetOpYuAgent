@@ -2,8 +2,9 @@
 
 NetOpYuAgent is now a DeepSeek Harness-only project. DSH owns the agent loop,
 Web UI, sessions, model calls, approvals, skills and subagent lifecycle.
-This repository supplies network-domain tools, scoped memory, A2A routing,
-durable HITL, offline evaluation and the Python bridge.
+This repository supplies the network-domain runtime above DSH: generalized L1
+Skills, deterministic Network L0 Skills, network tools, scoped memory, A2A
+routing, durable HITL, offline evaluation and the Python bridge.
 
 The historical FastAPI/WebUI, custom runtime loop, inbound A2A server,
 legacy HITL framework and rollback launcher have been removed. Future
@@ -16,6 +17,8 @@ development targets the DSH plugin and adapter only.
 - `dsh-plugin-netopyu/src/a2a.js` — DSH remote-agent provider and durable continuation tools.
 - `dsh-plugin-netopyu/src/hitl-store.js` — SQLite approval, grant, batch, trajectory and continuation state.
 - `dsh_adapter/` — Python manifest, tool invocation, memory, skills, learning and evaluation.
+- `network_runtime/` — strict compiler, immutable plans, workflow guard,
+  one-shot execution, typed verification, compensation and SQLite journal.
 - `profiles/` — isolated LAN, DC, WAN and default network capabilities.
 - `tools/` — shared paging and pragmatic Netmiko/NAPALM tools.
 - `agent_memory/` — scoped persistent memory reused by the DSH plugin.
@@ -61,14 +64,59 @@ the DSH bridge, `requirements-pragmatic.txt` for real network drivers,
 the test gate. The supported runtime matrix is recorded in
 `dsh-plugin-netopyu/compatibility.json`.
 
-For lower-latency network sessions:
+For model configuration:
 
 ```bash
 scripts/netopyu-dsh settings-sync
-scripts/netopyu-dsh model qwen2.5:7b
-scripts/netopyu-dsh preset minimal
+scripts/netopyu-dsh model qwen3.5:27b
 scripts/netopyu-dsh restart
 ```
+
+Keep `qwen3.5:27b` as the default for tool-using network sessions. Local UI
+qualification showed that `qwen2.5:7b` can load an L1 Skill but may render tool
+names as prose instead of emitting tool calls; it is not approved for mutating
+Network L0 Skill workflows. Smaller models require their own tool-call
+conformance gate before use.
+
+## Local Web UI L1 + L0 test
+
+Start a LAN-profile mock session with approval-gated writes enabled. This only
+changes the local simulator; it does not connect to a real device:
+
+```bash
+cd /Users/steven/NetOpYuAgent
+scripts/netopyu-dsh stop
+NETOPYU_PROFILE=lan \
+NETOPYU_DSH_BACKEND=mock \
+NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 \
+scripts/netopyu-dsh start
+```
+
+Open <http://127.0.0.1:3080/>, select `qwen3.5:27b`, and create a new session.
+Use this prompt:
+
+```text
+这是本地 mock 网络演练。请调用 lan-new-employee-onboarding-access Skill，
+为新员工 erin 开通 CRM 的端到端访问。严格实际调用工具；所有写入都让我在
+DSH 的 Network L0 Skill 计划审批卡中审批，不要使用通用提问代替审批。
+```
+
+For the LAN write, the approval card must show the exact arguments, plan hash,
+intent hash, L0 Skill id/version/hash, verifier, rollback contract and workflow
+binding. After `允许一次`, verify the terminal state and hash chain with:
+
+```bash
+scripts/netopyu-dsh runtime-list 5
+scripts/netopyu-dsh runtime PLAN_ID
+scripts/netopyu-dsh runtime-audit PLAN_ID
+```
+
+With no A2A peer configured, the reviewed workflow deliberately stops after
+verified LAN admission and reports Phase 2 incomplete. A complete LAN-to-DC UI
+run additionally requires a reachable `dc-agent`; configure it with
+`NETOPYU_DSH_A2A_PEERS` and confirm discovery with `scripts/netopyu-dsh peers`.
+The offline `scripts/netopyu-dsh demo-l1-l0` command remains the deterministic
+two-domain regression, but it is not a substitute for this Web UI + LLM test.
 
 ## Operations
 
@@ -80,6 +128,10 @@ scripts/netopyu-dsh worker-stop
 scripts/netopyu-dsh logs
 scripts/netopyu-dsh models
 scripts/netopyu-dsh backend
+scripts/netopyu-dsh runtime-list
+scripts/netopyu-dsh runtime PLAN_ID
+scripts/netopyu-dsh l0-skills
+scripts/netopyu-dsh demo-l1-l0
 scripts/netopyu-dsh peers
 scripts/netopyu-dsh parity
 scripts/netopyu-dsh reliability
@@ -96,11 +148,13 @@ works in restricted environments where process inspection is allowed but
 
 ## Safety
 
-Read-only tools are exposed by default. Mutating tools require all three gates:
+Read-only tools are exposed by default. Mutating tools require every gate:
 
 1. `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1` at deployment time.
 2. A fresh DSH `allowed-once` decision.
-3. Successful consumption of the exact one-shot Tool Guard grant by the Python bridge.
+3. A strictly compiled immutable L1 plan with fresh preflight evidence.
+4. Successful consumption of a Tool Guard grant bound to the exact plan hash.
+5. A typed independent postcondition read before success can be returned.
 
 Never set `NETOPYU_DSH_ALLOW_DESTRUCTIVE` manually. The plugin supplies the
 per-request authorization only after DSH approval.
@@ -141,7 +195,7 @@ scripts/netopyu-dsh retirement
 ```
 
 `retirement` is the complete local gate: Python tests, DSH-only architecture
-audit, Node syntax, 39-tool HITL/A2A smoke, profile skill projection, retrieval
+audit, Node syntax, 40-tool HITL/A2A/runtime smoke, profile skill projection, retrieval
 quality, concurrent Worker load, malformed-input isolation, restart recovery,
 destructive-policy enforcement and verification that retired harness surfaces
 remain absent.
@@ -149,7 +203,18 @@ remain absent.
 See `DSH_MIGRATION.md` for detailed runtime behavior and
 `MIGRATION_AUDIT.md` for the latest evidence.
 
-The next architecture layer is the deterministic L1 Network Runtime described
-in `NETWORK_RUNTIME.md`. DSH remains L0; network parameter compilation,
-preflight, plan-bound execution, independent verification and rollback belong
-to L1.
+The domain Network Runtime is implemented as described in `NETWORK_RUNTIME.md`.
+DSH replaces the base agent-framework layer; within the network domain, L1
+Skills handle generalized reasoning and Network L0 Skills own deterministic
+effects. Parameter compilation, preflight, plan-bound execution, independent
+verification, recovery and rollback therefore remain in this repository. The
+P1 foundation also rechecks target state immediately before a write, dispatches
+verification/compensation through versioned contracts and exposes
+`scripts/netopyu-dsh runtime-audit PLAN_ID` for event hash-chain verification.
+Every local mutating capability is additionally exposed through a versioned
+Network L0 Skill contract. Inspect its fixed steps, intent type and failure
+policy with `scripts/netopyu-dsh l0-skills`; raw write preparation without the
+exact L0 Skill binding is rejected. Run `scripts/netopyu-dsh demo-l1-l0` for an
+isolated walkthrough in which LAN and DC L1 Skills diagnose one access problem,
+invoke two L0 Skills, verify the final state and audit both event chains. See
+`L1_L0_SKILL_DEMO.md` for the stage-by-stage review and trust boundaries.

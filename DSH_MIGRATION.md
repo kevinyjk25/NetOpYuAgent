@@ -19,9 +19,11 @@ implementation; they are plugins of DSH rather than a second agent runtime.
   model receives a `[STORED:tool:id]` reference. Every profile exposes
   `read_stored_result` and `process_stored_chunks`; references survive the
   short-lived Python bridge process used for each tool call.
-- Setting `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1` registers mutating tools behind a
-  three-stage gate: DSH approval, a one-shot execution token, and the Python
-  destructive-operation gate.
+- Setting `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1` only registers mutating tools.
+  Before a write, L1 strictly compiles and preflights an immutable plan; DSH
+  approves the exact plan summary; Tool Guard binds its one-shot grant to the
+  plan hash; L1 executes once and returns success only after typed independent
+  verification. Direct bridge writes are retired.
 - Approval arguments and outcomes are recorded in `data/dsh_hitl.sqlite`.
   Startup marks interrupted `pending`/`approved`/`resuming` rows as `orphaned`.
   The read-only `netopyu_hitl_list` tool lists recoverable operations, and
@@ -114,6 +116,8 @@ scripts/netopyu-dsh status
 scripts/netopyu-dsh worker-status
 scripts/netopyu-dsh worker-start
 scripts/netopyu-dsh worker-stop
+scripts/netopyu-dsh runtime-list
+scripts/netopyu-dsh runtime PLAN_ID
 scripts/netopyu-dsh logs
 scripts/netopyu-dsh stop
 scripts/netopyu-dsh dump-config
@@ -187,8 +191,8 @@ optimization, not an authorization boundary; mutating tools still require
 running first. It listens on an owner-only Unix Socket (mode `0600`) under the
 DSH runtime and handles concurrent line-delimited JSON requests. Every response
 is correlated by request id; cancellation closes the client connection.
-Mutating invocations carry an explicit per-request authorization bit rather
-than changing process-global environment state.
+Mutating invocations carry the plan id, plan hash, one-shot nonce and durable
+DSH approval identity rather than changing process-global environment state.
 `NETOPYU_DSH_WORKER_CONCURRENCY` bounds in-flight requests from 1–64 and
 defaults to 8.
 
@@ -249,17 +253,29 @@ and `NETOPYU_DSH_A2A_MAX_HOPS` bounds the propagated delegation chain (default
 delegation explicitly reports unavailable.
 
 Mutating tools remain disabled by default. To expose them behind DSH approval
-and the one-shot Python gate:
+and the L1 Network Runtime:
 
 ```bash
 NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 scripts/netopyu-dsh start
 ```
 
-Do not set `NETOPYU_DSH_ALLOW_DESTRUCTIVE=1` yourself. The plugin supplies it
-only to the Python child process after DSH has issued an `allowed-once` grant.
-The Tool Guard binds that grant to the exact DSH execution token and tool name;
+Do not set `NETOPYU_DSH_ALLOW_DESTRUCTIVE=1` yourself. The plugin supplies the
+execution permission only for `runtime-execute`, after DSH has issued an
+`allowed-once` grant. The Tool Guard binds that grant to the exact DSH
+execution token, tool name and immutable plan hash;
 unused grants are revoked after execution and all still-issued grants become
 `orphaned` at plugin restart.
+
+The Worker marks any crash-interrupted write indeterminate and immediately
+reconciles it with verifier reads only. It never replays the write. A proven
+postcondition becomes `verified_success`; otherwise the durable state becomes
+`manual_intervention_required`. Inspect recent plans with `runtime-list` and a
+complete state/evidence journal with `runtime PLAN_ID`.
+Use `runtime-audit PLAN_ID` to verify the per-plan event hash chain; a mismatch
+is a hard audit failure and is never repaired automatically.
+Use `l0-skills` to inspect the deterministic Network L0 Skill catalog. DSH
+injects the manifest-provided L0 Skill id into single, recovery and batch plan
+preparation; callers cannot substitute an arbitrary tool or skill id.
 
 ### Recover an interrupted operation
 

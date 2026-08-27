@@ -13,6 +13,7 @@ export function createHitlStore(path) {
       status TEXT NOT NULL,
       outcome TEXT,
       reason TEXT,
+      plan_hash TEXT,
       created_at TEXT NOT NULL,
       decided_at TEXT,
       completed_at TEXT,
@@ -23,22 +24,65 @@ export function createHitlStore(path) {
     CREATE TABLE IF NOT EXISTS tool_grants (
       grant_id TEXT PRIMARY KEY,
       request_id TEXT NOT NULL,
-      token_hash TEXT NOT NULL UNIQUE,
+      token_hash TEXT NOT NULL,
       tool_name TEXT NOT NULL,
+      plan_hash TEXT,
       status TEXT NOT NULL,
       issued_at TEXT NOT NULL,
       consumed_at TEXT,
       revoked_at TEXT,
-      revoke_reason TEXT
+      revoke_reason TEXT,
+      UNIQUE(token_hash, plan_hash)
     )
   `)
-  database.prepare("UPDATE tool_grants SET status = 'orphaned', revoked_at = ?, revoke_reason = 'plugin restart' WHERE status = 'issued'")
-    .run(new Date().toISOString())
   const columns = new Set(database.prepare('PRAGMA table_info(requests)').all().map(column => column.name))
   if (!columns.has('recovery_request_id')) database.exec('ALTER TABLE requests ADD COLUMN recovery_request_id TEXT')
   if (!columns.has('recovered_arguments_json')) database.exec('ALTER TABLE requests ADD COLUMN recovered_arguments_json TEXT')
   if (!columns.has('recovered_at')) database.exec('ALTER TABLE requests ADD COLUMN recovered_at TEXT')
   if (!columns.has('expires_at')) database.exec('ALTER TABLE requests ADD COLUMN expires_at TEXT')
+  if (!columns.has('plan_hash')) database.exec('ALTER TABLE requests ADD COLUMN plan_hash TEXT')
+  const grantColumns = new Set(database.prepare('PRAGMA table_info(tool_grants)').all().map(column => column.name))
+  if (!grantColumns.has('plan_hash')) database.exec('ALTER TABLE tool_grants ADD COLUMN plan_hash TEXT')
+  const legacyTokenUnique = database.prepare('PRAGMA index_list(tool_grants)').all().some(index => {
+    if (Number(index.unique) !== 1) return false
+    const columns = database.prepare(`PRAGMA index_info(${JSON.stringify(index.name)})`).all()
+      .map(column => column.name)
+    return columns.length === 1 && columns[0] === 'token_hash'
+  })
+  if (legacyTokenUnique) {
+    database.exec('BEGIN IMMEDIATE')
+    try {
+      database.exec(`
+        CREATE TABLE tool_grants_v2 (
+          grant_id TEXT PRIMARY KEY,
+          request_id TEXT NOT NULL,
+          token_hash TEXT NOT NULL,
+          tool_name TEXT NOT NULL,
+          plan_hash TEXT,
+          status TEXT NOT NULL,
+          issued_at TEXT NOT NULL,
+          consumed_at TEXT,
+          revoked_at TEXT,
+          revoke_reason TEXT,
+          UNIQUE(token_hash, plan_hash)
+        );
+        INSERT INTO tool_grants_v2
+          (grant_id, request_id, token_hash, tool_name, plan_hash, status,
+           issued_at, consumed_at, revoked_at, revoke_reason)
+        SELECT grant_id, request_id, token_hash, tool_name, plan_hash, status,
+               issued_at, consumed_at, revoked_at, revoke_reason
+          FROM tool_grants;
+        DROP TABLE tool_grants;
+        ALTER TABLE tool_grants_v2 RENAME TO tool_grants;
+      `)
+      database.exec('COMMIT')
+    } catch (error) {
+      database.exec('ROLLBACK')
+      throw error
+    }
+  }
+  database.prepare("UPDATE tool_grants SET status = 'orphaned', revoked_at = ?, revoke_reason = 'plugin restart' WHERE status = 'issued'")
+    .run(new Date().toISOString())
   database.exec(`
     CREATE TABLE IF NOT EXISTS batch_items (
       batch_request_id TEXT NOT NULL,
@@ -81,8 +125,8 @@ export function createHitlStore(path) {
   database.prepare("UPDATE requests SET status = 'orphaned' WHERE status IN ('pending', 'approved', 'resuming')").run()
   const insert = database.prepare(`
     INSERT INTO requests
-      (id, session_id, call_id, tool_name, arguments_json, status, reason, created_at)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+      (id, session_id, call_id, tool_name, arguments_json, status, reason, plan_hash, created_at)
+    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, ?)
   `)
   const decide = database.prepare(`
     UPDATE requests SET status = ?, outcome = ?, decided_at = ? WHERE id = ?
@@ -151,12 +195,12 @@ export function createHitlStore(path) {
   `)
   const insertGrant = database.prepare(`
     INSERT INTO tool_grants
-      (grant_id, request_id, token_hash, tool_name, status, issued_at)
-    VALUES (?, ?, ?, ?, 'issued', ?)
+      (grant_id, request_id, token_hash, tool_name, plan_hash, status, issued_at)
+    VALUES (?, ?, ?, ?, ?, 'issued', ?)
   `)
   const consumeGrant = database.prepare(`
     UPDATE tool_grants SET status = 'consumed', consumed_at = ?
-     WHERE token_hash = ? AND tool_name = ? AND status = 'issued'
+     WHERE token_hash = ? AND tool_name = ? AND plan_hash = ? AND status = 'issued'
   `)
   const revokeGrant = database.prepare(`
     UPDATE tool_grants
@@ -202,7 +246,7 @@ export function createHitlStore(path) {
     expireDeferred.run(now, now)
   }
   return {
-    begin(execution, reason) {
+    begin(execution, reason, planHash) {
       const id = randomUUID()
       insert.run(
         id,
@@ -211,6 +255,7 @@ export function createHitlStore(path) {
         execution.name,
         JSON.stringify(execution.arguments),
         reason,
+        String(planHash),
         new Date().toISOString(),
       )
       return id
@@ -294,13 +339,13 @@ export function createHitlStore(path) {
     skipBatchRemainder(requestId, index, reason) {
       skipBatchItems.run(reason, new Date().toISOString(), requestId, index)
     },
-    issueGrant(requestId, tokenHash, toolName) {
+    issueGrant(requestId, tokenHash, toolName, planHash) {
       const grantId = randomUUID()
-      insertGrant.run(grantId, requestId, tokenHash, toolName, new Date().toISOString())
+      insertGrant.run(grantId, requestId, tokenHash, toolName, String(planHash), new Date().toISOString())
       return grantId
     },
-    consumeGrant(tokenHash, toolName) {
-      return consumeGrant.run(new Date().toISOString(), tokenHash, toolName).changes === 1
+    consumeGrant(tokenHash, toolName, planHash) {
+      return consumeGrant.run(new Date().toISOString(), tokenHash, toolName, String(planHash)).changes === 1
     },
     revokeGrant(tokenHash, reason) {
       return revokeGrant.run(new Date().toISOString(), reason, tokenHash).changes === 1
@@ -354,16 +399,17 @@ export class NetOpYuToolGuard {
     this.#store = hitlStore
   }
 
-  issue(token, requestId, toolName) {
-    return this.#store.issueGrant(requestId, tokenHash(token), toolName)
+  issue(token, requestId, toolName, planHash) {
+    if (typeof planHash !== 'string' || planHash.length < 16) throw new Error('tool grant requires a plan binding hash')
+    return this.#store.issueGrant(requestId, tokenHash(token), toolName, planHash)
   }
 
-  consume(token, toolName) {
-    return this.#store.consumeGrant(tokenHash(token), toolName)
+  consume(token, toolName, planHash) {
+    if (typeof planHash !== 'string' || planHash.length < 16) return false
+    return this.#store.consumeGrant(tokenHash(token), toolName, planHash)
   }
 
   revoke(token, reason = 'execution finished without consuming grant') {
     return this.#store.revokeGrant(tokenHash(token), reason)
   }
 }
-

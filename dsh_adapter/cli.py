@@ -5,10 +5,24 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import sys
 from typing import Any
 
-from .bridge import backend_report, build_manifest, invoke_tool
+from .bridge import (
+    audit_network_plan,
+    backend_report,
+    build_l0_skill_catalog,
+    build_manifest,
+    execute_network_plan,
+    inspect_network_plan,
+    invoke_tool,
+    observe_network_workflow,
+    prepare_network_plan,
+    reject_network_plan,
+    recent_network_plans,
+    start_network_workflow,
+)
 from .a2a_provider import delegate_a2a, discover_peers
 from .scoped_services import recall_memory, search_capabilities
 from .evaluation import parity_report
@@ -37,6 +51,37 @@ def main(argv: list[str] | None = None) -> int:
     invoke = subparsers.add_parser("invoke")
     invoke.add_argument("--profile", default="lan")
     invoke.add_argument("--tool", required=True)
+
+    runtime_prepare = subparsers.add_parser("runtime-prepare")
+    runtime_prepare.add_argument("--profile", default="lan")
+    runtime_prepare.add_argument("--tool", required=True)
+    runtime_prepare.add_argument("--session")
+    runtime_prepare.add_argument("--l0-skill")
+
+    runtime_execute = subparsers.add_parser("runtime-execute")
+    runtime_execute.add_argument("--profile", default="lan")
+    runtime_execute.add_argument("--tool")
+
+    runtime_inspect = subparsers.add_parser("runtime-inspect")
+    runtime_inspect.add_argument("--plan", required=True)
+
+    runtime_audit = subparsers.add_parser("runtime-audit")
+    runtime_audit.add_argument("--plan", required=True)
+
+    runtime_list = subparsers.add_parser("runtime-list")
+    runtime_list.add_argument("--limit", type=int, default=20)
+
+    runtime_reject = subparsers.add_parser("runtime-reject")
+    runtime_reject.add_argument("--profile", default="lan")
+
+    l0_skills = subparsers.add_parser("l0-skills")
+    l0_skills.add_argument("--profile", default="lan")
+
+    workflow_start = subparsers.add_parser("workflow-start")
+    workflow_start.add_argument("--profile", default="lan")
+
+    workflow_observe = subparsers.add_parser("workflow-observe")
+    workflow_observe.add_argument("--profile", default="lan")
 
     backend = subparsers.add_parser("backend")
     backend.add_argument("--profile", default="lan")
@@ -88,6 +133,30 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "invoke":
             result = asyncio.run(invoke_tool(args.profile, args.tool, _read_arguments()))
             payload = {"ok": True, "result": result}
+        elif args.command == "runtime-prepare":
+            payload = asyncio.run(prepare_network_plan(
+                args.profile, args.tool, _read_arguments(),
+                session_id=args.session, l0_skill_id=args.l0_skill,
+            ))
+        elif args.command == "runtime-execute":
+            payload = asyncio.run(execute_network_plan(
+                _read_arguments(),
+                allow_destructive=os.environ.get("NETOPYU_DSH_ALLOW_DESTRUCTIVE") == "1",
+            ))
+        elif args.command == "runtime-inspect":
+            payload = inspect_network_plan(args.plan)
+        elif args.command == "runtime-audit":
+            payload = audit_network_plan(args.plan)
+        elif args.command == "runtime-list":
+            payload = recent_network_plans(args.limit)
+        elif args.command == "runtime-reject":
+            payload = reject_network_plan(_read_arguments())
+        elif args.command == "l0-skills":
+            payload = build_l0_skill_catalog(args.profile)
+        elif args.command == "workflow-start":
+            payload = start_network_workflow(args.profile, _read_arguments())
+        elif args.command == "workflow-observe":
+            payload = asyncio.run(observe_network_workflow(args.profile, _read_arguments()))
         elif args.command == "backend":
             payload = asyncio.run(backend_report(args.profile))
         elif args.command == "memory-recall":

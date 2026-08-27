@@ -111,6 +111,16 @@ class TestAccessDiagnosisSkills(unittest.TestCase):
         self.assertIn("delegate", desc)
         self.assertTrue("data center" in desc or "dc agent" in desc)
 
+    def test_onboarding_skill_pins_complete_dc_delegate_arguments(self):
+        from pathlib import Path
+
+        text = (Path(__file__).parents[1]
+                / "profiles/lan/skills/lan-new-employee-onboarding-access/SKILL.md").read_text()
+        self.assertIn('target="dc-agent"', text)
+        self.assertIn('description="Grant <user_id> <app> application access"', text)
+        self.assertIn('self-contained `prompt=', text)
+        self.assertIn("never report end-to-end success", text)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

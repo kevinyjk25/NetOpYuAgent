@@ -48,8 +48,12 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "edit_device_config": {
         "description": "Push configuration change to a real device. Requires HITL approval.",
-        "parameters":  {"device_id": "Device identifier", "section": "Section to change", "changes": "Change dict", "reason": "Audit reason"},
-        "required":    ["device_id", "changes", "reason"],
+        "parameters":  {
+            "device_id": "Device identifier",
+            "config_lines": "Exact ordered list of CLI configuration commands",
+            "reason": "Audit reason",
+        },
+        "required":    ["device_id", "config_lines", "reason"],
         "returns":     "Push result with diff and rollback instructions",
         "hitl":        True,
         "action_type": "destructive",

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { dirname, resolve } from 'node:path'
 import { isDeepStrictEqual } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -14,7 +15,73 @@ export const inject = ['tools', 'approval', 'subagents', 'skills']
 const sourceDirectory = dirname(fileURLToPath(import.meta.url))
 const inferredProjectRoot = resolve(sourceDirectory, '..', '..')
 
-function toolDefinition(tool, bridge, toolGuard) {
+function bindingHash(value) {
+  return `sha256:${createHash('sha256').update(JSON.stringify(value)).digest('hex')}`
+}
+
+function preparationFailure(prepared) {
+  const details = [...(prepared.missing ?? []), ...(prepared.errors ?? [])]
+  return `${prepared.status ?? 'rejected'}${details.length > 0 ? `: ${details.join('; ')}` : ''}`
+}
+
+async function rejectPreparedPlans(bridge, preparedValues, reason, signal) {
+  await Promise.all((preparedValues ?? []).map(async prepared => {
+    if (prepared?.plan?.plan_id === undefined) return
+    try {
+      await callBridge({
+        ...bridge,
+        command: 'runtime-reject',
+        args: {
+          plan_id: prepared.plan.plan_id,
+          plan_hash: prepared.plan.plan_hash,
+          reason,
+        },
+        signal,
+      })
+    } catch {
+      // A plan that already started has its own authoritative terminal state.
+    }
+  }))
+}
+
+async function executePreparedPlan(bridge, prepared, requestId, operatorId, execution, suffix = '') {
+  const plan = prepared?.plan
+  if (plan === undefined || prepared.execution_nonce === undefined) {
+    throw new Error('approved Network Runtime plan is missing')
+  }
+  try {
+    const outcome = await callBridge({
+      ...bridge,
+      command: 'runtime-execute',
+      tool: plan.tool_name,
+      args: {
+        plan_id: plan.plan_id,
+        plan_hash: plan.plan_hash,
+        execution_nonce: prepared.execution_nonce,
+        approval_request_id: requestId,
+        approval_actor: operatorId,
+      },
+      signal: execution.signal,
+      allowDestructive: true,
+      correlationId: `${String(execution.callId ?? requestId)}${suffix}`,
+    })
+    if (outcome.ok !== true || outcome.state !== 'verified_success' || typeof outcome.result !== 'string') {
+      throw new Error(
+        `Network Runtime did not verify success (state=${outcome.state ?? 'unknown'}): ${outcome.error ?? 'missing evidence'}`,
+      )
+    }
+    return outcome.result
+  } catch (error) {
+    await rejectPreparedPlans(
+      bridge, [prepared],
+      `execution did not start or did not verify: ${error instanceof Error ? error.message : String(error)}`,
+      execution.signal,
+    )
+    throw error
+  }
+}
+
+function toolDefinition(tool, bridge, toolGuard, approvalByToken, bindingByToken, operatorId) {
   const properties = {}
   const required = []
   for (const [parameterName, parameter] of Object.entries(tool.parameters)) {
@@ -29,7 +96,7 @@ function toolDefinition(tool, bridge, toolGuard) {
       type: 'object',
       properties,
       ...(required.length > 0 ? { required } : {}),
-      additionalProperties: true,
+      additionalProperties: false,
     },
     output: {
       schema: { type: 'string' },
@@ -38,12 +105,31 @@ function toolDefinition(tool, bridge, toolGuard) {
     presentCall: args => ({
       card: 'generic',
       title: tool.name,
-      kind: 'read',
+      kind: tool.requires_approval ? 'write' : 'read',
       rawInput: JSON.stringify(args),
     }),
     async execute(args, execution) {
-      if (tool.requires_approval && !toolGuard.consume(execution.token, tool.name)) {
-        throw new Error(`${tool.name} requires a current NetOpYu durable-HITL grant`)
+      if (tool.requires_approval) {
+        const binding = bindingByToken.get(execution.token)
+        const requestId = approvalByToken.get(execution.token)
+        if (
+          binding?.kind !== 'single'
+          || binding.prepared?.plan?.tool_name !== tool.name
+          || requestId === undefined
+        ) {
+          await rejectPreparedPlans(
+            bridge, binding?.prepared ? [binding.prepared] : [],
+            'plan-bound tool grant validation failed', execution.signal,
+          )
+          throw new Error(`${tool.name} requires a current plan-bound NetOpYu durable-HITL grant`)
+        }
+        // A duplicate invocation racing the legitimate one must not reject
+        // their shared prepared plan. The atomic grant consume decides the
+        // winner; only malformed/mismatched bindings above can close a plan.
+        if (!toolGuard.consume(execution.token, tool.name, binding.bindingHash)) {
+          throw new Error(`${tool.name} requires a current plan-bound NetOpYu durable-HITL grant`)
+        }
+        return executePreparedPlan(bridge, binding.prepared, requestId, operatorId, execution)
       }
       const payload = await callBridge({
         ...bridge,
@@ -51,7 +137,7 @@ function toolDefinition(tool, bridge, toolGuard) {
         tool: tool.name,
         args,
         signal: execution.signal,
-        allowDestructive: tool.requires_approval,
+        allowDestructive: false,
         correlationId: execution.callId,
       })
       if (payload.ok !== true || typeof payload.result !== 'string') {
@@ -192,7 +278,7 @@ function validateEditableReplacement(tool, original, replacement) {
   }
 }
 
-function hitlDefinitions(manifest, bridge, toolGuard, approvalByToken, hitlStore) {
+function hitlDefinitions(manifest, bridge, toolGuard, approvalByToken, bindingByToken, hitlStore, operatorId) {
   const list = {
     name: 'netopyu_hitl_list',
     description: 'List interrupted or failed NetOpYu operations that may be resubmitted with fresh approval.',
@@ -229,7 +315,8 @@ function hitlDefinitions(manifest, bridge, toolGuard, approvalByToken, hitlStore
     },
     presentCall: args => ({ card: 'generic', title: 'Resume NetOpYu operation', kind: 'write', rawInput: JSON.stringify(args) }),
     async execute(args, execution) {
-      if (!toolGuard.consume(execution.token, resume.name)) {
+      const binding = bindingByToken.get(execution.token)
+      if (binding?.kind !== 'recovery' || !toolGuard.consume(execution.token, resume.name, binding.bindingHash)) {
         throw new Error('netopyu_hitl_resume requires a fresh one-shot DSH approval')
       }
       const original = hitlStore.recoverable(args.request_id)
@@ -246,20 +333,11 @@ function hitlDefinitions(manifest, bridge, toolGuard, approvalByToken, hitlStore
         throw new Error(`request ${original.id} was already claimed or is no longer recoverable`)
       }
       try {
-        const payload = await callBridge({
-          ...bridge,
-          command: 'invoke',
-          tool: tool.name,
-          args: replayArguments,
-          signal: execution.signal,
-          allowDestructive: true,
-          correlationId: execution.callId,
-        })
-        if (payload.ok !== true || typeof payload.result !== 'string') {
-          throw new Error(payload.error ?? `invalid result from ${tool.name}`)
-        }
+        const result = await executePreparedPlan(
+          bridge, binding.prepared, recoveryRequestId, operatorId, execution, ':recovery',
+        )
         hitlStore.finishRecovery(original.id, recoveryRequestId, false)
-        return payload.result
+        return result
       } catch (error) {
         hitlStore.finishRecovery(original.id, recoveryRequestId, true)
         throw error
@@ -330,7 +408,8 @@ function hitlDefinitions(manifest, bridge, toolGuard, approvalByToken, hitlStore
     },
     presentCall: args => ({ card: 'generic', title: 'NetOpYu batch operation', kind: 'write', rawInput: JSON.stringify(args) }),
     async execute(args, execution) {
-      if (!toolGuard.consume(execution.token, batch.name)) {
+      const binding = bindingByToken.get(execution.token)
+      if (binding?.kind !== 'batch' || !toolGuard.consume(execution.token, batch.name, binding.bindingHash)) {
         throw new Error('netopyu_hitl_batch requires a fresh one-shot DSH approval')
       }
       if (!Array.isArray(args.operations) || args.operations.length < 1 || args.operations.length > 50) {
@@ -353,20 +432,11 @@ function hitlDefinitions(manifest, bridge, toolGuard, approvalByToken, hitlStore
       for (const [index, operation] of operations.entries()) {
         if (!hitlStore.startBatchItem(requestId, index)) throw new Error(`batch item ${index} was already claimed`)
         try {
-          const payload = await callBridge({
-            ...bridge,
-            command: 'invoke',
-            tool: operation.tool_name,
-            args: operation.arguments,
-            signal: execution.signal,
-            allowDestructive: true,
-            correlationId: `${String(execution.callId ?? requestId)}:${index}`,
-          })
-          if (payload.ok !== true || typeof payload.result !== 'string') {
-            throw new Error(payload.error ?? `invalid result from ${operation.tool_name}`)
-          }
-          hitlStore.finishBatchItem(requestId, index, payload.result, undefined)
-          results.push({ index, tool_name: operation.tool_name, status: 'completed', result: payload.result })
+          const result = await executePreparedPlan(
+            bridge, binding.prepared[index], requestId, operatorId, execution, `:${index}`,
+          )
+          hitlStore.finishBatchItem(requestId, index, result, undefined)
+          results.push({ index, tool_name: operation.tool_name, status: 'completed', result })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
           hitlStore.finishBatchItem(requestId, index, undefined, message)
@@ -419,7 +489,14 @@ export async function apply(ctx, config = {}) {
     : { ...bridgeManifest, tools: bridgeManifest.tools.filter(tool => allowedToolNames.has(tool.name)) }
   const skillManifest = await callBridge({ ...bridge, command: 'skill-manifest' })
   if (!Array.isArray(skillManifest.skills)) throw new Error('NetOpYu skill manifest has no skills array')
+  const workflowSkills = new Map(
+    skillManifest.skills
+      .filter(skill => skill.network_workflow !== undefined)
+      .map(skill => [skill.name, skill.network_workflow]),
+  )
   const approvalByToken = new Map()
+  const bindingByToken = new Map()
+  const startedSkillInvocations = new Set()
   const hitlStorePath = config.hitlStorePath ?? process.env.NETOPYU_DSH_HITL_STORE ?? resolve(projectRoot, 'data', 'dsh_hitl.sqlite')
   const hitlStore = createHitlStore(hitlStorePath)
   const toolGuard = new NetOpYuToolGuard(hitlStore)
@@ -464,10 +541,16 @@ export async function apply(ctx, config = {}) {
     })
   }
 
-  for (const tool of manifest.tools) ctx.tools.register(toolDefinition(tool, bridge, toolGuard))
+  for (const tool of manifest.tools) {
+    ctx.tools.register(toolDefinition(tool, bridge, toolGuard, approvalByToken, bindingByToken, operatorId))
+  }
   for (const tool of scopedServiceDefinitions(memoryService, capabilityService)) ctx.tools.register(tool)
-  for (const tool of a2aToolDefinitions(ctx, a2aProvider, bridge, peerUrls, hitlStore, toolGuard)) ctx.tools.register(tool)
-  const hitlTools = hitlDefinitions(manifest, bridge, toolGuard, approvalByToken, hitlStore)
+  for (const tool of a2aToolDefinitions(
+    ctx, a2aProvider, bridge, peerUrls, hitlStore, toolGuard, bindingByToken,
+  )) ctx.tools.register(tool)
+  const hitlTools = hitlDefinitions(
+    manifest, bridge, toolGuard, approvalByToken, bindingByToken, hitlStore, operatorId,
+  )
   for (const tool of hitlTools) ctx.tools.register(tool)
   ctx.tools.register(trajectoryDefinition(hitlStore))
 
@@ -476,6 +559,33 @@ export async function apply(ctx, config = {}) {
       seq: event.seq,
       data_keys: event.data && typeof event.data === 'object' ? Object.keys(event.data).sort() : [],
     })
+  })
+
+  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+    const decision = await next()
+    if (decision.kind !== 'enter' || !Array.isArray(decision.messages)) return decision
+    const invoked = decision.messages.filter(message => (
+      message?.source?.kind === 'skill-invocation'
+      && workflowSkills.has(message.source.name)
+    ))
+    const pending = invoked.filter(message => {
+      const key = `${String(agent.session.id)}:${String(message.id ?? message.source.name)}`
+      return !startedSkillInvocations.has(key)
+    })
+    if (pending.length > 1) {
+      throw new Error('multiple mutating Network Runtime skills cannot be activated in one step')
+    }
+    for (const message of pending) {
+      const key = `${String(agent.session.id)}:${String(message.id ?? message.source.name)}`
+      await callBridge({
+        ...bridge,
+        command: 'workflow-start',
+        args: { session_id: String(agent.session.id), skill_name: message.source.name },
+        signal,
+      })
+      startedSkillInvocations.add(key)
+    }
+    return decision
   })
 
   ctx.on('tools/pre-execute', async (execution, next) => {
@@ -487,6 +597,19 @@ export async function apply(ctx, config = {}) {
         call_id: execution.callId === undefined ? null : String(execution.callId),
       })
     }
+    if (execution.name === 'skill' && workflowSkills.has(execution.arguments?.name)) {
+      if (sessionId === undefined) {
+        return { kind: 'deny', reason: 'Network Runtime workflow skill requires a DSH session' }
+      }
+      await callBridge({
+        ...bridge,
+        command: 'workflow-start',
+        args: { session_id: String(sessionId), skill_name: execution.arguments.name },
+        signal: execution.signal,
+        correlationId: execution.callId,
+      })
+      return next()
+    }
     const tool = manifest.tools.find(candidate => candidate.name === execution.name)
     const hitlAction = {
       netopyu_hitl_resume: 'recovery',
@@ -495,8 +618,109 @@ export async function apply(ctx, config = {}) {
     }[execution.name]
     if (tool?.requires_approval !== true && hitlAction === undefined) return next()
     const actionType = hitlAction ?? tool.action_type
-    const reason = `NetOpYu ${actionType} operation requires operator approval; arguments are durably recorded.`
-    const requestId = hitlStore.begin(execution, reason)
+    let binding
+    let reason
+    const provisionalPrepared = []
+    try {
+      if (tool?.requires_approval === true) {
+        const prepared = await callBridge({
+          ...bridge,
+          command: 'runtime-prepare',
+          tool: tool.name,
+          args: execution.arguments,
+          signal: execution.signal,
+          correlationId: execution.callId,
+          sessionId: sessionId === undefined ? undefined : String(sessionId),
+          l0SkillId: tool.l0_skill_id,
+        })
+        if (prepared.status !== 'plan_ready') {
+          return { kind: 'deny', reason: `Network Runtime ${preparationFailure(prepared)}` }
+        }
+        provisionalPrepared.push(prepared)
+        binding = { kind: 'single', prepared, bindingHash: prepared.plan.plan_hash }
+        reason = prepared.approval_summary
+      } else if (hitlAction === 'recovery') {
+        const original = hitlStore.recoverable(execution.arguments.request_id)
+        if (original === undefined) {
+          return { kind: 'deny', reason: `recoverable NetOpYu request not found: ${execution.arguments.request_id}` }
+        }
+        const originalTool = manifest.tools.find(candidate => candidate.name === original.tool_name)
+        if (originalTool?.requires_approval !== true) {
+          return { kind: 'deny', reason: 'recovery target is not an enabled approval-gated tool' }
+        }
+        const replayArguments = execution.arguments.arguments ?? original.arguments
+        if (execution.arguments.arguments !== undefined) {
+          validateEditableReplacement(originalTool, original.arguments, replayArguments)
+        }
+        const prepared = await callBridge({
+          ...bridge,
+          command: 'runtime-prepare',
+          tool: originalTool.name,
+          args: replayArguments,
+          signal: execution.signal,
+          correlationId: execution.callId,
+          sessionId: sessionId === undefined ? undefined : String(sessionId),
+          l0SkillId: originalTool.l0_skill_id,
+        })
+        if (prepared.status !== 'plan_ready') {
+          return { kind: 'deny', reason: `Network Runtime recovery ${preparationFailure(prepared)}` }
+        }
+        provisionalPrepared.push(prepared)
+        binding = { kind: 'recovery', prepared, bindingHash: prepared.plan.plan_hash }
+        reason = `Recovery resubmission with fresh approval.\n${prepared.approval_summary}`
+      } else if (hitlAction === 'batch') {
+        const operations = execution.arguments.operations
+        if (!Array.isArray(operations) || operations.length < 1 || operations.length > 50) {
+          return { kind: 'deny', reason: 'batch operations must contain 1-50 items' }
+        }
+        const prepared = []
+        for (const [index, operation] of operations.entries()) {
+          assertArgumentsObject(operation?.arguments, `operations[${index}].arguments`)
+          const operationTool = manifest.tools.find(candidate => candidate.name === operation.tool_name)
+          if (operationTool?.requires_approval !== true) {
+            throw new Error(`operations[${index}] is not an enabled approval-gated tool`)
+          }
+          const value = await callBridge({
+            ...bridge,
+            command: 'runtime-prepare',
+            tool: operationTool.name,
+            args: operation.arguments,
+            signal: execution.signal,
+            correlationId: `${String(execution.callId ?? 'batch')}:prepare:${index}`,
+            sessionId: sessionId === undefined ? undefined : String(sessionId),
+            l0SkillId: operationTool.l0_skill_id,
+          })
+          if (value.status !== 'plan_ready') {
+            throw new Error(`operations[${index}] ${preparationFailure(value)}`)
+          }
+          provisionalPrepared.push(value)
+          prepared.push(value)
+        }
+        binding = {
+          kind: 'batch',
+          prepared,
+          bindingHash: bindingHash(prepared.map(value => value.plan.plan_hash)),
+        }
+        reason = [
+          `Network Runtime batch (${execution.arguments.policy ?? 'best_effort'}), ${prepared.length} immutable plans:`,
+          ...prepared.map((value, index) => `[${index}] ${value.approval_summary}`),
+        ].join('\n')
+      } else {
+        binding = {
+          kind: 'remote-hitl',
+          bindingHash: bindingHash({ name: execution.name, arguments: execution.arguments }),
+        }
+        reason = `NetOpYu ${actionType} operation requires operator approval; arguments are durably recorded.`
+      }
+    } catch (error) {
+      await rejectPreparedPlans(
+        bridge, provisionalPrepared,
+        `workflow preparation rejected: ${error instanceof Error ? error.message : String(error)}`,
+        execution.signal,
+      )
+      return { kind: 'deny', reason: `Network Runtime rejected request: ${error instanceof Error ? error.message : String(error)}` }
+    }
+    const requestId = hitlStore.begin(execution, reason, binding.bindingHash)
     approvalByToken.set(execution.token, requestId)
     let outcome
     try {
@@ -512,18 +736,67 @@ export async function apply(ctx, config = {}) {
     }
     hitlStore.decided(requestId, outcome)
     if (outcome !== 'allowed-once') {
+      await rejectPreparedPlans(
+        bridge, provisionalPrepared, `DSH approval outcome: ${outcome}`, execution.signal,
+      )
       approvalByToken.delete(execution.token)
       return { kind: 'deny', reason: `NetOpYu operation not approved (${outcome})` }
     }
-    toolGuard.issue(execution.token, requestId, execution.name)
+    bindingByToken.set(execution.token, binding)
+    try {
+      toolGuard.issue(execution.token, requestId, execution.name, binding.bindingHash)
+    } catch (error) {
+      await rejectPreparedPlans(
+        bridge, provisionalPrepared,
+        `tool grant issuance failed: ${error instanceof Error ? error.message : String(error)}`,
+        execution.signal,
+      )
+      approvalByToken.delete(execution.token)
+      bindingByToken.delete(execution.token)
+      hitlStore.completed(requestId, true)
+      return {
+        kind: 'deny',
+        reason: `Network Runtime could not issue the one-shot grant: ${error instanceof Error ? error.message : String(error)}`,
+      }
+    }
     try {
       return await next()
     } catch (error) {
+      await rejectPreparedPlans(
+        bridge, provisionalPrepared, 'downstream pre-execute hook failed', execution.signal,
+      )
       toolGuard.revoke(execution.token, 'downstream pre-execute hook failed')
       approvalByToken.delete(execution.token)
+      bindingByToken.delete(execution.token)
       hitlStore.completed(requestId, true)
       throw error
     }
+  })
+
+  ctx.on('tools/post-execute', async (execution, result, next) => {
+    const sessionId = execution.agent?.session?.id
+    const tool = manifest.tools.find(candidate => candidate.name === execution.name)
+    if (sessionId === undefined || tool === undefined) return next()
+    try {
+      await callBridge({
+        ...bridge,
+        command: 'workflow-observe',
+        args: {
+          session_id: String(sessionId),
+          tool_name: execution.name,
+          tool_arguments: execution.arguments,
+          result: result.isError === true ? '' : String(result.value ?? ''),
+          success: result.isError !== true,
+        },
+        signal: execution.signal,
+        correlationId: execution.callId,
+      })
+    } catch {
+      // The network operation's own journal remains authoritative. A missing
+      // workflow observation cannot turn a verified device outcome into a
+      // failure; it will fail closed if a later guarded step needs the fact.
+    }
+    return next()
   })
 
   ctx.on('tools/result', (execution, result) => {
@@ -538,6 +811,7 @@ export async function apply(ctx, config = {}) {
     const requestId = approvalByToken.get(execution.token)
     if (requestId === undefined) return
     approvalByToken.delete(execution.token)
+    bindingByToken.delete(execution.token)
     toolGuard.revoke(execution.token)
     hitlStore.completed(requestId, result.isError === true)
   })

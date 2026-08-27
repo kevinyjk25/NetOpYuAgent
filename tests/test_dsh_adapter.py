@@ -1,6 +1,8 @@
 import asyncio
 import json
 import os
+import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -9,9 +11,18 @@ from unittest.mock import patch
 from dsh_adapter.backend import open_backend, resolve_backend_mode
 from dsh_adapter.bridge import build_manifest, invoke_tool
 from dsh_adapter.scoped_services import recall_memory, search_capabilities
+from network_runtime.contracts import ApprovalError
 
 
 class TestDshManifest(unittest.TestCase):
+    def test_network_runtime_imports_in_a_clean_interpreter(self):
+        completed = subprocess.run(
+            [sys.executable, "-c", "from network_runtime import NetworkRuntime; print(NetworkRuntime.__name__)"],
+            cwd=Path(__file__).parents[1], text=True, capture_output=True, check=False,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertEqual(completed.stdout.strip(), "NetworkRuntime")
+
     def test_default_manifest_exports_only_read_only_lan_tools(self):
         manifest = build_manifest("lan")
         names = {tool["name"] for tool in manifest["tools"]}
@@ -32,6 +43,14 @@ class TestDshManifest(unittest.TestCase):
         tools = {tool["name"]: tool for tool in manifest["tools"]}
         self.assertTrue(tools["restart_service"]["requires_approval"])
         self.assertEqual(tools["restart_service"]["action_type"], "destructive")
+        self.assertEqual(tools["restart_service"]["l0_skill_id"], "network.service.restart")
+        self.assertEqual(tools["restart_service"]["l0_skill_version"], "1.0.0")
+        self.assertTrue(tools["restart_service"]["l0_contract_hash"].startswith("sha256:"))
+        self.assertEqual(tools["restart_service"]["intent_kind"], "restart_service")
+        self.assertEqual(tools["restart_service"]["execution_boundary"], "network_l0_skill")
+        l0_skills = {item["skill_id"]: item for item in manifest["l0_skills"]}
+        self.assertIn("network.service.restart", l0_skills)
+        self.assertEqual(l0_skills["network.service.restart"]["tool_name"], "restart_service")
         self.assertEqual(
             tools["edit_device_config"]["editable_parameters"],
             ["config_lines", "reason"],
@@ -65,7 +84,7 @@ class TestDshInvocation(unittest.TestCase):
     def test_destructive_tool_is_denied_without_durable_hitl(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop("NETOPYU_DSH_ALLOW_DESTRUCTIVE", None)
-            with self.assertRaises(PermissionError):
+            with self.assertRaises(ApprovalError):
                 asyncio.run(invoke_tool("lan", "restart_service", {"service": "crm"}))
 
     def test_common_result_tools_are_available_for_every_profile(self):
@@ -206,7 +225,7 @@ pragmatic:
     def test_pragmatic_write_still_requires_durable_hitl(self):
         with patch.dict(os.environ, {"NETOPYU_DSH_BACKEND": "pragmatic"}, clear=False):
             os.environ.pop("NETOPYU_DSH_ALLOW_DESTRUCTIVE", None)
-            with self.assertRaises(PermissionError):
+            with self.assertRaises(ApprovalError):
                 asyncio.run(invoke_tool("lan", "edit_device_config", {
                     "device_id": "sw-1", "changes": {}, "reason": "test",
                 }))

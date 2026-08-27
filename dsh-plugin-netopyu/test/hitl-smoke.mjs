@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { unlinkSync } from 'node:fs'
+import { existsSync, unlinkSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -7,6 +7,13 @@ import { createServer } from 'node:http'
 import { apply } from '../src/index.js'
 
 const storePath = join(tmpdir(), `netopyu-hitl-${process.pid}.sqlite`)
+const runtimeStorePath = join(tmpdir(), `netopyu-network-runtime-${process.pid}.sqlite`)
+const toolResultStorePath = join(tmpdir(), `netopyu-tool-results-${process.pid}.sqlite`)
+// The smoke suite owns isolated temporary stores. Never route it through a
+// separately running desktop Worker with a different process environment.
+delete process.env.NETOPYU_DSH_WORKER_SOCKET
+process.env.NETOPYU_DSH_NETWORK_RUNTIME_STORE = runtimeStorePath
+process.env.NETOPYU_DSH_TOOL_RESULT_STORE = toolResultStorePath
 const definitions = []
 const listeners = new Map()
 const services = new Map()
@@ -83,6 +90,10 @@ const a2aHitlList = definitions.find(tool => tool.name === 'netopyu_a2a_hitl_lis
 const a2aHitlResume = definitions.find(tool => tool.name === 'netopyu_a2a_hitl_resume')
 assert.ok(peerList)
 assert.ok(delegate)
+assert.deepEqual(delegate.parameters.anyOf, [
+  { required: ['target'] },
+  { required: ['capability'] },
+])
 assert.ok(a2aHitlList)
 assert.ok(a2aHitlResume)
 const restart = definitions.find(tool => tool.name === 'restart_service')
@@ -137,6 +148,20 @@ await assert.rejects(restart.execute(execution.arguments, execution), /durable-H
 listeners.get('tools/result')(execution, { isError: false })
 assert.ok(JSON.parse(await trajectoryRecent.execute({ limit: 10 })).some(item => item.event_type === 'tool:result'))
 
+// DSH execution tokens are scoped to a call lifecycle and may be reused in a
+// later call. Historical consumed grants must not make that fresh plan fail.
+const reusedTokenExecution = {
+  ...execution,
+  callId: 'call-reused-token',
+  arguments: { service: 'billing', environment: 'staging' },
+}
+const reusedTokenDecision = await listeners.get('tools/pre-execute')(
+  reusedTokenExecution, async () => ({ kind: 'allow' }),
+)
+assert.equal(reusedTokenDecision.kind, 'allow')
+assert.match(await restart.execute(reusedTokenExecution.arguments, reusedTokenExecution), /restart/i)
+listeners.get('tools/result')(reusedTokenExecution, { isError: false })
+
 approvalOutcome = 'rejected'
 const rejected = { ...execution, token: 'token-rejected', callId: 'call-rejected' }
 const rejection = await listeners.get('tools/pre-execute')(rejected, async () => ({ kind: 'allow' }))
@@ -166,6 +191,7 @@ const rows = database.prepare('SELECT status, outcome FROM requests ORDER BY cre
   .map(row => ({ ...row }))
 database.close()
 assert.deepEqual(rows, [
+  { status: 'completed', outcome: 'allowed-once' },
   { status: 'completed', outcome: 'allowed-once' },
   { status: 'completed', outcome: 'allowed-once' },
   { status: 'denied', outcome: 'rejected' },
@@ -229,12 +255,8 @@ const forbiddenResume = {
   arguments: { request_id: interruptedId, arguments: { service: 'billing', environment: 'staging' } },
 }
 const forbiddenDecision = await listeners.get('tools/pre-execute')(forbiddenResume, async () => ({ kind: 'allow' }))
-assert.equal(forbiddenDecision.kind, 'allow')
-await assert.rejects(
-  resumeInterrupted.execute(forbiddenResume.arguments, forbiddenResume),
-  /non-editable keys.*service/,
-)
-listeners.get('tools/result')(forbiddenResume, { isError: true })
+assert.equal(forbiddenDecision.kind, 'deny')
+assert.match(forbiddenDecision.reason, /non-editable keys.*service/)
 assert.equal(JSON.parse(await listInterrupted.execute({}))[0].status, 'orphaned')
 
 const resumeDecision = await listeners.get('tools/pre-execute')(resumeExecution, async () => ({ kind: 'allow' }))
@@ -307,12 +329,8 @@ const failingBatchExecution = {
   },
 }
 const failingBatchDecision = await listeners.get('tools/pre-execute')(failingBatchExecution, async () => ({ kind: 'allow' }))
-assert.equal(failingBatchDecision.kind, 'allow')
-await assert.rejects(
-  batch.execute(failingBatchExecution.arguments, failingBatchExecution),
-  /not transactionally rolled back/,
-)
-listeners.get('tools/result')(failingBatchExecution, { isError: true })
+assert.equal(failingBatchDecision.kind, 'deny')
+assert.match(failingBatchDecision.reason, /config_text must be a string/)
 
 const expiringExecution = {
   ...asyncExecution,
@@ -341,6 +359,11 @@ const expiredOriginal = recovered.prepare("SELECT status FROM requests WHERE id 
 const grantCounts = recovered.prepare("SELECT status, COUNT(*) AS count FROM tool_grants GROUP BY status ORDER BY status").all()
 const a2aContinuationStatuses = recovered.prepare("SELECT status, COUNT(*) AS count FROM a2a_continuations GROUP BY status ORDER BY status").all()
 recovered.close()
+const runtimeAudit = new DatabaseSync(runtimeStorePath, { readOnly: true })
+const rejectedPlanCount = runtimeAudit.prepare("SELECT COUNT(*) AS count FROM plans WHERE state='rejected'").get().count
+const stillReadyCount = runtimeAudit.prepare("SELECT COUNT(*) AS count FROM plans WHERE state='plan_ready'").get().count
+const approvalRejectedEvents = runtimeAudit.prepare("SELECT COUNT(*) AS count FROM plan_events WHERE event_type='approval_rejected'").get().count
+runtimeAudit.close()
 assert.equal(original.status, 'recovered')
 assert.deepEqual(JSON.parse(original.recovered_arguments_json), { service: 'crm', environment: 'staging' })
 assert.equal(deferredOriginal.status, 'recovered')
@@ -349,24 +372,24 @@ assert.deepEqual(JSON.parse(deferredOriginal.recovered_arguments_json), {
 })
 assert.deepEqual(recoveryAudit.map(row => ({ ...row })), [
   { status: 'denied', outcome: 'rejected' },
-  { status: 'failed', outcome: 'allowed-once' },
   { status: 'completed', outcome: 'allowed-once' },
   { status: 'completed', outcome: 'allowed-once' },
 ])
 assert.deepEqual(batchItemCounts.map(row => ({ ...row })), [
-  { status: 'completed', count: 3 },
-  { status: 'failed', count: 1 },
-  { status: 'skipped', count: 1 },
+  { status: 'completed', count: 2 },
 ])
 assert.equal(expiredOriginal.status, 'expired')
 assert.deepEqual(grantCounts.map(row => ({ ...row })), [
-  { status: 'consumed', count: 8 },
+  { status: 'consumed', count: 7 },
   { status: 'orphaned', count: 1 },
 ])
 assert.deepEqual(a2aContinuationStatuses.map(row => ({ ...row })), [
   { status: 'completed', count: 1 },
   { status: 'rejected', count: 1 },
 ])
+assert.ok(rejectedPlanCount >= 2, 'DSH rejection and partial preparation must close runtime plans')
+assert.ok(approvalRejectedEvents >= 2)
+assert.equal(stillReadyCount, 0, 'smoke test must not leak executable unapproved plans')
 
 const compactStorePath = join(tmpdir(), `netopyu-compact-${process.pid}.sqlite`)
 const compactDefinitions = []
@@ -407,6 +430,11 @@ await assert.rejects(
 )
 
 unlinkSync(storePath)
+for (const path of [runtimeStorePath, toolResultStorePath]) {
+  for (const suffix of ['', '-shm', '-wal']) {
+    if (existsSync(`${path}${suffix}`)) unlinkSync(`${path}${suffix}`)
+  }
+}
 await new Promise((resolve, reject) => peerServer.close(error => error ? reject(error) : resolve()))
 console.log(JSON.stringify({
   tools: initialToolCount,

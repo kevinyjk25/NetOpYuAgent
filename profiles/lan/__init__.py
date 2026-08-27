@@ -39,6 +39,7 @@ _CALLABLES = {
     "drain_node":             _tools.drain_node,
     "failover":               _tools.failover,
     "delete_resource":        _tools.delete_resource,
+    "mock_operation_status":  _tools.mock_operation_status,
     "query_radius_logs":      _tools.query_radius_logs,   # H2 async-HITL demo (2026-05)
     # User / network-access control (cross-agent HITL scenario, 2026-05)
     "list_users":             _tools.list_users,

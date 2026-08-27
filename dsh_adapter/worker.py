@@ -17,7 +17,18 @@ from runtime.tracing import start_span
 
 from .a2a_provider import delegate_a2a, discover_peers
 from .backend import resolve_backend_mode
-from .bridge import _build_manifest, backend_report, invoke_tool
+from .bridge import (
+    _build_manifest,
+    audit_network_plan,
+    backend_report,
+    execute_network_plan,
+    inspect_network_plan,
+    invoke_tool,
+    observe_network_workflow,
+    prepare_network_plan,
+    reject_network_plan,
+    start_network_workflow,
+)
 from .scoped_services import recall_memory, search_capabilities
 from .skills import build_skill_manifest
 
@@ -66,6 +77,28 @@ async def dispatch(request: dict[str, Any]) -> Any:
             allow_destructive=bool(request.get("allow_destructive")),
         )
         return {"ok": True, "result": result}
+    if command == "runtime-prepare":
+        return await prepare_network_plan(
+            profile, str(request.get("tool", "")), arguments,
+            session_id=(str(request.get("session_id")) if request.get("session_id") else None),
+            l0_skill_id=(
+                str(request.get("l0_skill_id")) if request.get("l0_skill_id") else None
+            ),
+        )
+    if command == "runtime-execute":
+        return await execute_network_plan(
+            arguments, allow_destructive=bool(request.get("allow_destructive")),
+        )
+    if command == "runtime-inspect":
+        return inspect_network_plan(str(arguments.get("plan_id", "")))
+    if command == "runtime-audit":
+        return audit_network_plan(str(arguments.get("plan_id", "")))
+    if command == "runtime-reject":
+        return reject_network_plan(arguments)
+    if command == "workflow-start":
+        return start_network_workflow(profile, arguments)
+    if command == "workflow-observe":
+        return await observe_network_workflow(profile, arguments)
     if command == "backend":
         return await backend_report(profile)
     if command == "memory-recall":
@@ -121,6 +154,12 @@ async def _handle(
         "command": request.get("command"),
         "profile": request.get("profile", "lan"),
         "tool": request.get("tool"),
+        "network_plan_id": (
+            (request.get("args") or {}).get("plan_id")
+            if request.get("command") in {"runtime-execute", "runtime-inspect"}
+            and isinstance(request.get("args") or {}, dict)
+            else None
+        ),
         "ok": response["ok"],
         "error_type": error_type,
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
@@ -144,6 +183,16 @@ def _remove_stale_socket(path: Path) -> None:
 
 async def serve(path: Path) -> None:
     _configure_tracing()
+    from network_runtime.engine import NetworkRuntime, default_journal_path
+    from network_runtime.journal import NetworkJournal
+
+    # This is the only safe point to reconcile plans interrupted by a prior
+    # worker process. New request connections must never perform recovery.
+    with NetworkJournal(default_journal_path(), recover_crashed=True):
+        pass
+    # Reconcile uncertain device outcomes using verifier reads only. No write
+    # command is replayed after a crash.
+    await NetworkRuntime().recover_inflight()
     path = path.expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     _remove_stale_socket(path)
@@ -154,10 +203,16 @@ async def serve(path: Path) -> None:
     if not 1 <= concurrency <= 64:
         raise ValueError("NETOPYU_DSH_WORKER_CONCURRENCY must be between 1 and 64")
     semaphore = asyncio.Semaphore(concurrency)
-    server = await asyncio.start_unix_server(
-        lambda reader, writer: _handle(reader, writer, semaphore),
-        path=str(path),
-    )
+    # Apply owner-only permissions at bind time. A post-bind chmod alone has a
+    # race in which another local user can observe/connect to a 0755 socket.
+    previous_umask = os.umask(0o177)
+    try:
+        server = await asyncio.start_unix_server(
+            lambda reader, writer: _handle(reader, writer, semaphore),
+            path=str(path),
+        )
+    finally:
+        os.umask(previous_umask)
     os.chmod(path, 0o600)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()

@@ -20,14 +20,21 @@ architecture audit prevents retired imports and paths from returning.
 - GitHub Actions runs the same clean-checkout DSH-only retirement gate; no
   retired scripts, runtime installation, Ollama model or network endpoint is
   required.
-- Retained DSH/domain suite: 97 tests plus 4 profile subtests pass.
+- Retained DSH/domain suite: 121 tests plus 32 subtests pass.
 - DSH-only architecture audit: PASS.
-- Node syntax and the combined 39-tool HITL/A2A/memory/trajectory smoke: PASS.
+- Node syntax and the combined 40-tool HITL/A2A/memory/trajectory smoke: PASS.
 - Runtime skill projection: default 1, LAN 12, DC 5, WAN 1.
 - Retrieval gate: 100 balanced LAN cases, Recall@3 1.00, MRR 0.915,
   zero failures.
-- Local reliability: 24 requests at concurrency 8, p95 23.81 ms,
-  maximum 24.15 ms.
+- Local reliability: 24 requests at concurrency 8, p95 27.53 ms,
+  maximum 28.02 ms.
+- P1 Runtime Foundation: execution-time state-drift protection, versioned
+  verifier/compensator registries, public DC verification reads and per-plan
+  tamper-evident event hash chains are implemented and contract-tested.
+- P0.5 Network Skill completion: 14 local mutating capabilities are registered
+  as first-class deterministic L0 Skills. Schema-v4 plans bind normalized
+  IntentSpec, desired state, provenance, L0 contract and fixed step hashes;
+  unbound direct write preparation fails closed.
 - Malformed requests are isolated and the Worker remains healthy.
 - Worker stop/start recovery succeeds and removes its Unix Socket cleanly.
 - Ambient `NETOPYU_DSH_ALLOW_DESTRUCTIVE=1` cannot bypass an explicit
@@ -87,6 +94,8 @@ scripts/netopyu-dsh start
 scripts/netopyu-dsh retirement
 scripts/netopyu-dsh learning-mine
 scripts/netopyu-dsh reliability
+scripts/netopyu-dsh runtime-audit PLAN_ID
+scripts/netopyu-dsh l0-skills
 ```
 
 There are no remaining migration stages in the agreed scope.

@@ -25,11 +25,15 @@ def _request(socket_path: Path, payload: dict[str, Any]) -> tuple[dict[str, Any]
     return json.loads(response), (time.perf_counter() - started) * 1000
 
 
-def _start_worker(python: str, root: Path, socket_path: Path, result_store: Path) -> subprocess.Popen[str]:
+def _start_worker(
+    python: str, root: Path, socket_path: Path, result_store: Path,
+    runtime_store: Path,
+) -> subprocess.Popen[str]:
     environment = {
         **os.environ,
         "NETOPYU_DSH_BACKEND": "mock",
         "NETOPYU_DSH_TOOL_RESULT_STORE": str(result_store),
+        "NETOPYU_DSH_NETWORK_RUNTIME_STORE": str(runtime_store),
         # Prove that the explicit per-request False gate overrides ambient env.
         "NETOPYU_DSH_ALLOW_DESTRUCTIVE": "1",
         "NETOPYU_DSH_OTEL_ENABLED": "false",
@@ -77,7 +81,8 @@ def run_local_reliability(
         temp = Path(directory)
         socket_path = temp / "bridge.sock"
         result_store = temp / "results.sqlite"
-        worker = _start_worker(python, root, socket_path, result_store)
+        runtime_store = temp / "network-runtime.sqlite"
+        worker = _start_worker(python, root, socket_path, result_store, runtime_store)
         try:
             def invoke(index: int) -> tuple[dict[str, Any], float]:
                 return _request(socket_path, {
@@ -95,10 +100,31 @@ def run_local_reliability(
                 "tool": "restart_service", "args": {"service": "crm", "environment": "staging"},
                 "allow_destructive": False,
             })
-            allowed, _ = _request(socket_path, {
-                "id": "policy-allowed", "command": "invoke", "profile": "lan",
+            legacy_boolean, _ = _request(socket_path, {
+                "id": "legacy-boolean", "command": "invoke", "profile": "lan",
                 "tool": "restart_service", "args": {"service": "crm", "environment": "staging"},
                 "allow_destructive": True,
+            })
+            prepared, _ = _request(socket_path, {
+                "id": "runtime-prepare", "command": "runtime-prepare", "profile": "lan",
+                "tool": "restart_service", "args": {"service": "crm", "environment": "staging"},
+                "l0_skill_id": "network.service.restart",
+            })
+            prepared_payload = prepared.get("payload", {})
+            plan = prepared_payload.get("plan", {})
+            execution_args = {
+                "plan_id": plan.get("plan_id"), "plan_hash": plan.get("plan_hash"),
+                "execution_nonce": prepared_payload.get("execution_nonce"),
+                "approval_request_id": "local-reliability-approval",
+                "approval_actor": "local-reliability-operator",
+            }
+            unapproved_runtime, _ = _request(socket_path, {
+                "id": "runtime-unapproved", "command": "runtime-execute", "profile": "lan",
+                "tool": "restart_service", "args": execution_args, "allow_destructive": False,
+            })
+            allowed, _ = _request(socket_path, {
+                "id": "runtime-approved", "command": "runtime-execute", "profile": "lan",
+                "tool": "restart_service", "args": execution_args, "allow_destructive": True,
             })
 
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
@@ -110,7 +136,7 @@ def run_local_reliability(
         finally:
             _stop_worker(worker, socket_path)
 
-        restarted = _start_worker(python, root, socket_path, result_store)
+        restarted = _start_worker(python, root, socket_path, result_store, runtime_store)
         try:
             healthy_after_restart, _ = _request(socket_path, {"id": "after-restart", "command": "ping"})
         finally:
@@ -122,7 +148,12 @@ def run_local_reliability(
         "load": load_ok,
         "load_p95_under_1s": latencies[p95_index] < 1000,
         "ambient_destructive_env_does_not_bypass_request_gate": denied.get("ok") is False,
-        "explicit_local_simulation_authorization": allowed.get("ok") is True,
+        "legacy_write_boolean_is_retired": legacy_boolean.get("ok") is False,
+        "runtime_execute_requires_request_authorization": unapproved_runtime.get("ok") is False,
+        "explicit_local_simulation_authorization": (
+            allowed.get("ok") is True
+            and allowed.get("payload", {}).get("state") == "verified_success"
+        ),
         "malformed_request_isolated": malformed.get("ok") is False and healthy_after_chaos.get("ok") is True,
         "restart_recovery": healthy_after_restart.get("ok") is True,
         "legacy_surfaces_removed": all(not path.exists() for path in retired_paths),

@@ -19,6 +19,7 @@ LOG_DIR="$RUNTIME_ROOT/logs"
 LOG_FILE="$LOG_DIR/dsh-web.log"
 HITL_STORE="${NETOPYU_DSH_HITL_STORE:-$RUNTIME_ROOT/data/hitl.sqlite}"
 TOOL_RESULT_STORE="${NETOPYU_DSH_TOOL_RESULT_STORE:-$RUNTIME_ROOT/data/tool_results.sqlite}"
+NETWORK_RUNTIME_STORE="${NETOPYU_DSH_NETWORK_RUNTIME_STORE:-$RUNTIME_ROOT/data/network_runtime.sqlite}"
 LEARNING_STORE="${NETOPYU_DSH_LEARNING_STORE:-$RUNTIME_ROOT/data/learning.sqlite}"
 LEARNING_PROPOSALS="${NETOPYU_DSH_LEARNING_PROPOSALS:-$RUNTIME_ROOT/data/skill-proposals}"
 WORKER_SOCKET="${NETOPYU_DSH_WORKER_SOCKET:-$RUNTIME_ROOT/bridge.sock}"
@@ -62,6 +63,11 @@ Commands:
   preset NAME   Explicitly set the default agent preset (standard|minimal)
   settings-sync Add/update NetOpYu models while preserving other DSH settings
   backend       Show the active network backend and configured real sources
+  runtime-list  Show recent immutable Network Runtime plans and terminal states
+  runtime PLAN  Show one plan, state transition journal, approval, and evidence
+  runtime-audit PLAN  Verify the plan event hash chain and report tampering
+  l0-skills     Show registered deterministic Network L0 Skill contracts
+  demo-l1-l0    Run the isolated LAN/DC L1 Skill + L0 Skill walkthrough
   peers         Discover configured A2A peers and show their capabilities
   parity        Run the DSH capability retirement gate against the golden set
   learning-mine Dry-run offline trajectory mining; add --apply to store candidates
@@ -83,6 +89,7 @@ Environment overrides:
   NETOPYU_DSH_TOOL_ALLOWLIST=a,b     # optional compact bridge-tool projection
   NETOPYU_DSH_WORKER_SOCKET=/path/to/bridge.sock
   NETOPYU_DSH_WORKER_CONCURRENCY=8
+  NETOPYU_DSH_NETWORK_RUNTIME_STORE=/path/to/network_runtime.sqlite
   NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8001,http://127.0.0.1:8002
   NETOPYU_DSH_A2A_TIMEOUT=300
   NETOPYU_DSH_A2A_MAX_HOPS=3
@@ -243,6 +250,7 @@ runtime_env() {
   fi
   export NETOPYU_DSH_HITL_STORE="$HITL_STORE"
   export NETOPYU_DSH_TOOL_RESULT_STORE="$TOOL_RESULT_STORE"
+  export NETOPYU_DSH_NETWORK_RUNTIME_STORE="$NETWORK_RUNTIME_STORE"
   export NETOPYU_DSH_WORKER_SOCKET="$WORKER_SOCKET"
   export NETOPYU_OLLAMA_API_KEY="${NETOPYU_OLLAMA_API_KEY:-ollama}"
   export DSH_TELEMETRY_DISABLED="${DSH_TELEMETRY_DISABLED:-1}"
@@ -467,8 +475,9 @@ doctor() {
     failures=$((failures + 1))
   fi
   if [[ -f "$PLUGIN_ROOT/test/hitl-smoke.mjs" ]] && command -v node >/dev/null 2>&1; then
-    if (cd "$PROJECT_ROOT" && NETOPYU_DSH_BACKEND=mock node "$PLUGIN_ROOT/test/hitl-smoke.mjs" >/dev/null); then
-      printf '  PASS NetOpYu plugin/HITL smoke test\n'
+    if (cd "$PROJECT_ROOT" && NETOPYU_DSH_BACKEND=mock node "$PLUGIN_ROOT/test/hitl-smoke.mjs" >/dev/null \
+      && NETOPYU_DSH_BACKEND=mock node "$PLUGIN_ROOT/test/workflow-smoke.mjs" >/dev/null); then
+      printf '  PASS NetOpYu plugin/HITL/workflow smoke tests\n'
     else
       printf '  FAIL NetOpYu plugin/HITL smoke test\n' >&2
       failures=$((failures + 1))
@@ -617,6 +626,49 @@ show_backend() {
   "$PYTHON_BIN" -m dsh_adapter.cli backend --profile "$NETOPYU_PROFILE" | "$PYTHON_BIN" -m json.tool
 }
 
+show_runtime_plans() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local limit="${2:-20}"
+  [[ "$limit" =~ ^[0-9]+$ ]] || { fail 'Usage: scripts/netopyu-dsh runtime-list [LIMIT]'; return 1; }
+  "$PYTHON_BIN" -m dsh_adapter.cli runtime-list --limit "$limit" | "$PYTHON_BIN" -m json.tool
+}
+
+show_runtime_plan() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local plan_id="${2:-}"
+  [[ -n "$plan_id" ]] || { fail 'Usage: scripts/netopyu-dsh runtime PLAN_ID'; return 1; }
+  "$PYTHON_BIN" -m dsh_adapter.cli runtime-inspect --plan "$plan_id" | "$PYTHON_BIN" -m json.tool
+}
+
+audit_runtime_plan() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local plan_id="${2:-}"
+  [[ -n "$plan_id" ]] || { fail 'Usage: scripts/netopyu-dsh runtime-audit PLAN_ID'; return 1; }
+  local report
+  report="$("$PYTHON_BIN" -m dsh_adapter.cli runtime-audit --plan "$plan_id")" || return 1
+  printf '%s' "$report" | "$PYTHON_BIN" -m json.tool
+  printf '%s' "$report" | "$PYTHON_BIN" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") else 1)'
+}
+
+show_l0_skills() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m dsh_adapter.cli l0-skills --profile "$NETOPYU_PROFILE" | "$PYTHON_BIN" -m json.tool
+}
+
+run_l1_l0_demo() {
+  check_python || return 1
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" scripts/l1_l0_demo.py --approve-local-simulation
+}
+
 show_peers() {
   check_python || return 1
   runtime_env
@@ -695,6 +747,7 @@ run_e2e() {
   done
   printf '4/7 Tool, HITL, A2A, memory and trajectory smoke\n'
   NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/hitl-smoke.mjs || return 1
+  NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/workflow-smoke.mjs || return 1
   printf '5/7 Profile skill projection\n'
   for profile_id in default lan dc wan; do
     NETOPYU_DSH_BACKEND=mock "$PYTHON_BIN" -m dsh_adapter.cli skill-manifest \
@@ -733,6 +786,11 @@ case "$command" in
   preset) set_default_preset "$@" ;;
   settings-sync) check_python && write_settings ;;
   backend) show_backend ;;
+  runtime-list) show_runtime_plans "$@" ;;
+  runtime) show_runtime_plan "$@" ;;
+  runtime-audit) audit_runtime_plan "$@" ;;
+  l0-skills) show_l0_skills ;;
+  demo-l1-l0) run_l1_l0_demo ;;
   peers) show_peers ;;
   parity) run_parity ;;
   learning-mine) run_learning_mine "$@" ;;
