@@ -1,4 +1,4 @@
-"""Persistent, owner-only Unix-socket worker for the DSH Python bridge."""
+"""Persistent, owner-only Unix-socket worker shared by harness adapters."""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ _TRUE_VALUES = {"1", "true", "yes", "on"}
 
 
 def _configure_tracing() -> bool:
-    """Enable the existing optional OTel adapter for the DSH Worker."""
+    """Enable the existing optional OTel adapter for the shared Worker."""
     enabled_value = os.getenv(
         "NETOPYU_DSH_OTEL_ENABLED",
         os.getenv("OTEL_TRACING_ENABLED", "false"),
@@ -49,7 +49,7 @@ def _configure_tracing() -> bool:
         sample_ratio = 1.0
     return configure_tracing(
         enabled=enabled_value.strip().lower() in _TRUE_VALUES,
-        service_name=os.getenv("OTEL_SERVICE_NAME", "netopyu-dsh-worker"),
+        service_name=os.getenv("OTEL_SERVICE_NAME", "netopyu-harness-worker"),
         service_version=os.getenv("OTEL_SERVICE_VERSION", "0.1.0"),
         otlp_endpoint=os.getenv("OTEL_EXPORTER_OTLP_ENDPOINT") or None,
         sample_ratio=sample_ratio,
@@ -197,11 +197,14 @@ async def serve(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     _remove_stale_socket(path)
     try:
-        concurrency = int(os.getenv("NETOPYU_DSH_WORKER_CONCURRENCY", "8"))
+        concurrency = int(
+            os.getenv("NETOPYU_WORKER_CONCURRENCY")
+            or os.getenv("NETOPYU_DSH_WORKER_CONCURRENCY", "8")
+        )
     except ValueError as error:
-        raise ValueError("NETOPYU_DSH_WORKER_CONCURRENCY must be an integer") from error
+        raise ValueError("NETOPYU_WORKER_CONCURRENCY must be an integer") from error
     if not 1 <= concurrency <= 64:
-        raise ValueError("NETOPYU_DSH_WORKER_CONCURRENCY must be between 1 and 64")
+        raise ValueError("NETOPYU_WORKER_CONCURRENCY must be between 1 and 64")
     semaphore = asyncio.Semaphore(concurrency)
     # Apply owner-only permissions at bind time. A post-bind chmod alone has a
     # race in which another local user can observe/connect to a 0755 socket.

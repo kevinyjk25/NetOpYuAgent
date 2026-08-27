@@ -4,13 +4,13 @@
 
 ### 1. 权威架构声明
 
-NetOpYuAgent 是 **DSH-only 网络领域插件**。DSH 是唯一通用 Agent Harness；本仓库只实现 DSH 之上的网络领域能力和确定性效果运行时。
+NetOpYuAgent 是 **Harness 可适配的网络领域插件**。DSH 是主平台，Hermes 是可选平台 Adapter；二者只能通过窄插件/Worker 协议进入同一个 Network Runtime。本仓库不实现通用 Agent Harness。
 
 禁止重新引入以下表面：
 
 - 自建 Agent loop、通用 planner 或模型 client；
 - 独立 FastAPI/WebUI；
-- 与 DSH 并行的会话、审批或子代理框架；
+- 与 DSH/Hermes 并行的自建会话、模型循环或子代理框架；
 - 绕过 Network Runtime 的直接写工具入口；
 - 自动把轨迹/学习结果安装为可执行 Skill。
 
@@ -18,13 +18,13 @@ NetOpYuAgent 是 **DSH-only 网络领域插件**。DSH 是唯一通用 Agent Har
 
 ```text
 ┌──────────────────────────────────────────────────────────────┐
-│ DSH Platform Layer                                           │
-│ Session · Model · UI · Tool lifecycle · Skill · Approval UI │
+│ Harness Platform Layer: DSH (primary) or Hermes (optional)   │
+│ Session · Model · UI/CLI · Tool lifecycle · Skill           │
 └────────────────────────────┬─────────────────────────────────┘
-                             │ plugin contract
+                             │ public plugin contract
 ┌────────────────────────────▼─────────────────────────────────┐
 │ NetOpYu Domain Control Plane                                 │
-│ Tool projection · HITL · Tool Guard · A2A · Scoped services │
+│ Harness adapters · approval binding · A2A · scoped services │
 └────────────────────────────┬─────────────────────────────────┘
                              │ typed bridge commands
 ┌────────────────────────────▼─────────────────────────────────┐
@@ -39,15 +39,18 @@ NetOpYuAgent 是 **DSH-only 网络领域插件**。DSH 是唯一通用 Agent Har
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“不能自由发挥的效果合同”。二者都属于 NetOpYu Domain Layer，不应与 DSH 平台层的 L0/L1 命名混用。
+Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“不能自由发挥的效果合同”。二者都属于 NetOpYu Domain Layer，不应与任一 Harness 的内部层级命名混用。
 
 ### 3. 源代码边界
 
 #### 3.1 平台集成
 
-- `dsh-plugin-netopyu/`：唯一 JavaScript 插件入口；只依赖 DSH/Cordis contract 和 Python bridge。
+- `dsh-plugin-netopyu/`：DSH JavaScript Adapter；依赖 DSH/Cordis contract 和 Worker bridge。
+- `hermes-plugin-netopyu/`：Hermes 官方插件加载入口；只转发到 Python `hermes_adapter`。
+- `hermes_adapter/`：Hermes PluginContext 投影、Unix Socket client、进程内待审批绑定和 Adapter 对比门禁。
 - `.netopyu-dsh/`：隔离的 DSH workspace 描述，不包含生成 runtime。
-- `scripts/netopyu-dsh`：安装、启动、模型、诊断、审计和 retirement 的唯一运维入口。
+- `scripts/netopyu-dsh`：DSH 主平台的安装、运行、诊断和 retirement 入口。
+- `scripts/netopyu-hermes`：Hermes 插件链接、Worker、doctor、运行与 Adapter 对比入口。
 
 #### 3.2 领域控制面
 
@@ -61,7 +64,7 @@ Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“�
 - `tools/`：公共工具与 pragmatic local adapters；
 - `integrations/`：MCP/OpenAPI client 和 router；
 - `registry/`：只保留 outbound A2A AgentCard discovery schema；
-- `runtime/`：只保留通用但实际被 DSH 使用的 tool-result store/tracing；
+- `runtime/`：两个 Harness 共享的 tool-result store/tracing；
 - `agent_memory/`：仅通过 scoped service 暴露；
 - `retrieval/`：能力检索；
 - `evaluation/`：离线、非生产执行路径的质量门禁；
@@ -73,6 +76,7 @@ Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“�
 
 ```text
 dsh-plugin-netopyu -> dsh_adapter bridge protocol
+hermes-plugin-netopyu -> hermes_adapter -> Worker bridge protocol
 dsh_adapter -> network_runtime / profiles / scoped services
 network_runtime -> profiles metadata/callables / tools loader
 profiles -> tools common helpers
@@ -83,16 +87,17 @@ evaluation -> public manifests / retrieval / test data
 
 禁止的依赖方向：
 
-- `network_runtime` 不得依赖 DSH Web/UI 或模型；
+- `network_runtime` 不得依赖 DSH/Hermes UI、模型或插件 API；
 - `profiles`/`tools` 不得调用审批 API；
 - L1 `SKILL.md` 不得直接持有 backend credentials；
 - verifier 不得复用写工具返回文本作为唯一证据；
 - mock profile 不得加载 pragmatic real sources；
 - `evaluation` 不得进入生产工具执行调用链；
-- `agent_memory` 不得自动注入 DSH prompt；
-- JavaScript grant 不得用环境变量替代 request-level approval。
+- `agent_memory` 不得自动注入任一 Harness prompt；
+- Harness Adapter 不得用环境变量、模型文本或通用危险命令审批替代 request-level plan approval；
+- Hermes Adapter 不得把 execution nonce 返回给模型；只有用户 slash command handler 可以消费进程内绑定。
 
-`scripts/audit_dsh_only.py` 和 retirement gate 负责防止历史架构表面返回。
+`scripts/audit_harness_boundary.py` 和 retirement gate 负责防止历史自建 Harness 表面返回。
 
 ### 5. 核心不变量
 
@@ -107,11 +112,11 @@ evaluation -> public manifests / retrieval / test data
 
 ### 6. 架构决策记录
 
-#### ADR-001：采用 DSH 作为唯一平台层
+#### ADR-001：DSH 主平台 + 可替换 Harness Adapter
 
-决定：删除自建 UI、Agent loop、通用 HITL 和 inbound agent server。
+决定：删除自建 UI、Agent loop、通用 HITL 和 inbound agent server。DSH 保持主平台；Hermes 只能作为共享领域层之前的可选 Adapter。
 
-原因：这些能力与 DSH 重复，不能形成网络领域差异化；双 runtime 会造成会话、授权与工具生命周期不一致。
+原因：通用 Harness 不是网络领域差异化。允许第二个 Adapter 可验证 Runtime 可移植性，但不允许第二套 Network Runtime、合同、验证或回滚语义。
 
 #### ADR-002：保留 Python 领域 bridge
 
@@ -149,9 +154,15 @@ evaluation -> public manifests / retrieval / test data
 
 原因：控制 context、避免重复传输，并在 bridge 生命周期之间保留结果。
 
+#### ADR-008：Hermes 用户 slash command 是 Adapter 授权入口
+
+决定：Hermes 写工具只 prepare；模型可见结果删除 execution nonce。只有操作员输入包含完整 plan id/hash 的 `/netopyu-approve` 或 A2A 等价命令才执行。待审批 nonce 只驻留插件进程，重启即失效。
+
+原因：Hermes 的公开插件 API 可以注册工具和 slash command，但通用危险命令审批不是网络领域授权策略 API。显式用户命令保持人机边界，同时 Network Runtime 继续验证 hash、nonce、TTL、状态和证据。
+
 ### 7. Clean Code 规则
 
-- 一个模块只保留当前 DSH 路径实际使用的职责；
+- 一个模块只保留当前 DSH/Hermes 路径实际使用的职责；
 - 删除断裂 CLI、旧框架 adapter、重复文档和运行时产物，不保留“以后也许有用”的死代码；
 - 公共 API 由包 `__init__` 明确导出，内部 helper 不跨层引用；
 - mutation contract 必须 frozen/versioned/hashable；
@@ -160,7 +171,7 @@ evaluation -> public manifests / retrieval / test data
 - error message 不包含 secret value；
 - 模块级文档描述当前架构，不描述已经删除的 `main.py`/legacy loop；
 - 文档变更与代码合同变更同一个提交；
-- `scripts/netopyu-dsh retirement` 是合并前必过门禁。
+- `scripts/netopyu-dsh retirement` 与 `scripts/netopyu-hermes test` 是 Harness 相关变更的合并前门禁。
 
 ### 8. 新能力接入
 
@@ -211,14 +222,14 @@ evaluation -> public manifests / retrieval / test data
 
 ### 1. Authoritative statement
 
-NetOpYuAgent is a **DSH-only network-domain plugin**. DSH is the only general agent harness. This repository implements only the network-domain layer and deterministic effect runtime above DSH.
+NetOpYuAgent is a **harness-adaptable network-domain plugin**. DSH is the primary platform and Hermes is an optional adapter. Both enter the same Network Runtime through narrow public plugin and Worker contracts. This repository does not implement a general agent harness.
 
 The architecture forbids a custom agent loop or model client, a standalone Web UI, parallel session/approval/subagent frameworks, direct mutations outside Network Runtime, and automatic activation of learned Skills.
 
 ### 2. Layers
 
-1. **DSH Platform Layer:** sessions, models, UI, tool lifecycle, Skills, approval interaction.
-2. **NetOpYu Domain Control Plane:** tool projection, HITL, Tool Guard, A2A, scoped services.
+1. **Harness Platform Layer:** DSH (primary) or Hermes (optional) for sessions, models, UI/CLI, tool lifecycle, and Skills.
+2. **NetOpYu Domain Control Plane:** harness adapters, exact-plan approval binding, A2A, and scoped services.
 3. **Network Domain Runtime:** reviewed L1 workflow constraints, versioned L0 contracts, deterministic plan execution.
 4. **Backends:** profile mocks, pragmatic local tools, MCP, OpenAPI, and A2A peers.
 
@@ -226,21 +237,22 @@ Domain L1 Skills are model-assisted business orchestration. Network L0 Skills ar
 
 ### 3. Source boundaries
 
-- `dsh-plugin-netopyu/` is the only JavaScript plugin boundary.
+- `dsh-plugin-netopyu/` is the DSH JavaScript adapter.
+- `hermes-plugin-netopyu/` and `hermes_adapter/` implement the official Hermes plugin boundary, process-local approval binding, and Worker client.
 - `dsh_adapter/` projects Python domain capabilities into typed bridge commands.
 - `network_runtime/` is the only mutation execution path.
 - `profiles/` and `skills/` contain isolated capabilities and canonical L1 Skills.
 - `tools/` and `integrations/` provide local, MCP, and OpenAPI adapters.
 - `registry/` is outbound A2A discovery only.
-- `runtime/` contains only DSH-used result storage and tracing.
+- `runtime/` contains result storage and tracing shared by both adapters.
 - `agent_memory/` is reachable only through scoped services.
 - `evaluation/` is offline and never part of production execution.
 
 ### 4. Dependency rules
 
-The plugin may call the bridge; the bridge may call Network Runtime, profiles, and scoped services; Network Runtime may call profile metadata/callables and tool loaders; pragmatic backends may call integrations and schema; scoped services may call memory and retrieval.
+Either plugin may call the Worker bridge; the bridge may call Network Runtime, profiles, and scoped services; Network Runtime may call profile metadata/callables and tool loaders; pragmatic backends may call integrations and schema; scoped services may call memory and retrieval.
 
-Network Runtime must not depend on DSH UI or models. Tools must not call approval APIs. Skills must not carry credentials. Verifiers must not trust mutation response prose. Mock must not backfill pragmatic mode. Evaluation must not enter production execution. Memory must not inject itself automatically. Environment variables must not replace request-level authorization.
+Network Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Tools must not call approval APIs. Skills must not carry credentials. Verifiers must not trust mutation response prose. Mock must not backfill pragmatic mode. Evaluation must not enter production execution. Memory must not inject itself automatically. Environment variables, conversational consent, and generic command approval must not replace exact-plan authorization. Hermes must not expose execution nonces to the model.
 
 ### 5. Invariants
 
@@ -255,17 +267,18 @@ Network Runtime must not depend on DSH UI or models. Tools must not call approva
 
 ### 6. Decisions
 
-- **ADR-001:** DSH is the only platform layer; duplicate harness surfaces were removed.
+- **ADR-001:** DSH is the primary platform; Hermes is an optional adapter, not another domain runtime.
 - **ADR-002:** a narrow persistent Python bridge preserves domain investment while containing migration risk.
 - **ADR-003:** every mutation binds to a versioned Network L0 Skill.
 - **ADR-004:** SQLite is the durable P0.5 store; production HA and immutable remote audit are P1 decisions.
 - **ADR-005:** models are candidate generators, never a security boundary.
 - **ADR-006:** A2A sends self-contained tasks and explicit delegation chains.
 - **ADR-007:** oversized tool output is stored durably and paged.
+- **ADR-008:** Hermes mutations prepare only; an exact user slash command consumes a process-local nonce binding.
 
 ### 7. Clean-code and extension policy
 
-Keep only responsibilities used by the DSH path. Remove broken CLIs, retired adapters, duplicate documents, and runtime artifacts. Use explicit public APIs, frozen/versioned/hashable mutation contracts, side-effect-free imports, explicit backend cleanup, secret-safe errors, current module documentation, and the retirement gate before merge.
+Keep only responsibilities used by the DSH or Hermes paths. Remove broken CLIs, retired custom-harness surfaces, duplicate documents, and runtime artifacts. Use explicit public APIs, frozen/versioned/hashable mutation contracts, side-effect-free imports, explicit backend cleanup, secret-safe errors, current module documentation, and both adapter gates before merge.
 
 A new read tool needs a callable, metadata/schema, profile projection, tests, and result paging when needed. A new mutation additionally needs a ToolContract, L0 contract, intent/target/provenance compiler, independent preflight/verifier, optional compensator, approval assertions, integrity/failure/rollback tests, and a deterministic demo. A new L1 Skill must reference existing L0 effects and encode observations and stop conditions in a reviewed workflow.
 

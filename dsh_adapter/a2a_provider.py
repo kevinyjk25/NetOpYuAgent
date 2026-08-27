@@ -16,7 +16,7 @@ from registry.schemas import AgentEntry, RegistrationSource
 
 
 def _unwrap_a2a_event(raw: dict[str, Any]) -> list[dict[str, Any]]:
-    """Translate A2A artifacts/messages/status into DSH bridge chunks."""
+    """Translate A2A artifacts/messages/status into harness bridge chunks."""
     output: list[dict[str, Any]] = []
     if not isinstance(raw, dict):
         return output

@@ -1,4 +1,4 @@
-"""Expose NetOpYu profile tools through a small JSON-safe DSH bridge."""
+"""Expose NetOpYu profile tools through a small JSON-safe harness bridge."""
 
 from __future__ import annotations
 
@@ -103,7 +103,7 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
 
 
 def build_manifest(profile_id: str = "lan", *, include_destructive: bool = False) -> dict[str, Any]:
-    """Return DSH-facing declarations, including dynamically discovered tools."""
+    """Return harness-facing declarations, including dynamically discovered tools."""
     return asyncio.run(_build_manifest(profile_id, include_destructive=include_destructive))
 
 

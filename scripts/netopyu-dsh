@@ -80,7 +80,7 @@ Commands:
   parity        Run the DSH capability retirement gate against the golden set
   learning-mine Dry-run offline trajectory mining; add --apply to store candidates
   learning-review ID approve|reject REVIEWER  Review once; approval writes a proposal only
-  reliability   Run local load/chaos/policy and DSH-only retirement checks
+  reliability   Run local load/chaos/policy and harness-boundary retirement checks
   retirement    Run the complete local retirement gate
   e2e           Run the complete offline migration regression suite
 
@@ -835,7 +835,7 @@ run_e2e() {
   printf '1/7 Python full suite\n'
   "$PYTHON_BIN" -m pytest -q || return 1
   printf '2/7 Static audits\n'
-  "$PYTHON_BIN" scripts/audit_dsh_only.py || return 1
+  "$PYTHON_BIN" scripts/audit_harness_boundary.py || return 1
   printf '3/7 Node/plugin syntax\n'
   local plugin_source
   for plugin_source in dsh-plugin-netopyu/src/*.js; do
@@ -858,7 +858,7 @@ print("  PASS {}: {} skills".format(r["profile"], len(skills)))
   done
   printf '6/7 Retrieval retirement gate\n'
   run_parity || return 1
-  printf '7/7 Local load, chaos, policy and DSH-only retirement checks\n'
+  printf '7/7 Local load, chaos, policy and harness-boundary retirement checks\n'
   run_reliability || return 1
   printf '\nNetOpYu DSH end-to-end offline suite: PASS\n'
 }

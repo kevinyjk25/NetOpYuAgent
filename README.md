@@ -4,14 +4,14 @@
 
 ### 项目定位
 
-NetOpYuAgent 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 之上的网络领域插件与确定性执行运行时。
+NetOpYuAgent 是可接入多个通用 Agent Harness 的网络领域插件与确定性执行运行时。当前主平台是 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness)，并提供基于公开插件 API 的 [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) Adapter。
 
-DSH 负责通用智能体能力：会话、模型调用、工具调用、Web UI、Skill 生命周期、审批交互和子代理框架。NetOpYuAgent 不再实现第二套通用 Agent Harness，而是提供网络领域必须保留的可靠能力：
+DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生命周期和通用编排。NetOpYuAgent 不实现第二套通用 Agent Harness，而是提供网络领域必须保留的可靠能力：
 
 - Domain L1 Skills：诊断、追问、跨域协作和业务流程编排；
 - Network L0 Skills：参数校验、风险计算、预检、审批绑定、单次执行、结果验证、补偿/回滚和审计；
 - LAN、DC、WAN 与 pragmatic 网络工具；
-- DSH 插件、Python Worker、A2A provider、作用域记忆、能力检索和离线评测。
+- DSH/Hermes Harness Adapter、共享 Python Worker、A2A provider、作用域记忆、能力检索和离线评测。
 
 > 当前状态：P0 迁移完成；P0.5 本地模拟原型闭环完成。它证明了架构与安全执行链路，但不等于真实生产网络中的“绝对 100% 正确”。真实设备、企业身份、变更窗口、HA、备份恢复与生产 SLO 属于 P1。
 
@@ -21,8 +21,9 @@ DSH 负责通用智能体能力：会话、模型调用、工具调用、Web UI�
 
 | 名称 | 职责 |
 |---|---|
-| DSH Platform Layer | 通用 Agent Harness；管理模型、会话、UI、工具与审批交互 |
-| NetOpYu Domain Layer | DSH 之上的网络领域能力总层 |
+| Harness Platform Layer | DSH 或 Hermes；管理模型、会话、UI/CLI、工具与交互 |
+| Harness Adapter | 将同一领域能力投影到 DSH 或 Hermes，不拥有网络效果语义 |
+| NetOpYu Domain Layer | Harness 之下共享的网络领域能力总层 |
 | Domain L1 Skill | 允许模型参与的泛化业务 Skill；负责理解、诊断、追问和编排 |
 | Network L0 Skill | 不依赖模型推理的版本化执行合同；负责确定性网络效果 |
 | Network Runtime | 编译并执行 Network L0 Skill 的安全运行时 |
@@ -31,11 +32,11 @@ DSH 负责通用智能体能力：会话、模型调用、工具调用、Web UI�
 
 本地 mock 范围已经具备：
 
-- DSH-only Web UI 和 Agent runtime；
+- DSH Web UI 主路径和 Hermes CLI/Gateway 插件路径；
 - 版本化 Network L0 Skill 注册表；
 - 严格参数类型、必填字段、目标存在性与参数来源校验；
 - 不可变 `IntentSpec`、`plan_hash`、`intent_hash` 与 L0 合同哈希；
-- DSH `allowed-once` 审批与一次性 Tool Guard grant；
+- DSH `allowed-once` 卡片审批，或 Hermes 用户专属 slash command 审批；
 - 执行前状态重校验，阻止 TOCTOU 状态漂移；
 - 独立 typed postcondition 验证；
 - 合同化补偿/回滚与人工介入终态；
@@ -44,7 +45,8 @@ DSH 负责通用智能体能力：会话、模型调用、工具调用、Web UI�
 - A2A 发现、委派、深度/循环保护和持久化 continuation；
 - 本地 loopback-only DC peer，用于真实 A2A/SSE 协议模拟；
 - 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
-- 完整 retirement 门禁：132 个测试、32 个子测试和 7/7 本地端到端检查。
+- DSH/Hermes 使用同一 Worker、L0 注册表、Network Runtime、验证器和审计；
+- 完整 retirement 门禁：141 个测试、32 个子测试和 7/7 本地端到端检查。
 
 ### 快速开始
 
@@ -71,6 +73,39 @@ scripts/netopyu-dsh start
 ```
 
 打开 <http://127.0.0.1:3080/>。
+
+### Hermes Adapter 本地运行
+
+Hermes 不取代 Network Runtime，只增加一个 Harness 入口。先按 Hermes 官方说明安装 `hermes` CLI，然后运行：
+
+```bash
+scripts/netopyu-hermes install
+hermes plugins enable netopyu
+scripts/netopyu-hermes worker-start
+scripts/netopyu-hermes doctor
+
+NETOPYU_HERMES_PROFILE=lan \
+NETOPYU_HERMES_ENABLE_DESTRUCTIVE=1 \
+NETOPYU_HERMES_OPERATOR_ID=local:steven \
+scripts/netopyu-hermes run
+```
+
+写工具只返回 `approval_required`，其中不包含 execution nonce。模型必须停止；操作员核对完整计划后，亲自输入返回的精确命令：
+
+```text
+/netopyu-approve PLAN_ID FULL_PLAN_HASH
+```
+
+拒绝使用 `/netopyu-deny PLAN_ID FULL_PLAN_HASH`。Hermes 重启会丢弃待审批 nonce，旧计划因此无法执行，需要重新 prepare。可在没有 Hermes CLI 的情况下验证 Adapter 与 Runtime 一致性：
+
+Hermes 插件同时提供 `netopyu_skill_catalog`、`netopyu_skill_view`、`netopyu_capability_search` 和显式作用域 Memory。复杂业务先调用 `netopyu_skill_view`，Adapter 会启动 reviewed workflow；后续只读工具结果被记录为 L0 写入的前置 evidence。
+
+```bash
+scripts/netopyu-hermes compare
+scripts/netopyu-hermes test
+```
+
+当前机器尚未安装 Hermes 时，`doctor` 会明确报告该项；这不会影响纯本地 Adapter 合同测试。
 
 完整运行时依赖按用途拆分：
 
@@ -126,8 +161,8 @@ Network L0 Skill 能保证“已校验并经审批的具体计划”按合同执
 
 - 默认 backend 为 `mock`；pragmatic 模式缺少真实来源时 fail closed。
 - 默认只暴露只读工具。
-- 写工具必须显式设置 `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1`。
-- 环境变量不能绕过单次 DSH 审批。
+- DSH 写工具必须显式设置 `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1`；Hermes 使用 `NETOPYU_HERMES_ENABLE_DESTRUCTIVE=1`。
+- 环境变量不能绕过 DSH 的单次卡片审批或 Hermes 的用户 slash command。
 - 批准绑定到完整计划哈希；参数、目标或合同变化都会使批准失效。
 - 授权 grant 最多消费一次，重放和并发重复调用会失败。
 - 成功只能由新的独立 postcondition evidence 判定，不能由模型文本或写工具返回值直接判定。
@@ -153,6 +188,9 @@ scripts/netopyu-dsh demo-l1-l0
 scripts/netopyu-dsh parity
 scripts/netopyu-dsh reliability
 scripts/netopyu-dsh retirement
+scripts/netopyu-hermes doctor
+scripts/netopyu-hermes compare
+scripts/netopyu-hermes test
 ```
 
 可变运行时数据默认位于 `~/Library/Application Support/NetOpYuAgent/dsh-runtime`，可用 `NETOPYU_DSH_RUNTIME` 覆盖。运行时 SQLite、日志、虚拟环境和 IDE 文件不会提交到 Git。
@@ -163,7 +201,7 @@ scripts/netopyu-dsh retirement
 scripts/netopyu-dsh retirement
 ```
 
-该命令是本项目的权威本地门禁，覆盖 Python、Node 插件语法、DSH-only 架构、HITL、A2A、Network Runtime、Skill 投影、检索质量、Worker 并发/恢复和破坏性操作策略。
+该命令是项目主门禁，覆盖 Python、Node 插件语法、Harness 边界、HITL、A2A、Network Runtime、Skill 投影、检索质量、Worker 并发/恢复和破坏性操作策略。`scripts/netopyu-hermes test` 额外覆盖 Hermes 官方 PluginContext 表面、slash 审批、nonce 隐藏、A2A continuation 与 DSH/Hermes Runtime 不变量一致性。
 
 ### 文档
 
@@ -178,14 +216,14 @@ scripts/netopyu-dsh retirement
 
 ### Project scope
 
-NetOpYuAgent is a network-domain plugin and deterministic execution runtime built on [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
+NetOpYuAgent is a harness-adaptable network-domain plugin and deterministic execution runtime. [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) remains the primary platform, with an additional public-API adapter for [Hermes Agent](https://github.com/NousResearch/Hermes-Agent).
 
-DSH owns the general agent platform: sessions, model calls, tools, Web UI, Skills, approval interaction, and subagents. NetOpYuAgent no longer implements a second general-purpose harness. It contributes only the network-domain capabilities that must remain reliable:
+DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orchestration. NetOpYuAgent does not implement another general-purpose harness. It contributes the network capabilities that must remain reliable:
 
 - Domain L1 Skills for diagnosis, clarification, cross-domain collaboration, and workflow orchestration;
 - Network L0 Skills for validation, risk assessment, preflight, approval binding, one-shot execution, verification, compensation/rollback, and audit;
 - LAN, DC, WAN, and pragmatic network tools;
-- the DSH plugin, Python Worker, A2A provider, scoped memory, capability retrieval, and offline evaluation.
+- DSH/Hermes adapters, a shared Python Worker, A2A provider, scoped memory, capability retrieval, and offline evaluation.
 
 > Status: the P0 migration is complete and the P0.5 local-simulation prototype is complete. This validates the architecture and safety pipeline; it does not claim absolute correctness in a real production network. Real devices, enterprise identity, change windows, HA, backup/restore, and production SLOs belong to P1.
 
@@ -193,15 +231,32 @@ DSH owns the general agent platform: sessions, model calls, tools, Web UI, Skill
 
 | Name | Responsibility |
 |---|---|
-| DSH Platform Layer | General agent harness for models, sessions, UI, tools, and approval interaction |
-| NetOpYu Domain Layer | All network-domain capabilities above DSH |
+| Harness Platform Layer | DSH or Hermes for models, sessions, UI/CLI, tools, and interaction |
+| Harness Adapter | Projects domain capabilities without owning network effect semantics |
+| NetOpYu Domain Layer | Shared network-domain capabilities below either harness |
 | Domain L1 Skill | Generalized, model-assisted business Skill for reasoning and orchestration |
 | Network L0 Skill | Versioned, model-independent effect contract |
 | Network Runtime | Safety runtime that compiles and executes Network L0 Skills |
 
 ### P0.5 completion scope
 
-The local mock scope includes a DSH-only runtime and UI, versioned Network L0 Skills, strict parameters and provenance, immutable intent/plan/contract hashes, allowed-once approval, one-shot Tool Guard grants, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, and a complete retirement gate with 132 tests, 32 subtests, and 7/7 end-to-end checks.
+The local mock scope includes DSH and Hermes harness adapters, versioned Network L0 Skills, strict parameters and provenance, immutable intent/plan/contract hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, and a complete retirement gate with 141 tests, 32 subtests, and 7/7 end-to-end checks.
+
+### Hermes adapter
+
+Install Hermes separately, then link and run the repository plugin:
+
+```bash
+scripts/netopyu-hermes install
+hermes plugins enable netopyu
+scripts/netopyu-hermes worker-start
+NETOPYU_HERMES_PROFILE=lan \
+NETOPYU_HERMES_ENABLE_DESTRUCTIVE=1 \
+NETOPYU_HERMES_OPERATOR_ID=local:steven \
+scripts/netopyu-hermes run
+```
+
+A mutating tool only prepares a plan. The model never receives the execution nonce. The operator must type the exact `/netopyu-approve PLAN_ID FULL_PLAN_HASH` slash command. `netopyu_skill_catalog` and `netopyu_skill_view` expose canonical Skills and start reviewed workflows; read results become prerequisite evidence for guarded writes. Adapter parity can be tested without a Hermes installation through `scripts/netopyu-hermes compare` and `scripts/netopyu-hermes test`.
 
 ### Quick start
 
@@ -255,7 +310,7 @@ A Network L0 Skill guarantees the execution properties of a specific validated a
 
 - `mock` is the default backend; an incomplete pragmatic backend fails closed.
 - Only read-only tools are exposed by default.
-- Mutations require `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1` and a fresh DSH allowed-once decision.
+- DSH mutations require `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1`; Hermes mutations require `NETOPYU_HERMES_ENABLE_DESTRUCTIVE=1`. Both require a fresh, exact-plan user decision.
 - Approval is bound to the full plan hash and cannot be reused after any parameter, target, or contract change.
 - Grants are consumable once and resist replay/concurrent duplication.
 - Success requires fresh independent postcondition evidence.
@@ -267,7 +322,7 @@ A Network L0 Skill guarantees the execution properties of a specific validated a
 scripts/netopyu-dsh retirement
 ```
 
-This is the authoritative local gate for Python tests, Node/plugin syntax, DSH-only architecture, HITL, A2A, Network Runtime, Skill projection, retrieval quality, Worker concurrency/recovery, and mutation policy.
+This is the primary local gate for Python tests, Node/plugin syntax, harness boundaries, HITL, A2A, Network Runtime, Skill projection, retrieval quality, Worker concurrency/recovery, and mutation policy. `scripts/netopyu-hermes test` covers the Hermes PluginContext surface, slash approval, hidden nonces, remote continuations, and DSH/Hermes Runtime invariant parity.
 
 ### Documentation
 
