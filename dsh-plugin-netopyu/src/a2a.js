@@ -83,8 +83,21 @@ export class NetOpYuA2AProvider {
       let continuationId
       if (payload.status === 'input-required' && payload.interrupt_id && this.#continuationStore) {
         continuationId = this.#continuationStore.recordA2aContinuation(
-          delegateArgs.session_id, payload.peer, payload.interrupt_id, delegateArgs,
+          delegateArgs.session_id, payload.peer, payload.interrupt_id,
+          { ...delegateArgs, remote_approval: payload.approval },
         )
+      }
+      if (continuationId) {
+        return {
+          output: [{ type: 'text', text: JSON.stringify({
+            status: 'input-required',
+            peer: payload.peer,
+            continuation_id: continuationId,
+            remote_approval: payload.approval,
+            next_action: 'call netopyu_a2a_hitl_resume once with this continuation_id and the operator decision',
+          }, null, 2) }],
+          stopReason: 'completed',
+        }
       }
       const diagnostic = [
         payload.error ?? `A2A peer ended with status ${payload.status ?? 'unknown'}`,
@@ -204,7 +217,18 @@ export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, t
         additionalProperties: false,
       },
       output,
-      presentCall: args => ({ card: 'generic', title: `${args.decision} remote A2A continuation`, kind: 'write', rawInput: JSON.stringify(args) }),
+      presentCall: args => {
+        const continuation = hitlStore.a2aContinuation(args.continuation_id)
+        const approval = continuation?.request?.remote_approval
+        return {
+          card: 'generic',
+          title: approval?.plan_id
+            ? `${args.decision} remote DC Network L0 plan ${approval.plan_id}`
+            : `${args.decision} remote A2A continuation`,
+          kind: 'write',
+          rawInput: JSON.stringify({ ...args, ...(approval ? { remote_approval: approval } : {}) }),
+        }
+      },
       async execute(args, execution) {
         const binding = bindingByToken.get(execution.token)
         if (!toolGuard.consume(execution.token, 'netopyu_a2a_hitl_resume', binding?.bindingHash)) {
@@ -215,9 +239,29 @@ export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, t
         if (!hitlStore.claimA2aContinuation(continuation.id)) {
           throw new Error(`remote A2A continuation ${continuation.id} was already claimed`)
         }
+        const { remote_approval: _remoteApproval, ...originalRequest } = continuation.request
         if (args.decision === 'reject') {
-          hitlStore.finishA2aContinuation(continuation.id, 'rejected', undefined, 'rejected by local DSH operator')
-          return JSON.stringify({ continuation_id: continuation.id, status: 'rejected' }, null, 2)
+          try {
+            const payload = await callBridge({
+              ...bridge,
+              command: 'a2a-delegate',
+              args: {
+                ...originalRequest,
+                resume_interrupt_id: continuation.interrupt_id,
+                operator_decision: 'reject',
+              },
+              signal: execution.signal,
+              correlationId: execution.callId,
+            })
+            if (payload.ok !== true || payload.status !== 'completed') {
+              throw new Error(payload.error ?? `remote A2A rejection ended with status ${payload.status ?? 'unknown'}`)
+            }
+            hitlStore.finishA2aContinuation(continuation.id, 'rejected', payload.text, 'rejected by local DSH operator')
+            return payload.text || JSON.stringify({ continuation_id: continuation.id, status: 'rejected' }, null, 2)
+          } catch (error) {
+            hitlStore.finishA2aContinuation(continuation.id, 'failed', undefined, error instanceof Error ? error.message : String(error))
+            throw error
+          }
         }
         let resultText
         try {
@@ -225,7 +269,7 @@ export function a2aToolDefinitions(ctx, provider, bridge, peerUrls, hitlStore, t
             ...bridge,
             command: 'a2a-delegate',
             args: {
-              ...continuation.request,
+              ...originalRequest,
               resume_interrupt_id: continuation.interrupt_id,
               operator_decision: 'approve',
             },

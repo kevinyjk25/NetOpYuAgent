@@ -109,6 +109,21 @@ class TestDshA2AProvider(unittest.TestCase):
         self.assertEqual(metadata["resume_interrupt_id"], "peer-interrupt-1")
         self.assertEqual(metadata["operator_decision"], "approve")
 
+    def test_remote_structured_approval_is_preserved(self):
+        raw = {
+            "kind": "taskStatusUpdate",
+            "status": {"state": "input-required", "message": {
+                "interrupt_id": "dc-l0-1",
+                "approval": {"plan_id": "plan-1", "plan_hash": "sha256:abc"},
+            }},
+        }
+        from dsh_adapter.a2a_provider import _unwrap_a2a_event
+        self.assertEqual(_unwrap_a2a_event(raw), [{
+            "hitl_interrupt": True,
+            "interrupt_id": "dc-l0-1",
+            "approval": {"plan_id": "plan-1", "plan_hash": "sha256:abc"},
+        }])
+
     def test_remote_hitl_resume_fields_fail_closed(self):
         result = asyncio.run(delegate_a2a(
             prompt="require hitl", target="dc-agent", session_id="s-hitl-bad",

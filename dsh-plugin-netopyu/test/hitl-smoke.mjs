@@ -21,6 +21,7 @@ const providers = new Map()
 const registeredSkills = new Map()
 const disposers = []
 let approvalOutcome = 'allowed-once'
+let lastApprovalReason = ''
 let peerBaseUrl
 const peerServer = createServer(async (request, response) => {
   if (request.method === 'GET' && request.url === '/.well-known/agent-card.json') {
@@ -39,9 +40,23 @@ const peerServer = createServer(async (request, response) => {
     const prompt = requestBody.params.message.parts[0].text
     const metadata = requestBody.params.metadata
     const event = JSON.stringify(
-      prompt === 'require hitl' && metadata.operator_decision !== 'approve'
-        ? { kind: 'taskStatusUpdate', status: { state: 'input-required', message: 'peer-interrupt-1' } }
-        : { kind: 'message', message: { parts: [{ kind: 'text', text: metadata.resume_interrupt_id ? 'DC approved result' : 'DC delegated result' }] } },
+      metadata.resume_interrupt_id && metadata.operator_decision === 'reject'
+        ? { kind: 'message', message: { parts: [{ kind: 'text', text: JSON.stringify({ status: 'rejected' }) }] } }
+        : prompt === 'require hitl' && metadata.operator_decision !== 'approve'
+          ? { kind: 'taskStatusUpdate', status: { state: 'input-required', message: {
+            interrupt_id: 'peer-interrupt-1',
+            approval: {
+              kind: 'network-l0-plan', profile: 'dc', plan_id: 'dc-plan-1',
+              plan_hash: `sha256:${'a'.repeat(64)}`, tool_name: 'dc_grant_app_access',
+              arguments: { user_id: 'erin', app_id: 'crm', role: 'sales-rep' },
+              risk_level: 'high', l0_skill_id: 'network.dc.app-access.grant',
+              l0_skill_version: '1.0.0', l0_contract_hash: 'sha256:dc-l0',
+              intent_hash: 'sha256:dc-intent', verification_contract: 'dc-access-granted',
+              rollback_contract: 'inverse-tool-v1', workflow_run_id: 'dc-workflow-1',
+              workflow_template_hash: 'sha256:dc-workflow', expires_at: '2099-01-01T00:00:00Z',
+            },
+          } } }
+          : { kind: 'message', message: { parts: [{ kind: 'text', text: metadata.resume_interrupt_id ? 'DC approved result' : 'DC delegated result' }] } },
     )
     response.writeHead(200, { 'content-type': 'text/event-stream' })
     response.end(`data: ${event}\n\ndata: [DONE]\n\n`)
@@ -54,7 +69,7 @@ await new Promise(resolve => peerServer.listen(0, '127.0.0.1', resolve))
 peerBaseUrl = `http://127.0.0.1:${peerServer.address().port}`
 const context = {
   tools: { register(definition) { definitions.push(definition) } },
-  approval: { async request() { return approvalOutcome } },
+  approval: { async request({ reason }) { lastApprovalReason = reason; return approvalOutcome } },
   subagents: {
     registerProvider(provider) { providers.set(provider.name, provider) },
     async start(name, request) { return providers.get(name).start(request) },
@@ -117,10 +132,11 @@ assert.equal(
   await delegate.execute({ description: 'test', prompt: 'test', capability: 'rbac' }, readExecution),
   'DC delegated result',
 )
-await assert.rejects(
-  delegate.execute({ description: 'remote hitl', prompt: 'require hitl', target: 'dc-agent' }, readExecution),
-  /durable continuation/,
-)
+const remotePending = JSON.parse(await delegate.execute(
+  { description: 'remote hitl', prompt: 'require hitl', target: 'dc-agent' }, readExecution,
+))
+assert.equal(remotePending.status, 'input-required')
+assert.ok(remotePending.continuation_id)
 const waitingA2a = JSON.parse(await a2aHitlList.execute({}))
 assert.equal(waitingA2a.length, 1)
 assert.equal(waitingA2a[0].peer_agent, 'dc-agent')
@@ -132,6 +148,9 @@ const a2aResumeExecution = {
 }
 const a2aResumeDecision = await listeners.get('tools/pre-execute')(a2aResumeExecution, async () => ({ kind: 'allow' }))
 assert.equal(a2aResumeDecision.kind, 'allow')
+assert.match(lastApprovalReason, /Remote DC Network L0 plan/)
+assert.match(lastApprovalReason, /dc-plan-1/)
+assert.match(lastApprovalReason, new RegExp(`sha256:${'a'.repeat(64)}`))
 assert.equal(await a2aHitlResume.execute(a2aResumeExecution.arguments, a2aResumeExecution), 'DC approved result')
 listeners.get('tools/result')(a2aResumeExecution, { isError: false })
 assert.deepEqual(JSON.parse(await a2aHitlList.execute({})), [])
@@ -179,10 +198,10 @@ const concurrentResults = await Promise.allSettled([
 assert.deepEqual(concurrentResults.map(item => item.status).sort(), ['fulfilled', 'rejected'])
 listeners.get('tools/result')(concurrent, { isError: false })
 
-await assert.rejects(
-  delegate.execute({ description: 'persist remote hitl', prompt: 'require hitl', target: 'dc-agent' }, readExecution),
-  /durable continuation/,
-)
+const persistedPending = JSON.parse(await delegate.execute(
+  { description: 'persist remote hitl', prompt: 'require hitl', target: 'dc-agent' }, readExecution,
+))
+assert.equal(persistedPending.status, 'input-required')
 const persistedA2aId = JSON.parse(await a2aHitlList.execute({}))[0].id
 
 for (const dispose of disposers.reverse()) dispose()

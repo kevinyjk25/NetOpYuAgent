@@ -705,6 +705,37 @@ export async function apply(ctx, config = {}) {
           `Network Runtime batch (${execution.arguments.policy ?? 'best_effort'}), ${prepared.length} immutable plans:`,
           ...prepared.map((value, index) => `[${index}] ${value.approval_summary}`),
         ].join('\n')
+      } else if (hitlAction === 'remote-hitl-resume') {
+        const continuation = hitlStore.a2aContinuation(execution.arguments.continuation_id)
+        if (continuation === undefined) {
+          return { kind: 'deny', reason: `remote A2A continuation not found: ${execution.arguments.continuation_id}` }
+        }
+        const approval = continuation.request?.remote_approval
+        if (approval?.kind === 'network-l0-plan' && typeof approval.plan_hash === 'string') {
+          binding = {
+            kind: 'remote-hitl',
+            bindingHash: approval.plan_hash,
+            remoteApproval: approval,
+          }
+          reason = [
+            `Remote DC Network L0 plan (${execution.arguments.decision}):`,
+            `Plan: ${approval.plan_id}`,
+            `Tool: ${approval.tool_name} (risk=${approval.risk_level})`,
+            `Arguments: ${JSON.stringify(approval.arguments)}`,
+            `L0 Skill: ${approval.l0_skill_id}@${approval.l0_skill_version} (${approval.l0_contract_hash})`,
+            `Intent hash: ${approval.intent_hash}`,
+            `Verification: ${approval.verification_contract}; rollback: ${approval.rollback_contract}`,
+            `Workflow: ${approval.workflow_run_id} (${approval.workflow_template_hash})`,
+            `Expires: ${approval.expires_at}`,
+            `Plan hash: ${approval.plan_hash}`,
+          ].join('\n')
+        } else {
+          binding = {
+            kind: 'remote-hitl',
+            bindingHash: bindingHash({ name: execution.name, arguments: execution.arguments }),
+          }
+          reason = `Legacy remote A2A continuation has no structured Network L0 plan summary; approval is limited to the exact durable continuation.`
+        }
       } else {
         binding = {
           kind: 'remote-hitl',

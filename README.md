@@ -86,9 +86,11 @@ changes the local simulator; it does not connect to a real device:
 ```bash
 cd /Users/steven/NetOpYuAgent
 scripts/netopyu-dsh stop
+scripts/netopyu-dsh dc-peer-start
 NETOPYU_PROFILE=lan \
 NETOPYU_DSH_BACKEND=mock \
 NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 \
+NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8765 \
 scripts/netopyu-dsh start
 ```
 
@@ -111,18 +113,25 @@ scripts/netopyu-dsh runtime PLAN_ID
 scripts/netopyu-dsh runtime-audit PLAN_ID
 ```
 
-With no A2A peer configured, the reviewed workflow deliberately stops after
-verified LAN admission and reports Phase 2 incomplete. A complete LAN-to-DC UI
-run additionally requires a reachable `dc-agent`; configure it with
-`NETOPYU_DSH_A2A_PEERS` and confirm discovery with `scripts/netopyu-dsh peers`.
-The offline `scripts/netopyu-dsh demo-l1-l0` command remains the deterministic
-two-domain regression, but it is not a substitute for this Web UI + LLM test.
+The local `dc-agent` is loopback-only and mock-only. It exercises the real A2A
+AgentCard/SSE transport, reviewed DC workflow, immutable DC Network L0 plan,
+durable DSH continuation approval, independent verification and final path
+check. It refuses pragmatic mode. Confirm discovery with
+`scripts/netopyu-dsh dc-peer-status` and `scripts/netopyu-dsh peers`.
+The peer deliberately executes reviewed DC Skill semantics deterministically;
+the parent DSH session remains the local-LLM L1 orchestrator. A production
+multi-agent deployment should replace it with a separately operated DC DSH
+agent. The offline `scripts/netopyu-dsh demo-l1-l0` command remains the
+deterministic two-domain regression, but is not a substitute for the Web UI test.
 
 ## Operations
 
 ```bash
 scripts/netopyu-dsh status
 scripts/netopyu-dsh worker-status
+scripts/netopyu-dsh dc-peer-start
+scripts/netopyu-dsh dc-peer-status
+scripts/netopyu-dsh dc-peer-stop
 scripts/netopyu-dsh worker-start
 scripts/netopyu-dsh worker-stop
 scripts/netopyu-dsh logs

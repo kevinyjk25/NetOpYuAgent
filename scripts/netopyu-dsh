@@ -25,6 +25,11 @@ LEARNING_PROPOSALS="${NETOPYU_DSH_LEARNING_PROPOSALS:-$RUNTIME_ROOT/data/skill-p
 WORKER_SOCKET="${NETOPYU_DSH_WORKER_SOCKET:-$RUNTIME_ROOT/bridge.sock}"
 WORKER_PID_FILE="$RUNTIME_ROOT/bridge-worker.pid"
 WORKER_LOG_FILE="$LOG_DIR/bridge-worker.log"
+LOCAL_DC_HOST="${NETOPYU_DSH_LOCAL_DC_HOST:-127.0.0.1}"
+LOCAL_DC_PORT="${NETOPYU_DSH_LOCAL_DC_PORT:-8765}"
+LOCAL_DC_PID_FILE="$RUNTIME_ROOT/local-dc-peer.pid"
+LOCAL_DC_LOG_FILE="$LOG_DIR/local-dc-peer.log"
+LOCAL_DC_STATE="${NETOPYU_DSH_LOCAL_DC_STATE:-$RUNTIME_ROOT/data/local_dc_peer.sqlite}"
 OLLAMA_URL="${NETOPYU_OLLAMA_URL:-http://127.0.0.1:11434}"
 OLLAMA_MODEL="${NETOPYU_OLLAMA_MODEL:-qwen3.5:27b}"
 OLLAMA_FAST_MODEL="${NETOPYU_OLLAMA_FAST_MODEL:-qwen2.5:7b}"
@@ -56,6 +61,9 @@ Commands:
   worker-start  Start the persistent Python bridge worker
   worker-stop   Stop the managed persistent Python bridge worker
   worker-status Show worker process/socket status
+  dc-peer-start Start the loopback-only mock DC A2A peer
+  dc-peer-stop  Stop the managed local mock DC A2A peer
+  dc-peer-status Show local mock DC A2A peer status
   logs          Follow the DSH Web log
   dump-config   Print the composed DSH Web configuration and exit
   models        Show the configured default and NetOpYu Ollama models
@@ -93,6 +101,8 @@ Environment overrides:
   NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8001,http://127.0.0.1:8002
   NETOPYU_DSH_A2A_TIMEOUT=300
   NETOPYU_DSH_A2A_MAX_HOPS=3
+  NETOPYU_DSH_LOCAL_DC_HOST=127.0.0.1
+  NETOPYU_DSH_LOCAL_DC_PORT=8765
 EOF
 }
 
@@ -385,6 +395,92 @@ show_worker_status() {
     return 2
   else
     printf 'STOPPED socket=%s\n' "$WORKER_SOCKET"
+    return 1
+  fi
+}
+
+local_dc_peer_is_reachable() {
+  curl --silent --fail --max-time 1 "http://$LOCAL_DC_HOST:$LOCAL_DC_PORT/health" 2>/dev/null |
+    "$PYTHON_BIN" -c 'import json,sys; r=json.load(sys.stdin); raise SystemExit(0 if r.get("ok") and r.get("agent_id")=="dc-agent" and r.get("mode")=="mock" else 1)' \
+    >/dev/null 2>&1
+}
+
+local_dc_peer_pid_is_running() {
+  [[ -f "$LOCAL_DC_PID_FILE" ]] || return 1
+  local peer_pid
+  peer_pid="$(<"$LOCAL_DC_PID_FILE")"
+  [[ "$peer_pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$peer_pid" 2>/dev/null || local_dc_peer_is_reachable
+}
+
+start_local_dc_peer() {
+  check_python || return 1
+  if local_dc_peer_pid_is_running && local_dc_peer_is_reachable; then
+    printf 'Local mock dc-agent is already running (PID %s, http://%s:%s).\n' \
+      "$(<"$LOCAL_DC_PID_FILE")" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+    return 0
+  fi
+  if local_dc_peer_is_reachable; then
+    fail "A local dc-agent already owns $LOCAL_DC_HOST:$LOCAL_DC_PORT but is not managed by this launcher."
+    return 1
+  fi
+  mkdir -p "$RUNTIME_ROOT" "$LOG_DIR" "$(dirname "$LOCAL_DC_STATE")"
+  runtime_env
+  export NETOPYU_DSH_BACKEND=mock
+  export NETOPYU_DSH_LOCAL_DC_STATE="$LOCAL_DC_STATE"
+  cd "$PROJECT_ROOT" || return 1
+  nohup "$PYTHON_BIN" -m dsh_adapter.local_dc_peer \
+    --host "$LOCAL_DC_HOST" --port "$LOCAL_DC_PORT" \
+    --runtime-store "$NETWORK_RUNTIME_STORE" --state-store "$LOCAL_DC_STATE" \
+    >"$LOCAL_DC_LOG_FILE" 2>&1 &
+  local peer_pid=$!
+  printf '%s\n' "$peer_pid" >"$LOCAL_DC_PID_FILE"
+  local attempt
+  for attempt in {1..50}; do
+    if ! kill -0 "$peer_pid" 2>/dev/null; then
+      tail -n 50 "$LOCAL_DC_LOG_FILE" >&2
+      rm -f "$LOCAL_DC_PID_FILE"
+      return 1
+    fi
+    if local_dc_peer_is_reachable; then
+      printf 'Local mock dc-agent is running: http://%s:%s (PID %s).\n' \
+        "$LOCAL_DC_HOST" "$LOCAL_DC_PORT" "$peer_pid"
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "Local dc-agent did not become ready; see $LOCAL_DC_LOG_FILE"
+}
+
+stop_local_dc_peer() {
+  if ! local_dc_peer_pid_is_running; then
+    rm -f "$LOCAL_DC_PID_FILE"
+    printf 'Local mock dc-agent is not running.\n'
+    return 0
+  fi
+  local peer_pid attempt
+  peer_pid="$(<"$LOCAL_DC_PID_FILE")"
+  kill -TERM "$peer_pid" || return 1
+  for attempt in {1..50}; do
+    if ! kill -0 "$peer_pid" 2>/dev/null; then
+      rm -f "$LOCAL_DC_PID_FILE"
+      printf 'Local mock dc-agent stopped.\n'
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "Local dc-agent did not stop within 5 seconds; PID $peer_pid was left untouched."
+}
+
+show_local_dc_peer_status() {
+  if local_dc_peer_pid_is_running && local_dc_peer_is_reachable; then
+    printf 'RUNNING pid=%s url=http://%s:%s mode=mock\n' \
+      "$(<"$LOCAL_DC_PID_FILE")" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+  elif local_dc_peer_is_reachable; then
+    printf 'UNMANAGED_PEER url=http://%s:%s mode=mock\n' "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+    return 2
+  else
+    printf 'STOPPED url=http://%s:%s\n' "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
     return 1
   fi
 }
@@ -779,6 +875,9 @@ case "$command" in
   worker-start) start_worker ;;
   worker-stop) stop_worker ;;
   worker-status) show_worker_status ;;
+  dc-peer-start) start_local_dc_peer ;;
+  dc-peer-stop) stop_local_dc_peer ;;
+  dc-peer-status) show_local_dc_peer_status ;;
   logs) mkdir -p "$LOG_DIR"; touch "$LOG_FILE"; exec tail -n 100 -f "$LOG_FILE" ;;
   dump-config) dump_config ;;
   models) show_models ;;

@@ -52,9 +52,17 @@ def _unwrap_a2a_event(raw: dict[str, Any]) -> list[dict[str, Any]]:
         if state == "failed" and status.get("message"):
             output.append({"error": str(status["message"])})
         elif state in {"input-required", "input_required"}:
+            message = status.get("message")
+            if isinstance(message, dict):
+                interrupt_id = str(message.get("interrupt_id") or "").strip()
+                approval = message.get("approval")
+            else:
+                interrupt_id = str(message or "").strip()
+                approval = None
             output.append({
                 "hitl_interrupt": True,
-                "interrupt_id": str(status.get("message") or "").strip(),
+                "interrupt_id": interrupt_id,
+                **({"approval": approval} if isinstance(approval, dict) else {}),
             })
     return output
 
@@ -190,6 +198,7 @@ async def delegate_a2a(
     }
     output: list[str] = []
     interrupt_id = ""
+    remote_approval: dict[str, Any] | None = None
     error_text = ""
     stream_url = peer.base_url.rstrip("/") + "/stream"
     try:
@@ -212,6 +221,8 @@ async def delegate_a2a(
                     for chunk in _unwrap_a2a_event(raw):
                         if chunk.get("hitl_interrupt"):
                             interrupt_id = str(chunk.get("interrupt_id") or "")
+                            if isinstance(chunk.get("approval"), dict):
+                                remote_approval = chunk["approval"]
                         if chunk.get("error"):
                             error_text = str(chunk["error"])
                         text = chunk.get("token") or chunk.get("message")
@@ -230,6 +241,8 @@ async def delegate_a2a(
     }
     if interrupt_id:
         result.update({"interrupt_id": interrupt_id, "error": "remote peer requires its operator approval"})
+        if remote_approval is not None:
+            result["approval"] = remote_approval
     elif error_text:
         result["error"] = error_text
     return result
