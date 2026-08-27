@@ -1,4 +1,4 @@
-"""DSH bridge public API without eager imports into the L1 runtime."""
+"""Shared bridge public API without eager imports into the L1 runtime."""
 
 from typing import Any
 

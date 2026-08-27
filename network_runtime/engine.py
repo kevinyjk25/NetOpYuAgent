@@ -50,7 +50,10 @@ FaultHook = Callable[[str, PreparedPlan], Any]
 BackendFactory = Callable[[str], Awaitable[BackendSession]]
 
 def default_journal_path() -> Path:
-    configured = os.environ.get("NETOPYU_DSH_NETWORK_RUNTIME_STORE")
+    configured = (
+        os.environ.get("NETOPYU_NETWORK_RUNTIME_STORE")
+        or os.environ.get("NETOPYU_DSH_NETWORK_RUNTIME_STORE")
+    )
     return Path(configured).expanduser() if configured else Path("data/network_runtime.sqlite")
 
 class NetworkRuntime:
@@ -71,7 +74,8 @@ class NetworkRuntime:
         self.backend_factory = backend_factory
         self.plan_ttl_seconds = plan_ttl_seconds
         self.execution_timeout_seconds = execution_timeout_seconds or float(
-            os.environ.get("NETOPYU_DSH_EXECUTION_TIMEOUT", "90")
+            os.environ.get("NETOPYU_EXECUTION_TIMEOUT")
+            or os.environ.get("NETOPYU_DSH_EXECUTION_TIMEOUT", "90")
         )
         self.fault_hook = fault_hook
 

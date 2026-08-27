@@ -4,13 +4,13 @@
 
 ### 1. 规格状态
 
-本文件是 P0.5 的系统规格与安全基线。适用范围为本地 mock 和 DSH 插件集成。P1 将在真实网络、企业身份和生产审批环境中重新认证这些控制。
+本文件是 P0.5 的系统规格与安全基线。适用范围为本地 mock、DSH 主插件和 Hermes 可选 Adapter。P1 将在真实网络、企业身份和生产审批环境中重新认证这些控制。
 
 ### 2. 功能规格
 
 | ID | 必须满足的规格 |
 |---|---|
-| F-01 | 系统必须只使用 DSH 作为通用 Agent runtime 和 Web UI。 |
+| F-01 | 系统不得实现自建通用 Agent runtime；DSH 为主 Harness，Hermes 只能作为可选 Adapter。 |
 | F-02 | 系统必须按 `default/lan/dc/wan` profile 隔离工具与 Skill。 |
 | F-03 | 默认只能注册只读工具；写工具必须显式启用。 |
 | F-04 | 每个写工具必须绑定唯一、版本化的 Network L0 Skill。 |
@@ -24,6 +24,8 @@
 | F-12 | A2A 必须支持 peer 发现、能力选择、超时、循环保护和 durable continuation。 |
 | F-13 | 记忆召回必须绑定 operator 与 session，且只能显式调用。 |
 | F-14 | 离线学习只能生成 proposal，不能自动启用 Skill。 |
+| F-15 | DSH 与 Hermes 必须共享同一 L0 注册表、Network Runtime、verifier、compensator 和 journal 合同。 |
+| F-16 | Hermes 写工具不得向模型暴露 execution nonce；只有用户 slash command 可消费进程内 plan binding。 |
 
 ### 3. 可靠性规格
 
@@ -53,8 +55,9 @@
 
 | 边界 | 不可信输入 | 强制控制 |
 |---|---|---|
-| 用户/模型 → DSH | 自然语言、tool selection、arguments | Tool schema、L0 prepare、clarification |
-| DSH → Plugin | 工具生命周期、approval outcome | 精确 request/plan binding |
+| 用户/模型 → Harness | 自然语言、tool selection、arguments | Tool schema、L0 prepare、clarification |
+| DSH → Plugin | 工具生命周期、approval outcome | 精确 request/plan binding、Tool Guard |
+| Hermes → Plugin | tool handler、用户 slash command | nonce 不回显、exact hash、进程内一次性领取 |
 | Plugin → Worker | JSON 请求、环境配置 | command allowlist、大小/类型校验 |
 | Runtime → Backend | 规范化参数 | versioned ToolContract、profile、request authorization |
 | Backend → Runtime | 文本/JSON/transport error | typed evidence parser、freshness、predicate |
@@ -115,6 +118,13 @@
 - 风险：删除或修改失败事件。
 - 控制：每计划事件哈希链、plan hash、终态一致性 audit。P1 需要外部 append-only/WORM 副本以覆盖数据库管理员威胁。
 
+#### T-11 Hermes 把模型行为误当成人工授权
+
+- 风险：模型生成“批准”文本、重复工具调用、调用通用危险命令审批，或 Adapter 重启后恢复旧授权。
+- 控制：写 handler 永远只 prepare；模型可见 JSON 删除 nonce；只有 Hermes slash command dispatcher 可调用 approve handler；命令必须包含完整 plan id/hash；绑定进程内一次性领取；重启丢弃。
+- P0.5 假设：本地 Hermes 用户、插件进程、其他已安装插件和 OS account 可信，Gateway 已配置用户 allowlist。
+- 剩余风险：当前 Hermes slash command handler 不提供可验证的发送者身份，配置的 operator id 不等同于不可抵赖身份；Hermes 插件在进程内运行也不是安全沙箱。P1 必须增加企业身份上下文、独立审批服务、Worker 服务身份/进程隔离，并限制模型终端与代码执行面。
+
 ### 7. 审批规格
 
 审批摘要至少包含：
@@ -130,7 +140,7 @@
 - workflow binding；
 - expiry。
 
-批准只对该摘要对应 hash 有效。批量、异步恢复和 A2A continuation 也必须通过新的 DSH 审批，不能复用环境变量、自然语言“已批准”或历史会话状态。
+批准只对该摘要对应 hash 有效。DSH 使用 `allowed-once` 卡片和 Tool Guard；Hermes 使用用户输入的精确 slash command，nonce 只留在插件进程。批量、异步恢复和 A2A continuation 也必须获得新的 Harness 审批，不能复用环境变量、自然语言“已批准”或历史会话状态。
 
 ### 8. 模型安全策略
 
@@ -149,6 +159,7 @@
 
 - 密钥、密码、bearer token 和 API key 不得进入仓库。
 - Tool Guard 只持久化执行 token digest。
+- Hermes Adapter 不持久化 execution nonce，也不把它返回模型；进程重启使 pending plan 不可执行。
 - trajectory 不保存 prompt、参数值或工具结果正文。
 - A2A 只发送任务必需的自包含 prompt 和有限 provenance。
 - 大结果 TTL 默认 24 小时；P1 应按数据分类配置 TTL、加密和删除策略。
@@ -171,7 +182,7 @@
 P0.5 必须同时通过：
 
 1. Python 全套测试和子测试；
-2. DSH-only architecture audit；
+2. Harness-boundary architecture audit；
 3. Node/plugin syntax 与 HITL/A2A smoke；
 4. profile Skill projection；
 5. retrieval Recall@3 ≥ 0.95、MRR ≥ 0.90；
@@ -180,6 +191,7 @@ P0.5 必须同时通过：
 8. plan hash、nonce、state drift、verifier、compensator 和 event audit 单测；
 9. 本地 UI 中至少一次 L1 + L0 + approval + verification 实测；
 10. 小模型资格失败时 Runtime 必须拦截未批准的重复效果。
+11. Hermes PluginContext、slash approval、nonce hiding、restart loss、A2A continuation 和 DSH/Hermes invariant comparison。
 
 权威命令：
 
@@ -190,6 +202,7 @@ scripts/netopyu-dsh retirement
 ### 12. P1 安全缺口
 
 - 企业 SSO/RBAC 与审批人身份不可抵赖；
+- Hermes Gateway sender identity 到 plan approval actor 的强绑定；
 - mTLS、证书轮换、egress allowlist；
 - 集中密钥、静态加密和数据库访问控制；
 - WORM/远端审计副本；
@@ -204,13 +217,13 @@ scripts/netopyu-dsh retirement
 
 ### 1. Status
 
-This document is the P0.5 system and security baseline for local mock and DSH-plugin integration. P1 must recertify these controls against real networks, enterprise identity, and production approval systems.
+This document is the P0.5 system and security baseline for local mock, the primary DSH plugin, and the optional Hermes adapter. P1 must recertify these controls against real networks, enterprise identity, and production approval systems.
 
 ### 2. Functional requirements
 
 | ID | Requirement |
 |---|---|
-| F-01 | DSH must be the only general agent runtime and Web UI. |
+| F-01 | The project must not implement a custom general agent runtime; DSH is primary and Hermes is optional. |
 | F-02 | Tools and Skills must be isolated by profile. |
 | F-03 | Only read-only tools are registered by default. |
 | F-04 | Every mutation must bind to one versioned Network L0 Skill. |
@@ -224,6 +237,8 @@ This document is the P0.5 system and security baseline for local mock and DSH-pl
 | F-12 | A2A must provide discovery, selection, timeout/loop protection, and durable continuations. |
 | F-13 | Memory recall must be operator/session scoped and explicit. |
 | F-14 | Offline learning may create proposals but may not activate Skills. |
+| F-15 | DSH and Hermes must share one L0 registry, Network Runtime, verifier, compensator, and journal contract. |
+| F-16 | Hermes must not expose execution nonces to the model; only a user slash command may consume the process-local binding. |
 
 ### 3. Security objectives
 
@@ -241,20 +256,21 @@ The system must provide exact authorization, effect integrity, evidence-based ou
 - **Credential leakage:** external secrets, minimized trajectories, redacted logs.
 - **A2A loops/history leakage:** hop/chain controls and self-contained delegation.
 - **Audit tampering:** per-plan event hash chains; P1 still requires an external append-only copy.
+- **Hermes model-as-approver confusion:** prepare-only write handlers, nonce removal, exact user slash commands, process-local one-shot bindings, and safe loss on restart. P0.5 still trusts the local account and Hermes gateway allowlist; production requires authenticated sender identity and process isolation.
 
 ### 5. Approval and model policy
 
-Approval must display and bind the exact plan, intent, L0 contract, arguments, targets, provenance, risk, evidence, verifier/rollback, workflow, and expiry. Batch, recovery, and A2A continuation paths need fresh approval.
+Approval must display and bind the exact plan, intent, L0 contract, arguments, targets, provenance, risk, evidence, verifier/rollback, workflow, and expiry. DSH uses an allowed-once card and Tool Guard. Hermes uses an exact user slash command while retaining the nonce only in process. Batch, recovery, and A2A continuation paths need fresh harness approval.
 
 Models are not a trust root. They are qualified by use level: summary/classification, read-only candidate generation, mutation-plan candidate generation, and production mutation candidate generation. `qwen2.5:7b` failed the mutation-plan level and is not authorized for autonomous writes. `qwen3.5:27b` remains a local P0.5 default, not a production certification.
 
 ### 6. Data security
 
-Secrets must not enter Git, plans, prompts, or trajectories. Only execution-token digests are persisted. A2A sends bounded task data. Large results expire by default. Encryption, file permissions, backups, retention, and WORM audit are deployment controls that must be completed in P1.
+Secrets must not enter Git, plans, prompts, or trajectories. DSH persists only token digests; Hermes keeps the pending execution nonce in process and never returns it to the model. A2A sends bounded task data. Large results expire by default. Encryption, file permissions, backups, retention, and WORM audit are deployment controls that must be completed in P1.
 
 ### 7. Acceptance
 
-P0.5 acceptance requires the complete Python and subtest suite, DSH-only audit, Node/HITL/A2A smoke, Skill projection, retrieval thresholds, Worker load and recovery, destructive-gate tests, Runtime integrity/verification/compensation tests, a local UI L1+L0 exercise, and proof that an unapproved duplicate effect is blocked.
+P0.5 acceptance requires the complete Python and subtest suite, harness-boundary audit, Node/HITL/A2A smoke, Skill projection, retrieval thresholds, Worker load and recovery, destructive-gate tests, Runtime integrity/verification/compensation tests, a local UI L1+L0 exercise, and Hermes PluginContext/slash/nonces/restart/A2A/parity tests proving that unapproved duplicate effects are blocked.
 
 The authoritative command is:
 
@@ -264,4 +280,4 @@ scripts/netopyu-dsh retirement
 
 ### 8. P1 gaps
 
-P1 must add enterprise identity and non-repudiation, mTLS and egress controls, centralized secrets and encryption, external immutable audit, real-adapter command certification, change-window/ticket/two-person policy, HA/DR and long-duration chaos, and controlled model/Skill release with canary and rollback.
+P1 must add enterprise identity and non-repudiation—including a strong Hermes gateway sender-to-approval-actor binding—mTLS and egress controls, centralized secrets and encryption, external immutable audit, real-adapter command certification, change-window/ticket/two-person policy, HA/DR and long-duration chaos, and controlled model/Skill release with canary and rollback. Hermes plugins are in-process, not a sandbox; production must also isolate the Worker and restrict model terminal/code execution authority.

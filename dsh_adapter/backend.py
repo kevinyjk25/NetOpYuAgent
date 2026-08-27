@@ -1,4 +1,4 @@
-"""Backend lifecycle for DSH-exposed NetOpYu tools.
+"""Backend lifecycle for harness-exposed NetOpYu tools.
 
 Mock mode keeps the profile-local callables used by the existing demo. Pragmatic
 mode builds the real device/MCP/OpenAPI router for each short-lived bridge
@@ -56,12 +56,15 @@ def _attach_common_tools(
     metadata: dict[str, dict[str, Any]],
     sources: dict[str, str],
 ) -> Any:
-    """Bind the shared large-result paging tools to DSH's durable store."""
+    """Bind the shared large-result paging tools to the durable result store."""
     from runtime import ToolResultStore
     from tools import make_read_stored_result_tool
     from tools.builtin.registry import TOOLS as BUILTIN_TOOLS
 
-    configured = os.environ.get("NETOPYU_DSH_TOOL_RESULT_STORE")
+    configured = (
+        os.environ.get("NETOPYU_TOOL_RESULT_STORE")
+        or os.environ.get("NETOPYU_DSH_TOOL_RESULT_STORE")
+    )
     database = (
         Path(configured).expanduser()
         if configured
@@ -79,8 +82,12 @@ def _attach_common_tools(
 
 
 def resolve_backend_mode() -> str:
-    """Resolve the DSH tool backend without silently accepting a typo."""
-    configured = os.environ.get("NETOPYU_DSH_BACKEND") or os.environ.get("MODE")
+    """Resolve the shared harness backend without silently accepting a typo."""
+    configured = (
+        os.environ.get("NETOPYU_BACKEND")
+        or os.environ.get("NETOPYU_DSH_BACKEND")
+        or os.environ.get("MODE")
+    )
     if configured is None:
         from config import load
 
@@ -88,7 +95,7 @@ def resolve_backend_mode() -> str:
     mode = configured.strip().lower()
     if mode not in {"mock", "pragmatic"}:
         raise ValueError(
-            f"unsupported NetOpYu DSH backend {mode!r}; expected mock or pragmatic"
+            f"unsupported NetOpYu backend {mode!r}; expected mock or pragmatic"
         )
     return mode
 
@@ -236,7 +243,10 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
     loader = ToolLoader(mode="pragmatic", profile=profile_id)
     local_callables = loader.build_callables()
     metadata = loader.build_metadata()
-    router = ToolRouter(default_timeout=float(os.environ.get("NETOPYU_DSH_TOOL_TIMEOUT", "90")))
+    router = ToolRouter(default_timeout=float(
+        os.environ.get("NETOPYU_TOOL_TIMEOUT")
+        or os.environ.get("NETOPYU_DSH_TOOL_TIMEOUT", "90")
+    ))
     mcp_clients: list[Any] = []
     openapi_clients: list[Any] = []
 

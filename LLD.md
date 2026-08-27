@@ -4,7 +4,7 @@
 
 ### 1. 文档范围
 
-本文定义 DSH 插件、Python bridge/Worker、Network Runtime、L0 Skill、backend、A2A 和持久化组件的实现合同。这里的“必须”表示代码应 fail closed 的约束。
+本文定义 DSH/Hermes Harness Adapter、共享 Python bridge/Worker、Network Runtime、L0 Skill、backend、A2A 和持久化组件的实现合同。这里的“必须”表示代码应 fail closed 的约束。
 
 ### 2. 仓库模块
 
@@ -14,6 +14,11 @@
 | `dsh-plugin-netopyu/src/bridge.js` | Unix Socket Worker 与短进程 fallback transport |
 | `dsh-plugin-netopyu/src/hitl-store.js` | HITL、batch、grant、trajectory、continuation SQLite |
 | `dsh-plugin-netopyu/src/a2a.js` | DSH remote subagent provider 与 continuation 工具 |
+| `hermes-plugin-netopyu/` | Hermes `plugin.yaml` 与公开 `register(ctx)` 加载入口 |
+| `hermes_adapter/plugin.py` | Hermes 工具/Skill/command 投影与精确计划审批绑定 |
+| `hermes_adapter/client.py` | 同步、短连接、带 request id 的 Unix Socket client |
+| `hermes_adapter/pending.py` | 进程内 plan nonce 与远端 continuation 一次性绑定 |
+| `hermes_adapter/comparison.py` | DSH/Hermes Network Runtime 不变量 A/B 门禁 |
 | `dsh_adapter/bridge.py` | manifest、只读调用、prepare/execute/inspect/audit/workflow API |
 | `dsh_adapter/worker.py` | 持久化 JSON-lines Unix Socket 服务、请求隔离和 tracing |
 | `dsh_adapter/backend.py` | mock/pragmatic backend 生命周期和公共分页工具 |
@@ -50,6 +55,22 @@
 
 启动失败不得留下“部分写工具已注册”的状态。manifest、Python、backend 或存储初始化失败应使插件启动失败。
 
+#### 3.1 Hermes 插件启动
+
+Hermes 使用官方 `plugin.yaml + register(ctx)` API：
+
+1. `HermesAdapterConfig` 解析 profile、Worker socket、operator id 和破坏性工具开关；
+2. `HermesWorkerClient.ping()` 必须成功；
+3. 启用写工具时，Hermes 必须提供 `register_command`，否则在注册任何网络工具前失败；
+4. 先注册 `/netopyu-approve`、`/netopyu-deny` 和 A2A 等价命令，再注册工具；
+5. read handler 调用 Worker `invoke`，并以同一 task id 调用 `workflow-observe`；write handler 只调用 `runtime-prepare`；
+6. write handler 从模型可见结果删除 `execution_nonce`，将 nonce 与 plan id/hash 保存到 `PendingActions`；
+7. 只有 slash command handler 可原子领取绑定并调用 `runtime-execute`；
+8. 插件重启后 `PendingActions` 清空，Runtime 中尚未执行的计划保持不可执行并最终过期；
+9. canonical profile Skill 通过 `ctx.register_skill` 注册；`netopyu_skill_view` 或 Hermes `skill_view` hook 启动 reviewed workflow，写阶段采用 Harness-neutral 审批协议。
+
+Hermes tool handler 按官方合同返回 JSON string；错误返回结构化 `ok=false`，不能把异常转写成成功。Hermes 内置危险命令审批不能替代 Network L0 plan 审批。
+
 ### 4. Bridge/Worker 协议
 
 Worker 使用 Unix Domain Socket，消息为一行一个 JSON object。每个请求包含：
@@ -57,10 +78,10 @@ Worker 使用 Unix Domain Socket，消息为一行一个 JSON object。每个请
 ```json
 {
   "id": "correlation-id",
-  "command": "manifest|invoke|prepare|execute|inspect|audit|workflow-*",
+  "command": "manifest|invoke|runtime-prepare|runtime-execute|runtime-inspect|runtime-audit|workflow-*",
   "profile": "lan",
   "tool": "restart_service",
-  "arguments": {},
+  "args": {},
   "include_destructive": false,
   "allow_destructive": false,
   "l0_skill_id": "network.service.restart"
@@ -178,7 +199,7 @@ stateDiagram-v2
 9. 原子写入 plan 与 `plan_created`；
 10. 返回 `plan` 或 `clarification_required/errors`，不得同时返回两者。
 
-### 10. Approval 与 Tool Guard
+### 10. Approval 与 Harness Guard
 
 DSH 插件从计划生成审批摘要。`allowed-once` 后：
 
@@ -190,6 +211,15 @@ DSH 插件从计划生成审批摘要。`allowed-once` 后：
 - reject/timeout 会撤销或终止计划。
 
 Runtime journal 另保存 execution nonce 的 digest。Tool Guard 和 Runtime nonce 构成两层一次性保护。
+
+Hermes Adapter 使用不同的交互层，但不改变 Runtime 合同：
+
+- write tool 只返回 `approval_required`、完整 plan 和 `/netopyu-approve PLAN_ID FULL_HASH`；
+- execution nonce 只保存在插件进程内的 `PendingActions`，不返回模型、不写日志、不落盘；
+- slash command handler 要求精确两个参数，以 constant-time hash 比较后先原子领取 pending binding；
+- handler 使用配置的 operator id 生成唯一 approval request id，再调用相同 `runtime-execute`；
+- hash 错误不消费 binding；正确领取、过期或重启后均不能重用；
+- P0.5 的 operator id 是本地配置身份，不构成生产不可抵赖身份，P1 必须接企业身份上下文。
 
 ### 11. Execute/Verify 算法
 
@@ -231,7 +261,7 @@ Reviewed workflow template 从 canonical L1 `SKILL.md` 编译，hash 绑定模�
 
 ### 14. A2A continuation
 
-Remote `input-required` 结果不被当作成功。插件保存 peer、interrupt id、原始委派绑定和状态，展示新的 DSH 审批。恢复时发送 `resume_interrupt_id + operator_decision`；两者必须成对出现。continuation 领取使用原子状态更新，重复恢复失败或幂等返回终态。
+Remote `input-required` 结果不被当作成功。DSH 持久保存 continuation 并展示新卡片；Hermes 将结构化远端 plan hash 与 continuation 保存在插件进程，并返回用户专属 `/netopyu-a2a-approve` 命令。恢复时发送 `resume_interrupt_id + operator_decision`；两者必须成对出现。缺少结构化远端 plan hash 时 Hermes 拒绝建立可批准 continuation。
 
 ### 15. Journal 与审计
 
@@ -278,7 +308,7 @@ event_hash = SHA256(canonical(event_without_hash) + prev_event_hash)
 
 ### 1. Scope
 
-This document defines implementation contracts for the DSH plugin, Python bridge/Worker, Network Runtime, L0 Skills, backends, A2A, and persistence. “Must” denotes a fail-closed requirement.
+This document defines implementation contracts for the DSH and Hermes harness adapters, shared Python bridge/Worker, Network Runtime, L0 Skills, backends, A2A, and persistence. “Must” denotes a fail-closed requirement.
 
 ### 2. Module map
 
@@ -288,6 +318,11 @@ This document defines implementation contracts for the DSH plugin, Python bridge
 | `dsh-plugin-netopyu/src/bridge.js` | Unix-socket Worker and process fallback transport |
 | `dsh-plugin-netopyu/src/hitl-store.js` | HITL, batches, grants, trajectories, continuations |
 | `dsh-plugin-netopyu/src/a2a.js` | Remote subagent provider and continuation tools |
+| `hermes-plugin-netopyu/` | Official Hermes manifest and `register(ctx)` entry point |
+| `hermes_adapter/plugin.py` | Tool/Skill/command projection and exact-plan approval binding |
+| `hermes_adapter/client.py` | Request-bound Unix-socket Worker client |
+| `hermes_adapter/pending.py` | Process-local one-shot plan nonce and remote continuation bindings |
+| `hermes_adapter/comparison.py` | DSH/Hermes Runtime-invariant A/B gate |
 | `dsh_adapter/bridge.py` | Manifest, read, prepare, execute, inspect, audit, workflow API |
 | `dsh_adapter/worker.py` | Persistent JSON-lines Unix-socket server and request isolation |
 | `dsh_adapter/backend.py` | Backend lifecycle and common paging tools |
@@ -302,7 +337,9 @@ This document defines implementation contracts for the DSH plugin, Python bridge
 
 ### 3. Startup and transport
 
-Plugin startup resolves configuration, loads Python manifests, projects only the active profile and allowed mutation surface, initializes persistent stores and services, registers tools, and attaches cleanup. A partial mutation surface must never survive startup failure.
+DSH startup resolves configuration, loads Python manifests, projects only the active profile and allowed mutation surface, initializes persistent stores and services, registers tools, and attaches cleanup. A partial mutation surface must never survive startup failure.
+
+Hermes uses the official `plugin.yaml + register(ctx)` surface. It requires a healthy Worker and the public slash-command API before exposing mutations. Read handlers invoke the shared Worker and record reviewed-workflow observations under the same task id. `netopyu_skill_view` and the built-in `skill_view` hook start the matching reviewed workflow. Write handlers prepare only, remove the execution nonce from model-visible JSON, and retain it in process-local `PendingActions`. Only an exact user slash command may atomically claim that binding and call `runtime-execute`. Restart discards all pending bindings safely.
 
 The Worker accepts one JSON object per Unix-socket line. Malformed or unknown requests return structured errors without terminating the Worker. `invoke` is read-only. Mutation requires the plan-bound `execute` command with request-level authorization, nonce, approval identity, and L0 binding.
 
@@ -322,7 +359,7 @@ Only `verified_success` and `rollback_verified` represent verified outcomes. Rej
 
 Prepare resolves contracts, compiles parameters and intent, assesses risk, obtains fresh preflight evidence, verifies reviewed-workflow constraints, persists the plan, and returns either a plan or clarification/errors.
 
-An allowed-once decision creates a random token whose digest is stored and atomically consumed. The grant binds the operator, request, tool, canonical arguments, plan id/hash, and expiry. The Runtime independently consumes an execution nonce.
+A DSH allowed-once decision creates a random token whose digest is stored and atomically consumed. The grant binds the operator, request, tool, canonical arguments, plan id/hash, and expiry. Hermes instead binds the same plan to a process-local nonce hidden from the model and consumed only by `/netopyu-approve`. The Runtime independently validates and consumes the execution nonce in both paths.
 
 Execution checks integrity and authorization, revalidates the precondition, sends the write once, and always uses a separate verifier. Verification failure invokes a registered compensator when safe; otherwise the plan escalates to manual intervention.
 
@@ -332,7 +369,7 @@ Evidence is typed, fresh, source-identified, target-bound, predicate-driven, and
 
 Reviewed workflow templates are compiled from canonical L1 Skills and bound by hash. A mutation is allowed only in the correct phase after required observations. Intermediate write output cannot replace final verification.
 
-Remote `input-required` is persisted as a continuation and requires a fresh DSH approval to resume or reject. Hop limits, loop detection, atomic claims, and timeout/error states fail closed.
+Remote `input-required` requires fresh exact-plan approval. DSH persists a continuation and uses a card; Hermes retains a structured remote-plan binding in process and exposes a user-only slash command. Hop limits, loop detection, one-shot claims, and timeout/error states fail closed.
 
 ### 8. Journal and failures
 

@@ -1,4 +1,4 @@
-"""Session-scoped memory recall and profile-scoped capability retrieval for DSH."""
+"""Session-scoped memory recall and profile-scoped harness capability retrieval."""
 
 from __future__ import annotations
 
