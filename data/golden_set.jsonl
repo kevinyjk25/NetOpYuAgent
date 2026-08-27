@@ -31,3 +31,93 @@
 {"query": "我要回滚刚才的配置", "expected_ids": ["rollback_service"], "kind": "skill", "language": "zh", "tags": ["operational"], "notes": "Rollback request in Chinese"}
 {"query": "I read a large stored result, how do I page through it", "expected_ids": ["read_stored_result"], "kind": "skill", "language": "en", "tags": ["meta"], "notes": "Tests skill for handling [STORED:...] refs"}
 {"query": "diagnose unusual login failures", "expected_ids": ["service_health", "syslog_search"], "kind": "skill", "language": "en", "tags": ["diagnostic"], "notes": "Ambiguous — multiple skills could apply"}
+{"query":"summarize all active monitoring alerts","expected_ids":["alert_summary"],"kind":"skill","language":"en","tags":["monitoring","direct"],"notes":"P0 expanded retrieval coverage"}
+{"query":"group critical alerts by device and site","expected_ids":["alert_summary"],"kind":"skill","language":"en","tags":["monitoring","filter"],"notes":"P0 expanded retrieval coverage"}
+{"query":"which network devices have warning alerts","expected_ids":["alert_summary"],"kind":"skill","language":"en","tags":["monitoring","paraphrase"],"notes":"P0 expanded retrieval coverage"}
+{"query":"give me an alert severity summary","expected_ids":["alert_summary"],"kind":"skill","language":"en","tags":["monitoring","paraphrase"],"notes":"P0 expanded retrieval coverage"}
+{"query":"汇总当前所有监控告警","expected_ids":["alert_summary"],"kind":"skill","language":"zh","tags":["monitoring","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"按严重级别统计设备告警","expected_ids":["alert_summary"],"kind":"skill","language":"zh","tags":["monitoring","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"site-a 有哪些 active alerts","expected_ids":["alert_summary"],"kind":"skill","language":"mixed","tags":["monitoring","mixed"],"notes":"P0 expanded retrieval coverage"}
+{"query":"show a grouped alert table for critical events","expected_ids":["alert_summary"],"kind":"skill","language":"en","tags":["monitoring","format"],"notes":"P0 expanded retrieval coverage"}
+{"query":"user alice cannot open the payroll application; check LAN admission then DC permission","expected_ids":["app_access_troubleshoot"],"kind":"skill","language":"en","tags":["cross-domain","diagnostic"],"notes":"P0 expanded retrieval coverage"}
+{"query":"troubleshoot application access across RADIUS NAC and data-center RBAC","expected_ids":["app_access_troubleshoot"],"kind":"skill","language":"en","tags":["cross-domain","technical"],"notes":"P0 expanded retrieval coverage"}
+{"query":"the app is intermittently unavailable for one user; isolate LAN versus DC cause","expected_ids":["app_access_troubleshoot","lan_user_access_diagnose"],"kind":"skill","language":"en","tags":["cross-domain","ambiguous"],"notes":"Either cross-domain workflow is safe; both begin with LAN admission diagnosis"}
+{"query":"verify 802.1X admission before delegating an application permission check","expected_ids":["app_access_troubleshoot"],"kind":"skill","language":"en","tags":["cross-domain","workflow"],"notes":"P0 expanded retrieval coverage"}
+{"query":"用户无法访问数据中心应用，先查 RADIUS 和 NAC 再查应用权限","expected_ids":["app_access_troubleshoot"],"kind":"skill","language":"zh","tags":["cross-domain","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"应用访问失败，判断是 LAN 准入还是 DC RBAC","expected_ids":["app_access_troubleshoot"],"kind":"skill","language":"zh","tags":["cross-domain","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"alice 访问 crm 很慢且时断时续，做端到端准入排查","expected_ids":["app_access_troubleshoot"],"kind":"skill","language":"zh","tags":["cross-domain","intermittent"],"notes":"P0 expanded retrieval coverage"}
+{"query":"排除 VLAN 和 802.1X 后委派 DC 检查应用访问","expected_ids":["app_access_troubleshoot"],"kind":"skill","language":"zh","tags":["cross-domain","delegation"],"notes":"P0 expanded retrieval coverage"}
+{"query":"branch office users cannot reach the data-center application across WAN","expected_ids":["branch_app_reachability"],"kind":"skill","language":"en","tags":["three-domain","diagnostic"],"notes":"P0 expanded retrieval coverage"}
+{"query":"trace branch to DC application reachability through LAN WAN and fabric","expected_ids":["branch_app_reachability"],"kind":"skill","language":"en","tags":["three-domain","technical"],"notes":"P0 expanded retrieval coverage"}
+{"query":"the branch tunnel is up but headquarters application access is intermittent","expected_ids":["branch_app_reachability"],"kind":"skill","language":"en","tags":["three-domain","intermittent"],"notes":"P0 expanded retrieval coverage"}
+{"query":"diagnose circuit SLA and application path for a remote office","expected_ids":["branch_app_reachability"],"kind":"skill","language":"en","tags":["three-domain","wan"],"notes":"P0 expanded retrieval coverage"}
+{"query":"分支机构用户无法访问总部数据中心应用","expected_ids":["branch_app_reachability"],"kind":"skill","language":"zh","tags":["three-domain","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"排查分支到 DC 的隧道、电路 SLA 和应用可达性","expected_ids":["branch_app_reachability"],"kind":"skill","language":"zh","tags":["three-domain","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"分公司访问总部应用很慢，跨 LAN WAN DC 分层定位","expected_ids":["branch_app_reachability"],"kind":"skill","language":"zh","tags":["three-domain","performance"],"notes":"P0 expanded retrieval coverage"}
+{"query":"检查 branch-to-DC 路径并说明离线域的诊断边界","expected_ids":["branch_app_reachability"],"kind":"skill","language":"mixed","tags":["three-domain","degraded"],"notes":"P0 expanded retrieval coverage"}
+{"query":"provision end-to-end application access for a new employee","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"en","tags":["onboarding","provisioning"],"notes":"P0 expanded retrieval coverage"}
+{"query":"onboard a new hire with LAN admission and data-center RBAC","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"en","tags":["onboarding","cross-domain"],"notes":"P0 expanded retrieval coverage"}
+{"query":"grant and verify network plus application access for the new starter","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"en","tags":["onboarding","verification"],"notes":"P0 expanded retrieval coverage"}
+{"query":"new employee needs payroll access; configure NAC then request app role","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"en","tags":["onboarding","workflow"],"notes":"P0 expanded retrieval coverage"}
+{"query":"为新员工开通并验证端到端应用访问","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"zh","tags":["onboarding","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"新入职员工需要 LAN 准入和数据中心应用角色","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"zh","tags":["onboarding","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"完成新人 802.1X、NAC、RBAC 和可达性验证","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"zh","tags":["onboarding","verification"],"notes":"P0 expanded retrieval coverage"}
+{"query":"new hire onboarding 必须确认网络准入和应用权限都生效","expected_ids":["lan_new_employee_onboarding_access"],"kind":"skill","language":"mixed","tags":["onboarding","mixed"],"notes":"P0 expanded retrieval coverage"}
+{"query":"diagnose why bob is denied network access before checking the application","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"en","tags":["identity","diagnostic"],"notes":"P0 expanded retrieval coverage"}
+{"query":"check a user's RADIUS identity NAC policy and VLAN admission","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"en","tags":["identity","technical"],"notes":"P0 expanded retrieval coverage"}
+{"query":"determine whether this access denial is LAN-side or application-side","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"en","tags":["identity","classification"],"notes":"P0 expanded retrieval coverage"}
+{"query":"user permission failure: inspect network admission first","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"en","tags":["identity","workflow"],"notes":"P0 expanded retrieval coverage"}
+{"query":"诊断用户为什么没有网络访问权限","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"zh","tags":["identity","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"先检查用户身份、NAC 策略和 VLAN 准入","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"zh","tags":["identity","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"判断访问被拒绝是 LAN 准入问题还是应用权限问题","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"zh","tags":["identity","classification"],"notes":"P0 expanded retrieval coverage"}
+{"query":"用户已通过 802.1X 但仍无权访问，请判断是否应委派 DC","expected_ids":["lan_user_access_diagnose"],"kind":"skill","language":"zh","tags":["identity","delegation"],"notes":"P0 expanded retrieval coverage"}
+{"query":"analyse bandwidth consumers from NetFlow records","expected_ids":["netflow_analysis"],"kind":"skill","language":"en","tags":["traffic","paraphrase"],"notes":"P0 expanded retrieval coverage"}
+{"query":"find suspicious traffic spikes and top source addresses","expected_ids":["netflow_analysis"],"kind":"skill","language":"en","tags":["traffic","security"],"notes":"P0 expanded retrieval coverage"}
+{"query":"inspect flow records for unusual east-west traffic","expected_ids":["netflow_analysis"],"kind":"skill","language":"en","tags":["traffic","technical"],"notes":"P0 expanded retrieval coverage"}
+{"query":"rank the largest network conversations by bytes","expected_ids":["netflow_analysis"],"kind":"skill","language":"en","tags":["traffic","ranking"],"notes":"P0 expanded retrieval coverage"}
+{"query":"分析站点的 NetFlow 流量趋势和异常来源","expected_ids":["netflow_analysis"],"kind":"skill","language":"zh","tags":["traffic","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"找出占用带宽最高的通信双方","expected_ids":["netflow_analysis"],"kind":"skill","language":"zh","tags":["traffic","ranking"],"notes":"P0 expanded retrieval coverage"}
+{"query":"检查是否存在异常网络流量或 top talkers","expected_ids":["netflow_analysis"],"kind":"skill","language":"mixed","tags":["traffic","mixed"],"notes":"P0 expanded retrieval coverage"}
+{"query":"run a PromQL query for interface error rate","expected_ids":["prometheus_query"],"kind":"skill","language":"en","tags":["metrics","promql"],"notes":"P0 expanded retrieval coverage"}
+{"query":"query Prometheus for CPU utilization over thirty minutes","expected_ids":["prometheus_query"],"kind":"skill","language":"en","tags":["metrics","timeseries"],"notes":"P0 expanded retrieval coverage"}
+{"query":"show the time series for packet drops","expected_ids":["prometheus_query"],"kind":"skill","language":"en","tags":["metrics","monitoring"],"notes":"P0 expanded retrieval coverage"}
+{"query":"evaluate rate(if_errors_total[5m])","expected_ids":["prometheus_query"],"kind":"skill","language":"en","tags":["metrics","technical"],"notes":"P0 expanded retrieval coverage"}
+{"query":"用 PromQL 查询接口错误率","expected_ids":["prometheus_query"],"kind":"skill","language":"zh","tags":["metrics","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"查询 Prometheus 中过去一小时的 CPU 指标","expected_ids":["prometheus_query"],"kind":"skill","language":"zh","tags":["metrics","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"绘制 packet loss 的监控时间序列","expected_ids":["prometheus_query"],"kind":"skill","language":"zh","tags":["metrics","timeseries"],"notes":"P0 expanded retrieval coverage"}
+{"query":"prometheus query 查看设备内存指标","expected_ids":["prometheus_query"],"kind":"skill","language":"mixed","tags":["metrics","mixed"],"notes":"P0 expanded retrieval coverage"}
+{"query":"perform a rolling restart of the production API service","expected_ids":["restart_service"],"kind":"skill","language":"en","tags":["destructive","direct"],"notes":"P0 expanded retrieval coverage"}
+{"query":"restart the service gracefully one replica at a time","expected_ids":["restart_service"],"kind":"skill","language":"en","tags":["destructive","rolling"],"notes":"P0 expanded retrieval coverage"}
+{"query":"recycle the staging authentication service with approval","expected_ids":["restart_service"],"kind":"skill","language":"en","tags":["destructive","approval"],"notes":"P0 expanded retrieval coverage"}
+{"query":"the service needs a controlled restart","expected_ids":["restart_service"],"kind":"skill","language":"en","tags":["destructive","paraphrase"],"notes":"P0 expanded retrieval coverage"}
+{"query":"滚动重启生产环境的认证服务","expected_ids":["restart_service"],"kind":"skill","language":"zh","tags":["destructive","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"经审批后逐个重启服务副本","expected_ids":["restart_service"],"kind":"skill","language":"zh","tags":["destructive","approval"],"notes":"P0 expanded retrieval coverage"}
+{"query":"restart-service 操作需要安全执行","expected_ids":["restart_service"],"kind":"skill","language":"mixed","tags":["destructive","mixed"],"notes":"P0 expanded retrieval coverage"}
+{"query":"restore the service to its previous deployed version","expected_ids":["rollback_service"],"kind":"skill","language":"en","tags":["destructive","direct"],"notes":"P0 expanded retrieval coverage"}
+{"query":"undo the latest service configuration change","expected_ids":["rollback_service"],"kind":"skill","language":"en","tags":["destructive","paraphrase"],"notes":"P0 expanded retrieval coverage"}
+{"query":"roll production back to version 2.4.1","expected_ids":["rollback_service"],"kind":"skill","language":"en","tags":["destructive","version"],"notes":"P0 expanded retrieval coverage"}
+{"query":"revert the failed deployment after approval","expected_ids":["rollback_service"],"kind":"skill","language":"en","tags":["destructive","approval"],"notes":"P0 expanded retrieval coverage"}
+{"query":"将服务恢复到上一个稳定版本","expected_ids":["rollback_service"],"kind":"skill","language":"zh","tags":["destructive","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"撤销刚才失败的生产变更","expected_ids":["rollback_service"],"kind":"skill","language":"zh","tags":["destructive","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"rollback service 到指定版本并验证恢复","expected_ids":["rollback_service"],"kind":"skill","language":"mixed","tags":["destructive","verification"],"notes":"P0 expanded retrieval coverage"}
+{"query":"check whether the authentication service is healthy","expected_ids":["service_health"],"kind":"skill","language":"en","tags":["health","direct"],"notes":"P0 expanded retrieval coverage"}
+{"query":"report service latency uptime and replica status","expected_ids":["service_health"],"kind":"skill","language":"en","tags":["health","details"],"notes":"P0 expanded retrieval coverage"}
+{"query":"is the production API currently degraded","expected_ids":["service_health"],"kind":"skill","language":"en","tags":["health","paraphrase"],"notes":"P0 expanded retrieval coverage"}
+{"query":"verify database health before making a change","expected_ids":["service_health"],"kind":"skill","language":"en","tags":["health","precheck"],"notes":"P0 expanded retrieval coverage"}
+{"query":"检查认证服务的延迟和副本状态","expected_ids":["service_health"],"kind":"skill","language":"zh","tags":["health","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"数据库服务现在是否健康可用","expected_ids":["service_health"],"kind":"skill","language":"zh","tags":["health","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"service health 检查生产 API 是否降级","expected_ids":["service_health"],"kind":"skill","language":"mixed","tags":["health","mixed"],"notes":"P0 expanded retrieval coverage"}
+{"query":"find interface flap messages in device syslog","expected_ids":["syslog_search"],"kind":"skill","language":"en","tags":["logs","technical"],"notes":"P0 expanded retrieval coverage"}
+{"query":"search router logs for authentication errors","expected_ids":["syslog_search"],"kind":"skill","language":"en","tags":["logs","diagnostic"],"notes":"P0 expanded retrieval coverage"}
+{"query":"show warning syslog entries from site-a switches","expected_ids":["syslog_search"],"kind":"skill","language":"en","tags":["logs","filter"],"notes":"P0 expanded retrieval coverage"}
+{"query":"look through yesterday's device logs for link down events","expected_ids":["syslog_search"],"kind":"skill","language":"en","tags":["logs","time"],"notes":"P0 expanded retrieval coverage"}
+{"query":"搜索交换机日志中的端口抖动错误","expected_ids":["syslog_search"],"kind":"skill","language":"zh","tags":["logs","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"查询昨天设备 syslog 的 link down 记录","expected_ids":["syslog_search"],"kind":"skill","language":"mixed","tags":["logs","mixed"],"notes":"P0 expanded retrieval coverage"}
+{"query":"按主机和严重级别过滤网络日志","expected_ids":["syslog_search"],"kind":"skill","language":"zh","tags":["logs","filter"],"notes":"P0 expanded retrieval coverage"}
+{"query":"continue reading a result referenced by STORED id","expected_ids":["read_stored_result"],"kind":"skill","language":"en","tags":["paging","direct"],"notes":"P0 expanded retrieval coverage"}
+{"query":"fetch the next page of a large stored tool output","expected_ids":["read_stored_result"],"kind":"skill","language":"en","tags":["paging","pagination"],"notes":"P0 expanded retrieval coverage"}
+{"query":"retrieve an earlier chunk from the durable result store","expected_ids":["read_stored_result"],"kind":"skill","language":"en","tags":["paging","chunk"],"notes":"P0 expanded retrieval coverage"}
+{"query":"the tool response was truncated; load more using its stored reference","expected_ids":["read_stored_result"],"kind":"skill","language":"en","tags":["paging","paraphrase"],"notes":"P0 expanded retrieval coverage"}
+{"query":"读取 STORED 引用对应的大结果下一页","expected_ids":["read_stored_result"],"kind":"skill","language":"zh","tags":["paging","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"工具输出太大被落盘了，请继续分页读取","expected_ids":["read_stored_result"],"kind":"skill","language":"zh","tags":["paging","zh"],"notes":"P0 expanded retrieval coverage"}
+{"query":"read_stored_result 获取指定 offset 的结果片段","expected_ids":["read_stored_result"],"kind":"skill","language":"mixed","tags":["paging","technical"],"notes":"P0 expanded retrieval coverage"}

@@ -20,7 +20,7 @@ Built-in meta-tools (provided in this file):
 Custom meta-tools can be registered by host code via:
     get_meta_tool_registry().register(MetaTool(name=..., description=..., handler=async_fn))
 
-In production, register() is typically called from main.py after the
+In production, register() is called by the active DSH domain composition after the
 tool retriever and skill catalog are wired.
 """
 from __future__ import annotations
@@ -189,7 +189,7 @@ def get_meta_tool_registry() -> MetaToolRegistry:
 # ---------------------------------------------------------------------------
 # Built-in meta-tool factories
 # ---------------------------------------------------------------------------
-# These are NOT auto-registered — host code (main.py) decides which ones
+# These are NOT auto-registered — the DSH domain composition decides which ones
 # to wire after constructing the retrievers. This avoids hidden side effects.
 
 def make_list_tools_meta_tool(

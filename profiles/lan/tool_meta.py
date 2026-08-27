@@ -172,6 +172,19 @@ TOOLS: dict[str, dict[str, Any]] = {
         "action_type": "destructive",
         "tags":        ["destructive", "delete"],
     },
+    "mock_operation_status": {
+        "description": "Read structured state for local destructive-operation simulation verification.",
+        "parameters": {
+            "operation": {"type": "string", "description": "Optional operation name"},
+            "resource_id": {"type": "string", "description": "Resource identifier"},
+            "deploy_id": {"type": "string", "description": "Deployment identifier"},
+            "node_id": {"type": "string", "description": "Node identifier"},
+        },
+        "returns": "Machine-readable simulator operation state",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["simulation", "verification", "read-only"],
+    },
     "rollback_service": {
         "description": "Roll back a service to a previous version. Requires HITL approval.",
         "parameters":  {"service": "Service name", "version": "Target version (e.g. '3.2.1')", "environment": "prod|staging|dev"},

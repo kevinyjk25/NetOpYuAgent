@@ -1,0 +1,3 @@
+- insert:
+    - id: netopyu-tools
+      name: dsh-netopyu

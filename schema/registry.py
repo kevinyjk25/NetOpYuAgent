@@ -15,7 +15,7 @@ The registry is populated at startup time from three sources (in order):
   3. Local tool metadata  — auto-import via from_dict_metadata
 
 Later registrations win (last-write), giving operators a way to override
-auto-imported schemas with hand-tuned ones in main.py.
+auto-imported schemas with hand-tuned ones during backend composition.
 """
 from __future__ import annotations
 

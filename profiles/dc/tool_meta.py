@@ -74,6 +74,15 @@ TOOLS: dict[str, dict[str, Any]] = {
         "tags":        ["dc", "fabric", "config", "destructive"],
         "example":     {"node": "leaf-1", "config_lines": ["interface Ethernet1/1", "  mtu 9216"], "reason": "jumbo frames for storage VLAN"},
     },
+    "dc_get_applied_config": {
+        "description": "Read structured simulator-applied configuration for a fabric node.",
+        "parameters": {"node": "Fabric node id"},
+        "required": ["node"],
+        "returns": "Machine-readable applied configuration statements",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["dc", "fabric", "config", "verification", "read-only"],
+    },
 
     # ── Application access control (cross-agent HITL scenario, 2026-05) ──
     "dc_list_apps": {

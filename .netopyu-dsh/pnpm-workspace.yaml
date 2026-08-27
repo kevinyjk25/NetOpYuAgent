@@ -1,0 +1,11 @@
+packages: []
+
+# pnpm 10+ treats dependency lifecycle scripts as an explicit trust boundary.
+# These values mirror the reviewed policy shipped by DSH 0.1.1-rc.2.
+allowBuilds:
+  '@deepseek-ai/dsh-subprocess-local': true
+  '@google/genai': false
+  koffi: true
+  node-pty: true
+  protobufjs: false
+

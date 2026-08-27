@@ -39,8 +39,13 @@ from log_redaction import redact_text
 _DEVICES: dict[str, dict] = {}   # id → netmiko ConnectHandler kwargs
 
 
+def reset_devices() -> None:
+    """Clear the process-local inventory before rebuilding a runtime backend."""
+    _DEVICES.clear()
+
+
 def register_devices(devices: list) -> None:
-    """Called by main.py to load device inventory from config."""
+    """Called by the DSH backend to load device inventory from config."""
     for dev in devices:
         _DEVICES[dev.id] = {
             "device_type": dev.device_type,

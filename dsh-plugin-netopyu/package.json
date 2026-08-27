@@ -1,0 +1,20 @@
+{
+  "name": "dsh-netopyu",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "files": [
+    "src/*.js",
+    "cordis.patch.yml",
+    "compatibility.json"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  }
+}

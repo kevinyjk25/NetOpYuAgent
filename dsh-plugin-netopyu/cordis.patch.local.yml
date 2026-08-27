@@ -1,0 +1,3 @@
+- insert:
+    - id: netopyu-tools
+      name: '/Users/steven/NetOpYuAgent/dsh-plugin-netopyu/src/index.js'

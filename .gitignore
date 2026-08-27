@@ -1,0 +1,21 @@
+.DS_Store
+.idea/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+__pycache__/
+*.py[cod]
+*.log
+
+# Local virtualenv and runtime state
+.venv/
+data/agents/
+data/dsh_hitl.sqlite
+data/network_runtime.sqlite
+data/tool_results.db
+data/tool_results.sqlite
+data/local_dc_peer.sqlite
+
+# Generated local test/runtime artifacts
+*.sqlite-shm
+*.sqlite-wal

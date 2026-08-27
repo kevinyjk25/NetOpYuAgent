@@ -22,6 +22,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "get_device_status": {
         "description": "Get live operational status of a device: CPU, memory, uptime, interface summary.",
         "parameters":  {"device_id": "Device identifier from list_devices"},
+        "required":    ["device_id"],
         "returns":     "Status dict: cpu_pct, mem_pct, uptime, interface counts",
         "hitl":        False,
         "action_type": "read_only",
@@ -30,6 +31,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "get_device_config": {
         "description": "Retrieve running configuration from a real device via SSH/NAPALM.",
         "parameters":  {"device_id": "Device identifier", "section": "Config section (optional): radius|ntp|vlan|bgp"},
+        "required":    ["device_id"],
         "returns":     "Device configuration text",
         "hitl":        False,
         "action_type": "read_only",
@@ -38,6 +40,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "validate_device_config": {
         "description": "Validate device configuration against compliance rules. Returns findings.",
         "parameters":  {"device_id": "Device identifier"},
+        "required":    ["device_id"],
         "returns":     "Validation report: issues, severity, recommendations",
         "hitl":        False,
         "action_type": "read_only",
@@ -45,7 +48,12 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "edit_device_config": {
         "description": "Push configuration change to a real device. Requires HITL approval.",
-        "parameters":  {"device_id": "Device identifier", "section": "Section to change", "changes": "Change dict", "reason": "Audit reason"},
+        "parameters":  {
+            "device_id": "Device identifier",
+            "config_lines": "Exact ordered list of CLI configuration commands",
+            "reason": "Audit reason",
+        },
+        "required":    ["device_id", "config_lines", "reason"],
         "returns":     "Push result with diff and rollback instructions",
         "hitl":        True,
         "action_type": "destructive",
@@ -54,6 +62,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "get_syslog": {
         "description": "Retrieve recent syslog entries from a device via SSH.",
         "parameters":  {"device_id": "Device identifier", "level": "Severity filter: error|warning|info", "lines": "Max lines (default 50)"},
+        "required":    ["device_id"],
         "returns":     "Syslog lines with timestamp, facility, severity, message",
         "hitl":        False,
         "action_type": "read_only",
@@ -62,6 +71,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "query_interface_metrics": {
         "description": "Query interface traffic and error counters for a device.",
         "parameters":  {"device_id": "Device identifier", "interface": "Interface name (optional, default: all)"},
+        "required":    ["device_id"],
         "returns":     "Per-interface: rx/tx bytes, error counts, utilisation pct",
         "hitl":        False,
         "action_type": "read_only",
@@ -70,6 +80,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "get_bgp_summary": {
         "description": "Get BGP peer summary and session state for a router.",
         "parameters":  {"device_id": "Device identifier"},
+        "required":    ["device_id"],
         "returns":     "BGP table: peer IP, ASN, state, prefixes received/sent, uptime",
         "hitl":        False,
         "action_type": "read_only",
@@ -78,6 +89,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "get_device_facts": {
         "description": "Get hardware facts: model, OS version, serial number, uptime.",
         "parameters":  {"device_id": "Device identifier"},
+        "required":    ["device_id"],
         "returns":     "Facts dict: hostname, model, os_version, serial, uptime",
         "hitl":        False,
         "action_type": "read_only",
@@ -86,6 +98,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     "run_command": {
         "description": "Run an arbitrary show/display command on a device. Read-only commands only.",
         "parameters":  {"device_id": "Device identifier", "command": "CLI command string (show/display only)"},
+        "required":    ["device_id", "command"],
         "returns":     "Command output as text",
         "hitl":        False,
         "action_type": "read_only",
@@ -93,7 +106,7 @@ TOOLS: dict[str, dict[str, Any]] = {
     },
     "multi_device_check": {
         "description": "Run the same check across multiple devices in parallel.",
-        "parameters":  {"device_ids": "List of device identifiers", "check": "Check type: status|config|syslog|bgp"},
+        "parameters":  {"device_ids": "List of device identifiers (optional; default all)", "command": "Read-only show/display command", "tag": "Inventory tag filter (optional)"},
         "returns":     "Per-device results table",
         "hitl":        False,
         "action_type": "read_only",

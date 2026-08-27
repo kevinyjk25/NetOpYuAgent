@@ -3,8 +3,7 @@ integrations/tool_router.py
 -----------------------------
 ToolRouter — unified tool dispatcher for production use.
 
-Merges tools from three sources into one registry that AgentRuntimeLoop
-and TaskExecutor consume:
+Merges tools from three sources into one registry consumed by the DSH bridge:
 
   Source 1: MCP servers     (your company NetOps MCP)
   Source 2: OpenAPI clients (your company REST APIs)
@@ -19,14 +18,11 @@ Per-tool features
   schema_validation— validates args against tool's parameter schema before call
   latency_tracking — records p50/p99 per tool for /integrations/metrics
 
-The resulting registry dict is passed directly to:
-  - AgentRuntimeLoop(tool_registry=router.registry)
-  - TaskExecutor(tool_registry=router.registry)
-  - WebUI backend (tool_registry dict)
+The resulting registry dict is exposed as DSH plugin tools.
 
 Usage
 -----
-    # Build and wire in main.py
+    # Build and wire in the DSH backend
     from integrations.router.tool_router import ToolRouter
     from integrations.clients.mcp_client import MCPClient
     from integrations.clients.openapi_client import OpenAPIClient
@@ -146,7 +142,7 @@ class ToolRouter:
     Unified tool registry merging MCP, OpenAPI, and local tools.
 
     The .registry property returns a plain dict[str, callable] that any
-    existing component (AgentRuntimeLoop, TaskExecutor, WebUI) can consume
+    DSH bridge can consume
     without any changes.
     """
 
@@ -232,7 +228,7 @@ class ToolRouter:
     def registry(self) -> dict[str, Callable]:
         """
         Return the merged tool registry dict.
-        Pass this to AgentRuntimeLoop(tool_registry=router.registry).
+        Pass this to the DSH bridge.
         """
         # Wrap every callable with circuit-breaker + rate-limit + store routing
         wrapped = {}

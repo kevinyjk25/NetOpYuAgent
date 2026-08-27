@@ -13,18 +13,6 @@ Implementation:
   skills/catalog.py              — SkillCatalogService (register, load, format)
   skills/evolver.py              — runtime skill creation from LLM
 """
-from .catalog import (
-    Skill,
-    SkillSummary,
-    SkillDetail,
-    SkillCatalogService,
-)
-
-__all__ = [
-    "Skill",
-    "SkillSummary",
-    "SkillDetail",
-    "SkillCatalogService",
-]
-
 from skills.loader import SkillLoader  # public re-export
+
+__all__ = ["SkillLoader"]

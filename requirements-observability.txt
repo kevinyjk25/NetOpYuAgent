@@ -1,0 +1,5 @@
+# Optional Worker tracing. Add opentelemetry-exporter-otlp when exporting to a
+# collector; without it the bridge can use the local console exporter.
+opentelemetry-api>=1.25.0,<2.0.0
+opentelemetry-sdk>=1.25.0,<2.0.0
+opentelemetry-instrumentation-httpx>=0.46b0,<1.0.0

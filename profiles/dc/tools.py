@@ -87,9 +87,8 @@ async def dc_bgp_evpn_status(args: dict[str, Any]) -> str:
     out.append(f"{'NEIGHBOR':<12}{'STATE':<14}{'UP/DOWN':<12}{'EVPN-RT':<10}{'PFX-RCVD'}")
     out.append("-" * 60)
     for p in peers:
-        flap = random.random() < 0.12
-        state = "Idle (flapping)" if flap else "Established"
-        updown = f"{random.randint(0,3)}h{random.randint(10,59)}m" if not flap else "00:00:42"
+        state = "Established"
+        updown = f"{random.randint(0,3)}h{random.randint(10,59)}m"
         evpn_rt = random.randint(40, 120)
         pfx = random.randint(200, 1200)
         out.append(f"{p:<12}{state:<14}{updown:<12}{evpn_rt:<10}{pfx}")
@@ -209,6 +208,19 @@ async def dc_config_push(args: dict[str, Any]) -> str:
     out.append(f"  snapshot taken: {_ts()}  (rollback id: {random.randint(1000,9999)})")
     out.append(f"  status: applied, BGP EVPN re-converged in {random.uniform(0.3,1.2):.1f}s")
     return "\n".join(out)
+
+
+async def dc_get_applied_config(args: dict[str, Any]) -> str:
+    """Structured independent read of simulator-applied fabric config."""
+    await asyncio.sleep(0)
+    node = (args.get("node") or "").strip()
+    known = {item["id"] for item in _FABRIC_NODES}
+    if node not in known:
+        return f"Unknown fabric node {node!r}. Known: {', '.join(sorted(known))}."
+    return json.dumps({
+        "node": node,
+        "applied": list(_FABRIC_STATE.get(node, {}).get("applied", [])),
+    }, sort_keys=True)
 
 
 # ---------------------------------------------------------------------------

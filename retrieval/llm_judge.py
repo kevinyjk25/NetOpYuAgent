@@ -26,7 +26,7 @@ Signature: LLMJudgeRetriever(first_stage=Hybrid(...), llm_fn=async_callable, ...
 
 The llm_fn protocol is intentionally minimal:
   async def llm_fn(system: str, user: str) -> str
-which matches exactly the same shape SkillEvolver and main.py already use.
+which matches the injected asynchronous judge-callable contract.
 This means LLMJudgeRetriever can be wired without any new infrastructure.
 
 NOT auto-registered. To enable in production:

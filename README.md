@@ -1,1141 +1,277 @@
-# IT Ops Multi-Agent Platform
+# NetOpYuAgent
 
-> **IT 运维多智能体平台** — A2A-protocol multi-agent orchestration system with HITL human-in-the-loop, Hermes learning loop, dual-path execution engine, and a terminal-style WebUI console.
+## 中文
 
----
+### 项目定位
 
-## Table of Contents
+NetOpYuAgent 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 之上的网络领域插件与确定性执行运行时。
 
-1. [Overview](#1-overview)
-2. [Architecture](#2-architecture)
-3. [Module Reference](#3-module-reference)
-4. [Quick Start](#4-quick-start)
-5. [Running with a Real LLM (Ollama)](#5-running-with-a-real-llm-ollama)
-6. [WebUI Console Guide](#6-webui-console-guide)
-7. [HITL Human Approval Flow](#7-hitl-human-approval-flow)
-8. [Hermes Learning Loop](#8-hermes-learning-loop)
-9. [P0 Tool Result Cache](#9-p0-tool-result-cache)
-10. [P1 / P2 Features](#10-p1--p2-features)
-11. [Mock Tools & Skill Catalog](#11-mock-tools--skill-catalog)
-12. [Environment Variables](#12-environment-variables)
-13. [Project Structure](#13-project-structure)
-14. [Roadmap](#14-roadmap)
+DSH 负责通用智能体能力：会话、模型调用、工具调用、Web UI、Skill 生命周期、审批交互和子代理框架。NetOpYuAgent 不再实现第二套通用 Agent Harness，而是提供网络领域必须保留的可靠能力：
 
----
+- Domain L1 Skills：诊断、追问、跨域协作和业务流程编排；
+- Network L0 Skills：参数校验、风险计算、预检、审批绑定、单次执行、结果验证、补偿/回滚和审计；
+- LAN、DC、WAN 与 pragmatic 网络工具；
+- DSH 插件、Python Worker、A2A provider、作用域记忆、能力检索和离线评测。
 
-## 1. Overview
+> 当前状态：P0 迁移完成；P0.5 本地模拟原型闭环完成。它证明了架构与安全执行链路，但不等于真实生产网络中的“绝对 100% 正确”。真实设备、企业身份、变更窗口、HA、备份恢复与生产 SLO 属于 P1。
 
-An IT operations multi-agent platform built around two design principles:
+### 分层术语
 
-**A2A Protocol First** — All agent communication uses Google's A2A Protocol over HTTP. Agents are discoverable, load-balanced, and health-checked through a built-in registry. Agents written in any language or framework can participate.
+为避免 L0/L1 歧义，本项目统一使用以下名称：
 
-**Thin Loop, Thick Scaffold** — Inspired by Claude Code's architecture: the main execution loop (`AgentRuntimeLoop`) is deliberately thin. All the hard work lives in the scaffold around it — context budget management, tool result caching, stop policy, skill loading, FTS5 cross-session recall, and the Hermes post-turn learning pipeline.
-
-### Core Capabilities
-
-| Capability | Description |
+| 名称 | 职责 |
 |---|---|
-| **Dual-path routing** | Simple queries → Runtime Loop (no LangGraph overhead). Complex/destructive operations → HITL LangGraph with human approval gate |
-| **HITL approval** | LangGraph `interrupt()` pauses execution, browser shows approval card, graph resumes on decision |
-| **Hermes learning loop** | After every turn: FTS5 memory write, MemoryCurator extracts facts, UserModelEngine tracks expertise, SkillEvolver creates reusable skill recipes |
-| **FTS5 cross-session recall** | SQLite FTS5 stores all past turns; semantically similar context is injected into new queries automatically |
-| **P0 tool result cache** | Large tool outputs (syslogs, Prometheus, NetFlow) are stored externally; prompt carries only a `[STORED:id]` reference |
-| **Skill catalog** | Level 1 summaries injected every turn, Level 2 details loaded on demand — avoids spending tokens on irrelevant skills |
-| **Context budget** | Per-turn token allocation: confirmed facts > working set > memory > tool results > environment. Soft cap 3 200 tokens |
-| **Stop policy** | Six dimensions: max turns, max tool calls, token budget, low progress, low confidence, explicit stop signal |
-| **Agent registry** | Runtime agent registration/deregistration, health checks, round-robin / random / least-loaded balancing |
-| **MCP + OpenAPI** | Pluggable tool backends: MCP server (JSON config) and any OpenAPI 3.0 spec; mock mode for both |
+| DSH Platform Layer | 通用 Agent Harness；管理模型、会话、UI、工具与审批交互 |
+| NetOpYu Domain Layer | DSH 之上的网络领域能力总层 |
+| Domain L1 Skill | 允许模型参与的泛化业务 Skill；负责理解、诊断、追问和编排 |
+| Network L0 Skill | 不依赖模型推理的版本化执行合同；负责确定性网络效果 |
+| Network Runtime | 编译并执行 Network L0 Skill 的安全运行时 |
 
----
+### P0.5 完成范围
 
-## 2. Architecture
+本地 mock 范围已经具备：
 
-```
-External caller (RouterAgent / WebUI / webhook / curl)
-           │  A2A JSON-RPC over HTTP-SSE / REST
-           ▼
-┌──────────────────────────────────────────────────────────┐
-│                      API gateway                          │
-│   /api/v1/a2a/*   /hitl/*   /registry/*   /webui/*       │
-└─────────────────────────┬────────────────────────────────┘
-                          │
-         ┌────────────────▼──────────────────┐
-         │          Execution router          │
-         │                                   │
-         │  classify(query)                  │
-         │    SIMPLE  → Runtime Loop         │
-         │    COMPLEX → HITL Graph           │
-         └───────────────────────────────────┘
-              │                    │
-   ┌──────────▼─────────┐  ┌──────▼──────────────────────┐
-   │   Runtime Loop      │  │  HITL Graph (LangGraph)      │
-   │   context_budget    │  │    intent_classifier         │
-   │   stop_policy       │  │    risk_assessor             │
-   │   skill_catalog     │  │    planner                   │
-   │   tool_cache        │  │    hitl_interrupt_node ←─────│─── operator
-   │   FTS5 recall       │  │    executor                  │
-   └──────────┬──────────┘  │    result_formatter          │
-              │             └──────────────────────────────┘
-              ▼
-   ┌──────────────────────────────────────────────────────┐
-   │              Hermes post-turn pipeline                │
-   │   FTS5SessionStore → MemoryCurator → UserModelEngine  │
-   │                    → SkillEvolver                     │
-   └──────────────────────────────────────────────────────┘
-              │
-   ┌──────────▼───────────────────────────────────────────┐
-   │          Integrations layer                           │
-   │   OllamaEngine / OpenAIEngine   MCP client           │
-   │   OpenAPI client                ToolRouter            │
-   └──────────────────────────────────────────────────────┘
-```
+- DSH-only Web UI 和 Agent runtime；
+- 版本化 Network L0 Skill 注册表；
+- 严格参数类型、必填字段、目标存在性与参数来源校验；
+- 不可变 `IntentSpec`、`plan_hash`、`intent_hash` 与 L0 合同哈希；
+- DSH `allowed-once` 审批与一次性 Tool Guard grant；
+- 执行前状态重校验，阻止 TOCTOU 状态漂移；
+- 独立 typed postcondition 验证；
+- 合同化补偿/回滚与人工介入终态；
+- SQLite 状态机及防篡改事件哈希链；
+- 持久化 Python Worker 和故障恢复；
+- A2A 发现、委派、深度/循环保护和持久化 continuation；
+- 本地 loopback-only DC peer，用于真实 A2A/SSE 协议模拟；
+- 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
+- 完整 retirement 门禁：132 个测试、32 个子测试和 7/7 本地端到端检查。
 
-### Request flow — SIMPLE path
+### 快速开始
 
-`classify=SIMPLE` → FTS5 recall (past sessions) → `loop.stream()` with real LLM → Turn 1: LLM picks tool → tool executes (large output → `ToolResultStore`) → Turn 2: LLM synthesises answer → stop → Hermes pipeline fires (FTS5 write, curate, user model, skill evolver)
+依赖：
 
-### Request flow — COMPLEX path
-
-`classify=COMPLEX` → `executor.execute()` → `run_with_hitl()` → LangGraph streams → `hitl_interrupt_node` calls `interrupt()` → `register_interrupt()` → `TaskArtifactUpdateEvent` enqueued → SSE stream closes → browser shows HITL approval card → operator clicks Approve/Reject → `POST /hitl/{id}/approve` → `graph.ainvoke(None, thread_cfg)` resumes → executor node runs → result streams back
-
----
-
-## 3. Module Reference
-
-### 3.1 `runtime/` — Execution engine (8 files)
-
-| File | Responsibility |
-|---|---|
-| `loop.py` | `AgentRuntimeLoop`: thin main loop — classify, stream, pre/post verify, tool dispatch |
-| `context_budget.py` | `ContextBudgetManager`: per-turn token prioritisation; `ToolResultStore`: P0 large-output externalisation |
-| `stop_policy.py` | `StopPolicy`: six-dimension stop evaluation; `LoopState`: cross-turn state tracking |
-| `skill_catalog.py` | `SkillCatalogService` integration: L1 summary injection + L2 on-demand detail loading |
-| `model_tier.py` | `ModelTierClassifier`: routes queries to fast model vs full model |
-| `delegation.py` | Fork/fresh delegation modes, context inheritance policy |
-| `tool_cache.py` | Composite skill scoring (tool overlap × 0.6 + semantic similarity × 0.4) |
-
-### 3.2 `hitl/` — Human-in-the-loop (9 files)
-
-| File | Responsibility |
-|---|---|
-| `a2a_integration.py` | `ITOpsHitlAgentExecutor`: dual-path router + post-turn verification hook |
-| `graph.py` | LangGraph `StateGraph(ITOpsGraphState)`: 6 nodes (classify → risk → plan → interrupt → execute → format) |
-| `triggers.py` | Four trigger types: destructive op / alert severity / confidence / ambiguous intent |
-| `decision.py` | `HitlDecisionRouter`: approve / reject / edit / escalate / timeout |
-| `review.py` | Five notification channels: Slack, PagerDuty, SSE, WebSocket, email (concurrent fan-out) |
-| `audit.py` | Seven audit event types; in-memory and PostgreSQL backends |
-| `router.py` | FastAPI routes: `/hitl/pending`, `/hitl/{id}/approve`, `/hitl/{id}/reject`, `/hitl/ws` |
-
-**LangGraph state note:** `StateGraph(ITOpsGraphState)` uses a typed dict so LangGraph merges each node's return dict into accumulated state (`{**old, **new}`). Using a bare `dict` causes each node to receive only the previous node's output, silently dropping earlier keys like `intent_type` before `planner_node` runs.
-
-### 3.3 `memory/` — Storage and learning (12 files)
-
-| Layer | Backend | Retrieval | TTL |
-|---|---|---|---|
-| L1 in-process | Python list | full return | request lifetime |
-| L2 short-term | Redis sorted set | time-descending | 24 h |
-| L3 mid-term | ChromaDB vector index | cosine + time decay | 30 d |
-| L4 long-term | PostgreSQL full-text | pg_trgm similarity | permanent |
-
-**Hermes modules (active in this build):**
-
-| Module | Role |
-|---|---|
-| `fts_store.py` | `FTS5SessionStore`: SQLite FTS5, cross-session turn search, FTS5-safe query sanitiser |
-| `curator.py` | `MemoryCurator`: LLM-driven fact extraction from completed turns; system/user prompt separation prevents injection |
-| `user_model.py` | `UserModelEngine`: tracks tool preferences, domain expertise, technical level, behavioral traits |
-
-### 3.4 `skills/` — Skill system (3 files)
-
-| File | Responsibility |
-|---|---|
-| `catalog.py` | `SkillCatalogService`: L1 summaries + L2 detail loading; composite scoring (tool overlap + semantic similarity) |
-| `evolver.py` | `SkillEvolver`: autonomous skill creation after complex tasks; LLM decides reuse potential; feedback-driven self-improvement |
-
-### 3.5 `integrations/` — LLM and tool backends (5 files)
-
-| File | Responsibility |
-|---|---|
-| `llm_engine.py` | `OllamaEngine`, `OpenAIEngine`, `AnthropicEngine`, `MockEngine`; think-block stripping for reasoning models |
-| `mcp_client.py` | MCP server client; JSON config or env-var driven; mock mode |
-| `openapi_client.py` | OpenAPI 3.0 spec consumer; auto-generates tool definitions; mock mode |
-| `tool_router.py` | `ToolRouter`: dispatches tool calls to MCP / OpenAPI / mock registry |
-
-### 3.6 `task/` — Task orchestration (9 files)
-
-- `intra/planner.py`: `TaskPlanner` (goal → DAG) + `TaskScheduler` (concurrency=5, dependency resolution) + `TaskExecutor`
-- `inter/coordinator.py`: `A2ATaskDispatcher` (SSE delegation) + `MultiRoundCoordinator` (multi-turn context)
-- `inter/hitl_bridge.py`: `HitlTaskBridge` (suspend / resume hooks)
-
-### 3.7 `registry/` — Agent discovery (6 files)
-
-- Dynamic AgentCard fetching (4 well-known paths)
-- Health checks (60 s interval) + card refresh (300 s interval)
-- Load balancing: `round_robin` (default) / `random` / `least_loaded`
-
-### 3.8 `webui/` — Browser console
-
-- `backend.py`: FastAPI sub-app mounted at `/webui`; `/chat/stream` SSE endpoint; `/hitl/*` approval endpoints; `/system/wiring` live wiring status
-- `static/index.html`: terminal-style single-page console, no external JS framework; four tabs: Flow, HITL, Cache, Stats
-
----
-
-## 4. Quick Start
-
-### Requirements
-
-- Python 3.9+ (3.12 recommended)
-- [Ollama](https://ollama.ai) with `qwen3.5:27b` pulled (default LLM — see section 5)
-- Optional: Redis, PostgreSQL, ChromaDB (auto-stub when absent)
-
-### Install
+- macOS 或 Linux；
+- Python 3.11 或 3.12；
+- Node.js 22.19+ 或 24+；
+- pnpm；
+- Ollama 和本地模型。
 
 ```bash
-cd NetOpYuAgent
+cd /Users/steven/NetOpYuAgent
 python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt  # includes pyyaml for config.yaml loading
-```
+source .venv/bin/activate
+pip install -r requirements-dev.txt
 
-### Run (default: Ollama + qwen3.5:27b)
-
-```bash
-ollama serve
 ollama pull qwen3.5:27b
-uvicorn main:app --reload --port 8000
+ollama pull qwen2.5:7b
+
+scripts/netopyu-dsh install
+scripts/netopyu-dsh doctor
+scripts/netopyu-dsh start
 ```
 
-### Run (mock LLM — no Ollama needed)
+打开 <http://127.0.0.1:3080/>。
+
+完整运行时依赖按用途拆分：
+
+| 文件 | 用途 |
+|---|---|
+| `requirements-core.txt` | DSH bridge 核心依赖 |
+| `requirements-pragmatic.txt` | Netmiko/NAPALM/Nornir 等真实网络适配器 |
+| `requirements-observability.txt` | OpenTelemetry 可观测性 |
+| `requirements-dev.txt` | 本地/CI 测试门禁 |
+| `requirements.txt` | 生产能力全集 |
+
+### 本地 L1 + L0 + A2A 演练
+
+以下流程只改变本地模拟状态，不连接真实设备：
 
 ```bash
-# Override just the backend in config.yaml:
-#   llm:
-#     backend: "mock"
-# Or via env var:
-LLM_BACKEND=mock uvicorn main:app --reload --port 8000
+scripts/netopyu-dsh stop
+scripts/netopyu-dsh dc-peer-start
+
+NETOPYU_PROFILE=lan \
+NETOPYU_DSH_BACKEND=mock \
+NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 \
+NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8765 \
+scripts/netopyu-dsh start
 ```
 
-Open:
-- **WebUI console**: http://localhost:8000/webui/
-- **A2A endpoint**: http://localhost:8000/api/v1/a2a/
-- **HITL endpoints**: http://localhost:8000/hitl/
-- **Registry**: http://localhost:8000/registry/
-- **API docs**: http://localhost:8000/docs
-- **Health**: http://localhost:8000/health
+在 DSH 新会话中使用 `qwen3.5:27b`，输入：
 
-### Verify startup
-
-The startup log prints a configuration summary:
-
-```
-━━ Configuration ━━
-  LLM           : ollama/qwen3.5:27b  (base_url=http://localhost:11434)
-  Tools         : MCP=mock  OpenAPI=mock
-  HITL tools    : —
-  Memory dir    : ./data
-  DTM compaction: every 20 turns  nudge every 10 turns
-  Log mode      : normal  LLM detail: off
-  Server        : 0.0.0.0:8000  reload=True
+```text
+这是本地 mock 网络演练。请调用 lan-new-employee-onboarding-access Skill，
+为新员工 erin 开通 CRM 的端到端访问。严格实际调用工具；所有写入都让我在
+DSH 的 Network L0 Skill 计划审批卡中审批，不要使用通用提问代替审批。
 ```
 
-The Stats tab → **🔌 System Wiring** panel shows a live green/red checklist. `GET /webui/system/wiring` returns JSON including DTM stats.
+审批卡必须显示精确参数、目标、风险、plan hash、intent hash、L0 Skill 版本与哈希、验证合同和回滚合同。执行后检查：
+
+```bash
+scripts/netopyu-dsh runtime-list 5
+scripts/netopyu-dsh runtime PLAN_ID
+scripts/netopyu-dsh runtime-audit PLAN_ID
+```
+
+### 模型使用策略
+
+- 默认使用 `qwen3.5:27b` 进行网络工具会话。
+- `qwen2.5:7b` 的本地资格测试未通过自主变更要求：它会跳过指定 Skill、错误选择子代理、在成功后重复发起相同破坏性调用，并错误解释审批拒绝。
+- 7B 可以用于只读查询、分类或候选意图生成，但不能独立驱动可变更网络流程。
+- 模型只提出候选意图；Network Runtime 决定该意图能否安全进入效果层。
+
+Network L0 Skill 能保证“已校验并经审批的具体计划”按合同执行和验证，不能保证模型提出的计划天然等于用户真实业务意图。
+
+### 安全默认值
+
+- 默认 backend 为 `mock`；pragmatic 模式缺少真实来源时 fail closed。
+- 默认只暴露只读工具。
+- 写工具必须显式设置 `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1`。
+- 环境变量不能绕过单次 DSH 审批。
+- 批准绑定到完整计划哈希；参数、目标或合同变化都会使批准失效。
+- 授权 grant 最多消费一次，重放和并发重复调用会失败。
+- 成功只能由新的独立 postcondition evidence 判定，不能由模型文本或写工具返回值直接判定。
+- 真实凭据只允许通过环境或部署密钥系统注入，不写入仓库、计划摘要或轨迹。
+
+### 常用命令
+
+```bash
+scripts/netopyu-dsh doctor
+scripts/netopyu-dsh start
+scripts/netopyu-dsh stop
+scripts/netopyu-dsh status
+scripts/netopyu-dsh logs
+scripts/netopyu-dsh models
+scripts/netopyu-dsh model qwen3.5:27b
+scripts/netopyu-dsh backend
+scripts/netopyu-dsh worker-status
+scripts/netopyu-dsh dc-peer-start
+scripts/netopyu-dsh dc-peer-status
+scripts/netopyu-dsh peers
+scripts/netopyu-dsh l0-skills
+scripts/netopyu-dsh demo-l1-l0
+scripts/netopyu-dsh parity
+scripts/netopyu-dsh reliability
+scripts/netopyu-dsh retirement
+```
+
+可变运行时数据默认位于 `~/Library/Application Support/NetOpYuAgent/dsh-runtime`，可用 `NETOPYU_DSH_RUNTIME` 覆盖。运行时 SQLite、日志、虚拟环境和 IDE 文件不会提交到 Git。
+
+### 验证
+
+```bash
+scripts/netopyu-dsh retirement
+```
+
+该命令是本项目的权威本地门禁，覆盖 Python、Node 插件语法、DSH-only 架构、HITL、A2A、Network Runtime、Skill 投影、检索质量、Worker 并发/恢复和破坏性操作策略。
+
+### 文档
+
+- [ARCHITECTURE.md](ARCHITECTURE.md)：权威架构边界、依赖规则与架构决策；
+- [HLD.md](HLD.md)：高层设计、组件、部署和端到端数据流；
+- [LLD.md](LLD.md)：模块、接口、状态机、合同与异常处理；
+- [SSD.md](SSD.md)：系统规格、安全设计、威胁模型和验收标准。
 
 ---
 
-## 5. Running with a Real LLM (Ollama)
+## English
 
-**Recommended:** set config in `config.yaml` (already defaults to Ollama + qwen3.5:27b):
+### Project scope
 
-```yaml
-# config.yaml — already the default, no change needed
-llm:
-  backend:  "ollama"
-  model:    "qwen3.5:27b"
-  base_url: "http://localhost:11434"
-```
+NetOpYuAgent is a network-domain plugin and deterministic execution runtime built on [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
 
-Then simply:
+DSH owns the general agent platform: sessions, model calls, tools, Web UI, Skills, approval interaction, and subagents. NetOpYuAgent no longer implements a second general-purpose harness. It contributes only the network-domain capabilities that must remain reliable:
+
+- Domain L1 Skills for diagnosis, clarification, cross-domain collaboration, and workflow orchestration;
+- Network L0 Skills for validation, risk assessment, preflight, approval binding, one-shot execution, verification, compensation/rollback, and audit;
+- LAN, DC, WAN, and pragmatic network tools;
+- the DSH plugin, Python Worker, A2A provider, scoped memory, capability retrieval, and offline evaluation.
+
+> Status: the P0 migration is complete and the P0.5 local-simulation prototype is complete. This validates the architecture and safety pipeline; it does not claim absolute correctness in a real production network. Real devices, enterprise identity, change windows, HA, backup/restore, and production SLOs belong to P1.
+
+### Layer terminology
+
+| Name | Responsibility |
+|---|---|
+| DSH Platform Layer | General agent harness for models, sessions, UI, tools, and approval interaction |
+| NetOpYu Domain Layer | All network-domain capabilities above DSH |
+| Domain L1 Skill | Generalized, model-assisted business Skill for reasoning and orchestration |
+| Network L0 Skill | Versioned, model-independent effect contract |
+| Network Runtime | Safety runtime that compiles and executes Network L0 Skills |
+
+### P0.5 completion scope
+
+The local mock scope includes a DSH-only runtime and UI, versioned Network L0 Skills, strict parameters and provenance, immutable intent/plan/contract hashes, allowed-once approval, one-shot Tool Guard grants, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, and a complete retirement gate with 132 tests, 32 subtests, and 7/7 end-to-end checks.
+
+### Quick start
+
+Requirements: Python 3.11/3.12, Node.js 22.19+ or 24+, pnpm, Ollama, and a local model.
 
 ```bash
-ollama serve
+cd /Users/steven/NetOpYuAgent
+python -m venv .venv
+source .venv/bin/activate
+pip install -r requirements-dev.txt
+
 ollama pull qwen3.5:27b
-pip install -r requirements.txt   # includes pyyaml
-uvicorn main:app --port 8000 --reload
+ollama pull qwen2.5:7b
+
+scripts/netopyu-dsh install
+scripts/netopyu-dsh doctor
+scripts/netopyu-dsh start
 ```
 
-**Alternative — env var override** (no config.yaml edit needed):
+Open <http://127.0.0.1:3080/>.
+
+### Local L1 + L0 + A2A exercise
+
+This changes local simulator state only:
 
 ```bash
-ollama serve
-ollama pull qwen3.5:14b   # lighter model
+scripts/netopyu-dsh stop
+scripts/netopyu-dsh dc-peer-start
 
-LLM_MODEL=qwen3.5:14b uvicorn main:app --port 8000 --reload
+NETOPYU_PROFILE=lan \
+NETOPYU_DSH_BACKEND=mock \
+NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 \
+NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8765 \
+scripts/netopyu-dsh start
 ```
 
-Startup log confirms:
-```
-━━ Configuration ━━
-  LLM           : ollama/qwen3.5:27b  (base_url=http://localhost:11434)
-  Tools         : MCP=mock  OpenAPI=mock
-  Memory dir    : ./data
-  ...
-```
-
-**Supported backends:**
-
-| `LLM_BACKEND` | Notes |
-|---|---|
-| `ollama` | Local Ollama server; default — set `llm.base_url` and `llm.model` in config.yaml |
-| `openai` | OpenAI API; set `OPENAI_API_KEY` env var |
-| `anthropic` | Anthropic API; set `ANTHROPIC_API_KEY` env var |
-| `mock` | Deterministic stub, no LLM calls — for testing without Ollama |
-
-Thinking models (e.g. `qwen3-coder`): the engine automatically strips `<think>…</think>` blocks before parsing tool calls, and passes `think=False` to the Ollama API.
-
----
-
-## 6. WebUI Console Guide
-
-Three-column layout:
-
-### Left — Skills & Tools
-
-- **Skills panel**: all registered skills; click a skill name to populate the query box. Green dot = low risk, amber = medium, red = high/critical. `HITL` badge = approval required before execution.
-- **Quick Tools panel**: call any mock tool directly; large results appear in the Cache tab automatically.
-
-### Centre — Chat
-
-| Control | Description |
-|---|---|
-| Query box | Enter to send, Shift+Enter for newline |
-| `session` | Leave blank to auto-generate; enter an ID to continue a previous session |
-| `mode` | `stream` = SSE token-by-token; `sync` = wait for full response |
-| `delegation` | `fresh` = independent sub-agent; `forked` = inherit parent agent's confirmed facts and working set |
-| `[STORED:…]` chip | Click to load and page through a cached large result in the Cache tab |
-
-**Flow tab**: every module event is streamed in real time — classify, FTS5 recall, pre-verify, tool calls, post-verify, Hermes curation, user model update, skill evolver. Click any row to expand details.
-
-### Right — HITL / Cache / Stats
-
-- **HITL tab**: pending interrupts with trigger type, risk level, proposed action, and Approve / Reject buttons. Polls `/hitl/pending` every 3 s; switches to this tab automatically when an interrupt fires.
-- **Cache tab**: all `ToolResultStore` entries; page through large outputs with Prev/Next buttons.
-- **Stats tab**: skill count, cache entries, active agents, Hermes module status, system wiring checklist.
-
----
-
-## 7. HITL Human Approval Flow
-
-### Trigger queries
-
-```
-restart the payments-service in production
-rollback auth-service to version 3.2.1
-drain k8s-worker-03 for maintenance
-delete the staging database
-force failover payments-db to replica
-```
-
-### What happens
-
-1. `classify()` returns `COMPLEX` — logged as `Complexity: complex — Destructive action detected`
-2. `executor.execute()` calls `run_with_hitl()` — LangGraph graph starts
-3. `intent_classifier_node` → `risk_assessor_node` → `planner_node` → `route_after_plan()`
-4. `DestructiveActionTrigger` fires → routes to `hitl_interrupt_node`
-5. `interrupt(payload)` pauses the graph; checkpointer saves state
-6. `_handle_interrupt_chunk()` calls `register_interrupt()` — payload now in `_payload_store`
-7. `HitlA2AEventProcessor` emits `TaskArtifactUpdateEvent` — SSE delivers `hitl_interrupt` chunk to browser
-8. Browser: `switchTab('hitl')` + `refreshHitl(5)` (5 retries × 500 ms)
-9. HITL card appears: trigger, risk level, proposed action, SLA countdown
-10. Operator clicks **Approve** → `POST /hitl/{id}/approve` → `graph.ainvoke(None, thread_cfg)` → executor node runs
-11. Flow tab logs `⚠ HITL APPROVE` with outcome
-
-### Approval decision types
-
-| Decision | Effect |
-|---|---|
-| `approve` | Graph resumes, executor node runs the proposed action |
-| `reject` | Graph routes to END, task marked rejected |
-| `edit` | Operator patches proposed action params, then graph resumes |
-| `escalate` | Escalates to a senior reviewer; SLA timer resets |
-| `timeout` | Fires automatically when SLA expires |
-
-### Debugging HITL
-
-Key log lines to look for:
-
-```
-hitl.graph:    route_after_plan: intent_type='destructive_op' is_destructive=True action_type='restart_service'
-hitl.graph:    HITL interrupt — interrupt_id=… trigger=destructive_op risk=high
-hitl.graph:    Graph interrupt detection complete: found=True
-hitl.decision: HITL registered: interrupt_id=… status=pending store_size=1
-webui.backend: /hitl/pending: store_size=1 … returning 1 pending interrupts
-```
-
-If `found=False`: confirm `StateGraph(ITOpsGraphState)` is used (not bare `dict`), and that `intent_classifier_node` sees `"restart"` / `"rollback"` / `"delete"` / `"drain"` in the query.
-
----
-
-## 8. Hermes Learning Loop & Dual-Track Memory (DTM)
-
-### Overview
-
-Every completed query passes through two parallel memory systems — a design converging OpenClaw's static file-chunk model with Hermes's dynamic LLM-curation model.
-
-```
-Turn completes
-    │
-    ├── Track A write (Static — OpenClaw-style)
-    │     ├── FTS5SessionStore.write_turn()   → state.db (raw turns, BM25 indexed)
-    │     └── today_turns buffer              → daily/YYYY-MM-DD.md every 20 turns
-    │
-    ├── Track B write (Dynamic — Hermes-style)
-    │     └── MemoryCurator.after_turn()      → facts/facts.jsonl (structured facts)
-    │           LLM extracts: incident_lesson | tool_pattern | operational_fact
-    │                         environment_fact | user_preference
-    │
-    ├── UserModelEngine.after_turn()
-    │     Tracks: tool frequency, domain expertise, technical level, traits
-    │     Injects user profile into subsequent prompts
-    │
-    └── SkillEvolver.after_task()  (COMPLEX tasks only)
-          LLM: should this become a reusable skill?
-          If yes → markdown recipe saved to data/skills/<id>.md
-                 → registered in SkillCatalogService for future queries
-```
-
-### Dual-Track retrieval (before every turn)
-
-```
-Query arrives
-    │
-    ├── Track A ──────────────────────────────────────────────────────────
-    │     • FTS5 BM25 search over state.db (raw conversation turns)
-    │     • Keyword search over daily/YYYY-MM-DD.md (1600-char chunks)
-    │     • Temporal decay: score × e^(−λt), half-life = 7 days
-    │
-    ├── Track B ──────────────────────────────────────────────────────────
-    │     • Keyword + type-boost search over facts/facts.jsonl
-    │     • Type boosts: incident_lesson ×1.3, tool_pattern ×1.2
-    │     • confidence × track_b_weight (default 1.5×) multiplier
-    │
-    └── Arbitration ────────────────────────────────────────────────────────
-          MMR dedup (λ=0.7, Jaccard similarity) — no repeated facts
-          Track B facts first (abstracted signal)
-          Track A chunks follow (verbatim evidence)
-          → single ranked list → injected as prompt context
-```
-
-**Why two tracks?**
-
-| Scenario | Track A alone | Track B alone | Both |
-|---|---|---|---|
-| "Why did auth fail?" | 50 raw log turns, noisy | "RADIUS cert expires quarterly — pre-renew week 3" | Fact leads, chunk validates |
-| First session | Nothing | Nothing | Nothing (correct) |
-| After 5 sessions | Relevant raw turns | Extracted lessons + patterns | Best of both |
-
-### File layout on disk
-
-```
-data/                          ← HERMES_DATA_DIR (default: ./data)
-├── state.db                   # Track A: SQLite FTS5 raw turns (always written)
-├── state.db-shm / .db-wal    # SQLite WAL journal
-├── daily/
-│   └── 2026-04-16.md         # Track A: human-readable compacted sessions
-│                              #   written every DTM_COMPACTION_TURNS turns (default 20)
-│                              #   grep-able, git-versionable, inspectable in any editor
-├── facts/
-│   └── facts.jsonl           # Track B: curated facts, one JSON line per extraction
-│                              #   accumulates across all sessions permanently
-└── skills/
-    └── <skill_id>.md         # Evolved skill markdown recipes (SkillEvolver)
-```
-
-### Memory tab in the WebUI
-
-The **Memory** tab (right panel) auto-opens whenever recall finds results.
-
-| Card style | Track | Meaning |
-|---|---|---|
-| 🟢 Green left border · `📄 CHUNK` badge | A | Raw chunk from FTS5 or daily .md file |
-| 🟣 Purple left border · `💡 FACT` badge | B | Curated fact from facts.jsonl |
-
-Each card shows: score bar (width = relevance), source file, age, tags. Click any card to expand the full content that was injected into the LLM prompt.
-
-Filter buttons at top: **All** · **💡 Facts (B)** · **📄 Chunks (A)**
-
-Winner badge: `💡 Facts won` · `📄 Chunks won` · `⚖ Tied` — which track dominated for this query.
-
-**Flow tab recall event:**
-
-```
-🧠 DTM Recall — 480 chars · A:2 chunks B:1 facts · winner=B
-```
-
-### SSE events
-
-| Type | Key fields | Meaning |
-|---|---|---|
-| `recall` | `track_a`, `track_b`, `winner`, `memory_items[]`, `preview` | DTM recall result — drives Memory tab |
-| `hermes_write` | `session_id`, `track` | Turn written to Track A (FTS5 + daily buffer) |
-| `hermes_curate` | `memories_count`, `types[]` | Track B facts extracted → facts.jsonl |
-| `hermes_umodel` | `technical_level`, `domain_counts`, `trait_count` | User model updated |
-| `hermes_skill` | `created`, `skill_id` | Skill created by SkillEvolver (COMPLEX only) |
-
-### Compaction and nudge schedule
-
-| Trigger | Action |
-|---|---|
-| Every `DTM_COMPACTION_TURNS` turns (default 20) | today_turns buffer flushed to `daily/YYYY-MM-DD.md` |
-| Every `DTM_NUDGE_TURNS` turns (default 10) | Deep LLM review of recent turns → additional facts extracted |
-| Context window ~80% full | `pre_compaction_flush()` — immediate daily .md write + deep nudge |
-
-Lower `compaction_turns` in config.yaml to see daily files appear faster in development:
-
-```yaml
-memory:
-  dtm:
-    compaction_turns: 3    # dev mode — flush after every 3 turns
-    nudge_turns: 5
-```
-
-### Verifying memory is working
-
-After a few queries:
+Use `qwen3.5:27b` in a new DSH session and ask it to run the `lan-new-employee-onboarding-access` Skill for user `erin` and application `crm`. Approve writes only through the Network L0 plan card, then inspect and audit the plan:
 
 ```bash
-# Track B: curated facts (one JSON line per extraction)
-cat data/facts/facts.jsonl | python3 -m json.tool | head -30
-
-# Track A: daily compacted sessions (human-readable)
-ls -la data/daily/
-cat data/daily/$(date +%Y-%m-%d).md
-
-# Track A: raw FTS5 turns
-sqlite3 data/state.db \
-  "SELECT session_id, substr(user_text,1,80) FROM session_turns LIMIT 5;"
-
-# Confirm DTM is wired (check system/wiring endpoint)
-curl http://localhost:8000/webui/system/wiring | python3 -m json.tool | grep -A8 '"hermes"'
-# Expected: "dtm": true, "dtm_stats": {"daily_files": 1, "facts_count": 12, ...}
+scripts/netopyu-dsh runtime PLAN_ID
+scripts/netopyu-dsh runtime-audit PLAN_ID
 ```
 
-If `daily/` and `facts/` are empty after queries, the most common cause is `dtm` not appearing in services. Check the startup log for the `━━ Configuration ━━` block and ensure `HERMES_DATA_DIR` points to a writable directory.
+### Model policy
 
----
+`qwen3.5:27b` is the default for network tool sessions. Local qualification rejected `qwen2.5:7b` for autonomous mutations because it skipped the required Skill, selected an unrelated subagent path, retried a destructive action after success, and misinterpreted a rejected approval. It may be used for read-only classification or candidate intent generation behind the Runtime boundary.
 
+A Network L0 Skill guarantees the execution properties of a specific validated and approved plan. It does not guarantee that the model selected the correct business plan.
 
-## 9. P0 Tool Result Cache
+### Safety defaults
 
-### Problem
+- `mock` is the default backend; an incomplete pragmatic backend fails closed.
+- Only read-only tools are exposed by default.
+- Mutations require `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1` and a fresh DSH allowed-once decision.
+- Approval is bound to the full plan hash and cannot be reused after any parameter, target, or contract change.
+- Grants are consumable once and resist replay/concurrent duplication.
+- Success requires fresh independent postcondition evidence.
+- Credentials must come from environment or deployment secret systems and must not enter plans, trajectories, or Git.
 
-IT ops tools can return tens of thousands of bytes — 300-line syslogs, 60-minute Prometheus time series, 500-record NetFlow dumps. Injecting these directly into the prompt exhausts the context window on the first tool call.
-
-### Solution
-
-`ToolResultStore` + `ContextBudgetManager` — two-step externalisation:
-
-1. Tool output > 4 000 chars → stored in `ToolResultStore`. Prompt receives only:
-   ```
-   [STORED:syslog_search:a3f9c12b] Preview: Apr 10 09:12:01 ap-01 hostapd…
-   ```
-
-2. LLM reads details on demand via `read_stored_result`:
-   ```
-   [TOOL:read_stored_result] {"ref_id": "a3f9c12b", "offset": 0, "length": 2000}
-   ```
-
-### Walkthrough
-
-```
-1. Query: "search syslogs for errors on ap-01"
-   → Runtime Loop calls syslog_search (~6 000 chars)
-   → Stored automatically; [STORED:…] reference injected into prompt
-   → Cache tab shows new entry
-
-2. Click [STORED:syslog_search:abc123] chip in chat
-   → Cache tab loads first page (2 000 chars)
-   → Shows: Total: 6XXX chars | Has more: True | Next offset: 2000
-
-3. Click "Next ▶" to page through remaining content
-```
-
-### API
+### Verification
 
 ```bash
-# Trigger a large-result tool
-curl -X POST http://localhost:8000/webui/tools/syslog_search \
-  -H "Content-Type: application/json" \
-  -d '{"args": {"host": "ap-01", "keyword": "error", "lines": 300}}'
-
-# Read a stored result (paginated)
-curl "http://localhost:8000/webui/tools/result/{ref_id}?offset=0&length=2000"
+scripts/netopyu-dsh retirement
 ```
 
----
+This is the authoritative local gate for Python tests, Node/plugin syntax, DSH-only architecture, HITL, A2A, Network Runtime, Skill projection, retrieval quality, Worker concurrency/recovery, and mutation policy.
 
-## 10. P1 / P2 Features
+### Documentation
 
-### P1: Pre- and post-verification
-
-```python
-# Pre-verify: runs before execution, blocks destructive ops
-pre = await loop.pre_verify(query, confirmed_facts, env_context)
-if not pre.passed:
-    return STOP_HITL  # escalates to HITL graph
-
-# Post-verify: runs after each tool call
-post = await loop.post_verify(tool_name, result, confirmed_facts)
-if not post.passed:
-    state.unresolved_points.append(f"Post-verify: {post.reason}")
-```
-
-Built-in rules: destructive operations always fail pre-verify; closed change window + change op fails; `allow_destructive=False` + production env fails.
-
-### P1: Confirmed Facts & Working Set
-
-```python
-# Confirmed facts — injected at highest priority in every prompt
-state.record_new_fact("payments-service is healthy in prod")
-state.record_new_fact("DNS resolution confirmed OK; not the cause")
-
-# Working set — currently focused devices
-working_set = [
-    DeviceRef(id="ap-01", label="AP-01 at Site-A"),
-    DeviceRef(id="sw-core-01", label="Core Switch"),
-]
-```
-
-### P1: Forked delegation
-
-```python
-# fresh: independent sub-agent, starts from scratch
-# forked: inherits parent's confirmed facts and working set
-delegation = "forked"
-```
-
-### P2: Model tiering
-
-```python
-decision = loop.classify(query)
-print(decision.model_tier)   # "fast_model" or "full_model"
-
-# fast_model: check / status / dns / list queries
-# full_model: complex analysis, P0/P1 events, destructive ops
-# In production: map to different Ollama models or haiku vs sonnet
-```
-
----
-
-## 11. Mock Tools & Skill Catalog
-
-### Inventory tools (use these for "what devices exist?" queries)
-
-```bash
-POST /webui/tools/list_devices
-{"args": {}}                                      # all 13 devices (APs, switches, routers, servers)
-{"args": {"type": "switch"}}                       # wired switches only
-{"args": {"type": "wireless_ap"}}                  # wireless APs only
-{"args": {"type": "router"}}                       # routers only
-{"args": {"type": "switch", "site": "site-a"}}    # site-filtered
-
-POST /webui/tools/list_interfaces
-{"args": {"device_id": "sw-core-01"}}             # port table for a switch
-{"args": {"device_id": "ap-01"}}                  # radio interfaces for an AP
-{"args": {"device_id": "router-01"}}              # WAN/LAN interfaces for a router
-```
-
-The 13 mock devices span: 4 wireless APs, 5 switches (2 core + 3 access), 2 edge routers, 2 RADIUS servers — all at site-a or site-b.
-
-### Large-result tools (trigger P0 cache)
-
-```bash
-POST /webui/tools/syslog_search
-{"args": {"host": "ap-01", "keyword": "error", "lines": 300}}    # ~6 KB
-
-POST /webui/tools/prometheus_query
-{"args": {"metric": "up", "job": "network_devices", "range_minutes": 60}}  # ~5 KB
-
-POST /webui/tools/netflow_dump
-{"args": {"site": "site-a", "flows": 500}}   # ~10 KB
-```
-
-### Small-result tools (inline)
-
-```bash
-POST /webui/tools/dns_lookup      {"args": {"hostname": "payments.internal"}}
-POST /webui/tools/device_info     {"args": {"device_id": "sw-core-01"}}
-POST /webui/tools/alert_summary   {"args": {"severity": "P1"}}
-POST /webui/tools/service_health  {"args": {"service": "payments-service"}}
-```
-
-### Cache tools
-
-```bash
-# Read a page of a stored large result
-POST /webui/tools/read_stored_result
-{"args": {"ref_id": "a3f9c12b", "offset": 0, "length": 2000}}
-
-# Process all chunks of a stored result with an operation
-POST /webui/tools/process_stored_chunks
-{"args": {"ref_id": "a3f9c12b", "operation": "filter", "match": "ERROR"}}
-{"args": {"ref_id": "a3f9c12b", "operation": "extract", "pattern": "(\\d+\\.\\d+\\.\\d+\\.\\d+)"}}
-{"args": {"ref_id": "a3f9c12b", "operation": "count",   "match": "timeout"}}
-{"args": {"ref_id": "a3f9c12b", "operation": "summarise"}}
-```
-
-### Skill catalog (9 pre-built skills)
-
-| Skill ID | Risk | HITL |
-|---|---|---|
-| `radius_auth_diagnosis` | low | no |
-| `bgp_neighbor_check` | low | no |
-| `dns_resolution_debug` | low | no |
-| `k8s_pod_restart` | high | **yes** |
-| `db_failover` | critical | **yes** |
-| `syslog_bulk_analysis` | low | no |
-| `network_traffic_analysis` | low | no |
-| `prometheus_alert_triage` | medium | no |
-| `change_window_check` | low | no |
-
----
-
-## 12. Configuration
-
-All settings live in **`config.yaml`** (project root). Edit that file to change defaults — no code changes needed.
-
-Environment variables always override the YAML value (12-factor compatible).
-
-### Quick-start config
-
-```yaml
-# config.yaml — change these for your deployment
-llm:
-  backend: "ollama"        # ollama | openai | anthropic | mock
-  model:   "qwen3.5:27b"  # any Ollama-compatible model
-  base_url: "http://localhost:11434"
-
-logging:
-  mode: "normal"           # normal | llm | verbose
-```
-
-### Full environment variable reference
-
-#### LLM
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `LLM_BACKEND` | `llm.backend` | `ollama` | `ollama` \| `openai` \| `anthropic` \| `mock` |
-| `LLM_MODEL` | `llm.model` | `qwen3.5:27b` | Model name passed to the backend |
-| `LLM_BASE_URL` | `llm.base_url` | `http://localhost:11434` | Ollama or OpenAI-compatible base URL |
-| `LLM_TEMPERATURE` | `llm.temperature` | `0.1` | Sampling temperature |
-| `LLM_MAX_TOKENS` | `llm.max_tokens` | `2048` | Max tokens per LLM call |
-| `LLM_LOG_DETAIL` | `llm.log_detail` | `off` | `off` \| `compact` \| `full` — show LLM conversation in server log |
-
-#### Logging
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `LOG_MODE` | `logging.mode` | `normal` | `normal` — INFO only \| `llm` — DEBUG for LLM/tool interactions \| `verbose` — all DEBUG |
-
-#### Tools
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `MCP_USE_MOCK` | `tools.mcp.use_mock` | `true` | Use built-in NetOps mock instead of real MCP server |
-| `MCP_CONFIG_JSON` | `tools.mcp.config_json` | — | MCP server config (JSON string or path to JSON file) |
-| `OPENAPI_USE_MOCK` | `tools.openapi.use_mock` | `true` | Use built-in NetOps mock instead of real OpenAPI spec |
-| `OPENAPI_SPEC_URL` | `tools.openapi.spec_url` | — | URL to OpenAPI 3.0 spec |
-| `OPENAPI_BASE_URL` | `tools.openapi.base_url` | — | Base URL for OpenAPI calls |
-| `OPENAPI_AUTH_TYPE` | `tools.openapi.auth_type` | `bearer` | `bearer` \| `api_key` \| `none` |
-| `OPENAPI_TOKEN_ENV` | `tools.openapi.token_env` | `NETOPS_API_TOKEN` | Env var holding the API token |
-| `HITL_TOOL_NAMES` | `tools.hitl_tool_names` | — | Comma-separated tools that always require HITL approval before execution |
-
-#### HITL
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `HITL_CONFIDENCE_THRESHOLD` | `hitl.confidence_threshold` | `0.75` | Confidence below this triggers HITL ambiguity check |
-| `HITL_MAX_AUTO_HOST_COUNT` | `hitl.max_auto_host_count` | `5` | Actions affecting more hosts than this trigger HITL |
-| `HITL_SKILL_AMBIGUITY` | `hitl.skill_ambiguity` | `false` | `true` to route ambiguous skill matches to HITL approval |
-| `HITL_SLACK_WEBHOOK_URL` | `hitl.slack_webhook_url` | — | Slack incoming webhook URL for HITL notifications |
-| `HITL_PAGERDUTY_ROUTING_KEY` | `hitl.pagerduty_routing_key` | — | PagerDuty Events API routing key |
-
-#### Memory / Dual-Track Memory (DTM)
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `HERMES_DATA_DIR` | `memory.data_dir` | `./data` | Root directory for FTS5 database, daily .md files, facts.jsonl, skills |
-| `REDIS_URL` | `memory.redis_url` | — | Redis connection string (stubs to in-memory if absent) |
-| `POSTGRES_DSN` | `memory.postgres_dsn` | — | PostgreSQL DSN (skips persistence if absent) |
-| `CHROMA_PATH` | `memory.chroma_path` | `./chroma_db` | ChromaDB local path |
-| `DTM_COMPACTION_TURNS` | `memory.dtm.compaction_turns` | `20` | Turns before flushing today's buffer to `daily/YYYY-MM-DD.md` |
-| `DTM_NUDGE_TURNS` | `memory.dtm.nudge_turns` | `10` | Turns between deep Hermes LLM review sweeps |
-| `DTM_TRACK_B_WEIGHT` | `memory.dtm.track_b_weight` | `1.5` | Score multiplier for curated facts vs raw chunks (>1 prefers facts) |
-| `DTM_HALF_LIFE_DAYS` | `memory.dtm.temporal_half_life_days` | `7.0` | Track A temporal decay — score halves every N days |
-
-#### Registry
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `AGENT_URLS` | `registry.agent_urls` | — | Comma-separated peer agent A2A URLs for pre-population |
-| `REGISTRY_LB` | `registry.lb_strategy` | `round_robin` | `round_robin` \| `random` \| `least_loaded` |
-| `REGISTRY_HEALTH_INTERVAL` | `registry.health_check_interval` | `60` | Health check interval in seconds |
-
-#### Server & A2A
-
-| Variable | YAML key | Default | Description |
-|---|---|---|---|
-| `HOST` | `server.host` | `0.0.0.0` | Bind address |
-| `PORT` | `server.port` | `8000` | Listen port |
-| `RELOAD` | `server.reload` | `false` | Enable hot reload |
-| `A2A_BASE_URL` | `server.a2a_base_url` | `http://localhost:8000/api/v1/a2a` | This agent's outbound A2A base URL |
-
-### Override examples
-
-```bash
-# Run with a smaller model for testing
-LLM_MODEL=qwen3.5:14b uvicorn main:app --port 8000
-
-# Enable full LLM conversation logging
-LLM_LOG_DETAIL=compact LOG_MODE=llm uvicorn main:app --port 8000
-
-# Enable HITL for specific tools + skill ambiguity
-HITL_TOOL_NAMES=netflow_dump,db_failover HITL_SKILL_AMBIGUITY=true uvicorn main:app
-
-# Faster DTM compaction for development (see daily files appear sooner)
-DTM_COMPACTION_TURNS=3 uvicorn main:app --port 8000
-
-# Use real Ollama (same as config.yaml defaults)
-LLM_BACKEND=ollama LLM_MODEL=qwen3.5:27b uvicorn main:app --port 8000
-```
-
----
-
-## 13. Project Structure
-
-```
-it-ops-agent/
-├── main.py                        # FastAPI entry point — config-driven service assembly (v5)
-├── config.yaml                    # Single source of truth for all settings
-├── config.py                      # YAML loader + env var overlay + AppConfig dataclass
-├── logging_config.py              # Logging presets: normal | llm | verbose
-├── requirements.txt
-├── pytest.ini
-│
-├── a2a/                           # A2A protocol (9 files)
-│   ├── schemas.py                 # Pydantic data models
-│   ├── agent_card.py              # AgentCard builder
-│   ├── agent_executor.py          # Executor base class + processor chain
-│   ├── event_queue.py             # Sealed async event queue
-│   ├── request_handler.py         # JSON-RPC method router
-│   ├── server.py                  # FastAPI sub-app factory
-│   ├── push_notifications.py      # Push notifications (exponential backoff)
-│   └── task_store.py              # In-memory task state store
-│
-├── hitl/                          # Human-in-the-loop (9 files)
-│   ├── schemas.py                 # HitlPayload, HitlDecision, AuditRecord …
-│   ├── triggers.py                # Four trigger types + HitlConfig
-│   ├── graph.py                   # LangGraph StateGraph(ITOpsGraphState), 6 nodes
-│   ├── review.py                  # Five notification channels + WebSocket manager
-│   ├── decision.py                # HitlDecisionRouter — five decision types
-│   ├── audit.py                   # Audit service (in-memory + PostgreSQL)
-│   ├── router.py                  # FastAPI routes + /ws WebSocket endpoint
-│   └── a2a_integration.py         # ITOpsHitlAgentExecutor — dual-path + post-verify
-│
-├── memory/                        # Memory and learning (12 files)
-│   ├── schemas.py                 # MemoryRecord, RetrievalQuery …
-│   ├── router.py                  # MemoryRouter façade
-│   ├── fts_store.py               # FTS5SessionStore — SQLite FTS5 cross-session recall
-│   ├── curator.py                 # MemoryCurator — LLM-driven fact extraction
-│   ├── user_model.py              # UserModelEngine — expertise and trait tracking
-│   ├── consolidation.py           # Consolidation worker (summary + entity extraction)
-│   ├── stores/backends.py         # L1–L4 store implementations
-│   └── pipelines/                 # ingestion.py + retrieval.py
-│
-├── skills/                        # Skill system (3 files)
-│   ├── catalog.py                 # SkillCatalogService + 9 default skills
-│   └── evolver.py                 # SkillEvolver — autonomous skill creation + self-improvement
-│
-├── integrations/                  # LLM and tool backends (5 files)
-│   ├── llm_engine.py              # Ollama / OpenAI / Anthropic / Mock engines
-│   ├── mcp_client.py              # MCP server client
-│   ├── openapi_client.py          # OpenAPI 3.0 consumer
-│   └── tool_router.py             # ToolRouter — dispatches to MCP / OpenAPI / mock
-│
-├── runtime/                       # Execution engine (8 files)
-│   ├── loop.py                    # AgentRuntimeLoop — thin main loop
-│   ├── context_budget.py          # ContextBudgetManager + ToolResultStore (P0)
-│   ├── stop_policy.py             # StopPolicy + LoopState
-│   ├── skill_catalog.py           # SkillCatalogService integration
-│   ├── model_tier.py              # ModelTierClassifier (P2)
-│   ├── delegation.py              # Fork / fresh delegation
-│   └── tool_cache.py              # Composite skill scoring
-│
-├── task/                          # Task orchestration (9 files)
-│   ├── schemas.py                 # TaskDefinition, SessionRecord …
-│   ├── intra/planner.py           # TaskPlanner + TaskScheduler + TaskExecutor
-│   ├── intra/store.py             # TaskStore + RetryManager
-│   ├── inter/coordinator.py       # A2ATaskDispatcher + MultiRoundCoordinator
-│   ├── inter/session.py           # SessionManager (Redis, TTL=8 h)
-│   └── inter/hitl_bridge.py       # HitlTaskBridge — suspend / resume hooks
-│
-├── registry/                      # Agent registry (6 files)
-│   ├── schemas.py                 # AgentEntry, AgentSkill, ResolutionResult
-│   ├── store.py                   # InMemory + Redis dual storage
-│   ├── discovery.py               # AgentDiscovery — AgentCard fetching
-│   ├── registry.py                # AgentRegistry — register / resolve / health check
-│   └── router.py                  # FastAPI routes
-│
-├── tools/                         # Mock tools (2 files)
-│   └── mock_tools.py              # 11 mock tools: list_devices, list_interfaces, syslog_search, prometheus_query, netflow_dump, dns_lookup, device_info, alert_summary, service_health, read_stored_result, process_stored_chunks
-│
-├── webui/                         # Browser console
-│   ├── backend.py                 # FastAPI sub-app — chat/stream, HITL, system wiring
-│   └── static/index.html          # Terminal-style single-page console
-│
-└── tests/                         # Test suite
-    ├── test_a2a.py                # A2A module (~30 cases)
-    ├── test_hitl.py               # HITL module (~25 cases)
-    ├── test_memory_task.py        # Memory + Task (~45 cases)
-    ├── test_registry.py           # Registry (~30 cases)
-    ├── test_runtime.py            # Runtime Loop (~50 cases)
-    ├── test_hermes_features.py    # Hermes learning loop (~43 cases)
-    └── test_p0_p1_p2.py           # P0/P1/P2 + WebUI (~60 cases)
-```
-
----
-
-## 14. Roadmap
-
-### Implemented
-
-- [x] A2A Protocol v0.3.0 — full SSE streaming + WebSocket HITL
-- [x] HITL five-layer architecture (trigger → graph interrupt → notification fan-out → decision routing → audit)
-- [x] `StateGraph(ITOpsGraphState)` — typed state prevents silent key clobbering between nodes
-- [x] Four-layer memory (L1–L4, MMR retrieval, consolidation worker)
-- [x] Hermes post-turn pipeline (FTS5 recall, MemoryCurator, UserModelEngine, SkillEvolver)
-- [x] Integrations — Ollama / OpenAI / Anthropic / MCP / OpenAPI tool backends
-- [x] Task module (DAG scheduling + cross-agent delegation + multi-turn sessions)
-- [x] Registry — dynamic service discovery, health checks, load balancing
-- [x] Runtime Loop — thin main loop + dual-path routing + P1/P2 features
-- [x] P0: ToolResultStore large-output externalisation + paginated read API
-- [x] P0: ContextBudgetManager per-turn token prioritisation
-- [x] P0: StopPolicy six-dimension stop evaluation
-- [x] P1: SkillCatalogService — L1/L2 progressive disclosure + composite scoring
-- [x] P1: SkillEvolver — autonomous skill creation and feedback-driven improvement
-- [x] P1: Forked delegation — fresh / forked + context inheritance
-- [x] P1: Confirmed Facts & Working Set as first-class prompt citizens
-- [x] P1: Pre- and post-verification hooks
-- [x] P2: Model tiering — fast_model / full_model routing
-- [x] WebUI console — terminal style, SSE/sync modes, Flow tab, HITL approval, P0 visualisation
-
-### Production requirements (not yet implemented)
-
-- [ ] **JWT / OIDC auth**: `/hitl/{id}/approve` and `/hitl/{id}/reject` must be restricted to approver roles — highest priority
-- [ ] **Real LLM chains in graph nodes**: replace keyword stubs in `intent_classifier_node`, `risk_assessor_node`, `planner_node` with structured LLM calls
-- [ ] **Real tool backends**: replace `_execute_task` stubs in `task/intra/planner.py` (kubectl / Prometheus HTTP API / OpsGenie)
-- [ ] **Real embeddings**: replace `_EmbedderStub` in `memory/pipelines/ingestion.py`
-- [ ] **OpenTelemetry tracing**: add spans to all cross-module calls; propagate TraceID via `session_id`
-- [ ] **PostgreSQL checkpointer**: replace `MemorySaver` in `build_hitl_graph()` for production durability
-
-### Nice-to-have
-
-- [ ] Prompt cache-friendly prefix ordering (stable prefix first, variable content last)
-- [ ] Lightweight verifier agent (small model for post-execution health checks)
-- [ ] Agent versioning (AgentCard `version` field, canary releases)
-- [ ] MCP protocol integration for external tool access
-
----
-
-## 15. Multi-Agent (Phase 1 — identity + peer discovery)
-
-This release introduces the foundation for **multiple agent processes** to discover each other on the network. The platform is built on Google's A2A Protocol; the inbound server and outbound dispatcher have always been there, but each process previously thought it was alone. Phase 1 changes that: two LAN-agent and WAN-agent processes can now see each other in `/system/peers`. **Cross-agent dispatch is Phase 2 (not yet wired).** This Phase only adds identity + visibility.
-
-### Configure each agent's identity
-
-In `config.yaml`:
-
-```yaml
-agent:
-  agent_id:     "lan-agent"           # stable identifier; registry key
-  display_name: "LAN Operations Agent"
-  description: "Handles internal LAN devices: switches, APs, internal firewalls"
-  capabilities:
-    - skill_id:    "lan_diagnose"
-      description: "Diagnose internal LAN devices"
-      tags:        ["lan", "switch", "ap", "internal"]
-    - skill_id:    "lan_config"
-      description: "Push config changes to LAN devices (HITL-gated)"
-      tags:        ["lan", "destructive", "internal"]
-  peers:
-    - "http://localhost:8001/api/v1/a2a"   # WAN agent's A2A base URL
-  peer_refresh_interval_s: 120
-```
-
-Override via env vars (handy for two-terminal demos):
-
-| Env var | Purpose |
-|---|---|
-| `AGENT_ID` | Stable id (registry key, trace tag) |
-| `AGENT_DISPLAY_NAME` | Human-friendly label shown in WebUI / peer list |
-| `AGENT_DESCRIPTION` | One-line summary other agents see |
-| `AGENT_PEERS` | Comma-separated peer A2A base URLs |
-| `AGENT_PEER_REFRESH_S` | How often to re-fetch peer cards (default 120s, 0 disables) |
-
-### Run two agents locally
-
-```bash
-# Terminal 1 — LAN agent on :8000, peering with WAN
-AGENT_ID=lan-agent AGENT_DISPLAY_NAME="LAN Agent" \
-  AGENT_PEERS="http://localhost:8001/api/v1/a2a" \
-  uvicorn main:app --port 8000
-
-# Terminal 2 — WAN agent on :8001, peering with LAN
-AGENT_ID=wan-agent AGENT_DISPLAY_NAME="WAN Agent" \
-  AGENT_PEERS="http://localhost:8000/api/v1/a2a" \
-  uvicorn main:app --port 8001
-```
-
-### Verify they see each other
-
-```bash
-curl -s http://localhost:8000/webui/system/peers | jq
-# Expected: { "self": {"agent_id":"lan-agent",...},
-#             "peers": [{"agent_id":"wan-agent", "health":"healthy", ...}] }
-
-curl -s http://localhost:8001/webui/system/peers | jq
-# Expected: mirror — wan-agent sees lan-agent
-```
-
-Each agent also publishes its AgentCard at `GET /api/v1/a2a/.well-known/agent-card.json`:
-
-```bash
-curl -s http://localhost:8000/api/v1/a2a/.well-known/agent-card.json | jq '.agent_id, .skills[].id'
-# Output:
-#   "lan-agent"
-#   "lan_diagnose"
-#   "lan_config"
-```
-
-### What Phase 1 does NOT do
-
-- ❌ No cross-agent query dispatch — LAN agent can't yet ask WAN agent for help
-- ❌ PolicyEngine doesn't know peers exist (still classifies only read_only / destructive)
-- ❌ No cross-agent HITL passthrough (Phase 3)
-
-These are designed and roadmapped — see `ARCHITECTURE.md §8.3` for the Phase 1 changelog and `§11.3` for the multi-agent roadmap.
-
-### Backwards compatibility
-
-The `agent:` section is **optional**. If omitted, defaults reproduce the legacy single-agent behaviour:
-- `agent_id="default-agent"`
-- AgentCard uses the static SKILLS list from `a2a/agent_card.py`
-- No peer discovery
-
-Existing single-agent deployments work without yaml changes.
-
----
-
-## 16. Production readiness (Sprint-3-pre, 2026-05)
-
-This release ships four production-readiness improvements that don't change agent behaviour but make the agent **safer to deploy**. Each item addresses a concrete failure mode previously observed in the production-readiness audit. Full design in `ARCHITECTURE.md §8.4`.
-
-### 16.1 HITL approval persistence (default sqlite)
-
-**Previously:** HITL pending approvals lived in an in-memory dict. If the agent process restarted (SIGTERM, container OOM, host reboot) while an operator was reviewing a destructive-action card, the producing query's `await resolution_future` would hang on a dead `asyncio.Future` forever — and the audit log had no record of what was being approved.
-
-**Now:** `config.yaml` defaults `hitl.checkpoint.backend: "sqlite"`. Pending approvals survive restart.
-
-```yaml
-hitl:
-  checkpoint:
-    backend:     "sqlite"          # memory | sqlite | redis
-    sqlite_path: "data/hitl_checkpoints.db"
-    redis_url:   ""                # for multi-replica
-```
-
-Env override: `HITL_CHECKPOINT_BACKEND=redis HITL_REDIS_URL=redis://...`
-
-If you intentionally set `backend: "memory"` while running in `MODE=pragmatic` (real device operations), the agent logs a startup warning. Don't do this in production.
-
-### 16.2 Graceful shutdown drain
-
-**Previously:** A SIGTERM mid-tool-execute would orphan device state — Netmiko/NAPALM had already pushed config to a switch, but the result hadn't returned to the LLM yet so memory never recorded "we did X." Operator sees a quiet restart; the switch now has uncommitted state nobody can audit.
-
-**Now:** `lifespan` registers a SIGTERM/SIGINT handler. On shutdown:
-1. Stop accepting new work
-2. Wait up to **30 seconds** for in-flight LLM + tool tasks (registered in `services["in_flight_tasks"]`) to complete
-3. Flush the HITL checkpoint store
-4. Stop background services (registry, SkillJournalConsumer, etc.)
-
-Operator-facing: `docker stop` / `kubectl rollout` now does the right thing.
-
-Windows fallback: `add_signal_handler` is not supported on Windows; the shutdown still runs via uvicorn's own SIGINT path, just without the early-warning event.
-
-### 16.3 OpenTelemetry tracing (opt-in)
-
-**Previously:** No tracing. Prod debugging was `grep`-the-logs only.
-
-**Now:** Three high-value spans are instrumented (`agent.query` / `llm.call` / `tool.dispatch`), each tagged with `session_id`. Tracing is **default OFF** — the agent boots normally without the `opentelemetry-*` packages installed.
-
-```yaml
-observability:
-  tracing_enabled:  false           # flip to true
-  otlp_endpoint:    ""              # "http://collector:4317" or empty (=console)
-  sample_ratio:     1.0
-```
-
-Env override: `OTEL_TRACING_ENABLED=true OTEL_EXPORTER_OTLP_ENDPOINT=http://collector:4317`
-
-To enable in production:
-
-```bash
-pip install opentelemetry-api opentelemetry-sdk opentelemetry-exporter-otlp
-OTEL_TRACING_ENABLED=true \
-  OTEL_EXPORTER_OTLP_ENDPOINT=http://your-collector:4317 \
-  uvicorn main:app --port 8000
-```
-
-When tracing is disabled OR the OTel packages aren't installed, `with start_span(...)` calls become no-ops — zero perf cost. Adding more instrumentation is just `from runtime.tracing import start_span` at any callsite.
-
-**This is the minimum skeleton.** A full OTel deployment (FastAPI / httpx auto-instrumentation, `session_id → trace_id` propagation, Jaeger/Tempo dashboards) is 1-2 weeks of additional work and lives in the real Sprint 3.
-
-### 16.4 SkillEvolver A/B safety net
-
-**Previously:** `SkillEvolver.apply_feedback` would write LLM-improved skill prompts back to the catalog with no quality gate. If the LLM rewrote a prompt that confused later models more than the original, the regression was silent — no metric tracked it.
-
-**Now:** When the agent boots, it wires a bench runner into `SkillEvolver.set_bench_runner()`. Before any feedback patch is applied:
-1. The bench runner picks 3-5 cases from `data/tool_compliance_set.jsonl` whose expected_tool appears in the new content
-2. Baseline (old content) and candidate (new content) both run through `ToolComplianceBench`
-3. If candidate `args_ok` < baseline `args_ok` → **patch rejected**, old skill kept, warning logged
-4. If candidate ≥ baseline → patch applied, info log with delta
-
-When the golden set or LLM engine is missing, the safety net silently disables and we fall back to the legacy unchecked path. Operators see this in the startup log:
-
-```
-SkillEvolver: A/B safety-net wired (18 compliance cases loaded)
-# or:
-SkillEvolver: A/B safety-net DISABLED — golden set ... exists=False, engine=yes
-```
-
-### What Sprint-3-pre does NOT fix
-
-These items remain for the real Sprint 3 / production-readiness work:
-
-- ❌ Docker / docker-compose / k8s deployment manifests
-- ❌ Auth-required-in-production startup check (`auth.enabled=false` still boots)
-- ❌ `/livez` + `/readyz` endpoints that actually check Ollama / DB reachability
-- ❌ Prometheus `/metrics` endpoint (current `/integrations/metrics` returns JSON, not OpenMetrics)
-- ❌ FastAPI / httpx auto-instrumentation (only 3 manual span sites today)
-- ❌ Database migration framework (Alembic or equivalent)
-- ❌ Backup cron + restore runbook
-- ❌ CSRF protection on `/hitl/*` POST routes
-- ❌ Secrets management (Vault / AWS SM) — device passwords still in env vars
-
-Until these land, the agent should not run on internet-facing production traffic. The 4 items above make it safer for **internal** / **dev** / **staging** deployments.
-
----
-
-*Version: v3.0 | Updated: 2026-04-15*
-*Phase 1 multi-agent added: 2026-05*
-*Sprint-3-pre production readiness added: 2026-05*
+- [ARCHITECTURE.md](ARCHITECTURE.md): authoritative boundaries, dependency rules, and decisions;
+- [HLD.md](HLD.md): high-level components, deployment, and end-to-end flows;
+- [LLD.md](LLD.md): modules, interfaces, state machines, contracts, and failure handling;
+- [SSD.md](SSD.md): system specification, security design, threat model, and acceptance criteria.

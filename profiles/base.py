@@ -5,9 +5,8 @@ profiles/base.py — Business profile abstraction
 A **Profile** packages everything that makes an agent instance domain-specific:
 its business tools (callables + prompt-facing metadata), its business skills
 (SOPs), and the capabilities it advertises to peers. The common agent
-framework (runtime/, a2a/, registry/, hitl_core/, retrieval/, integrations/,
-tools/builtin, skills/builtin) knows NOTHING about LAN vs DC vs anything else —
-it only knows how to load "the active profile".
+DSH bridge knows nothing about LAN vs DC vs anything else; it only loads the
+active profile and projects that profile's tools and skills into DSH.
 
 Why this split exists
 ─────────────────────
@@ -22,9 +21,9 @@ With profiles:
   - `AGENT_PROFILE=lan`      → enterprise LAN Cisco tools + LAN SOPs
   - `AGENT_PROFILE=dc`       → data-center fabric tools + DC SOPs
   - `AGENT_PROFILE=wan`      → wide-area SD-WAN / transport tools + WAN SOPs
-…all from the SAME process image. Tool isolation between roles is then a
+…all from the same DSH plugin. Tool isolation between roles is then a
 natural consequence: a `lan` agent's registry simply doesn't contain the `dc`
-tools, so it physically cannot call them (it must delegate via A2A — Phase 2B).
+tools, so it cannot call them directly and must use a configured A2A peer.
 
 Contract
 ────────

@@ -57,6 +57,13 @@ _WAN_TUNNELS = [
     {"id": "tun-hq-dc",  "src": "edge-hq",    "dst": "edge-dc", "transport": "mpls"},
 ]
 
+# Mutable overlay used by the local simulator.  A write is not considered
+# verified merely because wan_failover_path returned a success string: the
+# runtime re-reads wan_tunnel_status and observes this state independently.
+_WAN_TUNNEL_STATE: dict[str, str] = {
+    tunnel["id"]: tunnel["transport"] for tunnel in _WAN_TUNNELS
+}
+
 
 def _edge_ids() -> set[str]:
     return {e["id"] for e in _WAN_EDGES}
@@ -115,9 +122,9 @@ async def wan_tunnel_status(args: dict[str, Any]) -> str:
     out.append(f"{'TUNNEL':<12}{'SRC':<12}{'DST':<12}{'TRANSPORT':<12}{'STATE'}")
     out.append("-" * 60)
     for t in rows:
-        down = random.random() < 0.10
-        state = "down (rekey fail)" if down else "up"
-        out.append(f"{t['id']:<12}{t['src']:<12}{t['dst']:<12}{t['transport']:<12}{state}")
+        state = "up"
+        transport = _WAN_TUNNEL_STATE.get(t["id"], t["transport"])
+        out.append(f"{t['id']:<12}{t['src']:<12}{t['dst']:<12}{transport:<12}{state}")
     return "\n".join(out)
 
 
@@ -183,5 +190,8 @@ async def wan_failover_path(args: dict[str, Any]) -> str:
     known = {t["id"] for t in _WAN_TUNNELS}
     if tunnel not in known:
         return f"Unknown tunnel {tunnel!r}. Use wan_tunnel_status. Known: {', '.join(sorted(known))}."
+    if to not in {"mpls", "broadband", "lte"}:
+        return "wan_failover_path to_transport must be one of: mpls, broadband, lte."
+    _WAN_TUNNEL_STATE[tunnel] = to
     return (f"[{_ts()}] Forced failover of {tunnel} to {to} transport. "
-            f"Traffic re-pinned; verify with wan_path_sla.")
+            f"Traffic re-pinned; verify with wan_tunnel_status and wan_path_sla.")

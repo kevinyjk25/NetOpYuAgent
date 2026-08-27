@@ -1,0 +1,902 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+RUNTIME_SPEC_ROOT="$PROJECT_ROOT/.netopyu-dsh"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  DEFAULT_RUNTIME_ROOT="${HOME:?}/Library/Application Support/NetOpYuAgent/dsh-runtime"
+else
+  DEFAULT_RUNTIME_ROOT="${XDG_DATA_HOME:-${HOME:?}/.local/share}/netopyu-agent/dsh-runtime"
+fi
+RUNTIME_ROOT="${NETOPYU_DSH_RUNTIME:-$DEFAULT_RUNTIME_ROOT}"
+DSH_HOME_DIR="${NETOPYU_DSH_HOME:-$RUNTIME_ROOT/home}"
+DSH_BIN="${NETOPYU_DSH_BIN:-$RUNTIME_ROOT/node_modules/.bin/dsh}"
+PLUGIN_ROOT="$PROJECT_ROOT/dsh-plugin-netopyu"
+PYTHON_BIN="${NETOPYU_PYTHON:-$PROJECT_ROOT/.venv/bin/python}"
+PID_FILE="$RUNTIME_ROOT/dsh.pid"
+LOG_DIR="$RUNTIME_ROOT/logs"
+LOG_FILE="$LOG_DIR/dsh-web.log"
+HITL_STORE="${NETOPYU_DSH_HITL_STORE:-$RUNTIME_ROOT/data/hitl.sqlite}"
+TOOL_RESULT_STORE="${NETOPYU_DSH_TOOL_RESULT_STORE:-$RUNTIME_ROOT/data/tool_results.sqlite}"
+NETWORK_RUNTIME_STORE="${NETOPYU_DSH_NETWORK_RUNTIME_STORE:-$RUNTIME_ROOT/data/network_runtime.sqlite}"
+LEARNING_STORE="${NETOPYU_DSH_LEARNING_STORE:-$RUNTIME_ROOT/data/learning.sqlite}"
+LEARNING_PROPOSALS="${NETOPYU_DSH_LEARNING_PROPOSALS:-$RUNTIME_ROOT/data/skill-proposals}"
+WORKER_SOCKET="${NETOPYU_DSH_WORKER_SOCKET:-$RUNTIME_ROOT/bridge.sock}"
+WORKER_PID_FILE="$RUNTIME_ROOT/bridge-worker.pid"
+WORKER_LOG_FILE="$LOG_DIR/bridge-worker.log"
+LOCAL_DC_HOST="${NETOPYU_DSH_LOCAL_DC_HOST:-127.0.0.1}"
+LOCAL_DC_PORT="${NETOPYU_DSH_LOCAL_DC_PORT:-8765}"
+LOCAL_DC_PID_FILE="$RUNTIME_ROOT/local-dc-peer.pid"
+LOCAL_DC_LOG_FILE="$LOG_DIR/local-dc-peer.log"
+LOCAL_DC_STATE="${NETOPYU_DSH_LOCAL_DC_STATE:-$RUNTIME_ROOT/data/local_dc_peer.sqlite}"
+OLLAMA_URL="${NETOPYU_OLLAMA_URL:-http://127.0.0.1:11434}"
+OLLAMA_MODEL="${NETOPYU_OLLAMA_MODEL:-qwen3.5:27b}"
+OLLAMA_FAST_MODEL="${NETOPYU_OLLAMA_FAST_MODEL:-qwen2.5:7b}"
+WEB_HOST="${NETOPYU_DSH_HOST:-127.0.0.1}"
+WEB_PORT="${NETOPYU_DSH_PORT:-3080}"
+DSH_VERSION="0.1.1-rc.2"
+
+# Codex Desktop ships a suitable isolated Node/pnpm toolchain. Prefer normal
+# system commands, but use that toolchain when this repository is being set up
+# on a machine where Node has not yet been installed globally.
+CODEX_RUNTIME="${HOME:?}/.cache/codex-runtimes/codex-primary-runtime/dependencies"
+if ! command -v node >/dev/null 2>&1 && [[ -x "$CODEX_RUNTIME/node/bin/node" ]]; then
+  PATH="$CODEX_RUNTIME/node/bin:$CODEX_RUNTIME/bin/fallback:$PATH"
+  export PATH
+fi
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/netopyu-dsh <command>
+
+Commands:
+  install       Install the pinned DSH runtime and NetOpYu plugin locally
+  doctor        Check Node, pnpm, Python, plugin, Ollama, and runtime state
+  start         Start DSH Web in the background
+  foreground    Start DSH Web attached to this terminal
+  stop          Gracefully stop the background DSH Web process
+  restart       Stop and start DSH Web
+  status        Show process and URL status
+  worker-start  Start the persistent Python bridge worker
+  worker-stop   Stop the managed persistent Python bridge worker
+  worker-status Show worker process/socket status
+  dc-peer-start Start the loopback-only mock DC A2A peer
+  dc-peer-stop  Stop the managed local mock DC A2A peer
+  dc-peer-status Show local mock DC A2A peer status
+  logs          Follow the DSH Web log
+  dump-config   Print the composed DSH Web configuration and exit
+  models        Show the configured default and NetOpYu Ollama models
+  model NAME    Explicitly change the DSH default to a configured local model
+  preset NAME   Explicitly set the default agent preset (standard|minimal)
+  settings-sync Add/update NetOpYu models while preserving other DSH settings
+  backend       Show the active network backend and configured real sources
+  runtime-list  Show recent immutable Network Runtime plans and terminal states
+  runtime PLAN  Show one plan, state transition journal, approval, and evidence
+  runtime-audit PLAN  Verify the plan event hash chain and report tampering
+  l0-skills     Show registered deterministic Network L0 Skill contracts
+  demo-l1-l0    Run the isolated LAN/DC L1 Skill + L0 Skill walkthrough
+  peers         Discover configured A2A peers and show their capabilities
+  parity        Run the DSH capability retirement gate against the golden set
+  learning-mine Dry-run offline trajectory mining; add --apply to store candidates
+  learning-review ID approve|reject REVIEWER  Review once; approval writes a proposal only
+  reliability   Run local load/chaos/policy and DSH-only retirement checks
+  retirement    Run the complete local retirement gate
+  e2e           Run the complete offline migration regression suite
+
+Environment overrides:
+  NETOPYU_DSH_PORT=3080
+  NETOPYU_OLLAMA_URL=http://127.0.0.1:11434
+  NETOPYU_OLLAMA_MODEL=qwen3.5:27b
+  NETOPYU_OLLAMA_FAST_MODEL=qwen2.5:7b
+  NETOPYU_PROFILE=lan
+  NETOPYU_DSH_BACKEND=mock|pragmatic
+  NETOPYU_CONFIG_PATH=/path/to/config.yaml
+  NETOPYU_PYTHON=/path/to/python
+  NETOPYU_DSH_ENABLE_DESTRUCTIVE=1   # opt in to approval-gated mutating tools
+  NETOPYU_DSH_TOOL_ALLOWLIST=a,b     # optional compact bridge-tool projection
+  NETOPYU_DSH_WORKER_SOCKET=/path/to/bridge.sock
+  NETOPYU_DSH_WORKER_CONCURRENCY=8
+  NETOPYU_DSH_NETWORK_RUNTIME_STORE=/path/to/network_runtime.sqlite
+  NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8001,http://127.0.0.1:8002
+  NETOPYU_DSH_A2A_TIMEOUT=300
+  NETOPYU_DSH_A2A_MAX_HOPS=3
+  NETOPYU_DSH_LOCAL_DC_HOST=127.0.0.1
+  NETOPYU_DSH_LOCAL_DC_PORT=8765
+EOF
+}
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  return 1
+}
+
+check_node() {
+  command -v node >/dev/null 2>&1 || {
+    fail 'Node.js is not on PATH. Install Node 22.19+ (22.x) or Node 24+.'
+    return 1
+  }
+  local version major minor
+  version="$(node -p 'process.versions.node' 2>/dev/null)" || return 1
+  major="${version%%.*}"
+  minor="${version#*.}"
+  minor="${minor%%.*}"
+  if (( major == 22 && minor >= 19 )) || (( major >= 24 )); then
+    return 0
+  fi
+  fail "Node.js $version is unsupported; DSH requires ^22.19.0 or >=24.0.0."
+}
+
+check_pnpm() {
+  command -v pnpm >/dev/null 2>&1 || {
+    fail 'pnpm is not on PATH. Install it with: corepack enable pnpm'
+    return 1
+  }
+}
+
+check_python() {
+  [[ -x "$PYTHON_BIN" ]] || {
+    fail "Python virtualenv not found at $PYTHON_BIN"
+    return 1
+  }
+  "$PYTHON_BIN" -c 'import dsh_adapter.cli' >/dev/null 2>&1 || {
+    fail 'The Python interpreter cannot import dsh_adapter.cli.'
+    return 1
+  }
+}
+
+check_runtime() {
+  local installed_version
+  [[ -x "$DSH_BIN" ]] || {
+    fail 'DSH is not installed locally. Run: scripts/netopyu-dsh install'
+    return 1
+  }
+  installed_version="$("$DSH_BIN" --version 2>/dev/null | head -n 1)" || {
+    fail 'Unable to read the installed DSH version.'
+    return 1
+  }
+  [[ "$installed_version" == "$DSH_VERSION" ]] || {
+    fail "Installed DSH $installed_version does not match tested version $DSH_VERSION. Run: scripts/netopyu-dsh install"
+    return 1
+  }
+  [[ -f "$DSH_HOME_DIR/settings.yaml" ]] || {
+    fail 'DSH settings are missing. Run: scripts/netopyu-dsh install'
+    return 1
+  }
+  [[ -f "$DSH_HOME_DIR/profiles/web/package.json" ]] || {
+    fail 'The DSH web profile is not initialized. Run: scripts/netopyu-dsh install'
+    return 1
+  }
+}
+
+check_ollama() {
+  command -v curl >/dev/null 2>&1 || {
+    fail 'curl is required for the Ollama health check.'
+    return 1
+  }
+  local tags
+  tags="$(curl --silent --show-error --fail --max-time 3 "$OLLAMA_URL/api/tags" 2>/dev/null)" || {
+    fail "Ollama is not reachable at $OLLAMA_URL. Start it with: ollama serve"
+    return 1
+  }
+  if [[ "$tags" != *"\"name\":\"$OLLAMA_MODEL\""* && "$tags" != *"\"model\":\"$OLLAMA_MODEL\""* ]]; then
+    fail "Ollama model $OLLAMA_MODEL is not installed. Run: ollama pull $OLLAMA_MODEL"
+    return 1
+  fi
+}
+
+write_settings() {
+  mkdir -p "$DSH_HOME_DIR"
+  "$PYTHON_BIN" -m dsh_adapter.settings \
+    --path "$DSH_HOME_DIR/settings.yaml" \
+    --base-url "$OLLAMA_URL" \
+    --primary-model "$OLLAMA_MODEL" \
+    --fast-model "$OLLAMA_FAST_MODEL" >/dev/null
+  printf 'Synchronized NetOpYu models in %s (default preserved).\n' "$DSH_HOME_DIR/settings.yaml"
+}
+
+check_ollama_model() {
+  local model="$1" tags
+  tags="$(curl --silent --show-error --fail --max-time 3 "$OLLAMA_URL/api/tags" 2>/dev/null)" || {
+    fail "Ollama is not reachable at $OLLAMA_URL. Start it with: ollama serve"
+    return 1
+  }
+  if [[ "$tags" != *"\"name\":\"$model\""* && "$tags" != *"\"model\":\"$model\""* ]]; then
+    fail "Ollama model $model is not installed. Run: ollama pull $model"
+    return 1
+  fi
+}
+
+show_models() {
+  check_python || return 1
+  [[ -f "$DSH_HOME_DIR/settings.yaml" ]] || { fail 'DSH settings are missing.'; return 1; }
+  "$PYTHON_BIN" - "$DSH_HOME_DIR/settings.yaml" <<'PY'
+import sys, yaml
+settings = yaml.safe_load(open(sys.argv[1], encoding="utf-8")) or {}
+default = settings.get("agent-default-model", {})
+provider = settings.get("llm-pi-ai", {}).get("providers", {}).get("netopyu-ollama", {})
+print("default={}/{}".format(default.get("provider", "unset"), default.get("model", "unset")))
+for model in provider.get("models", []):
+    print("model={}".format(model.get("id", "unknown")))
+PY
+}
+
+set_default_model() {
+  local model="${2:-}"
+  [[ -n "$model" ]] || { fail 'Usage: scripts/netopyu-dsh model NAME'; return 1; }
+  check_python && check_ollama_model "$model" || return 1
+  "$PYTHON_BIN" -m dsh_adapter.settings \
+    --path "$DSH_HOME_DIR/settings.yaml" \
+    --base-url "$OLLAMA_URL" \
+    --primary-model "$OLLAMA_MODEL" \
+    --fast-model "$OLLAMA_FAST_MODEL" \
+    --default-model "$model" >/dev/null || return 1
+  printf 'DSH default model changed to %s. Restart DSH to apply it.\n' "$model"
+}
+
+set_default_preset() {
+  local preset="${2:-}"
+  case "$preset" in
+    standard|minimal) ;;
+    *) fail 'Usage: scripts/netopyu-dsh preset standard|minimal'; return 1 ;;
+  esac
+  check_python || return 1
+  "$PYTHON_BIN" -m dsh_adapter.settings \
+    --path "$DSH_HOME_DIR/settings.yaml" \
+    --base-url "$OLLAMA_URL" \
+    --primary-model "$OLLAMA_MODEL" \
+    --fast-model "$OLLAMA_FAST_MODEL" \
+    --default-preset "$preset" >/dev/null || return 1
+  printf 'DSH default agent preset changed to %s. New sessions use it after restart.\n' "$preset"
+}
+
+runtime_env() {
+  export DSH_HOME="$DSH_HOME_DIR"
+  export NETOPYU_ROOT="$PROJECT_ROOT"
+  export NETOPYU_PYTHON="$PYTHON_BIN"
+  export NETOPYU_PROFILE="${NETOPYU_PROFILE:-lan}"
+  if [[ -z "${NETOPYU_DSH_BACKEND:-}" && -n "${MODE:-}" ]]; then
+    export NETOPYU_DSH_BACKEND="$MODE"
+  fi
+  export NETOPYU_DSH_HITL_STORE="$HITL_STORE"
+  export NETOPYU_DSH_TOOL_RESULT_STORE="$TOOL_RESULT_STORE"
+  export NETOPYU_DSH_NETWORK_RUNTIME_STORE="$NETWORK_RUNTIME_STORE"
+  export NETOPYU_DSH_WORKER_SOCKET="$WORKER_SOCKET"
+  export NETOPYU_OLLAMA_API_KEY="${NETOPYU_OLLAMA_API_KEY:-ollama}"
+  export DSH_TELEMETRY_DISABLED="${DSH_TELEMETRY_DISABLED:-1}"
+  export npm_config_store_dir="$RUNTIME_ROOT/store"
+  # macOS commonly launches GUI apps with maxfiles=256. DSH's native
+  # Chokidar watchers can exhaust that budget; polling keeps startup reliable.
+  export CHOKIDAR_USEPOLLING="${CHOKIDAR_USEPOLLING:-1}"
+}
+
+worker_pid_is_running() {
+  [[ -f "$WORKER_PID_FILE" ]] || return 1
+  local worker_pid reported_pid
+  worker_pid="$(<"$WORKER_PID_FILE")"
+  [[ "$worker_pid" =~ ^[0-9]+$ ]] || return 1
+  if kill -0 "$worker_pid" 2>/dev/null; then
+    return 0
+  fi
+  # Same restricted-process fallback as the Web PID check, strengthened by a
+  # live Socket ping that reports the Worker's own PID.
+  worker_is_reachable || return 1
+  reported_pid="$(worker_reported_pid 2>/dev/null || true)"
+  [[ "$reported_pid" == "$worker_pid" ]]
+}
+
+worker_is_reachable() {
+  [[ -S "$WORKER_SOCKET" ]] || return 1
+  "$PYTHON_BIN" - "$WORKER_SOCKET" <<'PY' >/dev/null 2>&1
+import json, socket, sys
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    client.settimeout(0.5)
+    client.connect(sys.argv[1])
+    client.sendall(b'{"id":"health","command":"ping"}\n')
+    response = b''
+    while True:
+        chunk = client.recv(4096)
+        if not chunk:
+            break
+        response += chunk
+payload = json.loads(response)
+raise SystemExit(0 if payload.get('ok') and payload.get('payload', {}).get('ok') else 1)
+PY
+}
+
+worker_reported_pid() {
+  [[ -S "$WORKER_SOCKET" ]] || return 1
+  "$PYTHON_BIN" - "$WORKER_SOCKET" <<'PY'
+import json, socket, sys
+with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+    client.settimeout(0.5)
+    client.connect(sys.argv[1])
+    client.sendall(b'{"id":"identity","command":"ping"}\n')
+    response = b''
+    while True:
+        chunk = client.recv(4096)
+        if not chunk:
+            break
+        response += chunk
+payload = json.loads(response)
+worker_pid = payload.get('payload', {}).get('worker_pid') if payload.get('ok') else None
+if not isinstance(worker_pid, int):
+    raise SystemExit(1)
+print(worker_pid)
+PY
+}
+
+start_worker() {
+  check_python || return 1
+  if worker_pid_is_running && worker_is_reachable; then
+    printf 'NetOpYu bridge worker is already running (PID %s).\n' "$(<"$WORKER_PID_FILE")"
+    return 0
+  fi
+  if worker_is_reachable; then
+    fail "A bridge worker already owns $WORKER_SOCKET but is not managed by this launcher."
+    return 1
+  fi
+  mkdir -p "$RUNTIME_ROOT" "$LOG_DIR" "$(dirname "$WORKER_SOCKET")"
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  nohup "$PYTHON_BIN" -m dsh_adapter.worker --socket "$WORKER_SOCKET" >"$WORKER_LOG_FILE" 2>&1 &
+  local worker_pid=$!
+  printf '%s\n' "$worker_pid" >"$WORKER_PID_FILE"
+  local attempt
+  for attempt in {1..50}; do
+    if ! kill -0 "$worker_pid" 2>/dev/null; then
+      tail -n 50 "$WORKER_LOG_FILE" >&2
+      rm -f "$WORKER_PID_FILE"
+      return 1
+    fi
+    if worker_is_reachable; then
+      printf 'NetOpYu bridge worker is running (PID %s, socket %s).\n' "$worker_pid" "$WORKER_SOCKET"
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "Bridge worker did not become ready; see $WORKER_LOG_FILE"
+}
+
+stop_worker() {
+  if ! worker_pid_is_running; then
+    if worker_is_reachable; then
+      fail "Bridge worker at $WORKER_SOCKET is not managed by this launcher; refusing to signal it."
+      return 1
+    fi
+    rm -f "$WORKER_PID_FILE"
+    printf 'NetOpYu bridge worker is not running.\n'
+    return 0
+  fi
+  local worker_pid reported_pid attempt
+  worker_pid="$(<"$WORKER_PID_FILE")"
+  reported_pid="$(worker_reported_pid 2>/dev/null || true)"
+  if [[ "$reported_pid" != "$worker_pid" ]]; then
+    fail "PID file and worker socket identity disagree; refusing to signal PID $worker_pid."
+    return 1
+  fi
+  kill -TERM "$worker_pid" || return 1
+  for attempt in {1..50}; do
+    if ! kill -0 "$worker_pid" 2>/dev/null; then
+      rm -f "$WORKER_PID_FILE"
+      printf 'NetOpYu bridge worker stopped.\n'
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "Bridge worker did not stop within 5 seconds; PID $worker_pid was left untouched."
+}
+
+show_worker_status() {
+  if worker_pid_is_running && worker_is_reachable; then
+    printf 'RUNNING pid=%s socket=%s\n' "$(<"$WORKER_PID_FILE")" "$WORKER_SOCKET"
+  elif worker_is_reachable; then
+    printf 'UNMANAGED_WORKER socket=%s\n' "$WORKER_SOCKET"
+    return 2
+  else
+    printf 'STOPPED socket=%s\n' "$WORKER_SOCKET"
+    return 1
+  fi
+}
+
+local_dc_peer_is_reachable() {
+  curl --silent --fail --max-time 1 "http://$LOCAL_DC_HOST:$LOCAL_DC_PORT/health" 2>/dev/null |
+    "$PYTHON_BIN" -c 'import json,sys; r=json.load(sys.stdin); raise SystemExit(0 if r.get("ok") and r.get("agent_id")=="dc-agent" and r.get("mode")=="mock" else 1)' \
+    >/dev/null 2>&1
+}
+
+local_dc_peer_pid_is_running() {
+  [[ -f "$LOCAL_DC_PID_FILE" ]] || return 1
+  local peer_pid
+  peer_pid="$(<"$LOCAL_DC_PID_FILE")"
+  [[ "$peer_pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$peer_pid" 2>/dev/null || local_dc_peer_is_reachable
+}
+
+start_local_dc_peer() {
+  check_python || return 1
+  if local_dc_peer_pid_is_running && local_dc_peer_is_reachable; then
+    printf 'Local mock dc-agent is already running (PID %s, http://%s:%s).\n' \
+      "$(<"$LOCAL_DC_PID_FILE")" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+    return 0
+  fi
+  if local_dc_peer_is_reachable; then
+    fail "A local dc-agent already owns $LOCAL_DC_HOST:$LOCAL_DC_PORT but is not managed by this launcher."
+    return 1
+  fi
+  mkdir -p "$RUNTIME_ROOT" "$LOG_DIR" "$(dirname "$LOCAL_DC_STATE")"
+  runtime_env
+  export NETOPYU_DSH_BACKEND=mock
+  export NETOPYU_DSH_LOCAL_DC_STATE="$LOCAL_DC_STATE"
+  cd "$PROJECT_ROOT" || return 1
+  nohup "$PYTHON_BIN" -m dsh_adapter.local_dc_peer \
+    --host "$LOCAL_DC_HOST" --port "$LOCAL_DC_PORT" \
+    --runtime-store "$NETWORK_RUNTIME_STORE" --state-store "$LOCAL_DC_STATE" \
+    >"$LOCAL_DC_LOG_FILE" 2>&1 &
+  local peer_pid=$!
+  printf '%s\n' "$peer_pid" >"$LOCAL_DC_PID_FILE"
+  local attempt
+  for attempt in {1..50}; do
+    if ! kill -0 "$peer_pid" 2>/dev/null; then
+      tail -n 50 "$LOCAL_DC_LOG_FILE" >&2
+      rm -f "$LOCAL_DC_PID_FILE"
+      return 1
+    fi
+    if local_dc_peer_is_reachable; then
+      printf 'Local mock dc-agent is running: http://%s:%s (PID %s).\n' \
+        "$LOCAL_DC_HOST" "$LOCAL_DC_PORT" "$peer_pid"
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "Local dc-agent did not become ready; see $LOCAL_DC_LOG_FILE"
+}
+
+stop_local_dc_peer() {
+  if ! local_dc_peer_pid_is_running; then
+    rm -f "$LOCAL_DC_PID_FILE"
+    printf 'Local mock dc-agent is not running.\n'
+    return 0
+  fi
+  local peer_pid attempt
+  peer_pid="$(<"$LOCAL_DC_PID_FILE")"
+  kill -TERM "$peer_pid" || return 1
+  for attempt in {1..50}; do
+    if ! kill -0 "$peer_pid" 2>/dev/null; then
+      rm -f "$LOCAL_DC_PID_FILE"
+      printf 'Local mock dc-agent stopped.\n'
+      return 0
+    fi
+    sleep 0.1
+  done
+  fail "Local dc-agent did not stop within 5 seconds; PID $peer_pid was left untouched."
+}
+
+show_local_dc_peer_status() {
+  if local_dc_peer_pid_is_running && local_dc_peer_is_reachable; then
+    printf 'RUNNING pid=%s url=http://%s:%s mode=mock\n' \
+      "$(<"$LOCAL_DC_PID_FILE")" "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+  elif local_dc_peer_is_reachable; then
+    printf 'UNMANAGED_PEER url=http://%s:%s mode=mock\n' "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+    return 2
+  else
+    printf 'STOPPED url=http://%s:%s\n' "$LOCAL_DC_HOST" "$LOCAL_DC_PORT"
+    return 1
+  fi
+}
+
+check_network_backend() {
+  local report
+  runtime_env
+  report="$(cd "$PROJECT_ROOT" && "$PYTHON_BIN" -m dsh_adapter.cli backend --profile "$NETOPYU_PROFILE")" || return 1
+  printf '%s' "$report" | "$PYTHON_BIN" -c '
+import json, sys
+r = json.load(sys.stdin)
+sources = ", ".join(f"{k}={v}" for k, v in r.get("sources", {}).items()) or "none"
+mode = r.get("mode")
+print(f"  INFO network backend={mode} sources={sources}")
+for warning in r.get("warnings", []):
+    print(f"  WARN {warning}")
+if r.get("mode") == "pragmatic" and not r.get("ready"):
+    raise SystemExit(1)
+'
+}
+
+check_a2a_peers() {
+  local report
+  runtime_env
+  report="$(cd "$PROJECT_ROOT" && "$PYTHON_BIN" -m dsh_adapter.cli a2a-peers --profile "$NETOPYU_PROFILE" <<<'{}')" || return 1
+  printf '%s' "$report" | "$PYTHON_BIN" -c '
+import json, sys
+r = json.load(sys.stdin)
+configured = int(r.get("configured", 0))
+discovered = int(r.get("discovered", 0))
+if configured == 0:
+    print("  INFO A2A solo mode (no peers configured)")
+elif discovered == configured:
+    ids = ", ".join(p.get("agent_id", "unknown") for p in r.get("peers", []))
+    print(f"  INFO A2A peers={discovered}/{configured}: {ids}")
+else:
+    print(f"  WARN A2A peers discovered={discovered}/{configured}")
+    raise SystemExit(1)
+'
+}
+
+install_runtime() {
+  check_node || return 1
+  check_pnpm || return 1
+  check_python || return 1
+  mkdir -p "$RUNTIME_ROOT" "$LOG_DIR" "$RUNTIME_ROOT/data" "$DSH_HOME_DIR"
+  install -m 0644 "$RUNTIME_SPEC_ROOT/package.json" "$RUNTIME_ROOT/package.json"
+  install -m 0644 "$RUNTIME_SPEC_ROOT/pnpm-workspace.yaml" "$RUNTIME_ROOT/pnpm-workspace.yaml"
+  printf 'Installing DeepSeek Harness %s in %s\n' "$DSH_VERSION" "$RUNTIME_ROOT"
+  CI=true pnpm --dir "$RUNTIME_ROOT" --store-dir "$RUNTIME_ROOT/store" install --frozen-lockfile=false || return 1
+  [[ -x "$DSH_BIN" ]] || return 1
+  write_settings || return 1
+  runtime_env
+  printf 'Installing the NetOpYu bundle into the DSH web profile\n'
+  "$DSH_BIN" plugin --profile web --store-dir "$RUNTIME_ROOT/store" add "$PLUGIN_ROOT" || return 1
+  printf '\nInstalled. Run the health check next:\n  %s doctor\n' "$0"
+}
+
+doctor() {
+  local failures=0
+  printf 'NetOpYu DSH doctor\n'
+  if check_node; then printf '  PASS Node.js %s\n' "$(node -p 'process.versions.node')"; else failures=$((failures + 1)); fi
+  if check_pnpm; then printf '  PASS pnpm %s\n' "$(pnpm --version)"; else failures=$((failures + 1)); fi
+  if check_python; then printf '  PASS Python %s\n' "$($PYTHON_BIN --version 2>&1)"; else failures=$((failures + 1)); fi
+  if check_runtime; then
+    printf '  PASS DSH runtime and web profile\n'
+    runtime_env
+    if (cd "$PROJECT_ROOT" && "$DSH_BIN" web --dump-config >/dev/null); then
+      printf '  PASS composed DSH configuration\n'
+    else
+      printf '  FAIL composed DSH configuration\n' >&2
+      failures=$((failures + 1))
+    fi
+  else
+    failures=$((failures + 1))
+  fi
+  if check_ollama; then printf '  PASS Ollama model %s\n' "$OLLAMA_MODEL"; else failures=$((failures + 1)); fi
+  if check_network_backend; then
+    printf '  PASS network backend configuration\n'
+  else
+    printf '  FAIL pragmatic backend has no configured real source\n' >&2
+    failures=$((failures + 1))
+  fi
+  if check_a2a_peers; then
+    printf '  PASS A2A peer configuration\n'
+  else
+    printf '  FAIL one or more configured A2A peers are unreachable\n' >&2
+    failures=$((failures + 1))
+  fi
+  if [[ -f "$PLUGIN_ROOT/test/hitl-smoke.mjs" ]] && command -v node >/dev/null 2>&1; then
+    if (cd "$PROJECT_ROOT" && NETOPYU_DSH_BACKEND=mock node "$PLUGIN_ROOT/test/hitl-smoke.mjs" >/dev/null \
+      && NETOPYU_DSH_BACKEND=mock node "$PLUGIN_ROOT/test/workflow-smoke.mjs" >/dev/null); then
+      printf '  PASS NetOpYu plugin/HITL/workflow smoke tests\n'
+    else
+      printf '  FAIL NetOpYu plugin/HITL smoke test\n' >&2
+      failures=$((failures + 1))
+    fi
+  fi
+  if (( failures > 0 )); then
+    printf '\nDoctor found %d problem(s).\n' "$failures" >&2
+    return 1
+  fi
+  printf '\nAll checks passed.\n'
+}
+
+pid_is_running() {
+  [[ -f "$PID_FILE" ]] || return 1
+  local pid identity
+  pid="$(<"$PID_FILE")"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  if kill -0 "$pid" 2>/dev/null; then
+    return 0
+  fi
+  # Sandboxed operators may be allowed to inspect a process but not signal it,
+  # including `kill -0`. In that case accept only a strong lsof identity match:
+  # the PID must have files under this DSH runtime and own the configured port.
+  command -v lsof >/dev/null 2>&1 || return 1
+  identity="$(lsof -nP -p "$pid" 2>/dev/null || true)"
+  [[ "$identity" == *"$RUNTIME_ROOT"* && "$identity" == *"TCP $WEB_HOST:$WEB_PORT (LISTEN)"* ]]
+}
+
+port_is_listening() {
+  [[ -x "$PYTHON_BIN" ]] || return 1
+  "$PYTHON_BIN" -c '
+import socket, sys
+s = socket.socket()
+s.settimeout(0.5)
+try:
+    connected = s.connect_ex((sys.argv[1], int(sys.argv[2]))) == 0
+finally:
+    s.close()
+raise SystemExit(0 if connected else 1)
+' "$WEB_HOST" "$WEB_PORT"
+}
+
+run_foreground() {
+  check_node && check_python && check_runtime && check_ollama && check_network_backend || return 1
+  start_worker || return 1
+  mkdir -p "$LOG_DIR" "$(dirname "$HITL_STORE")"
+  runtime_env
+  printf 'Starting NetOpYu on http://%s:%s\n' "$WEB_HOST" "$WEB_PORT"
+  cd "$PROJECT_ROOT" || return 1
+  exec "$DSH_BIN" web --host "$WEB_HOST" --port "$WEB_PORT" --no-open
+}
+
+start_background() {
+  if pid_is_running; then
+    # Reconcile the companion Worker as well; an already-running Web process
+    # must not cause `start` to skip recovery of a missing bridge Worker.
+    start_worker || return 1
+    printf 'NetOpYu DSH is already running (PID %s).\n' "$(<"$PID_FILE")"
+    return 0
+  fi
+  if port_is_listening; then
+    rm -f "$PID_FILE"
+    fail "Port $WEB_HOST:$WEB_PORT is already used by an unmanaged process; refusing to report a false DSH start."
+    return 1
+  fi
+  check_node && check_python && check_runtime && check_ollama && check_network_backend || return 1
+  start_worker || return 1
+  mkdir -p "$LOG_DIR" "$(dirname "$HITL_STORE")"
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  nohup "$DSH_BIN" web --host "$WEB_HOST" --port "$WEB_PORT" --no-open >"$LOG_FILE" 2>&1 &
+  local pid=$!
+  printf '%s\n' "$pid" >"$PID_FILE"
+  local attempt
+  for attempt in {1..30}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      printf 'DSH exited during startup. Recent log:\n' >&2
+      tail -n 50 "$LOG_FILE" >&2
+      rm -f "$PID_FILE"
+      return 1
+    fi
+    if curl --silent --fail --max-time 1 "http://$WEB_HOST:$WEB_PORT/" >/dev/null 2>&1; then
+      printf 'NetOpYu DSH is running: http://%s:%s (PID %s)\n' "$WEB_HOST" "$WEB_PORT" "$pid"
+      printf 'Log: %s\n' "$LOG_FILE"
+      return 0
+    fi
+    sleep 1
+  done
+  printf 'DSH is still starting (PID %s). Check: %s logs\n' "$pid" "$0"
+}
+
+stop_background() {
+  if ! pid_is_running; then
+    printf 'NetOpYu DSH is not running.\n'
+    rm -f "$PID_FILE"
+    return 0
+  fi
+  local pid command_line identity attempt
+  pid="$(<"$PID_FILE")"
+  identity=""
+  if command -v lsof >/dev/null 2>&1; then
+    identity="$(lsof -p "$pid" -Fn 2>/dev/null || true)"
+  fi
+  command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  if [[ "$identity" != *"$RUNTIME_ROOT"* && "$command_line" != *"$RUNTIME_ROOT"* && "$command_line" != *"@deepseek-ai/dsh"* ]]; then
+    fail "PID $pid does not look like this repository's DSH process; refusing to signal it."
+    return 1
+  fi
+  kill -TERM "$pid" || return 1
+  for attempt in {1..10}; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      rm -f "$PID_FILE"
+      printf 'NetOpYu DSH stopped.\n'
+      return 0
+    fi
+    sleep 1
+  done
+  fail "DSH did not stop within 10 seconds; PID $pid was left untouched."
+}
+
+show_status() {
+  if pid_is_running; then
+    printf 'RUNNING pid=%s url=http://%s:%s\n' "$(<"$PID_FILE")" "$WEB_HOST" "$WEB_PORT"
+  elif port_is_listening; then
+    printf 'UNMANAGED_LISTENER url=http://%s:%s (not started by this launcher)\n' "$WEB_HOST" "$WEB_PORT"
+    [[ ! -f "$PID_FILE" ]] || printf 'Stale PID file: %s\n' "$PID_FILE"
+    return 2
+  else
+    printf 'STOPPED url=http://%s:%s\n' "$WEB_HOST" "$WEB_PORT"
+    [[ ! -f "$PID_FILE" ]] || printf 'Stale PID file: %s\n' "$PID_FILE"
+    return 1
+  fi
+}
+
+dump_config() {
+  check_node && check_runtime || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  exec "$DSH_BIN" web --dump-config
+}
+
+show_backend() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m dsh_adapter.cli backend --profile "$NETOPYU_PROFILE" | "$PYTHON_BIN" -m json.tool
+}
+
+show_runtime_plans() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local limit="${2:-20}"
+  [[ "$limit" =~ ^[0-9]+$ ]] || { fail 'Usage: scripts/netopyu-dsh runtime-list [LIMIT]'; return 1; }
+  "$PYTHON_BIN" -m dsh_adapter.cli runtime-list --limit "$limit" | "$PYTHON_BIN" -m json.tool
+}
+
+show_runtime_plan() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local plan_id="${2:-}"
+  [[ -n "$plan_id" ]] || { fail 'Usage: scripts/netopyu-dsh runtime PLAN_ID'; return 1; }
+  "$PYTHON_BIN" -m dsh_adapter.cli runtime-inspect --plan "$plan_id" | "$PYTHON_BIN" -m json.tool
+}
+
+audit_runtime_plan() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local plan_id="${2:-}"
+  [[ -n "$plan_id" ]] || { fail 'Usage: scripts/netopyu-dsh runtime-audit PLAN_ID'; return 1; }
+  local report
+  report="$("$PYTHON_BIN" -m dsh_adapter.cli runtime-audit --plan "$plan_id")" || return 1
+  printf '%s' "$report" | "$PYTHON_BIN" -m json.tool
+  printf '%s' "$report" | "$PYTHON_BIN" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") else 1)'
+}
+
+show_l0_skills() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m dsh_adapter.cli l0-skills --profile "$NETOPYU_PROFILE" | "$PYTHON_BIN" -m json.tool
+}
+
+run_l1_l0_demo() {
+  check_python || return 1
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" scripts/l1_l0_demo.py --approve-local-simulation
+}
+
+show_peers() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m dsh_adapter.cli a2a-peers --profile "$NETOPYU_PROFILE" <<<'{}' | "$PYTHON_BIN" -m json.tool
+}
+
+run_parity() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local report
+  report="$("$PYTHON_BIN" -m dsh_adapter.cli parity --profile "$NETOPYU_PROFILE" \
+    --golden "$PROJECT_ROOT/data/golden_set.jsonl" <<<'{}')" || return 1
+  printf '%s' "$report" | "$PYTHON_BIN" -m json.tool
+  printf '%s' "$report" | "$PYTHON_BIN" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") else 1)'
+}
+
+run_learning_mine() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  if [[ "${2:-}" == "--apply" ]]; then
+    "$PYTHON_BIN" -m dsh_adapter.cli trajectory-mine \
+      --source "$HITL_STORE" --database "$LEARNING_STORE" --apply \
+      | "$PYTHON_BIN" -m json.tool
+  else
+    "$PYTHON_BIN" -m dsh_adapter.cli trajectory-mine \
+      --source "$HITL_STORE" --database "$LEARNING_STORE" \
+      | "$PYTHON_BIN" -m json.tool
+  fi
+}
+
+run_learning_review() {
+  check_python || return 1
+  local candidate="${2:-}" decision="${3:-}" reviewer="${4:-}"
+  [[ -n "$candidate" && -n "$decision" && -n "$reviewer" ]] || {
+    fail 'Usage: scripts/netopyu-dsh learning-review ID approve|reject REVIEWER'; return 1;
+  }
+  if [[ "$decision" == "approve" ]]; then
+    "$PYTHON_BIN" -m dsh_adapter.cli trajectory-review \
+      --database "$LEARNING_STORE" --candidate "$candidate" \
+      --decision "$decision" --reviewer "$reviewer" \
+      --proposal-directory "$LEARNING_PROPOSALS" | "$PYTHON_BIN" -m json.tool
+  else
+    "$PYTHON_BIN" -m dsh_adapter.cli trajectory-review \
+      --database "$LEARNING_STORE" --candidate "$candidate" \
+      --decision "$decision" --reviewer "$reviewer" | "$PYTHON_BIN" -m json.tool
+  fi
+}
+
+run_reliability() {
+  check_python || return 1
+  local report
+  report="$(cd "$PROJECT_ROOT" && "$PYTHON_BIN" -m dsh_adapter.cli reliability \
+    --project-root "$PROJECT_ROOT" --python "$PYTHON_BIN" --requests 24 --concurrency 8)" || return 1
+  printf '%s' "$report" | "$PYTHON_BIN" -m json.tool
+  printf '%s' "$report" | "$PYTHON_BIN" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") else 1)'
+}
+
+run_e2e() {
+  # The retirement gate must run from a clean checkout in CI. It validates
+  # the plugin and bridge directly and does not require an installed DSH Web
+  # runtime, settings file, Ollama model, or live network endpoint.
+  check_node && check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  printf '1/7 Python full suite\n'
+  "$PYTHON_BIN" -m pytest -q || return 1
+  printf '2/7 Static audits\n'
+  "$PYTHON_BIN" scripts/audit_dsh_only.py || return 1
+  printf '3/7 Node/plugin syntax\n'
+  local plugin_source
+  for plugin_source in dsh-plugin-netopyu/src/*.js; do
+    node --check "$plugin_source" || return 1
+  done
+  printf '4/7 Tool, HITL, A2A, memory and trajectory smoke\n'
+  NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/hitl-smoke.mjs || return 1
+  NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/workflow-smoke.mjs || return 1
+  printf '5/7 Profile skill projection\n'
+  for profile_id in default lan dc wan; do
+    NETOPYU_DSH_BACKEND=mock "$PYTHON_BIN" -m dsh_adapter.cli skill-manifest \
+      --profile "$profile_id" <<<'{}' | "$PYTHON_BIN" -c '
+import json, sys
+r = json.load(sys.stdin)
+skills = r.get("skills", [])
+if not skills or len({s["name"] for s in skills}) != len(skills):
+    raise SystemExit(1)
+print("  PASS {}: {} skills".format(r["profile"], len(skills)))
+' || return 1
+  done
+  printf '6/7 Retrieval retirement gate\n'
+  run_parity || return 1
+  printf '7/7 Local load, chaos, policy and DSH-only retirement checks\n'
+  run_reliability || return 1
+  printf '\nNetOpYu DSH end-to-end offline suite: PASS\n'
+}
+
+command="${1:-}"
+case "$command" in
+  install) install_runtime ;;
+  doctor) doctor ;;
+  start) start_background ;;
+  foreground) run_foreground ;;
+  stop) stop_background ;;
+  restart) stop_background && start_background ;;
+  status) show_status ;;
+  worker-start) start_worker ;;
+  worker-stop) stop_worker ;;
+  worker-status) show_worker_status ;;
+  dc-peer-start) start_local_dc_peer ;;
+  dc-peer-stop) stop_local_dc_peer ;;
+  dc-peer-status) show_local_dc_peer_status ;;
+  logs) mkdir -p "$LOG_DIR"; touch "$LOG_FILE"; exec tail -n 100 -f "$LOG_FILE" ;;
+  dump-config) dump_config ;;
+  models) show_models ;;
+  model) set_default_model "$@" ;;
+  preset) set_default_preset "$@" ;;
+  settings-sync) check_python && write_settings ;;
+  backend) show_backend ;;
+  runtime-list) show_runtime_plans "$@" ;;
+  runtime) show_runtime_plan "$@" ;;
+  runtime-audit) audit_runtime_plan "$@" ;;
+  l0-skills) show_l0_skills ;;
+  demo-l1-l0) run_l1_l0_demo ;;
+  peers) show_peers ;;
+  parity) run_parity ;;
+  learning-mine) run_learning_mine "$@" ;;
+  learning-review) run_learning_review "$@" ;;
+  reliability) run_reliability ;;
+  retirement) run_e2e ;;
+  e2e) run_e2e ;;
+  help|-h|--help|'') usage ;;
+  *) usage >&2; fail "Unknown command: $command" ;;
+esac

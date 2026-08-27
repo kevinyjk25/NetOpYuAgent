@@ -1,127 +1,73 @@
-name: CI
+name: DSH-only CI
 
-# Runs on every PR and on every push to main/master.
-# This is the gate that keeps the codebase healthy. If any audit fails or
-# the eval bench drops below thresholds, merging is blocked (when the
-# `Require status checks` branch protection rule is on).
-#
-# Jobs are intentionally separated so a flaky/slow eval doesn't mask a
-# fast-failing audit, and so the matrix can be expanded later without
-# rewiring everything.
-
-# NOTE: we quote "on" because YAML 1.1 (which PyYAML defaults to) treats
-# `on` / `off` / `yes` / `no` as booleans. GitHub's parser handles bare
-# `on:` correctly, but our own audit / yamllint / IDE plugins generally
-# don't — they read this file as `{True: {...}}` and report "no triggers
-# defined", which is confusing. Quoting makes the key unambiguously a
-# string for every parser.
 "on":
   pull_request:
   push:
     branches: [main, master]
-  # Allow manual runs from the Actions tab for ad-hoc bench runs.
   workflow_dispatch:
 
-# Cancel in-progress runs for the same PR/branch when new commits land —
-# saves runner minutes and gives faster feedback on what matters now.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  # ── 1. Fast static audits (no external deps, runs in ~30s) ────────────
-  audits:
-    name: Static audits
+  retirement:
+    name: Python ${{ matrix.python }} / Node ${{ matrix.node }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.11", "3.12"]
+        node: ["22.19.0", "24"]
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: ${{ matrix.python }}
           cache: pip
+          cache-dependency-path: requirements-dev.txt
 
-      - name: Install minimal deps
-        # Audits don't need fastapi/httpx/ollama — they're pure AST analysis.
-        # pyyaml is the only thing config.py needs to import successfully.
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml
-
-      - name: Run all static audits via precheck
-        run: ./scripts/precheck.sh --audits
-
-  # ── 2. Production-safety unit tests (memory/auth/redaction) ───────────
-  safety-tests:
-    name: Production safety tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
         with:
-          python-version: "3.11"
-          cache: pip
+          node-version: ${{ matrix.node }}
 
-      - name: Install deps for safety tests
-        # These tests touch agent_memory + auth_core + log_redaction;
-        # only need pyyaml + pytest. No web framework, no LLM.
+      - name: Create the project environment
         run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml pytest pytest-asyncio
+          python -m venv .venv
+          .venv/bin/python -m pip install --upgrade pip
+          .venv/bin/python -m pip install -r requirements-dev.txt
 
-      - name: Run pytest
-        run: pytest tests/ -v
-
-  # ── 3. Retrieval eval gate (catches retrieval-quality regressions) ────
-  retrieval-eval:
-    name: Retrieval eval (BM25)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install deps for eval
-        # BM25 backend is pure-python (no embedder, no LLM). We still need
-        # pyyaml for config + dataclasses for the report types.
-        run: |
-          python -m pip install --upgrade pip
-          pip install pyyaml
-
-      - name: Run retrieval bench against golden set
-        # BM25 thresholds are intentionally lower than the team's local
-        # `hybrid` benchmark — without semantic matching, paraphrase/zh
-        # cases naturally score lower. These floors catch CATASTROPHIC
-        # regressions; tighten as the golden set + scoring algorithms
-        # mature. Override per-branch via repo secrets if needed.
+      - name: Run the complete local DSH-only gate
         env:
-          MIN_RECALL_3: "0.40"
-          MIN_MRR:      "0.30"
-        run: ./scripts/precheck.sh --eval
+          NETOPYU_DSH_BACKEND: mock
+        run: scripts/netopyu-dsh retirement
 
-      - name: Validate tool-compliance golden set structure
-        # The compliance BENCH itself needs a running Ollama, which we
-        # don't have in GitHub-hosted runners. But the golden SET can
-        # still be validated structurally: every JSONL line must parse
-        # into a valid ToolCallCase. Catches typos / schema drift in
-        # the test data without needing an LLM.
+  pragmatic-dependencies:
+    name: Pragmatic dependency contract
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-*.txt
+
+      - name: Install all runtime dependency groups
+        run: python -m pip install -r requirements.txt
+
+      - name: Import pragmatic and observability adapters
         run: |
-          python -c "
-          import sys
-          sys.path.insert(0, '.')
-          from evaluation.compliance_cli import _load_cases
-          from pathlib import Path
-          cases = _load_cases(Path('data/tool_compliance_set.jsonl'))
-          assert len(cases) >= 15, f'compliance set has only {len(cases)} cases; minimum 15 expected'
-          print(f'✓ {len(cases)} compliance cases loaded and validated')
-          "
+          python -c "import netmiko, napalm, nornir"
+          python -c "import opentelemetry.trace, opentelemetry.sdk.trace"
+          NETOPYU_DSH_BACKEND=pragmatic python -c \
+            "from tools.loader import ToolLoader; assert ToolLoader(mode='pragmatic').build_callables()"
