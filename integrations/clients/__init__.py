@@ -1,18 +1,9 @@
-"""
-integrations.clients — outbound clients for external protocols.
+"""Outbound clients retained for DSH pragmatic MCP/OpenAPI tools."""
 
-These modules wrap third-party protocols and present them as Python objects:
-  - llm_engine     : OllamaEngine, OpenAIEngine, AnthropicEngine, MockEngine
-  - mcp_client     : MCP (Model Context Protocol) server clients
-  - openapi_client : OpenAPI 3 spec parser + invoker
-  - embedder       : embedding-model adapters (Ollama, OpenAI, stub)
+from .mcp_client import MCPClient, MCPServer, MCPToolSpec, MCPCallResult
+from .openapi_client import OpenAPIClient, OpenAPIParser, OperationSpec, ParamSpec
 
-Modules in clients/ DO NOT import from adapters/ or router/.
-"""
-from .llm_engine import (  # noqa: F401
-    LLMEngine, OllamaEngine, OpenAIEngine, AnthropicEngine, MockEngine,
-    IntentResult, patch_runtime_loop,
-)
-from .mcp_client     import MCPClient, MCPServer, MCPToolSpec, MCPCallResult  # noqa: F401
-from .openapi_client import OpenAPIClient, OpenAPIParser, OperationSpec, ParamSpec  # noqa: F401
-from .embedder       import build_embedder, OllamaEmbedder, OpenAIEmbedder, StubEmbedder  # noqa: F401
+__all__ = [
+    "MCPClient", "MCPServer", "MCPToolSpec", "MCPCallResult",
+    "OpenAPIClient", "OpenAPIParser", "OperationSpec", "ParamSpec",
+]

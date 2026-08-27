@@ -60,6 +60,19 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+def _normalise_result_ref(ref_id: str) -> str:
+    """Accept a bare id, a label, or a label followed by its preview text."""
+    import re
+
+    match = re.search(r"\[STORED:[^:\]]+:([^\]]+)\]", ref_id)
+    if match:
+        return match.group(1).strip()
+    ref_id = ref_id.strip("[]")
+    if ":" in ref_id:
+        ref_id = ref_id.rsplit(":", 1)[-1].strip()
+    return ref_id
+
+
 class _SqliteStoreProxy:
     """Dict-like proxy over the SQLite results table for backward-compat access."""
     def __init__(self, conn: Any) -> None:
@@ -70,9 +83,7 @@ class _SqliteStoreProxy:
         return row[0] if row else 0
 
     def get(self, ref_id: str, default: str = "") -> str:
-        ref_id = ref_id.strip("[]")
-        if ":" in ref_id:
-            ref_id = ref_id.rsplit(":", 1)[-1].strip()
+        ref_id = _normalise_result_ref(ref_id)
         row = self._conn.execute(
             "SELECT content FROM results WHERE ref_id=?", (ref_id,)
         ).fetchone()
@@ -140,10 +151,7 @@ class ToolResultStore:
 
     def read(self, ref_id: str, offset: int = 0, length: int = 2_000) -> Optional[str]:
         """Retrieve a slice of a stored result. Accepts full label or plain ref_id."""
-        # Normalise: strip brackets and tool_name: prefix
-        ref_id = ref_id.strip("[]")
-        if ":" in ref_id:
-            ref_id = ref_id.rsplit(":", 1)[-1].strip()
+        ref_id = _normalise_result_ref(ref_id)
         row = self._conn.execute(
             "SELECT content FROM results WHERE ref_id=?", (ref_id,)
         ).fetchone()
@@ -159,6 +167,10 @@ class ToolResultStore:
     @property
     def stored_count(self) -> int:
         return len(self._store)
+
+    def close(self) -> None:
+        """Release the SQLite connection owned by this store."""
+        self._conn.close()
 
 
 # ---------------------------------------------------------------------------

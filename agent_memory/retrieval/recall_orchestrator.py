@@ -196,6 +196,7 @@ def recall(
     max_chars: int = 1200,
     recent_turns: int = 4,
     top_k: int = 10,
+    cross_session: bool = True,
 ) -> RecallResult:
     """Build prompt-ready memory context for a query within one user's scope.
 
@@ -277,9 +278,19 @@ def recall(
     chunk_items: list = []
     fact_items: list  = []
     try:
-        search_out = mgr.search(
-            user_id=user_id, query=query, session_id=session_id, top_k=top_k,
-        )
+        if cross_session:
+            search_out = mgr.search(
+                user_id=user_id, query=query, session_id=session_id, top_k=top_k,
+            )
+        else:
+            search_out = {
+                "long_term": mgr.search_chunks(
+                    user_id=user_id, query=query, session_id=session_id, top_k=top_k,
+                ),
+                "mid_term": mgr.search_facts(
+                    user_id=user_id, query=query, session_id=session_id, top_k=top_k,
+                ),
+            }
         chunks_rr = search_out.get("long_term")
         facts_rr  = search_out.get("mid_term")
         if chunks_rr and hasattr(chunks_rr, "items"):

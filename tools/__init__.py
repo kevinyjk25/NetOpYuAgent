@@ -23,7 +23,7 @@ Business implementation files now live under profiles/<id>/:
   profiles/lan/tools.py, profiles/lan/tool_meta.py, profiles/lan/skills/ (SKILL.md)
   profiles/dc/tools.py,  profiles/dc/tool_meta.py,  profiles/dc/skills/ (SKILL.md)
 
-make_read_stored_result_tool is used directly by main.py to wire the
+make_read_stored_result_tool is used by the DSH backend to wire the
 ToolResultStore instance into the read_stored_result callable.
 """
 from tools.common_tools import make_read_stored_result_tool

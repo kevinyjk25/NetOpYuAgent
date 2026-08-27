@@ -23,22 +23,6 @@ from profiles.base import (
 )
 
 
-def get_batch_resolver_for_profile(profile: str):
-    """L0/L1 Stage B: return the multi-target batch HITL resolver for a
-    profile, or None. Network profiles (lan/dc) use the device-prose
-    resolver; default (and any non-network profile) returns None → the L0
-    loop raises single-target HITL (the domain-free default).
-
-    The L0 runtime calls the returned function via its injected
-    batch_resolver_fn; it never imports this module itself.
-    """
-    if profile in ("lan", "dc"):
-        from profiles.network_batch_resolver import resolve_network_batch
-        return resolve_network_batch
-    return None
-
-
 __all__ = [
     "Profile", "load_profile", "available_profiles",
-    "get_batch_resolver_for_profile",
 ]

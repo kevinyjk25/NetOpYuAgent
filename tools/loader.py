@@ -11,7 +11,7 @@ Principles
 - Layered memory      : builtin tools are always present; mode tools layer on top;
                         registered (MCP/OpenAPI) tools layer on top of those.
 
-Usage (from main.py)
+Usage (from the DSH backend)
 --------------------
     from tools.loader import ToolLoader
     loader = ToolLoader(mode="pragmatic")          # or "mock"

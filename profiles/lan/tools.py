@@ -216,18 +216,35 @@ async def device_info(args: dict[str, Any]) -> str:
     """Get device details — small, returned inline."""
     device_id = args.get("device_id", "ap-01")
     await asyncio.sleep(0.01)
-    return (
+    device = next((item for item in _DEVICE_INVENTORY if item["id"] == device_id), None)
+    if device is None:
+        return f"[Error: device {device_id!r} not found in inventory. Use list_devices to see valid IDs.]"
+
+    common = (
         f"Device: {device_id}\n"
-        f"  Model:        Cisco Catalyst 9115AXI\n"
+        f"  Model:        {device['model']}\n"
+        f"  Type:         {device['type']}\n"
+        f"  Role:         {device['role']}\n"
+        f"  Site:         {device['site']}\n"
+        f"  Management IP:{device['ip']:>16}\n"
         f"  Firmware:     17.9.3\n"
         f"  Uptime:       14d 6h 23m\n"
+    )
+    if device["type"] == "wireless_ap":
+        details = (
         f"  Clients (2.4GHz): 12\n"
         f"  Clients (5GHz):   28\n"
         f"  Channel (2.4):    6\n"
         f"  Channel (5):      36\n"
         f"  Tx Power:     20 dBm\n"
-        f"  Last reboot:  {_ts(20350)}"
-    )
+        )
+    elif device["type"] == "switch":
+        details = "  Ports:        48\n  Stack state:  ready\n"
+    elif device["type"] == "router":
+        details = "  WAN links:    2\n  Routing:      healthy\n"
+    else:
+        details = ""
+    return common + details + f"  Last reboot:  {_ts(20350)}"
 
 
 # ---------------------------------------------------------------------------
@@ -275,12 +292,11 @@ async def service_health(args: dict[str, Any]) -> str:
 # Tool 8: read_stored_result  (P0 on-demand retrieval tool)
 # ---------------------------------------------------------------------------
 
-# This is wired dynamically at runtime with the ToolResultStore reference.
-# See webui/backend.py for how it's injected.
+# This is wired dynamically by the DSH backend with ToolResultStore.
 
 
 # ---------------------------------------------------------------------------
-# Registry  (imported by webui backend and AgentRuntimeLoop)
+# Registry consumed by the DSH bridge.
 # ---------------------------------------------------------------------------
 # Tool 8a: list_devices  (inventory — list all network devices)
 # ---------------------------------------------------------------------------
@@ -376,7 +392,9 @@ def _apply_config_lines_to_state(device_id: str, config_lines: list[str]) -> dic
 async def list_devices(args: dict[str, Any]) -> str:
     """List all network devices in inventory, with optional filtering."""
     device_type = args.get("type", "").lower()    # wireless_ap | switch | router | server | ""
-    site        = args.get("site", "").lower()    # site-a | site-b | ""
+    # DSH/profile metadata calls this filter `tag` for parity with the real
+    # pragmatic inventory. Keep `site` as a backwards-compatible alias.
+    site        = str(args.get("tag") or args.get("site") or "").lower()
     role        = args.get("role", "").lower()    # core_switch | access_point | edge_router | ""
 
     await asyncio.sleep(0.01)
@@ -947,372 +965,40 @@ async def diff_device_config(args: dict[str, Any]) -> str:
 # ---------------------------------------------------------------------------
 # query_radius_logs — H2 (async fire-and-forget) HITL demo (2026-05)
 # ---------------------------------------------------------------------------
-#
-# Demonstrates async-nonblocking HITL:
-#   1. Tool registers an async HITL via register_async_pending() (inserts
-#      into the router registry under lock AND arms the SLA watchdog) and
-#      creates a real checkpoint that /hitl/pending lists.
-#   2. Returns immediately with default "permission_ok (assumed)".
-#   3. After a random delay (3-12s in demo mode), a background task calls
-#      router.deliver(...) directly to simulate "ops queue ack arrived".
-#      In production this spawn does not exist — a real operator clicks and
-#      router.deliver() is invoked via the HTTP endpoint instead.
-#
-# Robust to wiring failures: any error in the H2 setup (schema mismatch,
-# audit/registry write, demo autoreply spawn) is caught and the tool
-# still returns a usable degraded response. This prevents the LLM from
-# looping retrying on a tool error (observed on initial deploy where a
-# ProposedAction field mismatch raised pydantic ValidationError and the
-# LLM retried the same call 3 times before exhausting the turn cap).
-
-_RADIUS_DEMO_OUTCOMES = [
-    # (decision, comment, weight) — weighted random
-    ("approve", "RADIUS check passed: user has Wi-Fi access permission",        7),
-    ("reject",  "RADIUS check FAILED: user X is DISABLED in directory",         2),
-    ("reject",  "RADIUS check FAILED: user X account locked (5 failed attempts)", 1),
-]
-
+# query_radius_logs — local DSH simulation
+# ---------------------------------------------------------------------------
 
 async def query_radius_logs(args: dict[str, Any]) -> str:
-    """H2 demo: fire RADIUS query, return assumed default, ack comes later.
+    """Return deterministic local RADIUS evidence; DSH owns deferred HITL."""
+    user_id = str(args.get("user_id") or "unknown_user").strip()
+    minutes = int(args.get("minutes") or 60)
+    await asyncio.sleep(0)
+    return (
+        "# query_radius_logs (DSH local simulation)\n"
+        f"# user_id:  {user_id}\n"
+        f"# window:   last {minutes} min\n"
+        "# result:   permission_ok\n"
+        "# note:     approvals and deferred continuation are owned by the DSH plugin"
+    )
 
-    Args:
-        user_id: user to look up
-        minutes: time window in minutes (default 60)
-        # injected by runtime/loop._execute_tool:
-        _session_id: current session_id (for SSE notify routing)
-    """
-    user_id  = str(args.get("user_id") or "unknown_user").strip()
-    minutes  = int(args.get("minutes") or 60)
-    session_id = args.get("_session_id") or ""
-
-    # ── Lazy import of hitl_core / runtime / webui / main ────────────────
-    # tools/ MUST NOT import hitl_core in general. This is the one allowed
-    # exception for the H2 async-HITL DEMO that explicitly integrates with
-    # the async-HITL extension point.
-    # ALLOWED BY DESIGN: H2 async-HITL demo (single integration point)
-    try:
-        import uuid as _uuid                                              # noqa: E501
-        import random as _random                                          # noqa: E501
-        from hitl_core import HitlRouter
-        from hitl_core.schema import (
-            HitlPayload, TriggerKind, RiskLevel, InterruptMode,
-            ProposedAction, HitlDecision, DecisionKind, ClarificationField,
-            CheckpointEntry, ResumeHandle,
-            AuditEventKind, HitlAuditRecord,
-        )
-        from hitl_core.pipeline import AsyncPendingHitl
-        from runtime.loop import enqueue_async_inject
-    except Exception as _imp_exc:
-        # If imports fail (test env / partial install), fall back to a
-        # functional read-only stub so the LLM gets a useful result.
-        return (
-            f"# query_radius_logs (H2 DEMO — imports failed, degraded mode)\n"
-            f"# user_id:  {user_id}\n"
-            f"# window:   last {minutes} min\n"
-            f"# result:   permission_ok (assumed)\n"
-            f"# note:     H2 async-HITL wiring not available in this env\n"
-            f"# error:    {_imp_exc}"
-        )
-
-    # Try to get the global router/store via the service registry.
-    try:
-        from main import _services as _global_services                    # type: ignore
-    except Exception:
-        _global_services = None                                           # type: ignore
-
-    # The active backend is hitl_core: the real router/audit live under the
-    # hitl_core_* keys. The bare hitl_router/hitl_audit keys are retained as
-    # stub-None for legacy safety, so resolve core-first then fall back.
-    _router = None
-    if _global_services:
-        _router = (_global_services.get("hitl_core_router")
-                   or _global_services.get("hitl_router"))
-    if not _global_services or _router is None:
-        return (
-            f"# query_radius_logs (H2 DEMO — degraded, no router wired)\n"
-            f"# user_id:  {user_id}\n"
-            f"# window:   last {minutes} min\n"
-            f"# result:   permission_ok (assumed; H2 cannot fire here)"
-        )
-
-    router: HitlRouter = _router
-    store = _global_services.get("hitl_store")
-    if store is None:
-        return (
-            f"# query_radius_logs (H2 DEMO — no store available)\n"
-            f"# user_id:  {user_id}\n"
-            f"# result:   permission_ok (assumed)"
-        )
-
-    # ── H2 setup wrapped in try/except so wiring bugs degrade gracefully ──
-    # If anything below raises, the LLM sees a degraded but usable response
-    # instead of a tool error, avoiding retry loops.
-    try:
-        interrupt_id = str(_uuid.uuid4())
-
-        # Build the H2 payload. Operator-facing card explains the situation.
-        payload = HitlPayload(
-            interrupt_id   = interrupt_id,
-            thread_id      = session_id or "demo",
-            context_id     = session_id or "demo",
-            title          = f"RADIUS auth check for {user_id}",
-            description    = (
-                f"Async HITL: verify {user_id}'s RADIUS permission. "
-                f"Agent will continue with assumed default 'permission_ok' "
-                f"while you check. Reply within 3 minutes — anything later "
-                f"will surface as a follow-up note."
-            ),
-            # ProposedAction needs action_type + target (NOT tool_name/tool_args).
-            # See hitl_core/schema.py:170 — this is the domain-neutral
-            # representation. action_type is free-form; "tool_call:<name>"
-            # is the convention for tool-driven proposals.
-            proposed_action = ProposedAction(
-                action_type = "tool_call:query_radius_logs",
-                target      = user_id,
-                parameters  = {"user_id": user_id, "minutes": minutes},
-                risk_level  = RiskLevel.LOW,
-                reversible  = True,
-            ),
-            trigger_kind   = TriggerKind.EXTERNAL_DELEGATION,
-            risk_level     = RiskLevel.LOW,
-            interrupt_mode = InterruptMode.ASYNC_NONBLOCKING,
-            sla_seconds    = 180,                                # 3 min
-            clarification_fields = [
-                ClarificationField(
-                    key   = "actual_status",
-                    prompt= "Actual RADIUS status for this user",
-                    # Operator sees these as radio options if FE renders them.
-                    allowed_values = ["permission_ok", "permission_denied", "account_locked"],
-                ),
-            ],
-        )
-
-        # Persist as a real checkpoint so /hitl/pending sees it.
-        entry = CheckpointEntry(
-            interrupt_id  = interrupt_id,
-            payload       = payload,
-            resume_handle = ResumeHandle(resumer_name="async_hitl", state={}),
-        )
-        await store.save(entry)
-
-        # Build on_resolved closure — writes a confirmed_fact + SSE notify.
-        default_value = "permission_ok"
-
-        async def _on_resolved(iid: str, decision, default, diverged: bool) -> None:
-            # decision is None on timeout, else HitlDecision
-            if decision is None:
-                fact = (
-                    f"[ASYNC_HITL/radius:{iid[:8]}] "
-                    f"RADIUS check for user={user_id}: NO RESPONSE after "
-                    f"{payload.sla_seconds}s; agent proceeded with default "
-                    f"'{default}'."
-                )
-                outcome_label = "timeout"
-            else:
-                outcome_label = decision.decision.value
-                comment       = (decision.comment or "").strip()
-                answer        = (decision.clarification_answers or {}).get("actual_status", "")
-                if diverged:
-                    fact = (
-                        f"[ASYNC_HITL/radius:{iid[:8]}] "
-                        f"RADIUS check for user={user_id}: result DIVERGES from "
-                        f"assumption. Operator decided '{outcome_label}'"
-                        + (f" (actual={answer})" if answer else "")
-                        + (f" — {comment}" if comment else "")
-                    )
-                else:
-                    fact = (
-                        f"[ASYNC_HITL/radius:{iid[:8]}] "
-                        f"RADIUS check for user={user_id} CONFIRMED "
-                        f"'{default}'"
-                        + (f" — {comment}" if comment else "")
-                    )
-
-            # Inject into next turn's confirmed_facts via runtime inject queue.
-            try:
-                enqueue_async_inject(session_id, fact)
-            except Exception as _inj_exc:
-                logger.warning("async H2: enqueue_async_inject failed: %s", _inj_exc)
-
-            # Soft-notify the active SSE stream so operator sees it immediately.
-            try:
-                from webui.backend import emit_async_hitl_notify
-                emit_async_hitl_notify(session_id, {
-                    "type":            "async_hitl_resolved",
-                    "interrupt_id":    iid,
-                    "tool":            "query_radius_logs",
-                    "user_id":         user_id,
-                    "outcome":         outcome_label,
-                    "diverged":        diverged,
-                    "default_value":   default,
-                    "fact":            fact,
-                })
-            except Exception as _em_exc:
-                logger.warning("async H2: emit_async_hitl_notify failed: %s", _em_exc)
-
-        # Register pending via the unified helper so it (a) inserts under
-        # the registry lock and (b) arms the SLA watchdog. Previously the
-        # tool inserted into _async_registry directly with no timer, so
-        # when _demo_autoreply was disabled and no operator decided, the
-        # entry leaked forever and on_resolved(None) never fired (Bug 2).
-        try:
-            from hitl_core.router import register_async_pending
-            # Adapt the audit service (.log(HitlAuditRecord)) to the watchdog's
-            # on_audit(kind, iid, detail) shape so ASYNC_TIMEOUT is recorded.
-            _audit_svc = _global_services.get("hitl_core_audit") or _global_services.get("hitl_audit")
-            async def _audit_adapter(kind, iid, detail):
-                if _audit_svc is None:
-                    return
-                from datetime import datetime as _dt2, timezone as _tz2
-                await _audit_svc.log(HitlAuditRecord(
-                    interrupt_id = iid, kind = kind,
-                    detail = detail, timestamp = _dt2.now(_tz2.utc),
-                ))
-            register_async_pending(
-                AsyncPendingHitl(
-                    interrupt_id   = interrupt_id,
-                    payload        = payload,
-                    default_value  = default_value,
-                    on_resolved    = _on_resolved,
-                    divergence_check = None,
-                    sla_seconds    = payload.sla_seconds,
-                    session_id     = session_id,
-                ),
-                store=store,
-                on_audit=_audit_adapter,
-            )
-        except Exception as _reg_exc:
-            logger.warning("async H2: registry insert failed: %s", _reg_exc)
-
-        # Audit ASYNC_DELEGATED so the audit timeline reflects fire moment.
-        try:
-            from datetime import datetime as _dt, timezone as _tz
-            audit = _global_services.get("hitl_core_audit") or _global_services.get("hitl_audit")
-            if audit is not None:
-                await audit.log(HitlAuditRecord(
-                    interrupt_id = interrupt_id,
-                    kind         = AuditEventKind.ASYNC_DELEGATED,
-                    detail       = {
-                        "tool":         "query_radius_logs",
-                        "user_id":      user_id,
-                        "session_id":   session_id,
-                        "sla_seconds":  payload.sla_seconds,
-                    },
-                    timestamp = _dt.now(_tz.utc),
-                ))
-        except Exception as _aud_exc:
-            logger.debug("async H2: audit ASYNC_DELEGATED failed: %s", _aud_exc)
-
-        # ── Demo-only: auto-respond after a random delay so the flow is
-        # observable without an actual operator clicking. In production
-        # this spawn would not exist — real operators click and
-        # router.deliver() gets called via the HTTP endpoint.
-        if str(args.get("_demo_autoreply", "1")).lower() not in ("0", "false", "no"):
-            async def _demo_autoreply() -> None:
-                await asyncio.sleep(_random.uniform(3.0, 12.0))
-                # Pick weighted outcome
-                outcomes_flat = []
-                for o, c, w in _RADIUS_DEMO_OUTCOMES:
-                    outcomes_flat.extend([(o, c)] * w)
-                kind, comment = _random.choice(outcomes_flat)
-                decision = HitlDecision(
-                    interrupt_id = interrupt_id,
-                    decision     = DecisionKind.APPROVE if kind == "approve" else DecisionKind.REJECT,
-                    operator_id  = "demo_auto_responder",
-                    comment      = comment,
-                    clarification_answers = {
-                        "actual_status": (
-                            "permission_ok"     if kind == "approve" else
-                            "account_locked"    if "locked" in comment.lower() else
-                            "permission_denied"
-                        ),
-                    },
-                )
-                try:
-                    await router.deliver(decision)
-                except Exception as _del_exc:
-                    logger.warning("query_radius_logs demo autoreply failed: %s", _del_exc)
-            asyncio.create_task(
-                _demo_autoreply(),
-                name=f"radius_demo_autoreply_{interrupt_id[:12]}",
-            )
-
-        # Successful setup — return the H2 fire ack to the LLM.
-        return (
-            f"# query_radius_logs — RADIUS auth check pushed to ops queue\n"
-            f"# {'─'*60}\n"
-            f"  user_id:        {user_id}\n"
-            f"  window:         last {minutes} min\n"
-            f"  interrupt_id:   {interrupt_id}\n"
-            f"  assumed_result: permission_ok (proceeding without blocking)\n"
-            f"#\n"
-            f"# This is an ASYNC HITL — your job is now done for this query.\n"
-            f"# The actual ops result will arrive within ~3 minutes via:\n"
-            f"#   1. Soft notification in this chat (🔔 banner appears)\n"
-            f"#   2. confirmed_fact in next turn (LLM auto-uses it)\n"
-            f"#\n"
-            f"# DO NOT call query_radius_logs again for this user — give your\n"
-            f"# best answer based on the assumed result and stop. If the ops\n"
-            f"# result DIVERGES from 'permission_ok' later, the operator can\n"
-            f"# choose to re-ask you with the new fact."
-        )
-
-    except Exception as _setup_exc:
-        # ANY H2 setup failure ⇒ degraded fallback. Keeps the LLM from
-        # treating this as a generic tool error and retrying.
-        logger.warning(
-            "query_radius_logs H2 setup failed for user=%s: %s",
-            user_id, _setup_exc,
-        )
-        return (
-            f"# query_radius_logs (H2 DEMO — setup failed, degraded mode)\n"
-            f"# user_id:  {user_id}\n"
-            f"# window:   last {minutes} min\n"
-            f"# result:   permission_ok (assumed)\n"
-            f"# note:     H2 wiring failed; no async approval will arrive.\n"
-            f"# error:    {_setup_exc}\n"
-            f"#\n"
-            f"# Proceed with the assumed result and answer the user. Do NOT\n"
-            f"# call query_radius_logs again."
-        )
-
-
-# ===========================================================================
-# User / network-access tools (2026-05) — LAN side of the cross-agent HITL
-# fault scenario. The LAN owns USER IDENTITY + NETWORK ADMISSION (802.1X/NAC/
-# VLAN authorization + RADIUS auth). Application-layer access lives on the DC.
-#
-# Scenario consistency: 'alice' exists and is fully admitted on the LAN
-# (authenticated, NAC-permitted, VLAN-authorized) — so when "alice cannot
-# reach CRM", the LAN diagnosis comes back CLEAN and the agent must delegate
-# to the DC, where the real cause (no CRM app-access role) lives.
-#
-# Method 甲: queries are read-only; only grant/revoke (writes) are HITL-gated.
-# ===========================================================================
 
 _LAN_USERS = [
-    {"id": "alice", "name": "Alice Chen",    "dept": "sales",     "status": "active"},
-    {"id": "bob",   "name": "Bob Ramirez",   "dept": "sales",     "status": "active"},
-    {"id": "carol", "name": "Carol Singh",   "dept": "support",   "status": "active"},
-    {"id": "dave",  "name": "Dave Okafor",   "dept": "finance",   "status": "active"},
-    {"id": "erin",  "name": "Erin Lopez",    "dept": "finance",   "status": "suspended"},
+    {"id": "alice", "name": "Alice Chen", "dept": "sales", "status": "active"},
+    {"id": "bob", "name": "Bob Ramirez", "dept": "sales", "status": "active"},
+    {"id": "carol", "name": "Carol Singh", "dept": "support", "status": "active"},
+    {"id": "dave", "name": "Dave Okafor", "dept": "finance", "status": "active"},
+    {"id": "erin", "name": "Erin Lopez", "dept": "finance", "status": "suspended"},
 ]
 
-# Per-user network admission state. 'alice' is fully admitted (the LAN is NOT
-# the problem in the CRM scenario). 'erin' is suspended (a LAN-side fault, for
-# contrast / other scenarios).
 _LAN_USER_ACCESS: dict[str, dict[str, Any]] = {
-    "alice": {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 20,  "last_auth": "2 min ago"},
-    "bob":   {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 20,  "last_auth": "5 min ago"},
-    "carol": {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 30,  "last_auth": "1 min ago"},
-    "dave":  {"radius": "pass", "dot1x": "authorized", "nac": "compliant",   "vlan": 40,  "last_auth": "8 min ago"},
-    "erin":  {"radius": "fail", "dot1x": "rejected",   "nac": "quarantine", "vlan": None, "last_auth": "denied"},
+    "alice": {"radius": "pass", "dot1x": "authorized", "nac": "compliant", "vlan": 20, "last_auth": "2 min ago"},
+    "bob": {"radius": "pass", "dot1x": "authorized", "nac": "compliant", "vlan": 20, "last_auth": "5 min ago"},
+    "carol": {"radius": "pass", "dot1x": "authorized", "nac": "compliant", "vlan": 30, "last_auth": "1 min ago"},
+    "dave": {"radius": "pass", "dot1x": "authorized", "nac": "compliant", "vlan": 40, "last_auth": "8 min ago"},
+    "erin": {"radius": "fail", "dot1x": "rejected", "nac": "quarantine", "vlan": None, "last_auth": "denied"},
 }
 
 _LAN_ACCESS_CHANGES: list[dict[str, Any]] = []
-
-
 async def list_users(args: dict[str, Any]) -> str:
     """List enterprise users (read-only)."""
     await asyncio.sleep(0)

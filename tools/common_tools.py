@@ -11,7 +11,7 @@ agent read large tool outputs that were offloaded to disk/cache.
 
 Their prompt-facing metadata lives in tools/builtin/registry.py. The factory
 `make_read_stored_result_tool(tool_store)` binds them to a ToolResultStore
-instance at startup (in main.py:build_services).
+instance during DSH backend startup.
 
 `_ts()` is a tiny timestamp helper shared by profile tools that emit
 realistic mock log lines; it lives here so profile modules don't duplicate it.
@@ -49,10 +49,9 @@ def make_read_stored_result_tool(tool_store):
         if not ref_id:
             return "[Error: ref_id is required]"
 
-        # Normalise ref_id: LLM often copies the full "[STORED:tool:uuid]" label
-        ref_id = ref_id.strip("[]")
-        if ":" in ref_id:
-            ref_id = ref_id.rsplit(":", 1)[-1].strip()
+        # The LLM may copy the full label and its trailing preview text.
+        from runtime.context_budget import _normalise_result_ref
+        ref_id = _normalise_result_ref(ref_id)
 
         chunk = tool_store.read(ref_id, offset=offset, length=length)
         if chunk is None:
@@ -118,6 +117,9 @@ def make_read_stored_result_tool(tool_store):
 
         if not ref_id:
             return "[Error: ref_id is required]"
+
+        from runtime.context_budget import _normalise_result_ref
+        ref_id = _normalise_result_ref(ref_id)
 
         full = tool_store._store.get(ref_id)
         if full is None:
@@ -238,5 +240,3 @@ def make_read_stored_result_tool(tool_store):
         return "".join(output_parts)
 
     return read_stored_result, process_stored_chunks
-
-
