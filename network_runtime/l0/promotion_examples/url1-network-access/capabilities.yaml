@@ -1,0 +1,40 @@
+apiVersion: netopyu.io/capability-catalog/v1
+provider: example.url1-access-api
+version: 1.0.0
+
+capabilities:
+  - id: rest.url1.network-access.grant
+    role: effect
+    tool: url1_grant_network_access
+    profiles: [lan]
+    inputs:
+      user_id: {type: string, required: true, minLength: 1, maxLength: 64}
+      vlan_id: {type: integer, required: true, minimum: 1, maximum: 4094}
+      duration_minutes: {type: integer, required: true, minimum: 30, maximum: 10080}
+      reason: {type: string, required: true, minLength: 5, maxLength: 512}
+    outputs:
+      operation_id: {type: string}
+      accepted: {type: boolean}
+
+  - id: rest.network-access.get
+    role: observation
+    profiles: [lan]
+    inputs:
+      user_id: {type: string, required: true, minLength: 1, maxLength: 64}
+    outputs:
+      allowed: {type: boolean}
+      vlan_id: {type: integer, minimum: 1, maximum: 4094}
+      expires_at: {type: string}
+      revision: {type: integer, minimum: 0}
+      state: {type: object}
+
+  - id: rest.network-access.restore
+    role: compensation
+    tool: restore_network_access
+    profiles: [lan]
+    inputs:
+      user_id: {type: string, required: true, minLength: 1, maxLength: 64}
+      snapshot: {type: object, required: true}
+      expected_revision: {type: integer, required: true, minimum: 0}
+    outputs:
+      restored: {type: boolean}

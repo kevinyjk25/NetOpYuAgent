@@ -133,7 +133,28 @@ Worker 使用 Unix Domain Socket，消息为一行一个 JSON object。每个请
 | 8 | `compensate` | compensate | manual intervention；仅有合同的 Skill |
 | 9 | `audit` | terminal | fail closed |
 
-Raw write tool 必须解析到唯一 L0 Skill，且请求提供的 L0 id 必须完全匹配。未知、未绑定、profile 不允许或 contract hash 不一致都在 prepare 阶段拒绝。
+每次写请求必须解析到精确的 `(skill_id, version, contract_hash)`。同一 raw tool/capability 允许注册多个语义合同；存在多个候选时，请求必须显式提供 `l0_skill_id`，Runtime 不做猜测。未知、未绑定、profile 不允许或 contract hash 不一致都在 prepare 阶段拒绝。
+
+L0 v2 在既有执行合同之上增加 authoring/compiler 层：
+
+- `AtomicEffect` 定义可独立执行的 S1；
+- `DerivedEffect(mode=constraint)` 只允许固定值、缩小范围、增强审批，形成约束式 S11；
+- `DerivedEffect(mode=extension)` 允许增加参数、前置 Observation、验证谓词和 desired-state 字段，但不能改写父语义，形成扩展式 S11；
+- `CompositeEffect` 用显式 DAG、检查点和逆序补偿组合 S1+S2+…，形成 Saga；
+- 编译器递归展开继承、检查单调安全规则，并生成 immutable hash；Runtime 不解释继承；
+- Catalog 支持同 id 多版本和同 capability 多语义合同，`explain`、`diff`、`graph` 供代码审查使用。
+
+当前 v2 示例是兼容式 SDK/编译原型。现有 DSH 执行路径继续使用经 Core-72 验证的 v1 合同，直到 Provider Gateway、表达式/Resolver、Catalog loader 和执行故障认证完成。
+
+`network_runtime.l0.promotion` 实现离线 L1 → L0 流程：
+
+1. `load_skill_source()` 使用统一 `skills.skill_format` 解析标准 `SKILL.md`；
+2. `CapabilityCatalogManifest` 固定 Provider/version、capability role、profile 和输入输出 Schema；
+3. `promotion_prompt()` 输出包含 L1、Catalog、L0 Schema 和禁止猜测规则的有界 JSON packet；
+4. `assess_promotion()` 把 source/catalog hash 注入候选 labels，随后进行交叉检查和严格编译；
+5. `package_promotion()` 仅为零 error 候选生成 `SKILL.md`、`candidate.yaml`、`compiled.json` 和 `report.json`；
+6. `review_promotion()` 重算 proposal 与文件 hash，最多写入一个 approve/reject 记录；
+7. 所有报告固定 `executionEligible=false`、`autoActivated=false`，不存在 Runtime loader 副作用。
 
 ### 6. IntentSpec 与参数编译
 
@@ -474,7 +495,7 @@ slash approval 也优先返回相同封装。
 
 `evaluation.runtime_comparison` 实现两个执行器。参考执行器复用 DSH manifest 的 required/type/additional-properties Schema 规则和通用审批结果，然后直接调用 `BackendSession`；受控执行器调用真实 `NetworkRuntime.prepare/execute/invoke_read/audit`。每个场景返回相同结构的 `PathObservation`，并由独立 Oracle 判断是否满足安全或正确性目标。
 
-默认场景集固定为 11 项，故障/风险控制为其中 10 项。时延 campaign 预热后交替运行两条路径，计量纯机器端到端时间并排除人工等待。`write_report()` 生成 `runtime-ab.json`、`runtime-ab.md` 与 `runtime-ab.html`；CLI 只有 Runtime 全部 Oracle 通过时才返回 0。时延不作硬门禁，防止不同主机性能造成错误失败。
+Core-72 场景集固定为 72 项，包括 8 个有效操作和 64 个故障/风险控制，覆盖 LAN、DC、WAN 和跨域 Saga。时延 campaign 预热后交替运行两条路径，计量纯机器端到端时间并排除人工等待。`write_report()` 生成 `runtime-ab.json`、`runtime-ab.md` 与 `runtime-ab.html`；CLI 只有 Runtime 全部 Oracle 通过时才返回 0。时延不作硬门禁，防止不同主机性能造成错误失败。
 
 ---
 
@@ -533,7 +554,11 @@ The Worker accepts one JSON object per Unix-socket line. Malformed or unknown re
 
 ### 4. L0 and intent contracts
 
-A frozen `L0SkillContract` binds identity/version, one tool contract, intent kind, target fields, allowed profiles, fixed steps, and a canonical contract hash. A raw mutation must resolve to exactly one matching L0 contract.
+A frozen `L0SkillContract` binds identity/version, one tool contract, intent kind, target fields, allowed profiles, fixed steps, and a canonical contract hash. Every mutation resolves an exact `(skill_id, version, contract_hash)`. A capability may implement multiple semantic contracts; when candidates are ambiguous, Runtime requires an explicit L0 id and never guesses from the tool name.
+
+L0 v2 adds a compatible authoring/compiler layer. `AtomicEffect` defines S1. A constraint-derived S11 can only fix or narrow parameters and strengthen approval. An extension-derived S11 can add inputs, observations, predicates, and non-conflicting desired-state fields. `CompositeEffect` binds exact child versions/hashes in a DAG with checkpoints and reverse compensation. Compilation recursively flattens inheritance and enforces monotonic safety; Runtime receives only immutable artifacts. The multi-version Catalog exposes `explain`, `diff`, and `graph` review surfaces. The bundled REST examples remain an SDK/compiler prototype; the Core-72-qualified v1 contracts stay on the DSH execution path until Provider, resolver/expression, loader, and fault-injection qualification are complete.
+
+`network_runtime.l0.promotion` implements the offline L1 → L0 path. It parses the standard Skill through `skills.skill_format`, binds a versioned Capability Catalog, emits a bounded Agent prompt packet, injects source/catalog hashes into the candidate, cross-checks schemas and roles, compiles strictly, packages immutable review files, and permits one integrity-checked human decision. Every report remains non-executable and non-activated; no Runtime loader side effect exists.
 
 Compilation rejects unknown/missing/type-invalid arguments, invalid entities, untrusted provenance on critical fields, and unsupported profiles. It emits normalized arguments, targets, constraints, desired state, an argument digest, and an immutable `intent_hash`. Free-form model instructions never become backend commands.
 
@@ -712,4 +737,4 @@ never replays a Provider write.
 
 `evaluation.runtime_comparison` implements two executors. The reference executor mirrors the DSH manifest's required/type/additional-properties schema and generic approval result before invoking `BackendSession` directly. The guarded executor calls the real `NetworkRuntime.prepare/execute/invoke_read/audit` surface. Each scenario returns a common `PathObservation` evaluated by a machine oracle.
 
-The default set has 11 scenarios, including 10 fault/risk controls. After warm-up, latency trials alternate both paths and exclude human wait. `write_report()` emits JSON, Markdown, and HTML. The CLI exits zero only when Runtime passes every oracle; variable machine latency is reported but is not a hard gate.
+Core-72 contains 72 scenarios: eight valid operations and 64 fault/risk controls across LAN, DC, WAN, and cross-domain Saga behavior. After warm-up, latency trials alternate both paths and exclude human wait. `write_report()` emits JSON, Markdown, and HTML. The CLI exits zero only when Runtime passes every oracle; variable machine latency is reported but is not a hard gate.

@@ -1,0 +1,84 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: CompositeEffect
+
+metadata:
+  id: employee.application-access.provision
+  version: 1.0.0
+  owner: enterprise-access-team
+  description: S111 composite - bind S1 and S2 into one durable Saga
+
+spec:
+  inputs:
+    user_id:
+      type: string
+      required: true
+      resolver: iam.user
+      minLength: 1
+      maxLength: 64
+    vlan_id:
+      type: integer
+      required: true
+      minimum: 1
+      maximum: 4094
+    duration_minutes:
+      type: integer
+      required: true
+      minimum: 30
+      maximum: 10080
+    app_id:
+      type: string
+      required: true
+      resolver: application.catalog
+    role:
+      type: string
+      required: true
+      enum: [reader, operator, admin]
+    change_id:
+      type: string
+      required: true
+      pattern: "^CHG-[0-9]+$"
+
+  steps:
+    - id: network-access
+      domain: network
+      skillRef:
+        id: network.access.grant
+        version: 1.0.0
+      arguments:
+        user_id: "${input.user_id}"
+        vlan_id: "${input.vlan_id}"
+        duration_minutes: "${input.duration_minutes}"
+        reason: "${input.change_id}: employee application access"
+
+    - id: application-access
+      domain: service
+      dependsOn: [network-access]
+      skillRef:
+        id: service.application-access.grant
+        version: 1.0.0
+      arguments:
+        user_id: "${input.user_id}"
+        app_id: "${input.app_id}"
+        role: "${input.role}"
+        change_id: "${input.change_id}"
+
+  checkpoints:
+    - id: end-to-end-access
+      after: [application-access]
+      observations:
+        - id: path-check
+          capability: network.application-path.verify
+          arguments:
+            user_id: "${input.user_id}"
+            app_id: "${input.app_id}"
+          predicates:
+            - field: reachable
+              operator: equals
+              expected: true
+
+  approval:
+    required: true
+    risk: high
+    mode: dual
+
+  compensationOrder: reverse

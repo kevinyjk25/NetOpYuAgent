@@ -1,0 +1,92 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+
+metadata:
+  id: service.application-access.grant
+  version: 1.0.0
+  owner: application-access-team
+  description: S2 - grant an application role through a service REST capability
+
+spec:
+  template: access-grant
+  profiles: [lan, dc]
+
+  effect:
+    capability: rest.application-access.grant
+    tool: grant_application_access
+    request:
+      user_id: "${arguments.user_id}"
+      app_id: "${arguments.app_id}"
+      role: "${arguments.role}"
+      change_id: "${arguments.change_id}"
+
+  intent:
+    kind: grant_application_access
+    targetFields: [user_id, app_id]
+    desiredState:
+      allowed: true
+      role: "${arguments.role}"
+
+  parameters:
+    user_id:
+      type: string
+      required: true
+      resolver: iam.user
+    app_id:
+      type: string
+      required: true
+      resolver: application.catalog
+    role:
+      type: string
+      required: true
+      enum: [reader, operator, admin]
+    change_id:
+      type: string
+      required: true
+      pattern: "^CHG-[0-9]+$"
+
+  preflight:
+    - id: entitlement-state
+      capability: rest.application-access.get
+      arguments:
+        user_id: "${arguments.user_id}"
+        app_id: "${arguments.app_id}"
+      snapshotFields: [allowed, roles, revision]
+      predicates:
+        - field: revision
+          operator: exists
+
+  verification:
+    capability: rest.application-access.get
+    arguments:
+      user_id: "${arguments.user_id}"
+      app_id: "${arguments.app_id}"
+    predicates:
+      - field: allowed
+        operator: equals
+        expected: true
+      - field: roles
+        operator: contains
+        expected: "${arguments.role}"
+
+  compensation:
+    capability: rest.application-access.restore
+    tool: restore_application_access
+    arguments:
+      user_id: "${arguments.user_id}"
+      app_id: "${arguments.app_id}"
+      snapshot: "${preflight.entitlement-state.snapshot}"
+    verification:
+      capability: rest.application-access.get
+      arguments:
+        user_id: "${arguments.user_id}"
+        app_id: "${arguments.app_id}"
+      predicates:
+        - field: state
+          operator: exact_snapshot
+          expected: "${preflight.entitlement-state.snapshot}"
+
+  approval:
+    required: true
+    risk: high
+    mode: single

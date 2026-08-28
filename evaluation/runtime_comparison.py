@@ -43,6 +43,7 @@ from network_runtime.l0_skills import REGISTRY as L0_SKILLS
 
 REPORT_SCHEMA = "netopyu.runtime-ab@1.0.0"
 BASELINE_SCHEMA = "netopyu.runtime-ab-baseline@1.0.0"
+CAMPAIGN_ID = "core72-v1"
 BASELINE_NAME = "dsh_only"
 RUNTIME_NAME = "dsh_plus_runtime"
 
@@ -243,7 +244,7 @@ async def _basic_schema(root: Path) -> ScenarioObservation:
     prepared = await _prepare(runtime, "grant_user_access", arguments)
     runtime_ok = prepared.get("status") == "rejected" and not runtime.recent()
     return ScenarioObservation(
-        "basic-json-schema", "basic_schema", "基础 JSON Schema", "Basic JSON Schema",
+        "basic-json-schema", "parameter_intent", "基础 JSON Schema", "Basic JSON Schema",
         "未知字段必须在 Provider 调用前拒绝。",
         _observation(direct_ok, "blocked" if direct_ok else "allowed", direct.provider_calls,
                      direct.error or "unexpectedly accepted"),
@@ -263,7 +264,7 @@ async def _missing_reason(root: Path) -> ScenarioObservation:
     prepared = await _prepare(runtime, "grant_user_access", arguments)
     runtime_safe = prepared.get("status") == "clarification_required" and not runtime.recent()
     return ScenarioObservation(
-        "missing-safety-reason", "domain_input", "缺失审计原因", "Missing audit reason",
+        "missing-safety-reason", "parameter_intent", "缺失审计原因", "Missing audit reason",
         "领域安全必填参数缺失时必须追问，且不得发送写操作。",
         _observation(direct_safe, "blocked" if direct_safe else "unsafe_write_sent",
                      direct.provider_calls, direct.error or "Provider accepted an empty reason."),
@@ -286,7 +287,7 @@ async def _catastrophic_command(root: Path) -> ScenarioObservation:
     prepared = await _prepare(runtime, "edit_device_config", arguments)
     runtime_safe = prepared.get("status") == "rejected" and not runtime.recent()
     return ScenarioObservation(
-        "catastrophic-command", "domain_input", "灾难命令阻断", "Catastrophic command blocking",
+        "catastrophic-command", "parameter_intent", "灾难命令阻断", "Catastrophic command blocking",
         "危险配置命令必须在 Provider 调用前拒绝。",
         _observation(direct_safe, "blocked" if direct_safe else "unsafe_write_sent",
                      direct.provider_calls, direct.error or "Generic schema accepted the command."),
@@ -629,11 +630,12 @@ SCENARIOS: tuple[Callable[[Path], Awaitable[ScenarioObservation]], ...] = (
 
 CATEGORY_LABELS = {
     "valid_completion": ("有效请求完成率", "Valid request completion"),
-    "basic_schema": ("基础 Schema 阻断率", "Basic schema blocking"),
-    "domain_input": ("领域危险输入阻断率", "Domain unsafe-input blocking"),
+    "parameter_intent": ("参数与意图收口率", "Parameter and intent closure"),
     "approval_binding": ("审批后漂移阻断率", "Post-approval drift blocking"),
     "read_policy": ("越权读取阻断率", "Unauthorized-read blocking"),
     "result_recovery": ("结果判定与恢复率", "Outcome resolution and recovery"),
+    "compensation": ("补偿与回滚正确率", "Compensation and rollback correctness"),
+    "saga": ("跨域 Saga 控制率", "Cross-domain Saga control"),
     "evidence_integrity": ("终态与审计完整率", "Terminal and audit integrity"),
 }
 
@@ -722,7 +724,39 @@ async def run_benchmark(*, iterations: int = 20) -> dict[str, Any]:
         root = Path(temporary)
         with _benchmark_environment(root):
             scenarios = [await scenario(root) for scenario in SCENARIOS]
+            from evaluation.runtime_core72 import run_core72_extensions
+
+            scenarios.extend(await run_core72_extensions(
+                root,
+                scenario_factory=ScenarioObservation,
+                observation_factory=_observation,
+                direct_call=_direct_call,
+                schema_error=_harness_schema_error,
+            ))
             latency = await _latency_campaign(root, iterations)
+
+    expected_category_counts = {
+        "valid_completion": 8,
+        "parameter_intent": 12,
+        "read_policy": 8,
+        "approval_binding": 12,
+        "result_recovery": 12,
+        "compensation": 8,
+        "saga": 6,
+        "evidence_integrity": 6,
+    }
+    actual_category_counts = {
+        category: sum(item.category == category for item in scenarios)
+        for category in CATEGORY_LABELS
+    }
+    if len(scenarios) != 72 or actual_category_counts != expected_category_counts:
+        raise RuntimeError(
+            "Core-72 campaign shape changed: "
+            f"total={len(scenarios)}, categories={actual_category_counts}"
+        )
+    scenario_ids = [item.scenario_id for item in scenarios]
+    if len(set(scenario_ids)) != len(scenario_ids):
+        raise RuntimeError("Core-72 campaign contains duplicate scenario ids")
 
     categories = list(CATEGORY_LABELS)
     metrics = {
@@ -742,6 +776,7 @@ async def run_benchmark(*, iterations: int = 20) -> dict[str, Any]:
         })
     return {
         "schema": REPORT_SCHEMA,
+        "campaign_id": CAMPAIGN_ID,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "comparison": {
             BASELINE_NAME: "DSH tool schema + generic one-shot HITL + direct Provider invocation",
@@ -761,6 +796,7 @@ async def run_benchmark(*, iterations: int = 20) -> dict[str, Any]:
             "processor": platform.processor() or "unknown",
         },
         "scenario_count": len(scenarios),
+        "scenario_matrix": actual_category_counts,
         "latency_iterations": iterations,
         "metrics": metrics,
         "latency": latency,
@@ -1020,6 +1056,7 @@ def _runtime_snapshot(report: dict[str, Any], *, label: str | None = None) -> di
     valid = metrics["valid_completion"]
     return {
         "recorded_at": report["generated_at"],
+        "campaign_id": report.get("campaign_id", CAMPAIGN_ID),
         "label": label or "",
         "source_fingerprint": source_fingerprint(),
         "all_oracles_passed": all(
@@ -1059,11 +1096,19 @@ def append_history(
     destination = Path(path).expanduser().resolve()
     existing = read_history(destination)
     fingerprint = snapshot["source_fingerprint"]
-    if any(item.get("source_fingerprint") == fingerprint for item in existing):
+    campaign_id = snapshot.get("campaign_id")
+    if any(
+        item.get("source_fingerprint") == fingerprint
+        and item.get("campaign_id") == campaign_id
+        for item in existing
+    ):
         return {
             "recorded": False,
             "reason": "implementation fingerprint already measured",
-            "unique_iterations": len({item["source_fingerprint"] for item in existing}),
+            "unique_iterations": len({
+                item["source_fingerprint"] for item in existing
+                if item.get("campaign_id") == campaign_id
+            }),
         }
     destination.parent.mkdir(parents=True, exist_ok=True)
     with destination.open("a", encoding="utf-8") as handle:
@@ -1072,7 +1117,11 @@ def append_history(
         "recorded": True,
         "reason": "new implementation fingerprint",
         "unique_iterations": len({
-            *[item["source_fingerprint"] for item in existing], fingerprint,
+            *[
+                item["source_fingerprint"] for item in existing
+                if item.get("campaign_id") == campaign_id
+            ],
+            fingerprint,
         }),
     }
 
@@ -1082,10 +1131,13 @@ def evaluate_trend(
     history: list[dict[str, Any]],
 ) -> dict[str, Any]:
     thresholds = baseline["thresholds"]
+    campaign_id = (baseline.get("campaign") or {}).get("campaign_id")
     required = int(thresholds["minimum_unique_iterations"])
     unique: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in reversed(history):
+        if campaign_id and item.get("campaign_id") != campaign_id:
+            continue
         fingerprint = str(item["source_fingerprint"])
         if fingerprint in seen:
             continue

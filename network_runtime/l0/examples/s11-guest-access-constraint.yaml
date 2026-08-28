@@ -1,0 +1,27 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: DerivedEffect
+
+metadata:
+  id: network.guest-access.grant
+  version: 1.0.0
+  owner: network-access-team
+  description: S11 constraint - S1 narrowed to guest VLAN 300 and eight hours
+
+extends:
+  id: network.access.grant
+  version: 1.0.0
+
+mode: constraint
+
+spec:
+  constrainParameters:
+    vlan_id:
+      fixed: 300
+    duration_minutes:
+      maximum: 480
+    reason:
+      pattern: "^CHG-[0-9]+: .+$"
+  approval:
+    required: true
+    risk: high
+    mode: single

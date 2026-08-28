@@ -13,7 +13,7 @@
 | F-01 | 系统不得实现自建通用 Agent runtime；DSH 为主 Harness，Hermes 只能作为可选 Adapter。 |
 | F-02 | 系统必须按 `default/lan/dc/wan` profile 隔离工具与 Skill。 |
 | F-03 | 默认只能注册只读工具；写工具必须显式启用。 |
-| F-04 | 每个写工具必须绑定唯一、版本化的 Network L0 Skill。 |
+| F-04 | 每次 Network 写必须绑定精确的 `(skill_id, version, contract_hash)`；同一底层 Capability 可以承载多个语义 L0 Skill，但不得仅按 tool/capability 名猜测。 |
 | F-05 | 写计划必须包含规范化参数、参数来源、目标、风险、preflight、verifier 和合同 hash。 |
 | F-06 | 系统必须在执行前向操作员展示精确计划并获得 allowed-once 决策。 |
 | F-07 | 系统必须在写前重校验目标状态。 |
@@ -33,7 +33,7 @@
 | F-21 | Service Layer 必须通过真实 MCP stdio/Streamable HTTP 协议提供身份、应用、策略、变更、CMDB 与平台能力；pragmatic 禁止 in-process mock transport。 |
 | F-22 | Service desired state、Network enforcement 和 data plane 必须是独立事实源，并可由只读 reconciliation 分类 drift。 |
 | F-23 | 受信 MCP 写必须绑定 server identity/version、declared contract、structured result 与 input/output schema digest。 |
-| F-24 | 每个 Service 写必须绑定唯一 Service L0 Skill，并经过与 Network L0 相同的计划、审批、验证、补偿和审计内核。 |
+| F-24 | 每次 Service 写必须绑定精确的 Service L0 Skill 合同，并经过与 Network L0 相同的计划、审批、验证、补偿和审计内核。 |
 | F-25 | 内部 restore MCP tool 不得投影给模型，只能由注册 compensator 调用。 |
 | F-26 | 跨层 L1 必须把 Service 与 Network 写拆为明确计划并在步骤间重读；不得把顺序 workflow 宣称为原子分布式事务。 |
 | F-27 | 外部 Network provider 必须声明唯一、版本化 capability id、observer/actor role 与 action type；不得仅按 tool name 获得权限。 |
@@ -46,6 +46,8 @@
 | F-34 | Observation 必须在 Provider 调用前验证 authenticated subject、role、resource scope、purpose、clearance 与 sensitivity。 |
 | F-35 | Harness/模型只能消费 Runtime terminal envelope，不得把 Actor/Provider 中间态当作执行结果。 |
 | F-36 | 跨 Provider Saga 必须绑定不可变步骤定义和每步 plan id/hash；正向和补偿步骤均不得绕过 L0 审批、验证与审计。 |
+| F-37 | L0 v2 的约束、扩展和组合必须在编译期展开；Runtime 只接受不可变编译产物。约束不得放宽父合同，组合步骤必须绑定子合同的精确版本和 hash。 |
+| F-38 | L1 → L0 Promotion 必须把 Agent 输出视为不可信候选，绑定 L1/Capability/候选 hash，经过确定性校验和一次性人工 review；review 不得自动注册合同或授予执行权限。 |
 
 ### 3. 可靠性规格
 
@@ -317,7 +319,7 @@ MCP、网络设备、审批身份、分布式事务或生产可用性。
 错误、capability/digest 错误失败关闭、负面 payload 解包、同名单设备参数规范化，以及 backend
 Observer 读与 Actor 写分别走 MCP、内部参数隐藏、profile 精确投影、operation immutable reuse
 拒绝、crash-after-effect reconciliation、幂等不重发、精确 durable snapshot 恢复和双事件链。
-完整 Python 门禁为 205 个测试和 39 个子测试。
+完整 Python 门禁为 228 个测试和 39 个子测试。
 
 实际本地门禁必须证明 20 节点基线全部通过，并通过 Observer MCP 读取业务/网络 reconciliation
 所需事实；随后受审 Actor MCP 计划达到 `verified_success`，故意制造后置状态漂移的计划达到
@@ -353,7 +355,7 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-01 | The project must not implement a custom general agent runtime; DSH is primary and Hermes is optional. |
 | F-02 | Tools and Skills must be isolated by profile. |
 | F-03 | Only read-only tools are registered by default. |
-| F-04 | Every mutation must bind to one versioned Network L0 Skill. |
+| F-04 | Every Network mutation binds an exact `(skill_id, version, contract_hash)`. One underlying capability may implement multiple semantic L0 Skills, but Runtime never guesses from a tool or capability name alone. |
 | F-05 | A mutation plan must bind normalized arguments, provenance, targets, risk, preflight, verifier, and contract hashes. |
 | F-06 | The exact plan must receive an allowed-once operator decision. |
 | F-07 | Target state must be revalidated immediately before the write. |
@@ -373,7 +375,7 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-21 | The Service Layer must use real MCP stdio/Streamable HTTP for identity, application, policy, change, CMDB, and platform capabilities; pragmatic mode forbids in-process mock transport. |
 | F-22 | Service desired state, Network enforcement, and data-plane evidence must remain independent and support read-only drift reconciliation. |
 | F-23 | Trusted MCP writes must bind server identity/version, declared contract, structured result, and input/output schema digests. |
-| F-24 | Every Service mutation must bind one Service L0 Skill and use the same plan/approval/verification/compensation/audit kernel as Network L0. |
+| F-24 | Every Service mutation binds an exact Service L0 contract and uses the same plan/approval/verification/compensation/audit kernel as Network L0. |
 | F-25 | Internal restore MCP tools must be hidden from the model and callable only by registered compensators. |
 | F-26 | Cross-layer L1 workflows must use explicit plans with reads between effects and may not claim distributed atomicity. |
 | F-27 | External Network providers must declare a unique versioned capability id, observer/actor role, and action type; tool name alone grants no authority. |
@@ -386,6 +388,8 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-34 | Observation authorization checks authenticated subject, role, resource scope, purpose, clearance, and sensitivity before a Provider call. |
 | F-35 | Harness/model consumers receive only a Runtime terminal envelope and cannot treat Actor/Provider intermediate state as an outcome. |
 | F-36 | A cross-provider Saga binds an immutable step definition and per-step plan id/hash; forward and compensation steps never bypass L0 approval, verification, or audit. |
+| F-37 | L0 v2 constraints, extensions, and compositions are flattened at compile time; Runtime accepts only immutable compiled artifacts. Constraints cannot weaken a parent, and composite steps bind exact child versions and hashes. |
+| F-38 | L1 → L0 Promotion treats Agent output as an untrusted candidate, binds L1/Capability/candidate hashes, and requires deterministic checks plus one human review. Review cannot register a contract or grant execution authority. |
 
 ### 3. Security objectives
 
@@ -494,7 +498,7 @@ payload unwrapping, single-device argument normalization, and exact backend
 routing of Observer reads and Actor writes through separate MCP boundaries,
 hidden Runtime context, profile projection, immutable-operation conflicts,
 crash reconciliation without blind replay, exact durable restoration, and both
-hash chains. The complete gate is 205 tests plus 39 subtests.
+hash chains. The complete gate is 228 tests plus 39 subtests.
 
 The deployed gate requires the complete 20-node baseline and cross-layer facts
 read through Observer MCP. Real Actor MCP plans must reach `verified_success`;

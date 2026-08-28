@@ -225,7 +225,7 @@ evaluation -> public manifests / retrieval / test data
 - 写阶段必须引用已存在的 L0 Skill；
 - 必需 observation 和停止条件必须可编译为 reviewed workflow；
 - L1 失败不得降低 L0 控制；
-- L1 → L0 自动下沉仍不是 P0.5 范围。
+- L1 → L0 使用离线、审查门控的 Promotion Pipeline；Agent 只能生成候选，不能自动注册或执行。
 
 ### 9. 文档治理
 
@@ -284,6 +284,8 @@ evaluation -> public manifests / retrieval / test data
 - **ADR-026：Harness 只看 Runtime 终态。** Actor 原始结果只供 Runtime 内部处理，DSH/Hermes 对模型返回标准 terminal envelope。
 - **ADR-027：跨层一致性使用 durable Saga，不假装 ACID。** Saga 持久化不可变步骤图和 plan hash，按依赖执行、逆序补偿并支持重启恢复，但每一步仍需 L0 审批和验证。
 - **ADR-028：Runtime 成效必须用固定 L1 决策的 A/B Oracle 度量。** `evaluation/runtime_comparison.py` 给 DSH-only 参考路径与 Runtime 路径输入相同工具、参数、Provider 和故障，只比较 L0 增量；控制覆盖率不是生产成功概率，LLM/Skill 选择和人工等待另行评测。
+- **ADR-029：L0 复用在编译期发生，执行期只认精确合同。** S1 使用 `AtomicEffect`；S11 可以是只收窄父合同的 constraint、只增加非冲突保证的 extension，或绑定 S1+S2+… 精确版本/hash 的 Composite Saga。同一 Capability 可实现多个语义 Skill，但 Runtime 不按 tool 名猜测。所有派生在编译时完全展开并重新哈希，执行期不解释继承。v2 authoring/compiler 与现有 v1 执行合同兼容，接入 DSH 前必须单独完成 Provider 与故障认证。
+- **ADR-030：L1 → L0 下沉是 Promotion，不是线上自修改。** 标准 `SKILL.md` 和受信 Capability Catalog 作为独立输入，Agent 输出不可信候选；确定性检查绑定参数/工具覆盖、API role/schema、L0 编译和来源 hash。人工 review 不自动激活 Catalog，也不授予执行权。未来 Runtime UI 只能复用 proposal API，禁止同一次会话生成、批准并执行新合同。
 - 遥测、事件和大规模指标后续使用流式 evidence plane；MCP command/query 不承担高吞吐长期订阅。两条路径必须共享 correlation/target/capability schema，但不得把流事件直接当作写成功证明。
 
 ---
@@ -383,6 +385,8 @@ Effect Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Service
 - **ADR-026:** Harnesses consume only a Runtime terminal envelope. Raw Actor states remain internal and are represented externally only by a digest.
 - **ADR-027:** cross-layer consistency uses a durable Saga rather than pretending to be ACID. Immutable step/plan bindings, reverse compensation, restart recovery, and a hash chain never bypass per-step L0 approval and verification.
 - **ADR-028:** Runtime value is measured with fixed-L1 A/B oracles. `evaluation/runtime_comparison.py` gives the DSH-only reference and Runtime paths the same tool, arguments, Provider, and fault. Control coverage is not a production success probability; LLM/Skill selection and human wait require separate evaluations.
+- **ADR-029:** L0 reuse is compile-time only; execution consumes exact contracts. S1 uses `AtomicEffect`. S11 may be a constraint that only narrows its parent, an extension that adds non-conflicting guarantees, or a Composite Saga binding exact versions/hashes of S1+S2+…. One capability may back multiple semantic Skills, but Runtime never guesses from a tool name. Derivation is fully flattened and re-hashed before execution. The v2 authoring/compiler remains compatible with the qualified v1 path and requires separate Provider/fault qualification before DSH activation.
+- **ADR-030:** L1 → L0 is review-gated promotion, not online self-modification. A standard `SKILL.md` and trusted Capability Catalog are independent inputs; the Agent emits an untrusted candidate. Deterministic checks bind parameter/tool coverage, API roles/schemas, compilation, and provenance hashes. Human review neither activates the Catalog nor grants execution authority. A future Runtime UI may reuse the proposal API but cannot generate, approve, and execute a new contract in one session.
 - High-volume telemetry and event streams belong on a separate evidence plane. MCP remains the command/query protocol; both paths share target/correlation/capability schemas, and stream events never prove mutation success by themselves.
 
 ### 7. Clean-code and extension policy
