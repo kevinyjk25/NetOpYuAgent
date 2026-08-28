@@ -1,0 +1,129 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.application.enforcement.apply
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for network_apply_app_enforcement
+  labels:
+    runtime-tool-contract: network-app-enforcement-grant-v1
+    runtime-verifier: network-app-enforcement-granted
+    runtime-preflight-fields: user_id,app_id
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - lan
+  - dc
+  effect:
+    capability: network.application.enforcement.apply
+    tool: network_apply_app_enforcement
+    request:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+      change_id: ${arguments.change_id}
+      reason: ${arguments.reason}
+  intent:
+    kind: apply_network_application_enforcement
+    targetFields:
+    - user_id
+    - app_id
+    desiredState:
+      allowed: true
+  parameters:
+    user_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    change_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: network.application.enforcement.get
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.network-app-enforcement-granted
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation:
+    capability: network.application.enforcement.restore
+    tool: network_restore_app_enforcement
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    verification:
+      capability: netopyu.rollback-verifier.network-app-enforcement-snapshot-v1
+      arguments:
+        user_id: ${arguments.user_id}
+        app_id: ${arguments.app_id}
+      predicates:
+      - field: restored
+        operator: equals
+        expected: true
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: compensate
+    compensationFailed: manual_intervention

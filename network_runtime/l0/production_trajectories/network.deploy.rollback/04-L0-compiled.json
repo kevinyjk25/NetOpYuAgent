@@ -1,0 +1,118 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:52be2be9960d2cb06066f84ea04380d621874a7d628caa98dfd998afed0fe6cf",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for rollback_deploy",
+    "id": "network.deploy.rollback",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "deploy_id",
+      "runtime-tool-contract": "mock-rollback-deploy-v2",
+      "runtime-verifier": "mock-state"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": null,
+    "effect": {
+      "capability": "netopyu.tool.rollback_deploy",
+      "internal": {},
+      "request": {
+        "deploy_id": "${arguments.deploy_id}",
+        "scope": "${arguments.scope}"
+      },
+      "tool": "rollback_deploy"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "manual_intervention"
+    },
+    "intent": {
+      "desiredState": {
+        "rolled_back": true,
+        "services_healthy": true
+      },
+      "kind": "rollback_deployment",
+      "targetFields": [
+        "deploy_id"
+      ]
+    },
+    "parameters": {
+      "deploy_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "scope": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": false,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "deploy_id": "${arguments.deploy_id}"
+        },
+        "capability": "netopyu.tool.mock_operation_status",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "lan"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "deploy_id": "${arguments.deploy_id}"
+      },
+      "capability": "netopyu.verifier.mock-state",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

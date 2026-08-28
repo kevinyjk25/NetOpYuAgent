@@ -1,0 +1,161 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: service.platform.restart
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for platform_restart_service
+  labels:
+    runtime-tool-contract: service-platform-restart-v1
+    runtime-verifier: service-platform-healthy
+    runtime-preflight-fields: service,environment
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - lan
+  - dc
+  effect:
+    capability: netopyu.tool.platform_restart_service
+    tool: platform_restart_service
+    request:
+      service: ${arguments.service}
+      environment: ${arguments.environment}
+      change_id: ${arguments.change_id}
+      expected_revision: ${arguments.expected_revision}
+      reason: ${arguments.reason}
+      correlation_id: ${arguments.correlation_id}
+  intent:
+    kind: restart_platform_service
+    targetFields:
+    - service
+    - environment
+    desiredState:
+      status: healthy
+      rollout: complete
+  parameters:
+    service:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    environment:
+      type: string
+      required: true
+      description: ''
+      enum:
+      - prod
+      - staging
+      - dev
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    change_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    expected_revision:
+      type: integer
+      required: true
+      description: ''
+      enum: []
+      minimum: 0.0
+      maximum: null
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    correlation_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: netopyu.tool.platform_get_service_health
+    arguments:
+      service: ${arguments.service}
+      environment: ${arguments.environment}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.service-platform-healthy
+    arguments:
+      service: ${arguments.service}
+      environment: ${arguments.environment}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation:
+    capability: netopyu.compensator.service-platform-snapshot-v1
+    tool: platform_restore_service
+    arguments:
+      service: ${arguments.service}
+      environment: ${arguments.environment}
+    verification:
+      capability: netopyu.rollback-verifier.service-platform-snapshot-v1
+      arguments:
+        service: ${arguments.service}
+        environment: ${arguments.environment}
+      predicates:
+      - field: restored
+        operator: equals
+        expected: true
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: compensate
+    compensationFailed: manual_intervention

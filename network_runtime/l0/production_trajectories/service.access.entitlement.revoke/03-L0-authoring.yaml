@@ -1,0 +1,158 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: service.access.entitlement.revoke
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for access_policy_revoke_entitlement
+  labels:
+    runtime-tool-contract: service-entitlement-revoke-v1
+    runtime-verifier: service-entitlement-revoked
+    runtime-preflight-fields: user_id,app_id
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - lan
+  - dc
+  effect:
+    capability: netopyu.tool.access_policy_revoke_entitlement
+    tool: access_policy_revoke_entitlement
+    request:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+      change_id: ${arguments.change_id}
+      expected_revision: ${arguments.expected_revision}
+      reason: ${arguments.reason}
+      correlation_id: ${arguments.correlation_id}
+  intent:
+    kind: revoke_service_entitlement
+    targetFields:
+    - user_id
+    - app_id
+    desiredState:
+      allowed: false
+      roles: []
+  parameters:
+    user_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    change_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    expected_revision:
+      type: integer
+      required: true
+      description: ''
+      enum: []
+      minimum: 0.0
+      maximum: null
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    correlation_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: netopyu.tool.access_policy_get_entitlement
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.service-entitlement-revoked
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation:
+    capability: netopyu.compensator.service-entitlement-snapshot-v1
+    tool: access_policy_restore_entitlement
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    verification:
+      capability: netopyu.rollback-verifier.service-entitlement-snapshot-v1
+      arguments:
+        user_id: ${arguments.user_id}
+        app_id: ${arguments.app_id}
+      predicates:
+      - field: restored
+        operator: equals
+        expected: true
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: compensate
+    compensationFailed: manual_intervention

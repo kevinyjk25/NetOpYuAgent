@@ -47,7 +47,9 @@
 | F-35 | Harness/模型只能消费 Runtime terminal envelope，不得把 Actor/Provider 中间态当作执行结果。 |
 | F-36 | 跨 Provider Saga 必须绑定不可变步骤定义和每步 plan id/hash；正向和补偿步骤均不得绕过 L0 审批、验证与审计。 |
 | F-37 | L0 v2 的约束、扩展和组合必须在编译期展开；Runtime 只接受不可变编译产物。约束不得放宽父合同，组合步骤必须绑定子合同的精确版本和 hash。 |
-| F-38 | L1 → L0 Promotion 必须把 Agent 输出视为不可信候选，绑定 L1/Capability/候选 hash，经过确定性校验和一次性人工 review；review 不得自动注册合同或授予执行权限。 |
+| F-38 | L1 → L0 Promotion 必须保存 `L1 → L0.5 → L0` 三阶段及逐级 hash。L0.5 不得偏离 L1，L0 不得扩大 L0.5；Agent 输出仍是不可信候选，一次性人工 review 不得自动注册合同或授予执行权限。 |
+| F-39 | 全部内置受审写能力必须由编译 L0 v2 Contract 驱动；旧 ToolContract/verifier/compensator 只能作为精确绑定的实现 Adapter。prepare 和执行前必须校验 parity，Effect 参数只能从已批准值按 v2 模板渲染；禁止新增裸 v1 L0。 |
+| F-40 | 每个生产 L0 必须保存 L1/L0.5/L0 authoring/compiled 和逐级 hash 轨迹；主门禁必须重新验证 Promotion semantic parity、精确 contract round trip 和文件完整性。反向 bootstrap 产物必须标注来源、不得注册到 Harness 或宣称为模型独立推导。 |
 
 ### 3. 可靠性规格
 
@@ -319,7 +321,7 @@ MCP、网络设备、审批身份、分布式事务或生产可用性。
 错误、capability/digest 错误失败关闭、负面 payload 解包、同名单设备参数规范化，以及 backend
 Observer 读与 Actor 写分别走 MCP、内部参数隐藏、profile 精确投影、operation immutable reuse
 拒绝、crash-after-effect reconciliation、幂等不重发、精确 durable snapshot 恢复和双事件链。
-完整 Python 门禁为 228 个测试和 39 个子测试。
+完整 Python 门禁为 239 个测试和 81 个子测试。
 
 实际本地门禁必须证明 20 节点基线全部通过，并通过 Observer MCP 读取业务/网络 reconciliation
 所需事实；随后受审 Actor MCP 计划达到 `verified_success`，故意制造后置状态漂移的计划达到
@@ -389,7 +391,9 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-35 | Harness/model consumers receive only a Runtime terminal envelope and cannot treat Actor/Provider intermediate state as an outcome. |
 | F-36 | A cross-provider Saga binds an immutable step definition and per-step plan id/hash; forward and compensation steps never bypass L0 approval, verification, or audit. |
 | F-37 | L0 v2 constraints, extensions, and compositions are flattened at compile time; Runtime accepts only immutable compiled artifacts. Constraints cannot weaken a parent, and composite steps bind exact child versions and hashes. |
-| F-38 | L1 → L0 Promotion treats Agent output as an untrusted candidate, binds L1/Capability/candidate hashes, and requires deterministic checks plus one human review. Review cannot register a contract or grant execution authority. |
+| F-38 | L1 → L0 Promotion preserves `L1 → L0.5 → L0` stages in a predecessor-linked hash chain. L0.5 cannot drift from L1 and L0 cannot widen L0.5. Agent output remains untrusted, and one human review cannot register a contract or grant execution authority. |
+| F-39 | Every built-in reviewed mutation is driven by a compiled L0 v2 contract. Legacy ToolContracts/verifiers/compensators are exact implementation adapters only. Prepare and execution-time revalidation enforce parity, effect arguments are rendered from approved values through v2 templates, and new raw v1 L0 registrations are forbidden. |
+| F-40 | Every production L0 preserves L1/L0.5/L0 authoring/compiled artifacts and predecessor hashes. The primary gate reruns Promotion semantic parity, exact contract round trips, and file integrity. Reverse-bootstrapped artifacts declare their origin, are never registered into the Harness, and cannot be claimed as independent model inference. |
 
 ### 3. Security objectives
 
@@ -498,7 +502,7 @@ payload unwrapping, single-device argument normalization, and exact backend
 routing of Observer reads and Actor writes through separate MCP boundaries,
 hidden Runtime context, profile projection, immutable-operation conflicts,
 crash reconciliation without blind replay, exact durable restoration, and both
-hash chains. The complete gate is 228 tests plus 39 subtests.
+hash chains. The complete gate is 239 tests plus 81 subtests.
 
 The deployed gate requires the complete 20-node baseline and cross-layer facts
 read through Observer MCP. Real Actor MCP plans must reach `verified_success`;

@@ -144,17 +144,20 @@ L0 v2 在既有执行合同之上增加 authoring/compiler 层：
 - 编译器递归展开继承、检查单调安全规则，并生成 immutable hash；Runtime 不解释继承；
 - Catalog 支持同 id 多版本和同 capability 多语义合同，`explain`、`diff`、`graph` 供代码审查使用。
 
-当前 v2 示例是兼容式 SDK/编译原型。现有 DSH 执行路径继续使用经 Core-72 验证的 v1 合同，直到 Provider Gateway、表达式/Resolver、Catalog loader 和执行故障认证完成。
+`network_runtime.l0.production` 声明并编译全部 21 个内置受审写能力；`network_runtime.l0.runtime_loader` 通过精确 `(l0_id, version)` 绑定既有 ToolContract、verifier、可选 compensator 和 profile，并校验参数、desired state、preflight 与 Adapter parity。`network_runtime.l0.expressions` 只支持白名单根的路径读取，不允许函数和运算符；未知 Resolver 失败关闭。`NetworkRuntime.prepare()` 与执行前重校验都验证 v2 权威 Contract，Effect dispatch 只发送由已批准参数按 v2 模板渲染的字段，不直接透传模型参数。URL1 REST 示例没有真实 Provider，因此不在生产 Catalog。
 
 `network_runtime.l0.promotion` 实现离线 L1 → L0 流程：
 
 1. `load_skill_source()` 使用统一 `skills.skill_format` 解析标准 `SKILL.md`；
 2. `CapabilityCatalogManifest` 固定 Provider/version、capability role、profile 和输入输出 Schema；
-3. `promotion_prompt()` 输出包含 L1、Catalog、L0 Schema 和禁止猜测规则的有界 JSON packet；
-4. `assess_promotion()` 把 source/catalog hash 注入候选 labels，随后进行交叉检查和严格编译；
-5. `package_promotion()` 仅为零 error 候选生成 `SKILL.md`、`candidate.yaml`、`compiled.json` 和 `report.json`；
-6. `review_promotion()` 重算 proposal 与文件 hash，最多写入一个 approve/reject 记录；
-7. 所有报告固定 `executionEligible=false`、`autoActivated=false`，不存在 Runtime loader 副作用。
+3. `build_l05_spec()` 生成严格 `StructuredNaturalLanguageSkill`，以自然语言 YAML 固定参数、约束、六阶段 workflow、Capability 选项、风险、停止条件、结果和来源 hash；
+4. `promotion_prompt()` 输出包含 L1、L0.5、Catalog、L0 Schema 和禁止猜测规则的有界 JSON packet；
+5. `assess_promotion()` 检查 L0.5 不得偏离 L1、L0 不得扩大 L0.5，再把 source/catalog/L0.5 hash 注入候选 labels 并严格编译；
+6. `package_promotion()` 保存 Capability Catalog、编号 L1/L0.5/L0 文件及逐级 `previousSha256` 的 `trajectory.json`；
+7. `review_promotion()` 重算 proposal、所有文件、阶段顺序和 trajectory hash，最多写入一个 approve/reject 记录；
+8. 所有报告固定 `executionEligible=false`、`autoActivated=false`，不存在 Runtime loader 副作用。
+
+`network_runtime.l0.production_trajectory` 为 21 个存量生产 L0 构建源码内解释档案。生成器从权威 Contract 反向 bootstrap 标准 L1 和 L0.5，生成仅包含该 Contract 所用角色/Schema 的 Capability Catalog，再调用同一 `assess_promotion()`。校验器要求零 finding、去除 proposal-only labels 后 semantic hash 相等、authoring 重新编译后的完整 contract hash 相等、compiled JSON 等于运行 Catalog，并验证四阶段文件 hash 和 `previousSha256`。反向来源和证据边界写入每份 report，避免把 bootstrap 误报成模型独立推导。
 
 ### 6. IntentSpec 与参数编译
 
@@ -556,9 +559,13 @@ The Worker accepts one JSON object per Unix-socket line. Malformed or unknown re
 
 A frozen `L0SkillContract` binds identity/version, one tool contract, intent kind, target fields, allowed profiles, fixed steps, and a canonical contract hash. Every mutation resolves an exact `(skill_id, version, contract_hash)`. A capability may implement multiple semantic contracts; when candidates are ambiguous, Runtime requires an explicit L0 id and never guesses from the tool name.
 
-L0 v2 adds a compatible authoring/compiler layer. `AtomicEffect` defines S1. A constraint-derived S11 can only fix or narrow parameters and strengthen approval. An extension-derived S11 can add inputs, observations, predicates, and non-conflicting desired-state fields. `CompositeEffect` binds exact child versions/hashes in a DAG with checkpoints and reverse compensation. Compilation recursively flattens inheritance and enforces monotonic safety; Runtime receives only immutable artifacts. The multi-version Catalog exposes `explain`, `diff`, and `graph` review surfaces. The bundled REST examples remain an SDK/compiler prototype; the Core-72-qualified v1 contracts stay on the DSH execution path until Provider, resolver/expression, loader, and fault-injection qualification are complete.
+L0 v2 is the production semantic authority as well as the authoring/compiler layer. `AtomicEffect` defines S1. A constraint-derived S11 can only fix or narrow parameters and strengthen approval. An extension-derived S11 can add inputs, observations, predicates, and non-conflicting desired-state fields. `CompositeEffect` binds exact child versions/hashes in a DAG with checkpoints and reverse compensation. Compilation recursively flattens inheritance and enforces monotonic safety; Runtime receives only immutable artifacts. The multi-version Catalog exposes `explain`, `diff`, and `graph` review surfaces.
 
-`network_runtime.l0.promotion` implements the offline L1 → L0 path. It parses the standard Skill through `skills.skill_format`, binds a versioned Capability Catalog, emits a bounded Agent prompt packet, injects source/catalog hashes into the candidate, cross-checks schemas and roles, compiles strictly, packages immutable review files, and permits one integrity-checked human decision. Every report remains non-executable and non-activated; no Runtime loader side effect exists.
+`network_runtime.l0.production` compiles all 21 built-in reviewed mutation capabilities. `network_runtime.l0.runtime_loader` binds each exact `(l0_id, version)` to an existing qualified ToolContract, verifier, optional compensator, and profile, then validates parameters, desired state, preflight, and adapter parity. `network_runtime.l0.expressions` permits path reads from approved roots only; calls/operators and unknown resolvers fail closed. `NetworkRuntime.prepare()` and execution-time revalidation both enforce the v2 contract, and effect dispatch sends only fields rendered by the v2 request template from approved arguments. The URL1 REST examples have no real Provider and remain outside the production Catalog.
+
+`network_runtime.l0.promotion` implements the offline L1 → L0 path as a three-stage trajectory. It parses the standard Skill, binds a versioned Capability Catalog, builds a strict but human-readable `StructuredNaturalLanguageSkill`, and includes L1 plus L0.5 in the bounded Agent prompt. Assessment prevents L0.5 drift from L1 and L0 widening of L0.5 before strict compilation. Packaging stores numbered L1/L0.5/L0 artifacts and a predecessor-linked `trajectory.json`; review recalculates every file, stage order, and trajectory hash before recording one decision. Every report remains non-executable and non-activated; no Runtime loader side effect exists.
+
+`network_runtime.l0.production_trajectory` builds source-controlled explanation archives for all 21 existing production L0 contracts. It reverse-bootstraps a standard L1 and L0.5 from the authoritative contract, derives a capability catalog containing only the roles/schemas used by that contract, and invokes the same `assess_promotion()`. Validation requires zero findings, equal semantic hashes after proposal-only labels are removed, an exact full contract hash after recompiling authoring, compiled JSON equality with the Runtime Catalog, and intact stage/predecessor hashes. Every report declares the reverse-bootstrap origin so it cannot be misrepresented as independent model inference.
 
 Compilation rejects unknown/missing/type-invalid arguments, invalid entities, untrusted provenance on critical fields, and unsupported profiles. It emits normalized arguments, targets, constraints, desired state, an argument digest, and an immutable `intent_hash`. Free-form model instructions never become backend commands.
 

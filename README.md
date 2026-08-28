@@ -14,7 +14,7 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - 标准 MCP Provider Layer：只读 Network Observer、durable Network Actor，以及身份、应用目录、权限策略、变更、CMDB 和服务平台；
 - DSH/Hermes Harness Adapter、共享 Python Worker、A2A provider、作用域记忆、能力检索和离线评测。
 
-> 当前状态：P0 迁移、P0.5 Effect Runtime、P0.75-A/B/C Containerlab、P0.8 Service MCP、P0.9 Observer Boundary、P1.0 Durable Actor，以及 P1.1 Capability/Read Policy/Terminal Envelope/Durable Saga 本地原型均已完成。网络读写分别经过身份固定的 Observer/Actor MCP；真实 Containerlab 已验证成功提交、独立读回、故障后精确补偿和现场恢复。它仍不等于生产环境“绝对 100% 正确”；厂商控制器/设备、企业身份与审批、分布式 HA、远端不可变审计、备份恢复和生产 SLO 仍需 P1 后续资格认证。
+> 当前状态：P0 迁移、P0.5 Effect Runtime、P0.75-A/B/C Containerlab、P0.8 Service MCP、P0.9 Observer Boundary、P1.0 Durable Actor、P1.1 Capability/Read Policy/Terminal Envelope/Durable Saga 本地原型，以及 21/21 内置写能力的生产 L0 v2 升级均已完成。网络读写分别经过身份固定的 Observer/Actor MCP；真实 Containerlab 已验证成功提交、独立读回、故障后精确补偿和现场恢复。它仍不等于生产环境“绝对 100% 正确”；厂商控制器/设备、企业身份与审批、分布式 HA、远端不可变审计、备份恢复和生产 SLO 仍需 P1 后续资格认证。
 
 ### 分层术语
 
@@ -49,7 +49,7 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
 - DSH/Hermes 使用同一 Worker、L0 注册表、Effect Runtime、验证器和审计；
 - 标准 MCP SDK 的 stdio/Streamable HTTP client、服务身份/version pinning 与 schema hash 绑定；
-- 完整 Python 门禁：228 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
+- 完整 Python 门禁：239 个测试和 81 个子测试；另有 Containerlab 实际端到端演练。
 
 ### DSH only 与 DSH + Runtime 定量对比
 
@@ -99,7 +99,7 @@ scripts/netopyu-dsh compare-runtime --iterations 50 --record --label P1.2-iterat
 
 ### L0 v2 Skill SDK
 
-项目新增兼容式 L0 v2 authoring/compiler 原型，支持原子 S1、约束式 S11、扩展式 S11，以及组合式 S1+S2+… Saga。继承只在编译期发生，审批和执行只使用完全展开、带版本和哈希的不可变 Contract。详见 [L0 v2 设计](docs/l0-v2-design.md)。
+项目已将全部 21 个内置受审写能力升级为 L0 v2 权威契约，并保留声明式 SDK 来构建原子 S1、约束式 S11、扩展式 S11，以及组合式 S1+S2+… Saga。继承只在编译期发生；准备、审批、重校验和执行只使用完全展开、带版本和哈希的不可变 Contract。既有 ToolContract、verifier 和 compensator 只作为与精确 v2 契约绑定的合格执行 Adapter，不再是独立的语义真相源。详见 [L0 v2 设计](docs/l0-v2-design.md)和[生产迁移说明](docs/l0-v2-runtime-migration.md)。
 
 ```bash
 scripts/netopyu-l0 validate
@@ -108,16 +108,25 @@ scripts/netopyu-l0 explain network.privileged-access.grant
 scripts/netopyu-l0 diff network.access.grant network.guest-access.grant
 scripts/netopyu-l0 graph employee.application-access.provision
 scripts/netopyu-l0 compile --output artifacts/l0-v2/catalog.json
+scripts/netopyu-l0 runtime-validate
+scripts/netopyu-l0 runtime-list
+scripts/netopyu-l0 runtime-export --output artifacts/l0-v2/runtime-catalog.json
+scripts/netopyu-l0 runtime-trajectories-validate
+# 生产 Contract 变更后，由维护者显式重建并审查：
+scripts/netopyu-l0 runtime-trajectories-build
 ```
 
-示例位于 `network_runtime/l0/examples/`。当前已完成 Compiler、Catalog、继承安全检查、同 Capability 多语义、多版本 Registry 和 Saga 投影；示例 REST Capability 尚未接入真实 Provider，因此 v1 Runtime 仍是经过 Core-72 验证的执行兼容路径。
+生产 Catalog 位于 `network_runtime/l0/production.py`，21/21 个现有写工具在导入时编译为 `netopyu.io/l0-effect-compiled/v2`，并在 prepare 与执行前重校验阶段做契约/Adapter 一致性门禁；实际 Effect 参数由受限表达式引擎从已批准参数渲染，不能把模型原始参数直接透传给 Provider。`network_runtime/l0/examples/` 中的 URL1 REST Capability 仍是 SDK/Promotion 教学示例，尚无真实 Provider，因此不会自动注册到生产 Runtime。
+
+全部存量 L0 另有一份源码内可读档案，索引见 [生产 L0 轨迹](network_runtime/l0/production_trajectories/INDEX.md)。每个目录保存 Capability Catalog、L1 自然语言 Skill、L0.5 结构化自然语言 Skill、L0 authoring/compiled Contract、逐级 hash trajectory 和报告。主 `runtime-validate` 同时要求 21/21 Promotion 检查通过、21/21 精确 round trip，并验证所有文件和前后级 hash。存量 L1/L0.5 明确标注为从已受审 L0 反向 bootstrap 的解释基线：它验证可读投影和转换闭环，不冒充独立的模型语义推导。
 
 ### L1 → L0 辅助下沉
 
-离线 Promotion Pipeline 可以把 Anthropic 标准 `SKILL.md`、受信 API Capability Catalog 和人/Agent 生成的候选转换成不可变 L0 review proposal。它检查 L1 参数与工具覆盖、API observation/effect/compensation 角色、输入输出 Schema、风险、Profile、L0 编译和所有来源 hash。Agent 只能生成候选，批准也不会自动注册或执行。完整说明见 [L1 → L0 下沉设计](docs/l1-to-l0-promotion.md)。
+离线 Promotion Pipeline 保存完整的 `L1 自然语言 SKILL.md → L0.5 结构化自然语言 YAML → L0 authoring/compiled Contract` 轨迹。L0.5 先固定参数、约束、步骤、风险、停止条件、结果语义和可用 Capability，再让人/Agent 生成严格 L0。每阶段及前后关系都绑定 SHA-256；任一漂移会阻断 review。Agent 只能生成候选，批准也不会自动注册或执行。完整说明见 [L1 → L0 下沉设计](docs/l1-to-l0-promotion.md)。
 
 ```bash
 scripts/netopyu-l0 promote-inspect --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md
+scripts/netopyu-l0 promote-l05 --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml --output artifacts/l0-promotion/url1-L0.5.yaml
 scripts/netopyu-l0 promote-prompt --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml --output artifacts/l0-promotion/url1-prompt.json
 scripts/netopyu-l0 promote-assess --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --candidate network_runtime/l0/examples/s1-network-access-grant.yaml --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml
 ```
@@ -635,7 +644,7 @@ DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orc
 - standard MCP providers for a read-only Network Observer, a durable Network Actor, and identity, application, access policy, change, CMDB, and platform state;
 - DSH/Hermes adapters, a shared Python Worker, A2A provider, scoped memory, capability retrieval, and offline evaluation.
 
-> Status: P0 migration, P0.5 Effect Runtime, P0.75-A/B/C Containerlab, P0.8 Service MCP, P0.9 Observer Boundary, P1.0 Durable Actor, and the local P1.1 Capability/Read Policy/Terminal Envelope/Durable Saga prototype are complete. Network reads and writes cross separate identity-pinned Observer/Actor MCP boundaries. Real Containerlab runs qualified commit, independent readback, exact compensation, and baseline restoration. This is not absolute production correctness; vendor controllers/devices, enterprise identity/approval, distributed HA, remote immutable audit, backup/restore, and production SLO certification remain P1 work.
+> Status: P0 migration, P0.5 Effect Runtime, P0.75-A/B/C Containerlab, P0.8 Service MCP, P0.9 Observer Boundary, P1.0 Durable Actor, the local P1.1 Capability/Read Policy/Terminal Envelope/Durable Saga prototype, and the production L0 v2 migration of all 21 built-in mutation capabilities are complete. Network reads and writes cross separate identity-pinned Observer/Actor MCP boundaries. Real Containerlab runs qualified commit, independent readback, exact compensation, and baseline restoration. This is not absolute production correctness; vendor controllers/devices, enterprise identity/approval, distributed HA, remote immutable audit, backup/restore, and production SLO certification remain P1 work.
 
 ### Layer terminology
 
@@ -651,7 +660,7 @@ DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orc
 
 ### P0.5 completion scope
 
-The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema/capability hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, tamper-evident Runtime and Actor journals, persistent recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 228 tests and 39 subtests.
+The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema/capability hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, tamper-evident Runtime and Actor journals, persistent recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 239 tests and 81 subtests.
 
 ### DSH only versus DSH + Runtime benchmark
 
@@ -675,7 +684,7 @@ scripts/netopyu-dsh compare-runtime --iterations 50 --record --label P1.2-iterat
 
 ### L0 v2 Skill SDK
 
-The compatible L0 v2 authoring/compiler prototype supports atomic S1, constrained S11, extended S11, and S1+S2+… Composite Sagas. Derivation occurs only at compile time; approval and execution consume fully flattened, versioned, immutable hashes. See the bilingual [L0 v2 design](docs/l0-v2-design.md).
+All 21 built-in reviewed mutation capabilities now use compiled L0 v2 contracts as their semantic authority. The declarative SDK supports atomic S1, constrained S11, extended S11, and S1+S2+… Composite Sagas. Derivation occurs only at compile time; prepare, approval, revalidation, and execution consume fully flattened, versioned, immutable hashes. Existing ToolContracts, verifiers, and compensators remain only as qualified implementation adapters bound to exact v2 contracts. See the bilingual [L0 v2 design](docs/l0-v2-design.md) and [production migration guide](docs/l0-v2-runtime-migration.md).
 
 ```bash
 scripts/netopyu-l0 validate
@@ -684,16 +693,25 @@ scripts/netopyu-l0 explain network.privileged-access.grant
 scripts/netopyu-l0 diff network.access.grant network.guest-access.grant
 scripts/netopyu-l0 graph employee.application-access.provision
 scripts/netopyu-l0 compile --output artifacts/l0-v2/catalog.json
+scripts/netopyu-l0 runtime-validate
+scripts/netopyu-l0 runtime-list
+scripts/netopyu-l0 runtime-export --output artifacts/l0-v2/runtime-catalog.json
+scripts/netopyu-l0 runtime-trajectories-validate
+# Explicitly rebuild and review after a production Contract change:
+scripts/netopyu-l0 runtime-trajectories-build
 ```
 
-Examples live in `network_runtime/l0/examples/`. The Compiler, Catalog, monotonic derivation checks, multi-semantic/multi-version lookup, and Saga projection are implemented. The example REST capabilities do not yet have a real Provider, so the Core-72-qualified v1 contracts remain the execution-compatible DSH path.
+The production catalog is defined in `network_runtime/l0/production.py`. All 21 existing mutation tools compile to `netopyu.io/l0-effect-compiled/v2`; prepare and execution-time revalidation enforce contract/adapter parity, and the restricted expression engine renders the exact Provider effect arguments from approved inputs. The URL1 REST capability under `network_runtime/l0/examples/` remains an SDK/Promotion example without a real Provider and is not auto-registered into Runtime.
+
+Every existing L0 also has a source-controlled readable archive indexed in [production L0 trajectories](network_runtime/l0/production_trajectories/INDEX.md). Each directory preserves the Capability Catalog, natural-language L1, structured-natural-language L0.5, L0 authoring/compiled contracts, a predecessor-linked hash trajectory, and a report. The main `runtime-validate` gate requires 21/21 Promotion readiness, 21/21 exact compiler round trips, and file/stage integrity. These existing L1/L0.5 files are explicitly reverse-bootstrapped explanation baselines from reviewed L0; they validate readable projection and conversion closure without pretending to be independent model inference.
 
 ### Assisted L1 → L0 promotion
 
-The offline Promotion Pipeline combines an Anthropic-standard `SKILL.md`, a trusted API Capability Catalog, and a human/Agent candidate into an immutable L0 review proposal. It checks L1 parameter/tool coverage, API observation/effect/compensation roles, schemas, profiles, risk, L0 compilation, and source hashes. The Agent only drafts; even an approved review does not register or execute the contract. See the bilingual [promotion design](docs/l1-to-l0-promotion.md).
+The offline Promotion Pipeline preserves a complete `L1 natural-language SKILL.md → L0.5 structured-natural-language YAML → L0 authoring/compiled contract` trajectory. L0.5 fixes parameters, constraints, workflow phases, risk, stop conditions, outcome semantics, and trusted capability options before a human/Agent drafts strict L0. Every stage and predecessor link is SHA-256-bound; any drift blocks review. Even an approved review does not register or execute the contract. See the bilingual [promotion design](docs/l1-to-l0-promotion.md).
 
 ```bash
 scripts/netopyu-l0 promote-inspect --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md
+scripts/netopyu-l0 promote-l05 --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml --output artifacts/l0-promotion/url1-L0.5.yaml
 scripts/netopyu-l0 promote-prompt --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml --output artifacts/l0-promotion/url1-prompt.json
 scripts/netopyu-l0 promote-assess --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --candidate network_runtime/l0/examples/s1-network-access-grant.yaml --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml
 ```

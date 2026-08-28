@@ -1,0 +1,81 @@
+apiVersion: netopyu.io/capability-catalog/v1
+provider: netopyu.production.failover
+version: 1.0.0
+capabilities:
+- id: netopyu.tool.failover
+  role: effect
+  profiles:
+  - lan
+  inputs:
+    resource_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    target:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: failover
+- id: netopyu.tool.mock_operation_status
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    resource_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+- id: netopyu.verifier.mock-state
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    resource_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean

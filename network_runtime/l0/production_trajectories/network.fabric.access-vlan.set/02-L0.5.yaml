@@ -1,0 +1,84 @@
+apiVersion: netopyu.io/l0.5-structured-skill/v1
+kind: StructuredNaturalLanguageSkill
+skillId: network_fabric_access_vlan_set
+title: network.fabric.access-vlan.set
+purpose: 以精确参数安全执行 network.fabric.access-vlan.set，并通过独立证据验证结果。 / Safely execute network.fabric.access-vlan.set
+  with exact inputs and independent evidence.
+profiles:
+- dc
+parameters:
+  device_id: 'device_id；必填 / Required string；最长长度 / maximum length: 4096。'
+  interface: 'interface；必填 / Required string；最长长度 / maximum length: 4096。'
+  vlan_id: 'vlan_id；必填 / Required integer；最小值 / minimum: 1；最大值 / maximum: 4094。'
+  reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
+    4096。'
+  verification_probe_id: 'verification_probe_id；可选 / Optional string；最长长度 / maximum
+    length: 4096。'
+constraints:
+- 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
+  inputs, target, and preflight.
+- '只允许 profile：dc。 / Allowed profiles only: dc.'
+- Provider 返回不能替代独立验证。 / A Provider response cannot replace independent verification.
+- 写结果不确定时先只读对账，禁止盲目重试。 / Reconcile read-only after an indeterminate result; never
+  retry blindly.
+- 验证失败时只能使用合同声明的补偿并独立验证恢复。 / On verification failure, use only contractual compensation
+  and independently verify restoration.
+workflow:
+- phase: validate
+  instruction: 校验每个已记录参数并解析关键身份，不得推断。 / Validate every documented parameter and resolve
+    critical identities without inference.
+  capabilityOptions: []
+- phase: preflight
+  instruction: 通过独立 Observation 读取当前状态并保留 revision 与回滚证据。 / Read current state through
+    an independent observation and preserve revision plus rollback evidence.
+  capabilityOptions:
+  - network.fabric.access-vlan.get
+- phase: approval
+  instruction: 在任何 Effect 前展示并绑定精确不可变变更。 / Present and bind the exact immutable change
+    before any effect.
+  capabilityOptions: []
+- phase: effect
+  instruction: 只用已批准且通过 Schema 的输入调用一次受审 Effect。 / Invoke one reviewed effect with
+    only approved and schema-valid inputs.
+  capabilityOptions:
+  - network.fabric.access-vlan.set
+- phase: verification
+  instruction: 通过独立 Observation 判定成功，禁止只依赖写响应。 / Determine success from an independent
+    observation, never from the write response alone.
+  capabilityOptions:
+  - netopyu.verifier.fabric-access-vlan
+- phase: compensation
+  instruction: 验证失败时恢复精确前态并独立验证恢复结果。 / On failed verification, restore the exact prior
+    state and independently verify restoration.
+  capabilityOptions:
+  - network.fabric.access-vlan.restore
+capabilities:
+  effects:
+  - network.fabric.access-vlan.set
+  observations:
+  - netopyu.rollback-verifier.fabric-access-vlan-snapshot-v1
+  - netopyu.verifier.fabric-access-vlan
+  - network.fabric.access-vlan.get
+  compensations:
+  - network.fabric.access-vlan.restore
+safety:
+  risk: high
+  approvalRequired: true
+  unknownOutcomePolicy: 任何重试前先只读对账，禁止盲目重复 Effect。 / Read-only reconciliation before
+    any retry; never blindly repeat an effect.
+  stopConditions:
+  - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
+    inputs, target, and preflight.
+  - 写结果不确定时先只读对账，禁止盲目重试。 / Reconcile read-only after an indeterminate result; never
+    retry blindly.
+  nonCompensableJustification: null
+outcomes:
+  success: 独立验证的目标状态或独立验证的精确补偿状态。 / Independently verified desired state or independently
+    verified exact compensation.
+  failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
+    explicit recovery state.
+  rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
+sourceSkillSha256: sha256:ced788f9ea5a63a0491d39cef278301515ea9478686f326e64115f48a48427e9
+capabilityCatalogSha256: sha256:a624b5b27ae885821779ed31ee4f6ac2ab2a552b82172d0148e684344262d27a
+previousStageSha256: sha256:ced788f9ea5a63a0491d39cef278301515ea9478686f326e64115f48a48427e9
+unresolvedQuestions: []

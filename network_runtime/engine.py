@@ -44,6 +44,8 @@ from .evidence import (
 )
 from .journal import NetworkJournal
 from .l0_skills import REGISTRY as L0_SKILLS, L0SkillContract, compile_intent
+from .l0.models import CompiledAtomicEffect
+from .l0.runtime_loader import require_effect_arguments, validate_runtime_projection
 from .policies import ToolContract, project_arguments, resolve_contract
 from .validation import assess_risk, compile_parameters
 from .verifiers import REGISTRY as VERIFIERS, verify_operation
@@ -243,6 +245,36 @@ class NetworkRuntime:
                     provenance=compiled.provenance,
                     targets=compiled.targets,
                 )
+                if not isinstance(l0_contract.compiled_contract, CompiledAtomicEffect):
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["write L0 is not an activated compiled AtomicEffect v2"],
+                    }
+                parity = validate_runtime_projection(
+                    compiled=l0_contract.compiled_contract,
+                    tool_name=tool_name,
+                    tool_contract_id=contract.contract_id,
+                    verifier_id=contract.verifier,
+                    compensator_id=contract.compensator,
+                    profile=backend.profile_id,
+                    arguments=compiled.arguments,
+                    intent=intent.to_dict(),
+                    resolver_context={
+                        "profile": backend.profile_id,
+                        "mode": backend.mode,
+                        "provider": source,
+                    },
+                )
+                if not parity.ok:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [
+                            "L0 v2 Runtime parity failed: " + error
+                            for error in parity.errors
+                        ],
+                    }
             if requires_approval and contract.verifier not in VERIFIERS.contract_ids():
                 return {
                     "ok": False,
@@ -424,6 +456,10 @@ class NetworkRuntime:
             try:
                 backend = await self.backend_factory(plan.profile)
                 contract = self._revalidate_contract(plan, backend)
+                effect_arguments = require_effect_arguments(
+                    L0_SKILLS.get(plan.l0_skill_id, plan.l0_skill_version),
+                    plan.arguments,
+                )
                 if plan.workflow_run_id and plan.workflow_template_hash:
                     with WorkflowRuntime(self.journal_path) as workflow_runtime:
                         workflow_runtime.validate_plan_binding(
@@ -475,7 +511,7 @@ class NetworkRuntime:
                     effect_dispatched = True
                     result = _render(await asyncio.wait_for(
                         backend.invoke_effect(
-                            plan.tool_name, plan.arguments, plan=plan, phase="execute",
+                            plan.tool_name, effect_arguments, plan=plan, phase="execute",
                         ),
                         timeout=self.execution_timeout_seconds,
                     ))
@@ -879,6 +915,25 @@ class NetworkRuntime:
         )
         if intent.intent_hash != plan.intent_hash or intent.to_dict() != plan.intent_spec:
             raise PlanIntegrityError("approved intent is not bound to the L0 Skill plan")
+        if not isinstance(l0_contract.compiled_contract, CompiledAtomicEffect):
+            raise PlanIntegrityError("approved L0 is not a compiled AtomicEffect v2")
+        parity = validate_runtime_projection(
+            compiled=l0_contract.compiled_contract,
+            tool_name=plan.tool_name,
+            tool_contract_id=contract.contract_id,
+            verifier_id=contract.verifier,
+            compensator_id=contract.compensator,
+            profile=plan.profile,
+            arguments=plan.arguments,
+            intent=intent.to_dict(),
+            resolver_context={
+                "profile": plan.profile,
+                "mode": backend.mode,
+                "provider": current_source,
+            },
+        )
+        if not parity.ok:
+            raise PlanIntegrityError("L0 v2 Runtime parity changed: " + "; ".join(parity.errors))
         return contract
 
     @staticmethod

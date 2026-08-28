@@ -1,0 +1,171 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:c16600415f3e23496e8dcdf17f9a2b0c9b8171da2b2dd79d2fd65d24b8e80e08",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for dc_grant_app_access",
+    "id": "network.dc.app-access.grant",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "user_id,app_id",
+      "runtime-tool-contract": "dc-access-grant-v1",
+      "runtime-verifier": "dc-access-granted"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": {
+      "arguments": {
+        "app_id": "${arguments.app_id}",
+        "user_id": "${arguments.user_id}"
+      },
+      "capability": "network.dc.app-access.revoke",
+      "tool": "dc_revoke_app_access",
+      "verification": {
+        "arguments": {
+          "app_id": "${arguments.app_id}",
+          "user_id": "${arguments.user_id}"
+        },
+        "capability": "netopyu.rollback-verifier.inverse-tool-v1",
+        "predicates": [
+          {
+            "expected": true,
+            "field": "restored",
+            "operator": "equals"
+          }
+        ]
+      }
+    },
+    "effect": {
+      "capability": "network.dc.app-access.grant",
+      "internal": {},
+      "request": {
+        "app_id": "${arguments.app_id}",
+        "reason": "${arguments.reason}",
+        "role": "${arguments.role}",
+        "user_id": "${arguments.user_id}"
+      },
+      "tool": "dc_grant_app_access"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "compensate"
+    },
+    "intent": {
+      "desiredState": {
+        "allowed": true
+      },
+      "kind": "grant_application_access",
+      "targetFields": [
+        "user_id",
+        "app_id"
+      ]
+    },
+    "parameters": {
+      "app_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "reason": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": 1,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "role": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": false,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "user_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "app_id": "${arguments.app_id}",
+          "user_id": "${arguments.user_id}"
+        },
+        "capability": "network.dc.application-access.check",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "dc"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "app_id": "${arguments.app_id}",
+        "user_id": "${arguments.user_id}"
+      },
+      "capability": "netopyu.verifier.dc-access-granted",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

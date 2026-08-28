@@ -1,0 +1,128 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.dc.app-access.grant
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for dc_grant_app_access
+  labels:
+    runtime-tool-contract: dc-access-grant-v1
+    runtime-verifier: dc-access-granted
+    runtime-preflight-fields: user_id,app_id
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - dc
+  effect:
+    capability: network.dc.app-access.grant
+    tool: dc_grant_app_access
+    request:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+      role: ${arguments.role}
+      reason: ${arguments.reason}
+  intent:
+    kind: grant_application_access
+    targetFields:
+    - user_id
+    - app_id
+    desiredState:
+      allowed: true
+  parameters:
+    user_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    role:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: network.dc.application-access.check
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.dc-access-granted
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation:
+    capability: network.dc.app-access.revoke
+    tool: dc_revoke_app_access
+    arguments:
+      user_id: ${arguments.user_id}
+      app_id: ${arguments.app_id}
+    verification:
+      capability: netopyu.rollback-verifier.inverse-tool-v1
+      arguments:
+        user_id: ${arguments.user_id}
+        app_id: ${arguments.app_id}
+      predicates:
+      - field: restored
+        operator: equals
+        expected: true
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: compensate
+    compensationFailed: manual_intervention

@@ -1,0 +1,136 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:98206a9defa6e464800205dbf375abd5faf0bce9718e24cea392156a607efa68",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for grant_user_access",
+    "id": "network.lan.user-access.grant",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "user_id",
+      "runtime-tool-contract": "lan-access-grant-v1",
+      "runtime-verifier": "lan-access-granted"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": {
+      "arguments": {
+        "user_id": "${arguments.user_id}"
+      },
+      "capability": "network.lan.user-access.revoke",
+      "tool": "revoke_user_access",
+      "verification": {
+        "arguments": {
+          "user_id": "${arguments.user_id}"
+        },
+        "capability": "netopyu.rollback-verifier.inverse-tool-v1",
+        "predicates": [
+          {
+            "expected": true,
+            "field": "restored",
+            "operator": "equals"
+          }
+        ]
+      }
+    },
+    "effect": {
+      "capability": "network.lan.user-access.grant",
+      "internal": {},
+      "request": {
+        "reason": "${arguments.reason}",
+        "user_id": "${arguments.user_id}"
+      },
+      "tool": "grant_user_access"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "compensate"
+    },
+    "intent": {
+      "desiredState": {
+        "admitted": true
+      },
+      "kind": "grant_network_access",
+      "targetFields": [
+        "user_id"
+      ]
+    },
+    "parameters": {
+      "reason": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": 1,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "user_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "user_id": "${arguments.user_id}"
+        },
+        "capability": "network.access.user.get",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "lan"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "user_id": "${arguments.user_id}"
+      },
+      "capability": "netopyu.verifier.lan-access-granted",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

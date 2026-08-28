@@ -6,7 +6,7 @@ the step graph, desired state, verifier, compensation policy or failure mode.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 from .contracts import PlanIntegrityError, sha256_json
@@ -40,6 +40,7 @@ class L0SkillContract:
     steps: tuple[L0StepContract, ...]
     contract_hash: str
     schema_version: int = L0_SKILL_SCHEMA_VERSION
+    compiled_contract: Any | None = field(default=None, repr=False, compare=False)
 
     @classmethod
     def create(
@@ -87,7 +88,7 @@ class L0SkillContract:
         })
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             "schema_version": self.schema_version,
             "skill_id": self.skill_id,
             "version": self.version,
@@ -99,8 +100,61 @@ class L0SkillContract:
             "steps": [step.to_dict() for step in self.steps],
             "contract_hash": self.contract_hash,
         }
+        if self.compiled_contract is not None:
+            value.update({
+                "contract_format": self.compiled_contract.api_version,
+                "effect_capability": self.compiled_contract.spec.effect.capability,
+                "derivation": self.compiled_contract.derivation,
+            })
+        return value
+
+    @classmethod
+    def from_compiled(cls, compiled: Any, binding: Any) -> "L0SkillContract":
+        compensatable = compiled.spec.compensation is not None
+        steps = [
+            L0StepContract("validate_parameters", "prepare", "always", "clarify_or_reject"),
+            L0StepContract("compile_intent", "prepare", "validated_arguments", "clarify_or_reject"),
+            L0StepContract("preflight", "prepare", "always", "reject"),
+            L0StepContract("approval", "approve", "always", "reject"),
+            L0StepContract("revalidate", "execute", "always", "abort_without_write"),
+            L0StepContract("execute", "execute", "preconditions_unchanged", "reconcile"),
+            L0StepContract("verify", "verify", "write_may_have_been_sent", "compensate_or_escalate"),
+        ]
+        if compensatable:
+            steps.append(L0StepContract(
+                "compensate", "compensate", "verification_failed", "manual_intervention",
+            ))
+        steps.append(L0StepContract("audit", "terminal", "always", "fail_closed"))
+        return cls(
+            skill_id=compiled.metadata.id,
+            version=compiled.metadata.version,
+            tool_name=binding.tool_name,
+            tool_contract_id=binding.tool_contract_id,
+            intent_kind=compiled.spec.intent.kind,
+            target_fields=compiled.spec.intent.target_fields,
+            allowed_profiles=compiled.spec.profiles,
+            steps=tuple(steps),
+            contract_hash=compiled.contract_hash,
+            schema_version=2,
+            compiled_contract=compiled,
+        )
 
     def verify_integrity(self) -> None:
+        if self.compiled_contract is not None:
+            payload = self.compiled_contract.model_dump(by_alias=True, mode="json")
+            observed = payload.pop("contractHash")
+            if observed != self.contract_hash or sha256_json(payload) != observed:
+                raise PlanIntegrityError(f"L0 v2 contract hash mismatch: {self.skill_id}")
+            if (
+                self.compiled_contract.metadata.id != self.skill_id
+                or self.compiled_contract.metadata.version != self.version
+                or self.compiled_contract.spec.effect.tool != self.tool_name
+                or self.compiled_contract.spec.intent.kind != self.intent_kind
+                or self.compiled_contract.spec.intent.target_fields != self.target_fields
+                or self.compiled_contract.spec.profiles != self.allowed_profiles
+            ):
+                raise PlanIntegrityError(f"L0 v2 Runtime projection mismatch: {self.skill_id}")
+            return
         payload = self.to_dict()
         payload.pop("contract_hash")
         if sha256_json(payload) != self.contract_hash:
@@ -132,6 +186,25 @@ class IntentSpec:
         provenance: dict[str, str],
         targets: tuple[str, ...],
     ) -> "IntentSpec":
+        arguments_digest = sha256_json(arguments)
+        desired_state = _desired_state(contract.tool_name, arguments)
+        if contract.compiled_contract is not None:
+            from .l0.expressions import render_template
+
+            desired_state = render_template(
+                contract.compiled_contract.spec.intent.desired_state,
+                {
+                    "arguments": arguments,
+                    "intent": {
+                        "arguments_digest": arguments_digest,
+                        "configuration_digest": sha256_json(
+                            arguments.get("config_lines")
+                            or arguments.get("config_text")
+                            or arguments.get("changes")
+                        ),
+                    },
+                },
+            )
         stable = {
             "schema_version": INTENT_SCHEMA_VERSION,
             "intent_kind": contract.intent_kind,
@@ -140,9 +213,9 @@ class IntentSpec:
             "profile": profile,
             "operation": contract.tool_name,
             "targets": list(targets),
-            "desired_state": _desired_state(contract.tool_name, arguments),
+            "desired_state": desired_state,
             "constraints": _constraints(arguments),
-            "arguments_digest": sha256_json(arguments),
+            "arguments_digest": arguments_digest,
             "provenance": dict(sorted(provenance.items())),
         }
         return cls(intent_hash=sha256_json(stable), **{
@@ -242,79 +315,15 @@ class L0SkillRegistry:
 REGISTRY = L0SkillRegistry()
 
 
-def _register(
-    skill_id: str,
-    version: str,
-    tool_name: str,
-    intent_kind: str,
-    target_fields: tuple[str, ...],
-    *,
-    profiles: tuple[str, ...] = ("*",),
-) -> None:
-    tool_contract = reviewed_contracts()[tool_name]
-    REGISTRY.register(L0SkillContract.create(
-        skill_id=skill_id,
-        version=version,
-        tool_name=tool_name,
-        tool_contract_id=tool_contract.contract_id,
-        intent_kind=intent_kind,
-        target_fields=target_fields,
-        allowed_profiles=profiles,
-        compensatable=tool_contract.compensator is not None,
-    ))
+def _register_production_v2() -> None:
+    from .l0.production import BINDINGS, contracts
+
+    for compiled in contracts():
+        binding = BINDINGS[(compiled.metadata.id, compiled.metadata.version)]
+        REGISTRY.register(L0SkillContract.from_compiled(compiled, binding))
 
 
-_register(
-    "network.device.config.edit", "1.0.0", "edit_device_config", "configure_device",
-    ("device_id",), profiles=("lan", "dc"),
-)
-_register("network.device.config.push", "1.0.0", "push_config", "configure_device", ("device_id",))
-_register("network.service.restart", "1.0.0", "restart_service", "restart_service", ("service",))
-_register("network.service.rollback", "1.0.0", "rollback_service", "rollback_service", ("service",))
-_register("network.deploy.rollback", "1.0.0", "rollback_deploy", "rollback_deployment", ("deploy_id",))
-_register("network.node.drain", "1.0.0", "drain_node", "drain_node", ("node_id",))
-_register("network.resource.failover", "1.0.0", "failover", "failover_resource", ("resource_id",))
-_register("network.resource.delete", "1.0.0", "delete_resource", "delete_resource", ("resource_id",))
-_register("network.lan.user-access.grant", "1.0.0", "grant_user_access", "grant_network_access", ("user_id",), profiles=("lan",))
-_register("network.lan.user-access.revoke", "1.0.0", "revoke_user_access", "revoke_network_access", ("user_id",), profiles=("lan",))
-_register("network.dc.fabric-config.push", "1.0.0", "dc_config_push", "configure_fabric", ("node",), profiles=("dc",))
-_register("network.dc.app-access.grant", "1.0.0", "dc_grant_app_access", "grant_application_access", ("user_id", "app_id"), profiles=("dc",))
-_register("network.dc.app-access.revoke", "1.0.0", "dc_revoke_app_access", "revoke_application_access", ("user_id", "app_id"), profiles=("dc",))
-_register("network.wan.path.failover", "1.0.0", "wan_failover_path", "failover_wan_path", ("tunnel",), profiles=("wan",))
-_register(
-    "network.fabric.access-vlan.set", "1.0.0", "fabric_set_access_vlan",
-    "set_access_vlan", ("device_id", "interface"), profiles=("dc",),
-)
-_register(
-    "service.access.entitlement.grant", "1.0.0",
-    "access_policy_grant_entitlement", "grant_service_entitlement",
-    ("user_id", "app_id"), profiles=("lan", "dc"),
-)
-_register(
-    "service.access.entitlement.revoke", "1.0.0",
-    "access_policy_revoke_entitlement", "revoke_service_entitlement",
-    ("user_id", "app_id"), profiles=("lan", "dc"),
-)
-_register(
-    "service.platform.restart", "1.0.0",
-    "platform_restart_service", "restart_platform_service",
-    ("service", "environment"), profiles=("lan", "dc"),
-)
-_register(
-    "service.platform.rollback", "1.0.0",
-    "platform_rollback_service", "rollback_platform_service",
-    ("service", "environment"), profiles=("lan", "dc"),
-)
-_register(
-    "network.application.enforcement.apply", "1.0.0",
-    "network_apply_app_enforcement", "apply_network_application_enforcement",
-    ("user_id", "app_id"), profiles=("lan", "dc"),
-)
-_register(
-    "network.application.enforcement.revoke", "1.0.0",
-    "network_revoke_app_enforcement", "revoke_network_application_enforcement",
-    ("user_id", "app_id"), profiles=("lan", "dc"),
-)
+_register_production_v2()
 
 
 def compile_intent(

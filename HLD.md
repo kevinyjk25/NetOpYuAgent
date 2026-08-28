@@ -304,13 +304,15 @@ Saga 只协调受审 L0 计划，不直接持有 Provider 凭据或 execution no
 
 ### 20. L0 v2 authoring/compiler
 
-`network_runtime/l0/` 位于 L1 工作流与既有执行内核之间，但只承担合同开发和编译。作者可声明 Atomic、Constraint Derived、Extension Derived 或 Composite；Compiler 负责引用解析、继承展开、单调安全校验、DAG 校验和确定性 hash；Catalog 负责精确版本、同 Capability 多语义查询、解释、差异与 Saga 投影。Runtime 只消费编译产物，不允许模型在执行期修改继承、步骤、验证或补偿。
+`network_runtime/l0/` 位于 L1 工作流与执行内核之间。作者可声明 Atomic、Constraint Derived、Extension Derived 或 Composite；Compiler 负责引用解析、继承展开、单调安全校验、DAG 校验和确定性 hash；Catalog 负责精确版本、同 Capability 多语义查询、解释、差异与 Saga 投影。Runtime 只消费编译产物，不允许模型在执行期修改继承、步骤、验证或补偿。
 
-这降低了创建 S11 的重复代码，但没有把底层 API 的事务缺陷隐藏起来。一个可执行的 S1 仍必须有独立 Observation、验证和必要的 Compensation Provider。当前 REST 示例只认证 SDK/Compiler；接入 DSH 执行面需要完成 Gateway 和故障测试。
+全部 21 个内置受审写能力已经编译为 v2 Contract 并成为生产语义权威。`RuntimeBinding` 把每个精确 id/version 绑定到既有 ToolContract、verifier、可选 compensator 和 profile；这些对象只作为经过认证的实现 Adapter。prepare 和执行前重校验同时检查 Contract/Adapter parity，Provider 只接收由受限表达式引擎从已批准输入渲染的 Effect 参数。URL1 REST 示例没有真实 Provider，仍只认证 SDK/Promotion，不会自动进入生产 Catalog。完整迁移关系见 [docs/l0-v2-runtime-migration.md](docs/l0-v2-runtime-migration.md)。
+
+可解释性平面在 `network_runtime/l0/production_trajectories/` 为每个生产 L0 保存 Capability Catalog、L1、L0.5、L0 authoring/compiled 和 hash chain。`runtime-validate` 重新运行 Promotion 结构门禁和编译 round trip，要求 21/21 语义投影与生产 Contract 一致。该平面只读解释生产权威；反向 bootstrap 的 L1/L0.5 不进入 Harness Skill Registry，也不自动发布合同。
 
 ### 21. L1 → L0 Promotion
 
-Promotion 是独立于生产执行路径的开发组件。它读取标准 `SKILL.md`、受信 Capability Catalog 和 Agent/人工候选，输出带来源 hash 的不可变 proposal。静态检查覆盖参数、工具边界、API role/schema、profile、风险和 L0 v2 编译；人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
+Promotion 是独立于生产执行路径的开发组件。它保存 `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill → L0 authoring/compiled Contract` 三阶段轨迹。L0.5 用人可读 YAML 固定参数、约束、流程、风险、停止条件、结果语义和受信 Capability 选项；静态检查阻止 L0.5 偏离 L1 或 L0 扩大 L0.5。Proposal 以逐级 hash 链保存全部阶段，人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
 
 ---
 
@@ -508,10 +510,12 @@ JSON, Markdown, and HTML reports separate fixed-scenario control coverage from a
 
 ### 17. L0 v2 authoring/compiler
 
-`network_runtime/l0/` sits between L1 workflows and the qualified execution kernel, but only for contract development and compilation. Authors declare Atomic, Constraint Derived, Extension Derived, or Composite effects. The Compiler resolves references, flattens derivation, enforces monotonic safety and DAG rules, and hashes deterministically. The Catalog provides exact versions, multiple semantic contracts per capability, explanations, diffs, graphs, and Saga projection. Runtime consumes immutable compiled artifacts and gives the model no execution-time control over derivation, steps, verification, or compensation.
+`network_runtime/l0/` sits between L1 workflows and the qualified execution kernel. Authors declare Atomic, Constraint Derived, Extension Derived, or Composite effects. The Compiler resolves references, flattens derivation, enforces monotonic safety and DAG rules, and hashes deterministically. The Catalog provides exact versions, multiple semantic contracts per capability, explanations, diffs, graphs, and Saga projection. Runtime consumes immutable compiled artifacts and gives the model no execution-time control over derivation, steps, verification, or compensation.
 
-This removes duplicate S11 code without concealing a weak API transaction. An executable S1 still needs an independent Observation, verifier, and compensation Provider where required. The REST examples qualify the SDK/Compiler only; DSH activation requires Gateway and fault-injection qualification.
+All 21 built-in reviewed mutation capabilities are compiled v2 contracts and are now the production semantic authority. An exact `RuntimeBinding` connects each id/version to the existing qualified ToolContract, verifier, optional compensator, and profile as implementation adapters. Prepare and execution-time revalidation enforce contract/adapter parity, while a restricted expression engine renders only approved effect arguments for the Provider. The URL1 REST examples have no real Provider and remain SDK/Promotion examples outside the production Catalog. See [docs/l0-v2-runtime-migration.md](docs/l0-v2-runtime-migration.md).
+
+The explainability plane under `network_runtime/l0/production_trajectories/` preserves a Capability Catalog, L1, L0.5, L0 authoring/compiled artifacts, and a hash chain for every production L0. `runtime-validate` reruns Promotion structure and exact compiler round trips for 21/21 semantic projections. This plane is a read-only explanation of production authority; reverse-bootstrapped L1/L0.5 artifacts never enter the Harness Skill Registry or auto-publish a contract.
 
 ### 18. L1 → L0 promotion
 
-Promotion is a development component outside the production execution path. It consumes a standard `SKILL.md`, trusted Capability Catalog, and Agent/human candidate, then emits a source-hashed immutable proposal. Static checks cover parameters, tool boundaries, API roles/schemas, profiles, risk, and L0 v2 compilation. Human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
+Promotion is a development component outside the production execution path. It preserves a three-stage `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill → L0 authoring/compiled contract` trajectory. Human-readable L0.5 YAML fixes parameters, constraints, workflow, risk, stop conditions, outcomes, and trusted capability options. Static checks prevent L0.5 drift from L1 and L0 widening of L0.5. The proposal stores every stage in a predecessor-linked hash chain; human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
