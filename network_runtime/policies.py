@@ -17,12 +17,16 @@ class ToolContract:
     compensator: str | None = None
     allowed_sources: tuple[str, ...] = ()
     requires_trusted_mcp: bool = False
+    capability_id: str | None = None
+    allowed_provider_kinds: tuple[str, ...] = ()
 
 
 _CONTRACTS: dict[str, ToolContract] = {
     "edit_device_config": ToolContract(
         "device-config-v1", "get_device_config", ("device_id", "section"), "device-config",
         "restore_device_config", ("device_id",), "device-config-snapshot-v1",
+        capability_id="network.device.config.edit",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "push_config": ToolContract(
         "mock-config-push-v1", "get_device_config", ("device_id",), "device-config",
@@ -42,10 +46,14 @@ _CONTRACTS: dict[str, ToolContract] = {
     "grant_user_access": ToolContract(
         "lan-access-grant-v1", "get_user_access", ("user_id",), "lan-access-granted",
         "revoke_user_access", ("user_id",), "inverse-tool-v1",
+        capability_id="network.lan.user-access.grant",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "revoke_user_access": ToolContract(
         "lan-access-revoke-v1", "get_user_access", ("user_id",), "lan-access-revoked",
         "grant_user_access", ("user_id",), "inverse-tool-v1",
+        capability_id="network.lan.user-access.revoke",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "dc_config_push": ToolContract(
         "dc-config-v2", "dc_get_applied_config", ("node",), "dc-config",
@@ -53,10 +61,14 @@ _CONTRACTS: dict[str, ToolContract] = {
     "dc_grant_app_access": ToolContract(
         "dc-access-grant-v1", "dc_check_user_app_access", ("user_id", "app_id"), "dc-access-granted",
         "dc_revoke_app_access", ("user_id", "app_id"), "inverse-tool-v1",
+        capability_id="network.dc.app-access.grant",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "dc_revoke_app_access": ToolContract(
         "dc-access-revoke-v1", "dc_check_user_app_access", ("user_id", "app_id"), "dc-access-revoked",
         "dc_grant_app_access", ("user_id", "app_id"), "inverse-tool-v1",
+        capability_id="network.dc.app-access.revoke",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "wan_failover_path": ToolContract(
         "wan-failover-v1", "wan_tunnel_status", (), "wan-failover",
@@ -67,6 +79,8 @@ _CONTRACTS: dict[str, ToolContract] = {
         "fabric-access-vlan",
         "fabric_restore_access_vlan", ("device_id", "interface"),
         "fabric-access-vlan-snapshot-v1",
+        capability_id="network.fabric.access-vlan.set",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "access_policy_grant_entitlement": ToolContract(
         "service-entitlement-grant-v1",
@@ -106,7 +120,8 @@ _CONTRACTS: dict[str, ToolContract] = {
         "network-app-enforcement-granted",
         "network_restore_app_enforcement", ("user_id", "app_id"),
         "network-app-enforcement-snapshot-v1",
-        ("network-lab",), False,
+        capability_id="network.application.enforcement.apply",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "network_revoke_app_enforcement": ToolContract(
         "network-app-enforcement-revoke-v1",
@@ -114,7 +129,8 @@ _CONTRACTS: dict[str, ToolContract] = {
         "network-app-enforcement-revoked",
         "network_restore_app_enforcement", ("user_id", "app_id"),
         "network-app-enforcement-snapshot-v1",
-        ("network-lab",), False,
+        capability_id="network.application.enforcement.revoke",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
 }
 
@@ -140,6 +156,35 @@ def resolve_contract(
         return None
     if contract.allowed_sources and source not in contract.allowed_sources:
         return None
+    capability_bound = False
+    if contract.capability_id:
+        metadata = metadata or {}
+        capability_id = metadata.get("capability_id")
+        # Temporary P0.9 compatibility permits the two reviewed in-process
+        # providers used by tests/backfills to omit capability metadata. Every
+        # real pragmatic Lab backend created by open_backend is enriched and
+        # follows the capability branch below. External providers never enter
+        # this compatibility path.
+        if capability_id is None and source in {"network-lab", "profile-mock"}:
+            capability_bound = False
+        elif (
+            capability_id != contract.capability_id
+            or metadata.get("provider_role") != "actor"
+            or metadata.get("provider_kind") not in contract.allowed_provider_kinds
+            or not str(metadata.get("capability_version") or "")
+        ):
+            return None
+        else:
+            capability_bound = True
+            if source.startswith("mcp:") and (
+                not metadata.get("trusted_for_writes")
+                or not str(metadata.get("provider_identity") or "").startswith(f"{source}:")
+                or not str(metadata.get("input_schema_digest") or "").startswith("sha256:")
+                or not str(metadata.get("output_schema_digest") or "").startswith("sha256:")
+            ):
+                return None
+    if capability_bound:
+        return contract
     if contract.requires_trusted_mcp:
         metadata = metadata or {}
         if (

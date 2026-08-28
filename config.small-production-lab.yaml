@@ -63,6 +63,12 @@ pragmatic:
       trusted_for_writes: true
       expected_server_name: netopyu.platform
       expected_server_version: 1.0.0
+    - name: network-observer
+      domain: network
+      transport: stdio
+      command: [.venv/bin/python, -m, network_provider.mcp_observer, --profile, lan, --manifest, labs/p075-b-small-production/lab.yaml, --command-timeout, '30']
+      expected_server_name: netopyu.network-observer
+      expected_server_version: 1.0.0
   lab:
     enabled: true
     provider: containerlab

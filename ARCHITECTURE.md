@@ -58,6 +58,8 @@ Domain L1 Skill 是“可以推理的业务编排”；Network/Service L0 Skill 
 - `dsh_adapter/`：把 Python 领域能力投影为 DSH 可消费的 manifest/commands。
 - `effect_runtime/`：领域中性的运行时入口和跨层只读 reconciliation。
 - `network_runtime/`：Effect Runtime 的计划状态机、合同、验证器、补偿器与兼容 API。
+- `network_runtime/provider_contracts.py`：稳定的 Network provider capability id/version 与角色注册表。
+- `network_provider/`：身份固定的只读 Network Observer MCP 与版本化证据封装。
 - `service_layer/`：官方 MCP SDK 服务、严格 structured result 和事务型业务仿真存储。
 - `network_lab/`：P0.75-A manifest、Containerlab provider、FRR 命令白名单、探测与故障注入。
 - `labs/p075-a-frr/`：可重建的 OSPF 主备路径实验拓扑和基线配置。
@@ -86,6 +88,7 @@ hermes-plugin-netopyu -> hermes_adapter -> Worker bridge protocol
 dsh_adapter -> effect_runtime / profiles / scoped services
 effect_runtime -> network_runtime safety kernel / reconciliation
 network_runtime -> backend metadata/callables / tools loader
+network_provider -> network_lab reviewed adapter / provider capability registry
 service_layer -> official MCP SDK / transactional local store
 profiles -> tools common helpers
 pragmatic backend -> tools / integrations / schema
@@ -120,6 +123,8 @@ evaluation -> public manifests / retrieval / test data
 8. **Audit every terminal path**：成功、拒绝、过期、漂移、回滚和人工介入都有终态事件。
 9. **Independent truths**：Service desired state、Network enforcement 和 data plane 分别读取并 reconciliation。
 10. **Provider binding**：受信 Service 写计划绑定 MCP server identity/version 与 input/output schema digest。
+11. **Capability over tool name**：Network provider 的稳定语义键是 capability id/version；tool name 只是 Harness 兼容别名。
+12. **Evidence before consumption**：外部 Network observation 必须通过 identity、capability、时间和 payload digest 验证后才能进入 verifier/reconciliation。
 
 ### 6. 架构决策记录
 
@@ -260,6 +265,13 @@ evaluation -> public manifests / retrieval / test data
 - **ADR-017：业务仿真状态一次初始化。** 六个 MCP 进程共享 SQLite；seed 使用版本标记只执行一次。审批检查、revision CAS、写入、幂等和审计位于同一个 `BEGIN IMMEDIATE` 事务；陈旧幂等结果不得在后续状态变化后重放。
 - **ADR-018：跨层 L1 不是分布式原子事务。** 当前 `service-network-access-reconcile` 把 Service 与 Network 写拆成独立审批计划，并在每步之间重读事实；恢复也创建新的受审 L0 计划。P1 若要求单审批 bundle/自动 saga，必须增加独立的 durable saga 合同，不能由模型临时拼接。
 
+### 14. P0.9 Network Provider Boundary 决策
+
+- **ADR-019：Runtime 拥有事务，MCP 拥有协议适配。** Domain Effect Runtime 继续拥有意图、L0 计划、风险、审批、执行状态、验证、补偿和审计；MCP server 只实现外部 Service/Network provider 合同。MCP 不因标准化传输而自动成为信任根。
+- **ADR-020：Network read/write provider 分权。** `netopyu.network-observer@1.0.0` 仅公开 observer capability，并以 `network-evidence-envelope-v1` 返回 evidence。Actor capability 仍由受控本地 Lab provider 执行，但同样绑定稳定 capability id/version。Observer 不持有写凭据，Actor 不得伪造独立观测证据。
+- **ADR-021：Actor MCP 迁移以 durable recovery 为前置条件。** 当前 config/fabric snapshot 属于 backend execution session。没有 durable snapshot/outbox、幂等恢复、租约/fencing、crash reconciliation 和独立凭据前，不把写操作拆入短生命周期 MCP 进程。完成这些控制后，可以 `network-actor-mcp` 替换本地实现而不改变 L0 语义。
+- 遥测、事件和大规模指标后续使用流式 evidence plane；MCP command/query 不承担高吞吐长期订阅。两条路径必须共享 correlation/target/capability schema，但不得把流事件直接当作写成功证明。
+
 ---
 
 ## English
@@ -291,6 +303,8 @@ Domain L1 Skills are model-assisted business orchestration. Network and Service 
 - `dsh_adapter/` projects Python domain capabilities into typed bridge commands.
 - `effect_runtime/` is the domain-neutral entry point and owns cross-layer read reconciliation.
 - `network_runtime/` implements the shared plan kernel and remains the compatibility API.
+- `network_runtime/provider_contracts.py` owns stable Network provider capability ids, versions, and roles.
+- `network_provider/` implements the identity-pinned read-only Network Observer MCP and evidence envelope.
 - `service_layer/` implements official-SDK MCP domains, strict results, and transactional local business simulation.
 - `network_lab/` owns the reviewed P0.75-A manifest, Containerlab provider, FRR command allowlist, probes, and fault injection.
 - `labs/p075-a-frr/` is the reproducible redundant-OSPF topology and baseline.
@@ -320,6 +334,8 @@ Effect Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Service
 - A terminal audit event for every outcome.
 - Independent Service desired state, Network enforcement, and data-plane evidence.
 - Trusted MCP writes bound to provider identity/version and schema digests.
+- Network providers bound by capability id/version rather than compatibility tool name.
+- External observations validated for identity, capability, freshness format, and payload digest before consumption.
 
 ### 6. Decisions
 
@@ -341,6 +357,10 @@ Effect Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Service
 - **ADR-016:** Service mutations use the same immutable-plan L0 kernel. Internal restore tools are hidden from the model and callable only by compensators.
 - **ADR-017:** shared Service SQLite seeding is versioned and one-shot. Change authorization, revision comparison, mutation, idempotency, and audit are one immediate transaction; stale replays fail.
 - **ADR-018:** the current cross-layer L1 flow is a sequence of independently approved plans, not a distributed atomic transaction. A future automatic saga or approval bundle requires its own durable reviewed contract.
+- **ADR-019:** Runtime owns end-to-end transaction semantics; MCP owns provider protocol adaptation. MCP transport does not create trust by itself.
+- **ADR-020:** Network reads and writes are separated. `netopyu.network-observer@1.0.0` exposes observer capabilities only and returns `network-evidence-envelope-v1`; the trusted local Lab Actor keeps mutations while binding the same stable capability model.
+- **ADR-021:** an Actor MCP requires durable snapshots/outbox, idempotent recovery, leases/fencing, crash reconciliation, and isolated credentials. Moving the current session-local rollback state into a short-lived MCP process before those controls would weaken safety.
+- High-volume telemetry and event streams belong on a separate evidence plane. MCP remains the command/query protocol; both paths share target/correlation/capability schemas, and stream events never prove mutation success by themselves.
 
 ### 7. Clean-code and extension policy
 

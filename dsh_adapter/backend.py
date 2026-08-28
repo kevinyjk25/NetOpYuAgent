@@ -157,8 +157,28 @@ def _mcp_metadata(spec: Any) -> dict[str, Any]:
     )
     prefix_action = _external_action_type(spec.name)
     declared_action = str(declared.get("action_type") or "")
+    configured_domain = str(getattr(spec, "configured_domain", "external") or "external")
+    if configured_domain == "network" and declared.get("domain") != "network":
+        raise ValueError(
+            f"configured network MCP tool {spec.name!r} omitted domain=network metadata"
+        )
+    if configured_domain == "network" or declared.get("domain") == "network":
+        from network_runtime.provider_contracts import validate_declaration
+
+        validate_declaration(spec.name, declared)
     if spec.trusted_for_writes:
         action_type = declared_action or prefix_action
+    elif (
+        spec.identity_pinned
+        and declared.get("domain") == "network"
+        and declared.get("provider_role") == "observer"
+        and declared_action == "read_only"
+    ):
+        # Pinned observer identity + reviewed capability metadata is stronger
+        # than a tool-name prefix heuristic.  This permits compatibility names
+        # such as lab_trace_path without letting an arbitrary MCP self-declare
+        # a mutating tool as read-only.
+        action_type = "read_only"
     elif spec.identity_pinned and declared_action == "read_only":
         action_type = "read_only"
     else:
@@ -187,6 +207,10 @@ def _mcp_metadata(spec: Any) -> dict[str, Any]:
         "trusted_for_writes": bool(spec.trusted_for_writes),
         "service_domain": declared.get("service_domain"),
         "internal_only": bool(declared.get("internal_only", False)),
+        "capability_id": declared.get("capability_id"),
+        "capability_version": declared.get("capability_version"),
+        "provider_role": declared.get("provider_role"),
+        "provider_kind": declared.get("provider_kind"),
     }
 
 
@@ -319,6 +343,12 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
             topology_enabled=bool(manifest.links),
             fabric_enabled=manifest.fabric is not None,
         ))
+        from network_runtime.provider_contracts import enrich_metadata
+
+        metadata = {
+            name: enrich_metadata(name, value, provider_kind="network-lab")
+            for name, value in metadata.items()
+        }
         lab_providers.append(provider)
     else:
         local_callables = loader.build_callables()

@@ -14,7 +14,7 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - 标准 MCP Service Layer：身份、应用目录、权限策略、变更、CMDB 和服务平台；
 - DSH/Hermes Harness Adapter、共享 Python Worker、A2A provider、作用域记忆、能力检索和离线评测。
 
-> 当前状态：P0 迁移、P0.5 Effect Runtime 原型、P0.75-A/B/C Containerlab 后端和 P0.8 Service MCP 原型均已完成。P0.8 已在本机通过真实 MCP stdio 进程、持久化业务状态、四个受审 L0 计划和 Containerlab HTTP 数据面完成跨层闭环。它不等于生产环境“绝对 100% 正确”；真实厂商设备、企业 IT 系统、身份/审批、HA、备份恢复与生产 SLO 属于 P1。
+> 当前状态：P0 迁移、P0.5 Effect Runtime 原型、P0.75-A/B/C Containerlab 后端、P0.8 Service MCP 和 P0.9 Network Provider Boundary 原型均已完成。P0.9 已在本机通过身份固定的 Network Observer MCP、版本化能力合同、证据封装、四个受审 L0 计划和 Containerlab HTTP 数据面完成跨层闭环。它不等于生产环境“绝对 100% 正确”；真实厂商设备、企业 IT 系统、身份/审批、HA、备份恢复与生产 SLO 属于 P1。
 
 ### 分层术语
 
@@ -49,7 +49,7 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
 - DSH/Hermes 使用同一 Worker、L0 注册表、Effect Runtime、验证器和审计；
 - 标准 MCP SDK 的 stdio/Streamable HTTP client、服务身份/version pinning 与 schema hash 绑定；
-- 完整 Python 门禁：180 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
+- 完整 Python 门禁：186 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
 
 ### 快速开始
 
@@ -429,6 +429,38 @@ grant、Network apply 四个独立计划，验证中间 HTTP 阻断和最终恢�
 仅测试 Service MCP 时使用 `config.service-lab.yaml`；DSH 与网络联动使用
 `config.small-production-lab.yaml`。
 
+### P0.9 Network Provider Boundary
+
+Network Runtime 是端到端事务和安全控制面；MCP 是下层系统的标准协议边界，不替代
+Runtime 的意图、计划、审批、验证、补偿和审计职责。P0.9 将 Containerlab 只读能力迁入
+身份固定的 `netopyu.network-observer@1.0.0` MCP 进程，并引入 41 个版本化 provider
+capability（30 个 observer、11 个 actor）。小型现网 LAN profile 当前通过 MCP 暴露 22 个
+只读能力，原有 7 个写入/内部恢复能力继续留在受控本地 Actor。
+
+```mermaid
+flowchart TB
+    H[DSH / Hermes + Domain L1 Skill] --> R[Domain Effect Runtime]
+    R --> S[Service MCP Servers]
+    R --> O[Network Observer MCP<br/>identity + capability + evidence envelope]
+    R --> A[Trusted Network Actor<br/>L0 plan + approval + verify + compensate]
+    O --> C[Containerlab observed state / data plane]
+    A --> C
+    S --> B[Business desired state]
+    B --> X[Cross-layer reconciliation]
+    C --> X
+```
+
+Observer 的每个响应都携带 provider identity、capability id/version、UTC observation time、
+correlation id 和 canonical payload digest；client 验证后才向旧 verifier 解包 payload。provider
+失败与“观测到策略拒绝/探测失败”是两个不同状态，后者不会被误判为 MCP 故障。配置中的
+server identity/version 或 capability 声明不匹配时，工具发现即失败关闭。
+
+Actor 暂不迁入独立 MCP 进程是安全选择：当前 Containerlab config/fabric rollback snapshot
+只在一次 backend execution session 内存活；若在没有 durable snapshot、幂等恢复、fencing 和
+崩溃协调前拆为独立写进程，crash-after-write 会丢失补偿上下文。P1 应先实现 durable Actor
+journal/outbox、租约与 fencing、执行状态 reconciliation 和独立凭据，再把本地 Actor 替换为
+`network-actor-mcp`。工具名仅作为兼容别名，Runtime 的稳定绑定键是 capability id/version。
+
 ### 模型使用策略
 
 - 默认使用 `qwen3.5:27b` 进行网络工具会话。
@@ -510,7 +542,7 @@ DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orc
 - standard MCP Service Layer servers for identity, application, access policy, change, CMDB, and platform state;
 - DSH/Hermes adapters, a shared Python Worker, A2A provider, scoped memory, capability retrieval, and offline evaluation.
 
-> Status: P0 migration, the P0.5 Effect Runtime prototype, P0.75-A/B/C Containerlab backends, and the P0.8 Service MCP prototype are complete. P0.8 passed a local cross-layer run using real MCP stdio processes, persistent business state, four reviewed L0 plans, and the Containerlab HTTP data plane. This is not absolute production correctness; vendor devices, enterprise systems, identity/approval, HA, backup/restore, and SLO certification belong to P1.
+> Status: P0 migration, the P0.5 Effect Runtime prototype, P0.75-A/B/C Containerlab backends, P0.8 Service MCP, and the P0.9 Network Provider Boundary prototype are complete. P0.9 passed a local cross-layer run with an identity-pinned Network Observer MCP, versioned capabilities, evidence envelopes, four reviewed L0 plans, and the Containerlab HTTP data plane. This is not absolute production correctness; vendor devices, enterprise systems, identity/approval, HA, backup/restore, and SLO certification belong to P1.
 
 ### Layer terminology
 
@@ -526,7 +558,7 @@ DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orc
 
 ### P0.5 completion scope
 
-The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 180 tests and 39 subtests.
+The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 186 tests and 39 subtests.
 
 ### Hermes adapter
 
@@ -802,6 +834,30 @@ apply as four independently approved and audited plans; it proves the denied
 HTTP checkpoint and final semantic restoration. Use `config.service-lab.yaml`
 for Service-only DSH testing and `config.small-production-lab.yaml` for the
 combined environment.
+
+### P0.9 Network Provider Boundary
+
+Network Runtime remains the end-to-end transaction and safety control plane;
+MCP is a standard provider protocol, not a replacement for intent, planning,
+approval, verification, compensation, or audit. P0.9 moves Containerlab reads
+behind the identity-pinned `netopyu.network-observer@1.0.0` MCP server. The
+registry defines 41 versioned provider capabilities: 30 observer and 11 actor.
+The small-production LAN profile exposes 22 reads through MCP while seven
+mutation/internal-restore tools remain in the trusted local Actor.
+
+Every observation carries provider identity, capability id/version, UTC time,
+correlation id, and a canonical payload digest. The client validates this
+evidence envelope before unwrapping the compatibility payload. A provider
+failure is distinct from valid evidence that traffic or policy is denied, and
+identity/version/capability mismatches fail during discovery or invocation.
+
+Actor migration is intentionally deferred. Containerlab config/fabric rollback
+snapshots currently live only for one backend execution session. Moving writes
+to a separate MCP process before durable snapshots, idempotent recovery,
+fencing, crash reconciliation, and isolated credentials would make
+crash-after-write recovery weaker. P1 should add those controls before replacing
+the local Actor with `network-actor-mcp`. Tool names remain compatibility aliases;
+the stable Runtime binding is capability id/version.
 
 ### Safety defaults
 

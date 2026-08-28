@@ -34,6 +34,9 @@
 | `network_runtime/compensators.py` | 逆操作和补偿结果 registry |
 | `network_runtime/workflows.py` | reviewed L1 workflow template 与阶段约束 |
 | `network_runtime/journal.py` | SQLite 状态、nonce、事件哈希链和审计 |
+| `network_runtime/provider_contracts.py` | Network provider capability id/version/role registry |
+| `network_provider/mcp_observer.py` | identity-pinned read-only Network Observer MCP |
+| `network_provider/models.py` | strict `network-evidence-envelope-v1` model |
 | `network_lab/manifest.py` | schema-v1 lab 目标权威与路径/标识校验 |
 | `network_lab/containerlab.py` | 无 shell 生命周期、FRR CLI、probe、fault 和快照恢复 |
 | `network_lab/tools.py` | lab 节点到 pragmatic 工具合同的投影 |
@@ -395,6 +398,41 @@ read verifier 比较稳定事实。revision 是并发 token，补偿后继续单
 `enforcement_allows_but_data_plane_failed`、`data_plane_bypasses_denied_policy` 或 `none`。
 这些读取不是跨系统原子快照；所有写计划仍在 approval 后做 execution-time preflight revalidation。
 
+### 22. P0.9 Network Provider 合同与证据算法
+
+`ProviderCapabilityRegistry` 以唯一 `capability_id` 为主键，以 tool name 为兼容索引。每条合同
+固定 `capability_version`、`provider_role=observer|actor` 和 `action_type`。当前 registry 有
+30 个 observer 与 11 个 actor capability。启动时，任何声明 `domain=network` 的外部 MCP tool
+都必须逐字段匹配 registry；未知 tool、错误角色、错误 action 或版本漂移均中止 backend 初始化。
+
+`network_provider.mcp_observer` 包装已审核的 `ContainerlabProvider`/`LabToolAdapter`，但只从
+当前 profile callable 集合与 observer registry 的交集注册工具。它不注册写/restore callable，
+也不拥有写凭据。每次调用生成严格 `NetworkEvidenceEnvelope`：
+
+```text
+ok/code/correlation_id/observed_at/simulation
+provider_identity/capability_id/capability_version
+payload_digest/content_type/payload
+```
+
+`payload_digest` 是 canonical JSON 的 `sha256:` 摘要。MCP client 收到
+`result_contract=network-evidence-envelope-v1` 后按以下顺序失败关闭：字段完整性 → envelope
+`ok=true` → 实际 initialize server identity/version 与 envelope identity 完全相等 → tool discovery
+capability id/version 与 envelope 完全相等 → `observed_at` 为带时区 ISO-8601 且不早于 300 秒、不超前 30 秒 → payload digest
+相等。全部通过后，兼容 content 才被替换为 payload JSON/text；原 envelope 保留在
+`MCPCallResult.evidence_envelope`。payload 内部的 `ok=false` 是合法负面观测，不等于 provider
+调用失败。
+
+backend 先加载本地 Lab Actor，再注册 MCP Observer；同名 observer read 由 MCP 覆盖，未被
+Observer 暴露的 actor/restore 继续指向 `network-lab`。`ToolContract` 的 Network 写合同绑定
+预期 capability id、`provider_role=actor` 和允许的 provider kind。未来 MCP Actor 还必须通过
+trusted-write、server identity 与 input/output schema digest 校验。`profile-mock` 与无 metadata
+的旧 Lab 兼容只限审核过的 in-process source；任意外部 source 不进入此路径。
+
+当前 Actor 的 config/fabric snapshot 是 execution-session 内存对象。因此 P0.9 不创建短生命周期
+Actor MCP；否则 crash-after-write 会丢失恢复材料。后续实现必须先持久化 snapshot、effect
+attempt/idempotency/outbox、租约/fencing 和启动 reconciliation，再允许 MCP Actor 替换本地实现。
+
 ---
 
 ## English
@@ -552,3 +590,37 @@ Containerlab enforcement, and a real HTTP probe. It classifies missing mapping,
 desired/enforced drift, allowed-but-broken data plane, denied-but-bypassed data
 plane, or no drift. Cross-system reads are not an atomic snapshot, so every
 approved write still performs execution-time preflight revalidation.
+
+### 14. P0.9 Network Provider contracts and evidence algorithm
+
+`ProviderCapabilityRegistry` keys stable semantics by unique capability id and
+uses tool names only as compatibility indexes. Every entry fixes capability
+version, observer/actor role, and action type. External MCP declarations for
+the Network domain must match the reviewed registry exactly; unknown tools,
+role/action mismatches, or version drift abort backend initialization.
+
+`network_provider.mcp_observer` intersects the selected profile callables with
+the observer registry and never registers mutation or restore functions. Every
+call returns `network-evidence-envelope-v1` containing correlation id, zoned UTC
+observation time, simulation marker, exact provider identity, capability
+id/version, content type, canonical payload digest, and payload.
+
+The MCP client validates required fields, semantic envelope success, initialized
+server identity/version, discovered capability id/version, timezone-bearing
+ISO-8601 syntax with a 300-second age and 30-second future-skew limit, and payload
+digest—in that order—before exposing the unwrapped
+compatibility content. The original envelope remains available on the call
+result. A payload-level `ok=false` is valid negative network evidence and is
+distinct from transport/provider failure.
+
+Backend registration lets MCP Observer reads override same-name local reads;
+the local Actor retains capabilities not exposed by Observer. Mutation
+`ToolContract`s bind the expected capability id, actor role, and provider kind.
+A future MCP Actor additionally requires trusted-write, identity, and schema
+digest checks. Legacy metadata-free compatibility is restricted to reviewed
+in-process mock/Lab sources and never applies to an external source.
+
+The current config/fabric rollback snapshot lives in one execution session, so
+P0.9 intentionally avoids a short-lived Actor MCP. Durable snapshots, effect
+attempt/idempotency/outbox records, leases/fencing, and startup reconciliation
+are prerequisites for preserving crash-after-write recovery across that move.

@@ -36,6 +36,10 @@
 | F-24 | 每个 Service 写必须绑定唯一 Service L0 Skill，并经过与 Network L0 相同的计划、审批、验证、补偿和审计内核。 |
 | F-25 | 内部 restore MCP tool 不得投影给模型，只能由注册 compensator 调用。 |
 | F-26 | 跨层 L1 必须把 Service 与 Network 写拆为明确计划并在步骤间重读；不得把顺序 workflow 宣称为原子分布式事务。 |
+| F-27 | 外部 Network provider 必须声明唯一、版本化 capability id、observer/actor role 与 action type；不得仅按 tool name 获得权限。 |
+| F-28 | Network Observer MCP 只能公开只读 capability，且结果必须使用可验证的版本化 evidence envelope。 |
+| F-29 | Network evidence 必须在消费前验证 provider identity/version、capability id/version、带时区观测时间、300 秒 freshness/30 秒 future skew 和 canonical payload digest。 |
+| F-30 | Network Actor MCP 只有在 durable recovery、idempotency、fencing 和 crash reconciliation 完成后才能替代本地 Actor。 |
 
 ### 3. 可靠性规格
 
@@ -54,6 +58,7 @@
 | R-11 | Service seed 每个数据库只能执行一次；MCP 重启不得复活已撤销状态。 |
 | R-12 | 幂等 replay 仅在当前状态仍等于原 after snapshot 时允许；否则必须返回 conflict。 |
 | R-13 | MCP 初始化或身份/schema 漂移必须在写发送前关闭连接并失败，不得泄漏子进程或回退 mock。 |
+| R-14 | Observer 的 transport/provider 失败与合法负面网络观测必须保持不同语义，任一方不得伪装另一方。 |
 
 ### 4. 安全目标
 
@@ -79,6 +84,8 @@
 | A2A peer → 本 Agent | SSE event、interrupt、结果文本 | parser、timeout、continuation approval |
 | Runtime → SQLite | 计划、token digest、事件 | transaction、conditional update、hash chain |
 | Runtime → trusted MCP | provider 声明、schema、structured result | identity/version pin、contract/schema hash、fresh verifier |
+| Runtime → Network Observer MCP | capability 声明、证据封装、负面观测 | registry 精确匹配、identity/version pin、time/digest 验证、只读 role |
+| Runtime → Network Actor | 批准计划、效果重放、补偿上下文 | actor capability、one-shot execution、session snapshot；P1 durable journal/fencing |
 | Service MCP → SQLite | 并发业务变更 | WAL、RLock、BEGIN IMMEDIATE、revision、safe idempotency、audit |
 | Service ↔ Network | 非原子跨系统状态 | 独立读取、drift 分类、步骤间重校验、新计划恢复 |
 
@@ -153,6 +160,12 @@
 - 风险：恶意/误配置 MCP 把写伪装成读、同名 server 被替换、批准后 schema 改变、两个 MCP 进程同时通过旧 revision、进程重启重放 seed 或陈旧幂等结果覆盖新状态。
 - 控制：官方协议 client、受信标记、server identity/version pin、declared contract、structured result、schema digest 纳入 plan hash、执行前重新 discovery；ServiceStore 使用一次性 seed、WAL、进程内锁、跨进程 immediate transaction、revision 和状态敏感 idempotency。
 - 剩余风险：本地 SQLite 与 stdio 子进程仍共享 OS account，缺少 mTLS/HSM/远端 WORM/数据库 RBAC；生产 MCP 必须独立部署和认证。
+
+#### T-14 Network provider 越权、自证成功或崩溃丢失补偿
+
+- 风险：observer 把写工具声明成只读；同名工具替换审核语义；伪造 freshness/digest；actor 用自己的写响应自证成功；独立 actor 在写后崩溃并丢失 rollback snapshot。
+- 控制：capability registry 精确校验 role/action/version；observer server 不注册任何写 callable；identity-pinned evidence envelope 与 digest 验证；Runtime 使用 fresh observer read；当前 actor 保留在同一 execution session。
+- 剩余风险：本地 Observer/Actor 仍共享主机、OS account、Docker daemon 与 Containerlab 真值。P1 必须分离凭据/进程/故障域，并为 Actor 增加 durable snapshot/outbox、fencing、启动 reconciliation 与 HA。
 
 ### 7. 审批规格
 
@@ -284,6 +297,16 @@ L1+L0 强制后置条件失败最终为 `rollback_verified`、端口状态精确
 失败；最终 role、enforcement 和 HTTP 语义恢复。该结果只认证本地仿真逻辑，不认证真实企业
 MCP、网络设备、审批身份、分布式事务或生产可用性。
 
+### 17. P0.9 Network Provider 验收补充
+
+代码门禁必须覆盖 capability 唯一性、observer/actor 分权、observer 不暴露写工具、server identity
+错误、capability/digest 错误失败关闭、负面 payload 解包、同名单设备参数规范化，以及 backend
+读走 MCP/写留本地 Actor 的精确路由。完整 Python 门禁为 186 个测试和 39 个子测试。
+
+实际本地门禁必须证明 20 节点基线全部通过，并通过 Observer MCP 读取业务/网络 reconciliation
+所需事实；随后四个受审计划达到 `verified_success`，中间真实 HTTP 阻断且最终语义恢复。该门禁
+不认证 Actor crash recovery、独立凭据、生产遥测流、厂商设备或 HA。
+
 ---
 
 ## English
@@ -322,6 +345,10 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-24 | Every Service mutation must bind one Service L0 Skill and use the same plan/approval/verification/compensation/audit kernel as Network L0. |
 | F-25 | Internal restore MCP tools must be hidden from the model and callable only by registered compensators. |
 | F-26 | Cross-layer L1 workflows must use explicit plans with reads between effects and may not claim distributed atomicity. |
+| F-27 | External Network providers must declare a unique versioned capability id, observer/actor role, and action type; tool name alone grants no authority. |
+| F-28 | Network Observer MCP may expose only read capabilities and must return a versioned verifiable evidence envelope. |
+| F-29 | Network evidence must be checked for provider identity/version, capability id/version, zoned observation time, a 300-second freshness/30-second future-skew window, and canonical payload digest before use. |
+| F-30 | A Network Actor MCP may replace the local Actor only after durable recovery, idempotency, fencing, and crash reconciliation exist. |
 
 ### 3. Security objectives
 
@@ -342,6 +369,7 @@ The system must provide exact authorization, effect integrity, evidence-based ou
 - **Hermes model-as-approver confusion:** prepare-only write handlers, nonce removal, exact user slash commands, process-local one-shot bindings, and safe loss on restart. P0.5 still trusts the local account and Hermes gateway allowlist; production requires authenticated sender identity and process isolation.
 - **Lab command/target expansion:** strict manifests, path and identifier validation, shell-free argv, FRR read/write allowlists, management-interface exclusion, predeclared probes/faults, and process isolation from real inventory. Docker remains a trusted privileged boundary, not a multi-tenant sandbox.
 - **MCP spoofing/schema drift/shared-store races:** trusted flags, pinned server identity/version, declared contracts, structured results, schema digests in schema-v5 plans, execution-time rediscovery, one-time seeding, WAL, process locks, immediate transactions, revisions, and state-sensitive idempotency. Local stdio and SQLite still trust the OS account; production needs authenticated independent services and database controls.
+- **Network provider escalation/self-attestation/crash loss:** exact capability role/action/version matching, an observer with no mutation callables, identity-pinned digest-bearing evidence, and fresh observer postconditions. The Actor remains execution-session local until durable snapshots/outbox, fencing, startup reconciliation, and HA can preserve crash-after-write recovery. Observer and Actor still share one local host/account/Docker boundary in P0.9.
 
 ### 5. Approval and model policy
 
@@ -420,3 +448,17 @@ intermediate checkpoint must have desired/enforced false and a failed real HTTP
 probe; the final role, enforcement, and HTTP semantics must be restored. This
 qualifies only the local simulation, not real enterprise MCP services, devices,
 approval identity, distributed transactions, or production availability.
+
+### 13. P0.9 Network Provider acceptance supplement
+
+Code gates cover unique capabilities, observer/actor separation, absence of
+Observer writes, identity mismatch, capability/digest rejection, valid negative
+payload unwrapping, single-device argument normalization, and exact backend
+routing of reads to MCP while writes remain local. The complete gate is 186
+tests plus 39 subtests.
+
+The deployed gate requires the complete 20-node baseline and cross-layer facts
+read through Observer MCP, followed by four `verified_success` plans, a real
+denied HTTP checkpoint, final semantic restoration, and valid audit chains. It
+does not certify Actor crash recovery, separated credentials, production
+telemetry streaming, vendor devices, or HA.

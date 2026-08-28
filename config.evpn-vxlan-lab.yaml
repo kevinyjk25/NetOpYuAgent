@@ -12,7 +12,13 @@ tools:
     fabric_set_access_vlan: [vlan_id, reason, verification_probe_id]
 pragmatic:
   device_inventory: []
-  mcp_servers: []
+  mcp_servers:
+    - name: network-observer
+      domain: network
+      transport: stdio
+      command: [.venv/bin/python, -m, network_provider.mcp_observer, --profile, dc, --manifest, labs/p075-c-evpn-vxlan/lab.yaml, --command-timeout, '30']
+      expected_server_name: netopyu.network-observer
+      expected_server_version: 1.0.0
   lab:
     enabled: true
     provider: containerlab
