@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from dsh_adapter.skills import build_skill_manifest
+from network_lab.containerlab import CommandResult, ContainerlabProvider, LabCommandError
 from network_lab.manifest import ManifestError, load_manifest
 from network_lab.tools import LabToolAdapter, lab_access_metadata
 from network_runtime.policies import resolve_contract
@@ -15,6 +17,58 @@ from network_runtime.policies import resolve_contract
 ROOT = Path(__file__).resolve().parents[1]
 MANIFEST = ROOT / "labs" / "p075-a-campus-idc" / "lab.yaml"
 CONFIG = ROOT / "config.campus-idc-lab.yaml"
+
+
+def run(value):
+    return asyncio.run(value)
+
+
+class AdmissionRunner:
+    def __init__(self) -> None:
+        self.up = True
+        self.route = "10.20.0.0/16 via 10.10.20.1 dev eth1"
+
+    async def run(self, argv, *, cwd=None, timeout=30.0):
+        values = tuple(argv)
+        inner = values[3:] if values[:2] == ("docker", "exec") else ()
+        if inner == ("cat", "/sys/class/net/eth1/operstate"):
+            output = "up\n" if self.up else "down\n"
+        elif inner == ("ip", "route", "show"):
+            output = f"{self.route}\n" if self.route else ""
+        else:
+            output = ""
+        if inner == ("ip", "link", "set", "dev", "eth1", "down"):
+            self.up = False
+            self.route = ""
+        elif inner == ("ip", "link", "set", "dev", "eth1", "up"):
+            self.up = True
+        elif inner == (
+            "ip", "route", "replace", "10.20.0.0/16",
+            "via", "10.10.20.1", "dev", "eth1",
+        ):
+            self.route = "10.20.0.0/16 via 10.10.20.1 dev eth1"
+        return CommandResult(values, 0, output, "")
+
+
+class ApplicationPolicyRunner:
+    def __init__(self) -> None:
+        self.route: str | None = None
+
+    async def run(self, argv, *, cwd=None, timeout=30.0):
+        values = tuple(argv)
+        inner = values[3:] if values[:2] == ("docker", "exec") else ()
+        output = ""
+        if inner == ("ip", "route", "show", "10.10.20.10/32"):
+            output = f"{self.route}\n" if self.route else ""
+        elif inner == (
+            "ip", "route", "replace", "blackhole", "10.10.20.10/32",
+        ):
+            self.route = "blackhole 10.10.20.10"
+        elif inner == (
+            "ip", "route", "del", "blackhole", "10.10.20.10/32",
+        ):
+            self.route = None
+        return CommandResult(values, 0, output, "")
 
 
 class TestCampusIdcManifest(unittest.TestCase):
@@ -44,6 +98,34 @@ class TestCampusIdcManifest(unittest.TestCase):
             )
             with self.assertRaisesRegex(ManifestError, "endpoint is not declared"):
                 load_manifest(root / "lab.yaml")
+
+    def test_admission_snapshot_restores_interface_and_every_reviewed_route(self) -> None:
+        runner = AdmissionRunner()
+        provider = ContainerlabProvider(load_manifest(MANIFEST), runner=runner)
+        snapshot = run(provider.user_admission_snapshot("erin"))
+        self.assertTrue(snapshot["admitted"])
+        self.assertEqual(snapshot["routes"], {"10.20.0.0/16": True})
+        run(provider.set_user_admission("erin", admitted=False))
+        self.assertFalse(run(provider.user_admission_snapshot("erin"))["admitted"])
+        run(provider.restore_user_admission_snapshot("erin", snapshot))
+        self.assertEqual(run(provider.user_admission_snapshot("erin")), snapshot)
+        runner.route = "10.20.0.0/16 via 10.10.20.254 dev eth1"
+        with self.assertRaisesRegex(LabCommandError, "outside the reviewed"):
+            run(provider.user_admission_snapshot("erin"))
+
+    def test_application_snapshot_rejects_unknown_route_and_restores_exact_policy(self) -> None:
+        runner = ApplicationPolicyRunner()
+        provider = ContainerlabProvider(load_manifest(MANIFEST), runner=runner)
+        snapshot = run(provider.application_access_snapshot("erin", "crm"))
+        self.assertTrue(snapshot["allowed"])
+        self.assertIsNone(snapshot["route"])
+        run(provider.set_application_access("erin", "crm", allowed=False))
+        self.assertFalse(run(provider.application_access_snapshot("erin", "crm"))["allowed"])
+        run(provider.restore_application_access_snapshot("erin", "crm", snapshot))
+        self.assertEqual(run(provider.application_access_snapshot("erin", "crm")), snapshot)
+        runner.route = "10.10.20.10 via 10.20.10.1 dev eth1"
+        with self.assertRaisesRegex(LabCommandError, "outside the reviewed"):
+            run(provider.application_access_snapshot("erin", "crm"))
 
 
 class TestCampusIdcProjection(unittest.TestCase):

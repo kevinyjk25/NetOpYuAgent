@@ -85,6 +85,7 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
                 "editable_parameters": editable_parameters,
                 "source": backend.sources.get(name, "unknown"),
                 "tags": list(metadata.get("tags", [])),
+                "capability_contract": backend.describe_capability(name).to_dict(),
             }
             if l0_contract is not None:
                 declaration["l0_skill_id"] = l0_contract.skill_id
@@ -139,6 +140,7 @@ async def invoke_tool(
     arguments: dict[str, Any],
     *,
     allow_destructive: bool | None = None,
+    access_context: dict[str, Any] | None = None,
 ) -> str:
     """Invoke a strictly validated read.
 
@@ -146,7 +148,9 @@ async def invoke_tool(
     longer bypass the plan/approval/evidence runtime.
     """
     del allow_destructive
-    return await EffectRuntime().invoke_read(profile_id, tool_name, arguments)
+    return await EffectRuntime().invoke_read(
+        profile_id, tool_name, arguments, access_context=access_context,
+    )
 
 
 async def prepare_network_plan(
@@ -178,7 +182,10 @@ async def execute_network_plan(arguments: dict[str, Any], *, allow_destructive: 
         approval_actor=str(arguments["approval_actor"]),
         allow_destructive=allow_destructive,
     )
-    return outcome.to_dict()
+    return {
+        **outcome.to_dict(),
+        "terminal_envelope": outcome.terminal_envelope(),
+    }
 
 
 def inspect_network_plan(plan_id: str) -> dict[str, Any]:

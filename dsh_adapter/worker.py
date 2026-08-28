@@ -75,6 +75,10 @@ async def dispatch(request: dict[str, Any]) -> Any:
             str(request.get("tool", "")),
             arguments,
             allow_destructive=bool(request.get("allow_destructive")),
+            access_context=(
+                request.get("access_context")
+                if isinstance(request.get("access_context"), dict) else None
+            ),
         )
         return {"ok": True, "result": result}
     if command == "runtime-prepare":

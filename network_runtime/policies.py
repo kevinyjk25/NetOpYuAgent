@@ -181,6 +181,8 @@ def resolve_contract(
                 or not str(metadata.get("provider_identity") or "").startswith(f"{source}:")
                 or not str(metadata.get("input_schema_digest") or "").startswith("sha256:")
                 or not str(metadata.get("output_schema_digest") or "").startswith("sha256:")
+                or metadata.get("declared_contract_id") != contract.contract_id
+                or metadata.get("result_contract") != "structured-content-required-v1"
             ):
                 return None
     if capability_bound:

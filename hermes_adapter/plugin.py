@@ -164,6 +164,15 @@ class NetOpYuHermesAdapter:
                 result = self.client.request(
                     "invoke", profile=self.config.profile, tool=tool["name"], args=args,
                     allow_destructive=False,
+                    access_context={
+                        "subject_id": self.config.operator_id,
+                        "session_id": session_id,
+                        "roles": ["operations-reader", "network-operator"],
+                        "scopes": ["*", f"profile:{self.config.profile}"],
+                        "purpose": "interactive-network-operations",
+                        "clearance": "restricted",
+                        "authenticated": True,
+                    },
                 )
                 if isinstance(result, dict) and result.get("ok") is True:
                     self._observe_read(
@@ -234,6 +243,8 @@ class NetOpYuHermesAdapter:
                 },
                 allow_destructive=True,
             )
+            if isinstance(outcome, dict) and isinstance(outcome.get("terminal_envelope"), dict):
+                return _json(outcome["terminal_envelope"])
             return _json(outcome)
         except Exception as error:
             return _error(error)

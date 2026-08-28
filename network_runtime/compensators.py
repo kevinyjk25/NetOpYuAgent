@@ -82,7 +82,9 @@ async def _restore_device_snapshot(context: CompensationContext) -> Compensation
         raise RuntimeError("device provider does not expose reviewed snapshot restoration")
     rollback_args = project_arguments(plan.arguments, contract.rollback_fields)
     rollback_result = render(await asyncio.wait_for(
-        restore(rollback_args), timeout=context.timeout_seconds,
+        context.backend.invoke_effect(
+            contract.rollback_tool, rollback_args, plan=plan, phase="compensate",
+        ), timeout=context.timeout_seconds,
     ))
     if failed_output(rollback_result):
         raise RuntimeError(rollback_result)
@@ -135,7 +137,9 @@ async def _inverse_tool(context: CompensationContext) -> CompensationResult:
     rollback_args = project_arguments(plan.arguments, contract.rollback_fields)
     rollback_args["reason"] = f"automatic rollback of network runtime plan {plan.plan_id}"
     rollback_result = render(await asyncio.wait_for(
-        rollback(rollback_args), timeout=context.timeout_seconds,
+        context.backend.invoke_effect(
+            contract.rollback_tool, rollback_args, plan=plan, phase="compensate",
+        ), timeout=context.timeout_seconds,
     ))
     if failed_output(rollback_result):
         raise RuntimeError(rollback_result)
@@ -186,7 +190,9 @@ async def _restore_fabric_access_vlan(context: CompensationContext) -> Compensat
         raise RuntimeError("fabric provider does not expose reviewed snapshot restoration")
     rollback_args = project_arguments(plan.arguments, contract.rollback_fields)
     rollback_result = render(await asyncio.wait_for(
-        restore(rollback_args), timeout=context.timeout_seconds,
+        context.backend.invoke_effect(
+            contract.rollback_tool, rollback_args, plan=plan, phase="compensate",
+        ), timeout=context.timeout_seconds,
     ))
     if failed_output(rollback_result):
         raise RuntimeError(rollback_result)
@@ -250,7 +256,9 @@ async def _restore_service_entitlement(context: CompensationContext) -> Compensa
         "correlation_id": plan.plan_id,
     }
     rollback_result = render(await asyncio.wait_for(
-        restore(rollback_args), timeout=context.timeout_seconds,
+        context.backend.invoke_effect(
+            contract.rollback_tool, rollback_args, plan=plan, phase="compensate",
+        ), timeout=context.timeout_seconds,
     ))
     if failed_output(rollback_result):
         raise RuntimeError(rollback_result)
@@ -309,7 +317,9 @@ async def _restore_platform_service(context: CompensationContext) -> Compensatio
     if not rollback_args["version"]:
         raise RuntimeError("approved platform snapshot has no version")
     rollback_result = render(await asyncio.wait_for(
-        restore(rollback_args), timeout=context.timeout_seconds,
+        context.backend.invoke_effect(
+            contract.rollback_tool, rollback_args, plan=plan, phase="compensate",
+        ), timeout=context.timeout_seconds,
     ))
     if failed_output(rollback_result):
         raise RuntimeError(rollback_result)
@@ -364,7 +374,9 @@ async def _restore_network_app_enforcement(context: CompensationContext) -> Comp
         "reason": f"automatic rollback of effect-runtime plan {plan.plan_id}",
     }
     rollback_result = render(await asyncio.wait_for(
-        restore(rollback_args), timeout=context.timeout_seconds,
+        context.backend.invoke_effect(
+            contract.rollback_tool, rollback_args, plan=plan, phase="compensate",
+        ), timeout=context.timeout_seconds,
     ))
     if failed_output(rollback_result):
         raise RuntimeError(rollback_result)

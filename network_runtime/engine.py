@@ -27,11 +27,14 @@ from .contracts import (
     PlanIntegrityError,
     PlanState,
     PreparedPlan,
+    TERMINAL_STATES,
     canonical_json,
     sha256_json,
     utc_now,
 )
 from .compensators import REGISTRY as COMPENSATORS, compensate_operation
+from .access import ObservationAccessContext, ObservationPolicy
+from .capabilities import CapabilityKind
 from .evidence import (
     bounded as _bounded,
     failed_output as _failed_output,
@@ -68,6 +71,7 @@ class NetworkRuntime:
         plan_ttl_seconds: int = 300,
         execution_timeout_seconds: float | None = None,
         fault_hook: FaultHook | None = None,
+        observation_policy: ObservationPolicy | None = None,
     ) -> None:
         if not 30 <= plan_ttl_seconds <= 3600:
             raise ValueError("plan_ttl_seconds must be between 30 and 3600")
@@ -79,6 +83,7 @@ class NetworkRuntime:
             or os.environ.get("NETOPYU_DSH_EXECUTION_TIMEOUT", "90")
         )
         self.fault_hook = fault_hook
+        self.observation_policy = observation_policy or ObservationPolicy()
 
     async def _fault(self, stage: str, plan: PreparedPlan) -> None:
         if self.fault_hook is None:
@@ -271,6 +276,11 @@ class NetworkRuntime:
                     metadata.get("output_schema_digest")
                     or sha256_json(metadata.get("output_schema") or {})
                 ),
+                capability_id=str(metadata.get("capability_id") or l0_contract.skill_id),
+                capability_version=str(
+                    metadata.get("capability_version") or l0_contract.version
+                ),
+                provider_role=str(metadata.get("provider_role") or "actor"),
                 arguments=compiled.arguments,
                 argument_provenance=compiled.provenance,
                 targets=compiled.targets,
@@ -314,6 +324,8 @@ class NetworkRuntime:
         profile_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        *,
+        access_context: ObservationAccessContext | dict[str, Any] | None = None,
     ) -> str:
         """Strictly validate and invoke a read-only tool without a write lease."""
         backend = await self.backend_factory(profile_id)
@@ -322,10 +334,20 @@ class NetworkRuntime:
             tool = backend.callables.get(tool_name)
             if metadata is None or tool is None:
                 raise KeyError(f"unknown tool {tool_name!r} in {backend.mode} backend")
-            action = str(metadata.get("action_type", "read_only"))
-            if bool(metadata.get("hitl")) or action != "read_only":
+            capability = backend.describe_capability(tool_name)
+            if capability.kind != CapabilityKind.OBSERVATION:
                 raise ApprovalError(
                     f"direct write invocation of {tool_name} is retired; use runtime prepare/execute"
+                )
+            subject = ObservationAccessContext.from_value(
+                access_context, profile=backend.profile_id,
+            )
+            decision = self.observation_policy.authorize(
+                capability, arguments, subject,
+            )
+            if not decision.allowed:
+                raise ApprovalError(
+                    f"observation authorization denied ({decision.code}): {decision.reason}"
                 )
             compiled = compile_parameters(
                 profile=backend.profile_id,
@@ -338,7 +360,7 @@ class NetworkRuntime:
                 raise ValueError("missing required parameters: " + ", ".join(compiled.missing))
             if compiled.errors:
                 raise ValueError("; ".join(compiled.errors))
-            result = _render(await tool(compiled.arguments))
+            result = _render(await backend.invoke_observation(tool_name, compiled.arguments))
             if _failed_output(result):
                 raise NetworkRuntimeError(f"read tool returned a failure: {_bounded(result, 500)}")
             return self._store_large_result(backend, tool_name, result)
@@ -381,6 +403,7 @@ class NetworkRuntime:
             })
             backend: BackendSession | None = None
             result: str | None = None
+            effect_dispatched = False
             try:
                 backend = await self.backend_factory(plan.profile)
                 contract = self._revalidate_contract(plan, backend)
@@ -431,10 +454,13 @@ class NetworkRuntime:
                 journal.append_event(plan.plan_id, "l0_step_started", {
                     "step_id": "execute", "tool_name": plan.tool_name,
                 })
-                tool = backend.callables[plan.tool_name]
                 try:
+                    effect_dispatched = True
                     result = _render(await asyncio.wait_for(
-                        tool(plan.arguments), timeout=self.execution_timeout_seconds,
+                        backend.invoke_effect(
+                            plan.tool_name, plan.arguments, plan=plan, phase="execute",
+                        ),
+                        timeout=self.execution_timeout_seconds,
                     ))
                     journal.append_event(plan.plan_id, "l0_step_completed", {
                         "step_id": "execute", "result_received": True,
@@ -561,6 +587,21 @@ class NetworkRuntime:
                 return outcome
             finally:
                 if backend is not None:
+                    if effect_dispatched:
+                        current = journal.get(plan.plan_id)
+                        if current.state in TERMINAL_STATES:
+                            try:
+                                finalized = await backend.finalize_effect(
+                                    plan, current.state.value,
+                                )
+                                if finalized is not None:
+                                    journal.append_event(plan.plan_id, "actor_finalized", {
+                                        "state": current.state.value,
+                                    })
+                            except Exception as finalize_error:
+                                journal.append_event(plan.plan_id, "actor_finalize_failed", {
+                                    "error": f"{type(finalize_error).__name__}: {finalize_error}",
+                                })
                     await backend.close()
 
     def inspect(self, plan_id: str) -> dict[str, Any]:
@@ -595,6 +636,15 @@ class NetworkRuntime:
                         journal, backend, plan, contract, None,
                         OutcomeIndeterminateError("runtime restarted during side-effect processing"),
                     )
+                    if outcome.state in TERMINAL_STATES:
+                        finalized = await backend.finalize_effect(
+                            plan, outcome.state.value,
+                        )
+                        if finalized is not None:
+                            journal.append_event(plan.plan_id, "actor_finalized", {
+                                "state": outcome.state.value,
+                                "source": "startup_reconciliation",
+                            })
                     outcomes.append(outcome.to_dict())
                 except Exception as error:
                     current = journal.get(plan_id)
@@ -614,7 +664,48 @@ class NetworkRuntime:
                 finally:
                     if backend is not None:
                         await backend.close()
+            await self._recover_actor_finalizers(journal)
         return outcomes
+
+    async def _recover_actor_finalizers(self, journal: NetworkJournal) -> None:
+        """Retry a terminal Runtime-to-Actor commit lost during process shutdown."""
+        plan_ids = {
+            plan_id
+            for state in TERMINAL_STATES
+            for plan_id in journal.plan_ids_in_state(state)
+        }
+        for plan_id in sorted(plan_ids):
+            plan = journal.get(plan_id)
+            if ":netopyu.network-actor@" not in plan.provider_identity:
+                continue
+            events = journal.events(plan_id)
+            if any(item["event_type"] == "actor_finalized" for item in events):
+                continue
+            if not any(
+                item["event_type"] == "l0_step_started"
+                and item["payload"].get("step_id") == "execute"
+                for item in events
+            ):
+                continue
+            backend: BackendSession | None = None
+            try:
+                backend = await self.backend_factory(plan.profile)
+                self._revalidate_contract(plan, backend)
+                finalized = await backend.finalize_effect(plan, plan.state.value)
+                if finalized is None:
+                    raise RuntimeError("approved Network Actor finalizer is unavailable")
+                journal.append_event(plan_id, "actor_finalized", {
+                    "state": plan.state.value,
+                    "source": "startup_finalizer_recovery",
+                })
+            except Exception as error:
+                journal.append_event(plan_id, "actor_finalize_failed", {
+                    "source": "startup_finalizer_recovery",
+                    "error": f"{type(error).__name__}: {error}",
+                })
+            finally:
+                if backend is not None:
+                    await backend.close()
 
     def reject(self, *, plan_id: str, plan_hash: str, reason: str) -> dict[str, Any]:
         with NetworkJournal(self.journal_path) as journal:
@@ -717,6 +808,16 @@ class NetworkRuntime:
             metadata.get("output_schema_digest")
             or sha256_json(metadata.get("output_schema") or {})
         )
+        current_l0 = L0_SKILLS.for_tool(plan.profile, plan.tool_name)
+        current_capability_id = str(
+            metadata.get("capability_id")
+            or (current_l0.skill_id if current_l0 is not None else "")
+        )
+        current_capability_version = str(
+            metadata.get("capability_version")
+            or (current_l0.version if current_l0 is not None else "")
+        )
+        current_provider_role = str(metadata.get("provider_role") or "actor")
         if (
             contract is None
             or contract.contract_id != plan.tool_version
@@ -727,13 +828,16 @@ class NetworkRuntime:
             or current_provider != plan.provider_identity
             or current_input_digest != plan.input_schema_digest
             or current_output_digest != plan.output_schema_digest
+            or current_capability_id != plan.capability_id
+            or current_capability_version != plan.capability_version
+            or current_provider_role != plan.provider_role
         ):
             raise PlanIntegrityError("runtime tool contract changed after approval")
         if contract.verifier not in VERIFIERS.contract_ids():
             raise PlanIntegrityError("approved verifier contract is no longer registered")
         if contract.compensator and contract.compensator not in COMPENSATORS.contract_ids():
             raise PlanIntegrityError("approved compensation contract is no longer registered")
-        l0_contract = L0_SKILLS.for_tool(plan.profile, plan.tool_name)
+        l0_contract = current_l0
         if (
             l0_contract is None
             or plan.l0_skill_id != l0_contract.skill_id
@@ -1010,6 +1114,8 @@ class NetworkRuntime:
             f"Arguments: {args}\n"
             f"Source: {source}; backend={mode}; contract={plan.tool_version}\n"
             f"Provider: {plan.provider_identity}\n"
+            f"Capability: {plan.capability_id}@{plan.capability_version} "
+            f"({plan.provider_role})\n"
             f"Schemas: input={plan.input_schema_digest}; output={plan.output_schema_digest}\n"
             f"L0 Skill: {plan.l0_skill_id}@{plan.l0_skill_version} "
             f"({plan.l0_contract_hash})\n"

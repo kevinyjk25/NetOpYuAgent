@@ -70,6 +70,7 @@ class ToolMeta:
     source:       str       # "mcp" | "openapi" | "local"
     description:  str       = ""
     returns_large: bool     = False
+    internal_parameters: tuple[str, ...] = ()
 
     # Circuit breaker
     failure_count:     int   = 0
@@ -162,20 +163,28 @@ class ToolRouter:
     # Registration
     # ------------------------------------------------------------------
 
-    def register_mcp(self, mcp_client: Any) -> None:
+    def register_mcp(
+        self, mcp_client: Any, *, allowed_tools: set[str] | None = None,
+    ) -> None:
         """Register all tools from a connected MCPClient."""
         self._mcp_clients.append(mcp_client)
+        registered = 0
         for spec in mcp_client.list_tools():
+            if allowed_tools is not None and spec.name not in allowed_tools:
+                continue
+            declared = spec.meta.get("netopyu", {}) if isinstance(spec.meta, dict) else {}
             self._register(
                 name=spec.name,
                 fn=self._make_mcp_fn(mcp_client, spec.name),
                 source=f"mcp:{spec.server_name}",
                 description=spec.description,
                 returns_large=spec.returns_large,
+                internal_parameters=tuple(declared.get("internal_parameters") or ()),
             )
+            registered += 1
         logger.info(
             "ToolRouter: registered %d MCP tools from %s",
-            len(mcp_client.list_tools()),
+            registered,
             mcp_client.server_names,
         )
 
@@ -240,6 +249,13 @@ class ToolRouter:
         meta = self._meta[tool_name]
 
         async def _dispatch(args: dict) -> str:
+            internal_args = {
+                name: args[name] for name in meta.internal_parameters if name in args
+            }
+            validation_args = {
+                name: value for name, value in args.items()
+                if name not in meta.internal_parameters
+            }
             # ── Schema validation + coercion (if registered) ──────────
             # Catches LLM-produced shape errors BEFORE the tool runs,
             # converting common mistakes (str→int, list→dict, etc.) into
@@ -255,7 +271,7 @@ class ToolRouter:
                 if _validation_enabled:
                     _schema = get_schema_registry().get(tool_name)
                     if _schema is not None:
-                        _vresult = validate_and_coerce(_schema, args)
+                        _vresult = validate_and_coerce(_schema, validation_args)
                         if not _vresult.ok:
                             # Build an LLM-actionable error. The model sees
                             # this string as the tool result; its next turn
@@ -275,7 +291,7 @@ class ToolRouter:
                             import json as _json
                             _err_lines = [
                                 f"[ToolRouter] Schema validation FAILED for tool {tool_name!r}.",
-                                f"YOUR ARGS:  {_json.dumps(args, ensure_ascii=False)[:300]}",
+                                f"YOUR ARGS:  {_json.dumps(validation_args, ensure_ascii=False)[:300]}",
                                 f"PROBLEMS:",
                             ]
                             _err_lines.extend(f"  - {e}" for e in _vresult.errors)
@@ -283,7 +299,7 @@ class ToolRouter:
                             # Detect unknown arg names → suggest close-by schema fields
                             _schema_field_names = list(_schema.fields.keys())
                             _unknown_args = [
-                                k for k in args.keys() if k not in _schema_field_names
+                                k for k in validation_args.keys() if k not in _schema_field_names
                             ]
                             if _unknown_args and _schema_field_names:
                                 _suggest_lines = []
@@ -303,7 +319,7 @@ class ToolRouter:
                             _enum_lines = []
                             for fname, fspec in _schema.fields.items():
                                 if getattr(fspec, "enum", None):
-                                    given = args.get(fname)
+                                    given = validation_args.get(fname)
                                     if given is not None and given not in fspec.enum:
                                         _enum_lines.append(
                                             f"  - {fname}={given!r} is not valid. "
@@ -334,7 +350,7 @@ class ToolRouter:
                                 "ToolRouter: tool=%s schema-coerced args (warnings=%s)",
                                 tool_name, _vresult.warnings,
                             )
-                        args = _vresult.args
+                        args = {**_vresult.args, **internal_args}
             except ImportError:
                 pass   # schema package not present — silent skip
             except Exception as _vexc:
@@ -346,6 +362,10 @@ class ToolRouter:
             # Circuit breaker check
             if meta.disabled:
                 if time.time() < meta.disabled_until:
+                    if meta.internal_parameters:
+                        raise RuntimeError(
+                            f"tool {tool_name!r} circuit breaker is open"
+                        )
                     return (
                         f"[ToolRouter] Tool {tool_name!r} is temporarily disabled "
                         f"(circuit breaker open after {meta.consecutive_fails} failures). "
@@ -356,6 +376,8 @@ class ToolRouter:
 
             # Rate limit check
             if meta.is_rate_limited():
+                if meta.internal_parameters:
+                    raise RuntimeError(f"tool {tool_name!r} is rate-limited")
                 return (
                     f"[ToolRouter] Tool {tool_name!r} is rate-limited "
                     f"({meta.rate_limit_calls} calls/{meta.rate_limit_window_s}s). "
@@ -396,6 +418,8 @@ class ToolRouter:
 
             except asyncio.TimeoutError:
                 logger.warning("ToolRouter: timeout calling tool=%s", tool_name)
+                if meta.internal_parameters:
+                    raise
                 return f"[ToolRouter] Tool {tool_name!r} timed out after {self._default_timeout}s"
             except Exception as exc:
                 # Augment the error with arg shape info so the LLM (or human
@@ -410,6 +434,10 @@ class ToolRouter:
                     "ToolRouter: error calling tool=%s: %s | args shape: {%s}",
                     tool_name, exc, arg_shapes,
                 )
+                if meta.internal_parameters:
+                    raise RuntimeError(
+                        f"provider-internal tool {tool_name!r} failed: {exc}"
+                    ) from exc
                 # Hint pattern for common shape errors
                 exc_str = str(exc)
                 hint = ""
@@ -486,11 +514,13 @@ class ToolRouter:
     def _register(
         self, name: str, fn: Callable, source: str,
         description: str = "", returns_large: bool = False,
+        internal_parameters: tuple[str, ...] = (),
     ) -> None:
         self._callables[name] = fn
         self._meta[name] = ToolMeta(
             name=name, source=source,
             description=description, returns_large=returns_large,
+            internal_parameters=internal_parameters,
         )
 
     @staticmethod

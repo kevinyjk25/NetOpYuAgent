@@ -48,7 +48,7 @@ export async function resolvePython(projectRoot) {
   }
 }
 
-export async function callBridge({ projectRoot, python, profile, command, tool, args, signal, includeDestructive = false, allowDestructive = false, correlationId, sessionId, l0SkillId }) {
+export async function callBridge({ projectRoot, python, profile, command, tool, args, signal, includeDestructive = false, allowDestructive = false, correlationId, sessionId, l0SkillId, accessContext }) {
   const requestId = randomUUID()
   const bridgeCorrelationId = String(correlationId ?? requestId)
   const workerSocket = process.env.NETOPYU_DSH_WORKER_SOCKET
@@ -60,6 +60,7 @@ export async function callBridge({ projectRoot, python, profile, command, tool, 
         l0_skill_id: l0SkillId,
         include_destructive: includeDestructive,
         allow_destructive: allowDestructive,
+        access_context: accessContext,
       }, signal)
     } catch (error) {
       if (!['ENOENT', 'ECONNREFUSED'].includes(error?.code)) throw error
@@ -77,6 +78,7 @@ export async function callBridge({ projectRoot, python, profile, command, tool, 
       PYTHONPATH: [projectRoot, process.env.PYTHONPATH].filter(Boolean).join(delimiter),
       ...(allowDestructive ? { NETOPYU_DSH_ALLOW_DESTRUCTIVE: '1' } : {}),
       NETOPYU_DSH_CORRELATION_ID: bridgeCorrelationId,
+      ...(accessContext ? { NETOPYU_DSH_ACCESS_CONTEXT: JSON.stringify(accessContext) } : {}),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })

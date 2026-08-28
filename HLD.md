@@ -36,7 +36,7 @@ flowchart LR
     W --> NR[Domain Effect Runtime]
     NR --> TG[Typed Tool Gateway]
     TG --> NO[Network Observer MCP]
-    TG --> NA[Trusted Network Actor]
+    TG --> NA[Durable Network Actor MCP]
     NO --> NL[Network Layer / Containerlab]
     NA --> NL
     TG --> SL[Service Layer / MCP Servers]
@@ -60,7 +60,7 @@ flowchart LR
 | Typed Tool Gateway | 合并本地 Network provider、MCP 与 OpenAPI，保留 source/identity/schema | 数据/效果适配层 |
 | Network Provider Capability Registry | 用 id/version/observer-or-actor role 固定 provider 语义 | 版本化边界合同 |
 | Network Observer MCP | 只读查询、拓扑/路径/数据面观测和证据封装；无写凭据 | 独立观测边界 |
-| Trusted Network Actor | 只接受 Runtime 批准的 L0 写入并保留补偿上下文 | 受控效果边界 |
+| Durable Network Actor MCP | 只接受 Runtime 内部绑定的受审 L0 写入；持久化 operation/snapshot/lease/fence/audit | 受控效果边界 |
 | Network Layer | Containerlab 或设备 adapter；拥有拓扑、enforcement 和数据面事实 | 网络事实/效果层 |
 | Service Layer | Identity/Application/Policy/Change/CMDB/Platform MCP；拥有业务 desired state | 业务事实/效果层 |
 | Scoped Services | 作用域记忆、能力检索、大结果分页 | 只读辅助层 |
@@ -140,6 +140,7 @@ sequenceDiagram
 | 数据 | 默认存储 | 内容约束 |
 |---|---|---|
 | Network plans/events | `network_runtime.sqlite` | 规范化参数、hash、状态、证据摘要 |
+| Actor operations/events | 每个 lab 的 `.state/network_actor.sqlite` | immutable operation、snapshot、desired state、lease、fence、Actor hash chain |
 | HITL/grants | `hitl.sqlite` | 审批状态、token digest、绑定和 continuation |
 | Hermes pending approval | 插件进程内存 | execution nonce 不进入模型或磁盘；重启失效 |
 | Local DC state | `local_dc_peer.sqlite` | mock peer continuation 与模拟状态 |
@@ -162,7 +163,7 @@ sequenceDiagram
 |---|---|
 | L0 Skill/ToolContract | 无；使用同一注册表和 contract hash |
 | 参数、Intent、风险、preflight | 无；Hermes 只转发候选输入到同一 `prepare` |
-| Plan schema/状态机 | 无；仍为 schema v5 和同一状态迁移 |
+| Plan schema/状态机 | 无；仍为 schema v6 和同一状态迁移 |
 | verifier/compensator | 无；Adapter 不能替换或跳过 |
 | journal/audit | 无；同一 SQLite schema 与事件哈希链 |
 | 用户审批交互 | 有；DSH 为 plan card + Tool Guard，Hermes 为用户 slash command + 进程内 nonce binding |
@@ -244,20 +245,20 @@ seed runs once; restarting an MCP process cannot resurrect a revoked role. The c
 reviewed sequence of independent plans, not a distributed transaction. A failed later step must be recovered
 with a new reviewed L0 plan; automatic multi-effect saga/bundle authorization remains a P1 enhancement.
 
-### 17. P0.9 Network Provider 部署与数据流
+### 17. P0.9/P1.0 Network Provider 部署与数据流
 
-四个 Containerlab 配置现在各增加一个官方 SDK stdio Network Observer MCP。server 名称和
-版本固定为 `netopyu.network-observer@1.0.0`；启动时根据 manifest/profile 只注册真实可用的
-observer capabilities。小型现网 LAN 配置注册 22 个 MCP 读工具，本地 Lab provider 只保留
-7 个写入/内部恢复工具。MCP 同名读工具覆盖本地读实现，因此 DSH/Hermes、L1 workflow、
-Runtime verifier 和 reconciliation 都经过统一的跨进程观测边界。
+四个 Containerlab 配置均启动官方 SDK stdio Network Observer 与 Network Actor MCP，身份分别
+固定为 `netopyu.network-observer@1.0.0` 和 `netopyu.network-actor@1.0.0`。Observer 只注册
+manifest/profile 可用的读能力；Actor 声明每个能力适用的 profiles，由 backend 按当前 LAN/DC
+agent 精确投影。Actor MCP 同名写覆盖 backend 内的本地 callable；restore/finalize 和内部效果
+上下文不进入 Harness manifest。
 
 ```mermaid
 sequenceDiagram
     participant L as L1 / Runtime verifier
     participant G as Typed Tool Gateway
     participant O as Network Observer MCP
-    participant A as Trusted Local Actor
+    participant A as Durable Actor MCP
     participant C as Containerlab
     L->>G: read(capability id + typed args)
     G->>O: MCP call
@@ -267,15 +268,33 @@ sequenceDiagram
     G->>G: validate and unwrap
     G-->>L: compatibility payload + provider metadata
     L->>G: approved L0 mutation
-    G->>A: execute once
+    G->>A: operation + hashes + approved preflight
+    A->>A: durable snapshot + lease + fence
     A->>C: fixed reviewed effect
     L->>O: independent fresh verification
+    L->>A: internal finalize or snapshot compensation
 ```
 
-Observer/Actor 分权减少“同一写进程自证成功”，但当前并非完整的独立生产 verifier：二者仍
-运行在同一主机、同一 OS account，并读取同一 Containerlab。生产部署应把 Observer 使用的
-只读设备/控制器身份与 Actor 写身份分离。Actor MCP 迁移必须等待 durable snapshot/outbox、
-fencing、崩溃后 reconciliation 和 HA 状态机；否则进程崩溃会使当前精确补偿能力退化。
+Actor 在效果前持久化 immutable operation、approved-preflight digest、desired state 与精确
+snapshot。响应丢失后的重复调用只读回 desired/snapshot；启动 reconciliation 不重发 executing
+写入。Runtime compensation 仅以 operation id 取 durable snapshot。SQLite/WAL、target 文件锁、
+租约和单调 fence 认证本地 crash safety；Actor 事件与 Runtime 事件分别形成哈希链。
+
+Observer/Actor 仍运行于同一主机、OS account 和 Docker daemon，因此不是生产独立 verifier 或
+分布式线性一致 Actor。生产部署需分离读写身份/故障域，并把日志、租约、fencing 和幂等键下沉
+到远端事务存储及设备/控制器 CAS 能力。
+
+### 18. P1.1 Capability、只读授权、终态与 Saga
+
+Runtime 与 Provider 之间新增协议无关 Capability Gateway。Runtime 只识别 observation/effect、
+domain、identity、schema、effect semantics 和安全属性；MCP/OpenAPI/CLI/厂商协议均在 Gateway
+之后。Observation 在调用前经过 PEP，校验主体、角色、resource scope、用途、clearance 与数据
+sensitivity。企业 PDP 尚未接入，本地 system principal 仅兼容 owner-only 原型。
+
+Harness 不再接收 Actor 原始执行结果，只接收 Runtime terminal envelope。跨 Service/Network
+业务使用 durable Saga 记录不可变步骤图、每步 plan id/hash、依赖、正向终态和反向补偿终态。
+Saga 只协调受审 L0 计划，不直接持有 Provider 凭据或 execution nonce；它提供 crash recovery
+和逆序补偿，但不把多个系统伪装成 ACID 事务。
 
 ---
 
@@ -314,6 +333,8 @@ This document defines the system boundary, logical components, deployment topolo
 | Domain Effect Runtime | Intent compilation, plans, state machine, execution, verification, compensation, audit | Domain effect control plane |
 | Network/Service L0 Registry | Fixed steps, target fields, tool/verifier/rollback contracts | Versioned policy root |
 | Typed Tool Gateway | Preserves local/MCP/OpenAPI source, provider identity, and schema | Data/effect adapter |
+| Network Observer MCP | Identity-pinned read evidence only | Independent observation boundary |
+| Durable Network Actor MCP | Runtime-bound writes with durable operation/snapshot/fence state | Controlled effect boundary |
 | Network Layer | Containerlab or device adapters owning topology, enforcement, and data-plane facts | Network provider |
 | Service Layer | Identity/application/policy/change/CMDB/platform MCP owning business desired state | Service provider |
 | Scoped Services | Memory, capability retrieval, large-result paging | Read-only auxiliary layer |
@@ -350,7 +371,7 @@ The P1 production target uses independent domain deployments, enterprise identit
 
 ### 8.1 Hermes impact on Domain Effect Runtime
 
-Hermes does not change the L0 registry, ToolContracts, compilation, intent/risk/preflight, schema-v5 plan state machine, verifier, compensator, journal, or audit. It changes only the human-interaction edge: DSH uses a plan card and Tool Guard, while Hermes uses a user slash command and a process-local hidden nonce binding. `netopyu_skill_view` and the Skill hook start reviewed workflows, and read handlers record prerequisite observations. Restart loses pending Hermes authorization safely; DSH still has richer durable HITL recovery, batch, and deferred UX. The local A/B gate proves equal stable plan fields, `verified_success`, valid audit, hidden nonces, and duplicate blocking. It is a contract test, not a Hermes Gateway, model-quality, real-network, or performance certification.
+Hermes does not change the L0 registry, ToolContracts, compilation, intent/risk/preflight, schema-v6 plan state machine, verifier, compensator, journal, or audit. It changes only the human-interaction edge: DSH uses a plan card and Tool Guard, while Hermes uses a user slash command and a process-local hidden nonce binding. `netopyu_skill_view` and the Skill hook start reviewed workflows, and read handlers record prerequisite observations. Restart loses pending Hermes authorization safely; DSH still has richer durable HITL recovery, batch, and deferred UX. The local A/B gate proves equal stable plan fields, `verified_success`, valid audit, hidden nonces, and duplicate blocking. It is a contract test, not a Hermes Gateway, model-quality, real-network, or performance certification.
 
 ### 9. P0.5 acceptance
 
@@ -416,18 +437,19 @@ Service writes place change validation, optimistic revision comparison,
 mutation, idempotency, and audit in one immediate transaction. Versioned
 one-time seeding prevents restarted MCP processes from resurrecting revoked
 state, while stale idempotency replay fails. The current cross-layer workflow
-is an ordered set of independently approved plans, not an atomic distributed
-transaction; automatic saga/bundle authorization remains future work.
+remains a sequence of independently approved plans rather than an atomic
+distributed transaction. P1.1 now binds those plans to a durable Saga for
+restart recovery and reverse compensation; approval remains per L0 plan.
 
-### 14. P0.9 Network Provider deployment and flow
+### 14. P0.9/P1.0 Network Provider deployment and flow
 
-Each Containerlab configuration now starts an official-SDK stdio Network
-Observer MCP pinned to `netopyu.network-observer@1.0.0`. Discovery publishes
-only observer capabilities available in the selected manifest/profile. The
-small-production LAN configuration routes 22 reads through MCP and retains
-seven mutation/internal-restore tools in the trusted local Lab Actor. MCP
-overrides same-name local reads, so L1 workflows, Runtime verifiers, and
-reconciliation all cross the same process boundary.
+Each Containerlab configuration starts official-SDK stdio Observer and Actor
+MCP servers pinned to `netopyu.network-observer@1.0.0` and
+`netopyu.network-actor@1.0.0`. Observer discovery publishes only available read
+capabilities. Actor capabilities declare valid profiles; backend projection
+preserves the LAN/DC boundary. Same-name Actor writes override local backend
+callables, while internal effect context, restore, and finalize tools remain
+outside the Harness manifest.
 
 An observation is consumed only after identity, capability id/version, a zoned
 UTC timestamp within the freshness/skew window, and canonical payload digest
@@ -436,9 +458,28 @@ unwraps the payload for existing typed verifiers. Valid negative evidence is
 not confused with provider failure. Mutations remain capability-bound L0
 transactions and use fresh Observer reads for postconditions.
 
-This separation reduces self-attestation but is not yet a fully independent
-production verifier: both processes run on one host/account and observe the
-same Containerlab. Production should separate Observer read credentials from
-Actor write credentials. Actor MCP migration requires durable snapshots/outbox,
-fencing, crash reconciliation, and HA state before it can preserve the current
-exact-compensation semantics.
+Before dispatch, Actor persists immutable operation data, approved-preflight
+digest, desired state, and an exact snapshot. Duplicate and startup recovery
+reconcile by reads instead of replaying an uncertain write. Runtime compensation
+loads the snapshot by operation id. SQLite/WAL, target file locks, leases,
+monotonic fences, and a separate Actor hash chain qualify local crash safety.
+
+Observer and Actor still share one host/account and Docker daemon. Production
+must separate read/write credentials and failure domains, and move log, lease,
+fencing, and idempotency into a remote transaction system plus device/controller
+CAS support.
+
+### 15. P1.1 capability, read authorization, terminal result, and Saga
+
+A transport-neutral Capability Gateway separates Runtime semantics from MCP,
+OpenAPI, CLI, and vendor protocols. Observation authorization checks subject,
+role, resource scope, purpose, clearance, and sensitivity before a Provider
+call. An enterprise PDP is not yet connected; the implicit local system
+principal is owner-only prototype compatibility.
+
+Harnesses receive only a Runtime terminal envelope, never raw Actor execution
+states. A durable Saga binds immutable Service/Network step definitions and
+per-step plan ids/hashes, persists forward and reverse outcomes, resumes after
+restart, and compensates in reverse dependency order. It has no Provider
+credential or execution nonce and cannot bypass per-step L0 approval,
+verification, or audit; it is deliberately not distributed ACID.

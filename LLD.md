@@ -26,7 +26,7 @@
 | `dsh_adapter/scoped_services.py` | session/operator memory 和 profile capability retrieval |
 | `effect_runtime/` | 领域中性 façade 与跨 Service/Network reconciliation |
 | `network_runtime/engine.py` | Domain Effect Runtime 共享主状态机 |
-| `network_runtime/contracts.py` | schema v5、Plan/Evidence/Outcome 与状态迁移 |
+| `network_runtime/contracts.py` | schema v6、Plan/Evidence/Outcome 与状态迁移 |
 | `network_runtime/l0_skills.py` | L0 Skill/step/IntentSpec 注册表和 hash |
 | `network_runtime/validation.py` | 参数规范化、类型、来源、实体与风险校验 |
 | `network_runtime/policies.py` | 工具版本、preflight、verifier、compensator 合同 |
@@ -36,7 +36,10 @@
 | `network_runtime/journal.py` | SQLite 状态、nonce、事件哈希链和审计 |
 | `network_runtime/provider_contracts.py` | Network provider capability id/version/role registry |
 | `network_provider/mcp_observer.py` | identity-pinned read-only Network Observer MCP |
-| `network_provider/models.py` | strict `network-evidence-envelope-v1` model |
+| `network_provider/mcp_actor.py` | identity-pinned trusted Durable Network Actor MCP |
+| `network_provider/actor.py` | operation 执行、幂等重放、读回 reconciliation 与精确恢复 |
+| `network_provider/actor_store.py` | SQLite/WAL operation、snapshot、lease、fence 与 Actor hash chain |
+| `network_provider/models.py` | strict Observer/Actor structured result models |
 | `network_lab/manifest.py` | schema-v1 lab 目标权威与路径/标识校验 |
 | `network_lab/containerlab.py` | 无 shell 生命周期、FRR CLI、probe、fault 和快照恢复 |
 | `network_lab/tools.py` | lab 节点到 pragmatic 工具合同的投影 |
@@ -151,13 +154,14 @@ Raw write tool 必须解析到唯一 L0 Skill，且请求提供的 L0 id 必须�
 
 `IntentSpec` 不包含自由文本执行指令。模型解释只能保留在 DSH 会话，不能成为 backend 命令。
 
-### 7. PreparedPlan schema v5
+### 7. PreparedPlan schema v6
 
 核心字段：
 
 ```text
 plan_id, profile, tool_name, tool_version, action_type
 provider_identity, input_schema_digest, output_schema_digest
+capability_id, capability_version, provider_role
 arguments, argument_provenance, targets
 risk_level, risk_reasons
 preflight[]
@@ -168,7 +172,7 @@ workflow_run_id, workflow_template_hash
 created_at, expires_at, plan_hash, state, schema_version
 ```
 
-`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。schema v5 把 provider identity 与输入/输出 schema digest 纳入批准边界；只为读取既有 journal 保留 v4 hash 兼容，不能用 v4 创建新计划。
+`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。schema v6 在 provider identity 和输入/输出 schema digest 之外，把 capability id/version/role 纳入批准边界；v5 及更早 hash 仅用于读取既有 journal，不能创建新计划。
 
 ### 8. 状态机
 
@@ -398,11 +402,11 @@ read verifier 比较稳定事实。revision 是并发 token，补偿后继续单
 `enforcement_allows_but_data_plane_failed`、`data_plane_bypasses_denied_policy` 或 `none`。
 这些读取不是跨系统原子快照；所有写计划仍在 approval 后做 execution-time preflight revalidation。
 
-### 22. P0.9 Network Provider 合同与证据算法
+### 22. P0.9/P1.0 Network Provider 合同、证据与 Actor 算法
 
 `ProviderCapabilityRegistry` 以唯一 `capability_id` 为主键，以 tool name 为兼容索引。每条合同
 固定 `capability_version`、`provider_role=observer|actor` 和 `action_type`。当前 registry 有
-30 个 observer 与 11 个 actor capability。启动时，任何声明 `domain=network` 的外部 MCP tool
+30 个 observer 与 12 个 actor capability。启动时，任何声明 `domain=network` 的外部 MCP tool
 都必须逐字段匹配 registry；未知 tool、错误角色、错误 action 或版本漂移均中止 backend 初始化。
 
 `network_provider.mcp_observer` 包装已审核的 `ContainerlabProvider`/`LabToolAdapter`，但只从
@@ -423,15 +427,48 @@ capability id/version 与 envelope 完全相等 → `observed_at` 为带时区 I
 `MCPCallResult.evidence_envelope`。payload 内部的 `ok=false` 是合法负面观测，不等于 provider
 调用失败。
 
-backend 先加载本地 Lab Actor，再注册 MCP Observer；同名 observer read 由 MCP 覆盖，未被
-Observer 暴露的 actor/restore 继续指向 `network-lab`。`ToolContract` 的 Network 写合同绑定
-预期 capability id、`provider_role=actor` 和允许的 provider kind。未来 MCP Actor 还必须通过
-trusted-write、server identity 与 input/output schema digest 校验。`profile-mock` 与无 metadata
-的旧 Lab 兼容只限审核过的 in-process source；任意外部 source 不进入此路径。
+backend 注册 Observer 和显式 `trusted_for_writes` 的 Actor MCP；同名读写分别覆盖 backend 的
+本地 callable。`ToolContract` 绑定 capability id/version、`provider_role=actor`、provider kind、
+server identity/version、input/output schema digest、declared contract 与 structured result。
+Actor 的 `profiles` 声明在注册时按当前 agent profile 过滤；内部参数从模型 schema 删除，仅由
+`BackendSession.invoke_effect` 注入。
 
-当前 Actor 的 config/fabric snapshot 是 execution-session 内存对象。因此 P0.9 不创建短生命周期
-Actor MCP；否则 crash-after-write 会丢失恢复材料。后续实现必须先持久化 snapshot、effect
-attempt/idempotency/outbox、租约/fencing 和启动 reconciliation，再允许 MCP Actor 替换本地实现。
+`ActorStore` 在 `BEGIN IMMEDIATE` 内创建 operation，并持久化 arguments/preflight/snapshot digest、
+desired state、target key 和 fence token。target 的跨进程文件锁包围读写；SQLite lease 阻止另一
+operation 在有效期内占用相同 target。状态机为 `prepared → executing → applied`，异常进入
+`not_applied|outcome_indeterminate|manual_intervention`，补偿为 `restoring → restored`，成功终结为
+`committed`。每次变化追加独立 Actor event hash chain。
+
+同一 operation id 的 immutable 字段不一致立即拒绝。`prepared` 可在 snapshot 未漂移时恢复执行；
+`executing/outcome_indeterminate` 只能读回 desired 或 snapshot，绝不重发；`applied` 重试只在
+desired 仍成立时返回原结果。启动 reconciliation 使用同一规则。补偿工具忽略模型提供的旧状态，
+按 operation id 加载精确 durable snapshot。Runtime 内部 finalizer 将 `verified_success` 映射为
+`committed`、`rollback_verified` 映射为 `restored`，然后释放 lease。人工介入状态不释放安全
+边界：target 被 durable quarantine，后续 operation 失败关闭，直到受审人工解除流程处理。
+
+本地 fencing token 尚不能被 Containerlab/设备原生校验；当前实现依靠单主机文件锁和 SQLite
+认证 crash safety。跨主机 HA 必须用远端日志/队列、leader fencing 和设备/控制器 idempotency/CAS。
+
+### 23. P1.1 Capability SPI、Read PEP、Terminal Envelope 与 Saga 算法
+
+`CapabilityContract.from_metadata()` 将 backend metadata 标准化为 observation/effect、domain、
+provider identity/kind、schema digest、effect semantics、sensitivity、required roles、scope fields
+和 freshness limit。`BackendSession` 以结构化 SPI 提供 `describe_capability()`、
+`invoke_observation()`、`invoke_effect()` 和 `finalize_effect()`；Runtime 不根据传输协议名称分支。
+
+`invoke_read()` 先编译参数，再由 `ObservationPolicy` 检查 authenticated subject、role、clearance、
+purpose 和每个 `field:value` scope；拒绝发生在 Provider callable 前。DSH/Hermes Adapter 传递
+operator/session/purpose，manifest 同时投影 canonical capability contract。
+
+`ExecutionOutcome.terminal_envelope()` 删除原始 Provider result，只保留 digest、Runtime 终态、
+typed evidence、error 和 compensation 状态。DSH write handler 只把该 JSON 返回模型；Hermes
+slash approval 也优先返回相同封装。
+
+`SagaCoordinator` 维护 `effect_sagas`、`effect_saga_steps` 和 `effect_saga_events`。
+`SagaDefinition` 哈希固定步骤、domain、capability、依赖和 compensation capability。正向步骤只
+能在依赖 `verified` 后绑定 immutable plan；失败把已验证步骤按逆序标记为
+`compensation_required`。每个补偿仍绑定一个新 L0 plan；未知或不可补偿状态进入
+`manual_intervention_required`。Saga 事件另有 SHA-256 链，`recoverable()` 不重放 Provider write。
 
 ---
 
@@ -466,7 +503,8 @@ must reproduce the typed preflight evidence.
 | `dsh_adapter/backend.py` | Backend lifecycle and common paging tools |
 | `effect_runtime/` | Domain-neutral façade and Service/Network reconciliation |
 | `network_runtime/engine.py` | Shared deterministic effect state machine |
-| `network_runtime/contracts.py` | Schema v5 plans, evidence, outcomes, transitions |
+| `network_runtime/contracts.py` | Schema v6 plans, evidence, outcomes, transitions |
+| `network_provider/` | Identity-pinned Observer MCP, durable Actor MCP/store, strict results |
 | `network_runtime/l0_skills.py` | Versioned L0 and IntentSpec registry |
 | `network_runtime/validation.py` | Normalization, schema, provenance, entity, and risk validation |
 | `network_runtime/policies.py` | Tool, preflight, verifier, and compensator contracts |
@@ -495,7 +533,7 @@ Compilation rejects unknown/missing/type-invalid arguments, invalid entities, un
 
 ### 5. Plan and state machine
 
-Schema-v5 `PreparedPlan` binds the complete effect description, provider identity, input/output schema digests, evidence, L0 contract, intent, workflow, TTL, and `plan_hash`. Approval and execution revalidate every binding; any change invalidates prior authorization. V4 hash support is read compatibility only.
+Schema-v6 `PreparedPlan` binds the complete effect description, provider identity, input/output schema digests, capability id/version/role, evidence, L0 contract, intent, workflow, TTL, and `plan_hash`. Approval and execution revalidate every binding; any change invalidates prior authorization. Older hash shapes are read compatibility only.
 
 Only `verified_success` and `rollback_verified` represent verified outcomes. Rejection, expiry, changed preconditions, and manual intervention are safe terminal states. Illegal transitions raise `StateTransitionError`.
 
@@ -591,7 +629,7 @@ desired/enforced drift, allowed-but-broken data plane, denied-but-bypassed data
 plane, or no drift. Cross-system reads are not an atomic snapshot, so every
 approved write still performs execution-time preflight revalidation.
 
-### 14. P0.9 Network Provider contracts and evidence algorithm
+### 14. P0.9/P1.0 Network Provider contracts, evidence, and Actor algorithm
 
 `ProviderCapabilityRegistry` keys stable semantics by unique capability id and
 uses tool names only as compatibility indexes. Every entry fixes capability
@@ -613,14 +651,53 @@ compatibility content. The original envelope remains available on the call
 result. A payload-level `ok=false` is valid negative network evidence and is
 distinct from transport/provider failure.
 
-Backend registration lets MCP Observer reads override same-name local reads;
-the local Actor retains capabilities not exposed by Observer. Mutation
-`ToolContract`s bind the expected capability id, actor role, and provider kind.
-A future MCP Actor additionally requires trusted-write, identity, and schema
-digest checks. Legacy metadata-free compatibility is restricted to reviewed
-in-process mock/Lab sources and never applies to an external source.
+Backend registration lets Observer reads and trusted Actor writes override
+same-name local callables. Mutation contracts bind capability id/version/role,
+provider kind, server identity/version, input/output schema digests, declared
+contract, and structured result. Actor profile declarations are filtered for
+the active agent. Runtime-only effect context is removed from model schemas and
+injected by `BackendSession`.
 
-The current config/fabric rollback snapshot lives in one execution session, so
-P0.9 intentionally avoids a short-lived Actor MCP. Durable snapshots, effect
-attempt/idempotency/outbox records, leases/fencing, and startup reconciliation
-are prerequisites for preserving crash-after-write recovery across that move.
+`ActorStore` creates an immutable operation in an immediate transaction and
+persists argument/preflight/snapshot digests, desired state, target key, and
+fence token. A per-target process lock surrounds observation and effect, while
+the SQLite lease blocks another live operation. States progress through
+prepared/executing/applied, explicit uncertain states, restoring/restored, and
+committed/manual terminal states; every change enters an Actor hash chain.
+
+An immutable duplicate may resume only from prepared with an unchanged
+snapshot. Executing/indeterminate duplicates reconcile desired or snapshot by
+reads and never replay the write; applied duplicates return only while desired
+state still holds. Startup uses the same rule. Compensation loads the exact
+durable snapshot by operation id. Runtime finalization maps verified success to
+committed and verified rollback to restored, then releases the lease. Manual
+intervention durably quarantines the target; later operations fail closed until
+a reviewed operator-resolution flow clears it.
+
+Containerlab does not natively validate the fence token. The implementation
+therefore qualifies single-host crash safety through SQLite and file locks, not
+cross-host linearizability. HA requires a remote log/queue, leader fencing, and
+device/controller idempotency or CAS.
+
+### 15. P1.1 Capability SPI, read PEP, terminal envelope, and Saga
+
+`CapabilityContract.from_metadata()` normalizes every backend into
+observation/effect kind, domain, provider identity/kind, schema digests, effect
+semantics, sensitivity, roles, scope fields, and freshness. `BackendSession`
+structurally implements `describe_capability`, `invoke_observation`,
+`invoke_effect`, and `finalize_effect`; Runtime does not branch on transport.
+
+`invoke_read` compiles arguments and applies `ObservationPolicy` to subject,
+roles, clearance, purpose, and each `field:value` scope before any Provider
+call. DSH/Hermes pass operator/session purpose, and the manifest projects the
+canonical contract.
+
+`ExecutionOutcome.terminal_envelope()` replaces the raw Provider result with a
+digest and exposes only Runtime terminal state, typed evidence, error, and
+compensation status. Both Harness adapters return it after approval.
+
+`SagaCoordinator` persists immutable definitions, dependency-ordered plan
+bindings, terminal outcomes, reverse compensation bindings, and a separate
+event hash chain. Every compensation is a fresh L0 plan. Unknown or
+uncompensatable state escalates to manual intervention; recovery lists work but
+never replays a Provider write.

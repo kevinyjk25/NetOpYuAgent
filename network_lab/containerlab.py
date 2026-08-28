@@ -699,9 +699,31 @@ class ContainerlabProvider:
             raise LabCommandError(
                 f"no execution-session fabric snapshot exists for {device_id}:{interface}"
             )
+        return await self.restore_fabric_access_vlan_snapshot(
+            device_id, interface, snapshot,
+        )
+
+    async def restore_fabric_access_vlan_snapshot(
+        self,
+        device_id: str,
+        interface: str,
+        snapshot: dict[str, object],
+    ) -> str:
+        """Restore a validated durable bridge/PVID snapshot."""
+        if (
+            snapshot.get("device_id") != device_id
+            or snapshot.get("interface") != interface
+            or snapshot.get("mode") != "access"
+            or snapshot.get("ok") is not True
+        ):
+            raise LabCommandError("fabric snapshot does not match the reviewed target")
         previous_vlan = int(snapshot["current_vlan"])
         fabric = self._fabric()
+        if previous_vlan not in fabric.vlans:
+            raise LabCommandError("fabric snapshot references an undeclared VLAN")
         previous = fabric.vlans[previous_vlan]
+        if snapshot.get("bridge") != previous.bridge:
+            raise LabCommandError("fabric snapshot bridge does not match the manifest")
         current = await self.fabric_access_vlan(device_id, interface)
         if current["ok"] is not True:
             raise LabCommandError("access port is not in a valid declared state before rollback")
@@ -889,6 +911,60 @@ class ContainerlabProvider:
         )
         return user.status == "active" and output.strip().lower() == "up"
 
+    async def user_admission_snapshot(self, user_id: str) -> dict[str, object]:
+        """Capture the complete manifest-scoped admission effect surface."""
+        user = self._user(user_id)
+        node = self.manifest.endpoints[user.endpoint].node
+        admitted = await self.user_admitted(user_id)
+        rendered = await self._exec_node(node, ("ip", "route", "show"))
+        lines = tuple(
+            " ".join(line.split()) for line in rendered.splitlines() if line.strip()
+        )
+        routes: dict[str, bool] = {}
+        for prefix in user.route_prefixes:
+            expected = f"{prefix} via {user.gateway} dev {user.interface}"
+            matches = [line for line in lines if line.split(maxsplit=1)[0] == prefix]
+            if matches not in ([], [expected]):
+                raise LabCommandError(
+                    f"user {user_id!r} route {prefix!r} is outside the reviewed admission shape"
+                )
+            routes[prefix] = matches == [expected]
+        if any(present is not admitted for present in routes.values()):
+            raise LabCommandError(
+                f"user {user_id!r} interface and reviewed routes are not internally consistent"
+            )
+        return {
+            "user_id": user_id,
+            "endpoint": user.endpoint,
+            "interface": user.interface,
+            "admitted": admitted,
+            "routes": routes,
+        }
+
+    async def restore_user_admission_snapshot(
+        self, user_id: str, snapshot: dict[str, object],
+    ) -> str:
+        """Restore and read back one exact durable admission snapshot."""
+        user = self._user(user_id)
+        routes = snapshot.get("routes")
+        admitted = snapshot.get("admitted")
+        if (
+            snapshot.get("user_id") != user_id
+            or snapshot.get("endpoint") != user.endpoint
+            or snapshot.get("interface") != user.interface
+            or not isinstance(admitted, bool)
+            or not isinstance(routes, dict)
+            or set(routes) != set(user.route_prefixes)
+            or any(not isinstance(value, bool) for value in routes.values())
+            or any(value is not admitted for value in routes.values())
+        ):
+            raise LabCommandError("durable user-admission snapshot is invalid for this target")
+        result = await self.set_user_admission(user_id, admitted=admitted)
+        observed = await self.user_admission_snapshot(user_id)
+        if observed != snapshot:
+            raise LabCommandError("durable user-admission snapshot did not restore exactly")
+        return result
+
     async def set_user_admission(self, user_id: str, *, admitted: bool) -> str:
         """Change only the manifest-bound endpoint interface, never an arbitrary target."""
         user = self._user(user_id)
@@ -916,11 +992,55 @@ class ContainerlabProvider:
 
     async def application_access_blocked(self, user_id: str, app_id: str) -> bool:
         """Read the application endpoint's exact per-user blackhole policy."""
+        snapshot = await self.application_access_snapshot(user_id, app_id)
+        return snapshot["allowed"] is False
+
+    async def application_access_snapshot(
+        self, user_id: str, app_id: str,
+    ) -> dict[str, object]:
+        """Capture the complete manifest-scoped per-user application route."""
         user = self._user(user_id)
         app = self._application(app_id)
         node = self.manifest.endpoints[app.endpoint].node
         output = await self._exec_node(node, ("ip", "route", "show", f"{user.address}/32"))
-        return output.strip().lower().startswith("blackhole ")
+        routes = [" ".join(line.split()) for line in output.splitlines() if line.strip()]
+        expected = f"blackhole {user.address}"
+        if routes not in ([], [expected]):
+            raise LabCommandError(
+                f"application route for {user_id!r}->{app_id!r} is outside the reviewed shape"
+            )
+        return {
+            "user_id": user_id,
+            "app_id": app_id,
+            "source_prefix": f"{user.address}/32",
+            "application_endpoint": app.endpoint,
+            "allowed": not routes,
+            "route": routes[0] if routes else None,
+        }
+
+    async def restore_application_access_snapshot(
+        self, user_id: str, app_id: str, snapshot: dict[str, object],
+    ) -> str:
+        """Restore and read back one exact durable application-policy snapshot."""
+        user = self._user(user_id)
+        app = self._application(app_id)
+        expected_route = None if snapshot.get("allowed") is True else f"blackhole {user.address}"
+        if (
+            snapshot.get("user_id") != user_id
+            or snapshot.get("app_id") != app_id
+            or snapshot.get("source_prefix") != f"{user.address}/32"
+            or snapshot.get("application_endpoint") != app.endpoint
+            or not isinstance(snapshot.get("allowed"), bool)
+            or snapshot.get("route") != expected_route
+        ):
+            raise LabCommandError("durable application-policy snapshot is invalid for this target")
+        result = await self.set_application_access(
+            user_id, app_id, allowed=bool(snapshot["allowed"]),
+        )
+        observed = await self.application_access_snapshot(user_id, app_id)
+        if observed != snapshot:
+            raise LabCommandError("durable application-policy snapshot did not restore exactly")
+        return result
 
     async def set_application_access(
         self, user_id: str, app_id: str, *, allowed: bool,
@@ -1071,10 +1191,16 @@ class ContainerlabProvider:
         )
 
     async def restore_last_config(self, device_id: str) -> str:
-        device = self._device(device_id)
         snapshot = self._snapshots.get(device_id)
         if snapshot is None:
             raise LabCommandError(f"no execution-session snapshot exists for {device_id}")
+        return await self.restore_config_snapshot(device_id, snapshot)
+
+    async def restore_config_snapshot(self, device_id: str, snapshot: str) -> str:
+        """Restore an explicit durable FRR snapshot after target validation."""
+        device = self._device(device_id)
+        if not isinstance(snapshot, str) or not snapshot.strip():
+            raise LabCommandError("configuration snapshot is empty or invalid")
         payload = "\n".join(
             line for line in snapshot.splitlines()
             if not line.startswith("! Lab configuration for ")
@@ -1108,7 +1234,7 @@ class ContainerlabProvider:
         restored = await self.running_config(device_id)
         if normalize_frr_config(restored) != normalize_frr_config(snapshot):
             raise LabCommandError("FRR reload completed but exact normalized snapshot was not restored")
-        return f"Restored exact execution-session snapshot for {device_id}.\n{output}"
+        return f"Restored exact durable snapshot for {device_id}.\n{output}"
 
     async def probe(self, probe_id: str) -> dict[str, object]:
         try:

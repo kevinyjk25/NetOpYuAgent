@@ -173,7 +173,7 @@ class ServiceMCPTests(unittest.TestCase):
         prepared = self._prepare_grant(runtime)
         self.assertEqual(prepared["status"], "plan_ready")
         plan = prepared["plan"]
-        self.assertEqual(plan["schema_version"], 5)
+        self.assertEqual(plan["schema_version"], 6)
         self.assertEqual(
             plan["provider_identity"],
             "mcp:access-policy-service:netopyu.all@1.0.0",

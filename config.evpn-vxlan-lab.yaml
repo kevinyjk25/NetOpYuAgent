@@ -19,6 +19,13 @@ pragmatic:
       command: [.venv/bin/python, -m, network_provider.mcp_observer, --profile, dc, --manifest, labs/p075-c-evpn-vxlan/lab.yaml, --command-timeout, '30']
       expected_server_name: netopyu.network-observer
       expected_server_version: 1.0.0
+    - name: network-actor
+      domain: network
+      transport: stdio
+      command: [.venv/bin/python, -m, network_provider.mcp_actor, --profile, dc, --manifest, labs/p075-c-evpn-vxlan/lab.yaml, --store, labs/p075-c-evpn-vxlan/.state/network_actor.sqlite, --command-timeout, '30', --lease-seconds, '120']
+      trusted_for_writes: true
+      expected_server_name: netopyu.network-actor
+      expected_server_version: 1.0.0
   lab:
     enabled: true
     provider: containerlab
