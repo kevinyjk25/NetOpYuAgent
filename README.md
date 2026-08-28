@@ -158,6 +158,16 @@ P0.75-A 使用两个 FRR 路由器、主备 OSPF WAN 链路和两个 Alpine 终�
 从进程内 mock 推进到真实 CLI、真实协议收敛与真实容器转发。版本化
 `labs/p075-a-frr/lab.yaml` 固定设备、探测和故障接口；模型不能扩展目标范围。
 
+基础 OSPF 主备链路用例的组网如下，实线为首选路径，虚线为备份路径：
+
+```mermaid
+flowchart LR
+    BC[branch-client] --- BR[branch-r1]
+    BR ==>|主 WAN / OSPF| DR[dc-r1]
+    BR -.->|备 WAN / OSPF| DR
+    DR --- DS[dc-server]
+```
+
 在 Linux/Containerlab 环境中运行：
 
 ```bash
@@ -203,6 +213,19 @@ CRM/Wiki 两个 HTTP 应用。它把新员工用例落到真实容器数据面�
 enforcement，应用服务器的精确源 `/32` 策略表示 RBAC enforcement，最终验证必须得到
 员工终端实际 HTTP 响应。部署 topology 后运行：
 
+```mermaid
+flowchart LR
+    Erin[erin-client] --- Access[campus-access-1]
+    Bob[bob-client] --- Access
+    Access --- Core1[campus-core-1]
+    Access --- Core2[campus-core-2]
+    Core1 --- Border[idc-border-1]
+    Core2 --- Border
+    Border --- Leaf[idc-leaf-1]
+    Leaf --- CRM[crm-server]
+    Leaf --- Wiki[wiki-server]
+```
+
 ```bash
 NETOPYU_CONFIG_PATH=config.campus-idc-lab.yaml \
 NETOPYU_DSH_BACKEND=pragmatic \
@@ -230,6 +253,41 @@ scripts/netopyu-dsh start
 10 个终端/服务，覆盖有线办公、企业无线、访客无线、双园区核心、双安全出口、双 ISP、
 IDC、运维基础设施、DMZ 和模拟 Internet。企业内部运行 OSPF，出口运行 eBGP；11 条
 清单探测同时验证允许路径与拒绝路径，HTTP 探测验证应用层结果。
+
+下图是逻辑组网；每条边都对应 `topology.clab.yml` 中的真实容器链路，双核心同时连接
+两个接入域、两个安全出口、IDC 和 DMZ：
+
+```mermaid
+flowchart LR
+    subgraph Campus[园区网]
+        Erin[erin-client] --- Wired[access-wired-1]
+        Bob[bob-client] --- Wired
+        Ops[ops-client] --- Wired
+        Carol[carol-client] --- Wireless[access-wireless-1]
+        Guest[guest-client] --- Wireless
+        Wired --- Core1[campus-core-1]
+        Wired --- Core2[campus-core-2]
+        Wireless --- Core1
+        Wireless --- Core2
+        Core1 --- Core2
+    end
+    Core1 --- Sec1[security-edge-1]
+    Core2 --- Sec1
+    Core1 --- Sec2[security-edge-2]
+    Core2 --- Sec2
+    Core1 --- IDC[idc-leaf-1]
+    Core2 --- IDC
+    Core1 --- DMZ[dmz-leaf-1]
+    Core2 --- DMZ
+    IDC --- CRM[crm-server]
+    IDC --- Wiki[wiki-server]
+    IDC --- Infra[infra-server]
+    DMZ --- Public[public-web]
+    Sec1 --- ISP1[isp-1]
+    Sec2 --- ISP2[isp-2]
+    ISP1 --- ISP2
+    ISP1 --- Internet[internet-client]
+```
 
 ```bash
 python scripts/netopyu_lab.py \
@@ -272,6 +330,21 @@ L0 成功要求 fresh running-config 和预声明流量探测同时通过。失�
 Spine 为双 EVPN Route Reflector，Leaf 为 VTEP；VLAN 10/20 分别映射到
 L2VNI 10010/10020。接入口和 802.1Q trunk、Linux bridge/VXLAN 数据面、OSPF underlay、
 MP-BGP EVPN type-2/type-3 路由与跨 VTEP 转发都在容器中真实运行，不是工具返回 mock。
+
+```mermaid
+flowchart TB
+    S1[spine-1 / EVPN RR] --- L1[leaf-1 / VTEP]
+    S1 --- L2[leaf-2 / VTEP]
+    S2[spine-2 / EVPN RR] --- L1
+    S2 --- L2
+    L1 -.->|VXLAN L2VNI 10010 / 10020| L2
+    A1[host-a1 / VLAN 10] --- L1
+    B1[host-b1 / VLAN 20] --- L1
+    T1[trunk-1 / VLAN 10,20] --- L1
+    A2[host-a2 / VLAN 10] --- L2
+    B2[host-b2 / VLAN 20] --- L2
+    T2[trunk-2 / VLAN 10,20] --- L2
+```
 
 ```bash
 python scripts/netopyu_lab.py \
@@ -324,6 +397,26 @@ Service Layer 只拥有业务期望状态；Containerlab 只拥有网络 enforce
 state、CMDB binding、网络实际 `/32` enforcement 和真实 HTTP probe，并明确分类 drift。
 Service/Network 写操作都必须经过同一 Effect Runtime，但使用各自的 L0、provider identity、
 input/output schema hash、preflight、verifier 和 compensator。
+
+跨层用例把同一个业务意图投影到两个独立事实域；以 Bob 访问 CRM 为例，网络侧实际路径
+落在 P0.75-B 的容器数据面中：
+
+```mermaid
+flowchart LR
+    DSH[DSH / L1 Skill] --> ER[Domain Effect Runtime]
+    ER --> MCP[Service MCP<br/>身份・应用・权限・变更・CMDB]
+    ER --> NR[Network L0 Runtime]
+    MCP --> Desired[业务 desired state]
+    NR --> Enforce[网络 /32 enforcement]
+    Bob[bob-client] --> Wired[access-wired-1]
+    Wired --> Core[campus-core-1]
+    Core --> Leaf[idc-leaf-1]
+    Leaf --> CRM[crm-server :8080]
+    CRM --> Evidence[真实 HTTP evidence]
+    Desired --> Reconcile[reconcile_service_network_access]
+    Enforce --> Reconcile
+    Evidence --> Reconcile
+```
 
 先部署 P0.75-B 网络，再运行完整的撤销/恢复演练：
 
@@ -508,6 +601,16 @@ approval path as pragmatic devices, but add a strict FRR command allowlist,
 fresh configuration reads, a predeclared traffic probe, provider snapshot
 compensation, and exact normalized restoration evidence.
 
+The base OSPF case uses a preferred and a backup WAN link:
+
+```mermaid
+flowchart LR
+    BC[branch-client] --- BR[branch-r1]
+    BR ==>|primary WAN / OSPF| DR[dc-r1]
+    BR -.->|backup WAN / OSPF| DR
+    DR --- DS[dc-server]
+```
+
 ```bash
 python scripts/netopyu_lab.py preflight
 python scripts/netopyu_lab.py deploy --approve-local-lab
@@ -538,6 +641,19 @@ represents NAC enforcement and an exact source `/32` route on the application
 server represents RBAC enforcement. A successful workflow must receive the
 actual HTTP response from the employee container.
 
+```mermaid
+flowchart LR
+    Erin[erin-client] --- Access[campus-access-1]
+    Bob[bob-client] --- Access
+    Access --- Core1[campus-core-1]
+    Access --- Core2[campus-core-2]
+    Core1 --- Border[idc-border-1]
+    Core2 --- Border
+    Border --- Leaf[idc-leaf-1]
+    Leaf --- CRM[crm-server]
+    Leaf --- Wiki[wiki-server]
+```
+
 ```bash
 NETOPYU_CONFIG_PATH=config.campus-idc-lab.yaml \
 NETOPYU_DSH_BACKEND=pragmatic \
@@ -566,6 +682,40 @@ rollback are executable gates. Use `config.small-production-lab.yaml` for DSH.
 The secure-edge role models routing and zone boundaries; it is not stateful
 firewall, NAT, IPS, RF, 802.1X, ASIC, or vendor-CLI emulation.
 
+Every edge below corresponds to a real container link in `topology.clab.yml`:
+
+```mermaid
+flowchart LR
+    subgraph Campus[Campus]
+        Erin[erin-client] --- Wired[access-wired-1]
+        Bob[bob-client] --- Wired
+        Ops[ops-client] --- Wired
+        Carol[carol-client] --- Wireless[access-wireless-1]
+        Guest[guest-client] --- Wireless
+        Wired --- Core1[campus-core-1]
+        Wired --- Core2[campus-core-2]
+        Wireless --- Core1
+        Wireless --- Core2
+        Core1 --- Core2
+    end
+    Core1 --- Sec1[security-edge-1]
+    Core2 --- Sec1
+    Core1 --- Sec2[security-edge-2]
+    Core2 --- Sec2
+    Core1 --- IDC[idc-leaf-1]
+    Core2 --- IDC
+    Core1 --- DMZ[dmz-leaf-1]
+    Core2 --- DMZ
+    IDC --- CRM[crm-server]
+    IDC --- Wiki[wiki-server]
+    IDC --- Infra[infra-server]
+    DMZ --- Public[public-web]
+    Sec1 --- ISP1[isp-1]
+    Sec2 --- ISP2[isp-2]
+    ISP1 --- ISP2
+    ISP1 --- Internet[internet-client]
+```
+
 Topology and path answers no longer infer wiring from device configuration.
 The manifest declares seven zones, typed node roles, 26 exact two-ended links,
 and 52 interface addresses; loading proves an exact set match with Containerlab
@@ -584,6 +734,21 @@ does not traverse either security-edge node.
 dual EVPN route reflectors, two VTEPs, VLANs 10/20, and L2VNIs 10010/10020.
 Linux access/trunk VLANs, bridge/VXLAN forwarding, OSPF underlay, MP-BGP EVPN
 type-2/type-3 routes, and cross-VTEP traffic are live container behavior.
+
+```mermaid
+flowchart TB
+    S1[spine-1 / EVPN RR] --- L1[leaf-1 / VTEP]
+    S1 --- L2[leaf-2 / VTEP]
+    S2[spine-2 / EVPN RR] --- L1
+    S2 --- L2
+    L1 -.->|VXLAN L2VNI 10010 / 10020| L2
+    A1[host-a1 / VLAN 10] --- L1
+    B1[host-b1 / VLAN 20] --- L1
+    T1[trunk-1 / VLAN 10,20] --- L1
+    A2[host-a2 / VLAN 10] --- L2
+    B2[host-b2 / VLAN 20] --- L2
+    T2[trunk-2 / VLAN 10,20] --- L2
+```
 
 Use `verify`, `exercise-fabric-failover`, and
 `scripts/evpn_vxlan_runtime_e2e.py --approve-local-lab`. The last command runs
@@ -610,6 +775,23 @@ contract, structured output, and input/output schema digests. Both Service and
 Network effects then pass through the same Effect Runtime with domain-specific
 L0 contracts, preflight, verifier, and compensator. Run the actual local saga
 after deploying P0.75-B:
+
+```mermaid
+flowchart LR
+    DSH[DSH / L1 Skill] --> ER[Domain Effect Runtime]
+    ER --> MCP[Service MCP<br/>identity・application・policy・change・CMDB]
+    ER --> NR[Network L0 Runtime]
+    MCP --> Desired[business desired state]
+    NR --> Enforce[network /32 enforcement]
+    Bob[bob-client] --> Wired[access-wired-1]
+    Wired --> Core[campus-core-1]
+    Core --> Leaf[idc-leaf-1]
+    Leaf --> CRM[crm-server :8080]
+    CRM --> Evidence[real HTTP evidence]
+    Desired --> Reconcile[reconcile_service_network_access]
+    Enforce --> Reconcile
+    Evidence --> Reconcile
+```
 
 ```bash
 python scripts/service_network_runtime_e2e.py --approve-local-lab
