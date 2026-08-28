@@ -1,0 +1,22 @@
+mode: pragmatic
+agent:
+  agent_id: lan-agent
+  profile: lan
+  peer_urls: [http://127.0.0.1:8766]
+tools:
+  schema_validation_enabled: true
+  mcp: {config_json: ''}
+  openapi: {spec_url: '', base_url: ''}
+  editable_hitl_tools:
+    grant_user_access: [reason]
+    revoke_user_access: [reason]
+    dc_grant_app_access: [role, reason]
+    dc_revoke_app_access: [reason]
+pragmatic:
+  device_inventory: []
+  mcp_servers: []
+  lab:
+    enabled: true
+    provider: containerlab
+    manifest: labs/p075-a-campus-idc/lab.yaml
+    command_timeout: 30

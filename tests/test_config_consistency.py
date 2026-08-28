@@ -46,3 +46,17 @@ pragmatic:
             config = load(path)
         self.assertEqual(config.pragmatic.device_inventory[0].device_type, "cisco_ios")
         self.assertEqual(config.pragmatic.device_inventory[0].port, 22)
+
+    def test_mcp_server_defaults_to_config_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, "service.yaml")
+            path.write_text("""
+mode: pragmatic
+pragmatic:
+  mcp_servers:
+    - name: identity
+      transport: stdio
+      command: [.venv/bin/python, -m, service_layer.mcp_server, --domain, identity]
+""", encoding="utf-8")
+            config = load(path)
+        self.assertEqual(config.pragmatic.mcp_servers[0].cwd, str(Path(directory).resolve()))

@@ -1,0 +1,47 @@
+schema_version: 1
+name: netopyu-p075a
+topology: topology.clab.yml
+
+devices:
+  branch-r1:
+    node: branch-r1
+    platform: frr
+    role: branch-router
+    tags: [branch, wan, ospf]
+    expected_ospf_neighbors: 2
+  dc-r1:
+    node: dc-r1
+    platform: frr
+    role: dc-router
+    tags: [dc, wan, ospf]
+    expected_ospf_neighbors: 2
+
+endpoints:
+  branch-client:
+    node: branch-client
+  dc-server:
+    node: dc-server
+
+probes:
+  branch-to-dc:
+    source: branch-client
+    destination: 10.20.20.20
+    count: 3
+  dc-to-branch:
+    source: dc-server
+    destination: 10.10.10.10
+    count: 3
+
+fault_targets:
+  primary-wan-branch:
+    node: branch-r1
+    interface: eth2
+  primary-wan-dc:
+    node: dc-r1
+    interface: eth2
+  backup-wan-branch:
+    node: branch-r1
+    interface: eth3
+  backup-wan-dc:
+    node: dc-r1
+    interface: eth3

@@ -1,0 +1,111 @@
+schema_version: 1
+name: netopyu-campus-idc
+topology: topology.clab.yml
+
+devices:
+  campus-access-1:
+    node: campus-access-1
+    platform: frr
+    role: campus-access
+    tags: [campus, access, ospf]
+    expected_ospf_neighbors: 2
+  campus-core-1:
+    node: campus-core-1
+    platform: frr
+    role: campus-core
+    tags: [campus, core, primary, ospf]
+    expected_ospf_neighbors: 2
+  campus-core-2:
+    node: campus-core-2
+    platform: frr
+    role: campus-core
+    tags: [campus, core, backup, ospf]
+    expected_ospf_neighbors: 2
+  idc-border-1:
+    node: idc-border-1
+    platform: frr
+    role: idc-border
+    tags: [idc, border, ospf]
+    expected_ospf_neighbors: 3
+  idc-leaf-1:
+    node: idc-leaf-1
+    platform: frr
+    role: idc-leaf
+    tags: [idc, leaf, ospf]
+    expected_ospf_neighbors: 1
+
+endpoints:
+  erin-client: {node: erin-client}
+  bob-client: {node: bob-client}
+  crm-server: {node: crm-server}
+  wiki-server: {node: wiki-server}
+
+probes:
+  bob-to-crm:
+    source: bob-client
+    destination: 10.20.10.20
+    count: 3
+  bob-to-wiki:
+    source: bob-client
+    destination: 10.20.20.20
+    count: 3
+  erin-to-crm:
+    source: erin-client
+    destination: 10.20.10.20
+    count: 3
+    expected: false
+
+fault_targets:
+  campus-primary-uplink:
+    node: campus-access-1
+    interface: eth3
+  campus-backup-uplink:
+    node: campus-access-1
+    interface: eth4
+  crm-app-egress:
+    node: idc-leaf-1
+    interface: eth2
+
+access:
+  users:
+    erin:
+      name: Erin Zhou
+      department: sales
+      status: active
+      endpoint: erin-client
+      interface: eth1
+      address: 10.10.20.10
+      prefix_length: 24
+      gateway: 10.10.20.1
+      application_prefix: 10.20.0.0/16
+      vlan: 20
+    bob:
+      name: Bob Chen
+      department: support
+      status: active
+      endpoint: bob-client
+      interface: eth1
+      address: 10.10.30.10
+      prefix_length: 24
+      gateway: 10.10.30.1
+      application_prefix: 10.20.0.0/16
+      vlan: 30
+  applications:
+    crm:
+      name: Enterprise CRM
+      endpoint: crm-server
+      address: 10.20.10.20
+      port: 8080
+      path: /health
+      owner: sales-platform
+      tier: gold
+      roles: [sales-rep]
+    wiki:
+      name: Corporate Wiki
+      endpoint: wiki-server
+      address: 10.20.20.20
+      port: 8080
+      path: /health
+      owner: collaboration
+      tier: silver
+      roles: [reader]

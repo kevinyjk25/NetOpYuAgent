@@ -47,7 +47,7 @@ class TestDshManifest(unittest.TestCase):
         self.assertEqual(tools["restart_service"]["l0_skill_version"], "1.0.0")
         self.assertTrue(tools["restart_service"]["l0_contract_hash"].startswith("sha256:"))
         self.assertEqual(tools["restart_service"]["intent_kind"], "restart_service")
-        self.assertEqual(tools["restart_service"]["execution_boundary"], "network_l0_skill")
+        self.assertEqual(tools["restart_service"]["execution_boundary"], "domain_effect_runtime")
         l0_skills = {item["skill_id"]: item for item in manifest["l0_skills"]}
         self.assertIn("network.service.restart", l0_skills)
         self.assertEqual(l0_skills["network.service.restart"]["tool_name"], "restart_service")

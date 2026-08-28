@@ -1,0 +1,436 @@
+schema_version: 1
+name: netopyu-small-production
+topology: topology.clab.yml
+
+zones:
+  campus-corporate:
+    trust: trusted
+    description: Simulated corporate user attachment networks
+  campus-guest:
+    trust: untrusted
+    description: Simulated guest user attachment network
+  campus-routing:
+    trust: trusted
+    description: Campus routed access and core transit
+  enterprise-edge:
+    trust: restricted
+    description: Routed enterprise Internet edge; not a stateful firewall
+  idc-services:
+    trust: restricted
+    description: Internal service subnets behind the IDC leaf
+  dmz-services:
+    trust: restricted
+    description: Public service subnet behind the DMZ leaf
+  internet:
+    trust: external
+    description: Simulated external provider and client network
+
+devices:
+  access-wired-1:
+    node: access-wired-1
+    platform: frr
+    role: campus-wired-access
+    zone: campus-routing
+    tags: [campus, access, wired, ospf]
+    expected_ospf_neighbors: 2
+  access-wireless-1:
+    node: access-wireless-1
+    platform: frr
+    role: campus-wireless-access
+    zone: campus-routing
+    tags: [campus, access, wireless, guest, ospf]
+    expected_ospf_neighbors: 2
+  campus-core-1:
+    node: campus-core-1
+    platform: frr
+    role: campus-core
+    zone: campus-routing
+    tags: [campus, core, primary, ospf]
+    expected_ospf_neighbors: 7
+  campus-core-2:
+    node: campus-core-2
+    platform: frr
+    role: campus-core
+    zone: campus-routing
+    tags: [campus, core, backup, ospf]
+    expected_ospf_neighbors: 7
+  security-edge-1:
+    node: security-edge-1
+    platform: frr
+    role: secure-wan-edge
+    zone: enterprise-edge
+    tags: [security, edge, firewall-role, wan, ospf, bgp, primary]
+    expected_ospf_neighbors: 2
+    expected_bgp_neighbors: 1
+  security-edge-2:
+    node: security-edge-2
+    platform: frr
+    role: secure-wan-edge
+    zone: enterprise-edge
+    tags: [security, edge, firewall-role, wan, ospf, bgp, backup]
+    expected_ospf_neighbors: 2
+    expected_bgp_neighbors: 1
+  idc-leaf-1:
+    node: idc-leaf-1
+    platform: frr
+    role: idc-leaf
+    zone: idc-services
+    tags: [idc, server, ospf]
+    expected_ospf_neighbors: 2
+  dmz-leaf-1:
+    node: dmz-leaf-1
+    platform: frr
+    role: dmz-leaf
+    zone: dmz-services
+    tags: [dmz, security, ospf]
+    expected_ospf_neighbors: 2
+  isp-1:
+    node: isp-1
+    platform: frr
+    role: simulated-isp
+    zone: internet
+    tags: [internet, isp, bgp, primary]
+    expected_ospf_neighbors: 0
+    expected_bgp_neighbors: 2
+  isp-2:
+    node: isp-2
+    platform: frr
+    role: simulated-isp
+    zone: internet
+    tags: [internet, isp, bgp, backup]
+    expected_ospf_neighbors: 0
+    expected_bgp_neighbors: 2
+
+endpoints:
+  erin-client: {node: erin-client, role: user-client, zone: campus-corporate}
+  bob-client: {node: bob-client, role: user-client, zone: campus-corporate}
+  carol-client: {node: carol-client, role: user-client, zone: campus-corporate}
+  guest-client: {node: guest-client, role: guest-client, zone: campus-guest}
+  ops-client: {node: ops-client, role: operations-client, zone: campus-corporate}
+  crm-server: {node: crm-server, role: application-server, zone: idc-services}
+  wiki-server: {node: wiki-server, role: application-server, zone: idc-services}
+  infra-server: {node: infra-server, role: infrastructure-server, zone: idc-services}
+  public-web: {node: public-web, role: public-application-server, zone: dmz-services}
+  internet-client: {node: internet-client, role: external-client, zone: internet}
+
+links:
+  erin-wired:
+    endpoints:
+      - {node: erin-client, interface: eth1, address: 10.10.20.10/24}
+      - {node: access-wired-1, interface: eth1, address: 10.10.20.1/24}
+    relationship: access
+    path_role: primary
+  bob-wired:
+    endpoints:
+      - {node: bob-client, interface: eth1, address: 10.10.30.10/24}
+      - {node: access-wired-1, interface: eth2, address: 10.10.30.1/24}
+    relationship: access
+    path_role: primary
+  ops-wired:
+    endpoints:
+      - {node: ops-client, interface: eth1, address: 10.10.60.10/24}
+      - {node: access-wired-1, interface: eth3, address: 10.10.60.1/24}
+    relationship: access
+    path_role: primary
+  wired-core1:
+    endpoints:
+      - {node: access-wired-1, interface: eth4, address: 10.0.0.1/30}
+      - {node: campus-core-1, interface: eth1, address: 10.0.0.2/30}
+    relationship: uplink
+    path_role: primary
+  wired-core2:
+    endpoints:
+      - {node: access-wired-1, interface: eth5, address: 10.0.0.5/30}
+      - {node: campus-core-2, interface: eth1, address: 10.0.0.6/30}
+    relationship: uplink
+    path_role: backup
+  carol-wireless:
+    endpoints:
+      - {node: carol-client, interface: eth1, address: 10.10.50.10/24}
+      - {node: access-wireless-1, interface: eth1, address: 10.10.50.1/24}
+    relationship: access
+    path_role: primary
+  guest-wireless:
+    endpoints:
+      - {node: guest-client, interface: eth1, address: 10.10.40.10/24}
+      - {node: access-wireless-1, interface: eth2, address: 10.10.40.1/24}
+    relationship: access
+    path_role: primary
+  wireless-core1:
+    endpoints:
+      - {node: access-wireless-1, interface: eth3, address: 10.0.0.9/30}
+      - {node: campus-core-1, interface: eth2, address: 10.0.0.10/30}
+    relationship: uplink
+    path_role: primary
+  wireless-core2:
+    endpoints:
+      - {node: access-wireless-1, interface: eth4, address: 10.0.0.13/30}
+      - {node: campus-core-2, interface: eth2, address: 10.0.0.14/30}
+    relationship: uplink
+    path_role: backup
+  core-peer:
+    endpoints:
+      - {node: campus-core-1, interface: eth3, address: 10.0.0.17/30}
+      - {node: campus-core-2, interface: eth3, address: 10.0.0.18/30}
+    relationship: core-peer
+    path_role: peer
+  core1-edge1:
+    endpoints:
+      - {node: campus-core-1, interface: eth4, address: 10.0.0.21/30}
+      - {node: security-edge-1, interface: eth2, address: 10.0.0.22/30}
+    relationship: wan
+    path_role: primary
+  core2-edge1:
+    endpoints:
+      - {node: campus-core-2, interface: eth4, address: 10.0.0.25/30}
+      - {node: security-edge-1, interface: eth3, address: 10.0.0.26/30}
+    relationship: wan
+    path_role: backup
+  core1-edge2:
+    endpoints:
+      - {node: campus-core-1, interface: eth5, address: 10.0.0.29/30}
+      - {node: security-edge-2, interface: eth2, address: 10.0.0.30/30}
+    relationship: wan
+    path_role: backup
+  core2-edge2:
+    endpoints:
+      - {node: campus-core-2, interface: eth5, address: 10.0.0.33/30}
+      - {node: security-edge-2, interface: eth3, address: 10.0.0.34/30}
+    relationship: wan
+    path_role: primary
+  core1-idc:
+    endpoints:
+      - {node: campus-core-1, interface: eth6, address: 10.0.0.37/30}
+      - {node: idc-leaf-1, interface: eth1, address: 10.0.0.38/30}
+    relationship: uplink
+    path_role: primary
+  core2-idc:
+    endpoints:
+      - {node: campus-core-2, interface: eth6, address: 10.0.0.41/30}
+      - {node: idc-leaf-1, interface: eth2, address: 10.0.0.42/30}
+    relationship: uplink
+    path_role: backup
+  core1-dmz:
+    endpoints:
+      - {node: campus-core-1, interface: eth7, address: 10.0.0.45/30}
+      - {node: dmz-leaf-1, interface: eth1, address: 10.0.0.46/30}
+    relationship: uplink
+    path_role: primary
+  core2-dmz:
+    endpoints:
+      - {node: campus-core-2, interface: eth7, address: 10.0.0.49/30}
+      - {node: dmz-leaf-1, interface: eth2, address: 10.0.0.50/30}
+    relationship: uplink
+    path_role: backup
+  crm-service:
+    endpoints:
+      - {node: crm-server, interface: eth1, address: 10.20.10.20/24}
+      - {node: idc-leaf-1, interface: eth3, address: 10.20.10.1/24}
+    relationship: service
+    path_role: primary
+  wiki-service:
+    endpoints:
+      - {node: wiki-server, interface: eth1, address: 10.20.20.20/24}
+      - {node: idc-leaf-1, interface: eth4, address: 10.20.20.1/24}
+    relationship: service
+    path_role: primary
+  monitoring-service:
+    endpoints:
+      - {node: infra-server, interface: eth1, address: 10.20.30.20/24}
+      - {node: idc-leaf-1, interface: eth5, address: 10.20.30.1/24}
+    relationship: service
+    path_role: primary
+  portal-service:
+    endpoints:
+      - {node: public-web, interface: eth1, address: 10.30.10.20/24}
+      - {node: dmz-leaf-1, interface: eth3, address: 10.30.10.1/24}
+    relationship: service
+    path_role: primary
+  edge1-isp1:
+    endpoints:
+      - {node: security-edge-1, interface: eth1, address: 192.0.2.2/30}
+      - {node: isp-1, interface: eth1, address: 192.0.2.1/30}
+    relationship: wan
+    path_role: primary
+  edge2-isp2:
+    endpoints:
+      - {node: security-edge-2, interface: eth1, address: 192.0.2.6/30}
+      - {node: isp-2, interface: eth1, address: 192.0.2.5/30}
+    relationship: wan
+    path_role: backup
+  isp-peer:
+    endpoints:
+      - {node: isp-1, interface: eth2, address: 192.0.2.9/30}
+      - {node: isp-2, interface: eth2, address: 192.0.2.10/30}
+    relationship: core-peer
+    path_role: peer
+  internet-segment:
+    endpoints:
+      - {node: internet-client, interface: eth1, address: 198.51.100.100/24}
+      - {node: isp-1, interface: eth3, address: 198.51.100.1/24}
+    relationship: internet-segment
+    path_role: edge
+
+simulation:
+  forwarding: linux-l3-frr
+  network_admission: endpoint-interface-state
+  application_policy: server-source-blackhole-route
+  security_edge: routed-wan-edge-no-stateful-firewall
+
+probes:
+  bob-to-crm:
+    source: bob-client
+    destination: 10.20.10.20
+    count: 2
+  bob-to-wiki:
+    source: bob-client
+    destination: 10.20.20.20
+    count: 2
+  erin-to-crm:
+    source: erin-client
+    destination: 10.20.10.20
+    count: 2
+    expected: false
+  carol-to-wiki:
+    source: carol-client
+    destination: 10.20.20.20
+    count: 2
+  guest-to-crm:
+    source: guest-client
+    destination: 10.20.10.20
+    count: 2
+    expected: false
+  guest-to-portal:
+    source: guest-client
+    destination: 10.30.10.20
+    count: 2
+  guest-to-internet:
+    source: guest-client
+    destination: 198.51.100.100
+    count: 2
+  internet-to-portal:
+    source: internet-client
+    destination: 10.30.10.20
+    count: 2
+  internet-to-crm:
+    source: internet-client
+    destination: 10.20.10.20
+    count: 2
+    expected: false
+  ops-to-monitoring:
+    source: ops-client
+    destination: 10.20.30.20
+    count: 2
+  bob-to-monitoring:
+    source: bob-client
+    destination: 10.20.30.20
+    count: 2
+    expected: false
+
+fault_targets:
+  primary-internet-uplink:
+    node: security-edge-1
+    interface: eth1
+  backup-internet-uplink:
+    node: security-edge-2
+    interface: eth1
+  wired-primary-uplink:
+    node: access-wired-1
+    interface: eth4
+  wireless-primary-uplink:
+    node: access-wireless-1
+    interface: eth3
+  crm-app-egress:
+    node: idc-leaf-1
+    interface: eth3
+  portal-egress:
+    node: dmz-leaf-1
+    interface: eth3
+
+access:
+  users:
+    erin:
+      name: Erin Zhou
+      department: sales
+      status: active
+      endpoint: erin-client
+      interface: eth1
+      address: 10.10.20.10
+      prefix_length: 24
+      gateway: 10.10.20.1
+      application_prefix: 10.0.0.0/8
+      route_prefixes: [10.0.0.0/8, 198.51.100.0/24]
+      vlan: 20
+    bob:
+      name: Bob Chen
+      department: support
+      status: active
+      endpoint: bob-client
+      interface: eth1
+      address: 10.10.30.10
+      prefix_length: 24
+      gateway: 10.10.30.1
+      application_prefix: 10.0.0.0/8
+      route_prefixes: [10.0.0.0/8, 198.51.100.0/24]
+      vlan: 30
+    carol:
+      name: Carol Li
+      department: engineering
+      status: active
+      endpoint: carol-client
+      interface: eth1
+      address: 10.10.50.10
+      prefix_length: 24
+      gateway: 10.10.50.1
+      application_prefix: 10.0.0.0/8
+      route_prefixes: [10.0.0.0/8, 198.51.100.0/24]
+      vlan: 50
+    guest:
+      name: Guest Device
+      department: guest
+      status: active
+      endpoint: guest-client
+      interface: eth1
+      address: 10.10.40.10
+      prefix_length: 24
+      gateway: 10.10.40.1
+      application_prefix: 10.0.0.0/8
+      route_prefixes: [10.0.0.0/8, 198.51.100.0/24]
+      vlan: 40
+  applications:
+    crm:
+      name: Enterprise CRM
+      endpoint: crm-server
+      address: 10.20.10.20
+      port: 8080
+      path: /health
+      owner: sales-platform
+      tier: gold
+      roles: [sales-rep]
+    wiki:
+      name: Corporate Wiki
+      endpoint: wiki-server
+      address: 10.20.20.20
+      port: 8080
+      path: /health
+      owner: collaboration
+      tier: silver
+      roles: [reader]
+    monitoring:
+      name: Network Monitoring
+      endpoint: infra-server
+      address: 10.20.30.20
+      port: 8080
+      path: /health
+      owner: network-operations
+      tier: gold
+      roles: [noc-operator]
+    portal:
+      name: Public Service Portal
+      endpoint: public-web
+      address: 10.30.10.20
+      port: 8080
+      path: /health
+      owner: digital-channel
+      tier: silver
+      roles: [visitor]

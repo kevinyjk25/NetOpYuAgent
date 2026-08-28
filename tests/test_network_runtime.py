@@ -148,12 +148,15 @@ class NetworkRuntimeTests(unittest.TestCase):
         self.assertEqual(wrong["status"], "rejected")
         self.assertEqual(runtime.recent(), [])
 
-    def test_schema_v4_plan_binds_intent_and_deterministic_l0_steps(self) -> None:
+    def test_schema_v5_plan_binds_provider_schema_intent_and_l0_steps(self) -> None:
         prepared = self.prepare("lan", "restart_service", {
             "service": "crm", "environment": "staging",
         })
         plan = prepared["plan"]
-        self.assertEqual(plan["schema_version"], 4)
+        self.assertEqual(plan["schema_version"], 5)
+        self.assertEqual(plan["provider_identity"], "profile-mock")
+        self.assertTrue(plan["input_schema_digest"].startswith("sha256:"))
+        self.assertTrue(plan["output_schema_digest"].startswith("sha256:"))
         self.assertEqual(plan["l0_skill_id"], "network.service.restart")
         self.assertEqual(plan["intent_spec"]["operation"], "restart_service")
         self.assertEqual(

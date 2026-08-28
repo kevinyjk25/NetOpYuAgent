@@ -1,0 +1,20 @@
+mode: pragmatic
+agent:
+  agent_id: dc-fabric-agent
+  profile: dc
+  peer_urls: []
+tools:
+  schema_validation_enabled: true
+  mcp: {config_json: ''}
+  openapi: {spec_url: '', base_url: ''}
+  editable_hitl_tools:
+    edit_device_config: [config_lines, reason, verification_probe_id]
+    fabric_set_access_vlan: [vlan_id, reason, verification_probe_id]
+pragmatic:
+  device_inventory: []
+  mcp_servers: []
+  lab:
+    enabled: true
+    provider: containerlab
+    manifest: labs/p075-c-evpn-vxlan/lab.yaml
+    command_timeout: 30

@@ -1,0 +1,70 @@
+mode: pragmatic
+agent:
+  agent_id: lan-agent
+  profile: lan
+  peer_urls: [http://127.0.0.1:8766]
+tools:
+  schema_validation_enabled: true
+  mcp: {config_json: ''}
+  openapi: {spec_url: '', base_url: ''}
+  editable_hitl_tools:
+    edit_device_config: [config_lines, reason, verification_probe_id]
+    grant_user_access: [reason]
+    revoke_user_access: [reason]
+    dc_grant_app_access: [role, reason]
+    dc_revoke_app_access: [reason]
+    access_policy_grant_entitlement: [role, change_id, expected_revision, reason]
+    access_policy_revoke_entitlement: [change_id, expected_revision, reason]
+    platform_restart_service: [change_id, expected_revision, reason]
+    platform_rollback_service: [version, change_id, expected_revision, reason]
+    network_apply_app_enforcement: [change_id, reason]
+    network_revoke_app_enforcement: [change_id, reason]
+pragmatic:
+  device_inventory: []
+  # Real MCP protocol processes backed by deterministic local SQLite data.
+  # Network state remains owned by Containerlab; these servers own business
+  # identity, entitlement, catalog, change, CMDB and platform desired state.
+  mcp_servers:
+    - name: identity-service
+      domain: service
+      transport: stdio
+      command: [.venv/bin/python, -m, service_layer.mcp_server, --domain, identity, --store, data/service_layer.sqlite]
+      expected_server_name: netopyu.identity
+      expected_server_version: 1.0.0
+    - name: application-service
+      domain: service
+      transport: stdio
+      command: [.venv/bin/python, -m, service_layer.mcp_server, --domain, application, --store, data/service_layer.sqlite]
+      expected_server_name: netopyu.application
+      expected_server_version: 1.0.0
+    - name: access-policy-service
+      domain: service
+      transport: stdio
+      command: [.venv/bin/python, -m, service_layer.mcp_server, --domain, access-policy, --store, data/service_layer.sqlite]
+      trusted_for_writes: true
+      expected_server_name: netopyu.access-policy
+      expected_server_version: 1.0.0
+    - name: change-service
+      domain: service
+      transport: stdio
+      command: [.venv/bin/python, -m, service_layer.mcp_server, --domain, change, --store, data/service_layer.sqlite]
+      expected_server_name: netopyu.change
+      expected_server_version: 1.0.0
+    - name: cmdb-service
+      domain: service
+      transport: stdio
+      command: [.venv/bin/python, -m, service_layer.mcp_server, --domain, cmdb, --store, data/service_layer.sqlite]
+      expected_server_name: netopyu.cmdb
+      expected_server_version: 1.0.0
+    - name: platform-service
+      domain: service
+      transport: stdio
+      command: [.venv/bin/python, -m, service_layer.mcp_server, --domain, platform, --store, data/service_layer.sqlite]
+      trusted_for_writes: true
+      expected_server_name: netopyu.platform
+      expected_server_version: 1.0.0
+  lab:
+    enabled: true
+    provider: containerlab
+    manifest: labs/p075-b-small-production/lab.yaml
+    command_timeout: 30

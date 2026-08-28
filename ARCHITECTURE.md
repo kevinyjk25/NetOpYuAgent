@@ -4,14 +4,14 @@
 
 ### 1. 权威架构声明
 
-NetOpYuAgent 是 **Harness 可适配的网络领域插件**。DSH 是主平台，Hermes 是可选平台 Adapter；二者只能通过窄插件/Worker 协议进入同一个 Network Runtime。本仓库不实现通用 Agent Harness。
+NetOpYuAgent 是 **Harness 可适配的网络与业务运维领域插件**。DSH 是主平台，Hermes 是可选平台 Adapter；二者只能通过窄插件/Worker 协议进入同一个 Domain Effect Runtime。本仓库不实现通用 Agent Harness。
 
 禁止重新引入以下表面：
 
 - 自建 Agent loop、通用 planner 或模型 client；
 - 独立 FastAPI/WebUI；
 - 与 DSH/Hermes 并行的自建会话、模型循环或子代理框架；
-- 绕过 Network Runtime 的直接写工具入口；
+- 绕过 Domain Effect Runtime 的直接写工具入口；
 - 自动把轨迹/学习结果安装为可执行 Skill。
 
 ### 2. 架构分层
@@ -28,18 +28,19 @@ NetOpYuAgent 是 **Harness 可适配的网络领域插件**。DSH 是主平台�
 └────────────────────────────┬─────────────────────────────────┘
                              │ typed bridge commands
 ┌────────────────────────────▼─────────────────────────────────┐
-│ Network Domain Runtime                                      │
-│ L1 workflow constraints · L0 contracts · plan state machine │
+│ Domain Effect Runtime                                       │
+│ L1 workflow constraints · Network/Service L0 contracts      │
 │ validation · preflight · execute · verify · compensate      │
 └────────────────────────────┬─────────────────────────────────┘
-                             │ adapter contracts
+                             │ typed Tool Gateway
 ┌────────────────────────────▼─────────────────────────────────┐
-│ Backends                                                     │
-│ Profile mock · pragmatic local · MCP · OpenAPI · A2A peers  │
+│ Domain providers                                             │
+│ Network Layer: Containerlab/device adapters                  │
+│ Service Layer: Identity/App/Policy/Change/CMDB/Platform MCP │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“不能自由发挥的效果合同”。二者都属于 NetOpYu Domain Layer，不应与任一 Harness 的内部层级命名混用。
+Domain L1 Skill 是“可以推理的业务编排”；Network/Service L0 Skill 是“不能自由发挥的效果合同”。Network Layer 与 Service Layer 是平行的事实和效果所有者，不得把业务授权与网络 enforcement 合并成一个 mock 状态。
 
 ### 3. 源代码边界
 
@@ -55,7 +56,12 @@ Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“�
 #### 3.2 领域控制面
 
 - `dsh_adapter/`：把 Python 领域能力投影为 DSH 可消费的 manifest/commands。
-- `network_runtime/`：所有可变更效果的唯一执行入口。
+- `effect_runtime/`：领域中性的运行时入口和跨层只读 reconciliation。
+- `network_runtime/`：Effect Runtime 的计划状态机、合同、验证器、补偿器与兼容 API。
+- `service_layer/`：官方 MCP SDK 服务、严格 structured result 和事务型业务仿真存储。
+- `network_lab/`：P0.75-A manifest、Containerlab provider、FRR 命令白名单、探测与故障注入。
+- `labs/p075-a-frr/`：可重建的 OSPF 主备路径实验拓扑和基线配置。
+- `labs/p075-b-small-production/`：20 节点小型现网基准，覆盖园区、IDC、DMZ、双 ISP、OSPF/eBGP 与安全分区路径。
 - `profiles/`：域隔离的 mock capability 与 canonical L1 Skill。
 - `skills/`：common/pragmatic canonical Skill。
 
@@ -77,8 +83,10 @@ Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“�
 ```text
 dsh-plugin-netopyu -> dsh_adapter bridge protocol
 hermes-plugin-netopyu -> hermes_adapter -> Worker bridge protocol
-dsh_adapter -> network_runtime / profiles / scoped services
-network_runtime -> profiles metadata/callables / tools loader
+dsh_adapter -> effect_runtime / profiles / scoped services
+effect_runtime -> network_runtime safety kernel / reconciliation
+network_runtime -> backend metadata/callables / tools loader
+service_layer -> official MCP SDK / transactional local store
 profiles -> tools common helpers
 pragmatic backend -> tools / integrations / schema
 scoped services -> agent_memory / retrieval
@@ -87,7 +95,8 @@ evaluation -> public manifests / retrieval / test data
 
 禁止的依赖方向：
 
-- `network_runtime` 不得依赖 DSH/Hermes UI、模型或插件 API；
+- `effect_runtime`/`network_runtime` 不得依赖 DSH/Hermes UI、模型或插件 API；
+- Service MCP 不得读取或修改 Containerlab；Network provider 不得冒充业务 entitlement；
 - `profiles`/`tools` 不得调用审批 API；
 - L1 `SKILL.md` 不得直接持有 backend credentials；
 - verifier 不得复用写工具返回文本作为唯一证据；
@@ -101,7 +110,7 @@ evaluation -> public manifests / retrieval / test data
 
 ### 5. 核心不变量
 
-1. **One effect path**：所有写效果都经过 Network Runtime。
+1. **One effect path**：所有 Network/Service 写效果都经过 Domain Effect Runtime。
 2. **One immutable plan**：批准、grant 和执行看到同一个 plan hash。
 3. **One-shot authorization**：每个 execution token/nonce 最多消费一次。
 4. **Verify, do not infer**：成功只能由独立 postcondition 产生。
@@ -109,6 +118,8 @@ evaluation -> public manifests / retrieval / test data
 6. **Profile isolation**：未投影能力对模型不可见，也不能通过 capability search 泄漏。
 7. **No automatic promotion**：学习 proposal 不进入 active Skill registry。
 8. **Audit every terminal path**：成功、拒绝、过期、漂移、回滚和人工介入都有终态事件。
+9. **Independent truths**：Service desired state、Network enforcement 和 data plane 分别读取并 reconciliation。
+10. **Provider binding**：受信 Service 写计划绑定 MCP server identity/version 与 input/output schema digest。
 
 ### 6. 架构决策记录
 
@@ -216,31 +227,74 @@ evaluation -> public manifests / retrieval / test data
 
 所有主文档采用同文件双语结构，中文在前、英文在后。历史迁移过程不再作为当前架构文档保留；Git 历史承担追溯职责。
 
+### 10. P0.75-A 实验边界与决策
+
+- **ADR-009：** Network Lab 是 pragmatic backend 的受限 provider，不是第三个 Harness 或 mock。
+- lab 与真实 `device_inventory` 在同一进程中互斥，防止相同 `device_id` 指向不同信任域。
+- `lab.yaml` 是设备、容器、探测和故障接口的唯一目标源；自然语言不能扩展 blast radius。
+- 读写使用无 shell 参数数组；FRR 写入只接受审核白名单，`eth0` 管理口禁止变更。
+- lab L0 成功要求 fresh running-config 以及计划绑定的预声明流量 probe；失败使用 provider 会话快照恢复并重新验证。
+- Apple Silicon 上 Containerlab 运行在 Linux devcontainer/VM；P0.75-A 不证明厂商 CLI、ASIC、性能、硬件故障或无线 RF。
+- **ADR-010：** 园区/IDC access lab 复用同一 pragmatic provider；用户、接口、地址、应用、端口、路径和角色均由 manifest 固定。LAN 与 DC 工具按 profile 隔离，只有 `network-lab` source 能取得这些 access 写合同。
+
+### 11. P0.75-B 小型现网基准
+
+- **ADR-011：** 完整现网实验仍是 `network-lab` pragmatic provider，不新增框架层或绕开 Network Runtime。
+- Manifest 同时声明 OSPF/BGP 邻居期望、多前缀用户路由、允许/拒绝 probe 和故障目标；Runtime 只能执行这些预审对象。
+- OOB Docker 管理网与业务路由分离。企业侧 OSPF、外部 eBGP、双出口回切、IDC/DMZ/访客分区和 HTTP 应用证据均在容器数据面实际运行。
+- `secure-wan-edge` 是安全域路由角色。源 `/32` 黑洞表示本地 RBAC/微隔离 enforcement；不等同于状态防火墙、NAT、IPS 或厂商设备。
+- **ADR-012：** 拓扑问答以 typed manifest graph 为唯一静态事实源，以 manifest-bound traceroute 为唯一运行路径证据。清单链路必须与 Containerlab wiring 精确相等；未知 hop、未证明 adjacency 或未到达目标一律 fail closed。端点不能传给设备工具，模拟准入/应用策略必须按真实实现命名。
+
+### 12. P0.75-C EVPN/VXLAN Fabric 决策
+
+- **ADR-013：** EVPN/VXLAN 仍属于同一 `network-lab` provider，以 typed Fabric manifest 为唯一静态事实源，以 Linux/FRR JSON 与 manifest probe 为运行证据。
+- Fabric 写能力按完整扩展规则实现：metadata、`network.fabric.access-vlan.set` L0、ToolContract、workflow、verifier、compensator、测试和文档缺一不可。
+- access VLAN 工具只接受声明的 VTEP/interface/VLAN 并使用固定 argv；trunk、批量端口、任意 CLI 与任意 IP 不在合同内。
+- 当前执行内核不支持 NET_VRF，因此只声明 EVPN L2VPN。不得用 mock type-5/VRF 冒充 L3VPN；L3VPN 是执行环境升级后的独立资格认证。
+
+### 13. P0.8 Service Layer 与跨层执行决策
+
+- **ADR-014：Network Layer 与 Service Layer 平行。** Service MCP 管理业务 desired state，Containerlab/设备 adapter 管理网络 observed state；跨层一致性由 Effect Runtime reconciliation 计算，而不是让任一侧复制另一侧状态。
+- **ADR-015：MCP 是协议边界，不是安全边界。** 只读 MCP 必须 identity-pinned 才能采用声明的 read-only 分类；可写 MCP 还必须显式 trusted、绑定 server name/version、declared contract、structured result 以及 input/output schema digest。
+- **ADR-016：所有 Service 写继续使用 L0。** MCP tool 本身不能绕过 immutable plan、人工审批、revision preflight、fresh verifier、compensator 和 hash-chain audit。内部 restore tool 不投影给模型，只能由补偿器调用。
+- **ADR-017：业务仿真状态一次初始化。** 六个 MCP 进程共享 SQLite；seed 使用版本标记只执行一次。审批检查、revision CAS、写入、幂等和审计位于同一个 `BEGIN IMMEDIATE` 事务；陈旧幂等结果不得在后续状态变化后重放。
+- **ADR-018：跨层 L1 不是分布式原子事务。** 当前 `service-network-access-reconcile` 把 Service 与 Network 写拆成独立审批计划，并在每步之间重读事实；恢复也创建新的受审 L0 计划。P1 若要求单审批 bundle/自动 saga，必须增加独立的 durable saga 合同，不能由模型临时拼接。
+
 ---
 
 ## English
 
 ### 1. Authoritative statement
 
-NetOpYuAgent is a **harness-adaptable network-domain plugin**. DSH is the primary platform and Hermes is an optional adapter. Both enter the same Network Runtime through narrow public plugin and Worker contracts. This repository does not implement a general agent harness.
+NetOpYuAgent is a **harness-adaptable network/service-operations domain plugin**. DSH is the primary platform and Hermes is an optional adapter. Both enter the same Domain Effect Runtime through narrow public plugin and Worker contracts. This repository does not implement a general agent harness.
 
-The architecture forbids a custom agent loop or model client, a standalone Web UI, parallel session/approval/subagent frameworks, direct mutations outside Network Runtime, and automatic activation of learned Skills.
+The architecture forbids a custom agent loop or model client, a standalone Web UI, parallel session/approval/subagent frameworks, direct mutations outside Domain Effect Runtime, and automatic activation of learned Skills.
+
+**ADR-010:** The campus/IDC access lab reuses the pragmatic provider. Users,
+interfaces, addresses, applications, ports, paths, and roles are fixed by the
+manifest. LAN and DC tools are profile-isolated, and only the `network-lab`
+source may receive the lab access write contracts.
 
 ### 2. Layers
 
 1. **Harness Platform Layer:** DSH (primary) or Hermes (optional) for sessions, models, UI/CLI, tool lifecycle, and Skills.
 2. **NetOpYu Domain Control Plane:** harness adapters, exact-plan approval binding, A2A, and scoped services.
-3. **Network Domain Runtime:** reviewed L1 workflow constraints, versioned L0 contracts, deterministic plan execution.
-4. **Backends:** profile mocks, pragmatic local tools, MCP, OpenAPI, and A2A peers.
+3. **Domain Effect Runtime:** reviewed L1 workflow constraints, versioned Network/Service L0 contracts, and deterministic plan execution.
+4. **Domain providers:** Containerlab/device adapters own network state; official-SDK MCP services own identity, application, policy, change, CMDB, and platform state.
 
-Domain L1 Skills are model-assisted business orchestration. Network L0 Skills are fixed effect contracts. Both belong to the NetOpYu domain and must not be confused with names used for the platform layer.
+Domain L1 Skills are model-assisted business orchestration. Network and Service L0 Skills are fixed effect contracts. Service desired state and Network enforcement are independent truths reconciled above both providers.
 
 ### 3. Source boundaries
 
 - `dsh-plugin-netopyu/` is the DSH JavaScript adapter.
 - `hermes-plugin-netopyu/` and `hermes_adapter/` implement the official Hermes plugin boundary, process-local approval binding, and Worker client.
 - `dsh_adapter/` projects Python domain capabilities into typed bridge commands.
-- `network_runtime/` is the only mutation execution path.
+- `effect_runtime/` is the domain-neutral entry point and owns cross-layer read reconciliation.
+- `network_runtime/` implements the shared plan kernel and remains the compatibility API.
+- `service_layer/` implements official-SDK MCP domains, strict results, and transactional local business simulation.
+- `network_lab/` owns the reviewed P0.75-A manifest, Containerlab provider, FRR command allowlist, probes, and fault injection.
+- `labs/p075-a-frr/` is the reproducible redundant-OSPF topology and baseline.
+- `labs/p075-b-small-production/` owns the 20-node campus/IDC/DMZ/dual-ISP OSPF/eBGP reference topology.
 - `profiles/` and `skills/` contain isolated capabilities and canonical L1 Skills.
 - `tools/` and `integrations/` provide local, MCP, and OpenAPI adapters.
 - `registry/` is outbound A2A discovery only.
@@ -250,13 +304,13 @@ Domain L1 Skills are model-assisted business orchestration. Network L0 Skills ar
 
 ### 4. Dependency rules
 
-Either plugin may call the Worker bridge; the bridge may call Network Runtime, profiles, and scoped services; Network Runtime may call profile metadata/callables and tool loaders; pragmatic backends may call integrations and schema; scoped services may call memory and retrieval.
+Either plugin may call the Worker bridge; the bridge may call Effect Runtime, profiles, and scoped services; Effect Runtime may call backend metadata/callables and tool loaders; pragmatic backends may call integrations and schemas; Service MCP servers own only business state; scoped services may call memory and retrieval.
 
-Network Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Tools must not call approval APIs. Skills must not carry credentials. Verifiers must not trust mutation response prose. Mock must not backfill pragmatic mode. Evaluation must not enter production execution. Memory must not inject itself automatically. Environment variables, conversational consent, and generic command approval must not replace exact-plan authorization. Hermes must not expose execution nonces to the model.
+Effect Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Service MCP must not modify Containerlab, and network providers must not claim business entitlement. Tools must not call approval APIs. Skills must not carry credentials. Verifiers must not trust mutation response prose. Mock must not backfill pragmatic mode. Evaluation must not enter production execution. Memory must not inject itself automatically. Environment variables, conversational consent, and generic command approval must not replace exact-plan authorization. Hermes must not expose execution nonces to the model.
 
 ### 5. Invariants
 
-- One mutation path through Network Runtime.
+- One mutation path through Domain Effect Runtime.
 - One immutable plan shared by approval, grant, and execution.
 - One-shot authorization and nonce consumption.
 - Independent verification rather than inference.
@@ -264,6 +318,8 @@ Network Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Tools 
 - Profile isolation for both tool projection and capability search.
 - No automatic Skill promotion.
 - A terminal audit event for every outcome.
+- Independent Service desired state, Network enforcement, and data-plane evidence.
+- Trusted MCP writes bound to provider identity/version and schema digests.
 
 ### 6. Decisions
 
@@ -275,6 +331,16 @@ Network Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Tools 
 - **ADR-006:** A2A sends self-contained tasks and explicit delegation chains.
 - **ADR-007:** oversized tool output is stored durably and paged.
 - **ADR-008:** Hermes mutations prepare only; an exact user slash command consumes a process-local nonce binding.
+- **ADR-009:** the local lab is a constrained pragmatic provider, never another harness or mock fallback. Its manifest is the sole target authority; lab and real inventory are isolated, writes use shell-free argv plus an FRR allowlist, and success can bind both configuration and predeclared traffic evidence.
+- **ADR-010:** the campus/IDC access lab binds users, endpoints, applications, roles, and HTTP evidence to the same manifest while preserving LAN/DC tool isolation.
+- **ADR-011:** the complete small-production topology remains behind the same provider and Network Runtime. It adds typed OSPF/eBGP expectations, reviewed multi-prefix endpoint routes, dual-ISP failover, DMZ/guest segmentation, and HTTP evidence without claiming stateful-firewall or vendor emulation.
+- **ADR-012:** topology answers use the typed manifest graph as their only static source and manifest-bound traceroute as their only observed path evidence. Typed links must exactly equal Containerlab wiring. Unknown hops, unproved adjacency, or an unverified destination fail closed. Endpoints are never passed to device tools, and simulated enforcement is named by its actual implementation.
+- **ADR-013:** EVPN/VXLAN remains inside the same `network-lab` provider. A typed fabric manifest is the only static source, while Linux/FRR JSON and declared probes are runtime evidence. The access-VLAN write has the complete metadata/L0/ToolContract/workflow/verifier/compensator/test chain and accepts only declared VTEPs, interfaces, and VLANs through fixed argv. The current kernel lacks NET_VRF, so only EVPN L2VPN is claimed; L3VPN requires a separately qualified execution environment and may not be simulated through fake type-5 or VRF evidence.
+- **ADR-014:** Network and Service Layers are peers. Service MCP owns desired state; Containerlab/device adapters own observed enforcement; reconciliation compares independent facts.
+- **ADR-015:** MCP is a protocol boundary, not automatically a trust boundary. Trusted writes require pinned identity/version, declared contracts, structured results, and schema digests.
+- **ADR-016:** Service mutations use the same immutable-plan L0 kernel. Internal restore tools are hidden from the model and callable only by compensators.
+- **ADR-017:** shared Service SQLite seeding is versioned and one-shot. Change authorization, revision comparison, mutation, idempotency, and audit are one immediate transaction; stale replays fail.
+- **ADR-018:** the current cross-layer L1 flow is a sequence of independently approved plans, not a distributed atomic transaction. A future automatic saga or approval bundle requires its own durable reviewed contract.
 
 ### 7. Clean-code and extension policy
 

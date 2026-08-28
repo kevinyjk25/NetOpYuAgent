@@ -6,6 +6,9 @@ import { a2aToolDefinitions, NetOpYuA2AProvider } from './a2a.js'
 import { callBridge, resolvePython } from './bridge.js'
 import { createHitlStore, NetOpYuToolGuard } from './hitl-store.js'
 
+// HMR contract marker: reload the plugin when the Python topology/path surface changes.
+export const networkLabContractVersion = 'p075-b1-topology-path-v1'
+
 export { NetOpYuA2AProvider } from './a2a.js'
 export { NetOpYuToolGuard } from './hitl-store.js'
 

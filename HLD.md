@@ -9,11 +9,12 @@
 ### 2. 设计目标
 
 1. 使用成熟 Harness 替代历史自建通用 Agent Harness；DSH 为主平台，Hermes 为可选 Adapter，避免维护重复的会话、UI、模型与工具循环。
-2. 在网络领域保留比普通 tool call 更严格的确定性效果层。
+2. 在网络与业务运维领域保留比普通 tool call 更严格的确定性效果层。
 3. 将模型限制在候选意图、诊断和编排位置，不允许模型绕过 L0 合同直接执行写操作。
 4. 对每个变更建立可重放检查但不可重放授权的完整审计证据。
-5. 同时支持本地 mock 验证和显式配置的 pragmatic 真实适配器。
+5. 同时支持本地 mock、显式 pragmatic 真实适配器，以及 P0.75-A/B/C FRR/Containerlab 实验 provider。
 6. 支持 LAN、DC、WAN 的能力隔离以及受控 A2A 跨域协作。
+7. 将 Service desired state 与 Network enforcement 分离，通过标准 MCP 和统一 Effect Runtime 联动。
 
 ### 3. 非目标
 
@@ -32,9 +33,11 @@ flowchart LR
     DSH --> L1[Domain L1 Skills]
     DSH --> P[NetOpYu Harness Adapter]
     P --> W[Python Worker / Bridge]
-    W --> NR[Network Runtime]
-    NR --> B[Mock 或 Pragmatic Backend]
-    B --> N[网络系统 / 本地模拟器]
+    W --> NR[Domain Effect Runtime]
+    NR --> TG[Typed Tool Gateway]
+    TG --> NL[Network Layer / Containerlab]
+    TG --> SL[Service Layer / MCP Servers]
+    NR --> REC[Cross-layer Reconciliation]
     P --> A2A[A2A Provider]
     A2A --> PEER[LAN/DC/WAN Peer]
     NR --> J[(Runtime Journal)]
@@ -49,9 +52,11 @@ flowchart LR
 | NetOpYu Harness Adapters | 工具/Skill 投影、精确计划审批绑定、A2A | 领域控制面入口 |
 | Domain L1 Skills | 诊断、澄清、任务分解和跨域编排 | 不可信候选生成器 |
 | Shared Python Worker | 持久化 Unix Socket 调用、隔离异常、降低进程开销 | 受控执行入口 |
-| Network Runtime | 编译 Intent、生成计划、状态机、执行、验证、补偿和审计 | 领域效果控制面 |
-| Network L0 Skill Registry | 固定步骤、目标字段、工具合同、验证/回滚策略 | 版本化策略根 |
-| Backend | mock profile，或 pragmatic device/MCP/OpenAPI 路由 | 数据/效果适配层 |
+| Domain Effect Runtime | 编译 Intent、生成计划、状态机、执行、验证、补偿和审计 | 领域效果控制面 |
+| Network/Service L0 Registry | 固定步骤、目标字段、工具合同、验证/回滚策略 | 版本化策略根 |
+| Typed Tool Gateway | 合并本地 Network provider、MCP 与 OpenAPI，保留 source/identity/schema | 数据/效果适配层 |
+| Network Layer | Containerlab 或设备 adapter；拥有拓扑、enforcement 和数据面事实 | 网络事实/效果层 |
+| Service Layer | Identity/Application/Policy/Change/CMDB/Platform MCP；拥有业务 desired state | 业务事实/效果层 |
 | Scoped Services | 作用域记忆、能力检索、大结果分页 | 只读辅助层 |
 | A2A Provider | AgentCard 发现、选择、SSE 委派、continuation | 跨域边界 |
 | SQLite Stores | 计划、事件、审批、grant、continuation、轨迹和大结果 | 持久化证据层 |
@@ -63,8 +68,8 @@ sequenceDiagram
     participant U as Operator
     participant M as LLM / L1 Skill
     participant D as Harness Adapter
-    participant R as Network Runtime
-    participant B as Backend
+    participant R as Domain Effect Runtime
+    participant B as Domain Provider
 
     M->>D: 候选工具 + 参数 + provenance
     D->>R: prepare(l0_skill_id, arguments)
@@ -101,7 +106,7 @@ sequenceDiagram
 3. 委派链记录 agent id；超过最大深度或检测到循环时拒绝。
 4. peer 通过 SSE 返回消息、失败或 `input-required`。
 5. `input-required` 被保存为 continuation；DSH 使用新卡片，Hermes 使用包含远端 plan hash 的用户 slash command。
-6. 本地 DC peer 仅绑定 loopback、仅允许 mock，用于协议与工作流验证，不代表生产多 Agent 部署。
+6. 本地 DC peer 仅绑定 loopback，支持 mock 与显式配置的 pragmatic lab，用于协议与工作流验证，不代表生产多 Agent 部署。
 
 ### 9. 部署设计
 
@@ -145,13 +150,13 @@ sequenceDiagram
 - **性能**：Worker 常驻；大结果外置；本地门禁 24 请求/8 并发的 p95 小于 1 秒。
 - **隐私**：A2A 不继承会话；轨迹最小化；日志不得包含凭据和完整敏感参数。
 
-### 11.1 Hermes Adapter 对 Network Runtime 的影响
+### 11.1 Hermes Adapter 对 Domain Effect Runtime 的影响
 
 | 项目 | 影响 |
 |---|---|
 | L0 Skill/ToolContract | 无；使用同一注册表和 contract hash |
 | 参数、Intent、风险、preflight | 无；Hermes 只转发候选输入到同一 `prepare` |
-| Plan schema/状态机 | 无；仍为 schema v4 和同一状态迁移 |
+| Plan schema/状态机 | 无；仍为 schema v5 和同一状态迁移 |
 | verifier/compensator | 无；Adapter 不能替换或跳过 |
 | journal/audit | 无；同一 SQLite schema 与事件哈希链 |
 | 用户审批交互 | 有；DSH 为 plan card + Tool Guard，Hermes 为用户 slash command + 进程内 nonce binding |
@@ -165,6 +170,74 @@ sequenceDiagram
 
 P0.5 在本地 mock 范围完成；新增 Hermes Adapter 后，DSH 与 Hermes 的等价写请求具有相同 L0/Intent/风险/验证/回滚合同，并都达到 `verified_success` 与有效 hash-chain audit。Hermes 模型不可见 nonce，错误 hash、重复命令和进程重启后的旧批准均 fail closed。仍未完成的 P1 工作包括真实网络适配器逐项资格认证、Hermes Gateway 审批人身份不可抵赖、企业审批、生产故障注入、HA/DR、长期负载、真实 rollback 演练和变更治理。
 
+### 13. P0.75-A 部署与数据流
+
+P0.75-A 的 Linux 执行平面运行 Containerlab、FRR 和 Alpine endpoints；macOS DSH/Hermes、Worker 和 Runtime 保持不变。`config.lab.yaml` 选择 pragmatic lab provider，`lab.yaml` 固定目标。L1 Skill 必须先读取配置、OSPF 邻居和基线 probe；L0 plan 经人工审批后仅执行一次，随后读取 running-config 和 endpoint probe。验证失败进入 provider 快照补偿与独立恢复验证。
+
+验收分两层：无 Docker 时，manifest、命令边界、workflow、L0/补偿和 fail-closed 由单元测试覆盖；Linux lab 就绪后，`verify` 与 `exercise-failover` 负责协议、转发、收敛和恢复证据。
+
+园区 + IDC 扩展在相同 provider 内增加 manifest-bound user/application 实体。LAN L0 只改变
+用户 endpoint 的固定接口并读回准入状态；DC L0 只改变应用 endpoint 上该用户固定 `/32`
+策略并通过反向工具补偿。L1 通过 loopback A2A peer 跨域委派，完成条件是实际 HTTP probe，
+而不是写工具的成功文本。
+
+### 14. P0.75-B 典型小型现网部署
+
+`config.small-production-lab.yaml` 将同一 DSH + Domain Effect Runtime 绑定到 20 节点实验。
+内部 OSPF 与双 ISP eBGP 共同提供真实控制面；有线、无线、访客、运维、IDC、DMZ 和
+Internet endpoint 提供真实数据面。部署验收分四层：节点存活、OSPF/BGP 邻居、清单
+允许/拒绝探测、应用 HTTP；故障验收额外要求主出口切换至 Core2/Edge2 并在链路恢复后
+回切。L1/L0 onboarding 和失败回滚继续复用同一 Runtime，不创建实验旁路。
+
+拓扑查询数据流为 `DSH Skill → 只读 Lab Tool → typed manifest graph`；路径查询数据流为
+`declared source/destination → bounded traceroute → hop IP index → link adjacency verifier`。
+只有所有跳点解析、相邻关系成立且目标 endpoint 到达时才返回成功。用户到应用查询还会
+合并 endpoint 接口状态和应用服务器 `/32` blackhole 状态，明确指出它们不是真实
+RADIUS/802.1X、叶节点 ACL、状态防火墙或应用 IAM。
+
+### 15. P0.75-C EVPN/VXLAN Fabric 部署
+
+P0.75-C 在同一 pragmatic `network-lab` provider 下增加 typed Fabric contract。
+部署为双 Spine RR、双 Leaf VTEP 和六个 endpoint；控制面为 OSPF underlay + iBGP
+MP-BGP EVPN，数据面为 Linux 802.1Q、bridge 和 VXLAN。DSH/Hermes、Worker、Runtime、
+审批和审计边界不变。
+
+只读流为 `Fabric L1 Skill → manifest-bound tool → Linux/FRR JSON state`。写流为
+`Access-VLAN L1 workflow → network.fabric.access-vlan.set L0 → preflight → approval →
+fixed argv → fresh bridge/PVID read → optional traffic probe → verified success/compensation`。
+trunk、任意 shell、任意目标 IP、未声明 VLAN 和批量端口都不进入写合同。
+
+本机内核不支持 NET_VRF，因此 Fabric contract 固定为 `evpn-vxlan-l2`；架构不通过
+mock type-5 路由或伪 VRF 宣称 L3VPN。L3VPN 扩展需要支持 VRF 的 Linux 执行面或独立 NOS。
+
+### 16. P0.8 Service MCP 与跨层数据流
+
+本地部署新增六个独立 stdio MCP 进程。每个进程公开一个企业系统边界并报告固定 server
+identity/version；它们共享事务型 SQLite 只是为了可重建仿真，不表示生产应合库。Access
+Policy 与 Platform 是受信写 provider，其他域当前只读。所有 MCP 结果使用严格 Pydantic
+structured output；Tool Gateway 保存 provider identity、contract id 和 schema digests。
+
+```mermaid
+sequenceDiagram
+    participant L as service-network-access-reconcile L1
+    participant S as Service MCP
+    participant R as Domain Effect Runtime
+    participant N as Network L0 / Containerlab
+    L->>S: identity + policy + entitlement + change + CMDB reads
+    L->>N: observed enforcement + HTTP probe
+    L->>R: prepare Service L0 exact plan
+    R->>S: revision preflight, approved write, fresh readback
+    L->>R: prepare Network L0 exact plan
+    R->>N: enforcement preflight, approved write, fresh state/probe
+    L->>R: reconcile independent desired/enforced/data-plane facts
+```
+
+Service entitlement mutation uses optimistic revision and one-shot idempotency. Approval check, revision
+comparison, write, audit and idempotency record are one immediate transaction across processes. Database
+seed runs once; restarting an MCP process cannot resurrect a revoked role. The current L1 workflow is a
+reviewed sequence of independent plans, not a distributed transaction. A failed later step must be recovered
+with a new reviewed L0 plan; automatic multi-effect saga/bundle authorization remains a P1 enhancement.
+
 ---
 
 ## English
@@ -176,11 +249,12 @@ This document defines the system boundary, logical components, deployment topolo
 ### 2. Goals
 
 1. Replace the historical custom harness with mature platforms: DSH is primary and Hermes is an optional adapter.
-2. Preserve a deterministic network effect layer that is stricter than ordinary tool calling.
+2. Preserve a deterministic network/service effect layer that is stricter than ordinary tool calling.
 3. Restrict the model to candidate intent, diagnosis, and orchestration; it cannot bypass L0 contracts.
 4. Produce replay-checkable evidence without replayable authorization.
-5. Support local mock validation and explicitly configured pragmatic adapters.
+5. Support local mock validation, explicitly configured pragmatic adapters, and P0.75-A/B/C FRR/Containerlab lab providers.
 6. Isolate LAN, DC, and WAN capabilities while enabling controlled A2A collaboration.
+7. Separate Service desired state from Network enforcement and connect them through standard MCP plus one Effect Runtime.
 
 ### 3. Non-goals
 
@@ -198,9 +272,11 @@ This document defines the system boundary, logical components, deployment topolo
 | NetOpYu Harness Adapters | Tool/Skill projection, exact-plan approval binding, A2A | Domain entry control plane |
 | Domain L1 Skills | Diagnosis, clarification, decomposition, orchestration | Untrusted candidate producer |
 | Shared Python Worker | Persistent Unix-socket invocation and fault isolation | Controlled execution entry |
-| Network Runtime | Intent compilation, plans, state machine, execution, verification, compensation, audit | Domain effect control plane |
-| Network L0 Registry | Fixed steps, target fields, tool/verifier/rollback contracts | Versioned policy root |
-| Backend | Mock profiles or pragmatic device/MCP/OpenAPI routing | Data/effect adapter |
+| Domain Effect Runtime | Intent compilation, plans, state machine, execution, verification, compensation, audit | Domain effect control plane |
+| Network/Service L0 Registry | Fixed steps, target fields, tool/verifier/rollback contracts | Versioned policy root |
+| Typed Tool Gateway | Preserves local/MCP/OpenAPI source, provider identity, and schema | Data/effect adapter |
+| Network Layer | Containerlab or device adapters owning topology, enforcement, and data-plane facts | Network provider |
+| Service Layer | Identity/application/policy/change/CMDB/platform MCP owning business desired state | Service provider |
 | Scoped Services | Memory, capability retrieval, large-result paging | Read-only auxiliary layer |
 | A2A Provider | AgentCard discovery, peer selection, SSE delegation, continuations | Cross-domain boundary |
 | SQLite Stores | Plans, events, approvals, grants, continuations, trajectories, results | Persistent evidence layer |
@@ -233,10 +309,73 @@ The P1 production target uses independent domain deployments, enterprise identit
 - **Performance:** persistent transport and durable large-result paging; the local reliability gate requires p95 below one second for 24 requests at concurrency eight.
 - **Privacy:** no inherited A2A history and minimized trajectory fields.
 
-### 8.1 Hermes impact on Network Runtime
+### 8.1 Hermes impact on Domain Effect Runtime
 
-Hermes does not change the L0 registry, ToolContracts, compilation, intent/risk/preflight, schema-v4 plan state machine, verifier, compensator, journal, or audit. It changes only the human-interaction edge: DSH uses a plan card and Tool Guard, while Hermes uses a user slash command and a process-local hidden nonce binding. `netopyu_skill_view` and the Skill hook start reviewed workflows, and read handlers record prerequisite observations. Restart loses pending Hermes authorization safely; DSH still has richer durable HITL recovery, batch, and deferred UX. The local A/B gate proves equal stable plan fields, `verified_success`, valid audit, hidden nonces, and duplicate blocking. It is a contract test, not a Hermes Gateway, model-quality, real-network, or performance certification.
+Hermes does not change the L0 registry, ToolContracts, compilation, intent/risk/preflight, schema-v5 plan state machine, verifier, compensator, journal, or audit. It changes only the human-interaction edge: DSH uses a plan card and Tool Guard, while Hermes uses a user slash command and a process-local hidden nonce binding. `netopyu_skill_view` and the Skill hook start reviewed workflows, and read handlers record prerequisite observations. Restart loses pending Hermes authorization safely; DSH still has richer durable HITL recovery, batch, and deferred UX. The local A/B gate proves equal stable plan fields, `verified_success`, valid audit, hidden nonces, and duplicate blocking. It is a contract test, not a Hermes Gateway, model-quality, real-network, or performance certification.
 
 ### 9. P0.5 acceptance
 
 P0.5 is complete for local simulation. Equivalent DSH and Hermes requests retain the same L0, intent, risk, verifier, rollback, terminal-state, and audit invariants. Hermes hides the nonce from the model and blocks wrong hashes, duplicates, and approvals lost on restart. P1 still requires real-adapter qualification, non-repudiable Hermes gateway identity, enterprise approval, HA/DR, long-duration load, real rollback exercises, and formal change governance.
+
+### 10. P0.75-A lab deployment
+
+The Linux execution plane runs Containerlab, FRR, and Alpine endpoints while the macOS harness and shared Runtime remain unchanged. `config.lab.yaml` selects the pragmatic lab provider and the manifest fixes all targets. The reviewed L1 workflow requires configuration, OSPF-neighbor, and baseline-probe observations before an L0 plan can be approved. A successful write requires both fresh configuration and predeclared traffic evidence; failure invokes provider snapshot compensation and exact restoration verification. Unit tests cover the boundary without Docker, while `verify` and `exercise-failover` certify an actually deployed lab.
+
+The campus + IDC extension adds manifest-bound users and applications to the
+same provider. LAN L0 mutates only a fixed endpoint interface; DC L0 mutates
+only the user's fixed source `/32` policy on the application endpoint. L1 uses
+the loopback A2A peer for cross-domain delegation, and completion requires a
+real HTTP probe rather than trusting write output.
+
+### 11. P0.75-B typical small-production deployment
+
+`config.small-production-lab.yaml` binds the same DSH and Domain Effect Runtime to the
+20-node reference network. Acceptance proceeds through node health, OSPF/eBGP
+adjacency, manifest-declared positive and negative paths, and real HTTP evidence.
+The failover gate proves Core2/Edge2 forwarding after the primary ISP link fails
+and primary-path restoration after recovery. L1/L0 onboarding and verified
+rollback reuse the normal Runtime path without a lab-only bypass.
+
+Topology reads flow from the DSH Skill through read-only lab tools to the typed
+manifest graph. Path reads bind declared endpoints, run bounded traceroute,
+resolve hop IPs, and verify every link adjacency. Success requires every hop
+and the destination to be proved. User/application queries additionally join
+the endpoint interface state and server `/32` blackhole state while explicitly
+stating that they are not RADIUS/802.1X, leaf ACLs, stateful firewall, or IAM.
+
+### 12. P0.75-C EVPN/VXLAN fabric deployment
+
+The same pragmatic `network-lab` provider now accepts a typed fabric contract.
+Two spine route reflectors, two leaf VTEPs, and six endpoints run OSPF underlay,
+iBGP MP-BGP EVPN, Linux 802.1Q/bridge, and VXLAN forwarding. Harness, Worker,
+Runtime, approval, and audit boundaries remain unchanged.
+
+Reads bind to Linux/FRR JSON state. The only new mutation follows the reviewed
+access-VLAN L1 workflow into `network.fabric.access-vlan.set`: typed preflight,
+human approval, fixed argv, fresh bridge/PVID verification, an optional
+manifest-bound traffic probe, and exact snapshot compensation. Trunks,
+arbitrary shell/IP targets, undeclared VLANs, and batch ports are excluded.
+The local kernel lacks NET_VRF, so the contract claims L2 EVPN only; L3VPN
+requires a VRF-capable Linux execution plane or a separate network OS.
+
+### 13. P0.8 Service MCP and cross-layer flow
+
+Six independent official-SDK stdio MCP processes expose identity, application,
+access policy, change, CMDB, and platform boundaries. Their shared SQLite is a
+rebuildable local simulation, not a recommended production database topology.
+Trusted write providers are pinned by server name/version, declared contract,
+structured result, and input/output schema digests.
+
+Service desired state and Containerlab enforcement are read independently.
+`service-network-access-reconcile` first establishes identity/policy/change and
+CMDB facts, then prepares separate Service and Network L0 plans. Each plan has
+its own preflight, approval, provider-bound schema, fresh verifier, compensator,
+and audit chain. Reconciliation compares entitlement, actual `/32` network
+enforcement, and a real HTTP probe.
+
+Service writes place change validation, optimistic revision comparison,
+mutation, idempotency, and audit in one immediate transaction. Versioned
+one-time seeding prevents restarted MCP processes from resurrecting revoked
+state, while stale idempotency replay fails. The current cross-layer workflow
+is an ordered set of independently approved plans, not an atomic distributed
+transaction; automatic saga/bundle authorization remains future work.

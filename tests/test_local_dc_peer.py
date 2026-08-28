@@ -84,9 +84,9 @@ class TestLocalDcPeer(unittest.TestCase):
         inspected = NetworkRuntime(self.runtime_path).inspect(detail["approval"]["plan_id"])
         self.assertEqual(inspected["record"]["state"], "rejected")
 
-    def test_peer_refuses_pragmatic_mode(self):
+    def test_peer_refuses_pragmatic_mode_without_reviewed_lab(self):
         os.environ["NETOPYU_DSH_BACKEND"] = "pragmatic"
-        with self.assertRaisesRegex(RuntimeError, "mock-only"):
+        with self.assertRaisesRegex(RuntimeError, "only with the reviewed local lab"):
             LocalDcPeer(runtime_path=self.runtime_path, state_path=self.state_path)
 
 

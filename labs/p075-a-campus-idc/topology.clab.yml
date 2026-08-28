@@ -1,0 +1,84 @@
+name: netopyu-campus-idc
+
+topology:
+  defaults:
+    kind: linux
+  nodes:
+    campus-access-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - campus-access-1/daemons:/etc/frr/daemons
+        - campus-access-1/frr.conf:/etc/frr/frr.conf
+        - campus-access-1/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    campus-core-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - campus-core-1/daemons:/etc/frr/daemons
+        - campus-core-1/frr.conf:/etc/frr/frr.conf
+        - campus-core-1/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    campus-core-2:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - campus-core-2/daemons:/etc/frr/daemons
+        - campus-core-2/frr.conf:/etc/frr/frr.conf
+        - campus-core-2/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    idc-border-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - idc-border-1/daemons:/etc/frr/daemons
+        - idc-border-1/frr.conf:/etc/frr/frr.conf
+        - idc-border-1/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    idc-leaf-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - idc-leaf-1/daemons:/etc/frr/daemons
+        - idc-leaf-1/frr.conf:/etc/frr/frr.conf
+        - idc-leaf-1/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+
+    erin-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.20.10/24 dev eth1
+        - ip route add 10.20.0.0/16 via 10.10.20.1
+        - ip link set dev eth1 down
+    bob-client:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.30.10/24 dev eth1
+        - ip route add 10.20.0.0/16 via 10.10.30.1
+    crm-server:
+      image: alpine:3.21
+      binds:
+        - crm-server/serve.sh:/serve.sh
+      cmd: nc -lk -p 8080 -e /serve.sh
+      exec:
+        - ip address add 10.20.10.20/24 dev eth1
+        - ip route add 10.10.0.0/16 via 10.20.10.1
+        - ip route add blackhole 10.10.20.10/32
+    wiki-server:
+      image: alpine:3.21
+      binds:
+        - wiki-server/serve.sh:/serve.sh
+      cmd: nc -lk -p 8080 -e /serve.sh
+      exec:
+        - ip address add 10.20.20.20/24 dev eth1
+        - ip route add 10.10.0.0/16 via 10.20.20.1
+
+  links:
+    - endpoints: [erin-client:eth1, campus-access-1:eth1]
+    - endpoints: [bob-client:eth1, campus-access-1:eth2]
+    - endpoints: [campus-access-1:eth3, campus-core-1:eth1]
+    - endpoints: [campus-access-1:eth4, campus-core-2:eth1]
+    - endpoints: [campus-core-1:eth2, idc-border-1:eth1]
+    - endpoints: [campus-core-2:eth2, idc-border-1:eth2]
+    - endpoints: [idc-border-1:eth3, idc-leaf-1:eth1]
+    - endpoints: [crm-server:eth1, idc-leaf-1:eth2]
+    - endpoints: [wiki-server:eth1, idc-leaf-1:eth3]
+

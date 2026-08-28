@@ -48,6 +48,7 @@ class WorkflowTemplate:
     version: str
     allowed_tools: tuple[str, ...]
     write_requirements: dict[str, tuple[ObservationRequirement, ...]]
+    terminal_writes: tuple[str, ...]
     template_hash: str
 
     @classmethod
@@ -59,6 +60,7 @@ class WorkflowTemplate:
         version: str,
         allowed_tools: tuple[str, ...],
         write_requirements: dict[str, tuple[ObservationRequirement, ...]],
+        terminal_writes: tuple[str, ...] | None = None,
     ) -> "WorkflowTemplate":
         payload = {
             "skill_id": skill_id,
@@ -69,11 +71,13 @@ class WorkflowTemplate:
                 tool: [item.to_dict() for item in requirements]
                 for tool, requirements in sorted(write_requirements.items())
             },
+            "terminal_writes": list(terminal_writes or tuple(write_requirements)),
         }
         return cls(template_hash=sha256_json(payload), **{
             **payload,
             "allowed_tools": tuple(allowed_tools),
             "write_requirements": write_requirements,
+            "terminal_writes": tuple(terminal_writes or tuple(write_requirements)),
         })
 
     def to_dict(self) -> dict[str, Any]:
@@ -86,6 +90,7 @@ class WorkflowTemplate:
                 tool: [item.to_dict() for item in requirements]
                 for tool, requirements in sorted(self.write_requirements.items())
             },
+            "terminal_writes": list(self.terminal_writes),
             "template_hash": self.template_hash,
         }
 
@@ -113,6 +118,16 @@ _REVIEWED: dict[str, dict[str, Any]] = {
         ),
         "writes": {"edit_device_config": ()},
     },
+    "lab_ospf_path_remediation": {
+        "version": "1.0.0", "allowed": (
+            "get_device_config", "get_ospf_neighbors", "lab_probe", "edit_device_config",
+        ),
+        "writes": {"edit_device_config": (
+            _require("get_device_config", "device_id", config_readable=True),
+            _require("get_ospf_neighbors", "device_id", full_neighbors=2),
+            _require("lab_probe", probe_id="branch-to-dc", probe_ok=True),
+        )},
+    },
     "lan_new_employee_onboarding_access": {
         "version": "1.0.0", "allowed": (
             "list_users", "get_user_access", "check_nac_policy", "grant_user_access",
@@ -139,6 +154,50 @@ _REVIEWED: dict[str, dict[str, Any]] = {
             _require("dc_check_user_app_access", "user_id", "app_id", allowed=False),
             _require("dc_get_app_acl", "app_id", acl_loaded=True),
         )},
+    },
+    "lab_fabric_access_vlan_change": {
+        "version": "1.0.0", "allowed": (
+            "lab_get_access_vlan", "lab_probe", "fabric_set_access_vlan",
+        ),
+        "writes": {"fabric_set_access_vlan": (
+            _require("lab_get_access_vlan", "device_id", "interface", access_vlan_readable=True),
+        )},
+    },
+    "service_network_access_reconcile": {
+        "version": "1.0.0",
+        "allowed": (
+            "identity_get_user", "application_get", "access_policy_evaluate",
+            "access_policy_get_entitlement", "change_validate_window",
+            "cmdb_get_endpoint_binding", "network_get_app_enforcement",
+            "lab_app_probe", "reconcile_service_network_access",
+            "access_policy_grant_entitlement", "access_policy_revoke_entitlement",
+            "network_apply_app_enforcement", "network_revoke_app_enforcement",
+        ),
+        "writes": {
+            "access_policy_grant_entitlement": (
+                _require("identity_get_user", "user_id", identity_active=True),
+                _require("access_policy_evaluate", "user_id", "app_id", eligible=True),
+                _require("access_policy_get_entitlement", "user_id", "app_id", allowed=False),
+                _require("change_validate_window", "change_id", permitted=True),
+            ),
+            "access_policy_revoke_entitlement": (
+                _require("access_policy_get_entitlement", "user_id", "app_id", allowed=True),
+                _require("change_validate_window", "change_id", permitted=True),
+            ),
+            "network_apply_app_enforcement": (
+                _require("access_policy_get_entitlement", "user_id", "app_id", allowed=True),
+                _require("network_get_app_enforcement", "user_id", "app_id", allowed=False),
+                _require("change_validate_window", "change_id", permitted=True),
+            ),
+            "network_revoke_app_enforcement": (
+                _require("access_policy_get_entitlement", "user_id", "app_id", allowed=False),
+                _require("network_get_app_enforcement", "user_id", "app_id", allowed=True),
+                _require("change_validate_window", "change_id", permitted=True),
+            ),
+        },
+        "terminal_writes": (
+            "network_apply_app_enforcement", "network_revoke_app_enforcement",
+        ),
     },
 }
 
@@ -190,12 +249,36 @@ def compile_workflow_templates(profile: str, mode: str) -> dict[str, WorkflowTem
             version=str(reviewed["version"]),
             allowed_tools=allowed,
             write_requirements=writes,
+            terminal_writes=tuple(reviewed.get("terminal_writes") or tuple(writes)),
         )
         templates[skill_name] = template
     return templates
 
 
 def _extract_facts(tool_name: str, arguments: dict[str, Any], result: str) -> dict[str, Any]:
+    if tool_name in {
+        "identity_get_user", "access_policy_evaluate", "access_policy_get_entitlement",
+        "change_validate_window", "network_get_app_enforcement",
+        "reconcile_service_network_access",
+    }:
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            return {"structured": False}
+        if tool_name == "identity_get_user":
+            return {"identity_active": payload.get("user", {}).get("status") == "active"}
+        if tool_name == "access_policy_evaluate":
+            return {"eligible": payload.get("eligible") is True}
+        if tool_name == "access_policy_get_entitlement":
+            return {
+                "allowed": payload.get("allowed") is True,
+                "revision": payload.get("revision"),
+            }
+        if tool_name == "change_validate_window":
+            return {"permitted": payload.get("permitted") is True}
+        if tool_name == "network_get_app_enforcement":
+            return {"allowed": payload.get("allowed") is True}
+        return {"consistent": payload.get("consistent") is True}
     if tool_name == "list_users":
         return {"user_ids": sorted(set(re.findall(r"^\s{2}([a-zA-Z0-9_.-]+)\s+", result, re.MULTILINE)))}
     if tool_name == "get_user_access":
@@ -206,6 +289,33 @@ def _extract_facts(tool_name: str, arguments: dict[str, Any], result: str) -> di
         return {"allowed": "✅ ALLOWED" in result}
     if tool_name == "dc_get_app_acl":
         return {"acl_loaded": result.startswith("Access control for application")}
+    if tool_name == "get_device_config":
+        return {"config_readable": bool(result.strip()) and "[Error]" not in result}
+    if tool_name == "get_ospf_neighbors":
+        return {"full_neighbors": result.lower().count("full")}
+    if tool_name == "lab_probe":
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            return {"probe_id": None, "probe_ok": False}
+        return {
+            "probe_id": payload.get("probe_id"),
+            "probe_ok": payload.get("ok") is True,
+        }
+    if tool_name == "lab_get_access_vlan":
+        try:
+            payload = json.loads(result)
+        except json.JSONDecodeError:
+            return {"access_vlan_readable": False}
+        return {
+            "access_vlan_readable": (
+                isinstance(payload, dict)
+                and payload.get("ok") is True
+                and isinstance(payload.get("current_vlan"), int)
+                and bool(payload.get("bridge"))
+            ),
+            "current_vlan": payload.get("current_vlan") if isinstance(payload, dict) else None,
+        }
     return {"completed": True}
 
 
@@ -383,7 +493,8 @@ class WorkflowRuntime:
                VALUES (?, ?, ?, ?, ?)""",
             (run["run_id"], tool_name, canonical_json(arguments), canonical_json(facts), now),
         )
-        if mutating:
+        terminal_writes = set(run["template"].get("terminal_writes") or ())
+        if mutating and tool_name in terminal_writes:
             self.db.execute(
                 "UPDATE workflow_runs SET status='completed', updated_at=? WHERE run_id=?",
                 (now, run["run_id"]),

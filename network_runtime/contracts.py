@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 
 def utc_now() -> str:
@@ -135,6 +135,9 @@ class PreparedPlan:
     tool_name: str
     tool_version: str
     action_type: str
+    provider_identity: str
+    input_schema_digest: str
+    output_schema_digest: str
     arguments: dict[str, Any]
     argument_provenance: dict[str, str]
     targets: tuple[str, ...]
@@ -166,6 +169,9 @@ class PreparedPlan:
         tool_name: str,
         tool_version: str,
         action_type: str,
+        provider_identity: str,
+        input_schema_digest: str,
+        output_schema_digest: str,
         arguments: dict[str, Any],
         argument_provenance: dict[str, str],
         targets: tuple[str, ...],
@@ -192,6 +198,9 @@ class PreparedPlan:
             "tool_name": tool_name,
             "tool_version": tool_version,
             "action_type": action_type,
+            "provider_identity": provider_identity,
+            "input_schema_digest": input_schema_digest,
+            "output_schema_digest": output_schema_digest,
             "arguments": arguments,
             "argument_provenance": argument_provenance,
             "targets": list(targets),
@@ -233,8 +242,20 @@ class PreparedPlan:
         # Earlier P0.5 plans predate first-class L0 Skill/Intent contracts.
         # Accept their original immutable shape for inspection and explicit
         # rejection, but execution contract revalidation will fail closed.
+        if self.schema_version < 5:
+            legacy = dict(payload)
+            for field_name in (
+                "provider_identity", "input_schema_digest", "output_schema_digest",
+            ):
+                legacy.pop(field_name, None)
+            if self.schema_version >= 4 and sha256_json(legacy) == self.plan_hash:
+                return
         if self.schema_version < 4:
             legacy = dict(payload)
+            for field_name in (
+                "provider_identity", "input_schema_digest", "output_schema_digest",
+            ):
+                legacy.pop(field_name, None)
             for field_name in (
                 "l0_skill_id", "l0_skill_version", "l0_contract_hash",
                 "intent_spec", "intent_hash", "step_contract",
@@ -255,6 +276,9 @@ class PreparedPlan:
             "tool_name": self.tool_name,
             "tool_version": self.tool_version,
             "action_type": self.action_type,
+            "provider_identity": self.provider_identity,
+            "input_schema_digest": self.input_schema_digest,
+            "output_schema_digest": self.output_schema_digest,
             "arguments": self.arguments,
             "argument_provenance": self.argument_provenance,
             "targets": list(self.targets),
@@ -286,6 +310,9 @@ class PreparedPlan:
             tool_name=str(value["tool_name"]),
             tool_version=str(value["tool_version"]),
             action_type=str(value["action_type"]),
+            provider_identity=str(value.get("provider_identity", "legacy-unbound")),
+            input_schema_digest=str(value.get("input_schema_digest", "legacy-unbound")),
+            output_schema_digest=str(value.get("output_schema_digest", "legacy-unbound")),
             arguments=dict(value["arguments"]),
             argument_provenance=dict(value["argument_provenance"]),
             targets=tuple(value["targets"]),

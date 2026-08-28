@@ -1,0 +1,51 @@
+# P0.75-A disposable FRR laboratory configuration. No real credentials.
+mode: pragmatic
+
+agent:
+  agent_id: lab-lan-agent
+  profile: lan
+  peers: []
+
+tools:
+  schema_validation_enabled: true
+  mcp:
+    config_json: ""
+  openapi:
+    spec_url: ""
+    base_url: ""
+    auth_type: bearer
+    token_env: NETOPS_API_TOKEN
+  editable_hitl_tools:
+    edit_device_config: [config_lines, reason, verification_probe_id]
+
+pragmatic:
+  device_inventory: []
+  mcp_servers: []
+  napalm_getters: [get_facts, get_interfaces, get_interfaces_counters]
+  lab:
+    enabled: true
+    provider: containerlab
+    manifest: labs/p075-a-frr/lab.yaml
+    command_timeout: 30
+
+retrieval:
+  backend: bm25
+  cache:
+    enabled: false
+    max_entries: 1024
+    ttl_seconds: 600
+  hybrid:
+    bm25_weight: 0.5
+    embed_weight: 0.5
+    fusion: weighted_sum
+    rrf_k: 60
+    oversample: 4
+  llm_judge:
+    first_stage_top_k: 15
+    timeout_seconds: 10
+    fusion_alpha: 0.3
+    max_text_chars: 200
+  embed_index_concurrency: 8
+
+embeddings:
+  dim: 768

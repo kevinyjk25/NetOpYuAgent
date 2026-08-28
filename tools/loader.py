@@ -21,6 +21,7 @@ Usage (from the DSH backend)
 from __future__ import annotations
 
 import logging
+import os
 from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,38 @@ class ToolLoader:
         else:
             from tools.pragmatic.registry import TOOLS as PRAGMA_TOOLS
             meta.update(PRAGMA_TOOLS)
+            from config import load
+
+            if load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml")).pragmatic.lab.enabled:
+                from network_lab import load_manifest
+                from network_lab.tools import lab_tool_metadata
+
+                lab_cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml")).pragmatic.lab
+                manifest = load_manifest(lab_cfg.manifest)
+                meta.update(lab_tool_metadata(
+                    self._profile_id,
+                    access_enabled=bool(manifest.users and manifest.applications),
+                    topology_enabled=bool(manifest.links),
+                    fabric_enabled=manifest.fabric is not None,
+                ))
+                meta["edit_device_config"] = {
+                    **meta["edit_device_config"],
+                    "parameters": {
+                        **dict(meta["edit_device_config"].get("parameters") or {}),
+                        "verification_probe_id": (
+                            "Optional exact manifest probe that must pass after the write"
+                        ),
+                    },
+                }
+            cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
+            if any(server.domain == "service" for server in cfg.pragmatic.mcp_servers):
+                from service_layer.catalog import workflow_metadata
+
+                meta.update(workflow_metadata())
+                if cfg.pragmatic.lab.enabled:
+                    from effect_runtime.reconciliation import METADATA as RECONCILIATION_METADATA
+
+                    meta.update(RECONCILIATION_METADATA)
 
         logger.info(
             "ToolLoader[%s, profile=%s]: %d tools in metadata",

@@ -169,7 +169,7 @@ class ToolRouter:
             self._register(
                 name=spec.name,
                 fn=self._make_mcp_fn(mcp_client, spec.name),
-                source="mcp",
+                source=f"mcp:{spec.server_name}",
                 description=spec.description,
                 returns_large=spec.returns_large,
             )
@@ -499,6 +499,13 @@ class ToolRouter:
             result = await mcp_client.call_tool(tool_name, args)
             if result.is_error:
                 raise RuntimeError(result.error_msg)
+            if (
+                isinstance(result.structured_content, dict)
+                and result.structured_content.get("ok") is False
+            ):
+                raise RuntimeError(
+                    f"MCP tool {tool_name!r} returned structured ok=false"
+                )
             return result.content
         return _fn
 

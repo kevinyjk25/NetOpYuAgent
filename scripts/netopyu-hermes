@@ -1,0 +1,255 @@
+#!/usr/bin/env bash
+set -uo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  DEFAULT_RUNTIME_ROOT="${HOME:?}/Library/Application Support/NetOpYuAgent/hermes-runtime"
+else
+  DEFAULT_RUNTIME_ROOT="${XDG_DATA_HOME:-${HOME:?}/.local/share}/netopyu-agent/hermes-runtime"
+fi
+RUNTIME_ROOT="${NETOPYU_HERMES_RUNTIME:-$DEFAULT_RUNTIME_ROOT}"
+PYTHON_BIN="${NETOPYU_PYTHON:-$PROJECT_ROOT/.venv/bin/python}"
+WORKER_SOCKET="${NETOPYU_HERMES_WORKER_SOCKET:-$RUNTIME_ROOT/bridge.sock}"
+WORKER_PID_FILE="$RUNTIME_ROOT/bridge-worker.pid"
+LOG_DIR="$RUNTIME_ROOT/logs"
+WORKER_LOG_FILE="$LOG_DIR/bridge-worker.log"
+NETWORK_RUNTIME_STORE="${NETOPYU_NETWORK_RUNTIME_STORE:-$RUNTIME_ROOT/data/network_runtime.sqlite}"
+TOOL_RESULT_STORE="${NETOPYU_TOOL_RESULT_STORE:-$RUNTIME_ROOT/data/tool_results.sqlite}"
+PLUGIN_SOURCE="$PROJECT_ROOT/hermes-plugin-netopyu"
+PLUGIN_TARGET="${NETOPYU_HERMES_PLUGIN_DIR:-${HOME:?}/.hermes/plugins/netopyu}"
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/netopyu-hermes <command>
+
+Commands:
+  install       Link the repository plugin into ~/.hermes/plugins/netopyu
+  doctor        Check Hermes, Python, plugin, Worker, and Network Runtime state
+  worker-start  Start the shared owner-only Python Worker
+  worker-stop   Stop the managed Worker
+  worker-status Show the managed Worker status
+  smoke         Query the Worker and validate the Hermes tool manifest
+  compare       Run the local DSH-vs-Hermes Network Runtime invariant comparison
+  test          Run Hermes adapter tests
+  run           Start an interactive Hermes chat with the NetOpYu toolset
+
+Environment:
+  NETOPYU_HERMES_PROFILE=lan|dc|wan|default
+  NETOPYU_HERMES_ENABLE_DESTRUCTIVE=0|1
+  NETOPYU_HERMES_OPERATOR_ID=local:operator
+  NETOPYU_HERMES_WORKER_SOCKET=/path/to/bridge.sock
+  NETOPYU_HERMES_A2A_PEERS=http://127.0.0.1:8765
+  NETOPYU_HERMES_MEMORY_DIR=/path/to/scoped-memory
+  NETOPYU_BACKEND=mock|pragmatic
+  NETOPYU_NETWORK_RUNTIME_STORE=/path/to/network_runtime.sqlite
+  NETOPYU_TOOL_RESULT_STORE=/path/to/tool_results.sqlite
+EOF
+}
+
+fail() {
+  printf 'ERROR: %s\n' "$*" >&2
+  return 1
+}
+
+ensure_runtime_dirs() {
+  mkdir -p "$RUNTIME_ROOT/data" "$LOG_DIR"
+  chmod 700 "$RUNTIME_ROOT" "$RUNTIME_ROOT/data" "$LOG_DIR"
+}
+
+worker_pid() {
+  [[ -f "$WORKER_PID_FILE" ]] || return 1
+  local pid
+  pid="$(tr -d '[:space:]' < "$WORKER_PID_FILE")"
+  [[ "$pid" =~ ^[0-9]+$ ]] || return 1
+  kill -0 "$pid" 2>/dev/null || return 1
+  printf '%s' "$pid"
+}
+
+socket_worker_pid() {
+  [[ -S "$WORKER_SOCKET" ]] || return 1
+  NETOPYU_HERMES_WORKER_SOCKET="$WORKER_SOCKET" "$PYTHON_BIN" - <<'PY' 2>/dev/null
+import os
+from hermes_adapter.client import HermesWorkerClient
+print(HermesWorkerClient(os.environ["NETOPYU_HERMES_WORKER_SOCKET"], timeout_seconds=2).ping()["worker_pid"])
+PY
+}
+
+worker_start() {
+  ensure_runtime_dirs
+  if worker_pid >/dev/null; then
+    printf 'NetOpYu Hermes Worker already running (pid=%s)\n' "$(worker_pid)"
+    return 0
+  fi
+  [[ -x "$PYTHON_BIN" ]] || {
+    fail "Python environment not found: $PYTHON_BIN"
+    return 1
+  }
+  [[ ! -e "$WORKER_SOCKET" || -S "$WORKER_SOCKET" ]] || {
+    fail "refusing to replace non-socket path: $WORKER_SOCKET"
+    return 1
+  }
+  if [[ -S "$WORKER_SOCKET" ]]; then
+    local unmanaged_pid
+    if unmanaged_pid="$(socket_worker_pid)"; then
+      fail "an unmanaged Worker (pid=$unmanaged_pid) already owns $WORKER_SOCKET"
+      return 1
+    fi
+    rm -f "$WORKER_SOCKET"
+  fi
+  (
+    cd "$PROJECT_ROOT" || exit 1
+    export NETOPYU_BACKEND="${NETOPYU_BACKEND:-mock}"
+    export NETOPYU_NETWORK_RUNTIME_STORE="$NETWORK_RUNTIME_STORE"
+    export NETOPYU_TOOL_RESULT_STORE="$TOOL_RESULT_STORE"
+    export NETOPYU_WORKER_CONCURRENCY="${NETOPYU_WORKER_CONCURRENCY:-8}"
+    nohup "$PYTHON_BIN" -m dsh_adapter.worker --socket "$WORKER_SOCKET" \
+      >>"$WORKER_LOG_FILE" 2>&1 &
+    printf '%s\n' "$!" > "$WORKER_PID_FILE"
+  )
+  chmod 600 "$WORKER_PID_FILE"
+  local pid
+  pid="$(tr -d '[:space:]' < "$WORKER_PID_FILE")"
+  local attempt
+  for attempt in {1..50}; do
+    if [[ -S "$WORKER_SOCKET" ]]; then
+      if NETOPYU_HERMES_WORKER_SOCKET="$WORKER_SOCKET" "$PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import os
+from hermes_adapter.client import HermesWorkerClient
+HermesWorkerClient(os.environ["NETOPYU_HERMES_WORKER_SOCKET"], timeout_seconds=2).ping()
+PY
+      then
+        printf 'NetOpYu Hermes Worker started (pid=%s, socket=%s)\n' "$pid" "$WORKER_SOCKET"
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+  fail "Worker did not become ready; inspect $WORKER_LOG_FILE"
+}
+
+worker_stop() {
+  local pid
+  if ! pid="$(worker_pid)"; then
+    rm -f "$WORKER_PID_FILE"
+    printf 'NetOpYu Hermes Worker is not running\n'
+    return 0
+  fi
+  local reported_pid
+  reported_pid="$(socket_worker_pid || true)"
+  if [[ "$reported_pid" != "$pid" ]]; then
+    fail "pid $pid is not the Worker answering on $WORKER_SOCKET"
+    return 1
+  fi
+  kill "$pid"
+  local attempt
+  for attempt in {1..50}; do
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 0.1
+  done
+  rm -f "$WORKER_PID_FILE" "$WORKER_SOCKET"
+  printf 'NetOpYu Hermes Worker stopped\n'
+}
+
+worker_status() {
+  local pid
+  if pid="$(worker_pid)"; then
+    printf 'running pid=%s socket=%s\n' "$pid" "$WORKER_SOCKET"
+  else
+    printf 'stopped socket=%s\n' "$WORKER_SOCKET"
+    return 1
+  fi
+}
+
+install_plugin() {
+  [[ -f "$PLUGIN_SOURCE/plugin.yaml" && -f "$PLUGIN_SOURCE/__init__.py" ]] || {
+    fail "Hermes plugin source is incomplete: $PLUGIN_SOURCE"
+    return 1
+  }
+  mkdir -p "$(dirname "$PLUGIN_TARGET")"
+  if [[ -L "$PLUGIN_TARGET" ]]; then
+    local existing
+    existing="$(readlink "$PLUGIN_TARGET")"
+    if [[ "$existing" != "$PLUGIN_SOURCE" ]]; then
+      fail "plugin target is already a different symlink: $PLUGIN_TARGET -> $existing"
+      return 1
+    fi
+  elif [[ -e "$PLUGIN_TARGET" ]]; then
+    fail "plugin target already exists and was not modified: $PLUGIN_TARGET"
+    return 1
+  else
+    ln -s "$PLUGIN_SOURCE" "$PLUGIN_TARGET"
+  fi
+  printf 'Linked Hermes plugin: %s -> %s\n' "$PLUGIN_TARGET" "$PLUGIN_SOURCE"
+  if command -v hermes >/dev/null 2>&1; then
+    printf 'Enable it with: hermes plugins enable netopyu\n'
+  else
+    printf 'Hermes CLI is not installed; install Hermes, then run: hermes plugins enable netopyu\n'
+  fi
+}
+
+smoke() {
+  NETOPYU_HERMES_WORKER_SOCKET="$WORKER_SOCKET" \
+  NETOPYU_HERMES_PROFILE="${NETOPYU_HERMES_PROFILE:-${NETOPYU_PROFILE:-lan}}" \
+  "$PYTHON_BIN" - <<'PY'
+import json, os
+from hermes_adapter.client import HermesWorkerClient
+client = HermesWorkerClient(os.environ["NETOPYU_HERMES_WORKER_SOCKET"], timeout_seconds=10)
+ping = client.ping()
+manifest = client.request(
+    "manifest",
+    profile=os.environ["NETOPYU_HERMES_PROFILE"],
+    include_destructive=os.environ.get("NETOPYU_HERMES_ENABLE_DESTRUCTIVE", "0") == "1",
+)
+print(json.dumps({
+    "ok": True,
+    "worker_pid": ping["worker_pid"],
+    "profile": manifest["profile"],
+    "backend": manifest["backend"]["mode"],
+    "tools": len(manifest["tools"]),
+    "mutating_tools": sum(1 for item in manifest["tools"] if item["requires_approval"]),
+}, indent=2, sort_keys=True))
+PY
+}
+
+doctor() {
+  local failed=0
+  [[ -x "$PYTHON_BIN" ]] && printf 'PASS Python: %s\n' "$PYTHON_BIN" || { printf 'FAIL Python: %s\n' "$PYTHON_BIN"; failed=1; }
+  command -v hermes >/dev/null 2>&1 && printf 'PASS Hermes: %s\n' "$(command -v hermes)" || { printf 'WARN Hermes CLI is not installed\n'; failed=1; }
+  [[ -L "$PLUGIN_TARGET" && "$(readlink "$PLUGIN_TARGET")" == "$PLUGIN_SOURCE" ]] \
+    && printf 'PASS Plugin link: %s\n' "$PLUGIN_TARGET" \
+    || { printf 'WARN Plugin is not linked: run scripts/netopyu-hermes install\n'; failed=1; }
+  worker_status || failed=1
+  if [[ -S "$WORKER_SOCKET" ]]; then
+    smoke || failed=1
+    local mode
+    mode="$(stat -f '%Lp' "$WORKER_SOCKET" 2>/dev/null || stat -c '%a' "$WORKER_SOCKET" 2>/dev/null || true)"
+    [[ "$mode" == "600" ]] && printf 'PASS Worker socket mode: 600\n' || { printf 'FAIL Worker socket mode: %s\n' "$mode"; failed=1; }
+  fi
+  return "$failed"
+}
+
+run_hermes() {
+  command -v hermes >/dev/null 2>&1 || { fail 'Hermes CLI is not installed'; return 1; }
+  worker_start || return 1
+  export NETOPYU_HERMES_WORKER_SOCKET="$WORKER_SOCKET"
+  export NETOPYU_HERMES_PROFILE="${NETOPYU_HERMES_PROFILE:-${NETOPYU_PROFILE:-lan}}"
+  export NETOPYU_HERMES_OPERATOR_ID="${NETOPYU_HERMES_OPERATOR_ID:-local:${USER:-operator}}"
+  export NETOPYU_HERMES_ENABLE_DESTRUCTIVE="${NETOPYU_HERMES_ENABLE_DESTRUCTIVE:-0}"
+  exec hermes chat --toolsets "netopyu,skills,clarify"
+}
+
+command_name="${1:-}"
+case "$command_name" in
+  install) install_plugin ;;
+  doctor) doctor ;;
+  worker-start) worker_start ;;
+  worker-stop) worker_stop ;;
+  worker-status) worker_status ;;
+  smoke) smoke ;;
+  compare) cd "$PROJECT_ROOT" && "$PYTHON_BIN" -m hermes_adapter.comparison ;;
+  test) cd "$PROJECT_ROOT" && "$PYTHON_BIN" -m pytest -q tests/test_hermes_adapter.py ;;
+  run) run_hermes ;;
+  -h|--help|help|"") usage ;;
+  *) usage >&2; fail "unknown command: $command_name" ;;
+esac
