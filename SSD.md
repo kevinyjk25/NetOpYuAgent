@@ -39,7 +39,13 @@
 | F-27 | 外部 Network provider 必须声明唯一、版本化 capability id、observer/actor role 与 action type；不得仅按 tool name 获得权限。 |
 | F-28 | Network Observer MCP 只能公开只读 capability，且结果必须使用可验证的版本化 evidence envelope。 |
 | F-29 | Network evidence 必须在消费前验证 provider identity/version、capability id/version、带时区观测时间、300 秒 freshness/30 秒 future skew 和 canonical payload digest。 |
-| F-30 | Network Actor MCP 只有在 durable recovery、idempotency、fencing 和 crash reconciliation 完成后才能替代本地 Actor。 |
+| F-30 | Network Actor MCP 必须在效果前持久化 immutable operation、approved-preflight digest、desired state 与精确 rollback snapshot。 |
+| F-31 | Actor 的 operation/plan/intent hash、approved preflight 与 effect phase 必须由 Runtime 内部注入，不得由模型提供；restore/finalize 不得投影给模型。 |
+| F-32 | Actor capability 必须声明 profile，backend 必须按当前 LAN/DC agent 精确投影；计划 schema 必须绑定 capability id/version/role。 |
+| F-33 | Runtime 必须通过协议无关 Capability SPI 访问 observation/effect；传输协议不得成为授权语义。 |
+| F-34 | Observation 必须在 Provider 调用前验证 authenticated subject、role、resource scope、purpose、clearance 与 sensitivity。 |
+| F-35 | Harness/模型只能消费 Runtime terminal envelope，不得把 Actor/Provider 中间态当作执行结果。 |
+| F-36 | 跨 Provider Saga 必须绑定不可变步骤定义和每步 plan id/hash；正向和补偿步骤均不得绕过 L0 审批、验证与审计。 |
 
 ### 3. 可靠性规格
 
@@ -59,6 +65,14 @@
 | R-12 | 幂等 replay 仅在当前状态仍等于原 after snapshot 时允许；否则必须返回 conflict。 |
 | R-13 | MCP 初始化或身份/schema 漂移必须在写发送前关闭连接并失败，不得泄漏子进程或回退 mock。 |
 | R-14 | Observer 的 transport/provider 失败与合法负面网络观测必须保持不同语义，任一方不得伪装另一方。 |
+| R-15 | 同一 Actor operation 的 immutable 内容变化必须拒绝；executing/applied 重试不得盲目重发效果。 |
+| R-16 | Actor 启动恢复必须只读对比 desired 与 snapshot；无法证明任一状态时必须进入人工介入。 |
+| R-17 | 每个 Actor target 必须有跨进程互斥、租约和单调 fencing token；Actor 事件必须可检测断链。 |
+| R-18 | Runtime 只有在独立验证或精确补偿后才能内部 finalize Actor operation 并释放 lease。 |
+| R-19 | 人工介入 Actor operation 必须持久隔离 target；不得因 lease 超时自动允许新 operation。 |
+| R-20 | Saga 必须在重启后列出 planned/running/compensating 操作，但不得自动重放任何 Provider write。 |
+| R-21 | Saga 补偿必须按已验证步骤的逆序执行；未知或不可补偿状态必须进入人工介入。 |
+| R-22 | Saga 事件必须形成独立可验证哈希链；重复绑定不同 plan hash 必须失败关闭。 |
 
 ### 4. 安全目标
 
@@ -85,7 +99,7 @@
 | Runtime → SQLite | 计划、token digest、事件 | transaction、conditional update、hash chain |
 | Runtime → trusted MCP | provider 声明、schema、structured result | identity/version pin、contract/schema hash、fresh verifier |
 | Runtime → Network Observer MCP | capability 声明、证据封装、负面观测 | registry 精确匹配、identity/version pin、time/digest 验证、只读 role |
-| Runtime → Network Actor | 批准计划、效果重放、补偿上下文 | actor capability、one-shot execution、session snapshot；P1 durable journal/fencing |
+| Runtime → Network Actor MCP | 批准计划、效果重放、补偿上下文 | identity/schema/capability pin、内部 effect context、durable snapshot、lease/fence、Actor hash chain |
 | Service MCP → SQLite | 并发业务变更 | WAL、RLock、BEGIN IMMEDIATE、revision、safe idempotency、audit |
 | Service ↔ Network | 非原子跨系统状态 | 独立读取、drift 分类、步骤间重校验、新计划恢复 |
 
@@ -164,8 +178,8 @@
 #### T-14 Network provider 越权、自证成功或崩溃丢失补偿
 
 - 风险：observer 把写工具声明成只读；同名工具替换审核语义；伪造 freshness/digest；actor 用自己的写响应自证成功；独立 actor 在写后崩溃并丢失 rollback snapshot。
-- 控制：capability registry 精确校验 role/action/version；observer server 不注册任何写 callable；identity-pinned evidence envelope 与 digest 验证；Runtime 使用 fresh observer read；当前 actor 保留在同一 execution session。
-- 剩余风险：本地 Observer/Actor 仍共享主机、OS account、Docker daemon 与 Containerlab 真值。P1 必须分离凭据/进程/故障域，并为 Actor 增加 durable snapshot/outbox、fencing、启动 reconciliation 与 HA。
+- 控制：capability registry 精确校验 role/action/version；Observer 不注册写 callable；Runtime 使用 fresh Observer read；Actor 在效果前持久化 exact snapshot，以 operation id 做幂等/补偿，使用 target lock、lease、fence、启动 reconciliation 和独立 Actor hash chain。
+- 剩余风险：本地 Observer/Actor 仍共享主机、OS account、Docker daemon 与 Containerlab 真值；设备端不原生校验 fence。生产必须分离凭据/进程/故障域，并增加远端事务日志、HA leader fencing、设备/控制器 CAS 与不可变审计。
 
 ### 7. 审批规格
 
@@ -297,15 +311,32 @@ L1+L0 强制后置条件失败最终为 `rollback_verified`、端口状态精确
 失败；最终 role、enforcement 和 HTTP 语义恢复。该结果只认证本地仿真逻辑，不认证真实企业
 MCP、网络设备、审批身份、分布式事务或生产可用性。
 
-### 17. P0.9 Network Provider 验收补充
+### 17. P0.9/P1.0 Network Provider 验收补充
 
 代码门禁必须覆盖 capability 唯一性、observer/actor 分权、observer 不暴露写工具、server identity
 错误、capability/digest 错误失败关闭、负面 payload 解包、同名单设备参数规范化，以及 backend
-读走 MCP/写留本地 Actor 的精确路由。完整 Python 门禁为 186 个测试和 39 个子测试。
+Observer 读与 Actor 写分别走 MCP、内部参数隐藏、profile 精确投影、operation immutable reuse
+拒绝、crash-after-effect reconciliation、幂等不重发、精确 durable snapshot 恢复和双事件链。
+完整 Python 门禁为 205 个测试和 39 个子测试。
 
 实际本地门禁必须证明 20 节点基线全部通过，并通过 Observer MCP 读取业务/网络 reconciliation
-所需事实；随后四个受审计划达到 `verified_success`，中间真实 HTTP 阻断且最终语义恢复。该门禁
-不认证 Actor crash recovery、独立凭据、生产遥测流、厂商设备或 HA。
+所需事实；随后受审 Actor MCP 计划达到 `verified_success`，故意制造后置状态漂移的计划达到
+`rollback_verified`，durable snapshot 与现场均恢复。该门禁认证本地 crash-safety 原型，但不
+认证独立凭据、跨主机 fencing、生产遥测流、厂商设备/控制器或 HA。
+
+### 18. P1.1 Capability/Read/Saga 验收补充
+
+代码门禁必须证明：Capability 合同不依赖 MCP/API 名称；未认证、角色不足、clearance 不足和
+resource scope 不匹配的 observation 在 Provider 调用前拒绝；DSH/Hermes 写结果只包含 Runtime
+terminal envelope，Actor `applied` 不泄漏；Saga 依赖阻止乱序计划、失败后逆序补偿、重启可恢复、
+不可补偿步骤进入人工介入且事件链有效。跨层本地用例必须把四个独立 L0 计划绑定到同一 Saga。
+这不认证企业 PDP、多主机 Saga leader、分布式原子性或自动 bundle approval。
+
+### 19. Runtime A/B 定量验收
+
+基准必须固定相同工具、参数、Provider 和故障，且明确把 LLM/L1 选择排除在 Runtime 增量之外。DSH-only 参考路径必须保留基础 JSON Schema 和通用 HITL，不能构造为无保护 strawman。机器 Oracle 必须至少覆盖：有效请求、未知参数、领域安全必填、灾难命令、审批后 Provider/状态漂移、越权读取、错误后置条件与补偿、发送后不确定结果、终态信封和审计篡改。
+
+验收要求 Runtime 路径通过全部固定 Oracle；参考路径和 Runtime 的结果均须原样报告。输出必须包含机器可读 JSON、双语 Markdown 和浏览器 HTML，并同时披露 p50/p95 绝对机器时延、样本数、人工等待排除和未测量范围。固定场景 100% 不得表述为生产成功概率。
 
 ---
 
@@ -348,7 +379,13 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-27 | External Network providers must declare a unique versioned capability id, observer/actor role, and action type; tool name alone grants no authority. |
 | F-28 | Network Observer MCP may expose only read capabilities and must return a versioned verifiable evidence envelope. |
 | F-29 | Network evidence must be checked for provider identity/version, capability id/version, zoned observation time, a 300-second freshness/30-second future-skew window, and canonical payload digest before use. |
-| F-30 | A Network Actor MCP may replace the local Actor only after durable recovery, idempotency, fencing, and crash reconciliation exist. |
+| F-30 | Network Actor MCP must persist immutable operation data, approved-preflight digest, desired state, and the exact rollback snapshot before dispatch. |
+| F-31 | Runtime must inject operation/plan/intent hashes, approved preflight, and effect phase; the model cannot supply them, and restore/finalize are hidden. |
+| F-32 | Actor capabilities declare profiles, backend projection preserves LAN/DC boundaries, and plan schema binds capability id/version/role. |
+| F-33 | Runtime accesses observations/effects through a transport-neutral Capability SPI; transport is not authorization semantics. |
+| F-34 | Observation authorization checks authenticated subject, role, resource scope, purpose, clearance, and sensitivity before a Provider call. |
+| F-35 | Harness/model consumers receive only a Runtime terminal envelope and cannot treat Actor/Provider intermediate state as an outcome. |
+| F-36 | A cross-provider Saga binds an immutable step definition and per-step plan id/hash; forward and compensation steps never bypass L0 approval, verification, or audit. |
 
 ### 3. Security objectives
 
@@ -368,8 +405,8 @@ The system must provide exact authorization, effect integrity, evidence-based ou
 - **Audit tampering:** per-plan event hash chains; P1 still requires an external append-only copy.
 - **Hermes model-as-approver confusion:** prepare-only write handlers, nonce removal, exact user slash commands, process-local one-shot bindings, and safe loss on restart. P0.5 still trusts the local account and Hermes gateway allowlist; production requires authenticated sender identity and process isolation.
 - **Lab command/target expansion:** strict manifests, path and identifier validation, shell-free argv, FRR read/write allowlists, management-interface exclusion, predeclared probes/faults, and process isolation from real inventory. Docker remains a trusted privileged boundary, not a multi-tenant sandbox.
-- **MCP spoofing/schema drift/shared-store races:** trusted flags, pinned server identity/version, declared contracts, structured results, schema digests in schema-v5 plans, execution-time rediscovery, one-time seeding, WAL, process locks, immediate transactions, revisions, and state-sensitive idempotency. Local stdio and SQLite still trust the OS account; production needs authenticated independent services and database controls.
-- **Network provider escalation/self-attestation/crash loss:** exact capability role/action/version matching, an observer with no mutation callables, identity-pinned digest-bearing evidence, and fresh observer postconditions. The Actor remains execution-session local until durable snapshots/outbox, fencing, startup reconciliation, and HA can preserve crash-after-write recovery. Observer and Actor still share one local host/account/Docker boundary in P0.9.
+- **MCP spoofing/schema drift/shared-store races:** trusted flags, pinned server identity/version, declared contracts, structured results, schema/capability digests in schema-v6 plans, execution-time rediscovery, one-time seeding, WAL, process locks, immediate transactions, revisions, and state-sensitive idempotency. Local stdio and SQLite still trust the OS account; production needs authenticated independent services and database controls.
+- **Network provider escalation/self-attestation/crash loss:** exact capability role/action/version matching, an observer with no mutations, fresh digest-bearing evidence, and a durable Actor operation/snapshot store with target locks, leases, fences, startup reconciliation, and a hash chain. Observer and Actor still share one host/account/Docker boundary, and devices do not validate the local fence; production needs separated credentials/failure domains, a remote log, controller CAS, HA fencing, and immutable audit.
 
 ### 5. Approval and model policy
 
@@ -449,16 +486,37 @@ probe; the final role, enforcement, and HTTP semantics must be restored. This
 qualifies only the local simulation, not real enterprise MCP services, devices,
 approval identity, distributed transactions, or production availability.
 
-### 13. P0.9 Network Provider acceptance supplement
+### 13. P0.9/P1.0 Network Provider acceptance supplement
 
 Code gates cover unique capabilities, observer/actor separation, absence of
 Observer writes, identity mismatch, capability/digest rejection, valid negative
 payload unwrapping, single-device argument normalization, and exact backend
-routing of reads to MCP while writes remain local. The complete gate is 186
-tests plus 39 subtests.
+routing of Observer reads and Actor writes through separate MCP boundaries,
+hidden Runtime context, profile projection, immutable-operation conflicts,
+crash reconciliation without blind replay, exact durable restoration, and both
+hash chains. The complete gate is 205 tests plus 39 subtests.
 
 The deployed gate requires the complete 20-node baseline and cross-layer facts
-read through Observer MCP, followed by four `verified_success` plans, a real
-denied HTTP checkpoint, final semantic restoration, and valid audit chains. It
-does not certify Actor crash recovery, separated credentials, production
-telemetry streaming, vendor devices, or HA.
+read through Observer MCP. Real Actor MCP plans must reach `verified_success`;
+a deliberately broken postcondition must reach `rollback_verified` and restore
+the durable snapshot and live baseline. This qualifies the local crash-safety
+prototype, not separated credentials, cross-host fencing, production telemetry,
+vendor devices/controllers, or HA.
+
+### 14. P1.1 capability/read/Saga acceptance supplement
+
+Code gates prove that capability semantics do not depend on MCP/API names;
+unauthenticated, under-role, under-clearance, or out-of-scope observations are
+denied before Provider invocation; DSH/Hermes mutation output is a Runtime
+terminal envelope with no Actor `applied` state; and Saga dependencies prevent
+out-of-order plans, compensate in reverse, recover after restart, escalate
+uncompensatable work, and maintain a valid event chain. The local cross-layer
+case binds four independent L0 plans to one Saga. This does not certify an
+enterprise PDP, multi-host Saga leader, distributed atomicity, or automatic
+bundle approval.
+
+### 15. Runtime A/B quantitative acceptance
+
+The benchmark fixes the same tool, arguments, Provider, and fault while explicitly excluding LLM/L1 selection from the Runtime increment. The DSH-only reference retains basic JSON Schema and generic HITL and may not be reduced to an unprotected strawman. Machine oracles cover valid requests, unknown fields, domain safety requirements, catastrophic commands, post-approval Provider/state drift, unauthorized reads, failed postconditions and compensation, indeterminate writes, terminal envelopes, and audit tampering.
+
+Runtime must pass every fixed oracle while both paths remain visible in the report. Outputs include machine-readable JSON, bilingual Markdown, and browser HTML, plus absolute p50/p95 machine latency, sample count, the exclusion of human wait, and unmeasured scope. A 100% fixed-scenario result is never a production success probability.

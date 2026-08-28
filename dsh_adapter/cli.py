@@ -131,7 +131,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "manifest":
             payload = build_manifest(args.profile, include_destructive=args.include_destructive)
         elif args.command == "invoke":
-            result = asyncio.run(invoke_tool(args.profile, args.tool, _read_arguments()))
+            raw_access = os.environ.get("NETOPYU_DSH_ACCESS_CONTEXT", "")
+            access_context = json.loads(raw_access) if raw_access else None
+            if access_context is not None and not isinstance(access_context, dict):
+                raise TypeError("NETOPYU_DSH_ACCESS_CONTEXT must be a JSON object")
+            result = asyncio.run(invoke_tool(
+                args.profile, args.tool, _read_arguments(), access_context=access_context,
+            ))
             payload = {"ok": True, "result": result}
         elif args.command == "runtime-prepare":
             payload = asyncio.run(prepare_network_plan(

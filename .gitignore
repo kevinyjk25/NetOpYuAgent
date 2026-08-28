@@ -20,5 +20,6 @@ data/local_dc_peer.sqlite
 data/service_layer.sqlite
 
 # Generated local test/runtime artifacts
+artifacts/
 *.sqlite-shm
 *.sqlite-wal

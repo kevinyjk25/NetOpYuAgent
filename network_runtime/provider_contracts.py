@@ -144,6 +144,7 @@ _actor("fabric_restore_access_vlan", "network.fabric.access-vlan.restore", "reve
 _actor("network_apply_app_enforcement", "network.application.enforcement.apply", "reversible")
 _actor("network_revoke_app_enforcement", "network.application.enforcement.revoke", "reversible")
 _actor("network_restore_app_enforcement", "network.application.enforcement.restore", "reversible")
+_actor("network_actor_finalize", "network.actor.operation.finalize", "reversible")
 
 
 def enrich_metadata(

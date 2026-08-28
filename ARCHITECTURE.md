@@ -35,7 +35,7 @@ NetOpYuAgent 是 **Harness 可适配的网络与业务运维领域插件**。DSH
                              │ typed Tool Gateway
 ┌────────────────────────────▼─────────────────────────────────┐
 │ Domain providers                                             │
-│ Network Layer: Containerlab/device adapters                  │
+│ Network Layer: Observer MCP · Durable Actor MCP · adapters  │
 │ Service Layer: Identity/App/Policy/Change/CMDB/Platform MCP │
 └──────────────────────────────────────────────────────────────┘
 ```
@@ -57,9 +57,12 @@ Domain L1 Skill 是“可以推理的业务编排”；Network/Service L0 Skill 
 
 - `dsh_adapter/`：把 Python 领域能力投影为 DSH 可消费的 manifest/commands。
 - `effect_runtime/`：领域中性的运行时入口和跨层只读 reconciliation。
+- `effect_runtime/saga.py`：跨 Provider durable Saga、计划绑定、逆序补偿和事件哈希链。
 - `network_runtime/`：Effect Runtime 的计划状态机、合同、验证器、补偿器与兼容 API。
+- `network_runtime/capabilities.py`：协议无关 observation/effect Capability SPI。
+- `network_runtime/access.py`：只读主体、角色、scope、用途、clearance 与敏感度策略执行点。
 - `network_runtime/provider_contracts.py`：稳定的 Network provider capability id/version 与角色注册表。
-- `network_provider/`：身份固定的只读 Network Observer MCP 与版本化证据封装。
+- `network_provider/`：身份固定的只读 Network Observer MCP、durable Network Actor MCP、版本化证据与 Actor operation store。
 - `service_layer/`：官方 MCP SDK 服务、严格 structured result 和事务型业务仿真存储。
 - `network_lab/`：P0.75-A manifest、Containerlab provider、FRR 命令白名单、探测与故障注入。
 - `labs/p075-a-frr/`：可重建的 OSPF 主备路径实验拓扑和基线配置。
@@ -125,6 +128,10 @@ evaluation -> public manifests / retrieval / test data
 10. **Provider binding**：受信 Service 写计划绑定 MCP server identity/version 与 input/output schema digest。
 11. **Capability over tool name**：Network provider 的稳定语义键是 capability id/version；tool name 只是 Harness 兼容别名。
 12. **Evidence before consumption**：外部 Network observation 必须通过 identity、capability、时间和 payload digest 验证后才能进入 verifier/reconciliation。
+13. **Capability, not transport**：Runtime 只依赖 observation/effect 语义，不依赖 MCP、REST、NETCONF 或 SSH 名称。
+14. **Authorize every observation**：只读调用在 Provider 前验证主体、角色、scope、用途和数据敏感度。
+15. **Terminal envelope only**：模型/UI 不得消费 Provider/Actor 中间态，只能消费 Runtime 终态封装。
+16. **Saga never bypasses L0**：跨 Provider Saga 的每个正向和补偿步骤都是独立批准、验证的 L0 计划。
 
 ### 6. 架构决策记录
 
@@ -263,13 +270,20 @@ evaluation -> public manifests / retrieval / test data
 - **ADR-015：MCP 是协议边界，不是安全边界。** 只读 MCP 必须 identity-pinned 才能采用声明的 read-only 分类；可写 MCP 还必须显式 trusted、绑定 server name/version、declared contract、structured result 以及 input/output schema digest。
 - **ADR-016：所有 Service 写继续使用 L0。** MCP tool 本身不能绕过 immutable plan、人工审批、revision preflight、fresh verifier、compensator 和 hash-chain audit。内部 restore tool 不投影给模型，只能由补偿器调用。
 - **ADR-017：业务仿真状态一次初始化。** 六个 MCP 进程共享 SQLite；seed 使用版本标记只执行一次。审批检查、revision CAS、写入、幂等和审计位于同一个 `BEGIN IMMEDIATE` 事务；陈旧幂等结果不得在后续状态变化后重放。
-- **ADR-018：跨层 L1 不是分布式原子事务。** 当前 `service-network-access-reconcile` 把 Service 与 Network 写拆成独立审批计划，并在每步之间重读事实；恢复也创建新的受审 L0 计划。P1 若要求单审批 bundle/自动 saga，必须增加独立的 durable saga 合同，不能由模型临时拼接。
+- **ADR-018：跨层 L1 不是分布式原子事务。** `service-network-access-reconcile` 把 Service 与 Network 写拆成独立审批计划并在每步间重读；P1.1 durable Saga 固定步骤依赖、plan hash 与逆序补偿，但不合并审批，也不由模型临时拼接。
 
 ### 14. P0.9 Network Provider Boundary 决策
 
 - **ADR-019：Runtime 拥有事务，MCP 拥有协议适配。** Domain Effect Runtime 继续拥有意图、L0 计划、风险、审批、执行状态、验证、补偿和审计；MCP server 只实现外部 Service/Network provider 合同。MCP 不因标准化传输而自动成为信任根。
-- **ADR-020：Network read/write provider 分权。** `netopyu.network-observer@1.0.0` 仅公开 observer capability，并以 `network-evidence-envelope-v1` 返回 evidence。Actor capability 仍由受控本地 Lab provider 执行，但同样绑定稳定 capability id/version。Observer 不持有写凭据，Actor 不得伪造独立观测证据。
-- **ADR-021：Actor MCP 迁移以 durable recovery 为前置条件。** 当前 config/fabric snapshot 属于 backend execution session。没有 durable snapshot/outbox、幂等恢复、租约/fencing、crash reconciliation 和独立凭据前，不把写操作拆入短生命周期 MCP 进程。完成这些控制后，可以 `network-actor-mcp` 替换本地实现而不改变 L0 语义。
+- **ADR-020：Network read/write provider 分权。** `netopyu.network-observer@1.0.0` 仅公开 observer capability，并以 `network-evidence-envelope-v1` 返回 evidence；`netopyu.network-actor@1.0.0` 仅公开受审 Actor capability。Observer 不持有写入口，Actor 返回值不得替代 Observer 独立验证。
+- **ADR-021：Actor MCP 必须 durable-first。** P1.0 在效果前持久化 immutable operation、审批 preflight digest、desired state 与精确 snapshot；按 target 使用进程锁、租约和单调 fencing token，启动时只读 reconciliation。重复 operation 只能恢复 prepared 状态或读回既有结果，不能盲目重放 executing/applied 写入。
+- **ADR-022：效果上下文属于 Runtime，不属于模型。** operation/plan/intent hash、approved preflight 与 effect phase 由 backend 注入 MCP 的内部参数；restore/finalize 为 `internal_only`。PreparedPlan schema v6 绑定 capability id/version/role，Actor `profiles` 元数据控制 LAN/DC 精确投影。
+- **ADR-023：本地 fencing 不冒充分布式一致性。** SQLite、WAL 和文件锁仅认证单主机 crash safety；Containerlab/设备端不校验 fencing token。生产部署必须增加远端事务日志或队列、设备/控制器 idempotency/CAS、独立读写身份与故障域、HA leader fencing 和远端不可变审计。
+- **ADR-024：Capability SPI 高于传输协议。** Runtime 使用 `CapabilityContract`/`CapabilityProviderGateway`；协议适配留在 Provider Gateway，避免安全内核随 MCP/API 数量膨胀。
+- **ADR-025：Read 也是受保护操作。** Observation 根据 sensitivity、role、scope、purpose、clearance 授权；本地隐式 system principal 只用于兼容原型。
+- **ADR-026：Harness 只看 Runtime 终态。** Actor 原始结果只供 Runtime 内部处理，DSH/Hermes 对模型返回标准 terminal envelope。
+- **ADR-027：跨层一致性使用 durable Saga，不假装 ACID。** Saga 持久化不可变步骤图和 plan hash，按依赖执行、逆序补偿并支持重启恢复，但每一步仍需 L0 审批和验证。
+- **ADR-028：Runtime 成效必须用固定 L1 决策的 A/B Oracle 度量。** `evaluation/runtime_comparison.py` 给 DSH-only 参考路径与 Runtime 路径输入相同工具、参数、Provider 和故障，只比较 L0 增量；控制覆盖率不是生产成功概率，LLM/Skill 选择和人工等待另行评测。
 - 遥测、事件和大规模指标后续使用流式 evidence plane；MCP command/query 不承担高吞吐长期订阅。两条路径必须共享 correlation/target/capability schema，但不得把流事件直接当作写成功证明。
 
 ---
@@ -302,9 +316,11 @@ Domain L1 Skills are model-assisted business orchestration. Network and Service 
 - `hermes-plugin-netopyu/` and `hermes_adapter/` implement the official Hermes plugin boundary, process-local approval binding, and Worker client.
 - `dsh_adapter/` projects Python domain capabilities into typed bridge commands.
 - `effect_runtime/` is the domain-neutral entry point and owns cross-layer read reconciliation.
+- `effect_runtime/saga.py` owns durable cross-provider dependencies, plan bindings, reverse compensation, and its event hash chain.
 - `network_runtime/` implements the shared plan kernel and remains the compatibility API.
+- `network_runtime/capabilities.py` defines the transport-neutral observation/effect SPI, while `network_runtime/access.py` enforces read subject, role, scope, purpose, clearance, and sensitivity.
 - `network_runtime/provider_contracts.py` owns stable Network provider capability ids, versions, and roles.
-- `network_provider/` implements the identity-pinned read-only Network Observer MCP and evidence envelope.
+- `network_provider/` implements the identity-pinned read-only Network Observer MCP, durable Network Actor MCP, evidence envelope, and Actor operation store.
 - `service_layer/` implements official-SDK MCP domains, strict results, and transactional local business simulation.
 - `network_lab/` owns the reviewed P0.75-A manifest, Containerlab provider, FRR command allowlist, probes, and fault injection.
 - `labs/p075-a-frr/` is the reproducible redundant-OSPF topology and baseline.
@@ -356,10 +372,17 @@ Effect Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Service
 - **ADR-015:** MCP is a protocol boundary, not automatically a trust boundary. Trusted writes require pinned identity/version, declared contracts, structured results, and schema digests.
 - **ADR-016:** Service mutations use the same immutable-plan L0 kernel. Internal restore tools are hidden from the model and callable only by compensators.
 - **ADR-017:** shared Service SQLite seeding is versioned and one-shot. Change authorization, revision comparison, mutation, idempotency, and audit are one immediate transaction; stale replays fail.
-- **ADR-018:** the current cross-layer L1 flow is a sequence of independently approved plans, not a distributed atomic transaction. A future automatic saga or approval bundle requires its own durable reviewed contract.
+- **ADR-018:** the cross-layer L1 flow remains independently approved plans, not a distributed atomic transaction. The P1.1 durable Saga fixes dependencies, plan hashes, and reverse compensation without merging approvals or letting the model invent the workflow.
 - **ADR-019:** Runtime owns end-to-end transaction semantics; MCP owns provider protocol adaptation. MCP transport does not create trust by itself.
-- **ADR-020:** Network reads and writes are separated. `netopyu.network-observer@1.0.0` exposes observer capabilities only and returns `network-evidence-envelope-v1`; the trusted local Lab Actor keeps mutations while binding the same stable capability model.
-- **ADR-021:** an Actor MCP requires durable snapshots/outbox, idempotent recovery, leases/fencing, crash reconciliation, and isolated credentials. Moving the current session-local rollback state into a short-lived MCP process before those controls would weaken safety.
+- **ADR-020:** Network reads and writes are separated. `netopyu.network-observer@1.0.0` exposes observer capabilities and evidence only; `netopyu.network-actor@1.0.0` exposes reviewed Actor capabilities. Actor results never replace independent Observer verification.
+- **ADR-021:** the Actor is durable-first. Before an effect it records immutable operation content, approved-preflight digest, desired state, and exact snapshot. Per-target locks, leases, monotonic fencing, and read-only startup reconciliation prevent blind replays after crashes.
+- **ADR-022:** effect context belongs to Runtime, not the model. The backend injects operation/plan/intent hashes, approved preflight, and effect phase; restore/finalize tools are internal-only. PreparedPlan schema v6 binds capability id/version/role, while Actor profile declarations preserve LAN/DC projection.
+- **ADR-023:** local fencing is not distributed linearizability. SQLite/WAL/file locks qualify one-host crash safety; production needs a remote transaction log or queue, device/controller idempotency or CAS, separated read/write identities and failure domains, HA leader fencing, and immutable remote audit.
+- **ADR-024:** capability semantics sit above transport. Runtime consumes `CapabilityContract`/`CapabilityProviderGateway`; MCP/API/CLI adapters remain outside the safety kernel.
+- **ADR-025:** reads are protected operations. Observation authorization binds sensitivity, role, scope, purpose, and clearance; the implicit local system principal is prototype compatibility only.
+- **ADR-026:** Harnesses consume only a Runtime terminal envelope. Raw Actor states remain internal and are represented externally only by a digest.
+- **ADR-027:** cross-layer consistency uses a durable Saga rather than pretending to be ACID. Immutable step/plan bindings, reverse compensation, restart recovery, and a hash chain never bypass per-step L0 approval and verification.
+- **ADR-028:** Runtime value is measured with fixed-L1 A/B oracles. `evaluation/runtime_comparison.py` gives the DSH-only reference and Runtime paths the same tool, arguments, Provider, and fault. Control coverage is not a production success probability; LLM/Skill selection and human wait require separate evaluations.
 - High-volume telemetry and event streams belong on a separate evidence plane. MCP remains the command/query protocol; both paths share target/correlation/capability schemas, and stream events never prove mutation success by themselves.
 
 ### 7. Clean-code and extension policy

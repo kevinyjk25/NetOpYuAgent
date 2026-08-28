@@ -187,3 +187,33 @@ def same_snapshot(before: Any, after: Any) -> bool:
     if "digest" in before or "digest" in after:
         return before.get("digest") == after.get("digest")
     return before == after
+
+
+def config_matches(arguments: dict[str, object], output: str) -> bool:
+    """Match reviewed configuration intent against a fresh running config."""
+    lines = arguments.get("config_lines") or []
+    if not lines and isinstance(arguments.get("config_text"), str):
+        lines = [line for line in str(arguments["config_text"]).splitlines() if line.strip()]
+    changes = arguments.get("changes") or {}
+    section = str(arguments.get("section") or "").lower()
+    expected: list[str] = []
+    for line in lines if isinstance(lines, list) else []:
+        lowered = str(line).strip().lower()
+        timeout = re.search(r"radius-server.*timeout\s+(\d+)", lowered)
+        if timeout:
+            expected.append(f"timeout {timeout.group(1)}")
+        elif lowered.startswith("no ntp server "):
+            if lowered.removeprefix("no ") in output.lower():
+                return False
+        elif lowered.startswith("ntp server "):
+            expected.append(lowered)
+        elif "access-list" in lowered or "access-group" in lowered:
+            expected.append("access-list")
+        elif lowered:
+            expected.append(lowered)
+    if isinstance(changes, dict):
+        if section in {"radius", "aaa"} and "timeout" in changes:
+            expected.append(f"timeout {changes['timeout']}")
+        if section in {"ntp", "time"}:
+            expected.extend(f"ntp server {item}" for item in changes.get("servers", []))
+    return bool(expected) and all(item.lower() in output.lower() for item in expected)

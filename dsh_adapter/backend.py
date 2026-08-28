@@ -31,6 +31,72 @@ class BackendSession:
     _lab_providers: list[Any] = field(default_factory=list)
     _tool_store: Any | None = None
 
+    def describe_capability(self, tool_name: str) -> Any:
+        """Return the canonical contract without exposing transport details."""
+        from network_runtime.capabilities import CapabilityContract
+
+        metadata = self.metadata.get(tool_name)
+        if metadata is None or tool_name not in self.callables:
+            raise KeyError(f"unknown provider capability {tool_name!r}")
+        return CapabilityContract.from_metadata(
+            tool_name,
+            metadata,
+            source=self.sources.get(tool_name, "unknown"),
+        )
+
+    async def invoke_observation(
+        self, tool_name: str, arguments: dict[str, Any],
+    ) -> Any:
+        """Invoke one observation through the protocol-neutral gateway."""
+        contract = self.describe_capability(tool_name)
+        if contract.kind.value != "observation":
+            raise RuntimeError(f"capability {contract.capability_id!r} is not an observation")
+        return await self.callables[tool_name](dict(arguments))
+
+    async def invoke_effect(
+        self,
+        tool_name: str,
+        arguments: dict[str, Any],
+        *,
+        plan: Any,
+        phase: str,
+    ) -> Any:
+        """Invoke one effect while injecting provider-internal immutable context."""
+        tool = self.callables[tool_name]
+        metadata = self.metadata.get(tool_name, {})
+        internal = tuple(metadata.get("internal_parameters") or ())
+        if not internal:
+            return await tool(dict(arguments))
+        if not plan.preflight:
+            raise RuntimeError("provider-internal effect context requires approved preflight")
+        context = {
+            "operation_id": plan.plan_id,
+            "plan_hash": plan.plan_hash,
+            "intent_hash": plan.intent_hash,
+            "approved_preflight": plan.preflight[0].value,
+            "effect_phase": phase,
+        }
+        missing = sorted(set(internal) - set(context))
+        if missing:
+            raise RuntimeError(f"unsupported provider-internal effect fields: {missing}")
+        overlap = sorted(set(arguments) & set(internal))
+        if overlap:
+            raise RuntimeError(f"model arguments attempted to set internal fields: {overlap}")
+        return await tool({**dict(arguments), **{name: context[name] for name in internal}})
+
+    async def finalize_effect(self, plan: Any, terminal_state: str) -> Any | None:
+        metadata = self.metadata.get(plan.tool_name, {})
+        if metadata.get("provider_kind") != "network-actor-mcp":
+            return None
+        finalizer = self.callables.get("network_actor_finalize")
+        if finalizer is None:
+            raise RuntimeError("Network Actor provider has no durable finalizer")
+        return await finalizer({
+            "operation_id": plan.plan_id,
+            "plan_hash": plan.plan_hash,
+            "terminal_state": terminal_state,
+        })
+
     async def close(self) -> None:
         errors: list[str] = []
         for provider in reversed(self._lab_providers):
@@ -157,6 +223,28 @@ def _mcp_metadata(spec: Any) -> dict[str, Any]:
     )
     prefix_action = _external_action_type(spec.name)
     declared_action = str(declared.get("action_type") or "")
+    internal_parameters = declared.get("internal_parameters") or []
+    if not isinstance(internal_parameters, list) or any(
+        not isinstance(name, str) for name in internal_parameters
+    ):
+        raise ValueError(f"MCP tool {spec.name!r} has invalid internal_parameters metadata")
+    declared_profiles = declared.get("profiles") or []
+    if (
+        not isinstance(declared_profiles, list)
+        or any(item not in {"lan", "dc", "wan"} for item in declared_profiles)
+    ):
+        raise ValueError(f"MCP tool {spec.name!r} has invalid profiles metadata")
+    declared_scope_fields = declared.get("scope_fields")
+    if declared_scope_fields is not None and (
+        not isinstance(declared_scope_fields, list)
+        or any(not isinstance(item, str) for item in declared_scope_fields)
+    ):
+        raise ValueError(f"MCP tool {spec.name!r} has invalid scope_fields metadata")
+    properties = {
+        name: value for name, value in properties.items()
+        if name not in internal_parameters
+    }
+    required = [name for name in required if name not in internal_parameters]
     configured_domain = str(getattr(spec, "configured_domain", "external") or "external")
     if configured_domain == "network" and declared.get("domain") != "network":
         raise ValueError(
@@ -206,11 +294,18 @@ def _mcp_metadata(spec: Any) -> dict[str, Any]:
         "result_contract": declared.get("result_contract"),
         "trusted_for_writes": bool(spec.trusted_for_writes),
         "service_domain": declared.get("service_domain"),
+        "domain": declared.get("domain") or configured_domain,
+        "sensitivity": declared.get("sensitivity") or "internal",
+        "required_roles": list(declared.get("required_roles") or []),
+        "scope_fields": declared_scope_fields,
+        "freshness_limit_seconds": int(declared.get("freshness_limit_seconds") or 300),
         "internal_only": bool(declared.get("internal_only", False)),
         "capability_id": declared.get("capability_id"),
         "capability_version": declared.get("capability_version"),
         "provider_role": declared.get("provider_role"),
         "provider_kind": declared.get("provider_kind"),
+        "profiles": list(declared_profiles),
+        "internal_parameters": list(internal_parameters),
     }
 
 
@@ -235,6 +330,8 @@ def _openapi_metadata(operation: Any) -> dict[str, Any]:
         "action_type": "read_only" if read_only else "destructive",
         "hitl": not read_only,
         "tags": ["openapi", operation.method.lower(), *operation.tags],
+        "domain": "external",
+        "sensitivity": "internal",
     }
 
 
@@ -400,9 +497,15 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
         client = MCPClient.from_config(mcp_config)
         await client.connect_all()
         mcp_clients.append(client)
-        router.register_mcp(client)
+        projected_metadata: dict[str, dict[str, Any]] = {}
         for spec in client.list_tools():
-            metadata[spec.name] = _mcp_metadata(spec)
+            value = _mcp_metadata(spec)
+            profiles = value.get("profiles") or []
+            if profiles and profile_id not in profiles:
+                continue
+            projected_metadata[spec.name] = value
+        router.register_mcp(client, allowed_tools=set(projected_metadata))
+        metadata.update(projected_metadata)
 
     openapi_configured = bool(cfg.tools.openapi.spec_url and cfg.tools.openapi.base_url)
     if openapi_configured:

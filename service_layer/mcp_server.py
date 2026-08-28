@@ -45,6 +45,12 @@ def _meta(
     *,
     internal_only: bool = False,
 ) -> dict[str, Any]:
+    sensitivity = {
+        "identity": "restricted",
+        "access-policy": "confidential",
+        "change": "confidential",
+        "cmdb": "confidential",
+    }.get(domain, "internal")
     return {
         "netopyu": {
             "domain": "service",
@@ -54,6 +60,9 @@ def _meta(
             "contract_id": contract_id,
             "result_contract": "structured-content-required-v1",
             "internal_only": internal_only,
+            "sensitivity": sensitivity,
+            "required_roles": ["operations-reader"] if action_type == "read_only" else [],
+            "freshness_limit_seconds": 300,
         }
     }
 

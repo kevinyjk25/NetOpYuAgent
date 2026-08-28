@@ -27,6 +27,19 @@ function preparationFailure(prepared) {
   return `${prepared.status ?? 'rejected'}${details.length > 0 ? `: ${details.join('; ')}` : ''}`
 }
 
+function observationAccessContext(execution, operatorId, profile) {
+  const sessionId = execution.agent?.session?.id
+  return {
+    subject_id: operatorId,
+    session_id: sessionId === undefined ? undefined : String(sessionId),
+    roles: ['operations-reader', 'network-operator'],
+    scopes: ['*', `profile:${profile}`],
+    purpose: 'interactive-network-operations',
+    clearance: 'restricted',
+    authenticated: true,
+  }
+}
+
 async function rejectPreparedPlans(bridge, preparedValues, reason, signal) {
   await Promise.all((preparedValues ?? []).map(async prepared => {
     if (prepared?.plan?.plan_id === undefined) return
@@ -68,12 +81,19 @@ async function executePreparedPlan(bridge, prepared, requestId, operatorId, exec
       allowDestructive: true,
       correlationId: `${String(execution.callId ?? requestId)}${suffix}`,
     })
-    if (outcome.ok !== true || outcome.state !== 'verified_success' || typeof outcome.result !== 'string') {
+    const terminal = outcome.terminal_envelope
+    if (
+      outcome.ok !== true
+      || outcome.state !== 'verified_success'
+      || terminal?.contract !== 'netopyu.effect-runtime-terminal@1.0.0'
+      || terminal?.terminal !== true
+      || terminal?.state !== 'verified_success'
+    ) {
       throw new Error(
         `Network Runtime did not verify success (state=${outcome.state ?? 'unknown'}): ${outcome.error ?? 'missing evidence'}`,
       )
     }
-    return outcome.result
+    return JSON.stringify(terminal, null, 2)
   } catch (error) {
     await rejectPreparedPlans(
       bridge, [prepared],
@@ -142,6 +162,9 @@ function toolDefinition(tool, bridge, toolGuard, approvalByToken, bindingByToken
         signal: execution.signal,
         allowDestructive: false,
         correlationId: execution.callId,
+        accessContext: observationAccessContext(
+          execution, operatorId, bridge.profile,
+        ),
       })
       if (payload.ok !== true || typeof payload.result !== 'string') {
         throw new Error(payload.error ?? `invalid result from ${tool.name}`)

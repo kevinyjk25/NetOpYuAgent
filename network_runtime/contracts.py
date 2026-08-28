@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 
 def utc_now() -> str:
@@ -138,6 +138,9 @@ class PreparedPlan:
     provider_identity: str
     input_schema_digest: str
     output_schema_digest: str
+    capability_id: str
+    capability_version: str
+    provider_role: str
     arguments: dict[str, Any]
     argument_provenance: dict[str, str]
     targets: tuple[str, ...]
@@ -172,6 +175,9 @@ class PreparedPlan:
         provider_identity: str,
         input_schema_digest: str,
         output_schema_digest: str,
+        capability_id: str,
+        capability_version: str,
+        provider_role: str,
         arguments: dict[str, Any],
         argument_provenance: dict[str, str],
         targets: tuple[str, ...],
@@ -201,6 +207,9 @@ class PreparedPlan:
             "provider_identity": provider_identity,
             "input_schema_digest": input_schema_digest,
             "output_schema_digest": output_schema_digest,
+            "capability_id": capability_id,
+            "capability_version": capability_version,
+            "provider_role": provider_role,
             "arguments": arguments,
             "argument_provenance": argument_provenance,
             "targets": list(targets),
@@ -239,11 +248,18 @@ class PreparedPlan:
         payload = self.integrity_payload()
         if sha256_json(payload) == self.plan_hash:
             return
+        # Earlier plans predate first-class provider capability binding.
+        legacy_payload = dict(payload)
+        if self.schema_version < 6:
+            for field_name in ("capability_id", "capability_version", "provider_role"):
+                legacy_payload.pop(field_name, None)
+            if self.schema_version == 5 and sha256_json(legacy_payload) == self.plan_hash:
+                return
         # Earlier P0.5 plans predate first-class L0 Skill/Intent contracts.
         # Accept their original immutable shape for inspection and explicit
         # rejection, but execution contract revalidation will fail closed.
         if self.schema_version < 5:
-            legacy = dict(payload)
+            legacy = dict(legacy_payload)
             for field_name in (
                 "provider_identity", "input_schema_digest", "output_schema_digest",
             ):
@@ -251,7 +267,7 @@ class PreparedPlan:
             if self.schema_version >= 4 and sha256_json(legacy) == self.plan_hash:
                 return
         if self.schema_version < 4:
-            legacy = dict(payload)
+            legacy = dict(legacy_payload)
             for field_name in (
                 "provider_identity", "input_schema_digest", "output_schema_digest",
             ):
@@ -279,6 +295,9 @@ class PreparedPlan:
             "provider_identity": self.provider_identity,
             "input_schema_digest": self.input_schema_digest,
             "output_schema_digest": self.output_schema_digest,
+            "capability_id": self.capability_id,
+            "capability_version": self.capability_version,
+            "provider_role": self.provider_role,
             "arguments": self.arguments,
             "argument_provenance": self.argument_provenance,
             "targets": list(self.targets),
@@ -313,6 +332,9 @@ class PreparedPlan:
             provider_identity=str(value.get("provider_identity", "legacy-unbound")),
             input_schema_digest=str(value.get("input_schema_digest", "legacy-unbound")),
             output_schema_digest=str(value.get("output_schema_digest", "legacy-unbound")),
+            capability_id=str(value.get("capability_id", "legacy-unbound")),
+            capability_version=str(value.get("capability_version", "legacy")),
+            provider_role=str(value.get("provider_role", "legacy-unbound")),
             arguments=dict(value["arguments"]),
             argument_provenance=dict(value["argument_provenance"]),
             targets=tuple(value["targets"]),
@@ -362,4 +384,41 @@ class ExecutionOutcome:
             "evidence": [item.to_dict() for item in self.evidence],
             "error": self.error,
             "rollback_result": self.rollback_result,
+        }
+
+    def terminal_envelope(self) -> dict[str, Any]:
+        """Return the only execution result suitable for an LLM or operator UI.
+
+        Provider responses can contain intermediate states such as ``applied``.
+        They are intentionally replaced by a digest; only the Runtime terminal
+        state and independently collected evidence cross the harness boundary.
+        """
+        summaries = {
+            PlanState.VERIFIED_SUCCESS: "Runtime independently verified the approved effect.",
+            PlanState.ROLLBACK_VERIFIED: "The effect did not verify and Runtime proved restoration.",
+            PlanState.PRECONDITION_CHANGED: "Execution was stopped because approved state changed.",
+            PlanState.MANUAL_INTERVENTION_REQUIRED: "Runtime cannot prove a safe terminal state; operator action is required.",
+            PlanState.REJECTED: "The immutable plan was rejected before execution.",
+            PlanState.EXPIRED: "The immutable plan expired before execution.",
+        }
+        return {
+            "contract": "netopyu.effect-runtime-terminal@1.0.0",
+            "terminal": self.state in TERMINAL_STATES,
+            "ok": self.ok,
+            "state": self.state.value,
+            "plan_id": self.plan_id,
+            "plan_hash": self.plan_hash,
+            "summary": summaries.get(
+                self.state,
+                "Runtime reached a terminal state; inspect evidence and error fields.",
+            ),
+            "evidence": [item.to_dict() for item in self.evidence],
+            "error": self.error,
+            "compensation": {
+                "performed": self.state == PlanState.ROLLBACK_VERIFIED,
+                "verified": self.state == PlanState.ROLLBACK_VERIFIED,
+            },
+            "provider_result_digest": (
+                sha256_json({"result": self.result}) if self.result is not None else None
+            ),
         }

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import dataclass
 from typing import Awaitable, Callable
 
 from dsh_adapter.backend import BackendSession
 
 from .contracts import Evidence, PreparedPlan, sha256_json, utc_now
-from .evidence import failed_output, render, typed_evidence
+from .evidence import config_matches, failed_output, render, typed_evidence
 from .policies import ToolContract
 
 
@@ -119,7 +118,7 @@ async def _device_config(context: VerificationContext) -> VerificationResult:
         "device_id": plan.arguments["device_id"],
         **({"section": plan.arguments["section"]} if plan.arguments.get("section") else {}),
     }))
-    passed = _config_matches(plan.arguments, verify_text)
+    passed = config_matches(plan.arguments, verify_text)
     value = typed_evidence("get_device_config", verify_text)
     value["facts"]["requested_config_matched"] = passed
     evidence = Evidence(
@@ -445,32 +444,3 @@ async def _mock_state(context: VerificationContext) -> VerificationResult:
         expected=expected,
     )
     return _result(evidence, passed, None if passed else "simulator state did not prove requested effect")
-
-
-def _config_matches(arguments: dict[str, object], output: str) -> bool:
-    lines = arguments.get("config_lines") or []
-    if not lines and isinstance(arguments.get("config_text"), str):
-        lines = [line for line in str(arguments["config_text"]).splitlines() if line.strip()]
-    changes = arguments.get("changes") or {}
-    section = str(arguments.get("section") or "").lower()
-    expected: list[str] = []
-    for line in lines if isinstance(lines, list) else []:
-        lowered = str(line).strip().lower()
-        timeout = re.search(r"radius-server.*timeout\s+(\d+)", lowered)
-        if timeout:
-            expected.append(f"timeout {timeout.group(1)}")
-        elif lowered.startswith("no ntp server "):
-            if lowered.removeprefix("no ") in output.lower():
-                return False
-        elif lowered.startswith("ntp server "):
-            expected.append(lowered)
-        elif "access-list" in lowered or "access-group" in lowered:
-            expected.append("access-list")
-        elif lowered:
-            expected.append(lowered)
-    if isinstance(changes, dict):
-        if section in {"radius", "aaa"} and "timeout" in changes:
-            expected.append(f"timeout {changes['timeout']}")
-        if section in {"ntp", "time"}:
-            expected.extend(f"ntp server {item}" for item in changes.get("servers", []))
-    return bool(expected) and all(item.lower() in output.lower() for item in expected)

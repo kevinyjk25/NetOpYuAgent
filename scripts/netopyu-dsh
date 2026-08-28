@@ -81,6 +81,7 @@ Commands:
   learning-mine Dry-run offline trajectory mining; add --apply to store candidates
   learning-review ID approve|reject REVIEWER  Review once; approval writes a proposal only
   reliability   Run local load/chaos/policy and harness-boundary retirement checks
+  compare-runtime  Benchmark DSH-only versus DSH + Runtime; accepts benchmark CLI flags
   retirement    Run the complete local retirement gate
   e2e           Run the complete offline migration regression suite
 
@@ -831,6 +832,13 @@ run_reliability() {
   printf '%s' "$report" | "$PYTHON_BIN" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") else 1)'
 }
 
+run_runtime_comparison() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.runtime_comparison "$@"
+}
+
 run_e2e() {
   # The retirement gate must run from a clean checkout in CI. It validates
   # the plugin and bridge directly and does not require an installed DSH Web
@@ -901,6 +909,7 @@ case "$command" in
   learning-mine) run_learning_mine "$@" ;;
   learning-review) run_learning_review "$@" ;;
   reliability) run_reliability ;;
+  compare-runtime) run_runtime_comparison "$@" ;;
   retirement) run_e2e ;;
   e2e) run_e2e ;;
   help|-h|--help|'') usage ;;

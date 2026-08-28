@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from effect_runtime import EffectRuntime
+from effect_runtime import EffectRuntime, SagaCoordinator, SagaDefinition, SagaStepSpec
 from network_runtime import PlanState
 from network_runtime.l0_skills import REGISTRY as L0_SKILLS
 from network_runtime.workflows import WorkflowRuntime
@@ -34,6 +34,32 @@ from network_runtime.workflows import WorkflowRuntime
 PROFILE = "lan"
 SKILL = "service-network-access-reconcile"
 CHANGE_ID = "CHG-1001"
+
+SAGA = SagaDefinition.create(
+    "service-network-access-revoke-and-restore",
+    "1.0.0",
+    (
+        SagaStepSpec(
+            "service-revoke", "service", "service.access.entitlement.revoke",
+            compensation_capability_id="service.access.entitlement.grant",
+        ),
+        SagaStepSpec(
+            "network-revoke", "network", "network.application.enforcement.revoke",
+            depends_on=("service-revoke",),
+            compensation_capability_id="network.application.enforcement.apply",
+        ),
+        SagaStepSpec(
+            "service-restore", "service", "service.access.entitlement.grant",
+            depends_on=("network-revoke",),
+            compensation_capability_id="service.access.entitlement.revoke",
+        ),
+        SagaStepSpec(
+            "network-restore", "network", "network.application.enforcement.apply",
+            depends_on=("service-restore",),
+            compensation_capability_id="network.application.enforcement.revoke",
+        ),
+    ),
+)
 
 
 async def _read_json(
@@ -66,6 +92,10 @@ async def _execute_l0(
     arguments: dict[str, Any],
     *,
     session_id: str | None,
+    sagas: SagaCoordinator | None = None,
+    saga_id: str | None = None,
+    saga_step_id: str | None = None,
+    compensation: bool = False,
 ) -> dict[str, Any]:
     contract = L0_SKILLS.for_tool(PROFILE, tool_name)
     if contract is None:
@@ -82,6 +112,17 @@ async def _execute_l0(
             f"{tool_name} plan rejected: {json.dumps(prepared, ensure_ascii=False)}"
         )
     plan = prepared["plan"]
+    if sagas is not None and saga_id and saga_step_id:
+        if compensation:
+            sagas.bind_compensation_plan(
+                saga_id, saga_step_id,
+                plan_id=plan["plan_id"], plan_hash=plan["plan_hash"],
+            )
+        else:
+            sagas.bind_plan(
+                saga_id, saga_step_id,
+                plan_id=plan["plan_id"], plan_hash=plan["plan_hash"],
+            )
     outcome = await runtime.execute(
         plan_id=plan["plan_id"],
         plan_hash=plan["plan_hash"],
@@ -90,6 +131,17 @@ async def _execute_l0(
         approval_actor="local-e2e-operator",
         allow_destructive=True,
     )
+    if sagas is not None and saga_id and saga_step_id:
+        if compensation:
+            sagas.record_compensation_outcome(
+                saga_id, saga_step_id,
+                terminal_state=outcome.state.value, error=outcome.error,
+            )
+        else:
+            sagas.record_outcome(
+                saga_id, saga_step_id,
+                terminal_state=outcome.state.value, error=outcome.error,
+            )
     if outcome.state != PlanState.VERIFIED_SUCCESS:
         raise RuntimeError(
             f"{tool_name} ended in {outcome.state.value}: {outcome.error or 'verification failed'}"
@@ -138,6 +190,8 @@ async def _revoke(
     runtime: EffectRuntime,
     user_id: str,
     app_id: str,
+    sagas: SagaCoordinator,
+    saga_id: str,
 ) -> list[dict[str, Any]]:
     session_id = _start_workflow(runtime, "revoke")
     entitlement = await _read_json(
@@ -163,6 +217,7 @@ async def _revoke(
             "reason": "approved local cross-layer revoke exercise",
         },
         session_id=session_id,
+        sagas=sagas, saga_id=saga_id, saga_step_id="service-revoke",
     )
     await _read_json(
         runtime,
@@ -186,6 +241,7 @@ async def _revoke(
             "reason": "enforce approved Service Layer desired-state revoke",
         },
         session_id=session_id,
+        sagas=sagas, saga_id=saga_id, saga_step_id="network-revoke",
     )
     return [service, network]
 
@@ -195,6 +251,8 @@ async def _grant(
     user_id: str,
     app_id: str,
     role: str,
+    sagas: SagaCoordinator,
+    saga_id: str,
 ) -> list[dict[str, Any]]:
     session_id = _start_workflow(runtime, "grant")
     await _read_json(
@@ -230,6 +288,7 @@ async def _grant(
             "reason": "approved local cross-layer baseline restoration",
         },
         session_id=session_id,
+        sagas=sagas, saga_id=saga_id, saga_step_id="service-restore",
     )
     await _read_json(
         runtime,
@@ -253,8 +312,71 @@ async def _grant(
             "reason": "enforce approved Service Layer baseline restoration",
         },
         session_id=session_id,
+        sagas=sagas, saga_id=saga_id, saga_step_id="network-restore",
     )
     return [service, network]
+
+
+async def _compensate_saga(
+    runtime: EffectRuntime,
+    sagas: SagaCoordinator,
+    saga_id: str,
+    *,
+    user_id: str,
+    app_id: str,
+    role: str,
+) -> list[dict[str, Any]]:
+    """Resume reviewed reverse actions; never call a Provider directly."""
+    completed: list[dict[str, Any]] = []
+    while True:
+        action = sagas.next_action(saga_id)
+        if action is None:
+            return completed
+        if action.get("action") != "compensate":
+            raise RuntimeError(f"unexpected Saga recovery action: {action}")
+        capability = action.get("compensation_capability_id")
+        step_id = str(action["step_id"])
+        if capability == "service.access.entitlement.grant":
+            current = await _read_json(
+                runtime, "access_policy_get_entitlement",
+                {"user_id": user_id, "app_id": app_id},
+            )
+            tool_name = "access_policy_grant_entitlement"
+            arguments = {
+                "user_id": user_id, "app_id": app_id, "role": role,
+                "change_id": CHANGE_ID, "expected_revision": current["revision"],
+                "reason": "durable Saga compensation restores Service entitlement",
+            }
+        elif capability == "service.access.entitlement.revoke":
+            current = await _read_json(
+                runtime, "access_policy_get_entitlement",
+                {"user_id": user_id, "app_id": app_id},
+            )
+            tool_name = "access_policy_revoke_entitlement"
+            arguments = {
+                "user_id": user_id, "app_id": app_id,
+                "change_id": CHANGE_ID, "expected_revision": current["revision"],
+                "reason": "durable Saga compensation reverses Service restoration",
+            }
+        elif capability == "network.application.enforcement.apply":
+            tool_name = "network_apply_app_enforcement"
+            arguments = {
+                "user_id": user_id, "app_id": app_id, "change_id": CHANGE_ID,
+                "reason": "durable Saga compensation restores network enforcement",
+            }
+        elif capability == "network.application.enforcement.revoke":
+            tool_name = "network_revoke_app_enforcement"
+            arguments = {
+                "user_id": user_id, "app_id": app_id, "change_id": CHANGE_ID,
+                "reason": "durable Saga compensation reverses network restoration",
+            }
+        else:
+            raise RuntimeError(f"unsupported Saga compensation capability {capability!r}")
+        completed.append(await _execute_l0(
+            runtime, tool_name, arguments, session_id=None,
+            sagas=sagas, saga_id=saga_id, saga_step_id=step_id,
+            compensation=True,
+        ))
 
 
 async def run_case(args: argparse.Namespace) -> dict[str, Any]:
@@ -291,34 +413,43 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
 
     plans: list[dict[str, Any]] = []
     restore_attempted = False
-    try:
-        plans.extend(await _revoke(runtime, args.user, args.application))
-        denied = await _read_json(runtime, "reconcile_service_network_access", target)
-        if not (
-            denied.get("consistent") is True
-            and denied["service_desired_state"].get("allowed") is False
-            and denied["network_observed_state"].get("allowed") is False
-            and denied.get("traffic_evidence", {}).get("ok") is False
-        ):
-            raise RuntimeError("revoke did not converge across Service and Network layers")
-        plans.extend(await _grant(runtime, args.user, args.application, roles[0]))
-    except Exception:
-        # Only restore through new reviewed L0 plans. Never bypass the Runtime,
-        # even in the local test's error path.
-        restore_attempted = True
-        current = await _read_json(runtime, "access_policy_get_entitlement", target)
-        if current.get("roles") != roles:
-            plans.extend(await _grant(runtime, args.user, args.application, roles[0]))
-        else:
-            network = await _read_json(runtime, "network_get_app_enforcement", target)
-            if network.get("allowed") is not True:
-                plans.append(await _execute_l0(
-                    runtime,
-                    "network_apply_app_enforcement",
-                    {**target, "change_id": CHANGE_ID, "reason": "local E2E failure recovery"},
-                    session_id=None,
+    with SagaCoordinator(args.journal) as sagas:
+        saga = sagas.start(
+            SAGA,
+            correlation_id=f"service-network-e2e:{args.user}:{args.application}:{uuid.uuid4()}",
+        )
+        saga_id = saga["saga_id"]
+        try:
+            plans.extend(await _revoke(
+                runtime, args.user, args.application, sagas, saga_id,
+            ))
+            denied = await _read_json(runtime, "reconcile_service_network_access", target)
+            if not (
+                denied.get("consistent") is True
+                and denied["service_desired_state"].get("allowed") is False
+                and denied["network_observed_state"].get("allowed") is False
+                and denied.get("traffic_evidence", {}).get("ok") is False
+            ):
+                raise RuntimeError("revoke did not converge across Service and Network layers")
+            plans.extend(await _grant(
+                runtime, args.user, args.application, roles[0], sagas, saga_id,
+            ))
+        except Exception as error:
+            restore_attempted = True
+            current_saga = sagas.inspect(saga_id)
+            if current_saga["state"] in {"planned", "running"}:
+                current_saga = sagas.request_compensation(
+                    saga_id, reason=f"{type(error).__name__}: {error}",
+                )
+            if current_saga["state"] == "compensating":
+                plans.extend(await _compensate_saga(
+                    runtime, sagas, saga_id,
+                    user_id=args.user, app_id=args.application, role=roles[0],
                 ))
-        raise
+            raise
+        saga_report = sagas.inspect(saga_id)
+        if saga_report["state"] != "verified_success":
+            raise RuntimeError(f"cross-provider Saga ended in {saga_report['state']}")
 
     final = await _read_json(runtime, "reconcile_service_network_access", target)
     restored = (
@@ -334,6 +465,7 @@ async def run_case(args: argparse.Namespace) -> dict[str, Any]:
         "baseline": baseline,
         "denied_checkpoint": denied,
         "plans": plans,
+        "saga": saga_report,
         "final": final,
         "semantic_baseline_restored": restored,
         "restore_attempted_after_error": restore_attempted,

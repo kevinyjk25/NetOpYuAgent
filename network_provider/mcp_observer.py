@@ -279,6 +279,11 @@ def _tool_meta(tool_name: str) -> dict[str, Any]:
     capability = REGISTRY.for_tool(tool_name)
     if capability is None:
         raise RuntimeError(f"missing capability contract for observer tool {tool_name!r}")
+    sensitive = {
+        "get_device_config", "get_syslog", "run_command", "multi_device_check",
+        "list_users", "get_user_access", "check_nac_policy",
+        "dc_get_app_acl", "dc_check_user_app_access",
+    }
     return {
         "netopyu": {
             "domain": "network",
@@ -289,6 +294,9 @@ def _tool_meta(tool_name: str) -> dict[str, Any]:
             "capability_id": capability.capability_id,
             "capability_version": capability.capability_version,
             "result_contract": EVIDENCE_CONTRACT,
+            "sensitivity": "restricted" if tool_name in sensitive else "internal",
+            "required_roles": ["operations-reader"],
+            "freshness_limit_seconds": 300,
         }
     }
 
