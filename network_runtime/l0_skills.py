@@ -175,28 +175,68 @@ class IntentSpec:
 
 class L0SkillRegistry:
     def __init__(self) -> None:
-        self._by_tool: dict[str, L0SkillContract] = {}
-        self._by_id: dict[str, L0SkillContract] = {}
+        self._by_key: dict[tuple[str, str], L0SkillContract] = {}
+        self._by_tool: dict[str, list[L0SkillContract]] = {}
+        self._by_id: dict[str, list[L0SkillContract]] = {}
+
+    @staticmethod
+    def _version_key(value: str) -> tuple[int, int, int]:
+        parts = value.split(".")
+        if len(parts) != 3 or any(not item.isdigit() for item in parts):
+            raise RuntimeError(f"L0 Skill version must be MAJOR.MINOR.PATCH: {value!r}")
+        return tuple(int(item) for item in parts)  # type: ignore[return-value]
 
     def register(self, contract: L0SkillContract) -> None:
-        if contract.tool_name in self._by_tool or contract.skill_id in self._by_id:
-            raise RuntimeError(f"duplicate L0 Skill contract {contract.skill_id}")
-        self._by_tool[contract.tool_name] = contract
-        self._by_id[contract.skill_id] = contract
+        key = (contract.skill_id, contract.version)
+        if key in self._by_key:
+            raise RuntimeError(
+                f"duplicate L0 Skill contract {contract.skill_id}@{contract.version}"
+            )
+        self._version_key(contract.version)
+        self._by_key[key] = contract
+        self._by_tool.setdefault(contract.tool_name, []).append(contract)
+        self._by_id.setdefault(contract.skill_id, []).append(contract)
+        self._by_tool[contract.tool_name].sort(
+            key=lambda item: (item.skill_id, self._version_key(item.version)),
+        )
+        self._by_id[contract.skill_id].sort(key=lambda item: self._version_key(item.version))
 
-    def for_tool(self, profile: str, tool_name: str) -> L0SkillContract | None:
-        contract = self._by_tool.get(tool_name)
-        if contract is None:
-            return None
-        if "*" not in contract.allowed_profiles and profile not in contract.allowed_profiles:
-            return None
-        return contract
+    def candidates_for_tool(
+        self, profile: str, tool_name: str,
+    ) -> tuple[L0SkillContract, ...]:
+        return tuple(
+            contract for contract in self._by_tool.get(tool_name, ())
+            if "*" in contract.allowed_profiles or profile in contract.allowed_profiles
+        )
 
-    def get(self, skill_id: str) -> L0SkillContract | None:
-        return self._by_id.get(skill_id)
+    def for_tool(
+        self,
+        profile: str,
+        tool_name: str,
+        *,
+        skill_id: str | None = None,
+        version: str | None = None,
+    ) -> L0SkillContract | None:
+        candidates = self.candidates_for_tool(profile, tool_name)
+        if skill_id is not None:
+            candidates = tuple(item for item in candidates if item.skill_id == skill_id)
+        if version is not None:
+            candidates = tuple(item for item in candidates if item.version == version)
+        if not candidates:
+            return None
+        if skill_id is None and len({item.skill_id for item in candidates}) > 1:
+            # Ambiguous semantic entrypoints must never be chosen from tool name alone.
+            return None
+        return max(candidates, key=lambda item: self._version_key(item.version))
+
+    def get(self, skill_id: str, version: str | None = None) -> L0SkillContract | None:
+        values = tuple(self._by_id.get(skill_id, ()))
+        if version is not None:
+            return self._by_key.get((skill_id, version))
+        return max(values, key=lambda item: self._version_key(item.version)) if values else None
 
     def contracts(self) -> tuple[L0SkillContract, ...]:
-        return tuple(self._by_id[key] for key in sorted(self._by_id))
+        return tuple(self._by_key[key] for key in sorted(self._by_key))
 
 
 REGISTRY = L0SkillRegistry()

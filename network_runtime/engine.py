@@ -113,7 +113,9 @@ class NetworkRuntime:
             action_type = str(metadata.get("action_type", "read_only"))
             requires_approval = bool(metadata.get("hitl")) or action_type != "read_only"
             expected_l0 = (
-                L0_SKILLS.for_tool(backend.profile_id, tool_name)
+                L0_SKILLS.for_tool(
+                    backend.profile_id, tool_name, skill_id=l0_skill_id,
+                )
                 if requires_approval else None
             )
             compiled = compile_parameters(
@@ -196,8 +198,23 @@ class NetworkRuntime:
             l0_contract: L0SkillContract | None = None
             intent = None
             if requires_approval:
-                l0_contract = L0_SKILLS.for_tool(backend.profile_id, tool_name)
+                candidates = L0_SKILLS.candidates_for_tool(backend.profile_id, tool_name)
+                l0_contract = L0_SKILLS.for_tool(
+                    backend.profile_id, tool_name, skill_id=l0_skill_id,
+                )
                 if l0_contract is None:
+                    if l0_skill_id is None and len({item.skill_id for item in candidates}) > 1:
+                        return {
+                            "ok": False,
+                            "status": "rejected",
+                            "errors": [
+                                "write tool has multiple L0 semantic contracts; "
+                                "an exact L0 Skill id is required"
+                            ],
+                            "candidate_l0_skill_ids": sorted({
+                                item.skill_id for item in candidates
+                            }),
+                        }
                     return {
                         "ok": False,
                         "status": "rejected",
@@ -808,7 +825,12 @@ class NetworkRuntime:
             metadata.get("output_schema_digest")
             or sha256_json(metadata.get("output_schema") or {})
         )
-        current_l0 = L0_SKILLS.for_tool(plan.profile, plan.tool_name)
+        current_l0 = L0_SKILLS.for_tool(
+            plan.profile,
+            plan.tool_name,
+            skill_id=plan.l0_skill_id,
+            version=plan.l0_skill_version,
+        )
         current_capability_id = str(
             metadata.get("capability_id")
             or (current_l0.skill_id if current_l0 is not None else "")

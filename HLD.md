@@ -153,7 +153,7 @@ sequenceDiagram
 - **安全**：fail closed、最小工具暴露、一次性授权、独立验证、密钥外置。
 - **可靠性**：持久化 Worker、状态机、幂等领取、重启恢复、结果不确定终态。
 - **可审计性**：每计划独立事件哈希链、固定合同 hash、完整状态迁移。
-- **可扩展性**：profile、backend、L1 Skill、L0 Skill、verifier、compensator 均独立注册。
+- **可扩展性**：profile、backend、L1 Skill、L0 Skill、verifier、compensator 均独立注册；L0 v2 通过声明式 manifest、编译期派生与多版本 Catalog 复用确定性逻辑。
 - **性能**：Worker 常驻；大结果外置；本地门禁 24 请求/8 并发的 p95 小于 1 秒。
 - **隐私**：A2A 不继承会话；轨迹最小化；日志不得包含凭据和完整敏感参数。
 
@@ -302,6 +302,16 @@ Saga 只协调受审 L0 计划，不直接持有 Provider 凭据或 execution no
 
 报告同时输出 JSON、Markdown 和 HTML。控制有效率只表示固定场景覆盖，不能外推生产正确率；时延单独报告绝对 p50/p95，排除人工审批等待。该评测位于 `evaluation/`，不得进入生产执行路径。
 
+### 20. L0 v2 authoring/compiler
+
+`network_runtime/l0/` 位于 L1 工作流与既有执行内核之间，但只承担合同开发和编译。作者可声明 Atomic、Constraint Derived、Extension Derived 或 Composite；Compiler 负责引用解析、继承展开、单调安全校验、DAG 校验和确定性 hash；Catalog 负责精确版本、同 Capability 多语义查询、解释、差异与 Saga 投影。Runtime 只消费编译产物，不允许模型在执行期修改继承、步骤、验证或补偿。
+
+这降低了创建 S11 的重复代码，但没有把底层 API 的事务缺陷隐藏起来。一个可执行的 S1 仍必须有独立 Observation、验证和必要的 Compensation Provider。当前 REST 示例只认证 SDK/Compiler；接入 DSH 执行面需要完成 Gateway 和故障测试。
+
+### 21. L1 → L0 Promotion
+
+Promotion 是独立于生产执行路径的开发组件。它读取标准 `SKILL.md`、受信 Capability Catalog 和 Agent/人工候选，输出带来源 hash 的不可变 proposal。静态检查覆盖参数、工具边界、API role/schema、profile、风险和 L0 v2 编译；人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
+
 ---
 
 ## English
@@ -371,7 +381,7 @@ The P1 production target uses independent domain deployments, enterprise identit
 - **Security:** fail closed, least exposure, one-shot authorization, independent verification, externalized secrets.
 - **Reliability:** persistent Worker, explicit state machine, atomic claims, restart recovery, indeterminate outcomes.
 - **Auditability:** per-plan event hash chain and versioned contract hashes.
-- **Extensibility:** independent registries for profiles, backends, L1 Skills, L0 Skills, verifiers, and compensators.
+- **Extensibility:** independent registries for profiles, backends, L1 Skills, L0 Skills, verifiers, and compensators; L0 v2 reuses deterministic logic through declarative manifests, compile-time derivation, and a multi-version Catalog.
 - **Performance:** persistent transport and durable large-result paging; the local reliability gate requires p95 below one second for 24 requests at concurrency eight.
 - **Privacy:** no inherited A2A history and minimized trajectory fields.
 
@@ -495,3 +505,13 @@ verification, or audit; it is deliberately not distributed ACID.
 The offline Evaluation Layer fixes the L1 decision and feeds the DSH-only reference and DSH + Runtime paths the same tool, arguments, Provider, and fault. The reference retains JSON Schema and generic HITL before direct invocation; the Runtime path adds the domain L0 state machine. Machine oracles cover valid requests, basic schema, unsafe inputs, Provider/state drift, read authorization, outcome recovery, terminal envelopes, and audit integrity.
 
 JSON, Markdown, and HTML reports separate fixed-scenario control coverage from absolute p50/p95 machine latency. Human approval wait is excluded. The results are not production-correctness probabilities, and Evaluation never enters the production execution path.
+
+### 17. L0 v2 authoring/compiler
+
+`network_runtime/l0/` sits between L1 workflows and the qualified execution kernel, but only for contract development and compilation. Authors declare Atomic, Constraint Derived, Extension Derived, or Composite effects. The Compiler resolves references, flattens derivation, enforces monotonic safety and DAG rules, and hashes deterministically. The Catalog provides exact versions, multiple semantic contracts per capability, explanations, diffs, graphs, and Saga projection. Runtime consumes immutable compiled artifacts and gives the model no execution-time control over derivation, steps, verification, or compensation.
+
+This removes duplicate S11 code without concealing a weak API transaction. An executable S1 still needs an independent Observation, verifier, and compensation Provider where required. The REST examples qualify the SDK/Compiler only; DSH activation requires Gateway and fault-injection qualification.
+
+### 18. L1 → L0 promotion
+
+Promotion is a development component outside the production execution path. It consumes a standard `SKILL.md`, trusted Capability Catalog, and Agent/human candidate, then emits a source-hashed immutable proposal. Static checks cover parameters, tool boundaries, API roles/schemas, profiles, risk, and L0 v2 compilation. Human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.

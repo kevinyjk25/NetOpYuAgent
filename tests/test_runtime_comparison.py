@@ -26,7 +26,17 @@ class RuntimeComparisonTests(unittest.TestCase):
         cls.report = asyncio.run(run_benchmark(iterations=2))
 
     def test_campaign_is_explicit_and_runtime_passes_every_oracle(self) -> None:
-        self.assertEqual(self.report["scenario_count"], 11)
+        self.assertEqual(self.report["scenario_count"], 72)
+        self.assertEqual(self.report["scenario_matrix"], {
+            "valid_completion": 8,
+            "parameter_intent": 12,
+            "approval_binding": 12,
+            "read_policy": 8,
+            "result_recovery": 12,
+            "compensation": 8,
+            "saga": 6,
+            "evidence_integrity": 6,
+        })
         self.assertTrue(self.report["methodology"]["llm_and_l1_selection_excluded"])
         self.assertTrue(all(
             scenario[RUNTIME_NAME]["passed"] for scenario in self.report["scenarios"]
@@ -62,6 +72,7 @@ class RuntimeComparisonTests(unittest.TestCase):
                    controls: float = 100.0, valid: float = 100.0,
                    passed: bool = True, count: int = 10) -> dict:
             return {
+                "campaign_id": "core72-v1",
                 "source_fingerprint": f"sha256:{index:064d}",
                 "all_oracles_passed": passed,
                 "control_effectiveness_rate": controls,
@@ -71,7 +82,11 @@ class RuntimeComparisonTests(unittest.TestCase):
                 "p95_ms": p95,
             }
 
-        collecting = evaluate_trend(baseline, [sample(1), sample(2)])
+        legacy = {
+            "source_fingerprint": f"sha256:{0:064d}",
+            "all_oracles_passed": False,
+        }
+        collecting = evaluate_trend(baseline, [legacy, sample(1), sample(2)])
         self.assertEqual(collecting["status"], "collecting")
         stable = evaluate_trend(baseline, [sample(1), sample(2), sample(3)])
         self.assertEqual(stable["status"], "stable")
@@ -89,15 +104,22 @@ class RuntimeComparisonTests(unittest.TestCase):
     def test_history_counts_only_unique_implementation_fingerprints(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             history = Path(temporary) / "history.jsonl"
-            snapshot = {
+            legacy = {
                 "source_fingerprint": "sha256:" + "a" * 64,
                 "all_oracles_passed": True,
             }
+            snapshot = {
+                "campaign_id": "core72-v1",
+                "source_fingerprint": "sha256:" + "a" * 64,
+                "all_oracles_passed": True,
+            }
+            legacy_result = append_history(history, legacy)
             first = append_history(history, snapshot)
             duplicate = append_history(history, snapshot)
+            self.assertTrue(legacy_result["recorded"])
             self.assertTrue(first["recorded"])
             self.assertFalse(duplicate["recorded"])
-            self.assertEqual(len(read_history(history)), 1)
+            self.assertEqual(len(read_history(history)), 2)
 
 
 if __name__ == "__main__":

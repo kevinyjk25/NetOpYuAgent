@@ -49,7 +49,7 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
 - DSH/Hermes 使用同一 Worker、L0 注册表、Effect Runtime、验证器和审计；
 - 标准 MCP SDK 的 stdio/Streamable HTTP client、服务身份/version pinning 与 schema hash 绑定；
-- 完整 Python 门禁：205 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
+- 完整 Python 门禁：228 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
 
 ### DSH only 与 DSH + Runtime 定量对比
 
@@ -59,22 +59,23 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - `DSH + Runtime` 在相同边界上增加领域参数、不可变计划、审批绑定、执行前重校验、独立结果验证、补偿和防篡改审计；
 - 固定 L1 决策，不测 LLM 意图提取或 Skill 选择，因此结果只表示 Runtime 的确定性增量。
 
-当前本机 50 次时延样本与 11 个固定场景的基线：
+当前本机 50 次时延样本与 **Core-72** 固定场景的基线。Core-72 包含 8 个有效操作和 64 个风险/故障控制，覆盖 LAN、DC、WAN 与跨域 Saga：
 
 | 指标 | DSH only | DSH + Runtime |
 |---|---:|---:|
-| 有效请求完成率 | 100%（1/1） | 100%（1/1） |
-| 基础 Schema 阻断率 | 100%（1/1） | 100%（1/1） |
-| 领域危险输入阻断率 | 0%（0/2） | 100%（2/2） |
-| 审批后漂移阻断率 | 0%（0/2） | 100%（2/2） |
-| 越权读取阻断率 | 0%（0/1） | 100%（1/1） |
-| 结果判定与恢复率 | 0%（0/2） | 100%（2/2） |
-| 终态与审计完整率 | 0%（0/2） | 100%（2/2） |
-| **故障/风险控制有效率** | **10%（1/10）** | **100%（10/10）** |
-| 本地机器 p50 | 0.325 ms | 7.933 ms |
-| 本地机器 p95 | 0.413 ms | 8.976 ms |
+| 有效请求完成率 | 100%（8/8） | 100%（8/8） |
+| 参数与意图收口率 | 16.7%（2/12） | 100%（12/12） |
+| 读取权限控制率 | 25%（2/8） | 100%（8/8） |
+| 审批绑定控制率 | 8.3%（1/12） | 100%（12/12） |
+| 结果判定与恢复率 | 0%（0/12） | 100%（12/12） |
+| 补偿与回滚正确率 | 0%（0/8） | 100%（8/8） |
+| 跨域 Saga 控制率 | 0%（0/6） | 100%（6/6） |
+| 终态与审计完整率 | 0%（0/6） | 100%（6/6） |
+| **故障/风险控制有效率** | **7.8%（5/64）** | **100%（64/64）** |
+| 本地机器 p50 | 0.314 ms | 7.893 ms |
+| 本地机器 p95 | 0.381 ms | 8.871 ms |
 
-这里的百分比是“通过固定机器判定 Oracle 的场景数/场景总数”，不是生产成功概率。Runtime 本机 p50 增量为 7.608 ms；人工审批等待不计入时延，时延随机器负载变化。完整口径和逐项 Oracle 见 [定量基线](docs/benchmarks/runtime-ab-baseline.md)。复现并生成 JSON、Markdown 和浏览器 HTML：
+这里的百分比是“通过固定机器判定 Oracle 的场景数/场景总数”，不是生产成功概率。Runtime 本机 p50 增量为 7.579 ms；人工审批等待不计入时延，时延随机器负载变化。72 个场景都有唯一 ID、可执行故障注入和机器 Oracle；不以同一请求改名来增加数量。完整口径和逐项证据见 [定量基线](docs/benchmarks/runtime-ab-baseline.md)。复现并生成 JSON、Markdown 和浏览器 HTML：
 
 ```bash
 scripts/netopyu-dsh compare-runtime --iterations 50
@@ -95,6 +96,31 @@ scripts/netopyu-dsh compare-runtime --iterations 50 --record --label P1.2-iterat
 ```
 
 结果中的 `trend.status` 会显示 `collecting`、`improved`、`stable` 或 `regressed`。历史位于忽略提交的 `artifacts/runtime-ab/history.jsonl`；达到 3 个不同实现版本后才给出趋势结论，避免单次机器抖动误报。
+
+### L0 v2 Skill SDK
+
+项目新增兼容式 L0 v2 authoring/compiler 原型，支持原子 S1、约束式 S11、扩展式 S11，以及组合式 S1+S2+… Saga。继承只在编译期发生，审批和执行只使用完全展开、带版本和哈希的不可变 Contract。详见 [L0 v2 设计](docs/l0-v2-design.md)。
+
+```bash
+scripts/netopyu-l0 validate
+scripts/netopyu-l0 list
+scripts/netopyu-l0 explain network.privileged-access.grant
+scripts/netopyu-l0 diff network.access.grant network.guest-access.grant
+scripts/netopyu-l0 graph employee.application-access.provision
+scripts/netopyu-l0 compile --output artifacts/l0-v2/catalog.json
+```
+
+示例位于 `network_runtime/l0/examples/`。当前已完成 Compiler、Catalog、继承安全检查、同 Capability 多语义、多版本 Registry 和 Saga 投影；示例 REST Capability 尚未接入真实 Provider，因此 v1 Runtime 仍是经过 Core-72 验证的执行兼容路径。
+
+### L1 → L0 辅助下沉
+
+离线 Promotion Pipeline 可以把 Anthropic 标准 `SKILL.md`、受信 API Capability Catalog 和人/Agent 生成的候选转换成不可变 L0 review proposal。它检查 L1 参数与工具覆盖、API observation/effect/compensation 角色、输入输出 Schema、风险、Profile、L0 编译和所有来源 hash。Agent 只能生成候选，批准也不会自动注册或执行。完整说明见 [L1 → L0 下沉设计](docs/l1-to-l0-promotion.md)。
+
+```bash
+scripts/netopyu-l0 promote-inspect --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md
+scripts/netopyu-l0 promote-prompt --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml --output artifacts/l0-promotion/url1-prompt.json
+scripts/netopyu-l0 promote-assess --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --candidate network_runtime/l0/examples/s1-network-access-grant.yaml --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml
+```
 
 ### 快速开始
 
@@ -625,13 +651,13 @@ DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orc
 
 ### P0.5 completion scope
 
-The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema/capability hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, tamper-evident Runtime and Actor journals, persistent recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 205 tests and 39 subtests.
+The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema/capability hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, tamper-evident Runtime and Actor journals, persistent recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 228 tests and 39 subtests.
 
 ### DSH only versus DSH + Runtime benchmark
 
 The repository includes a reproducible fault-campaign benchmark. Both paths receive the same tool, arguments, Provider and injected fault. The DSH-only reference retains tool JSON Schema and generic one-shot HITL before directly invoking the Provider; the Runtime path adds domain validation, immutable plans, approval binding, execution-time revalidation, independent verification, compensation and tamper-evident audit. LLM intent extraction and L1 Skill selection are deliberately excluded.
 
-The current 11-scenario/50-latency-sample local baseline reports 100% valid completion for both paths, 10% (1/10) versus 100% (10/10) fault/risk control effectiveness, and p50 machine latency of 0.325 ms versus 7.933 ms. These percentages are fixed-oracle coverage, not production success probabilities. Human approval wait is excluded and latency varies with host load. See the [full quantitative baseline](docs/benchmarks/runtime-ab-baseline.md) and reproduce it with:
+The current Core-72/50-latency-sample local baseline contains eight valid operations and 64 fault/risk controls across LAN, DC, WAN and cross-domain Saga behavior. Both paths complete 8/8 valid operations. DSH only passes 5/64 controls (7.8%); DSH + Runtime passes 64/64 (100%). Local p50 is 0.314 ms versus 7.893 ms. These percentages are fixed-oracle coverage, not production success probabilities. Human approval wait is excluded and latency varies with host load. See the [full quantitative baseline](docs/benchmarks/runtime-ab-baseline.md) and reproduce it with:
 
 ```bash
 scripts/netopyu-dsh compare-runtime --iterations 50
@@ -646,6 +672,31 @@ scripts/netopyu-dsh compare-runtime --iterations 50 --record --label P1.2-iterat
 ```
 
 `trend.status` becomes `collecting`, `improved`, `stable`, or `regressed`. Local history is stored in ignored `artifacts/runtime-ab/history.jsonl`.
+
+### L0 v2 Skill SDK
+
+The compatible L0 v2 authoring/compiler prototype supports atomic S1, constrained S11, extended S11, and S1+S2+… Composite Sagas. Derivation occurs only at compile time; approval and execution consume fully flattened, versioned, immutable hashes. See the bilingual [L0 v2 design](docs/l0-v2-design.md).
+
+```bash
+scripts/netopyu-l0 validate
+scripts/netopyu-l0 list
+scripts/netopyu-l0 explain network.privileged-access.grant
+scripts/netopyu-l0 diff network.access.grant network.guest-access.grant
+scripts/netopyu-l0 graph employee.application-access.provision
+scripts/netopyu-l0 compile --output artifacts/l0-v2/catalog.json
+```
+
+Examples live in `network_runtime/l0/examples/`. The Compiler, Catalog, monotonic derivation checks, multi-semantic/multi-version lookup, and Saga projection are implemented. The example REST capabilities do not yet have a real Provider, so the Core-72-qualified v1 contracts remain the execution-compatible DSH path.
+
+### Assisted L1 → L0 promotion
+
+The offline Promotion Pipeline combines an Anthropic-standard `SKILL.md`, a trusted API Capability Catalog, and a human/Agent candidate into an immutable L0 review proposal. It checks L1 parameter/tool coverage, API observation/effect/compensation roles, schemas, profiles, risk, L0 compilation, and source hashes. The Agent only drafts; even an approved review does not register or execute the contract. See the bilingual [promotion design](docs/l1-to-l0-promotion.md).
+
+```bash
+scripts/netopyu-l0 promote-inspect --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md
+scripts/netopyu-l0 promote-prompt --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml --output artifacts/l0-promotion/url1-prompt.json
+scripts/netopyu-l0 promote-assess --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md --candidate network_runtime/l0/examples/s1-network-access-grant.yaml --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml
+```
 
 ### Hermes adapter
 
