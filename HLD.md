@@ -35,7 +35,10 @@ flowchart LR
     P --> W[Python Worker / Bridge]
     W --> NR[Domain Effect Runtime]
     NR --> TG[Typed Tool Gateway]
-    TG --> NL[Network Layer / Containerlab]
+    TG --> NO[Network Observer MCP]
+    TG --> NA[Trusted Network Actor]
+    NO --> NL[Network Layer / Containerlab]
+    NA --> NL
     TG --> SL[Service Layer / MCP Servers]
     NR --> REC[Cross-layer Reconciliation]
     P --> A2A[A2A Provider]
@@ -55,6 +58,9 @@ flowchart LR
 | Domain Effect Runtime | 编译 Intent、生成计划、状态机、执行、验证、补偿和审计 | 领域效果控制面 |
 | Network/Service L0 Registry | 固定步骤、目标字段、工具合同、验证/回滚策略 | 版本化策略根 |
 | Typed Tool Gateway | 合并本地 Network provider、MCP 与 OpenAPI，保留 source/identity/schema | 数据/效果适配层 |
+| Network Provider Capability Registry | 用 id/version/observer-or-actor role 固定 provider 语义 | 版本化边界合同 |
+| Network Observer MCP | 只读查询、拓扑/路径/数据面观测和证据封装；无写凭据 | 独立观测边界 |
+| Trusted Network Actor | 只接受 Runtime 批准的 L0 写入并保留补偿上下文 | 受控效果边界 |
 | Network Layer | Containerlab 或设备 adapter；拥有拓扑、enforcement 和数据面事实 | 网络事实/效果层 |
 | Service Layer | Identity/Application/Policy/Change/CMDB/Platform MCP；拥有业务 desired state | 业务事实/效果层 |
 | Scoped Services | 作用域记忆、能力检索、大结果分页 | 只读辅助层 |
@@ -238,6 +244,39 @@ seed runs once; restarting an MCP process cannot resurrect a revoked role. The c
 reviewed sequence of independent plans, not a distributed transaction. A failed later step must be recovered
 with a new reviewed L0 plan; automatic multi-effect saga/bundle authorization remains a P1 enhancement.
 
+### 17. P0.9 Network Provider 部署与数据流
+
+四个 Containerlab 配置现在各增加一个官方 SDK stdio Network Observer MCP。server 名称和
+版本固定为 `netopyu.network-observer@1.0.0`；启动时根据 manifest/profile 只注册真实可用的
+observer capabilities。小型现网 LAN 配置注册 22 个 MCP 读工具，本地 Lab provider 只保留
+7 个写入/内部恢复工具。MCP 同名读工具覆盖本地读实现，因此 DSH/Hermes、L1 workflow、
+Runtime verifier 和 reconciliation 都经过统一的跨进程观测边界。
+
+```mermaid
+sequenceDiagram
+    participant L as L1 / Runtime verifier
+    participant G as Typed Tool Gateway
+    participant O as Network Observer MCP
+    participant A as Trusted Local Actor
+    participant C as Containerlab
+    L->>G: read(capability id + typed args)
+    G->>O: MCP call
+    O->>C: reviewed read/probe
+    C-->>O: observed state
+    O-->>G: identity/capability/time/digest envelope
+    G->>G: validate and unwrap
+    G-->>L: compatibility payload + provider metadata
+    L->>G: approved L0 mutation
+    G->>A: execute once
+    A->>C: fixed reviewed effect
+    L->>O: independent fresh verification
+```
+
+Observer/Actor 分权减少“同一写进程自证成功”，但当前并非完整的独立生产 verifier：二者仍
+运行在同一主机、同一 OS account，并读取同一 Containerlab。生产部署应把 Observer 使用的
+只读设备/控制器身份与 Actor 写身份分离。Actor MCP 迁移必须等待 durable snapshot/outbox、
+fencing、崩溃后 reconciliation 和 HA 状态机；否则进程崩溃会使当前精确补偿能力退化。
+
 ---
 
 ## English
@@ -379,3 +418,27 @@ one-time seeding prevents restarted MCP processes from resurrecting revoked
 state, while stale idempotency replay fails. The current cross-layer workflow
 is an ordered set of independently approved plans, not an atomic distributed
 transaction; automatic saga/bundle authorization remains future work.
+
+### 14. P0.9 Network Provider deployment and flow
+
+Each Containerlab configuration now starts an official-SDK stdio Network
+Observer MCP pinned to `netopyu.network-observer@1.0.0`. Discovery publishes
+only observer capabilities available in the selected manifest/profile. The
+small-production LAN configuration routes 22 reads through MCP and retains
+seven mutation/internal-restore tools in the trusted local Lab Actor. MCP
+overrides same-name local reads, so L1 workflows, Runtime verifiers, and
+reconciliation all cross the same process boundary.
+
+An observation is consumed only after identity, capability id/version, a zoned
+UTC timestamp within the freshness/skew window, and canonical payload digest
+validation. The gateway then
+unwraps the payload for existing typed verifiers. Valid negative evidence is
+not confused with provider failure. Mutations remain capability-bound L0
+transactions and use fresh Observer reads for postconditions.
+
+This separation reduces self-attestation but is not yet a fully independent
+production verifier: both processes run on one host/account and observe the
+same Containerlab. Production should separate Observer read credentials from
+Actor write credentials. Actor MCP migration requires durable snapshots/outbox,
+fencing, crash reconciliation, and HA state before it can preserve the current
+exact-compensation semantics.

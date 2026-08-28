@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from typing import Any
 
 
@@ -30,6 +31,7 @@ class MCPToolSpec:
     server_name: str
     server_identity: str
     server_version: str
+    configured_domain: str = "external"
     parameters: dict[str, Any] = field(default_factory=dict)
     output_schema: dict[str, Any] = field(default_factory=dict)
     meta: dict[str, Any] = field(default_factory=dict)
@@ -75,6 +77,65 @@ class MCPCallResult:
     is_error: bool = False
     error_msg: str = ""
     call_ms: int = 0
+    evidence_envelope: dict[str, Any] | None = None
+
+
+def validate_evidence_envelope(
+    spec: MCPToolSpec,
+    structured: Any,
+    *,
+    server_identity: str,
+    server_version: str,
+    now: datetime | None = None,
+) -> tuple[str, dict[str, Any]]:
+    """Validate and unwrap a capability-bound provider evidence envelope."""
+    if not isinstance(structured, dict):
+        raise RuntimeError("network evidence result has no structuredContent object")
+    declared = spec.meta.get("netopyu", {}) if isinstance(spec.meta, dict) else {}
+    required = {
+        "ok", "code", "correlation_id", "observed_at", "simulation",
+        "provider_identity", "capability_id", "capability_version",
+        "payload_digest", "content_type", "payload",
+    }
+    missing = sorted(required - set(structured))
+    if missing:
+        raise RuntimeError(f"network evidence envelope is missing fields: {missing}")
+    if structured.get("ok") is not True:
+        raise RuntimeError("network evidence envelope returned ok=false")
+    expected_identity = f"{server_identity}@{server_version}"
+    if structured.get("provider_identity") != expected_identity:
+        raise RuntimeError(
+            "network evidence provider identity mismatch: "
+            f"expected {expected_identity!r}, got {structured.get('provider_identity')!r}"
+        )
+    for field_name in ("capability_id", "capability_version"):
+        if structured.get(field_name) != declared.get(field_name):
+            raise RuntimeError(
+                f"network evidence {field_name} mismatch for {spec.name!r}"
+            )
+    observed_at = str(structured.get("observed_at") or "")
+    try:
+        parsed = datetime.fromisoformat(observed_at.replace("Z", "+00:00"))
+    except ValueError as error:
+        raise RuntimeError("network evidence observed_at is not ISO-8601") from error
+    if parsed.tzinfo is None:
+        raise RuntimeError("network evidence observed_at must include a timezone")
+    current = now or datetime.now(timezone.utc)
+    age_seconds = (current - parsed.astimezone(timezone.utc)).total_seconds()
+    if age_seconds > 300:
+        raise RuntimeError("network evidence is older than the 300-second freshness limit")
+    if age_seconds < -30:
+        raise RuntimeError("network evidence observed_at exceeds the 30-second future-skew limit")
+    payload = structured.get("payload")
+    expected_digest = "sha256:" + hashlib.sha256(
+        _canonical(payload).encode("utf-8")
+    ).hexdigest()
+    if structured.get("payload_digest") != expected_digest:
+        raise RuntimeError("network evidence payload digest mismatch")
+    content = payload if isinstance(payload, str) else json.dumps(
+        payload, ensure_ascii=False, sort_keys=True,
+    )
+    return content, dict(structured)
 
 
 class MCPServer:
@@ -162,11 +223,16 @@ class MCPServer:
 
     def _verify_identity(self) -> None:
         trusted = bool(self.config.get("trusted_for_writes", False))
+        configured_domain = str(self.config.get("domain") or "external")
         expected_name = str(self.config.get("expected_server_name") or "")
         expected_version = str(self.config.get("expected_server_version") or "")
         if trusted and (not expected_name or not expected_version):
             raise ValueError(
                 f"trusted MCP server {self.name!r} requires expected_server_name and expected_server_version"
+            )
+        if configured_domain == "network" and (not expected_name or not expected_version):
+            raise ValueError(
+                f"network MCP server {self.name!r} requires expected_server_name and expected_server_version"
             )
         if expected_name and self.server_identity != expected_name:
             raise RuntimeError(
@@ -190,6 +256,7 @@ class MCPServer:
                     server_name=self.name,
                     server_identity=self.server_identity,
                     server_version=self.server_version,
+                    configured_domain=str(self.config.get("domain") or "external"),
                     parameters=dict(tool.input_schema or {}),
                     output_schema=dict(tool.output_schema or {}),
                     meta=meta,
@@ -223,12 +290,28 @@ class MCPServer:
                 text = getattr(block, "text", None)
                 if text is not None:
                     blocks.append(str(text))
-            structured = getattr(result, "structured_content", None)
-            content = (
-                json.dumps(structured, ensure_ascii=False, sort_keys=True)
-                if structured is not None else "\n".join(blocks)
-            )
             is_error = bool(result.is_error)
+            structured = getattr(result, "structured_content", None)
+            evidence_envelope: dict[str, Any] | None = None
+            spec = next((item for item in self._tools if item.name == tool_name), None)
+            declared = (
+                spec.meta.get("netopyu", {})
+                if spec is not None and isinstance(spec.meta, dict) else {}
+            )
+            if not is_error and declared.get("result_contract") == "network-evidence-envelope-v1":
+                if spec is None:  # pragma: no cover - discovery invariant
+                    raise RuntimeError(f"MCP tool {tool_name!r} was not discovered")
+                content, evidence_envelope = validate_evidence_envelope(
+                    spec,
+                    structured,
+                    server_identity=self.server_identity,
+                    server_version=self.server_version,
+                )
+            else:
+                content = (
+                    json.dumps(structured, ensure_ascii=False, sort_keys=True)
+                    if structured is not None else "\n".join(blocks)
+                )
             return MCPCallResult(
                 tool_name=tool_name,
                 server_name=self.name,
@@ -237,6 +320,7 @@ class MCPServer:
                 is_error=is_error,
                 error_msg="\n".join(blocks) if is_error else "",
                 call_ms=int((time.monotonic() - started) * 1000),
+                evidence_envelope=evidence_envelope,
             )
         except Exception as error:
             return MCPCallResult(
