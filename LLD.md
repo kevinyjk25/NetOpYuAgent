@@ -470,6 +470,12 @@ slash approval 也优先返回相同封装。
 `compensation_required`。每个补偿仍绑定一个新 L0 plan；未知或不可补偿状态进入
 `manual_intervention_required`。Saga 事件另有 SHA-256 链，`recoverable()` 不重放 Provider write。
 
+### 24. Runtime A/B 基准实现
+
+`evaluation.runtime_comparison` 实现两个执行器。参考执行器复用 DSH manifest 的 required/type/additional-properties Schema 规则和通用审批结果，然后直接调用 `BackendSession`；受控执行器调用真实 `NetworkRuntime.prepare/execute/invoke_read/audit`。每个场景返回相同结构的 `PathObservation`，并由独立 Oracle 判断是否满足安全或正确性目标。
+
+默认场景集固定为 11 项，故障/风险控制为其中 10 项。时延 campaign 预热后交替运行两条路径，计量纯机器端到端时间并排除人工等待。`write_report()` 生成 `runtime-ab.json`、`runtime-ab.md` 与 `runtime-ab.html`；CLI 只有 Runtime 全部 Oracle 通过时才返回 0。时延不作硬门禁，防止不同主机性能造成错误失败。
+
 ---
 
 ## English
@@ -701,3 +707,9 @@ bindings, terminal outcomes, reverse compensation bindings, and a separate
 event hash chain. Every compensation is a fresh L0 plan. Unknown or
 uncompensatable state escalates to manual intervention; recovery lists work but
 never replays a Provider write.
+
+### 16. Runtime A/B benchmark implementation
+
+`evaluation.runtime_comparison` implements two executors. The reference executor mirrors the DSH manifest's required/type/additional-properties schema and generic approval result before invoking `BackendSession` directly. The guarded executor calls the real `NetworkRuntime.prepare/execute/invoke_read/audit` surface. Each scenario returns a common `PathObservation` evaluated by a machine oracle.
+
+The default set has 11 scenarios, including 10 fault/risk controls. After warm-up, latency trials alternate both paths and exclude human wait. `write_report()` emits JSON, Markdown, and HTML. The CLI exits zero only when Runtime passes every oracle; variable machine latency is reported but is not a hard gate.

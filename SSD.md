@@ -317,7 +317,7 @@ MCP、网络设备、审批身份、分布式事务或生产可用性。
 错误、capability/digest 错误失败关闭、负面 payload 解包、同名单设备参数规范化，以及 backend
 Observer 读与 Actor 写分别走 MCP、内部参数隐藏、profile 精确投影、operation immutable reuse
 拒绝、crash-after-effect reconciliation、幂等不重发、精确 durable snapshot 恢复和双事件链。
-完整 Python 门禁为 201 个测试和 39 个子测试。
+完整 Python 门禁为 205 个测试和 39 个子测试。
 
 实际本地门禁必须证明 20 节点基线全部通过，并通过 Observer MCP 读取业务/网络 reconciliation
 所需事实；随后受审 Actor MCP 计划达到 `verified_success`，故意制造后置状态漂移的计划达到
@@ -331,6 +331,12 @@ resource scope 不匹配的 observation 在 Provider 调用前拒绝；DSH/Herme
 terminal envelope，Actor `applied` 不泄漏；Saga 依赖阻止乱序计划、失败后逆序补偿、重启可恢复、
 不可补偿步骤进入人工介入且事件链有效。跨层本地用例必须把四个独立 L0 计划绑定到同一 Saga。
 这不认证企业 PDP、多主机 Saga leader、分布式原子性或自动 bundle approval。
+
+### 19. Runtime A/B 定量验收
+
+基准必须固定相同工具、参数、Provider 和故障，且明确把 LLM/L1 选择排除在 Runtime 增量之外。DSH-only 参考路径必须保留基础 JSON Schema 和通用 HITL，不能构造为无保护 strawman。机器 Oracle 必须至少覆盖：有效请求、未知参数、领域安全必填、灾难命令、审批后 Provider/状态漂移、越权读取、错误后置条件与补偿、发送后不确定结果、终态信封和审计篡改。
+
+验收要求 Runtime 路径通过全部固定 Oracle；参考路径和 Runtime 的结果均须原样报告。输出必须包含机器可读 JSON、双语 Markdown 和浏览器 HTML，并同时披露 p50/p95 绝对机器时延、样本数、人工等待排除和未测量范围。固定场景 100% 不得表述为生产成功概率。
 
 ---
 
@@ -488,7 +494,7 @@ payload unwrapping, single-device argument normalization, and exact backend
 routing of Observer reads and Actor writes through separate MCP boundaries,
 hidden Runtime context, profile projection, immutable-operation conflicts,
 crash reconciliation without blind replay, exact durable restoration, and both
-hash chains. The complete gate is 201 tests plus 39 subtests.
+hash chains. The complete gate is 205 tests plus 39 subtests.
 
 The deployed gate requires the complete 20-node baseline and cross-layer facts
 read through Observer MCP. Real Actor MCP plans must reach `verified_success`;
@@ -508,3 +514,9 @@ uncompensatable work, and maintain a valid event chain. The local cross-layer
 case binds four independent L0 plans to one Saga. This does not certify an
 enterprise PDP, multi-host Saga leader, distributed atomicity, or automatic
 bundle approval.
+
+### 15. Runtime A/B quantitative acceptance
+
+The benchmark fixes the same tool, arguments, Provider, and fault while explicitly excluding LLM/L1 selection from the Runtime increment. The DSH-only reference retains basic JSON Schema and generic HITL and may not be reduced to an unprotected strawman. Machine oracles cover valid requests, unknown fields, domain safety requirements, catastrophic commands, post-approval Provider/state drift, unauthorized reads, failed postconditions and compensation, indeterminate writes, terminal envelopes, and audit tampering.
+
+Runtime must pass every fixed oracle while both paths remain visible in the report. Outputs include machine-readable JSON, bilingual Markdown, and browser HTML, plus absolute p50/p95 machine latency, sample count, the exclusion of human wait, and unmeasured scope. A 100% fixed-scenario result is never a production success probability.

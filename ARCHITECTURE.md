@@ -283,6 +283,7 @@ evaluation -> public manifests / retrieval / test data
 - **ADR-025：Read 也是受保护操作。** Observation 根据 sensitivity、role、scope、purpose、clearance 授权；本地隐式 system principal 只用于兼容原型。
 - **ADR-026：Harness 只看 Runtime 终态。** Actor 原始结果只供 Runtime 内部处理，DSH/Hermes 对模型返回标准 terminal envelope。
 - **ADR-027：跨层一致性使用 durable Saga，不假装 ACID。** Saga 持久化不可变步骤图和 plan hash，按依赖执行、逆序补偿并支持重启恢复，但每一步仍需 L0 审批和验证。
+- **ADR-028：Runtime 成效必须用固定 L1 决策的 A/B Oracle 度量。** `evaluation/runtime_comparison.py` 给 DSH-only 参考路径与 Runtime 路径输入相同工具、参数、Provider 和故障，只比较 L0 增量；控制覆盖率不是生产成功概率，LLM/Skill 选择和人工等待另行评测。
 - 遥测、事件和大规模指标后续使用流式 evidence plane；MCP command/query 不承担高吞吐长期订阅。两条路径必须共享 correlation/target/capability schema，但不得把流事件直接当作写成功证明。
 
 ---
@@ -381,6 +382,7 @@ Effect Runtime must not depend on DSH/Hermes UI, models, or plugin APIs. Service
 - **ADR-025:** reads are protected operations. Observation authorization binds sensitivity, role, scope, purpose, and clearance; the implicit local system principal is prototype compatibility only.
 - **ADR-026:** Harnesses consume only a Runtime terminal envelope. Raw Actor states remain internal and are represented externally only by a digest.
 - **ADR-027:** cross-layer consistency uses a durable Saga rather than pretending to be ACID. Immutable step/plan bindings, reverse compensation, restart recovery, and a hash chain never bypass per-step L0 approval and verification.
+- **ADR-028:** Runtime value is measured with fixed-L1 A/B oracles. `evaluation/runtime_comparison.py` gives the DSH-only reference and Runtime paths the same tool, arguments, Provider, and fault. Control coverage is not a production success probability; LLM/Skill selection and human wait require separate evaluations.
 - High-volume telemetry and event streams belong on a separate evidence plane. MCP remains the command/query protocol; both paths share target/correlation/capability schemas, and stream events never prove mutation success by themselves.
 
 ### 7. Clean-code and extension policy

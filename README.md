@@ -49,7 +49,52 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
 - DSH/Hermes 使用同一 Worker、L0 注册表、Effect Runtime、验证器和审计；
 - 标准 MCP SDK 的 stdio/Streamable HTTP client、服务身份/version pinning 与 schema hash 绑定；
-- 完整 Python 门禁：201 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
+- 完整 Python 门禁：205 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
+
+### DSH only 与 DSH + Runtime 定量对比
+
+项目包含可重复运行的 A/B 故障基准。两个路径接收完全相同的工具、参数、Provider 和注入故障：
+
+- `DSH only` 保留工具 JSON Schema 与通用一次性 HITL，然后直接调用 Provider；
+- `DSH + Runtime` 在相同边界上增加领域参数、不可变计划、审批绑定、执行前重校验、独立结果验证、补偿和防篡改审计；
+- 固定 L1 决策，不测 LLM 意图提取或 Skill 选择，因此结果只表示 Runtime 的确定性增量。
+
+当前本机 50 次时延样本与 11 个固定场景的基线：
+
+| 指标 | DSH only | DSH + Runtime |
+|---|---:|---:|
+| 有效请求完成率 | 100%（1/1） | 100%（1/1） |
+| 基础 Schema 阻断率 | 100%（1/1） | 100%（1/1） |
+| 领域危险输入阻断率 | 0%（0/2） | 100%（2/2） |
+| 审批后漂移阻断率 | 0%（0/2） | 100%（2/2） |
+| 越权读取阻断率 | 0%（0/1） | 100%（1/1） |
+| 结果判定与恢复率 | 0%（0/2） | 100%（2/2） |
+| 终态与审计完整率 | 0%（0/2） | 100%（2/2） |
+| **故障/风险控制有效率** | **10%（1/10）** | **100%（10/10）** |
+| 本地机器 p50 | 0.325 ms | 7.933 ms |
+| 本地机器 p95 | 0.413 ms | 8.976 ms |
+
+这里的百分比是“通过固定机器判定 Oracle 的场景数/场景总数”，不是生产成功概率。Runtime 本机 p50 增量为 7.608 ms；人工审批等待不计入时延，时延随机器负载变化。完整口径和逐项 Oracle 见 [定量基线](docs/benchmarks/runtime-ab-baseline.md)。复现并生成 JSON、Markdown 和浏览器 HTML：
+
+```bash
+scripts/netopyu-dsh compare-runtime --iterations 50
+open artifacts/runtime-ab/runtime-ab.html   # macOS
+```
+
+后续迭代使用版本化基线 [data/runtime_ab_baseline.json](data/runtime_ab_baseline.json) 做趋势判断：
+
+- 任一 Runtime Oracle 或有效请求完成率下降，立即标记 `regressed`；
+- 性能必须同时恶化超过基线 25% 且绝对增加超过 3 ms，才标记时延回退；
+- 最近 3 个不同执行代码指纹取中位数；相同代码重复测量不计为新迭代；
+- 时延改善超过 15% 且至少减少 1 ms，或在保持 100% 通过时增加控制场景，标记 `improved`；其余为 `stable`。
+
+每个实质性 Runtime 版本完成后记录一次：
+
+```bash
+scripts/netopyu-dsh compare-runtime --iterations 50 --record --label P1.2-iteration-1
+```
+
+结果中的 `trend.status` 会显示 `collecting`、`improved`、`stable` 或 `regressed`。历史位于忽略提交的 `artifacts/runtime-ab/history.jsonl`；达到 3 个不同实现版本后才给出趋势结论，避免单次机器抖动误报。
 
 ### 快速开始
 
@@ -521,6 +566,7 @@ scripts/netopyu-dsh l0-skills
 scripts/netopyu-dsh demo-l1-l0
 scripts/netopyu-dsh parity
 scripts/netopyu-dsh reliability
+scripts/netopyu-dsh compare-runtime --iterations 50
 scripts/netopyu-dsh retirement
 scripts/netopyu-hermes doctor
 scripts/netopyu-hermes compare
@@ -579,7 +625,27 @@ DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orc
 
 ### P0.5 completion scope
 
-The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema/capability hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, tamper-evident Runtime and Actor journals, persistent recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 201 tests and 39 subtests.
+The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema/capability hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, tamper-evident Runtime and Actor journals, persistent recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 205 tests and 39 subtests.
+
+### DSH only versus DSH + Runtime benchmark
+
+The repository includes a reproducible fault-campaign benchmark. Both paths receive the same tool, arguments, Provider and injected fault. The DSH-only reference retains tool JSON Schema and generic one-shot HITL before directly invoking the Provider; the Runtime path adds domain validation, immutable plans, approval binding, execution-time revalidation, independent verification, compensation and tamper-evident audit. LLM intent extraction and L1 Skill selection are deliberately excluded.
+
+The current 11-scenario/50-latency-sample local baseline reports 100% valid completion for both paths, 10% (1/10) versus 100% (10/10) fault/risk control effectiveness, and p50 machine latency of 0.325 ms versus 7.933 ms. These percentages are fixed-oracle coverage, not production success probabilities. Human approval wait is excluded and latency varies with host load. See the [full quantitative baseline](docs/benchmarks/runtime-ab-baseline.md) and reproduce it with:
+
+```bash
+scripts/netopyu-dsh compare-runtime --iterations 50
+```
+
+Trend evaluation uses the versioned [baseline](data/runtime_ab_baseline.json). Any Runtime oracle regression is immediate. Latency is regressed only when it is both 25% and 3 ms worse than baseline. The median of three unique execution-code fingerprints suppresses host noise; duplicate code does not count as a new iteration. A material latency reduction or additional 100%-passing controls is `improved`; preserved behavior is `stable`.
+
+Record one sample after each substantive Runtime iteration:
+
+```bash
+scripts/netopyu-dsh compare-runtime --iterations 50 --record --label P1.2-iteration-1
+```
+
+`trend.status` becomes `collecting`, `improved`, `stable`, or `regressed`. Local history is stored in ignored `artifacts/runtime-ab/history.jsonl`.
 
 ### Hermes adapter
 

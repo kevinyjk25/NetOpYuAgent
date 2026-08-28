@@ -296,6 +296,12 @@ Harness 不再接收 Actor 原始执行结果，只接收 Runtime terminal envel
 Saga 只协调受审 L0 计划，不直接持有 Provider 凭据或 execution nonce；它提供 crash recovery
 和逆序补偿，但不把多个系统伪装成 ACID 事务。
 
+### 19. Runtime A/B 定量评测
+
+离线 Evaluation Layer 固定 L1 决策，向 DSH-only 参考路径和 DSH + Runtime 路径输入相同工具、参数、Provider 与故障。参考路径保留 JSON Schema 和通用 HITL 后直接调用 Provider；Runtime 路径增加领域 L0 状态机。机器 Oracle 分别覆盖有效请求、基础 Schema、危险参数、Provider/状态漂移、读取授权、结果恢复、终态信封和审计链。
+
+报告同时输出 JSON、Markdown 和 HTML。控制有效率只表示固定场景覆盖，不能外推生产正确率；时延单独报告绝对 p50/p95，排除人工审批等待。该评测位于 `evaluation/`，不得进入生产执行路径。
+
 ---
 
 ## English
@@ -483,3 +489,9 @@ per-step plan ids/hashes, persists forward and reverse outcomes, resumes after
 restart, and compensates in reverse dependency order. It has no Provider
 credential or execution nonce and cannot bypass per-step L0 approval,
 verification, or audit; it is deliberately not distributed ACID.
+
+### 16. Runtime A/B quantitative evaluation
+
+The offline Evaluation Layer fixes the L1 decision and feeds the DSH-only reference and DSH + Runtime paths the same tool, arguments, Provider, and fault. The reference retains JSON Schema and generic HITL before direct invocation; the Runtime path adds the domain L0 state machine. Machine oracles cover valid requests, basic schema, unsafe inputs, Provider/state drift, read authorization, outcome recovery, terminal envelopes, and audit integrity.
+
+JSON, Markdown, and HTML reports separate fixed-scenario control coverage from absolute p50/p95 machine latency. Human approval wait is excluded. The results are not production-correctness probabilities, and Evaluation never enters the production execution path.
