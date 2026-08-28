@@ -28,6 +28,7 @@ from .contracts import (
     PlanState,
     PreparedPlan,
     canonical_json,
+    sha256_json,
     utc_now,
 )
 from .compensators import REGISTRY as COMPENSATORS, compensate_operation
@@ -177,6 +178,7 @@ class NetworkRuntime:
                 requires_approval=requires_approval,
                 mode=backend.mode,
                 source=source,
+                metadata=metadata,
             )
             if contract is None:
                 return {
@@ -260,6 +262,15 @@ class NetworkRuntime:
                 tool_name=tool_name,
                 tool_version=contract.contract_id,
                 action_type=action_type,
+                provider_identity=str(metadata.get("provider_identity") or source),
+                input_schema_digest=str(
+                    metadata.get("input_schema_digest")
+                    or sha256_json(metadata.get("parameters") or {})
+                ),
+                output_schema_digest=str(
+                    metadata.get("output_schema_digest")
+                    or sha256_json(metadata.get("output_schema") or {})
+                ),
                 arguments=compiled.arguments,
                 argument_provenance=compiled.provenance,
                 targets=compiled.targets,
@@ -666,13 +677,17 @@ class NetworkRuntime:
             ),)
         projected = project_arguments(arguments, contract.preflight_fields)
         rendered = _render(await tool(projected))
-        passed = not _failed_output(rendered)
+        value = _evidence_value(contract.preflight_tool, rendered)
+        passed = (
+            not _failed_output(rendered)
+            and value.get("facts", {}).get("ok") is not False
+        )
         return (Evidence(
             evidence_type="preflight",
             source=contract.preflight_tool,
             target=canonical_json(projected),
             observed_at=utc_now(),
-            value=_evidence_value(contract.preflight_tool, rendered),
+            value=value,
             passed=passed,
             predicate="preflight read succeeds without an error marker",
             expected=True,
@@ -690,6 +705,17 @@ class NetworkRuntime:
             requires_approval=requires_approval,
             mode=backend.mode,
             source=backend.sources.get(plan.tool_name, "unknown"),
+            metadata=metadata,
+        )
+        current_source = backend.sources.get(plan.tool_name, "unknown")
+        current_provider = str(metadata.get("provider_identity") or current_source)
+        current_input_digest = str(
+            metadata.get("input_schema_digest")
+            or sha256_json(metadata.get("parameters") or {})
+        )
+        current_output_digest = str(
+            metadata.get("output_schema_digest")
+            or sha256_json(metadata.get("output_schema") or {})
         )
         if (
             contract is None
@@ -698,6 +724,9 @@ class NetworkRuntime:
             or contract.compensator != plan.rollback_contract
             or action != plan.action_type
             or not requires_approval
+            or current_provider != plan.provider_identity
+            or current_input_digest != plan.input_schema_digest
+            or current_output_digest != plan.output_schema_digest
         ):
             raise PlanIntegrityError("runtime tool contract changed after approval")
         if contract.verifier not in VERIFIERS.contract_ids():
@@ -975,11 +1004,13 @@ class NetworkRuntime:
     def _approval_summary(plan: PreparedPlan, source: str, mode: str) -> str:
         args = canonical_json(plan.arguments)
         return (
-            f"Network plan {plan.plan_id}\n"
+            f"Effect plan {plan.plan_id}\n"
             f"Tool: {plan.tool_name} ({plan.action_type}, risk={plan.risk_level.value})\n"
             f"Target(s): {', '.join(plan.targets)}\n"
             f"Arguments: {args}\n"
             f"Source: {source}; backend={mode}; contract={plan.tool_version}\n"
+            f"Provider: {plan.provider_identity}\n"
+            f"Schemas: input={plan.input_schema_digest}; output={plan.output_schema_digest}\n"
             f"L0 Skill: {plan.l0_skill_id}@{plan.l0_skill_version} "
             f"({plan.l0_contract_hash})\n"
             f"Intent: {plan.intent_spec.get('intent_kind')} "

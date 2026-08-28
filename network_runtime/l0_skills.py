@@ -224,7 +224,10 @@ def _register(
     ))
 
 
-_register("network.device.config.edit", "1.0.0", "edit_device_config", "configure_device", ("device_id",), profiles=("lan",))
+_register(
+    "network.device.config.edit", "1.0.0", "edit_device_config", "configure_device",
+    ("device_id",), profiles=("lan", "dc"),
+)
 _register("network.device.config.push", "1.0.0", "push_config", "configure_device", ("device_id",))
 _register("network.service.restart", "1.0.0", "restart_service", "restart_service", ("service",))
 _register("network.service.rollback", "1.0.0", "rollback_service", "rollback_service", ("service",))
@@ -238,6 +241,40 @@ _register("network.dc.fabric-config.push", "1.0.0", "dc_config_push", "configure
 _register("network.dc.app-access.grant", "1.0.0", "dc_grant_app_access", "grant_application_access", ("user_id", "app_id"), profiles=("dc",))
 _register("network.dc.app-access.revoke", "1.0.0", "dc_revoke_app_access", "revoke_application_access", ("user_id", "app_id"), profiles=("dc",))
 _register("network.wan.path.failover", "1.0.0", "wan_failover_path", "failover_wan_path", ("tunnel",), profiles=("wan",))
+_register(
+    "network.fabric.access-vlan.set", "1.0.0", "fabric_set_access_vlan",
+    "set_access_vlan", ("device_id", "interface"), profiles=("dc",),
+)
+_register(
+    "service.access.entitlement.grant", "1.0.0",
+    "access_policy_grant_entitlement", "grant_service_entitlement",
+    ("user_id", "app_id"), profiles=("lan", "dc"),
+)
+_register(
+    "service.access.entitlement.revoke", "1.0.0",
+    "access_policy_revoke_entitlement", "revoke_service_entitlement",
+    ("user_id", "app_id"), profiles=("lan", "dc"),
+)
+_register(
+    "service.platform.restart", "1.0.0",
+    "platform_restart_service", "restart_platform_service",
+    ("service", "environment"), profiles=("lan", "dc"),
+)
+_register(
+    "service.platform.rollback", "1.0.0",
+    "platform_rollback_service", "rollback_platform_service",
+    ("service", "environment"), profiles=("lan", "dc"),
+)
+_register(
+    "network.application.enforcement.apply", "1.0.0",
+    "network_apply_app_enforcement", "apply_network_application_enforcement",
+    ("user_id", "app_id"), profiles=("lan", "dc"),
+)
+_register(
+    "network.application.enforcement.revoke", "1.0.0",
+    "network_revoke_app_enforcement", "revoke_network_application_enforcement",
+    ("user_id", "app_id"), profiles=("lan", "dc"),
+)
 
 
 def compile_intent(
@@ -282,7 +319,10 @@ def validate_registry() -> None:
 
 
 def _constraints(arguments: dict[str, Any]) -> dict[str, Any]:
-    fields = ("environment", "reason", "force", "dry_run", "to_transport", "version", "role")
+    fields = (
+        "environment", "reason", "force", "dry_run", "to_transport", "version", "role",
+        "change_id", "expected_revision", "correlation_id",
+    )
     return {field: arguments[field] for field in fields if field in arguments}
 
 
@@ -297,6 +337,16 @@ def _desired_state(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         "revoke_user_access": {"admitted": False},
         "dc_grant_app_access": {"allowed": True},
         "dc_revoke_app_access": {"allowed": False},
+        "access_policy_grant_entitlement": {
+            "allowed": True, "role": arguments.get("role"),
+        },
+        "access_policy_revoke_entitlement": {"allowed": False, "roles": []},
+        "platform_restart_service": {"status": "healthy", "rollout": "complete"},
+        "platform_rollback_service": {
+            "status": "healthy", "version": arguments.get("version"),
+        },
+        "network_apply_app_enforcement": {"allowed": True},
+        "network_revoke_app_enforcement": {"allowed": False},
     }
     if tool_name in fixed:
         return fixed[tool_name]
@@ -304,6 +354,8 @@ def _desired_state(tool_name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         return {"primary": arguments.get("target"), "healthy": True}
     if tool_name == "wan_failover_path":
         return {"transport": arguments.get("to_transport"), "state": "up"}
+    if tool_name == "fabric_set_access_vlan":
+        return {"vlan_id": arguments.get("vlan_id")}
     if tool_name in {"edit_device_config", "push_config", "dc_config_push"}:
         return {"requested_configuration_digest": sha256_json(
             arguments.get("config_lines") or arguments.get("config_text") or arguments.get("changes")

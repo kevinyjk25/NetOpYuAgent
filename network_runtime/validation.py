@@ -12,7 +12,8 @@ from .contracts import RiskLevel
 
 
 _INTEGER_KEYS = {
-    "flows", "grace_period_s", "length", "lines", "minutes", "offset", "range_minutes", "top_n", "vni",
+    "flows", "grace_period_s", "length", "lines", "minutes", "offset", "range_minutes",
+    "route_type", "top_n", "vlan_id", "vni", "expected_revision",
 }
 _BOOLEAN_KEYS = {"dry_run", "force", "graceful", "rolling"}
 _ARRAY_KEYS = {"config_lines", "device_ids"}
@@ -42,6 +43,21 @@ _SAFETY_REQUIRED: dict[str, set[str]] = {
     "dc_grant_app_access": {"user_id", "app_id", "reason"},
     "dc_revoke_app_access": {"user_id", "app_id", "reason"},
     "wan_failover_path": {"tunnel", "to_transport"},
+    "fabric_set_access_vlan": {"device_id", "interface", "vlan_id", "reason"},
+    "access_policy_grant_entitlement": {
+        "user_id", "app_id", "role", "change_id", "expected_revision", "reason",
+    },
+    "access_policy_revoke_entitlement": {
+        "user_id", "app_id", "change_id", "expected_revision", "reason",
+    },
+    "platform_restart_service": {
+        "service", "environment", "change_id", "expected_revision", "reason",
+    },
+    "platform_rollback_service": {
+        "service", "environment", "version", "change_id", "expected_revision", "reason",
+    },
+    "network_apply_app_enforcement": {"user_id", "app_id", "change_id", "reason"},
+    "network_revoke_app_enforcement": {"user_id", "app_id", "change_id", "reason"},
 }
 _FORBIDDEN_CONFIG = re.compile(
     r"(^|\s)(write\s+erase|erase\s+startup|format\b|reload\b|factory-reset|"
@@ -186,6 +202,10 @@ def compile_parameters(
             value = value.lower()
         if name == "vni" and isinstance(value, int) and not 1 <= value <= 16_777_215:
             errors.append("vni must be between 1 and 16777215")
+        if name == "vlan_id" and isinstance(value, int) and not 1 <= value <= 4_094:
+            errors.append("vlan_id must be between 1 and 4094")
+        if name == "route_type" and isinstance(value, int) and value not in {2, 3, 5}:
+            errors.append("route_type must be one of 2, 3, or 5")
         if name == "grace_period_s" and isinstance(value, int) and not 0 <= value <= 3_600:
             errors.append("grace_period_s must be between 0 and 3600")
         if name == "prefix" and isinstance(value, str):
@@ -209,7 +229,11 @@ def compile_parameters(
     if tool_name == "edit_device_config" and not compiled.get("config_lines") and not compiled.get("changes"):
         missing.append("config_lines or changes")
 
-    known = _known_entities(profile, mode)
+    tags = {str(item) for item in (metadata.get("tags") or [])}
+    # The Service MCP owns business identifiers. A user can legitimately have
+    # no Containerlab endpoint; cross-layer reconciliation reports that drift
+    # instead of parameter compilation rejecting the business identity.
+    known = {} if {"mcp", "service"}.issubset(tags) else _known_entities(profile, mode)
     for field_name, values in known.items():
         if field_name not in compiled or not values:
             continue

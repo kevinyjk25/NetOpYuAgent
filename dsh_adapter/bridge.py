@@ -7,13 +7,15 @@ import os
 from typing import Any
 
 from .backend import open_backend, resolve_backend_mode
-from network_runtime.engine import NetworkRuntime, default_journal_path
+from effect_runtime import EffectRuntime
+from network_runtime.engine import default_journal_path
 from network_runtime.l0_skills import REGISTRY as L0_SKILLS
 from network_runtime.workflows import WorkflowRuntime
 
 
 _INTEGER_KEYS = {
-    "flows", "grace_period_s", "length", "lines", "minutes", "offset", "range_minutes", "top_n", "vni",
+    "flows", "grace_period_s", "length", "lines", "minutes", "offset", "range_minutes",
+    "route_type", "top_n", "vlan_id", "vni",
 }
 _BOOLEAN_KEYS = {"dry_run", "force", "graceful", "rolling"}
 _ARRAY_KEYS = {"config_lines", "device_ids"}
@@ -55,6 +57,8 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
     l0_skills: dict[str, dict[str, Any]] = {}
     try:
         for name, metadata in sorted(backend.metadata.items()):
+            if metadata.get("internal_only"):
+                continue
             action_type = str(metadata.get("action_type", "read_only"))
             destructive = bool(metadata.get("hitl")) or action_type != "read_only"
             if destructive and not include_destructive:
@@ -87,7 +91,12 @@ async def _build_manifest(profile_id: str, *, include_destructive: bool) -> dict
                 declaration["l0_skill_version"] = l0_contract.version
                 declaration["l0_contract_hash"] = l0_contract.contract_hash
                 declaration["intent_kind"] = l0_contract.intent_kind
-                declaration["execution_boundary"] = "network_l0_skill"
+                declaration["execution_boundary"] = "domain_effect_runtime"
+                declaration["provider_identity"] = str(
+                    metadata.get("provider_identity") or backend.sources.get(name, "unknown")
+                )
+                declaration["input_schema_digest"] = metadata.get("input_schema_digest")
+                declaration["output_schema_digest"] = metadata.get("output_schema_digest")
                 l0_skills[l0_contract.skill_id] = l0_contract.to_dict()
             tools.append(declaration)
         return {
@@ -137,7 +146,7 @@ async def invoke_tool(
     longer bypass the plan/approval/evidence runtime.
     """
     del allow_destructive
-    return await NetworkRuntime().invoke_read(profile_id, tool_name, arguments)
+    return await EffectRuntime().invoke_read(profile_id, tool_name, arguments)
 
 
 async def prepare_network_plan(
@@ -148,7 +157,7 @@ async def prepare_network_plan(
     session_id: str | None = None,
     l0_skill_id: str | None = None,
 ) -> dict[str, Any]:
-    return await NetworkRuntime().prepare(
+    return await EffectRuntime().prepare(
         profile_id, tool_name, arguments,
         session_id=session_id, l0_skill_id=l0_skill_id,
     )
@@ -161,7 +170,7 @@ async def execute_network_plan(arguments: dict[str, Any], *, allow_destructive: 
     missing = sorted(name for name in required if not str(arguments.get(name, "")).strip())
     if missing:
         raise ValueError("runtime execute missing fields: " + ", ".join(missing))
-    outcome = await NetworkRuntime().execute(
+    outcome = await EffectRuntime().execute(
         plan_id=str(arguments["plan_id"]),
         plan_hash=str(arguments["plan_hash"]),
         execution_nonce=str(arguments["execution_nonce"]),
@@ -173,19 +182,19 @@ async def execute_network_plan(arguments: dict[str, Any], *, allow_destructive: 
 
 
 def inspect_network_plan(plan_id: str) -> dict[str, Any]:
-    return NetworkRuntime().inspect(plan_id)
+    return EffectRuntime().inspect(plan_id)
 
 
 def audit_network_plan(plan_id: str) -> dict[str, Any]:
-    return NetworkRuntime().audit(plan_id)
+    return EffectRuntime().audit(plan_id)
 
 
 def recent_network_plans(limit: int = 20) -> list[dict[str, Any]]:
-    return NetworkRuntime().recent(limit)
+    return EffectRuntime().recent(limit)
 
 
 def reject_network_plan(arguments: dict[str, Any]) -> dict[str, Any]:
-    return NetworkRuntime().reject(
+    return EffectRuntime().reject(
         plan_id=str(arguments.get("plan_id", "")),
         plan_hash=str(arguments.get("plan_hash", "")),
         reason=str(arguments.get("reason", "approval was not granted")),

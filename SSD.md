@@ -24,12 +24,18 @@
 | F-12 | A2A 必须支持 peer 发现、能力选择、超时、循环保护和 durable continuation。 |
 | F-13 | 记忆召回必须绑定 operator 与 session，且只能显式调用。 |
 | F-14 | 离线学习只能生成 proposal，不能自动启用 Skill。 |
-| F-15 | DSH 与 Hermes 必须共享同一 L0 注册表、Network Runtime、verifier、compensator 和 journal 合同。 |
+| F-15 | DSH 与 Hermes 必须共享同一 L0 注册表、Domain Effect Runtime、verifier、compensator 和 journal 合同。 |
 | F-16 | Hermes 写工具不得向模型暴露 execution nonce；只有用户 slash command 可消费进程内 plan binding。 |
 | F-17 | P0.75-A lab 的设备、probe 和 fault target 必须来自版本化 manifest，模型不得构造任意容器或接口。 |
 | F-18 | Lab 配置写必须使用 FRR 白名单和无 shell argv；成功必须满足配置证据及显式绑定的流量 probe。 |
 | F-19 | 小型现网必须验证 OSPF/eBGP 邻居、正负路径、HTTP、双 ISP 切换/回切，并保持 L1/L0 Runtime 不变量。 |
 | F-20 | 拓扑和路径回答必须来自与 Containerlab wiring 精确匹配的 typed graph 和完全解析的 observed traceroute；未知跳点或相邻关系必须失败关闭。 |
+| F-21 | Service Layer 必须通过真实 MCP stdio/Streamable HTTP 协议提供身份、应用、策略、变更、CMDB 与平台能力；pragmatic 禁止 in-process mock transport。 |
+| F-22 | Service desired state、Network enforcement 和 data plane 必须是独立事实源，并可由只读 reconciliation 分类 drift。 |
+| F-23 | 受信 MCP 写必须绑定 server identity/version、declared contract、structured result 与 input/output schema digest。 |
+| F-24 | 每个 Service 写必须绑定唯一 Service L0 Skill，并经过与 Network L0 相同的计划、审批、验证、补偿和审计内核。 |
+| F-25 | 内部 restore MCP tool 不得投影给模型，只能由注册 compensator 调用。 |
+| F-26 | 跨层 L1 必须把 Service 与 Network 写拆为明确计划并在步骤间重读；不得把顺序 workflow 宣称为原子分布式事务。 |
 
 ### 3. 可靠性规格
 
@@ -44,6 +50,10 @@
 | R-07 | A2A timeout、unreachable、loop 和 remote failure 不得报告为完成。 |
 | R-08 | 本地可靠性门禁必须覆盖 24 请求、8 并发，p95 小于 1 秒。 |
 | R-09 | Runtime event audit 必须检测断链、篡改和终态不一致。 |
+| R-10 | 多 MCP 进程的 change check、revision compare、mutation、idempotency 与 audit 必须位于同一 immediate transaction。 |
+| R-11 | Service seed 每个数据库只能执行一次；MCP 重启不得复活已撤销状态。 |
+| R-12 | 幂等 replay 仅在当前状态仍等于原 after snapshot 时允许；否则必须返回 conflict。 |
+| R-13 | MCP 初始化或身份/schema 漂移必须在写发送前关闭连接并失败，不得泄漏子进程或回退 mock。 |
 
 ### 4. 安全目标
 
@@ -68,6 +78,9 @@
 | 本 Agent → A2A peer | 委派 prompt、metadata | self-contained payload、hop/loop limits |
 | A2A peer → 本 Agent | SSE event、interrupt、结果文本 | parser、timeout、continuation approval |
 | Runtime → SQLite | 计划、token digest、事件 | transaction、conditional update、hash chain |
+| Runtime → trusted MCP | provider 声明、schema、structured result | identity/version pin、contract/schema hash、fresh verifier |
+| Service MCP → SQLite | 并发业务变更 | WAL、RLock、BEGIN IMMEDIATE、revision、safe idempotency、audit |
+| Service ↔ Network | 非原子跨系统状态 | 独立读取、drift 分类、步骤间重校验、新计划恢复 |
 
 ### 6. 威胁模型
 
@@ -134,6 +147,12 @@
 - 风险：模型通过 CLI 参数执行 shell、修改管理口、访问未声明容器或把故障注入扩展到宿主机。
 - 控制：严格 manifest、路径归属检查、标识符/IP/interface 校验、无 shell argv、read/config 白名单、`eth0` 禁止、预声明 probe/fault、lab 与真实 inventory 互斥、显式本地 lab 授权。
 - 剩余风险：Containerlab/Docker 具有高权限，宿主 Docker daemon 与 manifest 属于可信运维边界；本 provider 不是多租户安全沙箱。
+
+#### T-13 MCP 伪造、schema 漂移与共享存储竞态
+
+- 风险：恶意/误配置 MCP 把写伪装成读、同名 server 被替换、批准后 schema 改变、两个 MCP 进程同时通过旧 revision、进程重启重放 seed 或陈旧幂等结果覆盖新状态。
+- 控制：官方协议 client、受信标记、server identity/version pin、declared contract、structured result、schema digest 纳入 plan hash、执行前重新 discovery；ServiceStore 使用一次性 seed、WAL、进程内锁、跨进程 immediate transaction、revision 和状态敏感 idempotency。
+- 剩余风险：本地 SQLite 与 stdio 子进程仍共享 OS account，缺少 mTLS/HSM/远端 WORM/数据库 RBAC；生产 MCP 必须独立部署和认证。
 
 ### 7. 审批规格
 
@@ -242,6 +261,29 @@ endpoint 不进入 device API；已知路径的每个 hop 能解析到 node/inte
 为真；注入未知 hop 时返回 `fail_closed=true`；执行点输出明确否认真实 RADIUS/802.1X、
 leaf ACL/IAM 和 stateful firewall。
 
+### 15. P0.75-C Fabric 验收补充
+
+代码门禁必须覆盖 Fabric manifest 的唯一 VLAN/VNI、精确 attachment wiring、access/trunk
+模式、`vlan_id`/EVPN route type 边界、固定 argv、未知端口/VLAN 拒绝、审批前后状态漂移、
+fresh bridge/PVID 验证、流量失败补偿和 exact typed snapshot 恢复。
+
+真实实验门禁必须证明：10 个容器运行；四台网络节点达到 OSPF/BGP EVPN 邻居期望；
+VNI 10010/10020 在两台 VTEP 上存在且各有远端 VTEP；VLAN 10/20 access 与 802.1Q trunk
+跨 VTEP 流量成功；租户互访失败；单条 leaf-spine 链路故障期间 L2VPN 继续转发并恢复；
+L1+L0 强制后置条件失败最终为 `rollback_verified`、端口状态精确恢复、流量恢复且审计链有效。
+验收报告必须同时声明 L3VPN/MPLS/vendor/RF 为未实现。
+
+### 16. P0.8 Service MCP 验收补充
+
+代码门禁必须覆盖 official stdio structured content、identity/schema 绑定、untrusted write
+拒绝、批准后 schema drift、显式 `ok=false`、revision conflict、safe idempotency、seed 重启不
+复活、验证失败 exact snapshot 补偿、internal restore 隐藏和 cross-layer workflow prerequisites。
+
+实际本地门禁必须证明：Service revoke、Network revoke、Service grant、Network apply 四个
+计划均为 `verified_success` 且 audit chain 有效；中间 desired/enforcement 均 false、真实 HTTP
+失败；最终 role、enforcement 和 HTTP 语义恢复。该结果只认证本地仿真逻辑，不认证真实企业
+MCP、网络设备、审批身份、分布式事务或生产可用性。
+
 ---
 
 ## English
@@ -268,12 +310,18 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-12 | A2A must provide discovery, selection, timeout/loop protection, and durable continuations. |
 | F-13 | Memory recall must be operator/session scoped and explicit. |
 | F-14 | Offline learning may create proposals but may not activate Skills. |
-| F-15 | DSH and Hermes must share one L0 registry, Network Runtime, verifier, compensator, and journal contract. |
+| F-15 | DSH and Hermes must share one L0 registry, Domain Effect Runtime, verifier, compensator, and journal contract. |
 | F-16 | Hermes must not expose execution nonces to the model; only a user slash command may consume the process-local binding. |
 | F-17 | P0.75-A devices, probes, and fault targets must come from the versioned manifest; the model cannot invent containers or interfaces. |
 | F-18 | Lab writes must use shell-free argv and the reviewed FRR allowlist; success requires configuration evidence and any explicitly bound traffic probe. |
 | F-19 | The small-production lab must verify OSPF/eBGP, positive and negative paths, HTTP, dual-ISP failover/recovery, and unchanged L1/L0 Runtime invariants. |
 | F-20 | Topology and path answers must come from a typed graph that exactly matches Containerlab wiring and a fully resolved observed traceroute; unknown hops or adjacency must fail closed. |
+| F-21 | The Service Layer must use real MCP stdio/Streamable HTTP for identity, application, policy, change, CMDB, and platform capabilities; pragmatic mode forbids in-process mock transport. |
+| F-22 | Service desired state, Network enforcement, and data-plane evidence must remain independent and support read-only drift reconciliation. |
+| F-23 | Trusted MCP writes must bind server identity/version, declared contract, structured result, and input/output schema digests. |
+| F-24 | Every Service mutation must bind one Service L0 Skill and use the same plan/approval/verification/compensation/audit kernel as Network L0. |
+| F-25 | Internal restore MCP tools must be hidden from the model and callable only by registered compensators. |
+| F-26 | Cross-layer L1 workflows must use explicit plans with reads between effects and may not claim distributed atomicity. |
 
 ### 3. Security objectives
 
@@ -293,6 +341,7 @@ The system must provide exact authorization, effect integrity, evidence-based ou
 - **Audit tampering:** per-plan event hash chains; P1 still requires an external append-only copy.
 - **Hermes model-as-approver confusion:** prepare-only write handlers, nonce removal, exact user slash commands, process-local one-shot bindings, and safe loss on restart. P0.5 still trusts the local account and Hermes gateway allowlist; production requires authenticated sender identity and process isolation.
 - **Lab command/target expansion:** strict manifests, path and identifier validation, shell-free argv, FRR read/write allowlists, management-interface exclusion, predeclared probes/faults, and process isolation from real inventory. Docker remains a trusted privileged boundary, not a multi-tenant sandbox.
+- **MCP spoofing/schema drift/shared-store races:** trusted flags, pinned server identity/version, declared contracts, structured results, schema digests in schema-v5 plans, execution-time rediscovery, one-time seeding, WAL, process locks, immediate transactions, revisions, and state-sensitive idempotency. Local stdio and SQLite still trust the OS account; production needs authenticated independent services and database controls.
 
 ### 5. Approval and model policy
 
@@ -341,3 +390,33 @@ The topology/path gate additionally proves exact equality for 26 typed links,
 node/interface/link and adjacency resolution for a known trace, fail-closed
 behavior for an injected unknown hop, and truthful enforcement labels that deny
 real RADIUS/802.1X, leaf ACL/IAM, and stateful-firewall semantics.
+
+### 11. P0.75-C fabric acceptance supplement
+
+The code gate covers unique VLAN/VNI mappings, exact attachment wiring,
+access/trunk semantics, VLAN and EVPN route-type bounds, fixed argv, rejection
+of unknown ports/VLANs, approval-time drift, fresh bridge/PVID verification,
+traffic-triggered compensation, and exact typed snapshot restoration.
+
+The deployed gate requires all ten containers; expected OSPF and BGP EVPN
+adjacencies; VNIs 10010/10020 and remote VTEPs on both leaves; successful
+cross-VTEP access and tagged VLAN traffic; failed tenant crossing; surviving
+L2VPN traffic during one leaf-spine fault and recovery; and an L1+L0 forced
+postcondition failure ending in `rollback_verified` with exact port state,
+restored traffic, and a valid audit chain. Reports must explicitly mark L3VPN,
+MPLS VPNs, vendor behavior, and RF as unsupported.
+
+### 12. P0.8 Service MCP acceptance supplement
+
+Code gates must cover official stdio structured content, identity/schema
+binding, rejection of untrusted writes, post-approval schema drift, explicit
+`ok=false`, revision conflict, safe idempotency, no seed resurrection after
+restart, exact-snapshot compensation after verification failure, hidden
+internal restore tools, and cross-layer workflow prerequisites.
+
+The actual local gate must prove four `verified_success` plans—Service revoke,
+Network revoke, Service grant, and Network apply—with valid audit chains. The
+intermediate checkpoint must have desired/enforced false and a failed real HTTP
+probe; the final role, enforcement, and HTTP semantics must be restored. This
+qualifies only the local simulation, not real enterprise MCP services, devices,
+approval identity, distributed transactions, or production availability.

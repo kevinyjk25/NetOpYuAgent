@@ -4,7 +4,7 @@
 
 ### 1. 文档范围
 
-本文定义 DSH/Hermes Harness Adapter、共享 Python bridge/Worker、Network Runtime、L0 Skill、backend、A2A 和持久化组件的实现合同。这里的“必须”表示代码应 fail closed 的约束。
+本文定义 DSH/Hermes Harness Adapter、共享 Python bridge/Worker、Domain Effect Runtime、Network/Service L0 Skill、backend、MCP、A2A 和持久化组件的实现合同。这里的“必须”表示代码应 fail closed 的约束。
 
 ### 2. 仓库模块
 
@@ -24,8 +24,9 @@
 | `dsh_adapter/backend.py` | mock/pragmatic backend 生命周期和公共分页工具 |
 | `dsh_adapter/local_dc_peer.py` | loopback-only mock A2A peer |
 | `dsh_adapter/scoped_services.py` | session/operator memory 和 profile capability retrieval |
-| `network_runtime/engine.py` | Network Runtime 主状态机 |
-| `network_runtime/contracts.py` | schema v4、Plan/Evidence/Outcome 与状态迁移 |
+| `effect_runtime/` | 领域中性 façade 与跨 Service/Network reconciliation |
+| `network_runtime/engine.py` | Domain Effect Runtime 共享主状态机 |
+| `network_runtime/contracts.py` | schema v5、Plan/Evidence/Outcome 与状态迁移 |
 | `network_runtime/l0_skills.py` | L0 Skill/step/IntentSpec 注册表和 hash |
 | `network_runtime/validation.py` | 参数规范化、类型、来源、实体与风险校验 |
 | `network_runtime/policies.py` | 工具版本、preflight、verifier、compensator 合同 |
@@ -36,6 +37,10 @@
 | `network_lab/manifest.py` | schema-v1 lab 目标权威与路径/标识校验 |
 | `network_lab/containerlab.py` | 无 shell 生命周期、FRR CLI、probe、fault 和快照恢复 |
 | `network_lab/tools.py` | lab 节点到 pragmatic 工具合同的投影 |
+| `service_layer/models.py` | MCP strict structured-output Pydantic 合同 |
+| `service_layer/store.py` | 多进程事务、revision、幂等、审计与一次性 seed |
+| `service_layer/mcp_server.py` | 六个 official-SDK MCP domain server |
+| `integrations/clients/mcp_client.py` | official MCP stdio/Streamable HTTP client、identity/schema binding |
 | `runtime/tool_results.py` | durable 大结果外置与引用解析 |
 | `profiles/` | LAN/DC/WAN/mock callables、metadata 和 L1 Skills |
 | `tools/` | 公共分页和 pragmatic network tools |
@@ -99,7 +104,7 @@ Worker 使用 Unix Domain Socket，消息为一行一个 JSON object。每个请
 - Worker 每个请求建立独立 backend 生命周期并在结束时关闭客户端与结果 store；
 - Socket 残留只能在确认无监听者后删除。
 
-### 5. Network L0 Skill 合同
+### 5. Network/Service L0 Skill 合同
 
 `L0SkillContract` 是 frozen、版本化的效果定义，包含：
 
@@ -143,12 +148,13 @@ Raw write tool 必须解析到唯一 L0 Skill，且请求提供的 L0 id 必须�
 
 `IntentSpec` 不包含自由文本执行指令。模型解释只能保留在 DSH 会话，不能成为 backend 命令。
 
-### 7. PreparedPlan schema v4
+### 7. PreparedPlan schema v5
 
 核心字段：
 
 ```text
 plan_id, profile, tool_name, tool_version, action_type
+provider_identity, input_schema_digest, output_schema_digest
 arguments, argument_provenance, targets
 risk_level, risk_reasons
 preflight[]
@@ -159,7 +165,7 @@ workflow_run_id, workflow_template_hash
 created_at, expires_at, plan_hash, state, schema_version
 ```
 
-`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。
+`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。schema v5 把 provider identity 与输入/输出 schema digest 纳入批准边界；只为读取既有 journal 保留 v4 hash 兼容，不能用 v4 创建新计划。
 
 ### 8. 状态机
 
@@ -340,13 +346,62 @@ path_role。加载器拒绝重复接口/地址、不同子网、未知节点及�
 服务器源 `/32` route，只在两者允许时运行路径验证。四个工具均为 read-only，LAN/DC
 profile 共同可见；只有带 typed links 的 manifest 才投影这些工具和对应 Skill。
 
+### 20. P0.75-C Fabric 合同与执行细节
+
+`LabFabric` 解析 mode、ASN、RR、VTEP、`LabFabricVlan` 与
+`LabFabricAttachment`，并与 topology node/interface wiring 做精确校验。VLAN/VNI 必须
+唯一；access 恰有一个 VLAN，trunk 至少两个；endpoint、device、interface 和 tenant 必须
+全部来自 manifest。
+
+只读工具直接解析 `bridge -j vlan`、`ip -j -d link type vxlan`、
+`show bgp l2vpn evpn summary json`、`show evpn vni json` 与 EVPN RIB JSON。
+`fabric_set_access_vlan` 只使用固定 argv，在 execution session 保存 typed bridge/PVID
+快照。`fabric-access-vlan` verifier fresh-read 目标 PVID/bridge，并按需运行预声明 probe；
+`fabric-access-vlan-snapshot-v1` 恢复并比较稳定 typed facts 的完全相等性。
+
+参数编译器把 `vlan_id` 限制为 1–4094、`route_type` 限制为 2/3/5；目标仍按 inventory
+唯一解析。ToolContract、L0 Skill、L1 reviewed workflow、verifier 和 compensator 必须同时
+注册，否则启动或 prepare fail closed。
+
+### 21. P0.8 Service MCP 与 Effect Runtime 实现合同
+
+`config.service-lab.yaml` 与 `config.small-production-lab.yaml` 将每个 Service domain 声明为
+独立 stdio MCP server。pragmatic backend 使用官方 SDK 完成 initialize、server info、分页
+tool discovery 和 structured call；不支持 `transport=mock`。连接失败、identity/version 不符、
+重复工具名、schema discovery 失败和清理异常都不能降级为本地 mock。
+
+`MCPToolSpec` 为每个 tool 保存 server name/identity/version、input/output JSON schema、metadata
+和 SHA-256 digest。受信写工具要求 `trusted_for_writes=true`、配置的期望 identity/version、
+匹配的 `netopyu.contract_id` 和 `structured-content-required-v1`。`PreparedPlan` 保存这些值；
+execute 重新连接 provider 后逐项比较，任一变化抛出 `PlanIntegrityError`，写不发送。MCP
+transport success 但 structured payload 明确 `ok=false` 同样是 Runtime failure。
+
+Service SQLite 使用 WAL、foreign keys、进程内 `RLock` 和跨进程 `BEGIN IMMEDIATE`。seed
+仅在缺少 `store_metadata.seed_version` 时执行。entitlement/platform 写在单事务中完成：
+
+1. 验证 approved/open change；
+2. 读取并比较 `expected_revision`；
+3. 检查幂等记录；只有当前状态仍等于原 after snapshot 才允许 replay；
+4. 修改业务状态并单调递增 revision；
+5. 同事务写 idempotency 与 audit row。
+
+Access Policy 与 Platform 的 restore tool 标记 `internal_only`，不会进入 Harness manifest。
+compensator 从 plan preflight 提取精确稳定 snapshot，以执行后 revision 调用 restore，再通过独立
+read verifier 比较稳定事实。revision 是并发 token，补偿后继续单调增长，不要求回到旧数字。
+
+`reconcile_service_network_access` 是只读 composite：并行读取 entitlement、network enforcement
+和两条 CMDB binding，随后运行 manifest-bound HTTP probe。它返回
+`cmdb_network_binding_missing`、`desired_enforcement_mismatch`、
+`enforcement_allows_but_data_plane_failed`、`data_plane_bypasses_denied_policy` 或 `none`。
+这些读取不是跨系统原子快照；所有写计划仍在 approval 后做 execution-time preflight revalidation。
+
 ---
 
 ## English
 
 ### 1. Scope
 
-This document defines implementation contracts for the DSH and Hermes harness adapters, shared Python bridge/Worker, Network Runtime, L0 Skills, backends, A2A, and persistence. “Must” denotes a fail-closed requirement.
+This document defines implementation contracts for the DSH and Hermes harness adapters, shared Python bridge/Worker, Domain Effect Runtime, Network/Service L0 Skills, backends, MCP, A2A, and persistence. “Must” denotes a fail-closed requirement.
 
 The access-lab implementation parses typed `LabUser` and `LabApplication`
 entities. Admission can touch only the declared endpoint/interface and route;
@@ -371,8 +426,9 @@ must reproduce the typed preflight evidence.
 | `dsh_adapter/bridge.py` | Manifest, read, prepare, execute, inspect, audit, workflow API |
 | `dsh_adapter/worker.py` | Persistent JSON-lines Unix-socket server and request isolation |
 | `dsh_adapter/backend.py` | Backend lifecycle and common paging tools |
-| `network_runtime/engine.py` | Main deterministic state machine |
-| `network_runtime/contracts.py` | Schema v4 plans, evidence, outcomes, transitions |
+| `effect_runtime/` | Domain-neutral façade and Service/Network reconciliation |
+| `network_runtime/engine.py` | Shared deterministic effect state machine |
+| `network_runtime/contracts.py` | Schema v5 plans, evidence, outcomes, transitions |
 | `network_runtime/l0_skills.py` | Versioned L0 and IntentSpec registry |
 | `network_runtime/validation.py` | Normalization, schema, provenance, entity, and risk validation |
 | `network_runtime/policies.py` | Tool, preflight, verifier, and compensator contracts |
@@ -380,6 +436,8 @@ must reproduce the typed preflight evidence.
 | `network_lab/manifest.py` | Strict schema-v1 lab target authority |
 | `network_lab/containerlab.py` | Shell-free lifecycle, FRR CLI, probes, faults, snapshot restore |
 | `network_lab/tools.py` | Pragmatic tool-contract projection for lab nodes |
+| `service_layer/` | Strict official-SDK MCP domains and transactional business simulation |
+| `integrations/clients/mcp_client.py` | Official stdio/Streamable HTTP client and identity/schema binding |
 | `runtime/tool_results.py` | Durable oversized-result storage |
 | `profiles/`, `tools/`, `integrations/` | Domain tools and mock/pragmatic adapters |
 
@@ -399,7 +457,7 @@ Compilation rejects unknown/missing/type-invalid arguments, invalid entities, un
 
 ### 5. Plan and state machine
 
-Schema-v4 `PreparedPlan` binds the complete effect description, evidence, L0 contract, intent, workflow, TTL, and `plan_hash`. Approval and execution revalidate the hash; any change invalidates prior authorization.
+Schema-v5 `PreparedPlan` binds the complete effect description, provider identity, input/output schema digests, evidence, L0 contract, intent, workflow, TTL, and `plan_hash`. Approval and execution revalidate every binding; any change invalidates prior authorization. V4 hash support is read compatibility only.
 
 Only `verified_success` and `rollback_verified` represent verified outcomes. Rejection, expiry, changed preconditions, and manual intervention are safe terminal states. Illegal transitions raise `StateTransitionError`.
 
@@ -454,3 +512,43 @@ traces return `fail_closed=true`. `enforcement_path` fresh-reads endpoint
 operstate and the application server's source `/32` route before tracing. These
 read-only tools and their Skill are projected to LAN/DC only when typed links
 exist.
+
+### 12. P0.75-C fabric contracts and execution
+
+`LabFabric` strictly validates the mode, ASN, route reflectors, VTEPs, unique
+VLAN/VNI mappings, access/trunk attachments, tenants, endpoints, interfaces,
+and exact topology wiring. Reads parse Linux bridge/VXLAN JSON and FRR BGP EVPN,
+VNI, and RIB JSON directly.
+
+`fabric_set_access_vlan` uses fixed argv and a provider-owned execution-session
+snapshot. The `fabric-access-vlan` verifier performs a fresh bridge/PVID read
+and optional declared probe. `fabric-access-vlan-snapshot-v1` restores and
+compares exact stable typed facts. VLAN IDs are limited to 1–4094 and EVPN route
+types to 2/3/5. Metadata, ToolContract, L0 Skill, reviewed L1 workflow, verifier,
+and compensator must all be present or preparation fails closed.
+
+### 13. P0.8 Service MCP and Effect Runtime contracts
+
+Each Service domain is a separate official-SDK stdio MCP process. Pragmatic
+mode supports real stdio or Streamable HTTP only and never an in-process mock.
+Initialization discovers paged tools and records server identity/version,
+input/output schemas, metadata, and schema digests. Trusted mutations require
+configured identity pins, declared contract/result metadata, and structured
+content. Plan execution reconnects and rechecks all bindings before sending a
+write. Transport success with structured `ok=false` fails semantically.
+
+Service SQLite enables WAL and foreign keys, protects each process connection
+with an `RLock`, and serializes cross-process mutations with `BEGIN IMMEDIATE`.
+Versioned seed data is installed once. Change authorization, expected revision,
+safe idempotency replay, mutation, monotonic revision, and audit are one
+transaction. An idempotency result is replayable only while current state still
+equals its original after-snapshot; otherwise it returns a conflict.
+
+Internal restore tools are excluded from harness manifests and callable only by
+registered compensators. Compensation restores stable business facts from
+preflight and then performs an independent read; revision remains monotonic.
+The read-only reconciliation tool compares entitlement, two CMDB bindings,
+Containerlab enforcement, and a real HTTP probe. It classifies missing mapping,
+desired/enforced drift, allowed-but-broken data plane, denied-but-bypassed data
+plane, or no drift. Cross-system reads are not an atomic snapshot, so every
+approved write still performs execution-time preflight revalidation.

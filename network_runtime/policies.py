@@ -15,6 +15,8 @@ class ToolContract:
     rollback_tool: str | None = None
     rollback_fields: tuple[str, ...] = ()
     compensator: str | None = None
+    allowed_sources: tuple[str, ...] = ()
+    requires_trusted_mcp: bool = False
 
 
 _CONTRACTS: dict[str, ToolContract] = {
@@ -59,6 +61,61 @@ _CONTRACTS: dict[str, ToolContract] = {
     "wan_failover_path": ToolContract(
         "wan-failover-v1", "wan_tunnel_status", (), "wan-failover",
     ),
+    "fabric_set_access_vlan": ToolContract(
+        "fabric-access-vlan-v1",
+        "lab_get_access_vlan", ("device_id", "interface"),
+        "fabric-access-vlan",
+        "fabric_restore_access_vlan", ("device_id", "interface"),
+        "fabric-access-vlan-snapshot-v1",
+    ),
+    "access_policy_grant_entitlement": ToolContract(
+        "service-entitlement-grant-v1",
+        "access_policy_get_entitlement", ("user_id", "app_id"),
+        "service-entitlement-granted",
+        "access_policy_restore_entitlement", ("user_id", "app_id"),
+        "service-entitlement-snapshot-v1",
+        ("mcp:access-policy-service",), True,
+    ),
+    "access_policy_revoke_entitlement": ToolContract(
+        "service-entitlement-revoke-v1",
+        "access_policy_get_entitlement", ("user_id", "app_id"),
+        "service-entitlement-revoked",
+        "access_policy_restore_entitlement", ("user_id", "app_id"),
+        "service-entitlement-snapshot-v1",
+        ("mcp:access-policy-service",), True,
+    ),
+    "platform_restart_service": ToolContract(
+        "service-platform-restart-v1",
+        "platform_get_service_health", ("service", "environment"),
+        "service-platform-healthy",
+        "platform_restore_service", ("service", "environment"),
+        "service-platform-snapshot-v1",
+        ("mcp:platform-service",), True,
+    ),
+    "platform_rollback_service": ToolContract(
+        "service-platform-rollback-v1",
+        "platform_get_service_health", ("service", "environment"),
+        "service-platform-healthy",
+        "platform_restore_service", ("service", "environment"),
+        "service-platform-snapshot-v1",
+        ("mcp:platform-service",), True,
+    ),
+    "network_apply_app_enforcement": ToolContract(
+        "network-app-enforcement-grant-v1",
+        "network_get_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-granted",
+        "network_restore_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-snapshot-v1",
+        ("network-lab",), False,
+    ),
+    "network_revoke_app_enforcement": ToolContract(
+        "network-app-enforcement-revoke-v1",
+        "network_get_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-revoked",
+        "network_restore_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-snapshot-v1",
+        ("network-lab",), False,
+    ),
 }
 
 
@@ -74,12 +131,27 @@ def resolve_contract(
     requires_approval: bool,
     mode: str,
     source: str,
+    metadata: dict[str, Any] | None = None,
 ) -> ToolContract | None:
     if not requires_approval and action_type == "read_only":
         return ToolContract("read-only-v1", None, (), "read-result")
     contract = _CONTRACTS.get(tool_name)
     if contract is None:
         return None
+    if contract.allowed_sources and source not in contract.allowed_sources:
+        return None
+    if contract.requires_trusted_mcp:
+        metadata = metadata or {}
+        if (
+            not metadata.get("trusted_for_writes")
+            or metadata.get("declared_contract_id") != contract.contract_id
+            or metadata.get("result_contract") != "structured-content-required-v1"
+            or not str(metadata.get("provider_identity") or "").startswith(f"{source}:")
+            or not str(metadata.get("input_schema_digest") or "").startswith("sha256:")
+            or not str(metadata.get("output_schema_digest") or "").startswith("sha256:")
+        ):
+            return None
+        return contract
     # External MCP/OpenAPI writes cannot inherit a same-name local contract.
     if source not in {"profile-mock", "pragmatic-device", "network-lab"}:
         return None
@@ -90,6 +162,8 @@ def resolve_contract(
     pragmatic_lab_writes = {
         "grant_user_access", "revoke_user_access",
         "dc_grant_app_access", "dc_revoke_app_access",
+        "fabric_set_access_vlan",
+        "network_apply_app_enforcement", "network_revoke_app_enforcement",
     }
     if mode == "pragmatic" and tool_name != "edit_device_config":
         if source != "network-lab" or tool_name not in pragmatic_lab_writes:

@@ -22,7 +22,17 @@ def render(value: Any) -> str:
 
 
 def failed_output(value: str) -> bool:
-    return not value.strip() or bool(ERROR_RE.search(value))
+    rendered = value.strip()
+    if not rendered or ERROR_RE.search(rendered):
+        return True
+    try:
+        decoded = json.loads(rendered)
+    except (json.JSONDecodeError, TypeError):
+        return False
+    # Structured providers use ``ok`` as their protocol-level semantic
+    # outcome. Treat an explicit false as failure even when transport/MCP
+    # itself succeeded; prose/error-regex checks alone are insufficient.
+    return isinstance(decoded, dict) and decoded.get("ok") is False
 
 
 def bounded(value: str, limit: int = 4096) -> str:
@@ -32,6 +42,7 @@ def bounded(value: str, limit: int = 4096) -> str:
 def typed_evidence(tool_name: str, rendered: str) -> dict[str, Any]:
     """Return bounded typed facts and a digest; rendered prose is never proof."""
     facts: dict[str, Any] = {}
+    extra: dict[str, Any] = {}
     if tool_name == "get_device_config":
         # Configuration preflight comparisons must ignore volatile headers but
         # must remain sensitive to every effective configuration line.
@@ -95,7 +106,76 @@ def typed_evidence(tool_name: str, rendered: str) -> dict[str, Any]:
             facts = decoded if isinstance(decoded, dict) else {"invalid_shape": True}
         except json.JSONDecodeError:
             facts = {"invalid_json": True}
-    return {"digest": sha256_json(rendered), "bytes": len(rendered), "facts": facts}
+    elif tool_name == "lab_get_access_vlan":
+        try:
+            decoded = json.loads(rendered)
+        except json.JSONDecodeError:
+            facts = {"invalid_json": True}
+        else:
+            if not isinstance(decoded, dict):
+                facts = {"invalid_shape": True}
+            else:
+                # Only stable, state-defining fields participate in approval
+                # drift checks and exact rollback comparison.
+                facts = {
+                    "ok": decoded.get("ok") is True,
+                    "device_id": decoded.get("device_id"),
+                    "interface": decoded.get("interface"),
+                    "mode": decoded.get("mode"),
+                    "current_vlan": decoded.get("current_vlan"),
+                    "bridge": decoded.get("bridge"),
+                    "vlans": decoded.get("vlans"),
+                }
+    elif tool_name in {
+        "access_policy_get_entitlement", "application_check_access",
+    }:
+        try:
+            decoded = json.loads(rendered)
+        except json.JSONDecodeError:
+            facts = {"ok": False, "invalid_json": True}
+        else:
+            facts = {
+                "ok": decoded.get("ok") is True,
+                "user_id": decoded.get("user_id"),
+                "app_id": decoded.get("app_id"),
+                "roles": sorted(decoded.get("roles") or []),
+                "allowed": decoded.get("allowed") is True,
+            }
+            extra["concurrency_token"] = decoded.get("revision")
+    elif tool_name == "platform_get_service_health":
+        try:
+            decoded = json.loads(rendered)
+        except json.JSONDecodeError:
+            facts = {"ok": False, "invalid_json": True}
+        else:
+            facts = {
+                "ok": decoded.get("ok") is True,
+                "service": decoded.get("service"),
+                "environment": decoded.get("environment"),
+                "status": decoded.get("status"),
+                "version": decoded.get("version"),
+                "replicas_ready": decoded.get("replicas_ready"),
+                "replicas_desired": decoded.get("replicas_desired"),
+            }
+            extra["concurrency_token"] = decoded.get("revision")
+    elif tool_name == "network_get_app_enforcement":
+        try:
+            decoded = json.loads(rendered)
+        except json.JSONDecodeError:
+            facts = {"ok": False, "invalid_json": True}
+        else:
+            facts = {
+                "ok": decoded.get("ok") is True,
+                "user_id": decoded.get("user_id"),
+                "app_id": decoded.get("app_id"),
+                "allowed": decoded.get("allowed") is True,
+                "source_endpoint": decoded.get("source_endpoint"),
+                "application_endpoint": decoded.get("application_endpoint"),
+                "implementation": decoded.get("implementation"),
+            }
+    return {
+        "digest": sha256_json(rendered), "bytes": len(rendered), "facts": facts, **extra,
+    }
 
 
 def same_snapshot(before: Any, after: Any) -> bool:

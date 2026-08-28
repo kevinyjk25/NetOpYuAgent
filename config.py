@@ -52,6 +52,13 @@ class PragmaticMCPServer:
     url: str = ""
     command: list[str] = field(default_factory=list)
     auth: dict[str, Any] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
+    cwd: str = ""
+    domain: str = "external"
+    trusted_for_writes: bool = False
+    expected_server_name: str = ""
+    expected_server_version: str = ""
+    timeout: float = 30.0
 
 
 @dataclass
@@ -156,6 +163,7 @@ def _csv(value: str) -> list[str]:
 
 def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
     source = Path(path).expanduser()
+    config_directory = source.resolve().parent
     raw = yaml.safe_load(source.read_text(encoding="utf-8")) if source.is_file() else {}
     raw = _mapping(raw)
 
@@ -200,6 +208,15 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
         url=str(item.get("url", "")),
         command=[str(part) for part in _list(item.get("command"))],
         auth=_mapping(item.get("auth")),
+        env={str(k): str(v) for k, v in _mapping(item.get("env")).items()},
+        cwd=str(
+            (config_directory / str(item.get("cwd") or ".")).resolve()
+        ),
+        domain=str(item.get("domain", "external")),
+        trusted_for_writes=bool(item.get("trusted_for_writes", False)),
+        expected_server_name=str(item.get("expected_server_name", "")),
+        expected_server_version=str(item.get("expected_server_version", "")),
+        timeout=float(item.get("timeout", 30.0)),
     ) for item in map(_mapping, _list(pragmatic_raw.get("mcp_servers")))]
 
     editable = {

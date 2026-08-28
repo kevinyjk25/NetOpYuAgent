@@ -151,13 +151,42 @@ def _mcp_metadata(spec: Any) -> dict[str, Any]:
     schema = spec.parameters if isinstance(spec.parameters, dict) else {}
     properties = schema.get("properties", {})
     required = schema.get("required", [])
+    declared = (
+        spec.meta.get("netopyu", {})
+        if isinstance(getattr(spec, "meta", None), dict) else {}
+    )
+    prefix_action = _external_action_type(spec.name)
+    declared_action = str(declared.get("action_type") or "")
+    if spec.trusted_for_writes:
+        action_type = declared_action or prefix_action
+    elif spec.identity_pinned and declared_action == "read_only":
+        action_type = "read_only"
+    else:
+        # An untrusted server cannot make a write look read-only by metadata or
+        # by choosing a misleading name. Both signals must agree on read-only.
+        action_type = (
+            "read_only"
+            if declared_action == "read_only" and prefix_action == "read_only"
+            else "destructive"
+        )
     return {
         "description": spec.description or spec.name,
         "parameters": properties if isinstance(properties, dict) else {},
         "required": required if isinstance(required, list) else [],
-        "action_type": _external_action_type(spec.name),
-        "hitl": _external_action_type(spec.name) != "read_only",
-        "tags": ["mcp", spec.server_name],
+        "output_schema": spec.output_schema,
+        "action_type": action_type,
+        "hitl": action_type != "read_only",
+        "tags": ["mcp", spec.server_name, str(declared.get("domain") or "external")],
+        "provider_identity": (
+            f"mcp:{spec.server_name}:{spec.server_identity}@{spec.server_version}"
+        ),
+        "input_schema_digest": spec.input_schema_digest,
+        "output_schema_digest": spec.output_schema_digest,
+        "declared_contract_id": declared.get("contract_id"),
+        "result_contract": declared.get("result_contract"),
+        "trusted_for_writes": bool(spec.trusted_for_writes),
+        "service_domain": declared.get("service_domain"),
+        "internal_only": bool(declared.get("internal_only", False)),
     }
 
 
@@ -288,6 +317,7 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
             profile_id,
             access_enabled=bool(manifest.users and manifest.applications),
             topology_enabled=bool(manifest.links),
+            fabric_enabled=manifest.fabric is not None,
         ))
         lab_providers.append(provider)
     else:
@@ -307,6 +337,13 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
             "url": server.url,
             "command": server.command,
             "auth": server.auth,
+            "env": server.env,
+            "cwd": server.cwd or None,
+            "domain": server.domain,
+            "trusted_for_writes": server.trusted_for_writes,
+            "expected_server_name": server.expected_server_name,
+            "expected_server_version": server.expected_server_version,
+            "timeout": server.timeout,
         }
     mock_servers = [
         name for name, server in mcp_config.items()
@@ -319,15 +356,17 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
         )
     for name, server in mcp_config.items():
         transport = str(server.get("transport", "")).lower()
-        if transport == "http":
-            if find_spec("httpx") is None:
-                raise RuntimeError(f"MCP HTTP server {name!r} requires the httpx package")
+        if transport in {"http", "streamable-http"}:
             if not server.get("url"):
                 raise ValueError(f"MCP HTTP server {name!r} has no url")
         if transport == "stdio" and not server.get("command"):
             raise ValueError(f"MCP stdio server {name!r} has no command")
+        if transport not in {"stdio", "http", "streamable-http"}:
+            raise ValueError(f"MCP server {name!r} has unsupported transport {transport!r}")
         _validate_auth(f"MCP server {name!r}", server.get("auth", {}) or {})
     if mcp_config:
+        if find_spec("mcp") is None:
+            raise RuntimeError("configured MCP servers require the official 'mcp>=2,<3' SDK")
         client = MCPClient.from_config(mcp_config)
         await client.connect_all()
         mcp_clients.append(client)
@@ -370,9 +409,19 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
         )
         for row in tool_rows
     }
+    from effect_runtime.reconciliation import METADATA as RECONCILIATION_METADATA
+    from effect_runtime.reconciliation import build as build_reconciliation_tools
+
+    reconciliation = build_reconciliation_tools(callables)
+    callables.update(reconciliation)
+    for name in reconciliation:
+        metadata[name] = dict(RECONCILIATION_METADATA[name])
+        sources[name] = "effect-runtime"
     tool_store = _attach_common_tools(callables, metadata, sources)
     source_counts = router.tool_count()
     source_counts["netopyu-runtime"] = 2
+    if reconciliation:
+        source_counts["effect-runtime"] = len(reconciliation)
     if "local" in source_counts:
         source_counts[
             "network-lab" if cfg.pragmatic.lab.enabled else "pragmatic-device"

@@ -54,9 +54,13 @@ class TestCampusIdcProjection(unittest.TestCase):
         dc = adapter.callables("dc")
         self.assertIn("grant_user_access", lan)
         self.assertNotIn("dc_grant_app_access", lan)
-        self.assertNotIn("lab_app_probe", lan)
+        # Cross-domain reconciliation may share read-only observed-state
+        # probes, while profile-specific legacy mutation tools stay isolated.
+        self.assertIn("lab_app_probe", lan)
+        self.assertIn("network_get_app_enforcement", lan)
         self.assertIn("dc_grant_app_access", dc)
         self.assertIn("lab_app_probe", dc)
+        self.assertIn("network_get_app_enforcement", dc)
         self.assertNotIn("grant_user_access", dc)
         self.assertTrue(lab_access_metadata("lan")["grant_user_access"]["hitl"])
         self.assertTrue(lab_access_metadata("dc")["dc_grant_app_access"]["hitl"])

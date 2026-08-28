@@ -106,6 +106,48 @@ _ACCESS_COMMON_METADATA: dict[str, dict[str, Any]] = {
         "action_type": "read_only",
         "tags": ["lab", "application", "verification"],
     },
+    "network_get_app_enforcement": {
+        "description": (
+            "Read actual Containerlab application-policy enforcement for one user/application. "
+            "This is observed network state, not a business entitlement lookup."
+        ),
+        "parameters": {"user_id": "Declared lab user", "app_id": "Declared lab application"},
+        "required": ["user_id", "app_id"],
+        "returns": "Structured enforcement state and implementation boundary",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["network", "lab", "enforcement", "verification"],
+    },
+    "network_apply_app_enforcement": {
+        "description": (
+            "Apply manifest-bound network enforcement allowing one user to one application. "
+            "Requires Effect Runtime approval, verification and exact compensation."
+        ),
+        "parameters": {
+            "user_id": "Declared lab user", "app_id": "Declared lab application",
+            "change_id": "Approved enterprise change identifier", "reason": "Auditable reason",
+        },
+        "required": ["user_id", "app_id", "change_id", "reason"],
+        "returns": "Structured network enforcement mutation",
+        "hitl": True,
+        "action_type": "reversible",
+        "tags": ["network", "lab", "enforcement", "write"],
+    },
+    "network_revoke_app_enforcement": {
+        "description": (
+            "Apply manifest-bound network enforcement denying one user to one application. "
+            "Requires Effect Runtime approval, verification and exact compensation."
+        ),
+        "parameters": {
+            "user_id": "Declared lab user", "app_id": "Declared lab application",
+            "change_id": "Approved enterprise change identifier", "reason": "Auditable reason",
+        },
+        "required": ["user_id", "app_id", "change_id", "reason"],
+        "returns": "Structured network enforcement mutation",
+        "hitl": True,
+        "action_type": "reversible",
+        "tags": ["network", "lab", "enforcement", "write"],
+    },
 }
 
 _LAN_ACCESS_TOOLS = (
@@ -120,6 +162,80 @@ _TOPOLOGY_TOOLS = (
     "lab_get_topology_graph", "lab_get_endpoint", "lab_trace_path",
     "lab_get_enforcement_path",
 )
+
+_FABRIC_METADATA: dict[str, dict[str, Any]] = {
+    "lab_get_fabric_state": {
+        "description": (
+            "Read the actual 802.1Q, Linux bridge, VXLAN and FRR BGP EVPN state "
+            "and compare it with the reviewed fabric manifest."
+        ),
+        "parameters": {},
+        "returns": "Typed live fabric state with explicit protocol truth boundaries",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["fabric", "evpn", "vxlan", "verification"],
+    },
+    "lab_get_access_vlan": {
+        "description": "Read the actual Linux bridge, PVID and untagged state of one declared access port.",
+        "parameters": {
+            "device_id": "Exact declared VTEP device identifier",
+            "interface": "Exact declared access interface",
+        },
+        "required": ["device_id", "interface"],
+        "returns": "Observed bridge VLAN membership and PVID",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["fabric", "vlan", "bridge", "verification"],
+    },
+    "lab_get_vxlan_state": {
+        "description": "Read actual Linux VXLAN devices and FRR EVPN VNI state from one VTEP.",
+        "parameters": {"device_id": "Exact declared VTEP device identifier"},
+        "required": ["device_id"],
+        "returns": "Linux VXLAN IDs, FRR VNIs and remote VTEPs",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["fabric", "vxlan", "vni"],
+    },
+    "lab_get_bgp_evpn_summary": {
+        "description": "Read the actual FRR L2VPN EVPN BGP neighbor state from one fabric node.",
+        "parameters": {"device_id": "Exact declared fabric BGP device identifier"},
+        "required": ["device_id"],
+        "returns": "Structured EVPN peer state and received/sent prefixes",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["fabric", "bgp", "evpn"],
+    },
+    "lab_get_evpn_routes": {
+        "description": "Read actual FRR EVPN routes, optionally restricted to route type 2, 3, or 5.",
+        "parameters": {
+            "device_id": "Exact declared fabric BGP device identifier",
+            "route_type": {"type": "integer", "description": "Optional EVPN route type: 2, 3, or 5"},
+        },
+        "required": ["device_id"],
+        "returns": "Typed EVPN RIB entries and paths",
+        "hitl": False,
+        "action_type": "read_only",
+        "tags": ["fabric", "bgp", "evpn", "route"],
+    },
+    "fabric_set_access_vlan": {
+        "description": (
+            "Move one manifest-declared access port to one declared VLAN using fixed Linux argv. "
+            "Requires HITL, live state verification, an optional traffic probe and exact rollback."
+        ),
+        "parameters": {
+            "device_id": "Exact declared VTEP device identifier",
+            "interface": "Exact declared access interface",
+            "vlan_id": {"type": "integer", "description": "Declared target VLAN ID"},
+            "reason": "Operator change reason for the audit journal",
+            "verification_probe_id": "Optional exact manifest probe that must pass after the VLAN change",
+        },
+        "required": ["device_id", "interface", "vlan_id", "reason"],
+        "returns": "Observed VLAN mutation; success is decided by Network Runtime verification",
+        "hitl": True,
+        "action_type": "destructive",
+        "tags": ["fabric", "vlan", "write", "destructive"],
+    },
+}
 
 
 def lab_access_metadata(profile_id: str) -> dict[str, dict[str, Any]]:
@@ -139,8 +255,11 @@ def lab_access_metadata(profile_id: str) -> dict[str, dict[str, Any]]:
 
 def lab_tool_metadata(
     profile_id: str, *, access_enabled: bool = True, topology_enabled: bool = True,
+    fabric_enabled: bool = False,
 ) -> dict[str, dict[str, Any]]:
     base = dict(LAB_TOOL_METADATA)
+    if fabric_enabled and profile_id == "dc":
+        base.update(_FABRIC_METADATA)
     if not topology_enabled:
         for name in _TOPOLOGY_TOOLS:
             base.pop(name, None)
@@ -150,7 +269,7 @@ def lab_tool_metadata(
         return base
     return {
         **base,
-        **(_ACCESS_COMMON_METADATA if profile_id == "dc" else {}),
+        **_ACCESS_COMMON_METADATA,
         **lab_access_metadata(profile_id),
     }
 
@@ -187,6 +306,16 @@ class LabToolAdapter:
             })
             if self.provider.manifest.users and self.provider.manifest.applications:
                 values["lab_get_enforcement_path"] = self.lab_get_enforcement_path
+        if self.provider.manifest.fabric and profile_id == "dc":
+            values.update({
+                "lab_get_fabric_state": self.lab_get_fabric_state,
+                "lab_get_access_vlan": self.lab_get_access_vlan,
+                "lab_get_vxlan_state": self.lab_get_vxlan_state,
+                "lab_get_bgp_evpn_summary": self.lab_get_bgp_evpn_summary,
+                "lab_get_evpn_routes": self.lab_get_evpn_routes,
+                "fabric_set_access_vlan": self.fabric_set_access_vlan,
+                "fabric_restore_access_vlan": self.fabric_restore_access_vlan,
+            })
         if profile_id == "lan" and self.provider.manifest.users:
             values.update({
                 "list_users": self.list_users,
@@ -203,6 +332,14 @@ class LabToolAdapter:
                 "dc_check_user_app_access": self.dc_check_user_app_access,
                 "dc_grant_app_access": self.dc_grant_app_access,
                 "dc_revoke_app_access": self.dc_revoke_app_access,
+            })
+        if self.provider.manifest.users and self.provider.manifest.applications:
+            values.update({
+                "lab_app_probe": self.lab_app_probe,
+                "network_get_app_enforcement": self.network_get_app_enforcement,
+                "network_apply_app_enforcement": self.network_apply_app_enforcement,
+                "network_revoke_app_enforcement": self.network_revoke_app_enforcement,
+                "network_restore_app_enforcement": self.network_restore_app_enforcement,
             })
         return values
 
@@ -321,6 +458,43 @@ class LabToolAdapter:
             str(args["user_id"]), str(args["app_id"]),
         ), ensure_ascii=False, sort_keys=True)
 
+    async def lab_get_fabric_state(self, _args: dict[str, Any]) -> str:
+        return json.dumps(
+            await self.provider.fabric_state(), ensure_ascii=False, sort_keys=True,
+        )
+
+    async def lab_get_access_vlan(self, args: dict[str, Any]) -> str:
+        return json.dumps(await self.provider.fabric_access_vlan(
+            str(args["device_id"]), str(args["interface"]),
+        ), ensure_ascii=False, sort_keys=True)
+
+    async def lab_get_vxlan_state(self, args: dict[str, Any]) -> str:
+        return json.dumps(await self.provider.fabric_vxlan_state(
+            str(args["device_id"]),
+        ), ensure_ascii=False, sort_keys=True)
+
+    async def lab_get_bgp_evpn_summary(self, args: dict[str, Any]) -> str:
+        return json.dumps(await self.provider.fabric_bgp_evpn_summary(
+            str(args["device_id"]),
+        ), ensure_ascii=False, sort_keys=True)
+
+    async def lab_get_evpn_routes(self, args: dict[str, Any]) -> str:
+        route_type = args.get("route_type")
+        return json.dumps(await self.provider.fabric_evpn_routes(
+            str(args["device_id"]),
+            int(route_type) if route_type is not None else None,
+        ), ensure_ascii=False, sort_keys=True)
+
+    async def fabric_set_access_vlan(self, args: dict[str, Any]) -> str:
+        return await self.provider.set_fabric_access_vlan(
+            str(args["device_id"]), str(args["interface"]), int(args["vlan_id"]),
+        )
+
+    async def fabric_restore_access_vlan(self, args: dict[str, Any]) -> str:
+        return await self.provider.restore_fabric_access_vlan(
+            str(args["device_id"]), str(args["interface"]),
+        )
+
     async def lab_probe(self, args: dict[str, Any]) -> str:
         return json.dumps(await self.provider.probe(str(args["probe_id"])), sort_keys=True)
 
@@ -331,6 +505,44 @@ class LabToolAdapter:
         return json.dumps(await self.provider.application_probe(
             str(args["user_id"]), str(args["app_id"]),
         ), ensure_ascii=False, sort_keys=True)
+
+    async def network_get_app_enforcement(self, args: dict[str, Any]) -> str:
+        user_id = str(args["user_id"]).strip().lower()
+        app_id = str(args["app_id"]).strip().lower()
+        user = self.provider._user(user_id)
+        app = self.provider._application(app_id)
+        blocked = await self.provider.application_access_blocked(user_id, app_id)
+        return json.dumps({
+            "ok": True,
+            "user_id": user_id,
+            "app_id": app_id,
+            "allowed": not blocked,
+            "source_endpoint": user.endpoint,
+            "application_endpoint": app.endpoint,
+            "implementation": "server-source-blackhole-route",
+            "simulation": True,
+        }, ensure_ascii=False, sort_keys=True)
+
+    async def network_apply_app_enforcement(self, args: dict[str, Any]) -> str:
+        user_id = str(args["user_id"]).strip().lower()
+        app_id = str(args["app_id"]).strip().lower()
+        await self.provider.set_application_access(user_id, app_id, allowed=True)
+        return await self.network_get_app_enforcement(args)
+
+    async def network_revoke_app_enforcement(self, args: dict[str, Any]) -> str:
+        user_id = str(args["user_id"]).strip().lower()
+        app_id = str(args["app_id"]).strip().lower()
+        await self.provider.set_application_access(user_id, app_id, allowed=False)
+        return await self.network_get_app_enforcement(args)
+
+    async def network_restore_app_enforcement(self, args: dict[str, Any]) -> str:
+        user_id = str(args["user_id"]).strip().lower()
+        app_id = str(args["app_id"]).strip().lower()
+        allowed = args.get("allowed")
+        if not isinstance(allowed, bool):
+            raise ValueError("network enforcement restore requires boolean allowed")
+        await self.provider.set_application_access(user_id, app_id, allowed=allowed)
+        return await self.network_get_app_enforcement(args)
 
     async def list_users(self, args: dict[str, Any]) -> str:
         department = str(args.get("dept") or "").strip().lower()

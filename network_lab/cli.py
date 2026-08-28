@@ -39,7 +39,7 @@ async def _verify(provider: ContainerlabProvider) -> dict[str, Any]:
     }
     neighbors: dict[str, str] = {}
     neighbor_checks: dict[str, bool] = {}
-    bgp: dict[str, str] = {}
+    bgp: dict[str, Any] = {}
     bgp_checks: dict[str, bool] = {}
     # A freshly deployed multi-node topology needs time for both protocols to
     # converge. Verify the control plane before spending time on data probes.
@@ -54,15 +54,25 @@ async def _verify(provider: ContainerlabProvider) -> dict[str, Any]:
             ].expected_ospf_neighbors
             for device_id, output in neighbors.items()
         }
-        bgp = {
-            device_id: await provider.show(device_id, "show bgp summary")
-            for device_id in sorted(bgp_devices)
-        }
-        bgp_checks = {
-            device_id: _established_bgp_neighbors(output)
-            >= bgp_devices[device_id].expected_bgp_neighbors
-            for device_id, output in bgp.items()
-        }
+        if provider.manifest.fabric:
+            bgp = {
+                device_id: await provider.fabric_bgp_evpn_summary(device_id)
+                for device_id in sorted(bgp_devices)
+            }
+            bgp_checks = {
+                device_id: bool(value["ok"])
+                for device_id, value in bgp.items()
+            }
+        else:
+            bgp = {
+                device_id: await provider.show(device_id, "show bgp summary")
+                for device_id in sorted(bgp_devices)
+            }
+            bgp_checks = {
+                device_id: _established_bgp_neighbors(output)
+                >= bgp_devices[device_id].expected_bgp_neighbors
+                for device_id, output in bgp.items()
+            }
         if all(neighbor_checks.values()) and all(bgp_checks.values()):
             break
         if attempt < 30:
@@ -76,6 +86,7 @@ async def _verify(provider: ContainerlabProvider) -> dict[str, Any]:
     if "branch-r1" in provider.manifest.devices:
         route = await provider.show("branch-r1", "show ip route 10.20.20.0/24")
         primary_selected = "10.0.0.2" in route and "eth2" in route
+    fabric = await provider.fabric_state() if provider.manifest.fabric else None
     checks = {
         "all_nodes_running": bool(status["ok"]),
         "ospf_expected_neighbors": all(neighbor_checks.values()),
@@ -85,6 +96,7 @@ async def _verify(provider: ContainerlabProvider) -> dict[str, Any]:
             for probe_id, item in probes.items()
         ),
         "primary_wan_selected": primary_selected,
+        "fabric_contract_and_state": fabric is None or bool(fabric["ok"]),
     }
     return {
         "ok": all(checks.values()),
@@ -94,6 +106,7 @@ async def _verify(provider: ContainerlabProvider) -> dict[str, Any]:
         "bgp": bgp_checks,
         "probes": probes,
         "route_evidence": route,
+        "fabric": fabric,
     }
 
 
@@ -150,6 +163,74 @@ async def _exercise_failover(provider: ContainerlabProvider) -> dict[str, Any]:
     }
 
 
+async def _exercise_fabric_failover(provider: ContainerlabProvider) -> dict[str, Any]:
+    """Remove one leaf-to-spine path and prove EVPN L2 service plus recovery."""
+    fabric = provider.manifest.fabric
+    if fabric is None:
+        raise LabCommandError("exercise-fabric-failover requires a fabric manifest")
+    required = {"leaf1-spine1", "leaf1-spine2"}
+    if not required.issubset(provider.manifest.fault_targets):
+        raise LabCommandError("fabric failover targets leaf1-spine1/leaf1-spine2 are not declared")
+    baseline = await _verify(provider)
+    if not baseline["ok"]:
+        return {"ok": False, "phase": "baseline", "baseline": baseline}
+    started = time.monotonic()
+    await provider.set_fault("leaf1-spine1", kind="link_down")
+    degraded_summary: dict[str, Any] = {}
+    degraded_probes: dict[str, Any] = {}
+    try:
+        for _ in range(20):
+            await asyncio.sleep(1)
+            degraded_summary = await provider.fabric_bgp_evpn_summary("leaf-1")
+            degraded_probes = {
+                probe_id: await provider.probe(probe_id)
+                for probe_id in ("tenant-a-l2vpn", "tenant-b-l2vpn")
+                if probe_id in provider.manifest.probes
+            }
+            if (
+                int(degraded_summary.get("established_neighbors", 0)) >= 1
+                and all(item.get("ok") is True for item in degraded_probes.values())
+            ):
+                break
+    finally:
+        await provider.set_fault("leaf1-spine1", kind="link_up")
+    recovered_summary: dict[str, Any] = {}
+    recovery_probes: dict[str, Any] = {}
+    for _ in range(20):
+        await asyncio.sleep(1)
+        recovered_summary = await provider.fabric_bgp_evpn_summary("leaf-1")
+        recovery_probes = {
+            probe_id: await provider.probe(probe_id)
+            for probe_id in ("tenant-a-l2vpn", "tenant-b-l2vpn")
+            if probe_id in provider.manifest.probes
+        }
+        if (
+            recovered_summary.get("ok") is True
+            and all(item.get("ok") is True for item in recovery_probes.values())
+        ):
+            break
+    checks = {
+        "baseline_passed": bool(baseline["ok"]),
+        "one_evpn_path_remained": int(degraded_summary.get("established_neighbors", 0)) >= 1,
+        "l2vpn_survived_single_spine_loss": (
+            bool(degraded_probes) and all(item.get("ok") is True for item in degraded_probes.values())
+        ),
+        "all_evpn_peers_recovered": recovered_summary.get("ok") is True,
+        "l2vpn_recovered": (
+            bool(recovery_probes) and all(item.get("ok") is True for item in recovery_probes.values())
+        ),
+    }
+    return {
+        "ok": all(checks.values()),
+        "checks": checks,
+        "convergence_seconds": round(time.monotonic() - started, 3),
+        "degraded_bgp": degraded_summary,
+        "degraded_probes": degraded_probes,
+        "recovered_bgp": recovered_summary,
+        "recovery_probes": recovery_probes,
+    }
+
+
 async def run(args: argparse.Namespace) -> dict[str, Any]:
     provider = _provider(args.manifest, args.timeout)
     if args.command == "preflight":
@@ -165,6 +246,9 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
     if args.command == "exercise-failover":
         _approval(args)
         return await _exercise_failover(provider)
+    if args.command == "exercise-fabric-failover":
+        _approval(args)
+        return await _exercise_fabric_failover(provider)
     if args.command == "fault":
         _approval(args)
         output = await provider.set_fault(args.fault_id, kind=args.kind, value=args.value)
@@ -188,6 +272,8 @@ def parser() -> argparse.ArgumentParser:
     deploy.add_argument("--reconfigure", action="store_true")
     exercise = commands.add_parser("exercise-failover")
     exercise.add_argument("--approve-local-lab", action="store_true")
+    fabric_exercise = commands.add_parser("exercise-fabric-failover")
+    fabric_exercise.add_argument("--approve-local-lab", action="store_true")
     fault = commands.add_parser("fault")
     fault.add_argument("fault_id")
     fault.add_argument(

@@ -22,6 +22,7 @@ class ManifestError(ValueError):
 
 _ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 _INTERFACE = re.compile(r"^eth[1-9][0-9]*$")
+_LINUX_LINK = re.compile(r"^[a-z][a-z0-9_.-]{0,31}$")
 _HTTP_PATH = re.compile(r"^/[a-zA-Z0-9._/-]{0,255}$")
 
 
@@ -131,6 +132,36 @@ class LabSimulationModel:
 
 
 @dataclass(frozen=True)
+class LabFabricVlan:
+    key: str
+    vlan_id: int
+    name: str
+    tenant: str
+    l2vni: int
+    bridge: str
+    vxlan_interface: str
+
+
+@dataclass(frozen=True)
+class LabFabricAttachment:
+    endpoint: str
+    device: str
+    interface: str
+    mode: str
+    vlans: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class LabFabric:
+    mode: str
+    asn: int
+    route_reflectors: tuple[str, ...]
+    vteps: tuple[str, ...]
+    vlans: dict[int, LabFabricVlan]
+    attachments: dict[str, LabFabricAttachment]
+
+
+@dataclass(frozen=True)
 class LabProbe:
     probe_id: str
     source: str
@@ -186,6 +217,7 @@ class LabManifest:
     devices: dict[str, LabDevice]
     endpoints: dict[str, LabEndpoint]
     links: dict[str, LabLink]
+    fabric: LabFabric | None
     simulation: LabSimulationModel
     probes: dict[str, LabProbe]
     fault_targets: dict[str, LabFaultTarget]
@@ -377,6 +409,162 @@ def load_manifest(path: str | Path) -> LabManifest:
             path_role=path_role,
         )
 
+    fabric: LabFabric | None = None
+    fabric_raw_value = raw.get("fabric")
+    if fabric_raw_value is not None:
+        fabric_raw = _mapping(fabric_raw_value, "fabric")
+        mode = str(fabric_raw.get("mode") or "").strip().lower()
+        if mode != "evpn-vxlan-l2":
+            raise ManifestError(
+                "fabric.mode must be evpn-vxlan-l2; L3VPN is not qualified by this provider"
+            )
+        asn = fabric_raw.get("asn")
+        if not isinstance(asn, int) or isinstance(asn, bool) or not 1 <= asn <= 4_294_967_295:
+            raise ManifestError("fabric.asn must be between 1 and 4294967295")
+
+        def device_list(field: str) -> tuple[str, ...]:
+            values = fabric_raw.get(field)
+            if (
+                not isinstance(values, list) or not values
+                or any(not isinstance(value, str) for value in values)
+            ):
+                raise ManifestError(f"fabric.{field} must be a non-empty device array")
+            result = tuple(_identifier(value, f"fabric.{field}") for value in values)
+            if len(result) != len(set(result)):
+                raise ManifestError(f"fabric.{field} contains duplicate devices")
+            if any(value not in devices for value in result):
+                raise ManifestError(f"fabric.{field} references an undeclared device")
+            return result
+
+        route_reflectors = device_list("route_reflectors")
+        vteps = device_list("vteps")
+        if set(route_reflectors) & set(vteps):
+            raise ManifestError("fabric route reflectors and VTEPs must be distinct")
+
+        fabric_vlans: dict[int, LabFabricVlan] = {}
+        used_vnis: set[int] = set()
+        for key, value in _mapping(fabric_raw.get("vlans"), "fabric.vlans").items():
+            key = _identifier(key, "fabric.vlans key")
+            item = _mapping(value, f"fabric.vlans.{key}")
+            vlan_id = item.get("vlan_id")
+            l2vni = item.get("l2vni")
+            if (
+                not isinstance(vlan_id, int) or isinstance(vlan_id, bool)
+                or not 1 <= vlan_id <= 4094
+            ):
+                raise ManifestError(f"fabric.vlans.{key}.vlan_id must be between 1 and 4094")
+            if (
+                not isinstance(l2vni, int) or isinstance(l2vni, bool)
+                or not 1 <= l2vni <= 16_777_215
+            ):
+                raise ManifestError(
+                    f"fabric.vlans.{key}.l2vni must be between 1 and 16777215"
+                )
+            if vlan_id in fabric_vlans or l2vni in used_vnis:
+                raise ManifestError("fabric VLAN IDs and L2VNIs must be unique")
+            tenant = _identifier(item.get("tenant"), f"fabric.vlans.{key}.tenant")
+            if tenant not in zones:
+                raise ManifestError(f"fabric.vlans.{key}.tenant is not a declared zone")
+            bridge = str(item.get("bridge") or "").strip()
+            vxlan_interface = str(item.get("vxlan_interface") or "").strip()
+            if not _LINUX_LINK.fullmatch(bridge) or not bridge.startswith("br"):
+                raise ManifestError(f"fabric.vlans.{key}.bridge is invalid")
+            if (
+                not _LINUX_LINK.fullmatch(vxlan_interface)
+                or not vxlan_interface.startswith("vxlan")
+            ):
+                raise ManifestError(f"fabric.vlans.{key}.vxlan_interface is invalid")
+            fabric_vlans[vlan_id] = LabFabricVlan(
+                key=key,
+                vlan_id=vlan_id,
+                name=str(item.get("name") or key).strip(),
+                tenant=tenant,
+                l2vni=l2vni,
+                bridge=bridge,
+                vxlan_interface=vxlan_interface,
+            )
+            used_vnis.add(l2vni)
+        if not fabric_vlans:
+            raise ManifestError("fabric.vlans must declare at least one VLAN")
+
+        try:
+            topology_raw = yaml.safe_load(topology.read_text(encoding="utf-8")) or {}
+        except (OSError, UnicodeDecodeError, yaml.YAMLError) as error:
+            raise ManifestError(f"cannot validate fabric topology: {error}") from error
+        topology_nodes = _mapping(
+            _mapping(topology_raw, "topology file").get("topology"), "topology",
+        )
+        node_names = set(_mapping(topology_nodes.get("nodes"), "topology.nodes"))
+        if node_names != all_node_ids:
+            raise ManifestError("fabric topology nodes must exactly equal manifest nodes")
+        wired_pairs = {
+            frozenset(str(endpoint).strip() for endpoint in _mapping(
+                value, f"topology.links[{index}]",
+            ).get("endpoints") or [])
+            for index, value in enumerate(topology_nodes.get("links") or [])
+        }
+
+        attachments: dict[str, LabFabricAttachment] = {}
+        used_ports: set[tuple[str, str]] = set()
+        for endpoint_id, value in _mapping(
+            fabric_raw.get("attachments"), "fabric.attachments",
+        ).items():
+            endpoint_id = _identifier(endpoint_id, "fabric.attachments key")
+            if endpoint_id not in endpoints:
+                raise ManifestError(f"fabric attachment {endpoint_id!r} is not an endpoint")
+            item = _mapping(value, f"fabric.attachments.{endpoint_id}")
+            device = _identifier(item.get("device"), f"fabric.attachments.{endpoint_id}.device")
+            if device not in vteps:
+                raise ManifestError(f"fabric attachment {endpoint_id!r} must terminate on a VTEP")
+            interface = str(item.get("interface") or "").strip()
+            if not _INTERFACE.fullmatch(interface):
+                raise ManifestError(f"fabric attachment {endpoint_id!r} has an invalid interface")
+            mode_value = str(item.get("mode") or "").strip().lower()
+            if mode_value not in {"access", "trunk"}:
+                raise ManifestError(f"fabric attachment {endpoint_id!r} mode is invalid")
+            raw_vlans = item.get("vlans")
+            if (
+                not isinstance(raw_vlans, list) or not raw_vlans
+                or any(not isinstance(vlan, int) or isinstance(vlan, bool) for vlan in raw_vlans)
+            ):
+                raise ManifestError(f"fabric attachment {endpoint_id!r} vlans are invalid")
+            attachment_vlans = tuple(dict.fromkeys(raw_vlans))
+            if mode_value == "access" and len(attachment_vlans) != 1:
+                raise ManifestError("fabric access attachments require exactly one VLAN")
+            if mode_value == "trunk" and len(attachment_vlans) < 2:
+                raise ManifestError("fabric trunk attachments require at least two VLANs")
+            if any(vlan not in fabric_vlans for vlan in attachment_vlans):
+                raise ManifestError(f"fabric attachment {endpoint_id!r} references unknown VLAN")
+            port = (device, interface)
+            if port in used_ports:
+                raise ManifestError("fabric attachment ports must be unique")
+            physical_pair = frozenset({
+                f"{endpoints[endpoint_id].node}:eth1",
+                f"{devices[device].node}:{interface}",
+            })
+            if physical_pair not in wired_pairs:
+                raise ManifestError(
+                    f"fabric attachment {endpoint_id!r} does not match Containerlab wiring"
+                )
+            used_ports.add(port)
+            attachments[endpoint_id] = LabFabricAttachment(
+                endpoint=endpoint_id,
+                device=device,
+                interface=interface,
+                mode=mode_value,
+                vlans=attachment_vlans,
+            )
+        if set(attachments) != set(endpoints):
+            raise ManifestError("every fabric endpoint must have one typed attachment")
+        fabric = LabFabric(
+            mode=mode,
+            asn=asn,
+            route_reflectors=route_reflectors,
+            vteps=vteps,
+            vlans=fabric_vlans,
+            attachments=attachments,
+        )
+
     simulation_raw = _mapping(raw.get("simulation") or {}, "simulation")
     simulation = LabSimulationModel(
         forwarding=str(simulation_raw.get("forwarding") or "unspecified").strip(),
@@ -388,17 +576,26 @@ def load_manifest(path: str | Path) -> LabManifest:
         ).strip(),
         security_edge=str(simulation_raw.get("security_edge") or "unspecified").strip(),
     )
-    if links:
+    if links or fabric:
         allowed_simulation = {
-            "forwarding": {"linux-l3-frr", "unspecified"},
-            "network_admission": {"endpoint-interface-state", "unspecified"},
-            "application_policy": {"server-source-blackhole-route", "unspecified"},
-            "security_edge": {"routed-wan-edge-no-stateful-firewall", "unspecified"},
+            "forwarding": {"linux-l3-frr", "linux-frr-evpn-vxlan", "unspecified"},
+            "network_admission": {
+                "endpoint-interface-state", "8021q-linux-bridge", "unspecified",
+            },
+            "application_policy": {
+                "server-source-blackhole-route", "evpn-mac-route-distribution", "unspecified",
+            },
+            "security_edge": {
+                "routed-wan-edge-no-stateful-firewall",
+                "tenant-bridge-domain-isolation",
+                "unspecified",
+            },
         }
         for field, allowed in allowed_simulation.items():
             if getattr(simulation, field) not in allowed:
                 raise ManifestError(f"simulation.{field} is invalid")
-        _validate_topology_links(topology, links)
+        if links:
+            _validate_topology_links(topology, links)
 
     probes: dict[str, LabProbe] = {}
     for probe_id, value in _mapping(raw.get("probes"), "probes").items():
@@ -552,6 +749,7 @@ def load_manifest(path: str | Path) -> LabManifest:
         devices=devices,
         endpoints=endpoints,
         links=links,
+        fabric=fabric,
         simulation=simulation,
         probes=probes,
         fault_targets=faults,

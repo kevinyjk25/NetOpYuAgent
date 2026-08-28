@@ -4,16 +4,17 @@
 
 ### 项目定位
 
-NetOpYuAgent 是可接入多个通用 Agent Harness 的网络领域插件与确定性执行运行时。当前主平台是 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness)，并提供基于公开插件 API 的 [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) Adapter。
+NetOpYuAgent 是可接入多个通用 Agent Harness 的网络与业务运维领域插件，以及确定性 Domain Effect Runtime。当前主平台是 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness)，并提供基于公开插件 API 的 [Hermes Agent](https://github.com/NousResearch/Hermes-Agent) Adapter。
 
 DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生命周期和通用编排。NetOpYuAgent 不实现第二套通用 Agent Harness，而是提供网络领域必须保留的可靠能力：
 
 - Domain L1 Skills：诊断、追问、跨域协作和业务流程编排；
-- Network L0 Skills：参数校验、风险计算、预检、审批绑定、单次执行、结果验证、补偿/回滚和审计；
+- Network/Service L0 Skills：参数校验、风险计算、预检、审批绑定、单次执行、结果验证、补偿/回滚和审计；
 - LAN、DC、WAN 与 pragmatic 网络工具；
+- 标准 MCP Service Layer：身份、应用目录、权限策略、变更、CMDB 和服务平台；
 - DSH/Hermes Harness Adapter、共享 Python Worker、A2A provider、作用域记忆、能力检索和离线评测。
 
-> 当前状态：P0 迁移完成；P0.5 mock 原型闭环完成；P0.75-A FRR/Containerlab 实验后端已实现。P0.75-A 需要 Linux Containerlab 执行环境，本机依赖未就绪时仍会 fail closed。它证明架构、安全执行、控制面与容器转发链路，不等于真实生产网络中的“绝对 100% 正确”。真实设备、企业身份、变更窗口、HA、备份恢复与生产 SLO 属于 P1。
+> 当前状态：P0 迁移、P0.5 Effect Runtime 原型、P0.75-A/B/C Containerlab 后端和 P0.8 Service MCP 原型均已完成。P0.8 已在本机通过真实 MCP stdio 进程、持久化业务状态、四个受审 L0 计划和 Containerlab HTTP 数据面完成跨层闭环。它不等于生产环境“绝对 100% 正确”；真实厂商设备、企业 IT 系统、身份/审批、HA、备份恢复与生产 SLO 属于 P1。
 
 ### 分层术语
 
@@ -23,10 +24,11 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 |---|---|
 | Harness Platform Layer | DSH 或 Hermes；管理模型、会话、UI/CLI、工具与交互 |
 | Harness Adapter | 将同一领域能力投影到 DSH 或 Hermes，不拥有网络效果语义 |
-| NetOpYu Domain Layer | Harness 之下共享的网络领域能力总层 |
+| NetOpYu Domain Layer | Harness 之下共享的网络与业务运维领域能力总层 |
 | Domain L1 Skill | 允许模型参与的泛化业务 Skill；负责理解、诊断、追问和编排 |
 | Network L0 Skill | 不依赖模型推理的版本化执行合同；负责确定性网络效果 |
-| Network Runtime | 编译并执行 Network L0 Skill 的安全运行时 |
+| Service L0 Skill | 不依赖模型推理的版本化执行合同；负责确定性业务系统效果 |
+| Domain Effect Runtime | Network/Service L0 共用的计划、审批、验证、补偿与审计内核；`NetworkRuntime` 是兼容名称 |
 
 ### P0.5 完成范围
 
@@ -45,8 +47,9 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 - A2A 发现、委派、深度/循环保护和持久化 continuation；
 - 本地 loopback-only DC peer，用于真实 A2A/SSE 协议模拟；
 - 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
-- DSH/Hermes 使用同一 Worker、L0 注册表、Network Runtime、验证器和审计；
-- 完整 retirement 门禁：148 个测试、32 个子测试和 7/7 本地端到端检查。
+- DSH/Hermes 使用同一 Worker、L0 注册表、Effect Runtime、验证器和审计；
+- 标准 MCP SDK 的 stdio/Streamable HTTP client、服务身份/version pinning 与 schema hash 绑定；
+- 完整 Python 门禁：180 个测试和 39 个子测试；另有 Containerlab 实际端到端演练。
 
 ### 快速开始
 
@@ -62,7 +65,7 @@ DSH 或 Hermes 负责会话、模型调用、工具调用、UI/CLI、Skill 生�
 cd /Users/steven/NetOpYuAgent
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 
 ollama pull qwen3.5:27b
 ollama pull qwen2.5:7b
@@ -76,7 +79,7 @@ scripts/netopyu-dsh start
 
 ### Hermes Adapter 本地运行
 
-Hermes 不取代 Network Runtime，只增加一个 Harness 入口。先按 Hermes 官方说明安装 `hermes` CLI，然后运行：
+Hermes 不取代 Domain Effect Runtime，只增加一个 Harness 入口。先按 Hermes 官方说明安装 `hermes` CLI，然后运行：
 
 ```bash
 scripts/netopyu-hermes install
@@ -263,12 +266,82 @@ L0 成功要求 fresh running-config 和预声明流量探测同时通过。失�
 执行会话快照差异恢复，并由 Runtime 独立重读配置证明恢复；否则进入
 `manual_intervention_required`。厂商 CLI、ASIC、性能与无线 RF 不属于本阶段。
 
+### P0.75-C 真实 EVPN/VXLAN Fabric
+
+`labs/p075-c-evpn-vxlan/` 是 2 Spine + 2 Leaf 的 Clos Fabric，包含 6 个 endpoint。
+Spine 为双 EVPN Route Reflector，Leaf 为 VTEP；VLAN 10/20 分别映射到
+L2VNI 10010/10020。接入口和 802.1Q trunk、Linux bridge/VXLAN 数据面、OSPF underlay、
+MP-BGP EVPN type-2/type-3 路由与跨 VTEP 转发都在容器中真实运行，不是工具返回 mock。
+
+```bash
+python scripts/netopyu_lab.py \
+  --manifest labs/p075-c-evpn-vxlan/lab.yaml \
+  deploy --approve-local-lab --reconfigure
+python scripts/netopyu_lab.py \
+  --manifest labs/p075-c-evpn-vxlan/lab.yaml verify
+python scripts/netopyu_lab.py \
+  --manifest labs/p075-c-evpn-vxlan/lab.yaml \
+  exercise-fabric-failover --approve-local-lab
+python scripts/evpn_vxlan_runtime_e2e.py --approve-local-lab
+```
+
+最后一个命令运行完整 `lab-fabric-access-vlan-change` L1 +
+`network.fabric.access-vlan.set` L0 用例：建立端口与流量基线、生成高风险审批计划、实际
+切换接入口、fresh-read 验证、故意触发业务探测失败、自动恢复精确 bridge/PVID 快照并验证
+恢复后的流量和审计链。
+
+DSH UI 使用 Fabric 专用配置，建议与现有 3080 实例使用不同端口：
+
+```bash
+NETOPYU_CONFIG_PATH=config.evpn-vxlan-lab.yaml \
+NETOPYU_DSH_BACKEND=pragmatic \
+NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 \
+NETOPYU_DSH_PORT=3082 scripts/netopyu-dsh start
+```
+
+页面中可先提问“使用 `lab-evpn-vxlan-operations` 检查全网 EVPN/VXLAN 状态”，再要求
+“使用 `lab-fabric-access-vlan-change` 将 leaf-1 eth3 从 VLAN 10 改到 VLAN 20，原因是
+本地回滚演练，并用 tenant-a-l2vpn 验证；等待我审批”。
+
+当前 Docker Desktop Linux 内核明确显示 `CONFIG_NET_VRF is not set`，所以本实验只声明
+EVPN L2VPN。EVPN L3VPN、MPLS L2VPN/L3VPN、厂商 CLI/ASIC、防火墙会话与无线 RF 均未
+实现；需要支持 NET_VRF 的 Linux 主机或独立网络 NOS 镜像后才能扩展。
+
+### P0.8 Service MCP + Domain Effect Runtime
+
+`service_layer/` 不再把 Alice/Bob、应用权限或变更工单伪装成网络工具返回值。它通过官方
+MCP Python SDK 启动六类独立服务进程，并共享一个仅用于本地仿真的事务型 SQLite：
+
+- Identity：权威用户与生命周期状态；
+- Application：应用目录、owner、endpoint 与合法角色；
+- Access Policy：业务资格与 desired-state entitlement；
+- Change：工单审批与执行窗口；
+- CMDB：业务实体到 Containerlab endpoint 的显式映射；
+- Platform：服务健康、restart/rollback 与 revision。
+
+Service Layer 只拥有业务期望状态；Containerlab 只拥有网络 enforcement 和数据面。二者
+不读取同一个“万能 mock”值。`reconcile_service_network_access` 会并行读取 MCP desired
+state、CMDB binding、网络实际 `/32` enforcement 和真实 HTTP probe，并明确分类 drift。
+Service/Network 写操作都必须经过同一 Effect Runtime，但使用各自的 L0、provider identity、
+input/output schema hash、preflight、verifier 和 compensator。
+
+先部署 P0.75-B 网络，再运行完整的撤销/恢复演练：
+
+```bash
+python scripts/service_network_runtime_e2e.py --approve-local-lab
+```
+
+该命令不会直接调用 provider 写接口。它依次执行 Service revoke、Network revoke、Service
+grant、Network apply 四个独立计划，验证中间 HTTP 阻断和最终恢复，并检查每条审计链。
+仅测试 Service MCP 时使用 `config.service-lab.yaml`；DSH 与网络联动使用
+`config.small-production-lab.yaml`。
+
 ### 模型使用策略
 
 - 默认使用 `qwen3.5:27b` 进行网络工具会话。
 - `qwen2.5:7b` 的本地资格测试未通过自主变更要求：它会跳过指定 Skill、错误选择子代理、在成功后重复发起相同破坏性调用，并错误解释审批拒绝。
 - 7B 可以用于只读查询、分类或候选意图生成，但不能独立驱动可变更网络流程。
-- 模型只提出候选意图；Network Runtime 决定该意图能否安全进入效果层。
+- 模型只提出候选意图；Domain Effect Runtime 决定该意图能否安全进入效果层。
 
 Network L0 Skill 能保证“已校验并经审批的具体计划”按合同执行和验证，不能保证模型提出的计划天然等于用户真实业务意图。
 
@@ -306,6 +379,7 @@ scripts/netopyu-dsh retirement
 scripts/netopyu-hermes doctor
 scripts/netopyu-hermes compare
 scripts/netopyu-hermes test
+python scripts/service_network_runtime_e2e.py --approve-local-lab
 python scripts/netopyu_lab.py preflight
 python scripts/netopyu_lab.py verify
 ```
@@ -318,7 +392,7 @@ python scripts/netopyu_lab.py verify
 scripts/netopyu-dsh retirement
 ```
 
-该命令是项目主门禁，覆盖 Python、Node 插件语法、Harness 边界、HITL、A2A、Network Runtime、Skill 投影、检索质量、Worker 并发/恢复和破坏性操作策略。`scripts/netopyu-hermes test` 额外覆盖 Hermes 官方 PluginContext 表面、slash 审批、nonce 隐藏、A2A continuation 与 DSH/Hermes Runtime 不变量一致性。
+该命令是项目主门禁，覆盖 Python、Node 插件语法、Harness 边界、HITL、A2A、Domain Effect Runtime、Skill 投影、检索质量、Worker 并发/恢复和破坏性操作策略。`scripts/netopyu-hermes test` 额外覆盖 Hermes 官方 PluginContext 表面、slash 审批、nonce 隐藏、A2A continuation 与 DSH/Hermes Runtime 不变量一致性。
 
 ### 文档
 
@@ -333,16 +407,17 @@ scripts/netopyu-dsh retirement
 
 ### Project scope
 
-NetOpYuAgent is a harness-adaptable network-domain plugin and deterministic execution runtime. [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) remains the primary platform, with an additional public-API adapter for [Hermes Agent](https://github.com/NousResearch/Hermes-Agent).
+NetOpYuAgent is a harness-adaptable network/service-operations domain plugin and deterministic Domain Effect Runtime. [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness) remains the primary platform, with an additional public-API adapter for [Hermes Agent](https://github.com/NousResearch/Hermes-Agent).
 
 DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orchestration. NetOpYuAgent does not implement another general-purpose harness. It contributes the network capabilities that must remain reliable:
 
 - Domain L1 Skills for diagnosis, clarification, cross-domain collaboration, and workflow orchestration;
-- Network L0 Skills for validation, risk assessment, preflight, approval binding, one-shot execution, verification, compensation/rollback, and audit;
+- Network and Service L0 Skills for validation, risk assessment, preflight, approval binding, one-shot execution, verification, compensation/rollback, and audit;
 - LAN, DC, WAN, and pragmatic network tools;
+- standard MCP Service Layer servers for identity, application, access policy, change, CMDB, and platform state;
 - DSH/Hermes adapters, a shared Python Worker, A2A provider, scoped memory, capability retrieval, and offline evaluation.
 
-> Status: P0 migration and the P0.5 mock prototype are complete. The P0.75-A FRR/Containerlab backend is implemented and fails closed when its Linux lab dependencies are unavailable. It validates architecture, safe execution, control-plane behavior, and container forwarding, not absolute correctness on production hardware. Real devices, enterprise identity, change windows, HA, backup/restore, and production SLOs belong to P1.
+> Status: P0 migration, the P0.5 Effect Runtime prototype, P0.75-A/B/C Containerlab backends, and the P0.8 Service MCP prototype are complete. P0.8 passed a local cross-layer run using real MCP stdio processes, persistent business state, four reviewed L0 plans, and the Containerlab HTTP data plane. This is not absolute production correctness; vendor devices, enterprise systems, identity/approval, HA, backup/restore, and SLO certification belong to P1.
 
 ### Layer terminology
 
@@ -350,14 +425,15 @@ DSH or Hermes owns sessions, model calls, tools, UI/CLI, Skills, and general orc
 |---|---|
 | Harness Platform Layer | DSH or Hermes for models, sessions, UI/CLI, tools, and interaction |
 | Harness Adapter | Projects domain capabilities without owning network effect semantics |
-| NetOpYu Domain Layer | Shared network-domain capabilities below either harness |
+| NetOpYu Domain Layer | Shared network/service-operations capabilities below either harness |
 | Domain L1 Skill | Generalized, model-assisted business Skill for reasoning and orchestration |
 | Network L0 Skill | Versioned, model-independent effect contract |
-| Network Runtime | Safety runtime that compiles and executes Network L0 Skills |
+| Service L0 Skill | Versioned, model-independent business-system effect contract |
+| Domain Effect Runtime | Shared plan/approval/verification/compensation/audit kernel; `NetworkRuntime` is the compatibility name |
 
 ### P0.5 completion scope
 
-The local mock scope includes DSH and Hermes harness adapters, versioned Network L0 Skills, strict parameters and provenance, immutable intent/plan/contract hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, and a complete retirement gate with 148 tests, 32 subtests, and 7/7 end-to-end checks.
+The local scope includes DSH and Hermes harness adapters, versioned Network/Service L0 Skills, strict parameters and provenance, immutable intent/plan/provider/schema hashes, harness-specific user approval bound to one Runtime nonce, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, official MCP transports, and a Python gate with 180 tests and 39 subtests.
 
 ### Hermes adapter
 
@@ -383,7 +459,7 @@ Requirements: Python 3.11/3.12, Node.js 22.19+ or 24+, pnpm, Ollama, and a local
 cd /Users/steven/NetOpYuAgent
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 
 ollama pull qwen3.5:27b
 ollama pull qwen2.5:7b
@@ -502,6 +578,49 @@ inference. The current Erin→CRM primary path is
 `erin-client → access-wired-1 → campus-core-1 → idc-leaf-1 → crm-server` and
 does not traverse either security-edge node.
 
+### P0.75-C real EVPN/VXLAN fabric
+
+`labs/p075-c-evpn-vxlan/` runs a two-spine/two-leaf Clos with six endpoints,
+dual EVPN route reflectors, two VTEPs, VLANs 10/20, and L2VNIs 10010/10020.
+Linux access/trunk VLANs, bridge/VXLAN forwarding, OSPF underlay, MP-BGP EVPN
+type-2/type-3 routes, and cross-VTEP traffic are live container behavior.
+
+Use `verify`, `exercise-fabric-failover`, and
+`scripts/evpn_vxlan_runtime_e2e.py --approve-local-lab`. The last command runs
+the reviewed L1 workflow and `network.fabric.access-vlan.set` L0 contract,
+forces a protected traffic postcondition failure, then proves exact bridge/PVID
+restoration, recovered traffic, and an intact audit chain. Start a DSH instance
+with `config.evpn-vxlan-lab.yaml` to expose the two fabric Skills and typed tools.
+
+The current Docker Desktop kernel has `CONFIG_NET_VRF` disabled, so this lab
+truthfully claims EVPN L2VPN only. EVPN L3VPN, MPLS L2/L3VPN, vendor CLI/ASIC,
+stateful firewall behavior, and wireless RF remain unsupported.
+
+### P0.8 Service MCP + Domain Effect Runtime
+
+`service_layer/` runs six official-SDK MCP domains: identity, application,
+access policy, change, CMDB, and platform. They share a transactional local
+SQLite simulation but own only business desired state. Containerlab separately
+owns observed enforcement and packet/application behavior. The composite
+`reconcile_service_network_access` read compares those independent truths and
+classifies drift.
+
+Trusted Service mutations require a pinned MCP server name/version, declared
+contract, structured output, and input/output schema digests. Both Service and
+Network effects then pass through the same Effect Runtime with domain-specific
+L0 contracts, preflight, verifier, and compensator. Run the actual local saga
+after deploying P0.75-B:
+
+```bash
+python scripts/service_network_runtime_e2e.py --approve-local-lab
+```
+
+The case executes Service revoke, Network revoke, Service grant, and Network
+apply as four independently approved and audited plans; it proves the denied
+HTTP checkpoint and final semantic restoration. Use `config.service-lab.yaml`
+for Service-only DSH testing and `config.small-production-lab.yaml` for the
+combined environment.
+
 ### Safety defaults
 
 - `mock` is the default backend; an incomplete pragmatic backend fails closed.
@@ -518,7 +637,7 @@ does not traverse either security-edge node.
 scripts/netopyu-dsh retirement
 ```
 
-This is the primary local gate for Python tests, Node/plugin syntax, harness boundaries, HITL, A2A, Network Runtime, Skill projection, retrieval quality, Worker concurrency/recovery, and mutation policy. `scripts/netopyu-hermes test` covers the Hermes PluginContext surface, slash approval, hidden nonces, remote continuations, and DSH/Hermes Runtime invariant parity.
+This is the primary local gate for Python tests, Node/plugin syntax, harness boundaries, HITL, A2A, Domain Effect Runtime, Skill projection, retrieval quality, Worker concurrency/recovery, and mutation policy. `scripts/netopyu-hermes test` covers the Hermes PluginContext surface, slash approval, hidden nonces, remote continuations, and DSH/Hermes Runtime invariant parity.
 
 ### Documentation
 

@@ -111,6 +111,7 @@ class ToolLoader:
                     self._profile_id,
                     access_enabled=bool(manifest.users and manifest.applications),
                     topology_enabled=bool(manifest.links),
+                    fabric_enabled=manifest.fabric is not None,
                 ))
                 meta["edit_device_config"] = {
                     **meta["edit_device_config"],
@@ -121,6 +122,15 @@ class ToolLoader:
                         ),
                     },
                 }
+            cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
+            if any(server.domain == "service" for server in cfg.pragmatic.mcp_servers):
+                from service_layer.catalog import workflow_metadata
+
+                meta.update(workflow_metadata())
+                if cfg.pragmatic.lab.enabled:
+                    from effect_runtime.reconciliation import METADATA as RECONCILIATION_METADATA
+
+                    meta.update(RECONCILIATION_METADATA)
 
         logger.info(
             "ToolLoader[%s, profile=%s]: %d tools in metadata",

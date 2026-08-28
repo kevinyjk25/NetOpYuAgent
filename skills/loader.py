@@ -87,6 +87,16 @@ class SkillLoader:
         else:
             prag = self._load_folder(self._root / "skills" / "pragmatic", fatal=False)
             defs.update(prag)
+            service: dict[str, dict[str, Any]] = {}
+            try:
+                from config import load
+
+                cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
+                if any(server.domain == "service" for server in cfg.pragmatic.mcp_servers):
+                    service = self._load_folder(self._root / "skills" / "service", fatal=False)
+                    defs.update(service)
+            except (OSError, ValueError):
+                logger.warning("SkillLoader: service skill discovery skipped due to invalid config")
             lab: dict[str, dict[str, Any]] = {}
             try:
                 from config import load
@@ -101,6 +111,8 @@ class SkillLoader:
                         capabilities.add("access")
                     if manifest.links:
                         capabilities.add("topology")
+                    if manifest.fabric:
+                        capabilities.add("fabric")
                     discovered = self._load_folder(self._root / "skills" / "lab", fatal=False)
                     lab = {
                         skill_id: definition
@@ -116,7 +128,8 @@ class SkillLoader:
                 # discovery remains fail-soft as documented for business skills.
                 logger.warning("SkillLoader: lab skill discovery skipped due to invalid config")
             logger.info(
-                "SkillLoader[pragmatic]: %d skill(s) loaded (%d lab)", len(defs), len(lab),
+                "SkillLoader[pragmatic]: %d skill(s) loaded (%d service, %d lab)",
+                len(defs), len(service), len(lab),
             )
 
         return defs

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import ipaddress
+import json
 import os
 import platform
 import re
@@ -140,6 +141,7 @@ class ContainerlabProvider:
         self.runner = runner or LocalCommandRunner()
         self.command_timeout = command_timeout
         self._snapshots: dict[str, str] = {}
+        self._fabric_vlan_snapshots: dict[tuple[str, str], dict[str, object]] = {}
 
     def _device(self, device_id: str) -> LabDevice:
         try:
@@ -566,6 +568,317 @@ class ContainerlabProvider:
         container = self.manifest.container_name(node)
         result = await self._run(("docker", "exec", container, *argv))
         return self._require_ok(result, f"docker exec {node}")
+
+    def _fabric(self):
+        if self.manifest.fabric is None:
+            raise LabCommandError("this lab manifest has no typed fabric contract")
+        return self.manifest.fabric
+
+    async def _json_node(self, node: str, argv: Sequence[str]) -> object:
+        output = await self._exec_node(node, argv)
+        try:
+            return json.loads(output)
+        except json.JSONDecodeError as error:
+            raise LabCommandError(
+                f"node {node!r} returned invalid JSON for {tuple(argv)!r}"
+            ) from error
+
+    def _fabric_attachment(self, device_id: str, interface: str):
+        fabric = self._fabric()
+        self._device(device_id)
+        for attachment in fabric.attachments.values():
+            if attachment.device == device_id and attachment.interface == interface:
+                return attachment
+        raise LabCommandError(
+            f"interface {device_id}:{interface} is not a reviewed fabric attachment"
+        )
+
+    async def fabric_access_vlan(self, device_id: str, interface: str) -> dict[str, object]:
+        """Read the actual Linux bridge/PVID state for one declared access port."""
+        attachment = self._fabric_attachment(device_id, interface)
+        if attachment.mode != "access":
+            raise LabCommandError("fabric access VLAN operations require an access attachment")
+        device = self._device(device_id)
+        vlan_payload, link_payload = await asyncio.gather(
+            self._json_node(device.node, ("bridge", "-j", "vlan", "show", "dev", interface)),
+            self._json_node(device.node, ("ip", "-j", "link", "show", "dev", interface)),
+        )
+        if not isinstance(vlan_payload, list) or len(vlan_payload) != 1:
+            raise LabCommandError("bridge VLAN state is missing or ambiguous")
+        if not isinstance(link_payload, list) or len(link_payload) != 1:
+            raise LabCommandError("access-port link state is missing or ambiguous")
+        raw_vlans = vlan_payload[0].get("vlans") or {}
+        if not isinstance(raw_vlans, list):
+            raise LabCommandError("bridge VLAN state has an invalid shape")
+        vlan_entries = [
+            {
+                "vlan_id": int(item["vlan"]),
+                "pvid": "PVID" in (item.get("flags") or []),
+                "untagged": "Egress Untagged" in (item.get("flags") or []),
+            }
+            for item in raw_vlans
+            if isinstance(item, dict) and isinstance(item.get("vlan"), int)
+        ]
+        pvids = [item["vlan_id"] for item in vlan_entries if item["pvid"]]
+        if len(pvids) != 1:
+            raise LabCommandError("access port must have exactly one observed PVID")
+        current_vlan = pvids[0]
+        fabric = self._fabric()
+        expected_bridge = (
+            fabric.vlans[current_vlan].bridge if current_vlan in fabric.vlans else None
+        )
+        pvid_entry = next(item for item in vlan_entries if item["pvid"])
+        observed_bridge = link_payload[0].get("master")
+        return {
+            "ok": (
+                expected_bridge is not None
+                and observed_bridge == expected_bridge
+                and pvid_entry["untagged"] is True
+            ),
+            "evidence_type": "observed-linux-bridge-vlan",
+            "device_id": device_id,
+            "node": device.node,
+            "interface": interface,
+            "endpoint": attachment.endpoint,
+            "mode": attachment.mode,
+            "manifest_vlans": list(attachment.vlans),
+            "current_vlan": current_vlan,
+            "bridge": observed_bridge,
+            "vlans": vlan_entries,
+        }
+
+    async def set_fabric_access_vlan(
+        self, device_id: str, interface: str, vlan_id: int,
+    ) -> str:
+        """Move one reviewed access port to one declared VLAN using fixed argv only."""
+        fabric = self._fabric()
+        attachment = self._fabric_attachment(device_id, interface)
+        if attachment.mode != "access":
+            raise LabCommandError("only reviewed access ports may be moved between VLANs")
+        if vlan_id not in fabric.vlans:
+            raise LabCommandError(f"VLAN {vlan_id} is not declared by the fabric manifest")
+        before = await self.fabric_access_vlan(device_id, interface)
+        if before["ok"] is not True:
+            raise LabCommandError("access port is not in a valid declared preflight state")
+        current_vlan = int(before["current_vlan"])
+        if current_vlan == vlan_id:
+            raise LabCommandError("requested access VLAN already matches observed state")
+        key = (device_id, interface)
+        self._fabric_vlan_snapshots[key] = before
+        node = self._device(device_id).node
+        target = fabric.vlans[vlan_id]
+        commands = (
+            ("bridge", "vlan", "del", "dev", interface, "vid", str(current_vlan)),
+            ("ip", "link", "set", "dev", interface, "nomaster"),
+            ("ip", "link", "set", "dev", interface, "master", target.bridge),
+            (
+                "bridge", "vlan", "add", "dev", interface, "vid", str(vlan_id),
+                "pvid", "untagged",
+            ),
+            ("ip", "link", "set", "dev", interface, "up"),
+        )
+        for command in commands:
+            await self._exec_node(node, command)
+        observed = await self.fabric_access_vlan(device_id, interface)
+        if observed["current_vlan"] != vlan_id or observed["bridge"] != target.bridge:
+            raise LabCommandError("access VLAN command completed but target state was not observed")
+        return json.dumps({
+            "ok": True,
+            "device_id": device_id,
+            "interface": interface,
+            "previous_vlan": current_vlan,
+            "current_vlan": vlan_id,
+            "bridge": target.bridge,
+        }, sort_keys=True)
+
+    async def restore_fabric_access_vlan(self, device_id: str, interface: str) -> str:
+        """Restore the exact execution-session bridge and PVID snapshot."""
+        key = (device_id, interface)
+        snapshot = self._fabric_vlan_snapshots.get(key)
+        if snapshot is None:
+            raise LabCommandError(
+                f"no execution-session fabric snapshot exists for {device_id}:{interface}"
+            )
+        previous_vlan = int(snapshot["current_vlan"])
+        fabric = self._fabric()
+        previous = fabric.vlans[previous_vlan]
+        current = await self.fabric_access_vlan(device_id, interface)
+        if current["ok"] is not True:
+            raise LabCommandError("access port is not in a valid declared state before rollback")
+        node = self._device(device_id).node
+        current_vlan = int(current["current_vlan"])
+        commands = (
+            ("bridge", "vlan", "del", "dev", interface, "vid", str(current_vlan)),
+            ("ip", "link", "set", "dev", interface, "nomaster"),
+            ("ip", "link", "set", "dev", interface, "master", previous.bridge),
+            (
+                "bridge", "vlan", "add", "dev", interface, "vid", str(previous_vlan),
+                "pvid", "untagged",
+            ),
+            ("ip", "link", "set", "dev", interface, "up"),
+        )
+        for command in commands:
+            await self._exec_node(node, command)
+        restored = await self.fabric_access_vlan(device_id, interface)
+        comparable = ("current_vlan", "bridge", "vlans")
+        if any(restored[field] != snapshot[field] for field in comparable):
+            raise LabCommandError("fabric rollback did not restore the exact access-port state")
+        return json.dumps({
+            "ok": True,
+            "device_id": device_id,
+            "interface": interface,
+            "restored_vlan": previous_vlan,
+            "bridge": previous.bridge,
+        }, sort_keys=True)
+
+    async def fabric_bgp_evpn_summary(self, device_id: str) -> dict[str, object]:
+        fabric = self._fabric()
+        if device_id not in {*fabric.route_reflectors, *fabric.vteps}:
+            raise LabCommandError(f"device {device_id!r} is not a declared fabric BGP node")
+        payload = await self._json_node(
+            self._device(device_id).node,
+            ("vtysh", "-c", "show bgp l2vpn evpn summary json"),
+        )
+        if not isinstance(payload, dict) or not isinstance(payload.get("peers"), dict):
+            raise LabCommandError("BGP EVPN summary has an invalid shape")
+        peers = payload["peers"]
+        established = sum(
+            1 for peer in peers.values()
+            if isinstance(peer, dict) and peer.get("state") == "Established"
+        )
+        expected = self.manifest.devices[device_id].expected_bgp_neighbors
+        return {
+            "ok": established >= expected,
+            "evidence_type": "observed-frr-bgp-evpn-summary",
+            "device_id": device_id,
+            "asn": payload.get("as"),
+            "router_id": payload.get("routerId"),
+            "expected_neighbors": expected,
+            "established_neighbors": established,
+            "peers": peers,
+        }
+
+    async def fabric_vxlan_state(self, device_id: str) -> dict[str, object]:
+        fabric = self._fabric()
+        if device_id not in fabric.vteps:
+            raise LabCommandError(f"device {device_id!r} is not a declared VTEP")
+        device = self._device(device_id)
+        links, vnis = await asyncio.gather(
+            self._json_node(device.node, ("ip", "-j", "-d", "link", "show", "type", "vxlan")),
+            self._json_node(device.node, ("vtysh", "-c", "show evpn vni json")),
+        )
+        if not isinstance(links, list) or not isinstance(vnis, dict):
+            raise LabCommandError("VXLAN/VNI state has an invalid shape")
+        expected = {vlan.l2vni for vlan in fabric.vlans.values()}
+        observed_links = {
+            int(item.get("linkinfo", {}).get("info_data", {}).get("id"))
+            for item in links if isinstance(item, dict)
+            and isinstance(item.get("linkinfo", {}).get("info_data", {}).get("id"), int)
+        }
+        observed_vnis = {
+            int(key) for key, value in vnis.items()
+            if str(key).isdigit() and isinstance(value, dict) and value.get("type") == "L2"
+        }
+        remote_ready = all(
+            int(vnis[str(vni)].get("numRemoteVteps", 0)) >= len(fabric.vteps) - 1
+            for vni in expected if str(vni) in vnis
+        )
+        return {
+            "ok": expected == observed_links == observed_vnis and remote_ready,
+            "evidence_type": "observed-linux-vxlan-and-frr-vni",
+            "device_id": device_id,
+            "expected_l2vnis": sorted(expected),
+            "linux_vxlan_ids": sorted(observed_links),
+            "frr_vnis": vnis,
+            "remote_vteps_verified": remote_ready,
+            "links": links,
+        }
+
+    async def fabric_evpn_routes(
+        self, device_id: str, route_type: int | None = None,
+    ) -> dict[str, object]:
+        if route_type is not None and route_type not in {2, 3, 5}:
+            raise LabCommandError("EVPN route_type must be 2, 3, or 5")
+        payload = await self._json_node(
+            self._device(device_id).node,
+            ("vtysh", "-c", "show bgp l2vpn evpn route json"),
+        )
+        if not isinstance(payload, dict):
+            raise LabCommandError("EVPN route table has an invalid shape")
+        routes: list[dict[str, object]] = []
+        for rd, table in payload.items():
+            if not isinstance(table, dict):
+                continue
+            for prefix, value in table.items():
+                if prefix == "rd" or not isinstance(value, dict):
+                    continue
+                paths = value.get("paths") or []
+                flattened = [
+                    path for group in paths if isinstance(group, list)
+                    for path in group if isinstance(path, dict)
+                ]
+                observed_type = next(
+                    (int(path["routeType"]) for path in flattened if "routeType" in path),
+                    None,
+                )
+                if route_type is None or observed_type == route_type:
+                    routes.append({
+                        "rd": rd,
+                        "prefix": prefix,
+                        "route_type": observed_type,
+                        "paths": flattened,
+                    })
+        return {
+            "ok": bool(routes),
+            "evidence_type": "observed-frr-evpn-rib",
+            "device_id": device_id,
+            "route_type_filter": route_type,
+            "route_count": len(routes),
+            "routes": routes,
+        }
+
+    async def fabric_state(self) -> dict[str, object]:
+        fabric = self._fabric()
+        bgp_values = await asyncio.gather(*(
+            self.fabric_bgp_evpn_summary(device_id)
+            for device_id in (*fabric.route_reflectors, *fabric.vteps)
+        ))
+        vxlan_values = await asyncio.gather(*(
+            self.fabric_vxlan_state(device_id) for device_id in fabric.vteps
+        ))
+        attachments = await asyncio.gather(*(
+            self.fabric_access_vlan(item.device, item.interface)
+            for item in fabric.attachments.values() if item.mode == "access"
+        ))
+        return {
+            "ok": all(item["ok"] for item in (*bgp_values, *vxlan_values, *attachments)),
+            "lab": self.manifest.name,
+            "evidence_type": "observed-evpn-vxlan-fabric",
+            "contract": {
+                "mode": fabric.mode,
+                "asn": fabric.asn,
+                "route_reflectors": list(fabric.route_reflectors),
+                "vteps": list(fabric.vteps),
+                "vlans": [asdict(fabric.vlans[key]) for key in sorted(fabric.vlans)],
+                "attachments": [
+                    asdict(fabric.attachments[key]) for key in sorted(fabric.attachments)
+                ],
+            },
+            "bgp_evpn": list(bgp_values),
+            "vxlan": list(vxlan_values),
+            "access_ports": list(attachments),
+            "truth_boundary": {
+                "real_8021q": True,
+                "real_linux_bridge": True,
+                "real_vxlan_dataplane": True,
+                "real_bgp_evpn_control_plane": True,
+                "evpn_l2vpn": True,
+                "evpn_l3vpn": False,
+                "mpls_l2vpn": False,
+                "mpls_l3vpn": False,
+                "vendor_cli_or_asic": False,
+            },
+        }
 
     async def user_admitted(self, user_id: str) -> bool:
         """Read the actual endpoint interface state for a declared lab user."""
