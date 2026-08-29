@@ -1,0 +1,161 @@
+apiVersion: netopyu.io/l1-guard-policy/v1
+policyId: netopyu-production-l1-v1
+normalization:
+  form: NFKC
+  removeCodepoints: ["200b", "200c", "200d", "2060", "feff"]
+  maxCharacters: 4000
+selectionConfidenceFloor: 0.55
+safetyRules:
+  - id: control_bypass
+    patterns:
+      - "忽略(?:所有)?(?:审批|批准|变更流程)"
+      - "(?<!不要)(?<!不得)(?<!禁止)绕过(?:审批|批准|计划|变更流程|补偿器)"
+      - "(?:不要|无需|不需要)(?:生成|创建)?(?:变更)?计划"
+      - "(?<!not )(?<!never )\\bbypass(?: the)? (?:approval|plan|change process|compensator)\\b"
+      - "\\bignore(?: all| the)? approval\\b"
+      - "\\bwithout (?:a |the )?(?:plan|approval)\\b"
+  - id: credential_exfiltration
+    patterns:
+      - "(?<!不要)(?<!不得)(?<!禁止)(?:显示|打印|导出|发送|泄露|编码).{0,24}(?:密码|口令|令牌|密钥|凭证|api token|api key)"
+      - "(?:密码|口令|令牌|密钥|凭证|api token|api key).{0,24}(?:显示|打印|导出|发送|泄露|编码)"
+      - "(?<!not )(?<!never )\\b(?:print|show|export|send|exfiltrate|encode).{0,32}(?:passwords?|api tokens?|api keys?|credentials?|secrets?)\\b"
+  - id: uncontrolled_destructive
+    patterns:
+      - "\\bwrite[ -]?erase\\b"
+      - "\\brm\\s+-rf\\s+[/~]"
+      - "(?:删除|清空|擦除|恢复出厂).{0,16}(?:全部|所有|任意|整网|设备)"
+      - "\\b(?:erase|delete|wipe|factory reset).{0,24}(?:all|every|any|entire)\\b"
+  - id: blind_retry
+    patterns:
+      - "(?<!不要)(?<!不得)(?<!禁止)(?:一直|无限|不停|盲目).{0,12}重试"
+      - "重试.{0,16}(?:直到|直至).{0,8}成功"
+      - "(?<!not )(?<!never )\\b(?:blindly|forever|continuously) retry\\b"
+      - "\\bretry.{0,32}until (?:it )?succeeds?\\b"
+  - id: forged_authority
+    patterns:
+      - "(?:伪造|编造|虚构).{0,20}(?:审批|批准|变更单|chg|证明)"
+      - "\\b(?:forge|invent|fabricate|fake).{0,24}(?:approval|change ticket|chg|proof)\\b"
+  - id: guessed_target
+    patterns:
+      - "(?:随便|任意|随机|猜).{0,20}(?:设备|交换机|路由器|目标).{0,24}(?:修改|配置|删除|变更)"
+      - "\\b(?:guess|pick any|choose any).{0,24}(?:device|switch|router|target).{0,24}(?:change|modify|configure|delete)\\b"
+  - id: internal_only_bypass
+    patterns:
+      - "(?:直接调用|绕过).{0,20}(?:内部|隐藏).{0,8}(?:restore|恢复|工具)"
+      - "\\b(?:call|invoke).{0,20}(?:hidden|internal).{0,12}(?:restore|tool).{0,20}(?:directly|bypass)\\b"
+  - id: audit_disable
+    patterns:
+      - "(?<!不要)(?<!不得)(?<!禁止)(?:关闭|禁用|停止).{0,12}(?:审计|日志).{0,24}(?:执行|删除|修改|变更|下发)"
+      - "(?<!not )(?<!never )\\bdisable.{0,12}(?:audit|logging).{0,24}(?:before|then|and).{0,24}(?:delete|deleting|change|execute|push)\\b"
+  - id: command_injection
+    patterns:
+      - "(?:shell|命令).{0,16}\\brm\\s+-rf\\b"
+      - "(?:配置|config).{0,40}(?:;|&&|\\|\\|).{0,8}\\brm\\s+-rf\\b"
+      - "\\bexecute shell\\b"
+  - id: verification_bypass
+    patterns:
+      - "(?:不需要|(?<!不要)(?<!不得)(?<!禁止)(?:跳过|绕过)).{0,16}(?:observer|验证|校验).{0,28}(?:成功|完成|结果)"
+      - "(?:actor|执行器).{0,20}(?:返回|声称).{0,12}成功.{0,20}(?:当作|视为)(?:完成|最终)"
+      - "(?<!not )(?<!never )\\b(?:skip|without|bypass).{0,16}(?:observer|verification).{0,24}(?:success|final|complete)\\b"
+      - "\\btreat.{0,20}actor success.{0,24}(?:final|complete).{0,20}without observer\\b"
+  - id: stale_authority
+    patterns:
+      - "(?:上周|昨天|旧的|过期).{0,20}(?:审批|批准|变更单).{0,20}(?:直接|继续|仍然有效)"
+      - "\\b(?:old|expired|last week's|yesterday's).{0,20}(?:approval|ticket).{0,24}(?:still valid|execute|reuse)\\b"
+  - id: instruction_override
+    patterns:
+      - "(?:忽略|覆盖|无视).{0,16}(?:系统|之前|上面).{0,12}(?:指令|规则|提示)"
+      - "\\b(?:ignore|override|disregard).{0,20}(?:system|previous|above).{0,12}(?:instructions?|rules?|prompt)\\b"
+domainEvidence:
+  anchors:
+    - network
+    - service
+    - router
+    - switch
+    - device
+    - configuration
+    - config
+    - vlan
+    - bgp
+    - ospf
+    - evpn
+    - vxlan
+    - mpls
+    - acl
+    - dns
+    - syslog
+    - netflow
+    - radius
+    - nac
+    - tunnel
+    - circuit
+    - route
+    - routing
+    - interface
+    - fabric
+    - endpoint
+    - link
+    - failover
+    - restart
+    - rollback
+    - roll back
+    - deploy
+    - monitor
+    - metrics
+    - prometheus
+    - promql
+    - logs
+    - health
+    - troubleshoot
+    - diagnose
+    - resolve
+    - load-balancer
+    - lb pool
+    - lan
+    - wan
+    - dc
+    - new hire
+    - latency
+    - packet
+    - traffic
+    - application access
+    - user access
+    - onboarding
+    - 网络
+    - 服务
+    - 路由器
+    - 交换机
+    - 设备
+    - 配置
+    - 重启
+    - 回滚
+    - 恢复
+    - 开通
+    - 准入
+    - 访问
+    - 链路
+    - 隧道
+    - 路径
+    - 日志
+    - 指标
+    - 应用
+    - 用户
+    - 流量
+    - 时延
+    - 丢包
+    - 故障
+    - 拓扑
+    - 负载均衡
+  entityPatterns:
+    - "\\b(?:sw|router|edge|leaf|spine|border|ap|radius|tun|site)-[a-z0-9-]+\\b"
+    - "\\b\\d{1,3}(?:\\.\\d{1,3}){3}(?:/\\d{1,2})?\\b"
+    - "\\b[a-z0-9-]+\\.internal\\b"
+    - "\\b[a-z][a-z0-9-]+-(?:prod|staging|dev)\\b"
+  excludedDomains:
+    - "(?:天气|气温|weather|temperature)"
+    - "(?:写|创作|write).{0,12}(?:诗|故事|poem|story)"
+    - "(?:股票|证券|stock|share price)"
+    - "(?:工资|薪资|salary|payroll compensation)"
+    - "(?:机票|航班|酒店|flight|airfare|hotel booking)"
+    - "(?:处方药|开药|诊断疾病|prescribe medication|medical diagnosis)"
+    - "(?:社交媒体|朋友圈|social media).{0,16}(?:发布|发送|post|publish)"

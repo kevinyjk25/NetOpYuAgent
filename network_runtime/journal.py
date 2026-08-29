@@ -88,9 +88,14 @@ class NetworkJournal:
         self._ensure_column("plans", "approval_proof_id", "TEXT")
         self._ensure_column("plans", "approval_proof_hash", "TEXT")
         self._ensure_column("plans", "approval_evidence_json", "TEXT")
+        self._ensure_column("plans", "l1_decision_id", "TEXT")
         self._db.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_approval_proof "
             "ON plans(approval_proof_id) WHERE approval_proof_id IS NOT NULL"
+        )
+        self._db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_l1_decision "
+            "ON plans(l1_decision_id) WHERE l1_decision_id IS NOT NULL"
         )
         self._backfill_event_hashes()
         self._db.commit()
@@ -208,21 +213,38 @@ class NetworkJournal:
     def create(self, plan: PreparedPlan, execution_nonce: str) -> None:
         plan.verify_integrity()
         now = utc_now()
+        decision_binding = plan.l1_decision_binding or {}
+        l1_decision_id = decision_binding.get("decision_id")
         with self._lock:
-            self._db.execute(
-                """INSERT INTO plans
-                   (plan_id, plan_hash, plan_json, state, nonce_hash, created_at, updated_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (
-                    plan.plan_id,
-                    plan.plan_hash,
-                    canonical_json(plan.to_dict()),
-                    plan.state.value,
-                    _nonce_hash(execution_nonce),
-                    plan.created_at,
-                    now,
-                ),
-            )
+            try:
+                self._db.execute(
+                    """INSERT INTO plans
+                       (plan_id, plan_hash, plan_json, state, nonce_hash,
+                        l1_decision_id, created_at, updated_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        plan.plan_id,
+                        plan.plan_hash,
+                        canonical_json(plan.to_dict()),
+                        plan.state.value,
+                        _nonce_hash(execution_nonce),
+                        l1_decision_id,
+                        plan.created_at,
+                        now,
+                    ),
+                )
+            except sqlite3.IntegrityError as error:
+                self._db.rollback()
+                if l1_decision_id is not None:
+                    existing = self._db.execute(
+                        "SELECT plan_id FROM plans WHERE l1_decision_id = ?",
+                        (l1_decision_id,),
+                    ).fetchone()
+                    if existing is not None:
+                        raise PlanIntegrityError(
+                            "L1 Decision is already bound to an immutable Runtime plan"
+                        ) from error
+                raise
             self._append_event_locked(
                 plan.plan_id, None, plan.state.value, "plan_created",
                 {
@@ -232,6 +254,8 @@ class NetworkJournal:
                     "intent_hash": plan.intent_hash,
                     "requester_digest": plan.requester_digest,
                     "approval_policy_hash": plan.approval_policy_hash,
+                    "l1_decision_id": l1_decision_id,
+                    "l1_binding_digest": decision_binding.get("binding_digest"),
                 }, now,
             )
             self._db.commit()

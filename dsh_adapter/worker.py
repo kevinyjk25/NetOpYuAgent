@@ -32,6 +32,13 @@ from .bridge import (
 )
 from .scoped_services import recall_memory, search_capabilities
 from .skills import build_skill_manifest
+from l1_runtime.service import (
+    close_decision,
+    decide_shadow,
+    decision_metrics,
+    observe_decision,
+    recent_decisions,
+)
 
 
 MAX_REQUEST_BYTES = 1_048_576
@@ -96,6 +103,14 @@ async def dispatch(request: dict[str, Any]) -> Any:
                 if isinstance(request.get("subject_context"), dict) else None
             ),
             harness=str(request.get("harness") or "local"),
+            l1_decision_envelope=(
+                request.get("l1_decision_envelope")
+                if isinstance(request.get("l1_decision_envelope"), dict) else None
+            ),
+            l1_route_context=(
+                request.get("l1_route_context")
+                if isinstance(request.get("l1_route_context"), dict) else None
+            ),
         )
     if command == "runtime-approve":
         return approve_network_plan(arguments)
@@ -125,6 +140,45 @@ async def dispatch(request: dict[str, Any]) -> Any:
         return await delegate_a2a(**arguments)
     if command == "skill-manifest":
         return build_skill_manifest(profile, resolve_backend_mode())
+    if command == "l1-decision-shadow":
+        tool_declarations = arguments.get("tool_declarations")
+        if not isinstance(tool_declarations, list):
+            raise TypeError("L1 decision tool_declarations must be an array")
+        return await decide_shadow(
+            profile=profile,
+            session_id=str(arguments.get("session_id") or ""),
+            harness=str(arguments.get("harness") or "dsh"),
+            prompt=str(arguments.get("user_request") or ""),
+            tool_declarations=tool_declarations,
+            model=str(arguments.get("model") or ""),
+        )
+    if command == "l1-decision-recent":
+        return recent_decisions(
+            limit=int(arguments.get("limit", 20)),
+            session_id=(
+                str(arguments["session_id"])
+                if arguments.get("session_id") is not None else None
+            ),
+        )
+    if command == "l1-decision-observe":
+        observed_arguments = arguments.get("observed_arguments")
+        if not isinstance(observed_arguments, dict):
+            raise TypeError("L1 observed_arguments must be an object")
+        return observe_decision(
+            decision_id=str(arguments.get("decision_id") or ""),
+            session_id=str(arguments.get("session_id") or ""),
+            observed_kind=str(arguments.get("observed_kind") or ""),
+            observed_target=str(arguments.get("observed_target") or ""),
+            observed_arguments=observed_arguments,
+        )
+    if command == "l1-decision-close":
+        return close_decision(
+            decision_id=str(arguments.get("decision_id") or ""),
+            session_id=str(arguments.get("session_id") or ""),
+            reason=str(arguments.get("reason") or ""),
+        )
+    if command == "l1-decision-metrics":
+        return decision_metrics(limit=int(arguments.get("limit", 500)))
     raise ValueError(f"unsupported persistent bridge command {command!r}")
 
 

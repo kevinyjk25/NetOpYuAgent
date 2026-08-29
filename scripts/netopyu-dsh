@@ -20,6 +20,7 @@ LOG_FILE="$LOG_DIR/dsh-web.log"
 HITL_STORE="${NETOPYU_DSH_HITL_STORE:-$RUNTIME_ROOT/data/hitl.sqlite}"
 TOOL_RESULT_STORE="${NETOPYU_DSH_TOOL_RESULT_STORE:-$RUNTIME_ROOT/data/tool_results.sqlite}"
 NETWORK_RUNTIME_STORE="${NETOPYU_DSH_NETWORK_RUNTIME_STORE:-$RUNTIME_ROOT/data/network_runtime.sqlite}"
+L1_DECISION_STORE="${NETOPYU_L1_DECISION_STORE:-$RUNTIME_ROOT/data/l1_decisions.sqlite}"
 LEARNING_STORE="${NETOPYU_DSH_LEARNING_STORE:-$RUNTIME_ROOT/data/learning.sqlite}"
 LEARNING_PROPOSALS="${NETOPYU_DSH_LEARNING_PROPOSALS:-$RUNTIME_ROOT/data/skill-proposals}"
 WORKER_SOCKET="${NETOPYU_DSH_WORKER_SOCKET:-$RUNTIME_ROOT/bridge.sock}"
@@ -75,6 +76,14 @@ Commands:
   runtime PLAN  Show one plan, state transition journal, approval, and evidence
   runtime-audit PLAN  Verify the plan event hash chain and report tampering
   l0-skills     Show registered deterministic Network L0 Skill contracts
+  l1-decisions [LIMIT] [SESSION]  Show privacy-minimized P1.9 shadow decisions
+  l1-metrics [LIMIT]  Show P1.9 shadow protocol, agreement, escape, and latency metrics
+  l1-catalog-check  Verify current Tool/Skill candidates against the reviewed P1.9 baseline
+  l1-holdout-seal CASES DATASET VERSION  Print a prompt-free sealed holdout manifest
+  l1-holdout-adjudicate CASES MANIFEST REVIEW1 REVIEW2  Verify two independent label sets
+  l1-holdout-qualify CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]  Score same-model DSH/Hermes parity
+  l1-holdout-adapter-parity CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]  Run DSH/Hermes hooks through a temporary Worker
+  l1-canary-readiness WORKER ADAPTER PRODUCT OPS [OUTPUT]  Check evidence only; never activates canary
   demo-l1-l0    Run the isolated LAN/DC L1 Skill + L0 Skill walkthrough
   peers         Discover configured A2A peers and show their capabilities
   parity        Run the DSH capability retirement gate against the golden set
@@ -105,6 +114,12 @@ Environment overrides:
   NETOPYU_DSH_WORKER_SOCKET=/path/to/bridge.sock
   NETOPYU_DSH_WORKER_CONCURRENCY=8
   NETOPYU_DSH_NETWORK_RUNTIME_STORE=/path/to/network_runtime.sqlite
+  NETOPYU_L1_DECISION_MODE=off|shadow
+  NETOPYU_L1_DECISION_MODEL=qwen3.6:27b
+  NETOPYU_L1_DECISION_MODEL_ARTIFACT_DIGEST=sha256:...  # optional for local Ollama
+  NETOPYU_L1_DECISION_BASE_URL=http://127.0.0.1:11434/v1
+  NETOPYU_L1_DECISION_ALLOW_REMOTE=0|1
+  NETOPYU_L1_DECISION_STORE=/path/to/l1_decisions.sqlite
   NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8001,http://127.0.0.1:8002
   NETOPYU_DSH_A2A_TIMEOUT=300
   NETOPYU_DSH_A2A_MAX_HOPS=3
@@ -268,8 +283,11 @@ runtime_env() {
   export NETOPYU_DSH_HITL_STORE="$HITL_STORE"
   export NETOPYU_DSH_TOOL_RESULT_STORE="$TOOL_RESULT_STORE"
   export NETOPYU_DSH_NETWORK_RUNTIME_STORE="$NETWORK_RUNTIME_STORE"
+  export NETOPYU_L1_DECISION_STORE="$L1_DECISION_STORE"
+  export NETOPYU_L1_DECISION_BASE_URL="${NETOPYU_L1_DECISION_BASE_URL:-$OLLAMA_URL/v1}"
   export NETOPYU_DSH_WORKER_SOCKET="$WORKER_SOCKET"
   export NETOPYU_OLLAMA_API_KEY="${NETOPYU_OLLAMA_API_KEY:-ollama}"
+  export NETOPYU_L1_DECISION_API_KEY="${NETOPYU_L1_DECISION_API_KEY:-$NETOPYU_OLLAMA_API_KEY}"
   export DSH_TELEMETRY_DISABLED="${DSH_TELEMETRY_DISABLED:-1}"
   export npm_config_store_dir="$RUNTIME_ROOT/store"
   # macOS commonly launches GUI apps with maxfiles=256. DSH's native
@@ -772,6 +790,34 @@ show_l0_skills() {
   "$PYTHON_BIN" -m dsh_adapter.cli l0-skills --profile "$NETOPYU_PROFILE" | "$PYTHON_BIN" -m json.tool
 }
 
+show_l1_decisions() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local limit="${2:-20}" session_id="${3:-}"
+  [[ "$limit" =~ ^[0-9]+$ ]] || {
+    fail 'Usage: scripts/netopyu-dsh l1-decisions [LIMIT] [SESSION]'; return 1;
+  }
+  local request
+  request="$("$PYTHON_BIN" -c 'import json,sys; print(json.dumps({"limit": int(sys.argv[1]), **({"session_id": sys.argv[2]} if sys.argv[2] else {})}))' "$limit" "$session_id")" || return 1
+  printf '%s' "$request" \
+    | "$PYTHON_BIN" -m dsh_adapter.cli l1-decision-recent --profile "$NETOPYU_PROFILE" \
+    | "$PYTHON_BIN" -m json.tool
+}
+
+show_l1_metrics() {
+  check_python || return 1
+  runtime_env
+  cd "$PROJECT_ROOT" || return 1
+  local limit="${2:-500}"
+  [[ "$limit" =~ ^[0-9]+$ ]] || {
+    fail 'Usage: scripts/netopyu-dsh l1-metrics [LIMIT]'; return 1;
+  }
+  printf '{"limit":%s}' "$limit" \
+    | "$PYTHON_BIN" -m dsh_adapter.cli l1-decision-metrics --profile "$NETOPYU_PROFILE" \
+    | "$PYTHON_BIN" -m json.tool
+}
+
 run_l1_l0_demo() {
   check_python || return 1
   cd "$PROJECT_ROOT" || return 1
@@ -887,6 +933,82 @@ run_l1_dsh_schema() {
   "$PYTHON_BIN" -m evaluation.dsh_schema_compiler "$@"
 }
 
+run_l1_catalog_check() {
+  check_python || return 1
+  cd "$PROJECT_ROOT" || return 1
+  NETOPYU_BACKEND=mock "$PYTHON_BIN" -m l1_runtime.catalog_gate check
+}
+
+run_l1_holdout_seal() {
+  check_python || return 1
+  local cases="${2:-}" dataset="${3:-}" version="${4:-}"
+  [[ -n "$cases" && -n "$dataset" && -n "$version" ]] || {
+    fail 'Usage: scripts/netopyu-dsh l1-holdout-seal CASES DATASET VERSION'; return 1;
+  }
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m l1_runtime.holdout seal "$cases" \
+    --dataset-id "$dataset" --version "$version"
+}
+
+run_l1_holdout_adjudicate() {
+  check_python || return 1
+  local cases="${2:-}" manifest="${3:-}" first="${4:-}" second="${5:-}"
+  [[ -n "$cases" && -n "$manifest" && -n "$first" && -n "$second" ]] || {
+    fail 'Usage: scripts/netopyu-dsh l1-holdout-adjudicate CASES MANIFEST REVIEW1 REVIEW2'; return 1;
+  }
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m l1_runtime.holdout adjudicate \
+    "$cases" "$manifest" "$first" "$second"
+}
+
+run_l1_holdout_qualify() {
+  check_python || return 1
+  local cases="${2:-}" manifest="${3:-}" first="${4:-}" second="${5:-}"
+  local model="${6:-}" output="${7:-}"
+  [[ -n "$cases" && -n "$manifest" && -n "$first" && -n "$second" && -n "$model" ]] || {
+    fail 'Usage: scripts/netopyu-dsh l1-holdout-qualify CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]'; return 1;
+  }
+  cd "$PROJECT_ROOT" || return 1
+  runtime_env
+  local arguments=(
+    -m l1_runtime.qualification "$cases" "$manifest" "$first" "$second"
+    --model "$model" --repetitions 2
+  )
+  [[ -z "$output" ]] || arguments+=(--output "$output")
+  NETOPYU_BACKEND=mock "$PYTHON_BIN" "${arguments[@]}"
+}
+
+run_l1_holdout_adapter_parity() {
+  check_node && check_python || return 1
+  local cases="${2:-}" manifest="${3:-}" first="${4:-}" second="${5:-}"
+  local model="${6:-}" output="${7:-}"
+  [[ -n "$cases" && -n "$manifest" && -n "$first" && -n "$second" && -n "$model" ]] || {
+    fail 'Usage: scripts/netopyu-dsh l1-holdout-adapter-parity CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]'; return 1;
+  }
+  cd "$PROJECT_ROOT" || return 1
+  runtime_env
+  local arguments=(
+    -m l1_runtime.adapter_qualification "$cases" "$manifest" "$first" "$second"
+    --model "$model" --repetitions 1
+  )
+  [[ -z "$output" ]] || arguments+=(--output "$output")
+  NETOPYU_BACKEND=mock NETOPYU_NODE="$(command -v node)" \
+    "$PYTHON_BIN" "${arguments[@]}"
+}
+
+run_l1_canary_readiness() {
+  check_python || return 1
+  local worker="${2:-}" adapter="${3:-}" product="${4:-}" ops="${5:-}"
+  local output="${6:-}"
+  [[ -n "$worker" && -n "$adapter" && -n "$product" && -n "$ops" ]] || {
+    fail 'Usage: scripts/netopyu-dsh l1-canary-readiness WORKER ADAPTER PRODUCT OPS [OUTPUT]'; return 1;
+  }
+  cd "$PROJECT_ROOT" || return 1
+  local arguments=(-m l1_runtime.canary_readiness "$worker" "$adapter" "$product" "$ops")
+  [[ -z "$output" ]] || arguments+=("$output")
+  "$PYTHON_BIN" "${arguments[@]}"
+}
+
 run_e2e() {
   # The retirement gate must run from a clean checkout in CI. It validates
   # the plugin and bridge directly and does not require an installed DSH Web
@@ -898,6 +1020,17 @@ run_e2e() {
   "$PYTHON_BIN" -m pytest -q || return 1
   printf '2/7 Static audits\n'
   "$PYTHON_BIN" scripts/audit_harness_boundary.py || return 1
+  NETOPYU_BACKEND=mock "$PYTHON_BIN" -m l1_runtime.catalog_gate check >/dev/null || return 1
+  "$PYTHON_BIN" -m network_runtime.p2_cli catalog-validate \
+    --catalog data/capability_governance_catalog.yaml >/dev/null || return 1
+  "$PYTHON_BIN" -m productization.cli integration-check \
+    --pack examples/integration-rest-mcp/pack.yaml >/dev/null || return 1
+  "$PYTHON_BIN" -c '
+from evaluation.cockpit import render_convergence_html
+from evaluation.convergence import load_convergence_snapshot
+value = load_convergence_snapshot("data/convergence_baseline.json")
+render_convergence_html(value)
+' || return 1
   printf '3/7 Node/plugin syntax\n'
   local plugin_source
   for plugin_source in dsh-plugin-netopyu/src/*.js dsh-plugin-l1-shadow-capture/src/*.js dsh-plugin-l1-protocol-controller/src/*.js dsh-plugin-l1-schema-controller/src/*.js; do
@@ -908,6 +1041,7 @@ run_e2e() {
   printf '4/7 Tool, HITL, A2A, memory and trajectory smoke\n'
   NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/hitl-smoke.mjs || return 1
   NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/workflow-smoke.mjs || return 1
+  NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/l1-shadow-smoke.mjs || return 1
   printf '5/7 Profile skill projection\n'
   for profile_id in default lan dc wan; do
     NETOPYU_DSH_BACKEND=mock "$PYTHON_BIN" -m dsh_adapter.cli skill-manifest \
@@ -953,6 +1087,14 @@ case "$command" in
   runtime) show_runtime_plan "$@" ;;
   runtime-audit) audit_runtime_plan "$@" ;;
   l0-skills) show_l0_skills ;;
+  l1-decisions) show_l1_decisions "$@" ;;
+  l1-metrics) show_l1_metrics "$@" ;;
+  l1-catalog-check) run_l1_catalog_check ;;
+  l1-holdout-seal) run_l1_holdout_seal "$@" ;;
+  l1-holdout-adjudicate) run_l1_holdout_adjudicate "$@" ;;
+  l1-holdout-qualify) run_l1_holdout_qualify "$@" ;;
+  l1-holdout-adapter-parity) run_l1_holdout_adapter_parity "$@" ;;
+  l1-canary-readiness) run_l1_canary_readiness "$@" ;;
   demo-l1-l0) run_l1_l0_demo ;;
   peers) show_peers ;;
   parity) run_parity ;;

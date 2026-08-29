@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 def utc_now() -> str:
@@ -167,6 +167,7 @@ class PreparedPlan:
     approval_policy_id: str
     approval_policy_version: str
     approval_policy_hash: str
+    l1_decision_binding: dict[str, Any] | None
     created_at: str
     expires_at: str
     plan_hash: str
@@ -214,6 +215,7 @@ class PreparedPlan:
         approval_policy_id: str,
         approval_policy_version: str,
         approval_policy_hash: str,
+        l1_decision_binding: dict[str, Any] | None,
         created_at: str,
         expires_at: str,
     ) -> "PreparedPlan":
@@ -256,6 +258,7 @@ class PreparedPlan:
             "approval_policy_id": approval_policy_id,
             "approval_policy_version": approval_policy_version,
             "approval_policy_hash": approval_policy_hash,
+            "l1_decision_binding": l1_decision_binding,
             "created_at": created_at,
             "expires_at": expires_at,
         }
@@ -275,6 +278,32 @@ class PreparedPlan:
         return value
 
     def verify_integrity(self) -> None:
+        if self.schema_version < 10 and self.l1_decision_binding is not None:
+            raise PlanIntegrityError(
+                f"legacy plan {self.plan_id} cannot carry an unhashed L1 Decision binding"
+            )
+        if self.schema_version >= 10 and self.l1_decision_binding is not None:
+            from .proposal_binding import (
+                ProposalBindingError,
+                verify_persisted_plan_binding,
+            )
+
+            try:
+                verify_persisted_plan_binding(
+                    self.l1_decision_binding,
+                    profile=self.profile,
+                    tool_name=self.tool_name,
+                    l0_skill_id=self.l0_skill_id,
+                    l0_contract_hash=self.l0_contract_hash,
+                    plan_arguments=self.arguments,
+                    requester_identity=self.requester_identity,
+                    created_at=self.created_at,
+                    expires_at=self.expires_at,
+                )
+            except ProposalBindingError as error:
+                raise PlanIntegrityError(
+                    f"plan {self.plan_id} has an invalid L1 Decision binding: {error}"
+                ) from error
         if self.schema_version >= 9 and not self.provider_deployment_digest:
             raise PlanIntegrityError(
                 f"plan {self.plan_id} has no Provider deployment binding"
@@ -305,6 +334,10 @@ class PreparedPlan:
             return
         # Earlier plans predate requester identity and approval-policy binding.
         legacy_payload = dict(payload)
+        if self.schema_version < 10:
+            legacy_payload.pop("l1_decision_binding", None)
+            if self.schema_version == 9 and sha256_json(legacy_payload) == self.plan_hash:
+                return
         if self.schema_version < 9:
             legacy_payload.pop("provider_deployment_digest", None)
             if self.schema_version == 8 and sha256_json(legacy_payload) == self.plan_hash:
@@ -400,6 +433,7 @@ class PreparedPlan:
             "approval_policy_id": self.approval_policy_id,
             "approval_policy_version": self.approval_policy_version,
             "approval_policy_hash": self.approval_policy_hash,
+            "l1_decision_binding": self.l1_decision_binding,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "plan_hash": self.plan_hash,
@@ -455,6 +489,10 @@ class PreparedPlan:
             approval_policy_id=str(value.get("approval_policy_id", "legacy-unbound")),
             approval_policy_version=str(value.get("approval_policy_version", "legacy")),
             approval_policy_hash=str(value.get("approval_policy_hash", "legacy-unbound")),
+            l1_decision_binding=(
+                dict(value["l1_decision_binding"])
+                if isinstance(value.get("l1_decision_binding"), dict) else None
+            ),
             created_at=str(value["created_at"]),
             expires_at=str(value["expires_at"]),
             plan_hash=str(value["plan_hash"]),

@@ -17,6 +17,7 @@ from .models import (
     SkillRef,
 )
 from .promotion import assess_promotion, package_promotion, promotion_prompt
+from .workbench import export_workbench_html, inspect_workbench, list_workbench
 
 __all__ = [
     "AtomicEffectManifest",
@@ -32,4 +33,7 @@ __all__ = [
     "assess_promotion",
     "package_promotion",
     "promotion_prompt",
+    "export_workbench_html",
+    "inspect_workbench",
+    "list_workbench",
 ]

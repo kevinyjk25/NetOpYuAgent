@@ -31,6 +31,13 @@ from .learning import mine_candidates, review_candidate
 from .reliability import run_local_reliability
 from .skills import build_skill_manifest
 from .backend import resolve_backend_mode
+from l1_runtime.service import (
+    close_decision,
+    decide_shadow,
+    decision_metrics,
+    observe_decision,
+    recent_decisions,
+)
 
 
 def _read_arguments() -> dict[str, Any]:
@@ -132,6 +139,21 @@ def main(argv: list[str] | None = None) -> int:
     skill_manifest = subparsers.add_parser("skill-manifest")
     skill_manifest.add_argument("--profile", default="lan")
 
+    l1_decision_shadow = subparsers.add_parser("l1-decision-shadow")
+    l1_decision_shadow.add_argument("--profile", default="lan")
+
+    l1_decision_recent = subparsers.add_parser("l1-decision-recent")
+    l1_decision_recent.add_argument("--profile", default="lan")
+
+    l1_decision_observe = subparsers.add_parser("l1-decision-observe")
+    l1_decision_observe.add_argument("--profile", default="lan")
+
+    l1_decision_close = subparsers.add_parser("l1-decision-close")
+    l1_decision_close.add_argument("--profile", default="lan")
+
+    l1_decision_metrics = subparsers.add_parser("l1-decision-metrics")
+    l1_decision_metrics.add_argument("--profile", default="lan")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "manifest":
@@ -211,6 +233,50 @@ def main(argv: list[str] | None = None) -> int:
                 project_root=args.project_root, python_executable=args.python,
                 request_count=args.requests, concurrency=args.concurrency,
             )
+        elif args.command == "l1-decision-shadow":
+            request = _read_arguments()
+            tool_declarations = request.get("tool_declarations")
+            if not isinstance(tool_declarations, list):
+                raise TypeError("L1 decision tool_declarations must be an array")
+            payload = asyncio.run(decide_shadow(
+                profile=args.profile,
+                session_id=str(request.get("session_id") or ""),
+                harness=str(request.get("harness") or "dsh"),
+                prompt=str(request.get("user_request") or ""),
+                tool_declarations=tool_declarations,
+                model=str(request.get("model") or ""),
+            ))
+        elif args.command == "l1-decision-recent":
+            request = _read_arguments()
+            payload = recent_decisions(
+                limit=int(request.get("limit", 20)),
+                session_id=(
+                    str(request["session_id"])
+                    if request.get("session_id") is not None else None
+                ),
+            )
+        elif args.command == "l1-decision-observe":
+            request = _read_arguments()
+            observed_arguments = request.get("observed_arguments")
+            if not isinstance(observed_arguments, dict):
+                raise TypeError("L1 observed_arguments must be an object")
+            payload = observe_decision(
+                decision_id=str(request.get("decision_id") or ""),
+                session_id=str(request.get("session_id") or ""),
+                observed_kind=str(request.get("observed_kind") or ""),
+                observed_target=str(request.get("observed_target") or ""),
+                observed_arguments=observed_arguments,
+            )
+        elif args.command == "l1-decision-close":
+            request = _read_arguments()
+            payload = close_decision(
+                decision_id=str(request.get("decision_id") or ""),
+                session_id=str(request.get("session_id") or ""),
+                reason=str(request.get("reason") or ""),
+            )
+        elif args.command == "l1-decision-metrics":
+            request = _read_arguments()
+            payload = decision_metrics(limit=int(request.get("limit", 500)))
         else:
             payload = build_skill_manifest(args.profile, resolve_backend_mode())
     except Exception as error:

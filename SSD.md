@@ -50,7 +50,7 @@
 | F-38 | L1 → L0 Promotion 必须保存 `L1 → L0.5 → L0` 三阶段及逐级 hash。L0.5 不得偏离 L1，L0 不得扩大 L0.5；Agent 输出仍是不可信候选，一次性人工 review 不得自动注册合同或授予执行权限。 |
 | F-39 | 全部内置受审写能力必须由编译 L0 v2 Contract 驱动；旧 ToolContract/verifier/compensator 只能作为精确绑定的实现 Adapter。prepare 和执行前必须校验 parity，Effect 参数只能从已批准值按 v2 模板渲染；禁止新增裸 v1 L0。 |
 | F-40 | 每个生产 L0 必须保存 L1/L0.5/L0 authoring/compiled 和逐级 hash 轨迹；主门禁必须重新验证 Promotion semantic parity、精确 contract round trip 和文件完整性。反向 bootstrap 产物必须标注来源、不得注册到 Harness 或宣称为模型独立推导。 |
-| F-41 | schema-v9 写计划必须绑定经过 verifier 规范化的 requester/policy evidence，以及 Provider release/manifest/qualification/deployment digest；v8 及更早只读兼容。 |
+| F-41 | schema-v10 写计划必须绑定经过 verifier 规范化的 requester/policy evidence，以及 Provider release/manifest/qualification/deployment digest；v9/v8 及更早只读兼容。 |
 | F-42 | Harness 人工确认不得以 actor 字符串直接授权；Runtime 必须签发短时、精确绑定 plan/requester/policy/approver/risk/mode 的 approval proof，执行必须先验证签名与 TTL。 |
 | F-43 | `enforced` identity mode 未配置企业 credential verifier 时必须拒绝全部 requester context，并禁用 legacy actor compatibility；本地 verifier 不得被升级为生产凭证。 |
 | F-44 | approval policy 必须支持 single/dual approver、角色/作用域、职责分离、关键变更工单和可选活动窗口；主体混淆、自批冲突和窗口外审批必须失败关闭。 |
@@ -64,6 +64,19 @@
 | F-52 | Provider release 必须经过 stage/publish/environment promote；严格策略的 promote/rollback 必须绑定目标 release 的新部署证明，breaking promote 与 rollback 必须带审批引用，生命周期事件必须形成可验证哈希链。 |
 | F-53 | enforced admission 必须把 active signed release、非过期 deployment 与实际 discovery 精确比较，并验证三种 trust role/scope/expiry/revocation、qualification freshness、exact artifact map、result contract 和允许的 L0 hash。 |
 | F-54 | 执行前必须重新 admission；审批后 release/deployment/identity/schema/result/L0 漂移必须在 Provider 调用前进入可审计终态且 write count 为零。 |
+| F-55 | P1.9 Decision Plane 只能读取 DSH 已接受步骤中的直接用户消息；Skill、Tool、系统或插件生成文本不得冒充新的用户意图。 |
+| F-56 | Decision 候选必须从本轮精确 DSH Tool 声明和受审 Skill manifest 构建；模型不得发明候选、required fields、workflow 或 effect authority。 |
+| F-57 | Guard、候选 Schema、grounding 和 compiler 必须单调收窄：可以拒绝、追问或删除无证据参数，不得补默认值、扩大目标、改写已知值或授予权限。 |
+| F-58 | 每个 P1.9 信封必须固定 `authority=proposal_only`；Decision 不得调用 Runtime/Provider、签发审批证明、覆盖 DSH 路由或绕过任何 L0 控制。 |
+| F-59 | Decision 存储不得持久化原始 prompt、模型正文或参数值，只能保留摘要、参数键、有界证据和实际 DSH 路由关联。 |
+| F-60 | `shadow` 模式的 Decision 故障不得改变原 DSH 步骤；当前插件必须拒绝未验收的 `canary/enforced` 模式。 |
+| F-61 | 未来 `canary/enforced` 必须在效果前验证 Decision/session/message/候选/政策绑定、新鲜度、sealed holdout 门禁和目标/参数一致；任何不确定性均失败关闭，Runtime admission 仍不可跳过。 |
+| F-62 | P1.9 Catalog baseline 必须可跨 checkout，并绑定三 profile 的候选、Tool declaration、Skill semantic content 和生产政策；任何漂移未经显式 review 不得通过退休门禁。 |
+| F-63 | Holdout Prompt/标签必须保存在仓库外；seal manifest 不得包含其原值，且至少两个不同 reviewer 的完整语义标签一致后才能形成 consensus digest。reviewer id 本身不得冒充企业身份或不可抵赖证明。 |
+| F-64 | 可选 Decision→Plan binding 必须固定为 `proposal_only/canary`，验证完整 Decision/evidence digest、session/Harness/profile、候选 route、请求与编译参数及精确 L0 contract；一个 Decision id 最多创建一份计划，binding 必须进入 plan hash 和 hash-chain event。 |
+| F-65 | C1 canary policy 只能保持 Harness 原 route 或阻断/收窄；不得重路由、修改参数或产生权限。无效写 Decision 必须失败关闭，无效读 Decision 不得改变原 route。 |
+| F-66 | Canary readiness 必须交叉绑定合格 Worker/Adapter 报告、真实 DSH Web/Hermes CLI 产品证据和运维演练证据，并验证摘要、有效期、reviewer/owner 分离、64/64 Core 控制、至少三个实现版本的稳定/改善趋势与 p50/p95 阈值、完整 plan binding、零 replay/authority escape 及四份独立停用/回退/告警/no-effect replay receipt。 |
+| F-67 | Readiness 状态上限必须是 `ready_for_review`；CLI 不得修改 Adapter 配置或流量，也不得输出 Prompt、标签、参数值、reviewer/owner id。激活必须是独立的组织身份、签名和发布审批控制。 |
 
 ### 3. 可靠性规格
 
@@ -93,6 +106,9 @@
 | R-22 | Saga 事件必须形成独立可验证哈希链；重复绑定不同 plan hash 必须失败关闭。 |
 | R-23 | approval proof id 在 journal 中必须唯一；proof 或 execution nonce 的重复消费均不得产生第二次效果。 |
 | R-24 | Provider 合同漂移在 execution claim 后必须收敛为 `precondition_changed`、释放目标锁、保存失败证据并完成审计，不得遗留为无主 `executing`。 |
+| R-25 | 每次 Decision 模型尝试必须有超时、响应大小、单 Tool-call 和最大修复次数边界；耗尽后只能形成协议失败，不能形成候选执行。 |
+| R-26 | 同一 DSH session/message 的影子 Decision 必须有界去重；第一次实际 domain Skill/Tool 路由最多关联一次。 |
+| R-27 | Decision 指标必须把未观测、协议失败和 Guard 终止与真实路由一致分开；不得把 DSH parity 当作正确性 Oracle。 |
 
 ### 4. 安全目标
 
@@ -122,6 +138,8 @@
 | Runtime → Network Actor MCP | 批准计划、效果重放、补偿上下文 | identity/schema/capability pin、内部 effect context、durable snapshot、lease/fence、Actor hash chain |
 | Service MCP → SQLite | 并发业务变更 | WAL、RLock、BEGIN IMMEDIATE、revision、safe idempotency、audit |
 | Service ↔ Network | 非原子跨系统状态 | 独立读取、drift 分类、步骤间重校验、新计划恢复 |
+| DSH Harness → L1 Decision Plane | 用户来源、Tool 声明、实际路由 | direct-user provenance、精确候选、session/message digest、proposal-only |
+| L1 Decision Plane → Model | 自然语言与候选 | loopback-default、候选专属 Schema、单 Tool-call、有界修复、无 effect surface |
 
 ### 6. 威胁模型
 
@@ -204,7 +222,7 @@
 #### T-15 requester/approver 主体替换、证明伪造或跨计划重放
 
 - 风险：Adapter 把 Alice 的请求记为 Bob、攻击者修改 approver、复用另一计划/策略的批准，或在凭证过期后执行。
-- 控制：schema-v9 requester/policy 与 Provider release/deployment evidence 纳入 plan hash；`enforced` 固定 JWT issuer/audience/algorithm/lifetime/JWKS，将 access token 与 Gateway attestation 交叉绑定，并由 PDP/Change Authority 授权。执行验证 proof 和全部绑定后再原子消费 nonce。
+- 控制：schema-v10 继承 requester/policy 与 Provider release/deployment evidence 并纳入 plan hash；`enforced` 固定 JWT issuer/audience/algorithm/lifetime/JWKS，将 access token 与 Gateway attestation 交叉绑定，并由 PDP/Change Authority 授权。执行验证 proof 和全部绑定后再原子消费 nonce。
 - 本地边界：local verifier 明确标记 `local_simulation=true`，只认证 owner-only Adapter/Worker 进程链；`enforced` 缺少 OIDC、Gateway、PDP 或 Change Adapter 时全部拒绝，不能把 raw dictionary 当身份或策略。
 - 剩余风险：B2-ready 已验证本地 RS256/JWKS/HTTP、动态 Gateway mint 和显式 CA/mTLS wire path；真实 key rotation/撤销、组织 PDP 数据、change system、证书轮换/HSM 和外部不可变审批日志仍待 B2/P1.7 资格化。
 
@@ -213,6 +231,18 @@
 - 风险：恶意 Provider 自报可信 identity/release、Publisher 自行签资格报告、过期/撤销 key 继续使用、未资格 artifact 被激活、result/L0 权限在审批后扩大。
 - 控制：deployment-owned provider id；独立 Publisher/Qualifier/Deployer trust role；外部 JSONL 进程固定 9 项资格与真实 restart；OCI-image/SBOM/provenance 必需 digest；短期 exact deployment attestation；严格 lifecycle/rollback；schema-v9 release/deployment evidence；prepare/execute 双重 admission。
 - 本地边界：B-ready fixture 虽复制到仓库外并独立运行，但源码、临时 key、SQLite 和 digest fixture 仍同一工程信任域。P1.4-B 仍需要组织签名/HSM 根、独立仓库/CI/实验室、真实 OCI/SBOM/SLSA 内容验证和外部 WORM audit。
+
+#### T-17 Decision Plane 意图混淆、参数幻觉或旁路提权
+
+- 风险：插件把非用户消息当意图，模型发明目标/参数，陈旧 Decision 关联到另一轮 Tool，或将高置信度提案误作执行授权。
+- 控制：只接受 direct-user provenance；候选由当前 DSH 声明和受审 Skill 构建；候选专属 Schema、grounding、确定性 compiler 和有界修复；信封固定 `proposal_only`；存储只含摘要；实际路由按 session 一次关联；所有效果仍重新进入 L0 Runtime。
+- 当前边界：P1.9-B1 仅有本地 `off/shadow`，影子故障不会阻断原 Harness 行为。它不能证明 Harness 选择正确；虽有私有 holdout/双 reviewer 合同，但没有真实人工真值、组织 canary、身份绑定或告警 SLO，因此当前禁止 `canary/enforced`。
+
+#### T-18 Catalog/Evidence 被误当授权根或泄露敏感证据
+
+- 风险：治理委派被误解为设备读写授权，Evidence 页面被接入执行通道，或 Prompt、参数、审批身份、Provider payload 和路径从聚合结果泄露。
+- 控制：P2.1 决策固定为治理工作流，显式声明无 Runtime read/effect 和 Provider publication 权威；职责分离、scope、依赖和兼容性失败关闭。P2.2 只读打开来源并采用字段白名单，缺链、截断或篡改降级；离线页面没有审批、执行、注册或激活入口。
+- 当前边界：本地 Catalog/Evidence 不能替代企业 IAM/PDP、独立发布系统、远端 WORM、告警平台或生产 SLO；聚合指标也不能作为写成功证明。
 
 ### 7. 审批规格
 
@@ -402,6 +432,73 @@ C3 候选专属 Tool 必须由摘要绑定的可信候选合同生成，Tool 身
 
 C3 资格门禁必须精确验证候选合同摘要、预装 Skill 摘要、动态 Tool surface、单次调用、Schema、编译、回执、终态、usage 完整性、禁止/重复 Tool 和提前可见文本；所有配置、政策、模型 artifact、数据集与 evaluator 必须 fingerprint 绑定。即使固定 184 条通过，这也只认证无效果候选边界，不能表述为生产成功概率或取消 Runtime 的审批、重校验、独立验证、补偿和审计。
 
+### 23. P1.9 Decision Plane 验收补充
+
+P1.9-B1 代码门禁必须证明：生产包不导入 `evaluation.*`；Decision 合同 extra-forbid 且固定
+`proposal_only`；候选只来自当前 DSH Tool/Skill；危险请求无需模型即可安全终止；模型只可调用一个
+候选专属/终止 Tool；最多一次修复；无请求证据的值被删除并触发追问；原 DSH step 在成功、超时、
+协议错误时均保持不变；Hermes 使用公开生命周期 hook 且不注入 Decision context；Decision 与第一次
+实际 domain 路由关联一次；superseded/no-route/session-end 明确关闭且不可跨轮重绑；SQLite 不含原始
+请求、模型正文或参数值，旧 schema 参数值被迁移清除；token usage 不完整必须显式报告。
+
+Catalog 门禁必须在不同 checkout 得到同一摘要，并检测候选增删、Tool Schema/描述、Skill 语义内容和
+政策漂移。Holdout seal 必须拒绝低于 50 条/10 类/三 profile/中英最小覆盖或重复 Prompt 的输入；
+manifest 不得泄漏 Prompt/标签；同 reviewer、缺 case 或任何标签分歧不得形成 consensus digest。
+
+P1.9-B2 资格执行器必须先验证 consensus、Catalog baseline 和不可变模型 artifact digest，再以完全相同的模型、策略、候选声明
+和 repair limit 分别执行 DSH/Hermes 身份。至少两次重复且五类 action 覆盖后，输入合同 parity、
+Decision 语义 parity、每端 repeatability、协议、完整 action/target/arguments/missing/workflow Oracle
+和目标召回必须为 100%，安全逃逸必须为 0，才可标记 `qualified`。报告不得包含原始 Prompt、逐条
+标签或参数值，只能保留聚合值和 case-id digest；模型独立调用的非确定性不得被掩盖。
+
+该门禁 scope 只能声明 shared Worker Decision contract。DSH/Hermes Hook 提取/生命周期测试不能替代
+完整 Harness 产品实跑，runner 自测也不能替代真实仓库外未见集或独立人工真值。
+
+Adapter parity 必须使用生产 DSH `agent/pre-step` 和 Hermes `pre_llm_call` 代码、同一个临时
+owner-only Worker、同一模型 artifact/repair/Catalog。私有请求只能经 stdin/进程内内存传输；报告必须
+验证原请求 Prompt digest、两端 Catalog/Candidate/Policy 和完整 Decision digest 100% 一致，并在
+结束时删除临时 Socket/SQLite。其 scope 必须声明未启动 DSH Web/Hermes CLI/UI，不能升级为产品认证。
+
+本地影子报告至少公开协议成功、路由一致、直接 Tool 参数一致、安全逃逸、修复/调用次数和 p50/p95，
+并明确未观测样本。上述数值只描述本地旁路样本；路由一致率不是正确性 Oracle，固定集通过率不是生产
+成功概率。进入 P1.9-C canary 前还必须取得 sealed holdout、不同措辞/实体/拓扑扰动、DSH-only 对照、
+session/turn 绑定门禁、模型/政策不可变版本、告警与回退演练；在这些证据齐全前不得启用 enforced。
+
+P1.9-C0 代码门禁还必须证明 schema-v10 binding 为可选且不改变 `off/shadow`；shadow/terminal/failed
+Decision、错 session/Harness/profile/route/参数/候选/摘要、workflow 外 Tool、重复 Decision id 和持久化
+篡改全部失败关闭；无 binding 的新计划仍执行原 L0 门禁，v9/v8 计划仍可只读。Worker 只能透传绑定，
+不能把它转换成审批或 execution nonce。当前 DSH/Hermes 配置必须继续拒绝 `canary`。
+
+P1.9-C1 门禁还必须证明：所有 policy 结果只有 unchanged/blocked 两种，不存在 route/参数重写或授权；
+缺失、篡改、过期、模型/manifest/labels/catalog 不一致、演练失败、Core 控制退化、binding replay/escape
+都会得到 `not_ready`；通过的 synthetic fixture 只能验证门禁实现，不能成为产品证据。CLI 前后 Adapter
+配置内容必须相同，DSH/Hermes 仍拒绝 `canary`。详细应急流程由双语 runbook 约束。
+
+### 24. P2.0 Promotion Workbench 验收补充
+
+代码门禁必须证明 proposal、逐文件摘要、trajectory、report-to-stage、compiled identity/hash 和 review authority 任一篡改都会失败关闭；symlink、非常规文件和超限文档被拒绝。列表不得泄露 proposal 目录名，reviewer/reason 只保留摘要。
+
+浏览器产物必须自包含、转义嵌入数据并应用禁止外部资源的 CSP；不得出现批准、注册、激活、Runtime 或 Provider API。编辑或下载不能改变原 package，导出物固定标记为不可信 L0.5 草稿。`approve` review 仍不得产生 execution eligibility 或 Runtime activation。
+
+### 25. P2.1/P2.2 验收补充
+
+- Catalog 必须 21/21 精确覆盖生产 L0 id/version/contract/profile，并拒绝摘要漂移、scope 扩张、自委派、review+publish、未知/漂移/环依赖和不绑定旧合同的 supersedes；
+- Catalog access/diff 输出不得授予 Runtime read/effect、Provider publication、注册或激活权威；
+- Evidence 必须使用只读数据库连接，来源文件在采集前后保持不变；snapshot 不得包含原始 Prompt、参数值、审批身份、Provider payload 或路径；
+- Runtime/Saga/Provider 链、Decision digest 或 Promotion 完整性失败必须生成事故并使状态降级；legacy 无链和截断也必须降级；
+- HTML 必须绑定 snapshot digest、使用自包含 CSP、无外部请求且无审批/执行/发布/注册/激活控件；
+- Trend 必须拒绝重复或摘要无效 snapshot；安全/完整性退步返回 `regressed` 和非零退出，时延变化不得自动冒充 SLO 违约；
+- 本地专项、浏览器、全量和 retirement 门禁均通过后，阶段才可标记为本地完成；生产 WORM、告警、HA/DR 和 SLO 不在该结论内。
+
+### 26. P2.3 产品入口与评测验收补充
+
+- Integration Pack 必须严格区分 read/write；每个 write 必须有独立 read verifier，可逆 write 必须有 compensation，未知字段、明文凭据、模型可见凭据、坏摘要和悬空引用必须失败关闭。
+- Integration Pack assessment、Catalog discovery 和驾驶舱均不得连接 Provider、注册、发布、批准、激活或执行能力。
+- 默认评测快照必须绑定摘要，逐例证据不得包含 Prompt、query、参数值、原始输出或可重放授权；篡改必须拒绝。
+- 失败必须按唯一首层归因并把 Guard containment 单独展示，不能把最终被阻断冒充模型本身正确。
+- 驾驶舱必须 self-contained、CSP 禁止网络且无控制 API；固定集必须显示 `productionGeneralization=not_proven`。
+- 本地 demo 必须在执行任一临时 mock write 前要求明确命令行批准；不带批准不得调用 Runtime demo。
+
 ---
 
 ## English
@@ -454,7 +551,7 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-38 | L1 → L0 Promotion preserves `L1 → L0.5 → L0` stages in a predecessor-linked hash chain. L0.5 cannot drift from L1 and L0 cannot widen L0.5. Agent output remains untrusted, and one human review cannot register a contract or grant execution authority. |
 | F-39 | Every built-in reviewed mutation is driven by a compiled L0 v2 contract. Legacy ToolContracts/verifiers/compensators are exact implementation adapters only. Prepare and execution-time revalidation enforce parity, effect arguments are rendered from approved values through v2 templates, and new raw v1 L0 registrations are forbidden. |
 | F-40 | Every production L0 preserves L1/L0.5/L0 authoring/compiled artifacts and predecessor hashes. The primary gate reruns Promotion semantic parity, exact contract round trips, and file integrity. Reverse-bootstrapped artifacts declare their origin, are never registered into the Harness, and cannot be claimed as independent model inference. |
-| F-41 | A schema-v9 mutation plan binds requester/policy evidence and Provider release/manifest/qualification/deployment digests; v8 and older shapes are read-only compatibility. |
+| F-41 | A schema-v10 mutation plan binds requester/policy evidence and Provider release/manifest/qualification/deployment digests; v9/v8 and older shapes are read-only compatibility. |
 | F-42 | A Harness decision is not direct actor-string authority. Runtime signs a short-lived proof bound to the exact plan, requester, policy, approver, risk, and mode; execution verifies its signature and TTL first. |
 | F-43 | Enforced identity mode rejects all requester contexts without an enterprise credential verifier and disables legacy actor compatibility. A local verifier can never be promoted into a production credential. |
 | F-44 | Approval policy supports single/dual approvers, role/scope checks, separation of duties, critical-change tickets, and optional active windows. Subject confusion, self-approval conflicts, and out-of-window decisions fail closed. |
@@ -468,6 +565,19 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-52 | Strict promotion and rollback bind fresh deployment evidence for the target release; breaking promotion and rollback require approval references and lifecycle events are hash chained. |
 | F-53 | Enforced admission compares active release, non-expired deployment, exact artifact map, and discovery while validating all three trust roles. |
 | F-54 | Execution repeats admission. Post-approval release or deployment drift reaches an audited terminal state before Provider invocation with zero writes. |
+| F-55 | The P1.9 Decision Plane reads only direct user messages from an accepted DSH step; Skill, Tool, system, and plugin text cannot impersonate a new user intent. |
+| F-56 | Decision candidates come from the exact current DSH tool declarations and reviewed Skill manifest; the model cannot invent candidates, required fields, workflows, or effect authority. |
+| F-57 | Guard, candidate Schema, grounding, and compiler are monotonic narrowing controls: they may reject, clarify, or delete unsupported values but cannot add defaults, widen targets, rewrite known values, or grant authority. |
+| F-58 | Every P1.9 envelope has `authority=proposal_only`; a Decision cannot call Runtime/Providers, issue approval proofs, override DSH routing, or bypass L0 controls. |
+| F-59 | Decision storage retains no raw prompt, model prose, or argument values—only digests, argument keys, bounded evidence, and actual DSH-route correlation. |
+| F-60 | Decision failure in `shadow` cannot alter the original DSH step, and the current plugin rejects unqualified `canary/enforced` modes. |
+| F-61 | Future `canary/enforced` validates Decision/session/message/candidate/policy binding, freshness, sealed-holdout gates, and target/argument agreement before effects; uncertainty fails closed and Runtime admission remains mandatory. |
+| F-62 | The P1.9 Catalog baseline is checkout-portable and binds candidates, Tool declarations, Skill semantics, and production policy across all profiles; unreviewed drift fails retirement. |
+| F-63 | Holdout prompts/labels remain outside the repository; the seal manifest contains no raw values, and two distinct reviewers must provide complete semantically identical labels before a consensus digest exists. Reviewer ids are not enterprise identity proof. |
+| F-64 | An optional Decision-to-plan binding is fixed to `proposal_only/canary` and validates complete Decision/evidence digests, session/Harness/profile, candidate route, request and compiled arguments, and the exact L0 contract. One Decision id creates at most one plan, and the binding enters both the plan hash and hash-chained creation event. |
+| F-65 | C1 canary policy may only preserve the original Harness route or block/narrow it; it cannot redirect, rewrite arguments, or create authority. Invalid writes fail closed and invalid reads cannot change the route. |
+| F-66 | Canary readiness cross-binds qualified Worker/Adapter reports, real DSH Web/Hermes CLI product evidence, and operations drills while checking digests, expiry, reviewer/owner separation, 64/64 Core controls, a stable/improved trend across at least three implementation versions within p50/p95 thresholds, complete plan binding, zero replay/authority escape, and four distinct stop/rollback/alert/no-effect-replay receipts. |
+| F-67 | Readiness is capped at `ready_for_review`; its CLI cannot change Adapter configuration or traffic and emits no prompts, labels, argument values, reviewer ids, or owner ids. Activation remains an independent organization-identity/signature/release-approval control. |
 
 ### 3. Security objectives
 
@@ -487,10 +597,11 @@ The system must provide exact authorization, effect integrity, evidence-based ou
 - **Audit tampering:** per-plan event hash chains; P1 still requires an external append-only copy.
 - **Hermes model-as-approver confusion:** prepare-only write handlers, nonce removal, exact user slash commands, process-local one-shot bindings, and safe loss on restart. P0.5 still trusts the local account and Hermes gateway allowlist; production requires authenticated sender identity and process isolation.
 - **Lab command/target expansion:** strict manifests, path and identifier validation, shell-free argv, FRR read/write allowlists, management-interface exclusion, predeclared probes/faults, and process isolation from real inventory. Docker remains a trusted privileged boundary, not a multi-tenant sandbox.
-- **MCP spoofing/schema drift/shared-store races:** pinned contracts, schema/capability digests in schema-v9 plans, execution-time rediscovery, WAL, locks, revisions, and state-sensitive idempotency. Production still needs independently authenticated services and database controls.
-- **Requester/approver substitution or proof replay:** schema-v9 requester/policy/release/deployment binding, pinned enterprise credentials, PDP/change decisions, Runtime proofs, unique proof ids, and one-shot nonces.
+- **MCP spoofing/schema drift/shared-store races:** pinned contracts, schema/capability digests in schema-v10 plans, execution-time rediscovery, WAL, locks, revisions, and state-sensitive idempotency. Production still needs independently authenticated services and database controls.
+- **Requester/approver substitution or proof replay:** schema-v10 requester/policy/release/deployment binding, pinned enterprise credentials, PDP/change decisions, Runtime proofs, unique proof ids, and one-shot nonces.
 - **Provider supply-chain substitution or qualification forgery:** three independent role-scoped keys, external-process failure qualification, exact artifacts and deployment proof, strict lifecycle, and prepare/execute admission. B-ready is local; organizational roots, independent ownership/CI/labs, real artifact verification, and WORM audit remain P1.4-B.
 - **Network provider escalation/self-attestation/crash loss:** exact capability role/action/version matching, an observer with no mutations, fresh digest-bearing evidence, and a durable Actor operation/snapshot store with target locks, leases, fences, startup reconciliation, and a hash chain. Observer and Actor still share one host/account/Docker boundary, and devices do not validate the local fence; production needs separated credentials/failure domains, a remote log, controller CAS, HA fencing, and immutable audit.
+- **Decision intent confusion, hallucinated arguments, or privilege escalation:** direct-user provenance, current-manifest candidates, candidate-specific Schema, grounding, deterministic compilation, bounded repair, proposal-only envelopes, digest-only storage, and one observed route per pending session Decision. P1.9-B1 is local DSH/Hermes shadow only; its holdout/reviewer contract is not actual truth, production identity, canary safety, or a production SLO.
 
 ### 5. Approval and model policy
 
@@ -632,3 +743,83 @@ The C2 Guard is a monotonic narrowing layer: it may refuse, classify out of scop
 C3 candidate-specific Tools must be generated from a digest-bound trusted candidate contract. Tool identity fixes kind/target, and each Schema uses `additionalProperties=false` with only that candidate's business keys. Unknown-field constraining may only delete keys; it cannot change the candidate, rewrite known values, or add defaults. Argument grounding uses a versioned Oracle-independent policy to prove request evidence; unsupported values are removed and therefore participate in missing-field semantics. Action, missing fields, and workflow are derived deterministically from the trusted Catalog. Guard, Schema, grounding, and compiler grant no effect authority and cannot bypass L0.
 
 C3 qualification exactly gates candidate-contract and preloaded-Skill digests, dynamic Tool surface, single call, Schema, compiler, receipt, terminal state, complete usage, forbidden/duplicate Tools, and premature visible text. Configuration, policies, model artifact, dataset, and evaluator are fingerprint-bound. Passing the fixed 184 cases qualifies only the proposal-only boundary; it is not a production success probability and cannot remove Runtime approval, revalidation, independent verification, compensation, or audit.
+
+### 19. P1.9 Decision Plane acceptance supplement
+
+P1.9-B1 code gates prove that the production package does not import `evaluation.*`; the extra-forbid
+Decision contract is always proposal-only; candidates come only from current DSH Tool/Skill declarations;
+the Guard can terminate known unsafe requests without a model; the model can call exactly one candidate or
+terminal Tool with at most one repair; unsupported argument values are deleted and become clarification;
+the original DSH step is unchanged on success, timeout, and protocol failure; Hermes uses public lifecycle
+hooks without Decision context injection; the first actual domain route is correlated once; superseded,
+no-route, and session-end Decisions close and cannot rebind; SQLite contains no raw request, model prose, or
+argument values; legacy values are migrated away; and incomplete token accounting remains explicit.
+
+The Catalog gate is portable across checkouts and detects candidate, Tool Schema/description, Skill
+semantic-content, and policy drift. Holdout sealing rejects fewer than 50 cases, fewer than ten categories,
+missing profiles/language coverage, or duplicate prompts; its manifest leaks no prompt/label. Same-reviewer,
+missing-case, or semantically disagreeing labels cannot produce a consensus digest.
+
+The P1.9-B2 qualification runner first validates exact consensus, the Catalog baseline, and an immutable
+model artifact digest, then makes
+independent DSH/Hermes-identity calls with the same model, policies, candidate declarations, and repair
+limit. Qualification requires at least two repetitions, all five actions, 100% input-contract parity,
+Decision-semantic parity, per-Harness repeatability, protocol success, full action/target/argument/missing/
+workflow Oracle accuracy, and target retrieval, with zero safety escapes. Reports contain only aggregates
+and case-id digests—never raw prompts, per-case labels, or argument values—and must expose independent-model
+nondeterminism rather than hiding it.
+
+This gate may claim only shared Worker Decision-contract scope. Hook extraction/lifecycle tests do not
+replace a full DSH/Hermes product run, and runner self-tests do not replace real repository-external
+unseen cases or independent human truth.
+
+Adapter parity uses the production DSH `agent/pre-step` and Hermes `pre_llm_call` code, one temporary
+owner-only Worker, and identical model-artifact/repair/Catalog configuration. Private requests travel only
+through stdin or process memory. The report requires 100% expected prompt-digest binding and cross-adapter
+Catalog/Candidate/Policy/full-Decision parity, then removes temporary sockets/SQLite. Its scope must state
+that DSH Web and Hermes CLI/UI were not started and it cannot be promoted to product certification.
+
+Local shadow reporting exposes protocol success, routing agreement, direct-tool argument agreement, safety
+escape, repair/call counts, p50/p95, and unobserved samples. These describe bounded local side-channel data:
+routing parity is not a correctness oracle and fixed-case success is not a production probability. Before
+P1.9-C canary, acceptance additionally requires a sealed holdout with paraphrase/entity/topology shifts, a
+DSH-only control, session/turn binding gates, immutable model/policy versions, alerts, and rollback drills.
+Enforced mode remains prohibited until those gates pass.
+
+P1.9-C0 code gates additionally prove that schema-v10 binding is optional and leaves `off/shadow`
+unchanged. Shadow/terminal/failed Decisions, session/Harness/profile/route/argument/candidate/digest drift,
+Tools outside a selected workflow, duplicate Decision ids, and persisted tampering all fail closed. Unbound
+new plans retain every existing L0 gate, while schema-v9/v8 plans remain read-compatible. The Worker only
+transports binding material and cannot turn it into approval or an execution nonce. DSH/Hermes configuration
+continues to reject `canary`.
+
+P1.9-C1 gates additionally prove that policy has only unchanged/blocked effects and no route/argument
+rewrite or authority. Missing, tampered, expired, cross-binding-drifted, drill-failed, Core-regressed, or
+replay/escape evidence returns `not_ready`. Passing synthetic fixtures test the gate implementation but are
+not product evidence. Adapter files remain byte-identical across the CLI check and DSH/Hermes still reject
+`canary`; the bilingual runbook defines stop and incident handling.
+
+### 20. P2.0 Promotion Workbench acceptance supplement
+
+Code gates must fail closed on any proposal, per-file digest, trajectory, report-to-stage, compiled identity/hash, or review-authority tampering and reject symlinks, non-regular files, and oversized documents. Listings must not reveal proposal directory names; reviewer and reason remain digest-only.
+
+The browser artifact must be self-contained, escape embedded data, and use a CSP that forbids external resources. It exposes no approval, registration, activation, Runtime, or Provider API. Editing or download cannot mutate the package, and every export is labeled an untrusted L0.5 draft. An approve review never creates execution eligibility or Runtime activation.
+
+### 21. P2.1/P2.2 acceptance supplement
+
+- The Catalog must exactly cover 21/21 production L0 id/version/contract/profile entries and reject digest drift, scope widening, self-delegation, combined review/publication, unknown/drifted/cyclic dependencies, and unbound supersession.
+- Catalog access/diff output cannot grant Runtime read/effect, Provider publication, registration, or activation authority.
+- Evidence collection uses read-only database connections and does not mutate sources; snapshots exclude raw prompts, argument values, approval identities, Provider payloads, and paths.
+- Runtime/Saga/Provider chain, Decision digest, or Promotion integrity failure creates an incident and degrades the snapshot; legacy chain absence and truncation also degrade.
+- HTML is snapshot-bound, self-contained under CSP, performs no external request, and exposes no approval/execution/publication/registration/activation control.
+- Trends reject duplicate or digest-invalid snapshots; safety/integrity regressions return `regressed` and non-zero, while latency deltas never become automatic SLO violations.
+- Local focused, browser, full, and retirement gates must pass before local completion. Remote WORM, alerting, HA/DR, and production SLOs remain outside this claim.
+
+### 22. P2.3 product-front-door and evaluation acceptance supplement
+
+- Integration Packs strictly separate read/write. Every write requires an independent read verifier; reversible writes require compensation. Unknown fields, credential values, model-visible credentials, invalid digests, and dangling references fail closed.
+- Pack assessment, Catalog discovery, and the cockpit cannot connect, register, publish, approve, activate, or execute a capability.
+- Evaluation snapshots are digest-bound and per-case evidence excludes prompts, queries, argument values, raw output, and replayable authorization. Tampering is rejected.
+- Each failed case gets one first-failure layer while Guard containment is reported separately; a blocked model attempt is not presented as intrinsic model correctness.
+- The cockpit is self-contained, network-free under CSP, exposes no control API, and fixes `productionGeneralization=not_proven` for fixed-set evidence.
+- The local demo requires explicit command-line approval before any temporary mock effect; without it, Runtime demo code is not invoked.

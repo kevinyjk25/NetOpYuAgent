@@ -1,0 +1,27 @@
+apiVersion: netopyu.io/l1-argument-grounding-policy/v1
+policyId: netopyu-production-l1-v1
+maxPromptCharacters: 4000
+genericIdentifierValues:
+  app: [app, application, application access, access, setup]
+  app_id: [app, application, application access, access, setup]
+reasonEvidencePatterns:
+  - "(?:reason|because|justification)\\s*(?:is|=|:)?\\s*.+"
+  - "(?:原因|因为|理由|变更原因)\\s*(?:是|为|=|：|:)?\\s*.+"
+casefoldFields:
+  - app
+  - app_id
+  - environment
+  - section
+  - service
+  - severity
+  - to_transport
+aliases:
+  environment:
+    prod: [prod, production, 生产, 生产环境]
+    staging: [staging, preprod, 预发, 预发布]
+    dev: [dev, development, 开发, 开发环境]
+  severity:
+    error: [error, errors, 错误, 错误级别]
+    critical: [critical, 严重, 严重级别]
+  to_transport:
+    broadband: [broadband, 宽带, 宽带链路]
