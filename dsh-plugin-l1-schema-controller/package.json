@@ -1,0 +1,7 @@
+{
+  "name": "@netopyu/dsh-l1-schema-controller",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Effect-free candidate-specific Schema controller for P1.8-C3"
+}

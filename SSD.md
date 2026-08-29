@@ -398,6 +398,10 @@ B2/C1 若开启无效果 Tool，必须使用独立 overlay 和精确 Tool 白名
 
 C2 Guard 必须是单调收窄器：允许输出仅为拒绝、越界、弃权或保持原候选，禁止选择/改写 target、补充参数、生成 workflow 或授予权限。政策必须版本化、摘要绑定且不导入 Oracle 场景/标签。Protocol Firewall 只允许 loopback 模型端点，每次实际尝试必须计量；安全合成只能调用无参数 refusal/out-of-scope capture。报告同时显示模型首轮与 Guard 后 safety、固定集误杀、最大尝试和尾时延。最终 safety 为 0 不能掩盖原始模型逃逸、协议失败或 Runtime 仍是最终安全边界。
 
+C3 候选专属 Tool 必须由摘要绑定的可信候选合同生成，Tool 身份固定 kind/target，Schema 必须 `additionalProperties=false` 且只含该候选业务键。未知字段收窄只能删除字段，禁止改变候选、改写已知值或增加默认值。参数 grounding 必须使用版本化、Oracle-independent 政策验证值在用户请求中的证据；无法证明来源的值必须删除并触发缺参语义。action、missing fields 和 workflow 只能从可信 Catalog 确定性派生。Guard、Schema、grounding 和 compiler 都不得授予效果权限或绕过 L0。
+
+C3 资格门禁必须精确验证候选合同摘要、预装 Skill 摘要、动态 Tool surface、单次调用、Schema、编译、回执、终态、usage 完整性、禁止/重复 Tool 和提前可见文本；所有配置、政策、模型 artifact、数据集与 evaluator 必须 fingerprint 绑定。即使固定 184 条通过，这也只认证无效果候选边界，不能表述为生产成功概率或取消 Runtime 的审批、重校验、独立验证、补偿和审计。
+
 ---
 
 ## English
@@ -624,3 +628,7 @@ The DSH-in-loop shadow must also verify a pinned DSH version and exact active-pl
 When B2/C1 enables proposal-only Tools, it must use a separate overlay and exact Tool allowlist, and neither capture nor Governor may reach Runtime, Providers, devices, or approval. C1 digest-binds the preloaded Skill, system prompt, typed Tool set, and Catalog compiler rules. Its Governor is loopback-only; Tool forcing and hidden repairs are bounded and counted, and the terminal response is fixed after the receipt. A forbidden/duplicate Tool, schema/candidate/digest/receipt mismatch, premature text, or incomplete terminal state yields no proposal. Reports declare token cost as a lower bound when discarded retries are not fully metered. Any nonzero safety escape fails qualification even though Runtime would still reject the effect downstream.
 
 The C2 Guard is a monotonic narrowing layer: it may refuse, classify out of scope, abstain, or preserve a proposal, but cannot select/change a target, add arguments, generate workflow, or grant authority. Its versioned digest-bound policy cannot import Oracle cases or labels. The Protocol Firewall accepts only a loopback model endpoint and meters every actual attempt; synthetic safety is restricted to argument-free refusal/out-of-scope capture. Reports show first-attempt and guarded safety, fixed-set false positives, maximum attempts, and tail latency. Zero final safety escape cannot hide raw model escape, protocol failure, or Runtime's continuing role as the final safety boundary.
+
+C3 candidate-specific Tools must be generated from a digest-bound trusted candidate contract. Tool identity fixes kind/target, and each Schema uses `additionalProperties=false` with only that candidate's business keys. Unknown-field constraining may only delete keys; it cannot change the candidate, rewrite known values, or add defaults. Argument grounding uses a versioned Oracle-independent policy to prove request evidence; unsupported values are removed and therefore participate in missing-field semantics. Action, missing fields, and workflow are derived deterministically from the trusted Catalog. Guard, Schema, grounding, and compiler grant no effect authority and cannot bypass L0.
+
+C3 qualification exactly gates candidate-contract and preloaded-Skill digests, dynamic Tool surface, single call, Schema, compiler, receipt, terminal state, complete usage, forbidden/duplicate Tools, and premature visible text. Configuration, policies, model artifact, dataset, and evaluator are fingerprint-bound. Passing the fixed 184 cases qualifies only the proposal-only boundary; it is not a production success probability and cannot remove Runtime approval, revalidation, independent verification, compensation, or audit.

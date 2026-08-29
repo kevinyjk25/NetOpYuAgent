@@ -546,6 +546,12 @@ C1 启动审计固定 DSH 版本、28 个精确活动 entry、原 B1 disabled �
 
 `evaluation.dsh_guarded_tool` 组合不变的 C1 Adapter 与 Firewall，checkpoint 同时保存 CaseScore、C1 protocol trace 和 C2 guard trace。正式 C2 fingerprint 绑定 C1 evaluator、Guard/Firewall、政策、184 场景、Catalog、DSH/settings/model artifact 和 repair limit。原 160 与 24 条对抗集分别聚合，并保留首轮模型 safety、最终 safety、误杀、合成安全调用、完整 token、调用次数和尾时延。
 
+`evaluation.l1_candidate_schema` 读取 `data/l1_c3_candidate_schema.yaml`，只对精确 `kind:target` 应用参数合同补充和受审 Skill-over-primitive 支配关系，不修改冻结的 C1/C2 Catalog。`dsh-plugin-l1-schema-controller` 从环境注入的摘要绑定候选合同动态注册 `select_candidate_00..11`、`refuse_l1_request` 和 `reject_l1_out_of_scope`；候选 Tool Schema 为 flat object、`additionalProperties=false`、业务键全部 optional，Tool 名本身确定候选身份。
+
+`evaluation.l1_schema_gateway` 只监听 loopback，验证本次 prompt/candidate digest、精确 Tool surface、单 Tool 流式响应和 Guard 一致性。`constrain_attempt_to_candidate_schema()` 只能删除所选候选 Schema 外键，不能更换 Tool、候选或修改已知值；收窄后的 Tool-call 使用固定 proposal stream 返回 DSH。`evaluation.l1_argument_grounding` 再按版本化 `data/l1_c3_argument_policy.yaml` 对字符串、数值、布尔和集合执行请求证据校验、通用占位拒绝以及受审 alias/casefold 归一化。未证实值被删除，不产生默认值。
+
+`evaluation.dsh_schema_compiler` 从可信候选条目派生 action、required missing fields 和 workflow，记录 CaseScore、SchemaProtocolTrace 与 SchemaGuardTrace，并把 DSH/config/settings/Skill/system Prompt/Guard/grounding/candidate policy/model artifact/dataset/Catalog/evaluator 全部纳入 fingerprint。正式 184 条报告要求候选摘要、Skill、Tool 暴露、单次 capture、Schema、编译、回执、终态和 usage 门禁完整；所有效果 Adapter 仍被禁用。C3.2 的同一 7B 记录通过当前门槛，但输出仍只是无执行权 `L1Decision`。
+
 ---
 
 ## English
@@ -825,3 +831,9 @@ A loopback Governor requires a typed Tool on the first model round, permits at m
 `evaluation.l1_guard_policy` validates and digest-binds `data/l1_c2_guard_policy.yaml`, applies NFKC and zero-width cleanup to bounded requests, and returns only allow/refuse/out-of-scope; low-confidence selection only abstains. `evaluation.l1_protocol_firewall` is loopback-only, reconstructs streamed Tool calls, parses the current candidates/request, reruns C1 typed/candidate compilation, and records usage plus sanitized digests for every upstream attempt. Its only synthetic Tool calls are argument-free refusal/out-of-scope captures; exhausted ordinary requests return no Tool and fail closed in C1.
 
 `evaluation.dsh_guarded_tool` composes the unchanged C1 Adapter with the Firewall. Its checkpoint preserves CaseScore, C1 protocol trace, and C2 guard trace. The C2 fingerprint binds C1, Guard/Firewall, policy, all 184 cases, Catalog, DSH/settings/model artifact, and repair limit. Base-160 and adversarial-24 metrics remain separate, including first-attempt versus final safety, false positives, synthetic safe captures, complete tokens, calls, and tail latency.
+
+`evaluation.l1_candidate_schema` loads `data/l1_c3_candidate_schema.yaml` and applies parameter-contract additions and reviewed Skill-over-primitive dominance only to exact `kind:target` identities, leaving the frozen C1/C2 Catalog unchanged. `dsh-plugin-l1-schema-controller` dynamically registers `select_candidate_00..11`, `refuse_l1_request`, and `reject_l1_out_of_scope` from the digest-bound candidate contract injected through the environment. Candidate Tools use flat object Schemas with `additionalProperties=false` and optional business keys; Tool identity itself fixes the candidate.
+
+`evaluation.l1_schema_gateway` listens only on loopback and verifies prompt/candidate binding, the exact Tool surface, a single streamed Tool call, and Guard consistency. `constrain_attempt_to_candidate_schema()` may delete only keys outside the selected candidate Schema; it cannot switch Tools/candidates or alter known values. The sanitized proposal stream returns to DSH. `evaluation.l1_argument_grounding` then applies versioned request-evidence checks, generic-placeholder rejection, and reviewed alias/casefold normalization from `data/l1_c3_argument_policy.yaml`. Unsupported values are removed and no default is invented.
+
+`evaluation.dsh_schema_compiler` derives action, required missing fields, and workflow from the trusted candidate entry; preserves CaseScore, SchemaProtocolTrace, and SchemaGuardTrace; and fingerprints DSH/config/settings/Skill/system prompt/Guard/grounding/candidate policy/model artifact/dataset/Catalog/evaluator evidence. A formal 184-case report requires complete candidate-digest, Skill, Tool-surface, single-capture, Schema, compilation, receipt, terminal-state, and usage gates. All effect adapters remain disabled. The same 7B passes the current C3.2 gates, but its output remains a non-authoritative `L1Decision`.

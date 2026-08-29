@@ -87,6 +87,7 @@ Commands:
   compare-l1-dsh-tools  Evaluate P1.8-B2 controlled Skill + capture Tool path
   compare-l1-dsh-controlled  Evaluate P1.8-C deterministic Skill preload + one capture Tool
   compare-l1-dsh-guarded  Evaluate P1.8-C2 guard + typed Protocol Firewall path
+  compare-l1-dsh-schema  Evaluate P1.8-C3 candidate-specific Schema compiler path
   retirement    Run the complete local retirement gate
   e2e           Run the complete offline migration regression suite
 
@@ -879,6 +880,13 @@ run_l1_dsh_guarded() {
   "$PYTHON_BIN" -m evaluation.dsh_guarded_tool "$@"
 }
 
+run_l1_dsh_schema() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.dsh_schema_compiler "$@"
+}
+
 run_e2e() {
   # The retirement gate must run from a clean checkout in CI. It validates
   # the plugin and bridge directly and does not require an installed DSH Web
@@ -892,7 +900,7 @@ run_e2e() {
   "$PYTHON_BIN" scripts/audit_harness_boundary.py || return 1
   printf '3/7 Node/plugin syntax\n'
   local plugin_source
-  for plugin_source in dsh-plugin-netopyu/src/*.js dsh-plugin-l1-shadow-capture/src/*.js dsh-plugin-l1-protocol-controller/src/*.js; do
+  for plugin_source in dsh-plugin-netopyu/src/*.js dsh-plugin-l1-shadow-capture/src/*.js dsh-plugin-l1-protocol-controller/src/*.js dsh-plugin-l1-schema-controller/src/*.js; do
     node --check "$plugin_source" || return 1
   done
   node dsh-plugin-l1-shadow-capture/test/capture-smoke.mjs || return 1
@@ -957,6 +965,7 @@ case "$command" in
   compare-l1-dsh-tools) run_l1_dsh_tool_shadow "$@" ;;
   compare-l1-dsh-controlled) run_l1_dsh_controlled "$@" ;;
   compare-l1-dsh-guarded) run_l1_dsh_guarded "$@" ;;
+  compare-l1-dsh-schema) run_l1_dsh_schema "$@" ;;
   retirement) run_e2e ;;
   e2e) run_e2e ;;
   help|-h|--help|'') usage ;;
