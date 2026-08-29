@@ -41,6 +41,26 @@ class _RemoteClient:
         raise AssertionError(command)
 
 
+class _DecisionClient:
+    def __init__(self):
+        self.inner = InProcessWorkerClient()
+        self.calls = []
+        self.sequence = 0
+
+    def ping(self):
+        return self.inner.ping()
+
+    def request(self, command, *, args=None, **fields):
+        if command == "l1-decision-shadow":
+            self.sequence += 1
+            self.calls.append((command, dict(args or {})))
+            return {"decision_id": f"hermes-decision-{self.sequence}"}
+        if command in {"l1-decision-observe", "l1-decision-close"}:
+            self.calls.append((command, dict(args or {})))
+            return {"ok": True}
+        return self.inner.request(command, args=args, **fields)
+
+
 class HermesAdapterTests(unittest.TestCase):
     def setUp(self) -> None:
         self.temp = tempfile.TemporaryDirectory()
@@ -221,6 +241,52 @@ class HermesAdapterTests(unittest.TestCase):
         self.assertTrue(result["runtime_invariants_equal"])
         self.assertFalse(result["hermes"]["nonce_exposed_to_model"])
         self.assertTrue(result["hermes"]["duplicate_blocked"])
+
+    def test_p19_shadow_uses_public_hermes_hooks_and_closes_each_turn(self):
+        client = _DecisionClient()
+        config = HermesAdapterConfig(
+            **{
+                **self.config.__dict__,
+                "decision_mode": "shadow",
+                "decision_model": "selector-test",
+            }
+        )
+        adapter = NetOpYuHermesAdapter(client, config)
+        context = FakeHermesContext()
+        adapter.register(context)
+        self.assertIn("pre_llm_call", context.hooks)
+        self.assertIn("post_llm_call", context.hooks)
+        self.assertIn("on_session_end", context.hooks)
+
+        context.hooks["pre_llm_call"][0](
+            session_id="hermes-shadow", user_message="查看 alice 的网络访问。",
+            is_first_turn=True, model="test", platform="cli",
+        )
+        for hook in context.hooks["pre_tool_call"]:
+            hook(
+                tool_name="get_user_access", args={"user_id": "alice"},
+                task_id="hermes-shadow", session_id="hermes-shadow",
+            )
+        context.hooks["post_llm_call"][0](session_id="hermes-shadow")
+        observed = [item for item in client.calls if item[0] == "l1-decision-observe"]
+        self.assertEqual(len(observed), 1)
+        self.assertEqual(observed[0][1]["observed_target"], "get_user_access")
+
+        context.hooks["pre_llm_call"][0](
+            session_id="hermes-shadow", user_message="只做总结。",
+            is_first_turn=False, model="test", platform="cli",
+        )
+        context.hooks["post_llm_call"][0](session_id="hermes-shadow")
+        closed = [item for item in client.calls if item[0] == "l1-decision-close"]
+        self.assertEqual(closed[-1][1]["reason"], "no_domain_route")
+
+        context.hooks["pre_llm_call"][0](
+            session_id="hermes-shadow", user_message="查看网络。",
+            is_first_turn=False, model="test", platform="cli",
+        )
+        context.hooks["on_session_end"][0](session_id="hermes-shadow")
+        closed = [item for item in client.calls if item[0] == "l1-decision-close"]
+        self.assertEqual(closed[-1][1]["reason"], "session_end")
 
 
 if __name__ == "__main__":

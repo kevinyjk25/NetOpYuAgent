@@ -49,6 +49,7 @@ from .l0.models import CompiledAtomicEffect
 from .l0.runtime_loader import require_effect_arguments, validate_runtime_projection
 from .policies import ToolContract, project_arguments, resolve_contract
 from .provider_release import ProviderReleaseError
+from .proposal_binding import ProposalBindingError, compile_plan_decision_binding
 from .validation import assess_risk, compile_parameters
 from .verifiers import REGISTRY as VERIFIERS, verify_operation
 from .workflows import WorkflowRuntime
@@ -116,8 +117,18 @@ class NetworkRuntime:
         l0_skill_id: str | None = None,
         subject_context: dict[str, Any] | None = None,
         harness: str = "local",
+        l1_decision_envelope: dict[str, Any] | None = None,
+        l1_route_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Compile a request into an immutable plan before approval is shown."""
+        if (l1_decision_envelope is None) != (l1_route_context is None):
+            return {
+                "ok": False,
+                "status": "rejected",
+                "errors": [
+                    "L1 Decision envelope and observed route must be supplied together"
+                ],
+            }
         backend = await self.backend_factory(profile_id)
         try:
             metadata = backend.metadata.get(tool_name)
@@ -327,6 +338,12 @@ class NetworkRuntime:
                     "errors": ["rollback tool has no registered compensation contract; fail closed"],
                 }
             if not requires_approval:
+                if l1_decision_envelope is not None:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["L1 Decision-to-plan binding applies only to mutating plans"],
+                    }
                 return {
                     "ok": True,
                     "status": "read_ready",
@@ -355,6 +372,29 @@ class NetworkRuntime:
             approval_mode = str(l0_contract.compiled_contract.spec.approval.mode)
             created = datetime.now(timezone.utc)
             expires = created + timedelta(seconds=self.plan_ttl_seconds)
+            l1_binding: dict[str, Any] | None = None
+            if l1_decision_envelope is not None:
+                try:
+                    l1_binding = compile_plan_decision_binding(
+                        l1_decision_envelope,
+                        route_context=l1_route_context or {},
+                        profile=backend.profile_id,
+                        session_id=str(session_id or "local-session"),
+                        harness=harness,
+                        tool_name=tool_name,
+                        l0_skill_id=l0_contract.skill_id,
+                        l0_contract_hash=l0_contract.contract_hash,
+                        request_arguments=arguments,
+                        plan_arguments=compiled.arguments,
+                        created_at=created.isoformat(),
+                        expires_at=expires.isoformat(),
+                    )
+                except ProposalBindingError as error:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [f"L1 Decision-to-plan binding rejected: {error}"],
+                    }
             plan = PreparedPlan.create(
                 plan_id=str(uuid.uuid4()),
                 profile=backend.profile_id,
@@ -405,20 +445,28 @@ class NetworkRuntime:
                 approval_policy_id=self.approval_control_plane.policy_id,
                 approval_policy_version=self.approval_control_plane.policy_version,
                 approval_policy_hash=self.approval_control_plane.policy_hash,
+                l1_decision_binding=l1_binding,
                 created_at=created.isoformat(),
                 expires_at=expires.isoformat(),
             )
             nonce = secrets.token_urlsafe(32)
-            with NetworkJournal(self.journal_path) as journal:
-                journal.create(plan, nonce)
-                journal.append_events(plan.plan_id, [
-                    ("l0_step_completed", {
-                        "step_id": step_id,
-                        "l0_contract_hash": l0_contract.contract_hash,
-                        "intent_hash": intent.intent_hash,
-                    })
-                    for step_id in ("validate_parameters", "compile_intent", "preflight")
-                ])
+            try:
+                with NetworkJournal(self.journal_path) as journal:
+                    journal.create(plan, nonce)
+                    journal.append_events(plan.plan_id, [
+                        ("l0_step_completed", {
+                            "step_id": step_id,
+                            "l0_contract_hash": l0_contract.contract_hash,
+                            "intent_hash": intent.intent_hash,
+                        })
+                        for step_id in ("validate_parameters", "compile_intent", "preflight")
+                    ])
+            except PlanIntegrityError as error:
+                return {
+                    "ok": False,
+                    "status": "rejected",
+                    "errors": [str(error)],
+                }
             return {
                 "ok": True,
                 "status": "plan_ready",

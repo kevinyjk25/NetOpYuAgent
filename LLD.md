@@ -21,18 +21,34 @@
 | `hermes_adapter/comparison.py` | DSH/Hermes Network Runtime 不变量 A/B 门禁 |
 | `dsh_adapter/bridge.py` | manifest、只读调用、prepare/execute/inspect/audit/workflow API |
 | `dsh_adapter/worker.py` | 持久化 JSON-lines Unix Socket 服务、请求隔离和 tracing |
+| `l1_runtime/contracts.py` | P1.9 Decision/证据/信封的严格 proposal-only 合同与摘要绑定 |
+| `l1_runtime/catalog.py` | 从当前 DSH Tool 声明和受审 Skill manifest 构建候选目录、召回与支配关系 |
+| `l1_runtime/policies.py` | Oracle-independent Guard、参数 grounding 与单调收窄策略 |
+| `l1_runtime/client.py` | loopback-default OpenAI-compatible 单 Tool-call 模型 Adapter |
+| `l1_runtime/service.py` | Guard → 选择 → grounding → 确定性编译、一次有界修复和影子 API |
+| `l1_runtime/store.py` | 不保存原始请求/参数值的 Decision 与实际 DSH 路由关联 SQLite |
+| `l1_runtime/catalog_gate.py` | 三 profile 候选/Tool/Skill 语义摘要基线与漂移门禁 |
+| `l1_runtime/holdout.py` | 仓库外未见集封存清单与双 reviewer 一致性合同 |
+| `l1_runtime/qualification.py` | 私有 Oracle、同模型 DSH/Hermes 双身份 parity、重复稳定性与脱敏聚合报告 |
+| `l1_runtime/adapter_qualification.py` | 生产 DSH/Hermes Hook → 临时 Worker 的输入/Decision 摘要 parity |
+| `l1_runtime/canary_policy.py` | C1 无副作用单调策略：原 route 不变或阻断，不重路由/改参/授权 |
+| `l1_runtime/canary_readiness.py` | C1 四类外部证据的严格摘要、时效、交叉绑定、演练和隐私报告门禁 |
 | `dsh_adapter/backend.py` | mock/pragmatic backend 生命周期和公共分页工具 |
 | `dsh_adapter/local_dc_peer.py` | loopback-only mock A2A peer |
 | `dsh_adapter/scoped_services.py` | session/operator memory 和 profile capability retrieval |
 | `effect_runtime/` | 领域中性 façade 与跨 Service/Network reconciliation |
 | `network_runtime/engine.py` | Domain Effect Runtime 共享主状态机 |
-| `network_runtime/contracts.py` | schema v9、Plan/Evidence/Outcome 与状态迁移；兼容读取 v8 及更早 hash shape |
+| `network_runtime/contracts.py` | schema v10、Plan/Evidence/Outcome 与状态迁移；兼容读取 v9/v8 及更早 hash shape |
+| `network_runtime/proposal_binding.py` | P1.9-C0 proposal-only Decision→Plan 严格投影和持久化校验 |
 | `network_runtime/identity.py` | requester 主体规范化、策略判定、审批证明签发/校验与 local/enforced 模式 |
 | `network_runtime/enterprise.py` | 严格 JWT/JWKS cache、OIDC+Gateway 交叉绑定、动态 Gateway mint、显式 CA/mTLS、HTTP PDP、Change Authority 与环境装配 |
 | `network_runtime/enterprise_conformance.py` | 无泄密离线 Doctor 与无效果 live authority contract check |
 | `network_runtime/provider_release.py` | Provider Manifest/Qualification/Bundle/Trust、兼容检查、发布状态机、admission |
 | `network_runtime/provider_qualification.py` | 隔离 reference target 的固定 9 项故障资格执行器 |
 | `network_runtime/provider_release_cli.py` | schema/sign/bundle/verify/stage/publish/promote/rollback/deprecate/status/audit CLI |
+| `network_runtime/catalog_control.py` | P2.1 Governed Capability Catalog、委派、依赖、兼容与消费者影响 |
+| `network_runtime/evidence_plane.py` | P2.2 五类只读证据 adapter、统一摘要链、指标、事故与离线 HTML |
+| `network_runtime/p2_cli.py` | P2.1/P2.2 本地治理与 Evidence CLI |
 | `network_runtime/l0_skills.py` | L0 Skill/step/IntentSpec 注册表和 hash |
 | `network_runtime/validation.py` | 参数规范化、类型、来源、实体与风险校验 |
 | `network_runtime/policies.py` | 工具版本、preflight、verifier、compensator 合同 |
@@ -72,6 +88,11 @@
 6. 通过 `ctx.provide` 注册 DSH service；
 7. 注册普通工具、HITL 工具、A2A 工具和 trajectory 工具；
 8. 在 Cordis effect cleanup 中关闭 SQLite。
+
+P1.9-B1 启用 `NETOPYU_L1_DECISION_MODE=shadow` 时，还会注册
+`netopyuDecisionPlane` service。它只能观察 DSH 已接受的直接用户消息，并在原 DSH
+步骤之后产生无执行权 Decision；模型超时、协议错误或 Decision 服务失败不得改变原 DSH
+步骤。`off` 是默认值，当前插件拒绝 `canary/enforced`，避免尚未验收的模式被误启用。
 
 启动失败不得留下“部分写工具已注册”的状态。manifest、Python、backend 或存储初始化失败应使插件启动失败。
 
@@ -186,7 +207,7 @@ L0 v2 在既有执行合同之上增加 authoring/compiler 层：
 
 `IntentSpec` 不包含自由文本执行指令。模型解释只能保留在 DSH 会话，不能成为 backend 命令。
 
-### 7. PreparedPlan schema v9
+### 7. PreparedPlan schema v10
 
 核心字段：
 
@@ -205,10 +226,18 @@ intent_spec, intent_hash, step_contract
 workflow_run_id, workflow_template_hash
 requester_identity, requester_digest
 approval_mode, approval_policy_id, approval_policy_version, approval_policy_hash
+l1_decision_binding? {
+  decision/evidence/prompt/catalog/candidate/policy digests,
+  session/harness/profile, selected and observed route,
+  request/compiled argument digests and keys,
+  bound tool/L0 skill/L0 contract, lifetime, binding_digest
+}
 created_at, expires_at, plan_hash, state, schema_version
 ```
 
-`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。schema v9 保留 v7 requester/policy 与 v8 active release/manifest/qualification 绑定，并增加 active deployment digest。v8 及更早 hash shape 仅用于读取既有 journal，不能创建新计划。
+`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。schema v10 保留 v7 requester/policy、v8 active release/manifest/qualification 和 v9 deployment 绑定，并增加可选的 P1.9-C0 L1 provenance binding；v9/v8 及更早 hash shape 仅用于读取既有 journal，不能创建新计划。
+
+`l1_decision_binding` 只有在显式 canary 输入存在时才生成。Runtime 不依赖 `l1_runtime` 类型，而对 wire envelope 进行 extra-forbid 等价校验：Decision/evidence 摘要必须覆盖完整载荷，Guard 必须为 allow，协议有效，mode 必须为 canary，session/Harness/profile 和候选 route 必须一致。直接 Tool 要求 target 与请求参数完全相同；Skill 还要求实际 Tool 属于可信 workflow，当前 v1 同样要求参数精确一致，复杂参数投影留给未来受审 mapping contract。绑定仅保存摘要和字段名，不保存 Prompt。Journal 的 partial unique index 保证一个 `decision_id` 最多创建一份计划，并把 binding digest 写入 `plan_created` hash-chain event。
 
 ### 8. 状态机
 
@@ -552,6 +581,116 @@ C1 启动审计固定 DSH 版本、28 个精确活动 entry、原 B1 disabled �
 
 `evaluation.dsh_schema_compiler` 从可信候选条目派生 action、required missing fields 和 workflow，记录 CaseScore、SchemaProtocolTrace 与 SchemaGuardTrace，并把 DSH/config/settings/Skill/system Prompt/Guard/grounding/candidate policy/model artifact/dataset/Catalog/evaluator 全部纳入 fingerprint。正式 184 条报告要求候选摘要、Skill、Tool 暴露、单次 capture、Schema、编译、回执、终态和 usage 门禁完整；所有效果 Adapter 仍被禁用。C3.2 的同一 7B 记录通过当前门槛，但输出仍只是无执行权 `L1Decision`。
 
+### 27. P1.9 L1 Decision Plane 实现
+
+`l1_runtime` 是从 P1.8 评测代码中独立提取的生产 Decision Plane，禁止导入
+`evaluation.*`。一次影子决策按以下固定顺序执行：
+
+1. DSH `agent/pre-step` 先调用下游 `next()`；只有结果为 `enter` 且包含直接
+   `source.kind=user` 消息时才进入影子链路；
+2. 插件按 session/message digest 有界去重，把当前 DSH 精确 Tool 声明、profile 和请求交给
+   Python Worker；不接受用户传入的模型 endpoint、凭据或候选目录；
+3. `DecisionCatalog` 合并当前 Tool 声明与受审 Skill manifest，经 BM25 召回最多 12 个候选，
+   再应用版本化支配/override 规则；
+4. Guard 对规范化后的最多 4000 字符请求先执行单调收窄；确定危险或越界时直接产生终止
+   Decision，不调用模型；
+5. 模型只看到本轮候选专属 `select_candidate_NN` 和两个终止 Tool，必须恰好调用一个 Tool；
+   非法响应最多进行一次受限修复，修复仍不得扩展候选或参数 Schema；
+6. Grounding 只保留可从请求文本证明或由受审 alias 规范化的值；不补默认值，未知值被删除；
+7. action、required missing fields、workflow 只从可信候选合同确定性编译；模型不能直接提供这些
+   权威字段；
+8. `L1DecisionEnvelope` 固定 `authority=proposal_only`，保存 prompt/Decision/证据摘要、参数键、
+   策略摘要、调用次数、修复数与时延，不保存原始请求、模型正文或参数值；
+9. DSH 插件保持原 step 不变；Hermes `pre_llm_call` observer 同样不注入 context。二者在同 session
+   第一次真实 domain Skill/Tool 路由时写入一次 observation；被覆盖、no-route 或 session-end 的
+   pending Decision 显式关闭，关闭后不可绑定后续 Tool；
+10. 指标只计算有界本地 observation 的协议成功、路由一致、直接 Tool 参数一致、安全逃逸、修复、
+    调用次数和 p50/p95；DSH 路由一致率是 parity 信号，不是正确性真值或生产成功概率。
+
+P1.9-C0 另提供不启用的计划绑定路径。Worker 的 `runtime-prepare` 可选透传完整 Decision envelope
+和 `{kind,target}` route context；`NetworkRuntime.prepare()` 在创建计划前完成 wire digest、mode、
+session/Harness/profile、候选、请求参数、编译参数与 L0 contract 校验，再把隐私化 binding 写入
+schema-v10 plan hash。Journal 对 `decision_id` 做唯一约束，第二次 prepare 直接拒绝。持久化 binding
+或计划内容被改动时，即使外层 plan hash 被重新计算，binding digest/上下文校验仍会拒绝读取。
+当前 DSH/Hermes 配置构造器仍只允许 `off/shadow`，所以 C0 不能自行进入业务流量。
+
+P1.9-C1 的 `evaluate_canary_policy()` 只接收严格 Envelope 与 Harness 已确定的 route。选择完全一致时返回
+`continue_original_route/unchanged`；clarify/refuse/out-of-scope/selection mismatch 返回
+`blocked/narrowed`；无效写材料失败关闭，无效读材料保持 route 且只记录观察。返回合同把
+`authority_granted/route_rewritten/arguments_rewritten` 固定为 false，并把
+`runtime_admission_required` 固定为 true。该函数无 filesystem/network/environment/Adapter/Provider
+副作用。
+
+`canary_readiness` 对 Worker qualification、Adapter qualification、产品/部署 attestation 与运维
+attestation 执行完整报告摘要、自身证据摘要、有效期和 model/manifest/labels/catalog 交叉绑定。
+产品证据必须覆盖真实 DSH Web UI、Hermes CLI 与交互 SLO；运维证据必须证明 reviewer/owner 分离、
+64/64 Core 控制、至少三个实现版本的 stable/improved trend 与 p50/p95 阈值、完整 C0 binding、零
+replay/authority escape、四个独立 receipt 的 kill switch/回 shadow/告警/no-effect replay 演练和不超过 5%/120 分钟的
+限制。报告不输出 Prompt、标签、参数、reviewer/owner id，状态最多为 `ready_for_review`，CLI 返回码
+不写配置也不激活流量。
+
+影子链路无 effect authority：它不能调用 Runtime/Provider、不能签发审批证明、不能覆盖 DSH
+路由，也不能把模型置信度转换为权限。影子失败对原 DSH 行为 fail-open，但只限旁路观测；未来
+`canary/enforced` 在进入任何效果路径前必须对 Decision 绑定、证据新鲜度、政策版本、sealed
+holdout、目标/参数一致和 Runtime admission 全部 fail closed，并保留 DSH/Hermes 与 L0 Runtime
+作为最终权限边界。
+
+`l1_runtime.catalog_gate` 在 mock 资格环境重建 LAN/DC/WAN 当前只读 Tool declarations、Skill
+semantic manifest 和候选目录，与 `data/l1_catalog_baseline.json` 精确比较；Skill 绝对路径从摘要中
+删除，使基线可跨 checkout。新增/删除、Schema/描述/Skill 内容或策略变化都使门禁失败，只有完成
+manifest review 后才可显式替换 baseline。
+
+`l1_runtime.holdout` 只处理仓库外 JSONL：seal 要求至少 50 个唯一请求、10 个类别、三个 profile、
+至少 10 条中文和 10 条英文，输出不含 Prompt/标签的摘要 manifest；adjudicate 要求两个不同且各自
+稳定的 reviewer id 覆盖同一精确 case set，任一语义标签分歧都不产生 consensus digest。reviewer id
+只是本地流程约束，不是企业身份或不可抵赖签名；仓库当前没有真实人工审核 holdout。
+
+`l1_runtime.qualification` 只在 consensus 与 Catalog gate 均通过后加载私有内容到内存。每个 case
+按固定 Tool declarations、策略、模型和 repair limit 分别以 `harness=dsh|hermes` 独立执行至少两次；
+Decision id、session 和时延不参与语义比较，输入合同则精确比较 prompt/catalog/candidate/policy/model
+摘要与候选序列。Oracle 分别计算 action、target、arguments、missing fields、workflow、完整语义、
+候选召回、安全拒绝、token 和 p50/p95；重复执行计算每端稳定率，配对执行计算输入合同与 Decision
+语义 parity。只有五类 action 覆盖、不可变模型 artifact digest、所有绝对门槛 100%、安全 escape 为 0 才输出 `qualified`。
+
+报告只输出聚合 action 计数、类别切片和 case-id digest，禁止输出 Prompt、逐条 label 或 argument
+value。当前 scope 固定为 `shared_worker_decision_contract`；DSH/Hermes Hook 提取与生命周期由 Adapter
+测试覆盖，但完整 Harness 产品运行仍是独立外部证据，不能从 Worker runner 推断。
+
+`l1_runtime.adapter_qualification` 再把边界推进一层。它从同一 sealed/consensus set 生成仅含
+case-id digest、Prompt 和 repetition 的内存输入，通过 stdin 交给真实 DSH JavaScript driver；driver
+调用生产插件的 accepted `agent/pre-step`。Hermes 侧注册生产 Adapter 并调用其官方 `pre_llm_call`。
+两端连接同一个临时 owner-only Unix Socket Worker，模型端点、artifact、repair limit 和 mock Catalog
+完全相同。Worker store 只返回脱敏 Envelope，runner 比较预期 Prompt digest、Catalog/Candidate/Policy
+摘要、协议终态和完整 Decision digest，然后删除临时 Socket/SQLite。
+Node/Python 注入型启动环境被清除，Node executable 解析为可执行绝对路径；Prompt 不进入 argv、日志或报告。
+
+Adapter report 的 scope 固定为 `adapter_hook_to_worker`。它证明 Hook 提取和 Worker wire composition，
+但没有启动 DSH Web/Hermes CLI/UI，也未验证其发行包、session host、部署身份或真实组织配置。
+
+### 28. P2.0 Promotion Workbench 实现
+
+`network_runtime/l0/workbench.py` 提供 `inspect_workbench()`、`list_workbench()`、`render_workbench_html()` 和 `export_workbench_html()`。输入只接受 `ready_for_review` Promotion v2 目录；所有 stage 必须是普通文件、非 symlink、单文件不超过 2 MB，且 package manifest、trajectory、report、source Skill、L0.5、Capability Catalog、compiled contract 和 review 摘要必须一致。
+
+`inspect_workbench()` 使用现有 Pydantic 合同解析 L0.5/Catalog/compiled L0，生成 semantic diff、四阶段 DAG 和 Runtime contract graph；Composite graph 的边来自 `dependsOn`，不得从列表顺序推断。Reviewer 和 reason 只输出摘要。`list_workbench()` 只扫描直接子目录并把目录名摘要化，无效输入只返回 `invalid`。
+
+`render_workbench_html()` 将转义后的 JSON 嵌入 CSP 限制的自包含页面，不执行外部 fetch/XHR。编辑器 Reset 只恢复内存副本，Download 只生成不可信草稿。CLI 的 `workbench-inspect/list/export` 不修改 proposal；唯一写入是用户指定的 HTML 输出文件。
+
+### 29. P2.1/P2.2 控制面实现
+
+`network_runtime/catalog_control.py` 定义 frozen/extra-forbid Pydantic Catalog。`seal_governance_catalog()` 先归一化再计算整体 `catalogHash`；`load_governance_catalog()` 拒绝 symlink、超过 4 MB、未知字段和摘要漂移。Catalog validator 检查团队/租户引用、owner-steward 分离、consumer 合同摘要、owner-only 委派、scope 子集、精确 dependency 摘要、DAG 无环和 `supersedes` 的旧版本绑定。`validate_runtime_catalog_binding()` 对生产 Registry 做 21/21 id/version/contract/profile 精确集合比较；`evaluate_catalog_access()` 返回摘要化团队/委派和固定无 Runtime/Provider 权威标志；`catalog_compatibility_report()` 检测原地语义/依赖/范围变化、删除、生命周期回退和消费者影响。
+
+`network_runtime/evidence_plane.py` 对 SQLite 使用 URI `mode=ro`、`PRAGMA query_only=ON`、大小/条数上限和固定查询。五类 collector 只投影 digest、时间、category、state/outcome 与白名单标量，并分别验证 Runtime/Saga/Provider 事件链、Decision evidence digest 和 Promotion package。所有事件排序后生成跨来源 `projection_digest` 链，再由 `snapshot_digest` 绑定整个 snapshot；invalid、unverified 或 truncated source 使状态为 `degraded`。HTML exporter 先验证 snapshot digest，再以 CSP 自包含页面输出；页面没有远程资源或控制动作。
+
+`analyze_evidence_trend()` 验证至少两个唯一 snapshot，按时间排序并计算 Runtime/L1/事故/完整性变化；仅 critical incident、降级来源、安全逃逸和状态恢复/退化参与自动趋势分类，p50/p95 只展示不自动宣称 SLO。`network_runtime/p2_cli.py` 暴露 `catalog-bootstrap/validate/authorize/diff` 和 `evidence-collect/export/incident/trend`。兼容性 breaking、治理拒绝、Evidence degraded 或 trend regressed 使用非零退出码；输出目标拒绝 symlink。`scripts/netopyu-dsh retirement` 额外校验源码 Catalog 与生产 L0 Registry 一致。
+
+### 30. P2.3 产品化与收敛评测实现
+
+- `productization/integration.py` 使用冻结、`extra=forbid` 的 Pydantic 模型解析最大 2 MB、非 symlink 的 Pack。跨引用校验保证 Provider 存在、write 有独立 read verifier、可逆 write 有 write compensation、凭据只接受环境变量名且 `modelVisible=false`。结果最多进入 L0 authoring/offline review。
+- `productization/cli.py` 是统一入口。`doctor/journeys/capabilities/evaluate/integration-check` 无外部效果；`demo` 未提供显式批准时在调用演示代码前返回 2。输出写入拒绝 symlink 和非普通目标。
+- `evaluation/convergence.py` 只接受确切 Runtime/L1 schema，删除 Prompt/参数值后保留布尔门禁并计算唯一首层失败；源报告和最终快照绑定 canonical SHA-256。
+- `evaluation/cockpit.py` 在导出前复核快照摘要，用 JSON 转义、DOM `textContent` 和 CSP 生成 self-contained 页面；无 fetch/XHR、表单、审批、激活或执行接口。
+- `data/convergence_baseline.json` 是源码化脱敏快照，使新 clone 无需重跑数小时模型评测即可查看现状；原始报告可生成新的非权威快照。
+
 ---
 
 ## English
@@ -582,6 +721,16 @@ must reproduce the typed preflight evidence.
 | `hermes_adapter/comparison.py` | DSH/Hermes Runtime-invariant A/B gate |
 | `dsh_adapter/bridge.py` | Manifest, read, prepare, execute, inspect, audit, workflow API |
 | `dsh_adapter/worker.py` | Persistent JSON-lines Unix-socket server and request isolation |
+| `l1_runtime/contracts.py` | Strict proposal-only Decision, evidence, envelope, and digest contracts |
+| `l1_runtime/catalog.py` | Candidate catalog/retrieval from current DSH tools and reviewed Skills |
+| `l1_runtime/policies.py` | Oracle-independent guard, grounding, and monotonic narrowing policies |
+| `l1_runtime/client.py` | Loopback-default OpenAI-compatible single-tool-call model adapter |
+| `l1_runtime/service.py` | Guard, selection, grounding, deterministic compile, bounded repair, and shadow API |
+| `l1_runtime/store.py` | Privacy-bounded Decision-to-observed-DSH-route SQLite store |
+| `l1_runtime/catalog_gate.py` | Three-profile candidate/Tool/Skill semantic drift baseline |
+| `l1_runtime/holdout.py` | Repository-external holdout sealing and two-reviewer consensus contract |
+| `l1_runtime/qualification.py` | Private Oracle, same-model DSH/Hermes identity parity, repeatability, and redacted aggregate reports |
+| `l1_runtime/adapter_qualification.py` | Production DSH/Hermes hook-to-temporary-Worker input/full-Decision digest parity |
 | `dsh_adapter/backend.py` | Backend lifecycle and common paging tools |
 | `effect_runtime/` | Domain-neutral façade and Service/Network reconciliation |
 | `network_runtime/engine.py` | Shared deterministic effect state machine |
@@ -592,6 +741,9 @@ must reproduce the typed preflight evidence.
 | `network_runtime/provider_release.py` | Provider release contracts, trust, compatibility, lifecycle registry, and admission |
 | `network_runtime/provider_qualification.py` | Fixed nine-case failure qualification against an isolated reference target |
 | `network_runtime/provider_release_cli.py` | Provider schema/sign/bundle/verify/lifecycle CLI |
+| `network_runtime/catalog_control.py` | P2.1 governed Catalog, delegation, dependencies, compatibility, and consumer impact |
+| `network_runtime/evidence_plane.py` | P2.2 five read-only adapters, unified digest chain, metrics, incidents, and offline HTML |
+| `network_runtime/p2_cli.py` | P2.1/P2.2 local governance and Evidence CLI |
 | `network_provider/` | Identity-pinned Observer MCP, durable Actor MCP/store, strict results |
 | `network_runtime/l0_skills.py` | Versioned L0 and IntentSpec registry |
 | `network_runtime/validation.py` | Normalization, schema, provenance, entity, and risk validation |
@@ -608,6 +760,12 @@ must reproduce the typed preflight evidence.
 ### 3. Startup and transport
 
 DSH startup resolves configuration, loads Python manifests, projects only the active profile and allowed mutation surface, initializes persistent stores and services, registers tools, and attaches cleanup. A partial mutation surface must never survive startup failure.
+
+With P1.9-B1 `NETOPYU_L1_DECISION_MODE=shadow`, startup also provides the
+`netopyuDecisionPlane` service. It observes only direct user messages from an already accepted DSH step
+and produces a non-authoritative Decision after downstream processing. Timeout, protocol failure, or
+Decision-service failure cannot alter that DSH step. `off` remains the default, and the plugin rejects
+`canary/enforced` until those modes have separate acceptance evidence.
 
 Hermes uses the official `plugin.yaml + register(ctx)` surface. It requires a healthy Worker and the public slash-command API before exposing mutations. Read handlers invoke the shared Worker and record reviewed-workflow observations under the same task id. `netopyu_skill_view` and the built-in `skill_view` hook start the matching reviewed workflow. Write handlers prepare only, remove the execution nonce from model-visible JSON, and retain it in process-local `PendingActions`. Only an exact user slash command may atomically claim that binding, request a signed proof through `runtime-approve`, and call `runtime-execute`. Restart discards all pending bindings safely.
 
@@ -837,3 +995,111 @@ A loopback Governor requires a typed Tool on the first model round, permits at m
 `evaluation.l1_schema_gateway` listens only on loopback and verifies prompt/candidate binding, the exact Tool surface, a single streamed Tool call, and Guard consistency. `constrain_attempt_to_candidate_schema()` may delete only keys outside the selected candidate Schema; it cannot switch Tools/candidates or alter known values. The sanitized proposal stream returns to DSH. `evaluation.l1_argument_grounding` then applies versioned request-evidence checks, generic-placeholder rejection, and reviewed alias/casefold normalization from `data/l1_c3_argument_policy.yaml`. Unsupported values are removed and no default is invented.
 
 `evaluation.dsh_schema_compiler` derives action, required missing fields, and workflow from the trusted candidate entry; preserves CaseScore, SchemaProtocolTrace, and SchemaGuardTrace; and fingerprints DSH/config/settings/Skill/system prompt/Guard/grounding/candidate policy/model artifact/dataset/Catalog/evaluator evidence. A formal 184-case report requires complete candidate-digest, Skill, Tool-surface, single-capture, Schema, compilation, receipt, terminal-state, and usage gates. All effect adapters remain disabled. The same 7B passes the current C3.2 gates, but its output remains a non-authoritative `L1Decision`.
+
+### 19. P1.9 L1 Decision Plane implementation
+
+`l1_runtime` is a production Decision Plane extracted independently from P1.8; it must not import
+`evaluation.*`. After downstream accepts a DSH step, shadow mode selects only the latest direct user
+message, deduplicates it per session/message digest, and supplies the Worker with the exact current DSH
+tool declarations. The catalog merges those declarations with the reviewed Skill manifest, retrieves at
+most twelve candidates, and applies versioned dominance/override policy.
+
+The fixed pipeline is guard, exactly one candidate-specific or terminal tool call, at most one bounded
+repair, argument grounding, and deterministic derivation of action, missing fields, and workflow. No
+default or unsupported value is synthesized. The resulting envelope always has
+`authority=proposal_only`; storage retains digests, argument keys, policy identity, call/repair counts,
+and latency, but not raw prompts, model prose, or parameter values. The DSH plugin returns the original
+step unchanged, while the Hermes pre-LLM observer injects no context. Both correlate the proposal once
+with the first actual domain Skill/tool route. Superseded, no-route, and session-end pending Decisions
+are explicitly closed and cannot attach to later Tools.
+
+Shadow failures are fail-open only for this side-channel observation and never grant effect authority.
+The current plugin accepts only `off` and `shadow`. A future canary/enforced path must fail closed before
+effects on binding, freshness, policy version, sealed-holdout gates, target/argument agreement, and
+Runtime admission. Routing agreement is a parity signal, not a correctness oracle or production success
+probability; L0 approval, revalidation, independent verification, compensation, and audit remain the
+authority boundary.
+
+P1.9-C0 additionally provides a disabled plan-binding path. Worker `runtime-prepare` may carry the full
+Decision envelope plus an observed `{kind,target}` route context. Before creating a plan,
+`NetworkRuntime.prepare()` verifies wire digests, canary mode, session/Harness/profile, candidate route,
+request and compiled arguments, and the exact L0 contract, then stores only a privacy-minimized binding in
+the schema-v10 plan hash. The Journal permits one plan per Decision id. A second prepare is rejected, and
+persisted binding/context tampering fails even if an outer plan hash is recomputed. DSH/Hermes configuration
+still accepts only `off/shadow`, so C0 cannot put itself into traffic.
+
+P1.9-C1 `evaluate_canary_policy()` consumes a strict Envelope plus the route already selected by the
+Harness. An exact selection match returns `continue_original_route/unchanged`; clarification, refusal,
+out-of-scope, or mismatch returns `blocked/narrowed`. Invalid writes fail closed, while invalid reads
+preserve the original route as observation only. Authority, route rewriting, and argument rewriting are
+literal false and Runtime admission remains literal true. The function has no filesystem, network,
+environment, Adapter, or Provider side effects.
+
+`canary_readiness` verifies full Worker/Adapter report digests, self-bound and expiring product/operations
+attestations, and a common model/manifest/labels/catalog identity. Product evidence covers real DSH Web UI,
+Hermes CLI, and interaction SLOs; operations evidence covers reviewer/owner separation, 64/64 Core controls,
+a stable/improved three-implementation trend within p50/p95 thresholds, complete C0 binding, zero replay/
+authority escape, four distinct stop/shadow rollback/alert/no-effect-replay receipts, and at most 5%/120 minutes. The report emits
+no prompts, labels, arguments, reviewer ids, or owner ids, returns at most `ready_for_review`, and the CLI
+cannot configure or activate traffic.
+
+`l1_runtime.catalog_gate` rebuilds the LAN/DC/WAN read-only Tool declarations, portable Skill semantics,
+and candidates in the mock qualification environment and compares them exactly with
+`data/l1_catalog_baseline.json`. Checkout-specific Skill paths are excluded. A candidate, Schema,
+description, Skill-content, or policy change fails until the reviewed baseline is explicitly replaced.
+
+`l1_runtime.holdout` processes repository-external JSONL only. Sealing requires at least 50 unique prompts,
+ten categories, all three profiles, and at least ten Chinese plus ten English cases, and emits a manifest
+without prompts or labels. Adjudication requires two distinct stable reviewer ids covering the exact case
+set; any semantic disagreement prevents a consensus digest. Reviewer ids are a local process constraint,
+not enterprise identity or non-repudiation, and the repository contains no real adjudicated holdout.
+
+`l1_runtime.qualification` loads private material in memory only after exact consensus and a clean Catalog
+gate. Every case uses fixed Tool declarations, policies, model, and repair limit for at least two independent
+calls under each `dsh` and `hermes` identity. Decision/session ids and latency are excluded from semantic
+comparison; prompt/catalog/candidate/policy/model digests and candidate order form the exact input-contract
+comparison. Separate Oracles score action, target, arguments, missing fields, workflow, full semantics,
+target retrieval, refusal safety, token accounting, and p50/p95. Repeated calls measure per-Harness stability,
+while paired calls measure input-contract and Decision semantic parity. Local Ollama artifact digests are
+discovered from its loopback tags API; other endpoints require an explicit immutable digest. Qualification
+requires all five actions, every absolute gate at 100%, and zero safety escapes.
+
+Reports contain aggregate action counts, category slices, and case-id digests only—never prompts, per-case
+labels, or argument values. Scope is explicitly `shared_worker_decision_contract`; adapter tests cover hook
+extraction/lifecycle, while a full Harness-product run remains separate external evidence.
+
+`l1_runtime.adapter_qualification` advances the boundary by executing the production hook code. It sends
+case-id digest/prompt/repetition material to the real DSH JavaScript driver over stdin, invokes the accepted
+`agent/pre-step`, registers the production Hermes adapter, and invokes its official `pre_llm_call`. Both use
+one temporary owner-only Unix-socket Worker with identical endpoint, artifact, repair limit, and mock Catalog.
+Privacy-redacted envelopes are checked against the expected prompt digest and each other for Catalog,
+Candidate, Policy, protocol state, and full Decision digest; all temporary sockets/SQLite are removed.
+Injection-oriented Node/Python startup variables are removed and Node is pinned to an executable absolute
+path; prompts never enter argv, logs, or reports.
+
+Its scope is `adapter_hook_to_worker`: it proves adapter extraction and Worker wire composition, not DSH Web,
+Hermes CLI/UI, distribution integrity, session hosting, deployment identity, or real organizational config.
+
+### 20. P2.0 Promotion Workbench implementation
+
+`network_runtime/l0/workbench.py` exposes `inspect_workbench()`, `list_workbench()`, `render_workbench_html()`, and `export_workbench_html()`. It accepts only a `ready_for_review` Promotion-v2 directory. Every stage must be a regular non-symlink file no larger than 2 MB, and the package manifest, trajectory, report, source Skill, L0.5, Capability Catalog, compiled contract, and optional review digests must cross-bind.
+
+The inspector parses existing Pydantic contracts and produces a semantic diff, four-stage DAG, and Runtime contract graph. Composite edges come from `dependsOn`, never incidental list order. Reviewer and reason are digest-minimized; list results digest directory names and expose invalid children only as `invalid`.
+
+The renderer embeds escaped JSON in a CSP-constrained self-contained page with no external fetch/XHR. Reset changes browser memory only, and Download emits an untrusted draft. The inspect/list/export CLIs never mutate a proposal; export writes only the explicitly selected HTML output.
+
+### 21. P2.1/P2.2 control-plane implementation
+
+`network_runtime/catalog_control.py` defines a frozen, extra-forbid Pydantic Catalog. Sealing normalizes then hashes the complete document; loading rejects symlinks, documents above 4 MB, unknown fields, and digest drift. Validation enforces team/tenant references, owner/steward separation, exact consumer and dependency hashes, owner-only scoped delegation, acyclic dependencies, and bound supersession. Runtime validation compares the exact 21/21 id/version/contract/profile set. Access decisions expose only digested team/delegation identities and fixed false Runtime/Provider authority flags; compatibility reports detect in-place semantics/dependency/scope changes, removals, lifecycle regression, and consumer impact.
+
+`network_runtime/evidence_plane.py` opens SQLite through URI read-only mode plus `query_only`, with size and record bounds and fixed queries. Five collectors project only digests, timestamps, category, state/outcome, and allowlisted scalars while validating Runtime/Saga/Provider chains, Decision evidence digests, and Promotion packages. Sorted events form a cross-source projection chain and the complete snapshot is digest-bound; invalid, unverified, or truncated sources produce `degraded`. HTML export revalidates the snapshot and emits a CSP self-contained page with no remote resource or control action.
+
+`analyze_evidence_trend()` validates at least two unique snapshots, sorts them by time, and computes Runtime/L1/incident/integrity deltas. Only critical incidents, degraded sources, safety escapes, and status recovery/degradation are classified automatically; p50/p95 is displayed without an SLO claim. `network_runtime/p2_cli.py` exposes Catalog plus evidence collect/export/incident/trend commands. Breaking compatibility, denied governance, degraded evidence, and regressed trends return non-zero; output symlinks are refused. The retirement gate also verifies exact source-Catalog-to-production-L0 coverage.
+
+### 22. P2.3 productization and convergence implementation
+
+- `productization/integration.py` parses non-symlink packs up to 2 MB with frozen, extra-forbid models. Cross-reference checks require known Providers, an independent read verifier for every write, write compensation for reversible effects, environment-name-only credentials, and `modelVisible=false`. Results are review proposals, never registration or activation.
+- `productization/cli.py` is the common entry point. `doctor/journeys/capabilities/evaluate/integration-check` have no external effects; `demo` returns before invocation without explicit approval. Output rejects symlinks and non-file targets.
+- `evaluation/convergence.py` accepts exact Runtime/L1 schemas, removes prompts and argument values, retains boolean case gates, and computes one first-failure layer. Inputs and output are digest-bound.
+- `evaluation/cockpit.py` revalidates the snapshot and generates a self-contained CSP page using escaped JSON and DOM text insertion, with no network, approval, activation, or execution surface.
+- `data/convergence_baseline.json` is the source-controlled redacted clone-time baseline; fresh raw reports generate a new non-authoritative snapshot.

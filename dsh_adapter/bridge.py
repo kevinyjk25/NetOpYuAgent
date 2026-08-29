@@ -165,11 +165,15 @@ async def prepare_network_plan(
     l0_skill_id: str | None = None,
     subject_context: dict[str, Any] | None = None,
     harness: str = "local",
+    l1_decision_envelope: dict[str, Any] | None = None,
+    l1_route_context: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return await EffectRuntime().prepare(
         profile_id, tool_name, arguments,
         session_id=session_id, l0_skill_id=l0_skill_id,
         subject_context=subject_context, harness=harness,
+        l1_decision_envelope=l1_decision_envelope,
+        l1_route_context=l1_route_context,
     )
 
 

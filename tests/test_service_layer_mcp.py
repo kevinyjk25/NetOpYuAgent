@@ -172,7 +172,8 @@ class ServiceMCPTests(unittest.TestCase):
         prepared = self._prepare_grant(runtime)
         self.assertEqual(prepared["status"], "plan_ready")
         plan = prepared["plan"]
-        self.assertEqual(plan["schema_version"], 9)
+        self.assertEqual(plan["schema_version"], 10)
+        self.assertIsNone(plan["l1_decision_binding"])
         self.assertTrue(plan["provider_release_digest"].startswith("unmanaged-local:"))
         self.assertEqual(plan["provider_deployment_digest"], "unmanaged-local")
         self.assertEqual(

@@ -24,6 +24,7 @@ from .promotion import (
     promotion_prompt,
     review_promotion,
 )
+from .workbench import export_workbench_html, inspect_workbench, list_workbench
 
 
 def _contract(catalog: L0Catalog, skill_id: str, version: str | None) -> Any:
@@ -105,6 +106,24 @@ def main(argv: list[str] | None = None) -> int:
     review_command.add_argument("--reviewer", required=True)
     review_command.add_argument("--decision", choices=("approve", "reject"), required=True)
     review_command.add_argument("--reason", default="")
+
+    workbench_inspect = sub.add_parser(
+        "workbench-inspect",
+        help="validate and project one immutable Promotion package for review",
+    )
+    workbench_inspect.add_argument("--proposal", required=True)
+    workbench_list = sub.add_parser(
+        "workbench-list",
+        help="list direct-child Promotion packages without exposing directory names",
+    )
+    workbench_list.add_argument("--root", required=True)
+    workbench_list.add_argument("--limit", type=int, default=100)
+    workbench_export = sub.add_parser(
+        "workbench-export",
+        help="render a self-contained offline L0.5 review/editor HTML artifact",
+    )
+    workbench_export.add_argument("--proposal", required=True)
+    workbench_export.add_argument("--output", required=True)
 
     sub.add_parser(
         "runtime-validate", help="validate the complete activated production L0 v2 catalog",
@@ -192,6 +211,24 @@ def main(argv: list[str] | None = None) -> int:
                 proposal_directory=args.proposal, reviewer=args.reviewer,
                 decision=args.decision, reason=args.reason,
             ), ensure_ascii=False, indent=2, sort_keys=True))
+            return 0
+        if args.command == "workbench-inspect":
+            print(json.dumps(
+                inspect_workbench(args.proposal),
+                ensure_ascii=False, indent=2, sort_keys=True,
+            ))
+            return 0
+        if args.command == "workbench-list":
+            print(json.dumps(
+                list_workbench(args.root, limit=args.limit),
+                ensure_ascii=False, indent=2, sort_keys=True,
+            ))
+            return 0
+        if args.command == "workbench-export":
+            print(json.dumps(
+                export_workbench_html(args.proposal, args.output),
+                ensure_ascii=False, indent=2, sort_keys=True,
+            ))
             return 0
         if args.command in {
             "runtime-trajectories-build", "runtime-trajectories-validate",

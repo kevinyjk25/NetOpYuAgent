@@ -24,7 +24,7 @@ NetOpYuAgent 是 **Harness 可适配的网络与业务运维领域插件**。DSH
                              │ public plugin contract
 ┌────────────────────────────▼─────────────────────────────────┐
 │ NetOpYu Domain Control Plane                                 │
-│ Harness adapters · approval binding · A2A · scoped services │
+│ Harness adapters · L1 Decision Plane · approval · A2A       │
 └────────────────────────────┬─────────────────────────────────┘
                              │ typed bridge commands
 ┌────────────────────────────▼─────────────────────────────────┐
@@ -56,6 +56,7 @@ Domain L1 Skill 是“可以推理的业务编排”；Network/Service L0 Skill 
 #### 3.2 领域控制面
 
 - `dsh_adapter/`：把 Python 领域能力投影为 DSH 可消费的 manifest/commands。
+- `l1_runtime/`：正式 L1 Decision Plane；生产 Catalog、候选 Schema、grounding、Guard、严格 proposal-only Envelope 和隐私化 shadow 证据。不得依赖 `evaluation/`。
 - `effect_runtime/`：领域中性的运行时入口和跨层只读 reconciliation。
 - `effect_runtime/saga.py`：跨 Provider durable Saga、计划绑定、逆序补偿和事件哈希链。
 - `network_runtime/`：Effect Runtime 的计划状态机、合同、验证器、补偿器与兼容 API。
@@ -63,6 +64,8 @@ Domain L1 Skill 是“可以推理的业务编排”；Network/Service L0 Skill 
 - `network_runtime/enterprise_conformance.py`：离线配置 Doctor 与无效果 live contract 资格检查；不进入执行授权主路径。
 - `network_runtime/provider_release.py`：Provider 发布合同、独立信任根、兼容/生命周期注册表和 Runtime admission。
 - `network_runtime/provider_qualification.py`：固定故障资格套件；不得动态加载未受信 Provider 代码。
+- `network_runtime/catalog_control.py`：P2.1 源码化治理 Catalog；只能分析所有权、委派、依赖、消费者与兼容性，不拥有 Runtime 权威。
+- `network_runtime/evidence_plane.py`：P2.2 单向只读证据投影、指标、事故与离线页面；不得进入事务或控制路径。
 - `network_runtime/capabilities.py`：协议无关 observation/effect Capability SPI。
 - `network_runtime/access.py`：只读主体、角色、scope、用途、clearance 与敏感度策略执行点。
 - `network_runtime/provider_contracts.py`：稳定的 Network provider capability id/version 与角色注册表。
@@ -82,7 +85,8 @@ Domain L1 Skill 是“可以推理的业务编排”；Network/Service L0 Skill 
 - `runtime/`：两个 Harness 共享的 tool-result store/tracing；
 - `agent_memory/`：仅通过 scoped service 暴露；
 - `retrieval/`：能力检索；
-- `evaluation/`：离线、非生产执行路径的质量门禁；
+- `evaluation/`：离线、非生产执行路径的质量门禁；其中 `convergence.py`/`cockpit.py` 只做 P2.3 收敛归因和自包含评测投影。
+- `productization/` 与 `scripts/netopyu`：Golden Path、只读 Doctor、能力发现和 proposal-only Integration Pack；不是新的 Harness 或控制面。
 - `tests/`：迁移与 P0.5 规格的可执行证据。
 
 ### 4. 依赖规则
@@ -102,6 +106,7 @@ profiles -> tools common helpers
 pragmatic backend -> tools / integrations / schema
 scoped services -> agent_memory / retrieval
 evaluation -> public manifests / retrieval / test data
+l1_runtime -> public Tool/Skill manifests / retrieval / versioned production policies
 ```
 
 禁止的依赖方向：
@@ -139,7 +144,9 @@ evaluation -> public manifests / retrieval / test data
 15. **Terminal envelope only**：模型/UI 不得消费 Provider/Actor 中间态，只能消费 Runtime 终态封装。
 16. **Saga never bypasses L0**：跨 Provider Saga 的每个正向和补偿步骤都是独立批准、验证的 L0 计划。
 17. **Release before capability**：外部 Capability 只有在环境 active 的双签名 release 精确授权后才能进入 Runtime。
-18. **Approval survives no drift**：schema-v9 绑定 release/manifest/qualification/deployment；审批后任何 Provider 部署或 L0 授权漂移均在写前终止。
+18. **Approval survives no drift**：schema-v10 继承 v9 的 release/manifest/qualification/deployment 绑定；审批后任何 Provider 部署或 L0 授权漂移均在写前终止。
+19. **Decision is not authority**：L1 Decision 永远是 `proposal_only`；shadow/canary/enforced 均不能授予写权限或替代 L0 验证。
+20. **Decision binds once or not at all**：可选 canary binding 把 Decision/evidence、实际 route、请求/编译参数和 L0 contract 纳入 schema-v10 plan hash；同一 Decision 不能生成两份计划。
 
 ### 6. 架构决策记录
 
@@ -285,7 +292,7 @@ evaluation -> public manifests / retrieval / test data
 - **ADR-019：Runtime 拥有事务，MCP 拥有协议适配。** Domain Effect Runtime 继续拥有意图、L0 计划、风险、审批、执行状态、验证、补偿和审计；MCP server 只实现外部 Service/Network provider 合同。MCP 不因标准化传输而自动成为信任根。
 - **ADR-020：Network read/write provider 分权。** `netopyu.network-observer@1.0.0` 仅公开 observer capability，并以 `network-evidence-envelope-v1` 返回 evidence；`netopyu.network-actor@1.0.0` 仅公开受审 Actor capability。Observer 不持有写入口，Actor 返回值不得替代 Observer 独立验证。
 - **ADR-021：Actor MCP 必须 durable-first。** P1.0 在效果前持久化 immutable operation、审批 preflight digest、desired state 与精确 snapshot；按 target 使用进程锁、租约和单调 fencing token，启动时只读 reconciliation。重复 operation 只能恢复 prepared 状态或读回既有结果，不能盲目重放 executing/applied 写入。
-- **ADR-022：效果上下文属于 Runtime，不属于模型。** operation/plan/intent hash、approved preflight 与 effect phase 由 backend 注入 MCP 的内部参数；restore/finalize 为 `internal_only`。PreparedPlan schema v9 绑定 capability、requester/policy 与 Provider release/deployment evidence。
+- **ADR-022：效果上下文属于 Runtime，不属于模型。** operation/plan/intent hash、approved preflight 与 effect phase 由 backend 注入 MCP 的内部参数；restore/finalize 为 `internal_only`。PreparedPlan schema v10 继承 capability、requester/policy 与 Provider release/deployment evidence，并可绑定无权 L1 proposal provenance。
 - **ADR-023：本地 fencing 不冒充分布式一致性。** SQLite、WAL 和文件锁仅认证单主机 crash safety；Containerlab/设备端不校验 fencing token。生产部署必须增加远端事务日志或队列、设备/控制器 idempotency/CAS、独立读写身份与故障域、HA leader fencing 和远端不可变审计。
 - **ADR-024：Capability SPI 高于传输协议。** Runtime 使用 `CapabilityContract`/`CapabilityProviderGateway`；协议适配留在 Provider Gateway，避免安全内核随 MCP/API 数量膨胀。
 - **ADR-025：Read 也是受保护操作。** Observation 根据 sensitivity、role、scope、purpose、clearance 授权；本地隐式 system principal 只用于兼容原型。
@@ -296,7 +303,7 @@ evaluation -> public manifests / retrieval / test data
 - **ADR-030：L1 → L0 下沉是三阶段 Promotion，不是线上自修改。** 标准 `SKILL.md` 和受信 Capability Catalog 先形成可读、严格的 L0.5 StructuredNaturalLanguageSkill，再产生不可信 L0 候选。确定性检查阻止 L0.5 偏离 L1 或 L0 扩大 L0.5；Proposal 用逐级 hash 链保存 L1/L0.5/L0。人工 review 不自动激活 Catalog，也不授予执行权。未来 Runtime UI 只能复用 proposal API，禁止同一次会话生成、批准并执行新合同。
 - **ADR-031：生产 L0 以编译 v2 Contract 为唯一语义权威。** 21 个内置受审写工具全部映射为 v2；旧 ToolContract、verifier 和 compensator 只作为精确 `RuntimeBinding` 下的合格实现 Adapter。prepare 与执行前重校验必须检查 Contract/Adapter parity，Provider 参数必须由 v2 模板从已批准值渲染；新裸 v1 L0 注册禁止进入生产 Registry。
 - **ADR-032：每个生产 L0 必须有不参与执行的可读轨迹。** 存量合同保存 L1、L0.5、L0 authoring/compiled 和逐级 hash；主门禁同时重跑 Promotion semantic parity 与精确 compiler round trip。存量 L1/L0.5 必须标注为从受审 L0 反向 bootstrap，不能冒充历史自然语言来源、模型独立推导或执行授权；这些档案不得注册到 Harness。
-- **ADR-033：审批结果必须成为 Runtime 签名证明。** schema-v9 plan 绑定 requester/policy 和 Provider release/deployment evidence；Harness 人工确认后 Runtime 才签发短时 plan-bound proof，并在消费 nonce 前验证全部绑定。
+- **ADR-033：审批结果必须成为 Runtime 签名证明。** schema-v10 plan 绑定 requester/policy、Provider release/deployment evidence 和可选 L1 proposal provenance；Harness 人工确认后 Runtime 才签发短时 plan-bound proof，并在消费 nonce 前验证全部绑定。
 - **ADR-034：企业主体、Gateway、策略和工单是四个独立证据源。** `enforced` 只从固定 issuer/audience/非对称 algorithm 的短时 access JWT 获取 subject/role/scope/clearance/assurance；独立 Gateway JWT 绑定 Harness/session/client，并用 `act_sub + subject_jti` 绑定人的 credential。Gateway 可按每个 Harness session 动态签发；JWKS/mint/PDP/change 共用显式 CA/mTLS transport，默认不采信环境代理/CA。PDP 分别授权 observation/prepare/approve，Change Authority 验证 ticket revision/window/scope/risk。公开决策进入 requester/policy hash 或签名 proof，token/secret 不进入模型、计划或 journal。任一依赖缺失或失败均关闭 read/write；loopback HTTP 只用于本地资格实验，不构成生产信任根。
 - **ADR-035：Provider 发布资格与执行事务是两个独立控制面。** Publisher、Qualifier、Deployer 使用独立 Ed25519 角色；外部 JSONL 进程通过固定 9/9 与真实 restart，Deployer 再签 exact artifact/environment。Runtime 把 release/deployment evidence 写入 schema-v9 plan并重复 admission。B-ready 的本地 fixture/key/SQLite 不冒充组织独立 Provider、HSM、真实 OCI/SBOM/SLSA 或 WORM；这些由现场 P1.4-B 提供。
 - **ADR-036：L1/模型资格与 L0 安全资格必须分开。** P1.8 只把自然语言映射为无执行权候选，使用版本化 160 场景分别测候选召回、最终选择、参数、追问、workflow 与拒绝；模型看不到 callable effect、nonce/proof 或 Provider credential。只有完整数据集和不可变模型 artifact digest 可形成资格记录。模型通过不授权执行，模型失败也不能改变 Runtime 权限；Core-72 的固定 L1 结果不得冒充模型准确率。
@@ -304,6 +311,13 @@ evaluation -> public manifests / retrieval / test data
 - **ADR-038：受控 Tool 协议只能收集候选，不能成为效果通道。** P1.8-C1 在 DSH 中预加载 digest-bound L0.5 风格 Skill，仅暴露五个互斥、强类型、无效果 proposal Tool。Loopback Protocol Governor 要求单次结构化提交，允许有限隐藏修复，并由确定性控制器校验目标、参数、workflow、Skill digest 与完整 transcript；任何缺失、冲突、越界、重复或摘要异常都不产生有效决定。该路径与 Runtime、Provider、设备、审批、凭证完全断开；固定场景通过率只用于模型资格，不等于生产成功率或执行授权。
 - **ADR-039：L1 安全 Guard 只能收窄，且必须与模型成绩分账。** P1.8-C2 Guard 可要求安全拒绝、判定无领域证据的越界请求或低置信度弃权，但不得选择 Capability、补参数或生成 workflow。Loopback Protocol Firewall 校验每次 typed/candidate contract 并完整计量实际尝试；修复耗尽时只允许合成无参数 refusal/out-of-scope capture。报告必须同时保留模型首轮与 Guard 后 safety、固定集误杀、重试成本和尾时延；Guard 结果不能表述为模型准确率，也不能绕过 L0 Runtime。
 - **ADR-040：候选身份与参数边界必须由 Tool/Schema 表达，模型只保留语义选择与显式值提取。** P1.8-C3 把每个检索候选编译成独立无效果 Tool，Tool 身份固定 kind/target，候选 Schema 固定允许业务键。Gateway 只能删除 Schema 外键，grounding 只能删除无请求证据的值或做受审归一化；action、missing fields 和 workflow 从可信 Catalog 确定性派生。任何层都不得替模型选择正常候选、补值或授予执行权。固定 184 条通过只认证摘要绑定的本地候选边界，所有写候选仍进入 L0 Runtime。
+- **ADR-041：生产 L1 收口是独立 Decision Plane，不是效果内核扩展。** 它只消费 direct-user 文本与当前暴露 Catalog，输出摘要绑定的 `proposal_only` Envelope。P1.9-B1 已形成可选 DSH/Hermes shadow：只保存隐私化摘要、token 完整性、生命周期和首次路由证据；pending Decision 在 observed/superseded/no-route/session-end 后不可重绑，三 profile Catalog 漂移进入退休门禁。B2 已具备仓库外 seal/双 reviewer、shared-Worker Oracle runner 和 Adapter Hook runner：后者实际执行生产 DSH JavaScript/Python Hook 与临时 owner-only Worker，比较输入和完整 Decision 摘要。两级 runner 均不冒充真实人工真值、DSH Web/Hermes CLI/UI、发行包或部署身份认证。后续 canary 最多收窄可见面或要求追问；任何 Decision 都不能批准计划、执行 Provider 或声明成功，进入 enforced 前仍须完成真实 sealed holdout、完整 Harness 产品证据和 Decision-to-plan binding。
+- **ADR-042：Decision→Plan 绑定是无权来源证明，不是新的授权链。** C0 的 schema-v10 binding 在 Runtime 内重新校验完整 Decision/evidence digest、canary mode、session/Harness/profile、实际 route、请求与编译参数、候选和精确 L0 contract，并由 Journal 唯一索引阻止 Decision replay。绑定进入 plan hash 和 hash-chain event，但不能替代身份、审批、Provider admission、preflight、verify 或 rollback。DSH/Hermes 继续拒绝 `canary`，直到真实 B2 证据与 C1 启停/回退 runbook 通过评审。
+- **ADR-043：Canary 准备与激活分离，策略只能单调收窄。** C1 policy 只有“保持原 Harness route”或“阻断”两种效果，不能重路由、改参数或授予权限；无效写 Decision 失败关闭，无效读 Decision 不改变原 route。readiness gate 只验证四类外部证据的摘要、时效、交叉绑定和演练结果，输出上限为 `ready_for_review`，固定不改配置/流量。真实身份/签名、人工发布审批和 Adapter 激活是仓库外独立控制。
+- **ADR-044：Promotion Workbench 是审查投影，不是权威控制面。** P2.0 只能校验不可变 proposal 并显示语义 diff、轨迹和合同图；编辑只导出不可信 L0.5 草稿。页面不得拥有 approve/register/activate/Runtime/Provider API，review approve 也只能形成 `approved_not_active`。新草稿必须重新 assess/package，并由独立渠道 review；生产发布与 Runtime 注册仍是独立后续门禁。
+- **ADR-045：Governed Capability Catalog 是治理投影，不是 Runtime 权威。** P2.1 必须精确绑定版本化 L0 合同/schema/profile、owner/steward、租户/环境、消费者和依赖；委派只作用于 Catalog workflow，明确不能授权 observation/effect、Provider 发布、注册或激活。实际 read/write 权限仍分别由 Runtime Read PEP 与不可变计划/审批/Provider admission/状态机决定。
+- **ADR-046：Evidence Plane 是单向只读投影，不参与事务。** P2.2 从 Journal/Decision/Saga/Provider/Promotion 建立隐私最小化摘要链；来源缺链、截断或校验失败必须降级。它没有反向控制接口，指标、事故或页面状态不能成为审批、执行成功证明、生产 SLO 或外部不可变审计结论。
+- **ADR-047：产品可理解性不能扩大执行权威。** P2.3 只编排只读诊断、离线评测、显式批准的临时 mock 演示和 proposal-only 接入校验。Integration Pack 强制 read/write、独立 verifier、补偿和凭据引用；驾驶舱将 L1 概率性与 L0 确定性分开归因。两者都不能连接、注册、发布、批准、激活或执行能力，固定集数据必须标注 `productionGeneralization=not_proven`。
 - 遥测、事件和大规模指标后续使用流式 evidence plane；MCP command/query 不承担高吞吐长期订阅。两条路径必须共享 correlation/target/capability schema，但不得把流事件直接当作写成功证明。
 
 ---
@@ -324,7 +338,7 @@ source may receive the lab access write contracts.
 ### 2. Layers
 
 1. **Harness Platform Layer:** DSH (primary) or Hermes (optional) for sessions, models, UI/CLI, tool lifecycle, and Skills.
-2. **NetOpYu Domain Control Plane:** harness adapters, exact-plan approval binding, A2A, and scoped services.
+2. **NetOpYu Domain Control Plane:** harness adapters, proposal-only L1 Decision Plane, exact-plan approval binding, A2A, and scoped services.
 3. **Domain Effect Runtime:** reviewed L1 workflow constraints, versioned Network/Service L0 contracts, and deterministic plan execution.
 4. **Provider Release Control Plane:** independent publication/qualification trust, environment activation, and Runtime admission.
 5. **Domain providers:** Containerlab/device adapters own network state; official-SDK MCP services own identity, application, policy, change, CMDB, and platform state.
@@ -336,6 +350,7 @@ Domain L1 Skills are model-assisted business orchestration. Network and Service 
 - `dsh-plugin-netopyu/` is the DSH JavaScript adapter.
 - `hermes-plugin-netopyu/` and `hermes_adapter/` implement the official Hermes plugin boundary, process-local approval binding, and Worker client.
 - `dsh_adapter/` projects Python domain capabilities into typed bridge commands.
+- `l1_runtime/` is the production L1 Decision Plane: current Catalog binding, candidate-specific Schema, grounding, monotonic Guard, strict proposal-only Envelopes, and privacy-minimized shadow evidence. It never imports `evaluation/`.
 - `effect_runtime/` is the domain-neutral entry point and owns cross-layer read reconciliation.
 - `effect_runtime/saga.py` owns durable cross-provider dependencies, plan bindings, reverse compensation, and its event hash chain.
 - `network_runtime/` implements the shared plan kernel and remains the compatibility API.
@@ -343,6 +358,8 @@ Domain L1 Skills are model-assisted business orchestration. Network and Service 
 - `network_runtime/enterprise_conformance.py` provides the offline Doctor and no-effect live contract qualification outside the execution authorization path.
 - `network_runtime/provider_release.py` owns release contracts, independent trust roots, compatibility/lifecycle state, and Runtime admission.
 - `network_runtime/provider_qualification.py` runs the fixed failure suite without dynamically importing untrusted Provider code.
+- `network_runtime/catalog_control.py` is the source-controlled P2.1 governance Catalog and analyzes ownership, delegation, dependencies, consumers, and compatibility without Runtime authority.
+- `network_runtime/evidence_plane.py` is the one-way P2.2 read-only evidence, metric, incident, and offline-page projection outside transaction/control paths.
 - `network_runtime/capabilities.py` defines the transport-neutral observation/effect SPI, while `network_runtime/access.py` enforces read subject, role, scope, purpose, clearance, and sensitivity.
 - `network_runtime/provider_contracts.py` owns stable Network provider capability ids, versions, and roles.
 - `network_provider/` implements the identity-pinned read-only Network Observer MCP, durable Network Actor MCP, evidence envelope, and Actor operation store.
@@ -355,7 +372,8 @@ Domain L1 Skills are model-assisted business orchestration. Network and Service 
 - `registry/` is outbound A2A discovery only.
 - `runtime/` contains result storage and tracing shared by both adapters.
 - `agent_memory/` is reachable only through scoped services.
-- `evaluation/` is offline and never part of production execution.
+- `evaluation/` is offline and never part of production execution; `convergence.py`/`cockpit.py` provide P2.3 attribution and a self-contained evaluation projection only.
+- `productization/` and `scripts/netopyu` provide Golden Paths, a read-only Doctor, capability discovery, and a proposal-only Integration Pack; they are not another Harness or control plane.
 
 ### 4. Dependency rules
 
@@ -381,6 +399,7 @@ Provider self-declared release identity or unsigned L0 authorization is never a 
 - External observations validated for identity, capability, freshness format, and payload digest before consumption.
 - External capabilities admitted only through the environment's active independently signed release.
 - Schema-v9 approval binds release/manifest/qualification/deployment evidence; post-approval Provider deployment or L0 drift stops before any write.
+- Every L1 Decision remains `proposal_only`; no rollout mode can grant mutation authority or replace L0 verification.
 
 ### 6. Decisions
 
@@ -405,7 +424,7 @@ Provider self-declared release identity or unsigned L0 authorization is never a 
 - **ADR-019:** Runtime owns end-to-end transaction semantics; MCP owns provider protocol adaptation. MCP transport does not create trust by itself.
 - **ADR-020:** Network reads and writes are separated. `netopyu.network-observer@1.0.0` exposes observer capabilities and evidence only; `netopyu.network-actor@1.0.0` exposes reviewed Actor capabilities. Actor results never replace independent Observer verification.
 - **ADR-021:** the Actor is durable-first. Before an effect it records immutable operation content, approved-preflight digest, desired state, and exact snapshot. Per-target locks, leases, monotonic fencing, and read-only startup reconciliation prevent blind replays after crashes.
-- **ADR-022:** effect context belongs to Runtime, not the model. PreparedPlan schema v9 binds capability, requester/policy, and Provider release/deployment evidence; provider-internal effect context remains model-inaccessible.
+- **ADR-022:** effect context belongs to Runtime, not the model. PreparedPlan schema v10 retains capability, requester/policy, and Provider release/deployment evidence and can additionally bind non-authoritative L1 proposal provenance; provider-internal effect context remains model-inaccessible.
 - **ADR-023:** local fencing is not distributed linearizability. SQLite/WAL/file locks qualify one-host crash safety; production needs a remote transaction log or queue, device/controller idempotency or CAS, separated read/write identities and failure domains, HA leader fencing, and immutable remote audit.
 - **ADR-024:** capability semantics sit above transport. Runtime consumes `CapabilityContract`/`CapabilityProviderGateway`; MCP/API/CLI adapters remain outside the safety kernel.
 - **ADR-025:** reads are protected operations. Observation authorization binds sensitivity, role, scope, purpose, and clearance; the implicit local system principal is prototype compatibility only.
@@ -424,6 +443,13 @@ Provider self-declared release identity or unsigned L0 authorization is never a 
 - **ADR-038:** the controlled Tool protocol captures proposals only and can never become an effect channel. P1.8-C1 preloads a digest-bound L0.5-style Skill in DSH and exposes exactly five mutually exclusive, typed, no-effect proposal Tools. A loopback Protocol Governor requires one structured submission, permits only bounded hidden repair, and lets a deterministic controller validate targets, arguments, workflow, Skill digest, and the complete transcript. Missing, conflicting, out-of-scope, duplicate, or malformed output yields no valid decision. The path has no Runtime, Provider, device, approval, or credential connection; fixed-set scores are model-qualification evidence, not production success probabilities or execution authority.
 - **ADR-039:** an L1 safety Guard may only narrow authority, and its outcome is accounted separately from model quality. P1.8-C2 may require safe refusal, classify a request with no domain evidence as out of scope, or abstain on low confidence; it cannot select a Capability, add arguments, or create workflow. A loopback Protocol Firewall validates every typed/candidate contract and fully meters actual attempts. Exhaustion may synthesize only an argument-free refusal/out-of-scope capture. Reports retain both first-attempt and guarded safety, fixed-set false positives, repair cost, and tail latency; Guard results are not model accuracy and never bypass L0 Runtime.
 - **ADR-040:** candidate identity and argument bounds are expressed by Tools and Schemas, leaving only semantic choice and explicit-value extraction to the model. P1.8-C3 compiles each retrieved candidate into a distinct proposal-only Tool whose identity fixes kind/target and whose Schema fixes allowed business keys. The Gateway may only delete unknown keys, grounding may only remove unsupported values or apply reviewed normalization, and action/missing fields/workflow are derived deterministically from the trusted Catalog. No layer may select a normal candidate for the model, invent a value, or grant execution authority. Passing the fixed 184 cases qualifies only the digest-bound local proposal boundary; every write proposal still enters L0 Runtime.
+- **ADR-041:** production L1 narrowing is a separate Decision Plane, not an extension of the effect kernel. It consumes direct-user text plus the current exposed Catalog and emits a digest-bound `proposal_only` Envelope. P1.9-B1 provides opt-in DSH/Hermes shadow and records only privacy-minimized digests, token completeness, lifecycle, and first-route evidence. Pending Decisions cannot rebind after observed/superseded/no-route/session-end, and three-profile Catalog drift is retirement-gated. B2 adds repository-external sealing/two-reviewer contracts, a shared-Worker Oracle runner, and an adapter-hook runner. The latter executes production DSH JavaScript/Python hook code through a temporary owner-only Worker and compares input/full-Decision digests. Neither runner substitutes for real human truth, DSH Web/Hermes CLI/UI, distributions, or deployment identity certification. Canary may later narrow visibility or require clarification; no Decision can approve a plan, execute a Provider, or declare success, and a real sealed holdout, full Harness-product evidence, and Decision-to-plan binding precede enforcement.
+- **ADR-042:** Decision-to-plan binding is non-authoritative provenance, not a new authorization chain. The C0 schema-v10 binding revalidates the full Decision/evidence digests, canary mode, session/Harness/profile, observed route, request and compiled arguments, candidate, and exact L0 contract inside Runtime. A Journal uniqueness constraint prevents Decision replay. The binding enters the plan hash and hash-chained event but never replaces identity, approval, Provider admission, preflight, verification, or rollback. DSH/Hermes continue to reject `canary` until real B2 evidence and a reviewed C1 activation/rollback runbook exist.
+- **ADR-043:** Canary readiness is separate from activation, and policy is monotonic. C1 may preserve the original Harness route or block it; it cannot redirect, rewrite arguments, or grant authority. Invalid writes fail closed while invalid read observations do not change the route. The readiness gate validates only digest/freshness/cross-binding/drill consistency across four external evidence classes and emits at most `ready_for_review`, with no configuration or traffic effect. Organization identity/signatures, human release approval, and Adapter activation remain independent external controls.
+- **ADR-044:** the Promotion Workbench is a review projection, not an authority plane. P2.0 validates immutable proposals and renders semantic diffs, lineage, and contract graphs; editing exports only an untrusted L0.5 draft. The page has no approve/register/activate/Runtime/Provider API, and an approved review remains `approved_not_active`. A draft must be reassessed, repackaged, and independently reviewed; publication and Runtime registration remain separate future gates.
+- **ADR-045:** the governed Capability Catalog is a governance projection, not Runtime authority. P2.1 exactly binds versioned L0 contracts/schemas/profiles, owner/steward, tenant/environment, consumers, and dependencies. Delegation applies only to Catalog workflow and cannot authorize observations/effects, Provider publication, registration, or activation. Runtime Read PEP and immutable plan/approval/Provider-admission/state-machine controls remain the actual read/write authority.
+- **ADR-046:** the Evidence Plane is a one-way read-only projection outside transactions. P2.2 builds privacy-minimized digest chains from Journal, Decision, Saga, Provider, and Promotion evidence; missing chains, truncation, or verification failure must degrade. It has no reverse control interface, and no metric, incident, or page state is approval, mutation-success proof, a production SLO, or an external immutable-audit opinion.
+- **ADR-047:** product usability must not widen effect authority. P2.3 may orchestrate read-only diagnosis, offline evaluation, an explicitly approved temporary mock demo, and proposal-only integration validation. Packs require read/write separation, independent verification, compensation, and credential references; the cockpit attributes probabilistic L1 separately from deterministic L0. Neither surface can connect, register, publish, approve, activate, or execute, and fixed-set evidence retains `productionGeneralization=not_proven`.
 - High-volume telemetry and event streams belong on a separate evidence plane. MCP remains the command/query protocol; both paths share target/correlation/capability schemas, and stream events never prove mutation success by themselves.
 
 ### 7. Clean-code and extension policy

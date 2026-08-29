@@ -150,12 +150,13 @@ class NetworkRuntimeTests(unittest.TestCase):
         self.assertEqual(wrong["status"], "rejected")
         self.assertEqual(runtime.recent(), [])
 
-    def test_schema_v9_plan_binds_identity_policy_provider_release_intent_and_l0_steps(self) -> None:
+    def test_schema_v10_plan_binds_identity_policy_provider_release_intent_and_l0_steps(self) -> None:
         prepared = self.prepare("lan", "restart_service", {
             "service": "crm", "environment": "staging",
         })
         plan = prepared["plan"]
-        self.assertEqual(plan["schema_version"], 9)
+        self.assertEqual(plan["schema_version"], 10)
+        self.assertIsNone(plan["l1_decision_binding"])
         self.assertEqual(plan["requester_identity"]["subject_id"], "local-effect-runtime")
         self.assertEqual(plan["requester_digest"], prepared["identity_binding"]["requester_digest"])
         self.assertEqual(plan["approval_mode"], "single")
@@ -198,6 +199,21 @@ class NetworkRuntimeTests(unittest.TestCase):
             "revalidate", "execute", "execute", "verify", "verify", "audit",
         ])
 
+    def test_schema_v9_plan_hash_remains_read_compatible(self) -> None:
+        prepared = self.prepare("lan", "restart_service", {
+            "service": "crm", "environment": "staging",
+        })
+        legacy = dict(prepared["plan"])
+        legacy["schema_version"] = 9
+        legacy.pop("l1_decision_binding")
+        immutable = dict(legacy)
+        immutable.pop("plan_hash")
+        immutable.pop("state")
+        legacy["plan_hash"] = sha256_json(immutable)
+        loaded = PreparedPlan.from_dict(legacy)
+        self.assertEqual(loaded.schema_version, 9)
+        self.assertIsNone(loaded.l1_decision_binding)
+
     def test_schema_v8_plan_hash_remains_read_compatible(self) -> None:
         prepared = self.prepare("lan", "restart_service", {
             "service": "crm", "environment": "staging",
@@ -205,6 +221,7 @@ class NetworkRuntimeTests(unittest.TestCase):
         legacy = dict(prepared["plan"])
         legacy["schema_version"] = 8
         legacy.pop("provider_deployment_digest")
+        legacy.pop("l1_decision_binding")
         immutable = dict(legacy)
         immutable.pop("plan_hash")
         immutable.pop("state")

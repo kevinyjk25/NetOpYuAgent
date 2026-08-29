@@ -6,6 +6,24 @@
 
 ## 中文
 
+### 0. 从这里开始
+
+```bash
+scripts/netopyu doctor       # 只读检查：哪些路径在本机可用
+scripts/netopyu journeys     # 三条 Golden Path：理解、演示、接入
+scripts/netopyu evaluate     # 生成统一 JSON 和只读评测驾驶舱
+open artifacts/convergence/cockpit.html
+```
+
+接入自己的 REST/MCP/NETCONF/SSH/Controller 系统：
+
+```bash
+scripts/netopyu integration-check \
+  --pack examples/integration-rest-mcp/pack.yaml
+```
+
+这个检查只验证 read/write、独立 verifier、补偿、凭据隔离和 L0 绑定完整性，不连接或激活任何系统。完整步骤见[使用与系统接入](docs/getting-started-integration.md)；“LLM 到底收敛到什么程度”见[收敛评测](docs/convergence-evaluation.md)。
+
 ### 1. 设计
 
 项目遵循一个核心原则：**越靠近用户越灵活，越靠近设备和业务系统越确定。**
@@ -45,14 +63,20 @@ flowchart TB
 | 多 Harness | DSH 主路径；Hermes 使用同一 Worker、L0、Runtime、Provider 和审计 |
 | L1 智能编排 | LAN/DC/WAN Skill、缺参追问、多步 workflow、领域外拒绝和风险拒绝 |
 | L1 确定性收口 | 每个候选独立 Tool Schema；请求证据 grounding；确定性 action/missing-fields/workflow 编译 |
+| L1 决策面 | P1.9-B1/B2 shadow 与资格执行器；C0 plan binding；C1 单调收窄策略、外部证据门禁及回退手册；`proposal_only`、默认关闭 |
 | L0 Skill | 21 个生产注册合同；支持原子、约束、扩展和组合 Saga；保存 L1 → L0.5 → L0 可解释轨迹 |
+| Promotion Workbench | P2.0 本地只读校验、语义 diff、轨迹/合同图和 L0.5 草稿编辑；不批准、不注册、不激活 |
+| Capability Catalog | P2.1 对 21/21 L0 合同做 owner/steward、租户/环境、委派、依赖、消费者和兼容治理；不授予 Runtime 权限 |
+| Evidence Plane | P2.2 只读聚合 Runtime/Decision/Saga/Provider/Promotion 证据，输出隐私最小化指标、事故和离线时间线 |
+| 产品入口与接入包 | P2.3 三条 Golden Path、只读 Doctor、能力发现、严格 proposal-only Integration Pack |
+| 收敛驾驶舱 | P2.3 合并 Runtime A/B 与模型资格，按 retrieval/protocol/语义/参数/追问/workflow 首层归因 |
 | Runtime 事务 | 不可变计划、plan-bound one-shot 审批、TOCTOU 重校验、typed verifier、补偿和持久化恢复 |
 | Provider 解耦 | 协议无关 Capability SPI；Service MCP、Network Observer MCP、durable Network Actor |
 | 网络仿真 | Containerlab + FRR：OSPF、eBGP、VLAN、EVPN/VXLAN L2VPN、故障切换、真实容器转发与 HTTP probe |
 | 业务系统仿真 | Identity、Application、Access Policy、Change、CMDB、Platform 六类 MCP 服务 |
 | 跨域协作 | Service/Network Durable Saga、A2A discovery/delegation/continuation、循环与深度保护 |
 | 身份与供应链 | 本地签名 proof；企业 OIDC/PDP/Change Adapter；Provider release/qualification/deployment 绑定参考实现 |
-| 证据与评测 | 防篡改事件链、Runtime A/B Core-72、L1 184 场景资格集、故障注入和 retirement gate |
+| 证据与评测 | 防篡改事件链、Runtime A/B Core-72、L1 184 场景、私有 holdout 聚合评分、故障注入和 retirement gate |
 
 ### 3. 项目优势
 
@@ -98,7 +122,15 @@ Core-72 固定相同 L1 决策、工具、参数、Provider 和故障，只测 R
 
 相对 C2，E2E +29.34、选择 +30.39、参数 F1 +25.60、workflow +40.62 个百分点，模型调用从 267 次降至 193 次。模型首轮 safety escape 仍为 3.12%，最终 0 来自确定性 Guard；因此该成绩不表示模型天然安全，也不替代 L0 Runtime。完整说明见 [P1.8 模型资格](docs/l1-model-qualification.md)。
 
-当前主门禁：333 tests + 81 subtests，retirement 7/7 通过，L0 生产合同/可读轨迹/精确 round-trip/Promotion 为 21/21。
+同口径 `qwen3.6:27b` 虽把 E2E/选择/参数 F1 提升到 95.11%/96.08%/95.83%，但两例超过 300 秒协议时限，协议完整率仅 98.91%，p50/p95 为 68.193/176.923 秒，因此**未通过**精确协议门禁。当前合格默认仍是 7B；更大模型不是稳定性的替代品。
+
+P1.9-B2 已补齐两级私有资格路径：第一层在共享 Worker 上分别以 DSH/Hermes 身份计算协议、选择、参数、追问、workflow、安全、重复稳定性、语义 parity 与 p50/p95；第二层实际执行 DSH JavaScript `agent/pre-step` 和 Hermes Python `pre_llm_call`，经临时 owner-only Worker 比较 Prompt/Catalog/Candidate/Policy 与完整 Decision digest。执行器已验证，但仓库仍没有真实人工标注基线，也不冒充 DSH Web/Hermes CLI/UI 和部署身份认证。
+
+P1.9-C0 已加入默认不启用的 Decision→Plan 绑定内核：PreparedPlan schema v10 可把 canary Decision、实际 Harness 路由、请求/编译参数和 L0 合同纳入同一 plan hash，并以 Journal 唯一约束阻止一个 Decision 绑定两份计划。DSH/Hermes 仍只接受 `off/shadow`；真实 B2 证据完成前不能开启 canary。
+
+P1.9-C1 已完成不启用流量的安全准备层：策略只能保持原 Harness route 或收窄/阻断，不能重路由或授权；readiness 门禁严格交叉绑定 Worker、Adapter、真实产品/部署和运维演练四类外部证据，最强结果也只是 `ready_for_review`。当前缺少真实 B2/产品证据，因此 canary 仍关闭。
+
+当前主门禁：392 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
 
 ### 5. 典型场景
 
@@ -237,6 +269,17 @@ scripts/netopyu-l0 runtime-trajectories-validate
 
 L0 的原子/约束/扩展/组合规则见 [L0 v2 设计](docs/l0-v2-design.md)；自然语言 L1 → 结构化 L0.5 → L0 候选流程见 [L1 → L0 Promotion](docs/l1-to-l0-promotion.md)。Promotion 只生成待审候选，不会自动注册或执行。
 
+审查已打包的 proposal 并导出本地只读工作台：
+
+```bash
+scripts/netopyu-l0 workbench-list --root /path/to/proposals
+scripts/netopyu-l0 workbench-inspect --proposal /path/to/proposal
+scripts/netopyu-l0 workbench-export \
+  --proposal /path/to/proposal --output /tmp/netopyu-workbench.html
+```
+
+页面只能下载不可信 L0.5 草稿；它没有批准、注册或激活能力。完整边界见 [P2.0 Promotion Workbench](docs/p20-promotion-workbench.md)。
+
 #### 6.5 评测与主门禁
 
 ```bash
@@ -251,6 +294,24 @@ scripts/netopyu-dsh compare-l1-dsh-schema \
 scripts/netopyu-dsh retirement
 ```
 
+校验治理 Catalog，或从本地证据库导出只读 Evidence 页面：
+
+```bash
+scripts/netopyu-p2 catalog-validate \
+  --catalog data/capability_governance_catalog.yaml
+
+scripts/netopyu-p2 evidence-export \
+  --runtime-journal /path/to/runtime.sqlite \
+  --decision-store /path/to/l1-decisions.sqlite \
+  --saga-store /path/to/sagas.sqlite \
+  --provider-registry /path/to/provider-releases.sqlite \
+  --proposal-root /path/to/proposals \
+  --snapshot-output /tmp/netopyu-evidence.json \
+  --output /tmp/netopyu-evidence.html
+```
+
+Evidence 来源缺少可验证链、被截断或校验失败时会返回 `degraded` 和非零退出码。Catalog 与 Evidence 都没有审批、执行、发布、注册或激活权威；完整命令和边界见 [P2.1/P2.2 控制面](docs/p21-p22-control-planes.md)。
+
 184 条完整 L1 资格运行耗时较长：
 
 ```bash
@@ -258,6 +319,40 @@ scripts/netopyu-dsh compare-l1-dsh-schema \
   --model qwen2.5:7b --repair-limit 1 --record --resume \
   --output-dir artifacts/l1-dsh-schema-compiler/qwen2.5-7b
 ```
+
+启用 P1.9 shadow（会额外调用一次选择模型，不改变原 DSH step）：
+
+```bash
+NETOPYU_L1_DECISION_MODE=shadow \
+NETOPYU_L1_DECISION_MODEL=qwen3.6:27b \
+scripts/netopyu-dsh restart
+
+scripts/netopyu-dsh l1-decisions 20
+scripts/netopyu-dsh l1-metrics 500
+scripts/netopyu-dsh l1-catalog-check
+```
+
+私有集、manifest 和两份已消歧标注均保存在仓库外后，可执行两次重复的 B2 评分；本地 Ollama artifact digest 会自动解析（其他 endpoint 必须设置 `NETOPYU_L1_DECISION_MODEL_ARTIFACT_DIGEST`），报告不包含原始 Prompt、标签或参数值：
+
+```bash
+scripts/netopyu-dsh l1-holdout-qualify \
+  /private/cases.jsonl /private/manifest.json \
+  /private/reviewer-a.jsonl /private/reviewer-b.jsonl \
+  qwen3.6:27b /private/qualification-report.json
+
+scripts/netopyu-dsh l1-holdout-adapter-parity \
+  /private/cases.jsonl /private/manifest.json \
+  /private/reviewer-a.jsonl /private/reviewer-b.jsonl \
+  qwen3.6:27b /private/adapter-parity-report.json
+
+# 只检查四类证据；不激活、不改配置、不改流量
+scripts/netopyu-dsh l1-canary-readiness \
+  /private/qualification-report.json /private/adapter-parity-report.json \
+  /private/product-evidence.json /private/ops-evidence.json \
+  /private/canary-readiness.json
+```
+
+完整边界和指标见 [P1.9 L1 决策面](docs/l1-decision-plane.md)，证据、停用与回退步骤见 [C1 Canary 手册](docs/p19-canary-runbook.md)。默认 `off`。
 
 #### 6.6 Hermes（可选）
 
@@ -288,6 +383,12 @@ Hermes 只是另一 Harness 入口，不复制或绕过 Runtime；详细使用�
 - [LLD](LLD.md)：接口、状态机、合同和异常处理
 - [SSD](SSD.md)：安全设计、威胁模型和验收标准
 - [P1.8 模型资格](docs/l1-model-qualification.md)：数据集、门槛、C3.2 证据和解释边界
+- [P1.9 L1 决策面](docs/l1-decision-plane.md)：生产 shadow、证据、指标与 canary 门禁
+- [P1.9-C1 Canary 手册](docs/p19-canary-runbook.md)：外部证据、单调策略、停用与回退
+- [P2.0 Promotion Workbench](docs/p20-promotion-workbench.md)：本地审查投影、语义 diff、合同图和安全边界
+- [P2.1/P2.2 控制面](docs/p21-p22-control-planes.md)：Capability Catalog、Evidence Plane、命令与权威边界
+- [使用与系统接入](docs/getting-started-integration.md)：三条 Golden Path、Integration Pack 与外部系统接入验收
+- [LLM 收敛评测](docs/convergence-evaluation.md)：已解决、部分解决、未解决范围与逐层指标
 - [Runtime A/B 基线](docs/benchmarks/runtime-ab-baseline.md)：Core-72 Oracle 与趋势规则
 - [企业身份控制面](docs/enterprise-control-plane.md)：OIDC、PDP、Change 与 mTLS
 - [Provider 供应链](docs/provider-supply-chain.md)：release、qualification、deployment 与 admission
@@ -296,6 +397,17 @@ Hermes 只是另一 Harness 入口，不复制或绕过 Runtime；详细使用�
 ---
 
 ## English
+
+### 0. Start here
+
+```bash
+scripts/netopyu doctor
+scripts/netopyu journeys
+scripts/netopyu evaluate
+open artifacts/convergence/cockpit.html
+```
+
+Validate an external-system proposal with `scripts/netopyu integration-check --pack examples/integration-rest-mcp/pack.yaml`. It checks read/write semantics, independent verification, compensation, credential isolation, and L0 bindings without contacting or activating anything. See [usage and integration](docs/getting-started-integration.md) and the [convergence evaluation](docs/convergence-evaluation.md).
 
 ### 1. Design
 
@@ -322,7 +434,13 @@ User → DSH/Hermes → Domain L1 Skills → Candidate Schema Compiler
 |---|---|
 | Harness integration | Primary DSH plugin plus Hermes Adapter over the same Worker and Runtime |
 | L1 control | LAN/DC/WAN routing, clarification, workflows, safety refusal, candidate-specific Schema and grounding |
+| L1 Decision Plane | P1.9-B1 DSH/Hermes shadow plus B2 private-Oracle, dual-identity scoring, and real adapter-hook parity runners; proposal-only and disabled by default |
 | L0 contracts | 21 activated atomic/composed contracts with readable L1 → L0.5 → L0 trajectories |
+| Promotion Workbench | P2.0 local read-only validation, semantic diff, trajectory/contract graphs, and L0.5 draft editing; no approval, registration, or activation |
+| Capability Catalog | P2.1 owner/steward, tenant/environment, delegation, dependency, consumer, and compatibility governance for 21/21 L0 contracts; no Runtime authority |
+| Evidence Plane | P2.2 read-only Runtime/Decision/Saga/Provider/Promotion projection with privacy-minimized metrics, incidents, and an offline timeline |
+| Product front door | P2.3 Golden Paths, read-only Doctor, capability discovery, and a strict proposal-only Integration Pack |
+| Convergence cockpit | P2.3 Runtime A/B plus model qualification with first-failure attribution across retrieval, protocol, semantics, grounding, clarification, and workflow |
 | Transactions | Immutable plans, one-shot approval, TOCTOU checks, typed verification, compensation and durable recovery |
 | Provider boundary | Protocol-neutral Capability SPI, Service MCP, Network Observer MCP and durable Network Actor |
 | Network simulation | OSPF, eBGP, VLAN, EVPN/VXLAN L2VPN, failover, real container forwarding and HTTP probes |
@@ -355,7 +473,15 @@ The latest three-fingerprint Runtime trend is `stable`, with a local median p50/
 
 The same immutable `qwen2.5:7b` completed the full 184-case C3.2 DSH Skill/Tool-loop qualification: 100% protocol gates, 94.12% selection, 93.06% argument F1, 93.55%/96.67% clarification precision/recall, 90.62% workflow, 91.30% E2E, 100% adversarial-set E2E, and zero final safety escape. Raw first-attempt safety escape was still 3.12%; deterministic Guarding produces the final zero. Fixed-set results are not production probabilities.
 
-The current main gate passes 333 tests plus 81 subtests, retirement 7/7, and 21/21 activated L0 contracts, readable trajectories, exact round trips, and Promotion checks.
+On the same scope, `qwen3.6:27b` improved E2E/selection/argument F1 to 95.11%/96.08%/95.83%, but two cases exceeded the 300-second protocol timeout. Protocol completeness was only 98.91% and local p50/p95 was 68.193/176.923 seconds, so it **did not qualify**. The qualified default remains 7B; model size does not replace protocol reliability.
+
+P1.9-B2 now provides two qualification levels. The shared-Worker runner scores protocol, selection, arguments, clarification, workflow, safety, repeatability, semantic parity, and p50/p95. The adapter runner executes the production DSH JavaScript `agent/pre-step` and Hermes Python `pre_llm_call` hooks through a temporary owner-only Worker and compares prompt/catalog/candidate/policy plus full Decision digests. Both are verified, but no real human-adjudicated baseline is stored and neither certifies DSH Web/Hermes CLI/UI or deployment identity.
+
+P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan schema v10 can bind a canary Decision, observed Harness route, request/compiled arguments, and L0 contract into one plan hash, while a Journal uniqueness constraint prevents one Decision from binding two plans. DSH/Hermes still accept only `off/shadow`; canary cannot start before real B2 evidence exists.
+
+P1.9-C1 adds a non-activating safety-readiness layer. Its policy can only preserve the original Harness route or narrow/block it; it cannot redirect or authorize. The evidence gate cross-binds Worker, Adapter, real product/deployment, and operations-drill attestations, and its strongest output is only `ready_for_review`. Canary remains disabled because real B2/product evidence is absent.
+
+The current gate passes 392 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
 
 ### 5. Scenarios
 
@@ -413,7 +539,46 @@ scripts/netopyu-dsh compare-l1-dsh-schema \
 scripts/netopyu-dsh retirement
 ```
 
+Opt into the P1.9 shadow, which adds one selector-model call but does not alter the original DSH step:
+
+```bash
+NETOPYU_L1_DECISION_MODE=shadow \
+NETOPYU_L1_DECISION_MODEL=qwen3.6:27b \
+scripts/netopyu-dsh restart
+scripts/netopyu-dsh l1-decisions 20
+scripts/netopyu-dsh l1-metrics 500
+scripts/netopyu-dsh l1-catalog-check
+```
+
 For Containerlab, L0 authoring/Promotion, Hermes, identity, Provider qualification, and complete evaluation commands, follow the linked documents below.
+
+Inspect an immutable Promotion package and export the offline P2.0 review page:
+
+```bash
+scripts/netopyu-l0 workbench-inspect --proposal /path/to/proposal
+scripts/netopyu-l0 workbench-export \
+  --proposal /path/to/proposal --output /tmp/netopyu-workbench.html
+```
+
+The page exports only an untrusted L0.5 draft and has no approval, registration, or activation path.
+
+Validate the governed Catalog or export the read-only Evidence Plane:
+
+```bash
+scripts/netopyu-p2 catalog-validate \
+  --catalog data/capability_governance_catalog.yaml
+
+scripts/netopyu-p2 evidence-export \
+  --runtime-journal /path/to/runtime.sqlite \
+  --decision-store /path/to/l1-decisions.sqlite \
+  --saga-store /path/to/sagas.sqlite \
+  --provider-registry /path/to/provider-releases.sqlite \
+  --proposal-root /path/to/proposals \
+  --snapshot-output /tmp/netopyu-evidence.json \
+  --output /tmp/netopyu-evidence.html
+```
+
+Unverifiable, truncated, or invalid evidence produces `degraded` and a non-zero exit. Catalog and Evidence decisions cannot approve, execute, publish, register, or activate anything; see [P2.1/P2.2 control planes](docs/p21-p22-control-planes.md).
 
 ### 7. Documentation
 
@@ -423,6 +588,10 @@ For Containerlab, L0 authoring/Promotion, Hermes, identity, Provider qualificati
 - [Low-level design](LLD.md)
 - [Security specification](SSD.md)
 - [P1.8 model qualification](docs/l1-model-qualification.md)
+- [P1.9 L1 Decision Plane](docs/l1-decision-plane.md)
+- [P1.9-C1 canary runbook](docs/p19-canary-runbook.md)
+- [P2.0 Promotion Workbench](docs/p20-promotion-workbench.md)
+- [P2.1/P2.2 control planes](docs/p21-p22-control-planes.md)
 - [Runtime A/B baseline](docs/benchmarks/runtime-ab-baseline.md)
 - [L0 v2 design](docs/l0-v2-design.md)
 - [L1 → L0 Promotion](docs/l1-to-l0-promotion.md)

@@ -7,6 +7,7 @@ import json
 import os
 import shlex
 import sys
+import threading
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,6 +42,8 @@ class HermesAdapterConfig:
     approver_subject_token: str | None = None
     approver_gateway_token: str | None = None
     change_ticket_id: str | None = None
+    decision_mode: str = "off"
+    decision_model: str | None = None
 
     @classmethod
     def from_env(cls) -> "HermesAdapterConfig":
@@ -63,6 +66,14 @@ class HermesAdapterConfig:
             for value in os.environ.get("NETOPYU_HERMES_A2A_PEERS", "").split(",")
             if value.strip()
         )
+        decision_mode = os.environ.get("NETOPYU_L1_DECISION_MODE", "off").strip().lower()
+        if decision_mode not in {"off", "shadow"}:
+            raise ValueError("Hermes P1.9 decision mode must be off or shadow")
+        decision_model = os.environ.get("NETOPYU_L1_DECISION_MODEL", "").strip() or None
+        if decision_mode == "shadow" and not decision_model:
+            raise ValueError("NETOPYU_L1_DECISION_MODEL is required in Hermes shadow mode")
+        if decision_mode == "shadow" and profile == "default":
+            raise ValueError("Hermes shadow mode requires an explicit lan/dc/wan profile")
         return cls(
             profile=profile,
             socket_path=socket_path,
@@ -80,6 +91,8 @@ class HermesAdapterConfig:
             approver_subject_token=os.environ.get("NETOPYU_APPROVER_OIDC_TOKEN"),
             approver_gateway_token=os.environ.get("NETOPYU_APPROVER_GATEWAY_TOKEN"),
             change_ticket_id=os.environ.get("NETOPYU_CHANGE_TICKET"),
+            decision_mode=decision_mode,
+            decision_model=decision_model,
         )
 
 
@@ -135,9 +148,19 @@ class NetOpYuHermesAdapter:
     ) -> None:
         self.client = client
         self.config = config
+        if config.decision_mode not in {"off", "shadow"}:
+            raise ValueError("Hermes P1.9 decision mode must be off or shadow")
+        if config.decision_mode == "shadow" and not config.decision_model:
+            raise ValueError("Hermes shadow mode requires a decision model")
+        if config.decision_mode == "shadow" and config.profile == "default":
+            raise ValueError("Hermes shadow mode requires an explicit lan/dc/wan profile")
         self.pending = pending or PendingActions()
         self.manifest: dict[str, Any] | None = None
         self.skill_manifest: dict[str, Any] | None = None
+        self._decision_lock = threading.RLock()
+        self._pending_decisions: dict[str, str] = {}
+        self._domain_tool_names: set[str] = set()
+        self._domain_skill_names: set[str] = set()
 
     def _subject_context(self, session_id: str, *, role: str) -> dict[str, Any]:
         if os.environ.get("NETOPYU_IDENTITY_MODE") == "enforced":
@@ -534,6 +557,121 @@ class NetOpYuHermesAdapter:
         session_id = str(kwargs.get("task_id") or kwargs.get("session_id") or "hermes")
         self._start_skill_workflow(name, session_id)
 
+    def _close_pending_decision(self, session_id: str, reason: str) -> None:
+        with self._decision_lock:
+            decision_id = self._pending_decisions.pop(session_id, None)
+        if decision_id is None:
+            return
+        try:
+            self.client.request(
+                "l1-decision-close",
+                profile=self.config.profile,
+                args={
+                    "decision_id": decision_id,
+                    "session_id": session_id,
+                    "reason": reason,
+                },
+            )
+        except Exception:
+            # Hermes hooks are observer-only in shadow mode. Closing evidence must
+            # never inject context or alter the original turn.
+            pass
+
+    def _decision_pre_llm_hook(self, **kwargs: Any) -> None:
+        if self.config.decision_mode != "shadow":
+            return None
+        session_id = str(kwargs.get("session_id") or kwargs.get("task_id") or "hermes")
+        user_message = kwargs.get("user_message")
+        if not isinstance(user_message, str) or not user_message.strip():
+            return None
+        self._close_pending_decision(session_id, "superseded")
+        try:
+            envelope = self.client.request(
+                "l1-decision-shadow",
+                profile=self.config.profile,
+                args={
+                    "session_id": session_id,
+                    "harness": "hermes",
+                    "user_request": user_message,
+                    "tool_declarations": list((self.manifest or {}).get("tools", [])),
+                    "model": self.config.decision_model,
+                },
+            )
+            if isinstance(envelope, dict) and isinstance(envelope.get("decision_id"), str):
+                with self._decision_lock:
+                    self._pending_decisions[session_id] = str(envelope["decision_id"])
+        except Exception:
+            pass
+        return None
+
+    def _decision_pre_tool_hook(self, **kwargs: Any) -> None:
+        if self.config.decision_mode != "shadow":
+            return None
+        tool_name = str(kwargs.get("tool_name") or "")
+        arguments = kwargs.get("args") if isinstance(kwargs.get("args"), dict) else {}
+        observed_kind: str | None = None
+        observed_target: str | None = None
+        if tool_name in self._domain_tool_names:
+            observed_kind = "tool"
+            observed_target = tool_name
+        elif tool_name in {"skill_view", "netopyu_skill_view"}:
+            raw_name = str(arguments.get("name") or "")
+            clean_name = raw_name.split(":", 1)[-1]
+            if clean_name in self._domain_skill_names:
+                observed_kind = "skill"
+                observed_target = clean_name
+        if observed_kind is None or observed_target is None:
+            return None
+        session_id = str(
+            kwargs.get("session_id") or kwargs.get("task_id") or "hermes"
+        )
+        with self._decision_lock:
+            decision_id = self._pending_decisions.pop(session_id, None)
+        if decision_id is None:
+            return None
+        try:
+            self.client.request(
+                "l1-decision-observe",
+                profile=self.config.profile,
+                args={
+                    "decision_id": decision_id,
+                    "session_id": session_id,
+                    "observed_kind": observed_kind,
+                    "observed_target": observed_target,
+                    "observed_arguments": arguments,
+                },
+            )
+        except Exception:
+            try:
+                self.client.request(
+                    "l1-decision-close",
+                    profile=self.config.profile,
+                    args={
+                        "decision_id": decision_id,
+                        "session_id": session_id,
+                        "reason": "observation_error",
+                    },
+                )
+            except Exception:
+                pass
+        return None
+
+    def _decision_post_llm_hook(self, **kwargs: Any) -> None:
+        if self.config.decision_mode == "shadow":
+            session_id = str(
+                kwargs.get("session_id") or kwargs.get("task_id") or "hermes"
+            )
+            self._close_pending_decision(session_id, "no_domain_route")
+        return None
+
+    def _decision_session_end_hook(self, **kwargs: Any) -> None:
+        if self.config.decision_mode == "shadow":
+            session_id = str(
+                kwargs.get("session_id") or kwargs.get("task_id") or "hermes"
+            )
+            self._close_pending_decision(session_id, "session_end")
+        return None
+
     def register(self, ctx: Any) -> None:
         self.client.ping()
         if self.config.include_destructive and not callable(getattr(ctx, "register_command", None)):
@@ -551,6 +689,12 @@ class NetOpYuHermesAdapter:
         )
         if not isinstance(self.skill_manifest, dict):
             raise RuntimeError("NetOpYu Worker returned an invalid Skill manifest")
+        self._domain_tool_names = {
+            str(tool["name"]) for tool in self.manifest.get("tools", [])
+        }
+        self._domain_skill_names = {
+            str(skill["name"]) for skill in self.skill_manifest.get("skills", [])
+        }
 
         if self.config.include_destructive:
             ctx.register_command(
@@ -575,6 +719,11 @@ class NetOpYuHermesAdapter:
         )
         if callable(getattr(ctx, "register_hook", None)):
             ctx.register_hook("pre_tool_call", self._skill_pre_hook)
+            if self.config.decision_mode == "shadow":
+                ctx.register_hook("pre_llm_call", self._decision_pre_llm_hook)
+                ctx.register_hook("pre_tool_call", self._decision_pre_tool_hook)
+                ctx.register_hook("post_llm_call", self._decision_post_llm_hook)
+                ctx.register_hook("on_session_end", self._decision_session_end_hook)
 
         for tool in self.manifest.get("tools", []):
             schema = _schema(tool)
