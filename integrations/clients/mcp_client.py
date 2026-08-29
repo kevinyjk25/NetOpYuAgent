@@ -38,6 +38,7 @@ class MCPToolSpec:
     returns_large: bool = False
     trusted_for_writes: bool = False
     identity_pinned: bool = False
+    release_provider_id: str = ""
 
     @property
     def input_schema_digest(self) -> str:
@@ -265,6 +266,9 @@ class MCPServer:
                     identity_pinned=bool(
                         self.config.get("expected_server_name")
                         and self.config.get("expected_server_version")
+                    ),
+                    release_provider_id=str(
+                        self.config.get("release_provider_id") or ""
                     ),
                 ))
             cursor = getattr(result, "next_cursor", None)

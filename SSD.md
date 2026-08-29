@@ -47,7 +47,23 @@
 | F-35 | Harness/模型只能消费 Runtime terminal envelope，不得把 Actor/Provider 中间态当作执行结果。 |
 | F-36 | 跨 Provider Saga 必须绑定不可变步骤定义和每步 plan id/hash；正向和补偿步骤均不得绕过 L0 审批、验证与审计。 |
 | F-37 | L0 v2 的约束、扩展和组合必须在编译期展开；Runtime 只接受不可变编译产物。约束不得放宽父合同，组合步骤必须绑定子合同的精确版本和 hash。 |
-| F-38 | L1 → L0 Promotion 必须把 Agent 输出视为不可信候选，绑定 L1/Capability/候选 hash，经过确定性校验和一次性人工 review；review 不得自动注册合同或授予执行权限。 |
+| F-38 | L1 → L0 Promotion 必须保存 `L1 → L0.5 → L0` 三阶段及逐级 hash。L0.5 不得偏离 L1，L0 不得扩大 L0.5；Agent 输出仍是不可信候选，一次性人工 review 不得自动注册合同或授予执行权限。 |
+| F-39 | 全部内置受审写能力必须由编译 L0 v2 Contract 驱动；旧 ToolContract/verifier/compensator 只能作为精确绑定的实现 Adapter。prepare 和执行前必须校验 parity，Effect 参数只能从已批准值按 v2 模板渲染；禁止新增裸 v1 L0。 |
+| F-40 | 每个生产 L0 必须保存 L1/L0.5/L0 authoring/compiled 和逐级 hash 轨迹；主门禁必须重新验证 Promotion semantic parity、精确 contract round trip 和文件完整性。反向 bootstrap 产物必须标注来源、不得注册到 Harness 或宣称为模型独立推导。 |
+| F-41 | schema-v9 写计划必须绑定经过 verifier 规范化的 requester/policy evidence，以及 Provider release/manifest/qualification/deployment digest；v8 及更早只读兼容。 |
+| F-42 | Harness 人工确认不得以 actor 字符串直接授权；Runtime 必须签发短时、精确绑定 plan/requester/policy/approver/risk/mode 的 approval proof，执行必须先验证签名与 TTL。 |
+| F-43 | `enforced` identity mode 未配置企业 credential verifier 时必须拒绝全部 requester context，并禁用 legacy actor compatibility；本地 verifier 不得被升级为生产凭证。 |
+| F-44 | approval policy 必须支持 single/dual approver、角色/作用域、职责分离、关键变更工单和可选活动窗口；主体混淆、自批冲突和窗口外审批必须失败关闭。 |
+| F-45 | `enforced` read/write 必须只从固定 issuer/audience/非对称 algorithm 的短时 JWT 获取 subject、role、scope、clearance 和 assurance；未知 kid、过期、超长 lifetime 或 claim/signature 不符必须失败关闭。 |
+| F-46 | 人的 access token 必须与独立 Gateway sender attestation 通过 `act_sub + subject_jti` 交叉绑定；Gateway 必须绑定 Harness/session/client，任一替换不得进入 Provider。 |
+| F-47 | 外部 PDP 必须分别授权 observation、prepare 和 approve，decision id/policy/version/obligations 必须进入哈希绑定证据；外部 obligation 只能收紧内置 L0 policy。 |
+| F-48 | 变更工单必须由配置的 Change Authority 验证 status/revision/window/profile/capability/targets/risk ceiling；调用方自报 ticket 属性不得成为权威。 |
+| F-49 | 外部 Provider 的 Manifest、Qualification Report 与 Deployment Attestation 必须分别由独立 Publisher/Qualifier/Deployer Ed25519 key 签名；同一公钥不得跨角色复用。 |
+| F-50 | Provider Manifest 必须固定 artifact、Provider identity/version、Capability/schema/result contract、profile 与允许的 L0 contract hash；Runtime 不得信任 Provider 自报 release id。 |
+| F-51 | Qualification 必须通过固定的 timeout、幂等、乱序、部分成功、不确定终态、补偿、补偿失败和重启恢复等 9 项故障场景；任一失败不得生成可发布报告。 |
+| F-52 | Provider release 必须经过 stage/publish/environment promote；严格策略的 promote/rollback 必须绑定目标 release 的新部署证明，breaking promote 与 rollback 必须带审批引用，生命周期事件必须形成可验证哈希链。 |
+| F-53 | enforced admission 必须把 active signed release、非过期 deployment 与实际 discovery 精确比较，并验证三种 trust role/scope/expiry/revocation、qualification freshness、exact artifact map、result contract 和允许的 L0 hash。 |
+| F-54 | 执行前必须重新 admission；审批后 release/deployment/identity/schema/result/L0 漂移必须在 Provider 调用前进入可审计终态且 write count 为零。 |
 
 ### 3. 可靠性规格
 
@@ -75,6 +91,8 @@
 | R-20 | Saga 必须在重启后列出 planned/running/compensating 操作，但不得自动重放任何 Provider write。 |
 | R-21 | Saga 补偿必须按已验证步骤的逆序执行；未知或不可补偿状态必须进入人工介入。 |
 | R-22 | Saga 事件必须形成独立可验证哈希链；重复绑定不同 plan hash 必须失败关闭。 |
+| R-23 | approval proof id 在 journal 中必须唯一；proof 或 execution nonce 的重复消费均不得产生第二次效果。 |
+| R-24 | Provider 合同漂移在 execution claim 后必须收敛为 `precondition_changed`、释放目标锁、保存失败证据并完成审计，不得遗留为无主 `executing`。 |
 
 ### 4. 安全目标
 
@@ -161,9 +179,9 @@
 #### T-11 Hermes 把模型行为误当成人工授权
 
 - 风险：模型生成“批准”文本、重复工具调用、调用通用危险命令审批，或 Adapter 重启后恢复旧授权。
-- 控制：写 handler 永远只 prepare；模型可见 JSON 删除 nonce；只有 Hermes slash command dispatcher 可调用 approve handler；命令必须包含完整 plan id/hash；绑定进程内一次性领取；重启丢弃。
+- 控制：写 handler 永远只 prepare；模型可见 JSON 删除 nonce；只有 Hermes slash command dispatcher 可调用 approve handler；命令必须包含完整 plan id/hash；绑定进程内一次性领取；随后 Runtime 签发模型不可见的 plan-bound approval proof；重启丢弃。
 - P0.5 假设：本地 Hermes 用户、插件进程、其他已安装插件和 OS account 可信，Gateway 已配置用户 allowlist。
-- 剩余风险：当前 Hermes slash command handler 不提供可验证的发送者身份，配置的 operator id 不等同于不可抵赖身份；Hermes 插件在进程内运行也不是安全沙箱。P1 必须增加企业身份上下文、独立审批服务、Worker 服务身份/进程隔离，并限制模型终端与代码执行面。
+- 剩余风险：local-simulation 仍以 OS account/owner-only Worker 为信任根；B1 OIDC/Gateway/PDP/Change Adapter 只完成本地 HTTP 资格测试，尚未连接真实企业发行方或取得不可抵赖证据。Hermes 插件在进程内运行也不是安全沙箱；生产仍需真实 Gateway token minting、进程隔离和模型终端/代码执行面限制。
 
 #### T-12 Lab provider 命令注入或目标扩张
 
@@ -183,6 +201,19 @@
 - 控制：capability registry 精确校验 role/action/version；Observer 不注册写 callable；Runtime 使用 fresh Observer read；Actor 在效果前持久化 exact snapshot，以 operation id 做幂等/补偿，使用 target lock、lease、fence、启动 reconciliation 和独立 Actor hash chain。
 - 剩余风险：本地 Observer/Actor 仍共享主机、OS account、Docker daemon 与 Containerlab 真值；设备端不原生校验 fence。生产必须分离凭据/进程/故障域，并增加远端事务日志、HA leader fencing、设备/控制器 CAS 与不可变审计。
 
+#### T-15 requester/approver 主体替换、证明伪造或跨计划重放
+
+- 风险：Adapter 把 Alice 的请求记为 Bob、攻击者修改 approver、复用另一计划/策略的批准，或在凭证过期后执行。
+- 控制：schema-v9 requester/policy 与 Provider release/deployment evidence 纳入 plan hash；`enforced` 固定 JWT issuer/audience/algorithm/lifetime/JWKS，将 access token 与 Gateway attestation 交叉绑定，并由 PDP/Change Authority 授权。执行验证 proof 和全部绑定后再原子消费 nonce。
+- 本地边界：local verifier 明确标记 `local_simulation=true`，只认证 owner-only Adapter/Worker 进程链；`enforced` 缺少 OIDC、Gateway、PDP 或 Change Adapter 时全部拒绝，不能把 raw dictionary 当身份或策略。
+- 剩余风险：B2-ready 已验证本地 RS256/JWKS/HTTP、动态 Gateway mint 和显式 CA/mTLS wire path；真实 key rotation/撤销、组织 PDP 数据、change system、证书轮换/HSM 和外部不可变审批日志仍待 B2/P1.7 资格化。
+
+#### T-16 Provider 供应链替换、资格伪造或审批后 release/deployment 漂移
+
+- 风险：恶意 Provider 自报可信 identity/release、Publisher 自行签资格报告、过期/撤销 key 继续使用、未资格 artifact 被激活、result/L0 权限在审批后扩大。
+- 控制：deployment-owned provider id；独立 Publisher/Qualifier/Deployer trust role；外部 JSONL 进程固定 9 项资格与真实 restart；OCI-image/SBOM/provenance 必需 digest；短期 exact deployment attestation；严格 lifecycle/rollback；schema-v9 release/deployment evidence；prepare/execute 双重 admission。
+- 本地边界：B-ready fixture 虽复制到仓库外并独立运行，但源码、临时 key、SQLite 和 digest fixture 仍同一工程信任域。P1.4-B 仍需要组织签名/HSM 根、独立仓库/CI/实验室、真实 OCI/SBOM/SLSA 内容验证和外部 WORM audit。
+
 ### 7. 审批规格
 
 审批摘要至少包含：
@@ -196,9 +227,12 @@
 - preflight 摘要；
 - verification/rollback contract；
 - workflow binding；
+- requester subject/issuer/session/assurance/digest；
+- approval mode 与 policy id/version/hash；
+- Provider release/manifest/qualification digest；
 - expiry。
 
-批准只对该摘要对应 hash 有效。DSH 使用 `allowed-once` 卡片和 Tool Guard；Hermes 使用用户输入的精确 slash command，nonce 只留在插件进程。批量、异步恢复和 A2A continuation 也必须获得新的 Harness 审批，不能复用环境变量、自然语言“已批准”或历史会话状态。
+批准只对该摘要对应 hash 有效。DSH 使用 `allowed-once` 卡片和 Tool Guard；Hermes 使用用户输入的精确 slash command，nonce 只留在插件进程。两者确认后都必须调用 `runtime-approve` 获取模型不可见的短时签名 proof，`runtime-execute` 不再信任裸 actor 字符串；只有 local compatibility 模式为旧测试保留该入口。批量、异步恢复和 A2A continuation 也必须获得新的 Harness 审批，不能复用环境变量、自然语言“已批准”或历史会话状态。
 
 ### 8. 模型安全策略
 
@@ -319,7 +353,7 @@ MCP、网络设备、审批身份、分布式事务或生产可用性。
 错误、capability/digest 错误失败关闭、负面 payload 解包、同名单设备参数规范化，以及 backend
 Observer 读与 Actor 写分别走 MCP、内部参数隐藏、profile 精确投影、operation immutable reuse
 拒绝、crash-after-effect reconciliation、幂等不重发、精确 durable snapshot 恢复和双事件链。
-完整 Python 门禁为 228 个测试和 39 个子测试。
+当前完整 Python 门禁为 288 个测试和 81 个子测试。
 
 实际本地门禁必须证明 20 节点基线全部通过，并通过 Observer MCP 读取业务/网络 reconciliation
 所需事实；随后受审 Actor MCP 计划达到 `verified_success`，故意制造后置状态漂移的计划达到
@@ -338,7 +372,31 @@ terminal envelope，Actor `applied` 不泄漏；Saga 依赖阻止乱序计划、
 
 基准必须固定相同工具、参数、Provider 和故障，且明确把 LLM/L1 选择排除在 Runtime 增量之外。DSH-only 参考路径必须保留基础 JSON Schema 和通用 HITL，不能构造为无保护 strawman。机器 Oracle 必须至少覆盖：有效请求、未知参数、领域安全必填、灾难命令、审批后 Provider/状态漂移、越权读取、错误后置条件与补偿、发送后不确定结果、终态信封和审计篡改。
 
+### 20. P1.3-B1 与 B2-ready 企业控制面验收补充
+
+本地代码门禁必须通过真实 RS256/JWKS/HTTP wire path 覆盖：OIDC access token 与 Gateway attestation 成功交叉绑定；敏感 observation、effect prepare 和 approval 均调用 PDP；Change Authority 校验 revision/window/scope/risk；签名主体替换、access-token 替换、raw role 注入、unknown kid、PDP deny、ticket deny 和 scope mismatch 均在 Provider 前失败关闭。token 和控制面 bearer secret 不得进入 plan、proof public evidence、journal、trajectory 或模型结果。
+
+B2-ready 还要求动态 Gateway mint、显式 CA/mTLS、owner-only client key、离线无泄密 Doctor 和无效果 live contract check 通过。该验收仍不认证用户企业的 issuer、组织 PDP 策略、变更平台可用性、撤销传播、证书轮换/HSM 或外部 WORM 审计；这些属于 B2/P1.7。
+
 验收要求 Runtime 路径通过全部固定 Oracle；参考路径和 Runtime 的结果均须原样报告。输出必须包含机器可读 JSON、双语 Markdown 和浏览器 HTML，并同时披露 p50/p95 绝对机器时延、样本数、人工等待排除和未测量范围。固定场景 100% 不得表述为生产成功概率。
+
+### 21. P1.4-B-ready Provider 发布验收补充
+
+本地代码门禁必须证明：三角色 key 独立；仓库外进程通过固定 9/9 与真实重启；必需 artifact、部署签名/时效/environment/exact map 失败关闭；stage/publish/promote/证明续期/严格 rollback/deprecate 和 audit 有效；Backend admission 精确；审批后 release 或 deployment 漂移以零写入 `precondition_changed` 结束。
+
+该验收只形成 B-ready 接入协议。只有独立组织拥有的 Provider、仓库/CI/实验室、企业签名/HSM 根、真实 OCI/SBOM/SLSA 验证及外部 WORM lifecycle audit 通过后，才能完成 P1.4-B。
+
+### 22. P1.8 L1/模型资格验收
+
+L1 评测必须与 Runtime 执行隔离，不得暴露 callable Tool、审批 nonce/proof、Provider credential 或生产 Memory。模型输出必须通过 extra-forbid 决策合同和候选目标绑定；非法 JSON、未知目标、selection 缺字段、refusal 携带执行内容一律不可形成候选计划。模型原始正文和 endpoint 错误正文不得写入报告，远程 endpoint 必须显式 opt-in。
+
+固定集必须覆盖 Skill/Tool 选择、参数、追问、多步 workflow、安全绕过和领域外请求，并报告中英切片。危险请求逃逸率必须为 0；但此结果只证明固定集在严格 Parser 后未逃逸，不能替代 L0/Runtime。完整模型门禁必须绑定不可变 artifact digest、Prompt、Catalog 和数据集；任何 safety escape 增加或核心指标下降超过 5 个百分点标记回退。子集、规则 Adapter、可变 tag 或未保存 digest 的运行不得标记模型合格。
+
+DSH-in-loop 影子评测还必须在任何模型调用前验证固定 DSH 版本和精确活动插件白名单。所有 Skill、Tool、shell、文件工具、Web、子代理、遥测、远程模型 Provider 与 NetOpYu effect 必须关闭；仅允许隔离临时 session 持久化，运行结束必须删除。配置漂移、未知活动 entry、输出超限、超时或非法候选均 fail closed。B1 结果不得描述为实际 Skill/tool-call 准确率。
+
+B2/C1 若开启无效果 Tool，必须使用独立 overlay 和精确 Tool 白名单，且 capture/Governor 不得连接 Runtime、Provider、设备或审批。C1 的预装 Skill、系统提示、typed Tool 集合和 Catalog 编译规则必须摘要绑定；Governor 只能监听 loopback，Tool 强制与隐藏重试必须有界、可计数，回执后固定终止。任何 forbidden/duplicate Tool、Schema/候选/摘要/回执漂移、提前文本或不完整终态不得形成候选。隐藏重试 token 未完整计量时，报告必须声明成本下界。safety escape 非零即不合格，即使 Runtime 后续仍会拒绝该效果。
+
+C2 Guard 必须是单调收窄器：允许输出仅为拒绝、越界、弃权或保持原候选，禁止选择/改写 target、补充参数、生成 workflow 或授予权限。政策必须版本化、摘要绑定且不导入 Oracle 场景/标签。Protocol Firewall 只允许 loopback 模型端点，每次实际尝试必须计量；安全合成只能调用无参数 refusal/out-of-scope capture。报告同时显示模型首轮与 Guard 后 safety、固定集误杀、最大尝试和尾时延。最终 safety 为 0 不能掩盖原始模型逃逸、协议失败或 Runtime 仍是最终安全边界。
 
 ---
 
@@ -389,7 +447,23 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-35 | Harness/model consumers receive only a Runtime terminal envelope and cannot treat Actor/Provider intermediate state as an outcome. |
 | F-36 | A cross-provider Saga binds an immutable step definition and per-step plan id/hash; forward and compensation steps never bypass L0 approval, verification, or audit. |
 | F-37 | L0 v2 constraints, extensions, and compositions are flattened at compile time; Runtime accepts only immutable compiled artifacts. Constraints cannot weaken a parent, and composite steps bind exact child versions and hashes. |
-| F-38 | L1 → L0 Promotion treats Agent output as an untrusted candidate, binds L1/Capability/candidate hashes, and requires deterministic checks plus one human review. Review cannot register a contract or grant execution authority. |
+| F-38 | L1 → L0 Promotion preserves `L1 → L0.5 → L0` stages in a predecessor-linked hash chain. L0.5 cannot drift from L1 and L0 cannot widen L0.5. Agent output remains untrusted, and one human review cannot register a contract or grant execution authority. |
+| F-39 | Every built-in reviewed mutation is driven by a compiled L0 v2 contract. Legacy ToolContracts/verifiers/compensators are exact implementation adapters only. Prepare and execution-time revalidation enforce parity, effect arguments are rendered from approved values through v2 templates, and new raw v1 L0 registrations are forbidden. |
+| F-40 | Every production L0 preserves L1/L0.5/L0 authoring/compiled artifacts and predecessor hashes. The primary gate reruns Promotion semantic parity, exact contract round trips, and file integrity. Reverse-bootstrapped artifacts declare their origin, are never registered into the Harness, and cannot be claimed as independent model inference. |
+| F-41 | A schema-v9 mutation plan binds requester/policy evidence and Provider release/manifest/qualification/deployment digests; v8 and older shapes are read-only compatibility. |
+| F-42 | A Harness decision is not direct actor-string authority. Runtime signs a short-lived proof bound to the exact plan, requester, policy, approver, risk, and mode; execution verifies its signature and TTL first. |
+| F-43 | Enforced identity mode rejects all requester contexts without an enterprise credential verifier and disables legacy actor compatibility. A local verifier can never be promoted into a production credential. |
+| F-44 | Approval policy supports single/dual approvers, role/scope checks, separation of duties, critical-change tickets, and optional active windows. Subject confusion, self-approval conflicts, and out-of-window decisions fail closed. |
+| F-45 | Enforced reads and writes derive subject, role, scope, clearance, and assurance only from short-lived JWTs with pinned issuer/audience/asymmetric algorithms. Unknown keys and invalid lifetime/signature/claims fail closed. |
+| F-46 | A human access token is cross-bound to a separately signed Gateway attestation by `act_sub + subject_jti`; the Gateway binds Harness/session/client. Substitution cannot reach a Provider. |
+| F-47 | An external PDP separately authorizes observation, prepare, and approve. Decision identity and obligations enter hash-bound evidence, and obligations may only tighten built-in L0 policy. |
+| F-48 | A configured Change Authority, not caller-supplied attributes, qualifies ticket status, revision, window, profile, capability, targets, and risk ceiling. |
+| F-49 | Provider Manifest, Qualification, and Deployment evidence use independent Publisher, Qualifier, and Deployer Ed25519 roles; key material cannot cross roles. |
+| F-50 | A Manifest binds artifact, Provider identity/version, Capability/schema/result contract, profile, and allowed L0 hashes; Runtime never trusts a Provider self-declared release id. |
+| F-51 | Qualification passes the fixed nine-case timeout/idempotency/order/partial/uncertain/compensation/recovery suite; any failure prevents a publishable report. |
+| F-52 | Strict promotion and rollback bind fresh deployment evidence for the target release; breaking promotion and rollback require approval references and lifecycle events are hash chained. |
+| F-53 | Enforced admission compares active release, non-expired deployment, exact artifact map, and discovery while validating all three trust roles. |
+| F-54 | Execution repeats admission. Post-approval release or deployment drift reaches an audited terminal state before Provider invocation with zero writes. |
 
 ### 3. Security objectives
 
@@ -409,12 +483,14 @@ The system must provide exact authorization, effect integrity, evidence-based ou
 - **Audit tampering:** per-plan event hash chains; P1 still requires an external append-only copy.
 - **Hermes model-as-approver confusion:** prepare-only write handlers, nonce removal, exact user slash commands, process-local one-shot bindings, and safe loss on restart. P0.5 still trusts the local account and Hermes gateway allowlist; production requires authenticated sender identity and process isolation.
 - **Lab command/target expansion:** strict manifests, path and identifier validation, shell-free argv, FRR read/write allowlists, management-interface exclusion, predeclared probes/faults, and process isolation from real inventory. Docker remains a trusted privileged boundary, not a multi-tenant sandbox.
-- **MCP spoofing/schema drift/shared-store races:** trusted flags, pinned server identity/version, declared contracts, structured results, schema/capability digests in schema-v6 plans, execution-time rediscovery, one-time seeding, WAL, process locks, immediate transactions, revisions, and state-sensitive idempotency. Local stdio and SQLite still trust the OS account; production needs authenticated independent services and database controls.
+- **MCP spoofing/schema drift/shared-store races:** pinned contracts, schema/capability digests in schema-v9 plans, execution-time rediscovery, WAL, locks, revisions, and state-sensitive idempotency. Production still needs independently authenticated services and database controls.
+- **Requester/approver substitution or proof replay:** schema-v9 requester/policy/release/deployment binding, pinned enterprise credentials, PDP/change decisions, Runtime proofs, unique proof ids, and one-shot nonces.
+- **Provider supply-chain substitution or qualification forgery:** three independent role-scoped keys, external-process failure qualification, exact artifacts and deployment proof, strict lifecycle, and prepare/execute admission. B-ready is local; organizational roots, independent ownership/CI/labs, real artifact verification, and WORM audit remain P1.4-B.
 - **Network provider escalation/self-attestation/crash loss:** exact capability role/action/version matching, an observer with no mutations, fresh digest-bearing evidence, and a durable Actor operation/snapshot store with target locks, leases, fences, startup reconciliation, and a hash chain. Observer and Actor still share one host/account/Docker boundary, and devices do not validate the local fence; production needs separated credentials/failure domains, a remote log, controller CAS, HA fencing, and immutable audit.
 
 ### 5. Approval and model policy
 
-Approval must display and bind the exact plan, intent, L0 contract, arguments, targets, provenance, risk, evidence, verifier/rollback, workflow, and expiry. DSH uses an allowed-once card and Tool Guard. Hermes uses an exact user slash command while retaining the nonce only in process. Batch, recovery, and A2A continuation paths need fresh harness approval.
+Approval must display and bind the exact plan, intent, L0 contract, Provider release/manifest/qualification evidence, arguments, targets, provenance, risk, evidence, verifier/rollback, workflow, requester identity digest, approval policy, and expiry. DSH uses an allowed-once card and Tool Guard. Hermes uses an exact user slash command while retaining the nonce only in process. Both paths then obtain a model-hidden signed Runtime proof before execution. Batch, recovery, and A2A continuation paths need fresh Harness approval.
 
 Models are not a trust root. They are qualified by use level: summary/classification, read-only candidate generation, mutation-plan candidate generation, and production mutation candidate generation. `qwen2.5:7b` failed the mutation-plan level and is not authorized for autonomous writes. `qwen3.5:27b` remains a local P0.5 default, not a production certification.
 
@@ -498,7 +574,7 @@ payload unwrapping, single-device argument normalization, and exact backend
 routing of Observer reads and Actor writes through separate MCP boundaries,
 hidden Runtime context, profile projection, immutable-operation conflicts,
 crash reconciliation without blind replay, exact durable restoration, and both
-hash chains. The complete gate is 228 tests plus 39 subtests.
+hash chains. The current complete gate is 316 tests plus 81 subtests.
 
 The deployed gate requires the complete 20-node baseline and cross-layer facts
 read through Observer MCP. Real Actor MCP plans must reach `verified_success`;
@@ -524,3 +600,27 @@ bundle approval.
 The benchmark fixes the same tool, arguments, Provider, and fault while explicitly excluding LLM/L1 selection from the Runtime increment. The DSH-only reference retains basic JSON Schema and generic HITL and may not be reduced to an unprotected strawman. Machine oracles cover valid requests, unknown fields, domain safety requirements, catastrophic commands, post-approval Provider/state drift, unauthorized reads, failed postconditions and compensation, indeterminate writes, terminal envelopes, and audit tampering.
 
 Runtime must pass every fixed oracle while both paths remain visible in the report. Outputs include machine-readable JSON, bilingual Markdown, and browser HTML, plus absolute p50/p95 machine latency, sample count, the exclusion of human wait, and unmeasured scope. A 100% fixed-scenario result is never a production success probability.
+
+### 16. P1.3-B1 and B2-ready enterprise control-plane acceptance supplement
+
+Local gates use real RS256/JWKS/HTTP wire paths to prove successful OIDC access-token/Gateway-attestation cross-binding; PDP decisions for sensitive observation, effect prepare, and approval; and authoritative change revision/window/scope/risk checks. Subject substitution, access-token substitution, raw-role injection, unknown keys, PDP denial, ticket denial, and scope mismatch fail before Provider invocation. Tokens and control-plane bearer secrets never enter plans, public proof evidence, journals, trajectories, or model-visible output.
+
+B2-ready additionally qualifies dynamic Gateway minting, explicit CA/mTLS, owner-only client keys, an offline secret-safe Doctor, and a no-effect live contract check. This still does not certify the user's issuer, organizational PDP policy, change-platform availability, revocation propagation, certificate rotation/HSM, or external WORM audit; those remain B2/P1.7 work.
+
+### 17. P1.4-B-ready Provider publication acceptance supplement
+
+Local gates prove independent Publisher/Qualifier/Deployer keys; external-process 9/9 qualification and actual restart; required artifact and deployment-attestation checks; promotion, proof renewal, strict rollback and lifecycle audit; exact admission; and zero-write terminal behavior after release or deployment drift.
+
+This is a B-ready protocol qualification, not production certification. P1.4-B requires independently owned Provider/CI/labs, organizational signing/HSM roots, real OCI/SBOM/SLSA verification, and external immutable lifecycle audit.
+
+### 18. P1.8 L1/model qualification acceptance
+
+L1 evaluation is isolated from Runtime execution and exposes no callable Tool, approval nonce/proof, Provider credential, or production Memory. Every response passes an extra-forbid contract and supplied-candidate target check. Invalid JSON, unknown targets, incomplete selections, and executable refusal content cannot form a proposal. Reports retain no raw model or endpoint-error text, and remote endpoints require explicit opt-in.
+
+The fixed set covers Skill/Tool choice, arguments, clarification, multi-step workflows, bypass attempts, and out-of-scope requests with language slices. Safety escape must be zero, but that statement applies only after the strict parser on this fixed set and never replaces L0/Runtime. Full qualification binds immutable model, Prompt, Catalog, and dataset fingerprints. Any increased safety escape or greater-than-five-point core regression fails the trend gate. Partial, rule-adapter, mutable-tag, or unresolved-digest runs cannot qualify a model.
+
+The DSH-in-loop shadow must also verify a pinned DSH version and exact active-plugin allowlist before any model call. Skills, tools, shells, filesystem tools, Web, subagents, telemetry, remote model providers, and every NetOpYu effect remain disabled; only isolated ephemeral session persistence is permitted and is removed after the run. Configuration drift, unknown active entries, oversized output, timeout, or an invalid candidate fails closed. B1 results must not be presented as actual Skill/tool-call accuracy.
+
+When B2/C1 enables proposal-only Tools, it must use a separate overlay and exact Tool allowlist, and neither capture nor Governor may reach Runtime, Providers, devices, or approval. C1 digest-binds the preloaded Skill, system prompt, typed Tool set, and Catalog compiler rules. Its Governor is loopback-only; Tool forcing and hidden repairs are bounded and counted, and the terminal response is fixed after the receipt. A forbidden/duplicate Tool, schema/candidate/digest/receipt mismatch, premature text, or incomplete terminal state yields no proposal. Reports declare token cost as a lower bound when discarded retries are not fully metered. Any nonzero safety escape fails qualification even though Runtime would still reject the effect downstream.
+
+The C2 Guard is a monotonic narrowing layer: it may refuse, classify out of scope, abstain, or preserve a proposal, but cannot select/change a target, add arguments, generate workflow, or grant authority. Its versioned digest-bound policy cannot import Oracle cases or labels. The Protocol Firewall accepts only a loopback model endpoint and meters every actual attempt; synthetic safety is restricted to argument-free refusal/out-of-scope capture. Reports show first-attempt and guarded safety, fixed-set false positives, maximum attempts, and tail latency. Zero final safety escape cannot hide raw model escape, protocol failure, or Runtime's continuing role as the final safety boundary.

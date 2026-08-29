@@ -1,0 +1,83 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.resource.delete
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for delete_resource
+  labels:
+    runtime-tool-contract: mock-delete-v2
+    runtime-verifier: mock-state
+    runtime-preflight-fields: resource_id
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - lan
+  effect:
+    capability: netopyu.tool.delete_resource
+    tool: delete_resource
+    request:
+      resource_id: ${arguments.resource_id}
+      force: ${arguments.force}
+  intent:
+    kind: delete_resource
+    targetFields:
+    - resource_id
+    desiredState:
+      exists: false
+  parameters:
+    resource_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    force:
+      type: boolean
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: netopyu.tool.mock_operation_status
+    arguments:
+      resource_id: ${arguments.resource_id}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.mock-state
+    arguments:
+      resource_id: ${arguments.resource_id}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation: null
+  approval:
+    required: true
+    risk: critical
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: manual_intervention
+    compensationFailed: manual_intervention

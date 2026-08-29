@@ -1,6 +1,6 @@
 # L0 v2 Effect Contract SDK / L0 v2 确定性作用契约
 
-> 中文在前，English follows. 本文描述可运行的 L0 v2 authoring/compiler 原型；现有 v1 Runtime 执行内核继续作为兼容生产路径，直到 v2 Catalog 完成 Provider 联调和同等故障认证。
+> 中文在前，English follows. 本文描述 L0 v2 authoring/compiler 和生产 Runtime 集成。全部 21 个内置受审写能力已使用编译后的 v2 Contract 作为语义权威；旧 ToolContract、verifier、compensator 仅保留为精确绑定的执行 Adapter。
 
 ## 中文
 
@@ -24,7 +24,10 @@ network_runtime/l0/
 ├── models.py       严格 Pydantic Schema 和编译产物类型
 ├── compiler.py     继承展开、安全单调检查、子契约哈希绑定
 ├── catalog.py      多版本/多语义索引、explain/diff/graph、Saga 投影
-├── cli.py          validate/list/show/explain/diff/graph/compile/schema
+├── expressions.py  非图灵完备的参数/状态模板渲染器
+├── production.py   21 个生产 L0 v2 定义及精确执行 Adapter 绑定
+├── runtime_loader.py  Catalog/Adapter 一致性、Resolver 和执行参数门禁
+├── cli.py          开发、Promotion 与生产 Catalog 命令
 └── examples/
     ├── s1-network-access-grant.yaml
     ├── s11-guest-access-constraint.yaml
@@ -43,6 +46,9 @@ scripts/netopyu-l0 diff network.access.grant network.guest-access.grant
 scripts/netopyu-l0 graph employee.application-access.provision
 scripts/netopyu-l0 compile --output artifacts/l0-v2/catalog.json
 scripts/netopyu-l0 schema --kind all
+scripts/netopyu-l0 runtime-validate
+scripts/netopyu-l0 runtime-list
+scripts/netopyu-l0 runtime-export --output artifacts/l0-v2/runtime-catalog.json
 ```
 
 ### 3. S1：原子 REST Effect
@@ -126,7 +132,7 @@ end-to-end checkpoint
 
 ### 8. 多版本与多语义 Registry
 
-兼容 v1 Registry 已改为：
+Runtime Registry 使用：
 
 ```text
 (skill_id, version) -> Contract
@@ -135,7 +141,7 @@ tool/capability      -> [S1, S11, ...]
 
 相同 Skill 可并存多个版本；未指定版本时选最高语义版本。一个 Tool 存在多个 Skill 语义时，禁止仅依据 Tool 名猜测，必须提供精确 `l0_skill_id`。这避免通用 URL1 在 S1/S11 之间发生静默误选。
 
-### 9. 当前完成边界
+### 9. 生产运行集成
 
 已完成：
 
@@ -148,25 +154,35 @@ tool/capability      -> [S1, S11, ...]
 - SagaDefinition 投影；
 - CLI explain/diff/graph/compile；
 - 正向和负向单元测试；
-- v1 Registry 多版本/歧义拒绝兼容改造。
+- Registry 多版本/歧义拒绝兼容改造；
+- 21/21 个现有生产写工具的编译 v2 Contract；
+- 精确 `RuntimeBinding`：每个 v2 id/version 绑定一个 ToolContract、verifier、可选 compensator 和 profile；
+- prepare 与执行前重校验阶段的双重 Contract/Adapter parity gate；
+- 非图灵完备表达式渲染和 fail-closed Resolver Registry；
+- Provider Effect 只接收由已批准参数按 v2 模板渲染的字段；
+- 21/21 个生产 L0 的 L1/L0.5/L0 可读存档、Promotion semantic parity 和精确 round trip；
+- Core-72 Runtime 64/64 控制 Oracle 和完整 Python 回归。
 
-尚未把示例 REST Capability 接入真实 Provider，因此示例 Catalog 当前是 authoring/compiler 原型，不会自动出现在 DSH 页面。进入实际运行前还需要：
+旧 ToolContract、verifier 和 compensator 仍被复用，但它们只是经过验证的实现 Adapter。Contract id/version/hash、参数 Schema、desired state、preflight 字段、risk/profile、effect capability 和补偿要求以编译 v2 产物为准；任一投影漂移都会在写前失败关闭。新生产 L0 不得再以裸 v1 注册形式加入。
 
-1. OpenAPI/MCP Capability Provider；
-2. 表达式解析器和参数 Resolver 插件；
-3. 编译 Catalog 到 Runtime Plan 的 Loader；
-4. DSH/Hermes 为每个语义 Contract 投影独立逻辑入口；
-5. 单/双人审批身份实现；
-6. 对 S1/S11/Saga 运行与 Core-72 同等级别的故障认证。
+存量合同的解释索引位于 [`production_trajectories/`](../network_runtime/l0/production_trajectories/INDEX.md)。档案中的 L1/L0.5 从受审 L0 反向 bootstrap，并明确保存来源声明；主门禁重新执行 Promotion 和编译，不把可读档案当作运行权威，也不把 bootstrap 当作模型独立转换准确率。
+
+### 10. 仍然保留的安全边界
+
+`examples/` 中 URL1 REST Capability 是 authoring/Promotion 教学示例，尚未接入真实 Provider，因此不属于上述 21 个生产合同，也不会自动出现在 DSH。离线 Promotion 的人工 approve 同样不会自动发布合同；外部候选仍需 Provider 认证、故障注入和显式 Catalog 发布。企业单/双人审批身份、厂商设备和生产 HA 也仍是 P1 资格认证范围。
 
 L1 自然语言辅助构建入口见 [L1 → L0 Promotion Pipeline](l1-to-l0-promotion.md)。它可以生成和审查候选，但不改变上述执行认证边界。
 
 ## English
 
-L0 v2 introduces a strict authoring/compiler layer for atomic effects, constraint-only derivations, additive derivations, and composite Sagas. Inheritance is compile-time only. Every derived effect is flattened and hashed before approval; every composite step binds an exact child id, version and contract hash.
+L0 v2 provides a strict authoring/compiler layer for atomic effects, constraint-only derivations, additive derivations, and composite Sagas. Inheritance is compile-time only. Every derived effect is flattened and hashed before approval; every composite step binds an exact child id, version and contract hash.
 
 The SDK uses strict Pydantic schemas, monotonic-security checks, a multi-version/multi-semantic catalog, human-readable explain/graph commands, and projection into the existing durable `SagaDefinition`. A shared REST capability may back S1 and several S11 semantic contracts, but tool name alone can never choose between them.
 
-The existing v1 Runtime remains the compatibility execution path while the v2 catalog is qualified. The bundled REST manifests demonstrate authoring and compilation; they are not exposed in DSH until a real Capability Provider, expression/resolver layer, Runtime catalog loader, semantic harness entrypoints, enterprise approval identity, and fault certification are connected.
+All 21 built-in reviewed mutation tools now use compiled `netopyu.io/l0-effect-compiled/v2` artifacts as their semantic authority. Exact Runtime bindings retain the previously qualified ToolContracts, verifiers, and compensators only as implementation adapters. Prepare and execution-time revalidation enforce schema, desired-state, preflight, profile, verifier, and compensation parity; Provider effect arguments are rendered from approved values through a non-Turing-complete expression engine. Unknown resolvers and any projection drift fail closed. Core-72 remains 64/64 for the Runtime path.
+
+The [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md) preserves readable L1/L0.5/L0 artifacts for 21/21 existing contracts. These L1/L0.5 baselines are explicitly reverse-bootstrapped from reviewed L0. The primary gate reruns Promotion semantic parity and exact compiler round trips without treating the readable archive as execution authority or as evidence of independent model inference accuracy.
+
+The bundled URL1 REST manifests remain authoring/Promotion examples without a real Provider and are not auto-registered. An approved offline promotion is also non-executable until separate Provider qualification, fault injection, and explicit Catalog publication. Enterprise approval identity, vendor-device qualification, and production HA remain P1 boundaries. See the [production migration guide](l0-v2-runtime-migration.md) for the exact authority and compatibility model.
 
 See the [L1 → L0 Promotion Pipeline](l1-to-l0-promotion.md) for the natural-language-assisted candidate workflow. It generates review proposals but does not weaken execution qualification.

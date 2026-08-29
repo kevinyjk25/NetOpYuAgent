@@ -1,0 +1,118 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:bf8a83e0587cdb9f3d965f1523cd356eca24df7db9cc5df98802455a6bbf3ab5",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for failover",
+    "id": "network.resource.failover",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "resource_id",
+      "runtime-tool-contract": "mock-failover-v2",
+      "runtime-verifier": "mock-state"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": null,
+    "effect": {
+      "capability": "netopyu.tool.failover",
+      "internal": {},
+      "request": {
+        "resource_id": "${arguments.resource_id}",
+        "target": "${arguments.target}"
+      },
+      "tool": "failover"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "manual_intervention"
+    },
+    "intent": {
+      "desiredState": {
+        "healthy": true,
+        "primary": "${arguments.target}"
+      },
+      "kind": "failover_resource",
+      "targetFields": [
+        "resource_id"
+      ]
+    },
+    "parameters": {
+      "resource_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "target": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "resource_id": "${arguments.resource_id}"
+        },
+        "capability": "netopyu.tool.mock_operation_status",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "lan"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "resource_id": "${arguments.resource_id}"
+      },
+      "capability": "netopyu.verifier.mock-state",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

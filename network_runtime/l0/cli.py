@@ -17,7 +17,9 @@ from .models import (
 from .promotion import (
     PromotionError,
     assess_promotion,
+    build_l05_spec,
     inspect_skill,
+    l05_yaml,
     package_promotion,
     promotion_prompt,
     review_promotion,
@@ -65,11 +67,19 @@ def main(argv: list[str] | None = None) -> int:
     )
     inspect_command.add_argument("--skill", required=True)
 
+    l05_command = sub.add_parser(
+        "promote-l05", help="build the reviewable L0.5 structured-language stage",
+    )
+    l05_command.add_argument("--skill", required=True)
+    l05_command.add_argument("--capabilities", required=True)
+    l05_command.add_argument("--output", required=True)
+
     prompt_command = sub.add_parser(
         "promote-prompt", help="build a bounded Agent prompt packet for an L0 candidate",
     )
     prompt_command.add_argument("--skill", required=True)
     prompt_command.add_argument("--capabilities", required=True)
+    prompt_command.add_argument("--l05")
     prompt_command.add_argument("--output")
 
     for name, help_text in (
@@ -80,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--skill", required=True)
         command.add_argument("--candidate", required=True)
         command.add_argument("--capabilities", required=True)
+        command.add_argument("--l05")
         command.add_argument(
             "--dependencies", action="append", default=[],
             help="L0 manifest file/directory required by a derived/composite candidate",
@@ -94,6 +105,31 @@ def main(argv: list[str] | None = None) -> int:
     review_command.add_argument("--reviewer", required=True)
     review_command.add_argument("--decision", choices=("approve", "reject"), required=True)
     review_command.add_argument("--reason", default="")
+
+    sub.add_parser(
+        "runtime-validate", help="validate the complete activated production L0 v2 catalog",
+    )
+    sub.add_parser(
+        "runtime-list", help="list every activated production L0 v2 contract",
+    )
+    runtime_export = sub.add_parser(
+        "runtime-export", help="export the immutable activated production catalog",
+    )
+    runtime_export.add_argument("--output", required=True)
+    trajectory_build = sub.add_parser(
+        "runtime-trajectories-build",
+        help="materialize readable L1/L0.5/L0 archives for every production L0",
+    )
+    trajectory_build.add_argument(
+        "--output", default="network_runtime/l0/production_trajectories",
+    )
+    trajectory_validate = sub.add_parser(
+        "runtime-trajectories-validate",
+        help="validate stage hashes, Promotion parity, and exact L0 round trips",
+    )
+    trajectory_validate.add_argument(
+        "--source", default="network_runtime/l0/production_trajectories",
+    )
     args = parser.parse_args(argv)
     try:
         if args.command == "schema":
@@ -111,9 +147,20 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "promote-inspect":
             print(json.dumps(inspect_skill(args.skill), ensure_ascii=False, indent=2, sort_keys=True))
             return 0
+        if args.command == "promote-l05":
+            value = l05_yaml(build_l05_spec(
+                skill_path=args.skill,
+                capability_catalog_path=args.capabilities,
+            ))
+            destination = Path(args.output).expanduser().resolve()
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_text(value, encoding="utf-8")
+            print(json.dumps({"ok": True, "output": str(destination)}, ensure_ascii=False))
+            return 0
         if args.command == "promote-prompt":
             value = promotion_prompt(
                 skill_path=args.skill, capability_catalog_path=args.capabilities,
+                l05_path=args.l05,
             )
             if args.output:
                 destination = Path(args.output).expanduser().resolve()
@@ -128,6 +175,7 @@ def main(argv: list[str] | None = None) -> int:
                 skill_path=args.skill, candidate_path=args.candidate,
                 capability_catalog_path=args.capabilities,
                 dependency_paths=args.dependencies,
+                l05_path=args.l05,
             )
             print(json.dumps(assessment.report, ensure_ascii=False, indent=2, sort_keys=True))
             return 0 if assessment.report["status"] == "ready_for_review" else 1
@@ -136,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
                 skill_path=args.skill, candidate_path=args.candidate,
                 capability_catalog_path=args.capabilities,
                 dependency_paths=args.dependencies, output_directory=args.output,
+                l05_path=args.l05,
             ), ensure_ascii=False, indent=2, sort_keys=True))
             return 0
         if args.command == "promote-review":
@@ -143,6 +192,63 @@ def main(argv: list[str] | None = None) -> int:
                 proposal_directory=args.proposal, reviewer=args.reviewer,
                 decision=args.decision, reason=args.reason,
             ), ensure_ascii=False, indent=2, sort_keys=True))
+            return 0
+        if args.command in {
+            "runtime-trajectories-build", "runtime-trajectories-validate",
+        }:
+            from network_runtime.l0.production_trajectory import (
+                build_production_trajectories,
+                validate_production_trajectories,
+            )
+
+            value = (
+                build_production_trajectories(args.output)
+                if args.command == "runtime-trajectories-build"
+                else validate_production_trajectories(args.source)
+            )
+            print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+            return 0
+        if args.command in {"runtime-validate", "runtime-list", "runtime-export"}:
+            from network_runtime.l0.production import BINDINGS, CATALOG
+            from network_runtime.l0_skills import REGISTRY as RUNTIME_REGISTRY
+            from network_runtime.policies import reviewed_contracts
+
+            contracts = CATALOG.contracts()
+            if args.command == "runtime-validate":
+                from network_runtime.l0.production_trajectory import (
+                    validate_production_trajectories,
+                )
+
+                runtime_tools = {item.tool_name for item in RUNTIME_REGISTRY.contracts()}
+                reviewed_tools = set(reviewed_contracts())
+                if runtime_tools != reviewed_tools or len(BINDINGS) != len(contracts):
+                    raise L0CompileError("production v2 catalog coverage mismatch")
+                trajectories = validate_production_trajectories()
+                print(json.dumps({
+                    "ok": True,
+                    "contracts": len(contracts),
+                    "bindings": len(BINDINGS),
+                    "reviewed_write_tools": len(reviewed_tools),
+                    "readable_trajectories": trajectories["contracts"],
+                    "promotion_ready": trajectories["promotion_ready"],
+                    "exact_round_trips": trajectories["exact_round_trips"],
+                    "formats": sorted({item.api_version for item in contracts}),
+                    "runtime_authority": "l0-v2-compiled",
+                }, ensure_ascii=False, indent=2, sort_keys=True))
+            elif args.command == "runtime-list":
+                for item in contracts:
+                    binding = BINDINGS[(item.metadata.id, item.metadata.version)]
+                    print(
+                        f"{item.metadata.id}@{item.metadata.version}\t{binding.tool_name}\t"
+                        f"{item.contract_hash}"
+                    )
+            else:
+                destination = Path(args.output).expanduser().resolve()
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(CATALOG.to_json(), encoding="utf-8")
+                print(json.dumps({
+                    "ok": True, "contracts": len(contracts), "output": str(destination),
+                }, ensure_ascii=False, indent=2, sort_keys=True))
             return 0
         catalog = L0Catalog.from_path(args.source)
         if args.command == "validate":

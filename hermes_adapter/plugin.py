@@ -36,6 +36,11 @@ class HermesAdapterConfig:
     peer_urls: tuple[str, ...]
     timeout_seconds: float
     memory_dir: Path | None = None
+    subject_token: str | None = None
+    gateway_token: str | None = None
+    approver_subject_token: str | None = None
+    approver_gateway_token: str | None = None
+    change_ticket_id: str | None = None
 
     @classmethod
     def from_env(cls) -> "HermesAdapterConfig":
@@ -70,6 +75,11 @@ class HermesAdapterConfig:
                 Path(os.environ["NETOPYU_HERMES_MEMORY_DIR"]).expanduser()
                 if os.environ.get("NETOPYU_HERMES_MEMORY_DIR") else None
             ),
+            subject_token=os.environ.get("NETOPYU_OIDC_TOKEN"),
+            gateway_token=os.environ.get("NETOPYU_GATEWAY_TOKEN"),
+            approver_subject_token=os.environ.get("NETOPYU_APPROVER_OIDC_TOKEN"),
+            approver_gateway_token=os.environ.get("NETOPYU_APPROVER_GATEWAY_TOKEN"),
+            change_ticket_id=os.environ.get("NETOPYU_CHANGE_TICKET"),
         )
 
 
@@ -129,6 +139,44 @@ class NetOpYuHermesAdapter:
         self.manifest: dict[str, Any] | None = None
         self.skill_manifest: dict[str, Any] | None = None
 
+    def _subject_context(self, session_id: str, *, role: str) -> dict[str, Any]:
+        if os.environ.get("NETOPYU_IDENTITY_MODE") == "enforced":
+            subject_token = (
+                self.config.approver_subject_token
+                if role == "approver" else self.config.subject_token
+            )
+            gateway_token = (
+                self.config.approver_gateway_token
+                if role == "approver" else self.config.gateway_token
+            )
+            return {
+                "subject_token": subject_token or "",
+                "gateway_token": gateway_token or "",
+            }
+        roles = (
+            ["network-approver", "change-approver"]
+            if role == "approver"
+            else ["network-operator", "change-requester"]
+        )
+        return {
+            "subject_id": self.config.operator_id,
+            "issuer": "netopyu.local/hermes",
+            "harness": "hermes",
+            "session_id": session_id,
+            "roles": roles,
+            "scopes": ["*", f"profile:{self.config.profile}"],
+            "purpose": (
+                "interactive-effect-approval"
+                if role == "approver" else "interactive-effect-operation"
+            ),
+            "assurance_level": 1,
+            "auth_method": "hermes-local-adapter",
+            "authenticated": True,
+            "credential_id": (
+                f"hermes:{session_id}:{self.config.operator_id}:{role}"
+            ),
+        }
+
     def _observe_read(
         self,
         *,
@@ -164,15 +212,21 @@ class NetOpYuHermesAdapter:
                 result = self.client.request(
                     "invoke", profile=self.config.profile, tool=tool["name"], args=args,
                     allow_destructive=False,
-                    access_context={
-                        "subject_id": self.config.operator_id,
-                        "session_id": session_id,
-                        "roles": ["operations-reader", "network-operator"],
-                        "scopes": ["*", f"profile:{self.config.profile}"],
-                        "purpose": "interactive-network-operations",
-                        "clearance": "restricted",
-                        "authenticated": True,
-                    },
+                    access_context=(
+                        self._subject_context(session_id, role="requester")
+                        if os.environ.get("NETOPYU_IDENTITY_MODE") == "enforced"
+                        else {
+                            "subject_id": self.config.operator_id,
+                            "session_id": session_id,
+                            "roles": ["operations-reader", "network-operator"],
+                            "scopes": ["*", f"profile:{self.config.profile}"],
+                            "purpose": "interactive-network-operations",
+                            "clearance": "restricted",
+                            "authenticated": True,
+                        }
+                    ),
+                    session_id=session_id,
+                    harness="hermes",
                 )
                 if isinstance(result, dict) and result.get("ok") is True:
                     self._observe_read(
@@ -197,6 +251,8 @@ class NetOpYuHermesAdapter:
                     args=args,
                     session_id=session_id,
                     l0_skill_id=tool["l0_skill_id"],
+                    subject_context=self._subject_context(session_id, role="requester"),
+                    harness="hermes",
                 )
                 if not isinstance(prepared, dict) or prepared.get("status") != "plan_ready":
                     return _json(prepared)
@@ -230,6 +286,30 @@ class NetOpYuHermesAdapter:
         try:
             plan_id, plan_hash = self._two_args(raw, "netopyu-approve")
             pending = self.pending.claim_plan(plan_id, plan_hash)
+            session_id = str(
+                pending.plan.get("requester_identity", {}).get("session_id") or "hermes"
+            )
+            approval_request_id = f"hermes-slash:{uuid.uuid4()}"
+            approval = self.client.request(
+                "runtime-approve",
+                profile=pending.profile,
+                tool=pending.tool_name,
+                args={
+                    "plan_id": pending.plan_id,
+                    "plan_hash": pending.plan_hash,
+                    "approval_request_id": approval_request_id,
+                    "approver_contexts": [
+                        self._subject_context(session_id, role="approver")
+                    ],
+                    **({
+                        "change_context": {"ticket_id": self.config.change_ticket_id}
+                    } if self.config.change_ticket_id else {}),
+                },
+            )
+            if not isinstance(approval, dict) or not isinstance(
+                approval.get("approval_proof"), str
+            ):
+                raise RuntimeError("Network Runtime did not issue a signed approval proof")
             outcome = self.client.request(
                 "runtime-execute",
                 profile=pending.profile,
@@ -238,8 +318,7 @@ class NetOpYuHermesAdapter:
                     "plan_id": pending.plan_id,
                     "plan_hash": pending.plan_hash,
                     "execution_nonce": pending.execution_nonce,
-                    "approval_request_id": f"hermes-slash:{uuid.uuid4()}",
-                    "approval_actor": self.config.operator_id,
+                    "approval_proof": approval["approval_proof"],
                 },
                 allow_destructive=True,
             )

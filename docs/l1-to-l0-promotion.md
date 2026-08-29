@@ -8,36 +8,43 @@
 
 Anthropic Agent Skill 的标准入口是带 YAML frontmatter 的 `SKILL.md`，正文可以包含自然语言流程、脚本和参考资料。自然语言适合表达业务经验，但 API 是否支持独立读取、写是否幂等、什么状态代表成功、失败后如何恢复，不能仅靠语言模型可靠推断。
 
-因此 NetOpYu 把转换拆成两个边界：
+因此 NetOpYu 把转换拆成三个可审计阶段：
 
 ```text
 L1 SKILL.md + 受信 Capability Catalog
                   │
                   ▼
-       Agent 生成候选 / 澄清问题
+ L0.5 StructuredNaturalLanguageSkill
+   参数/范围/步骤/风险/Capability 选项
+                  │ human-readable, hash-bound
+                  ▼
+       Agent/人工生成 L0 v2 候选
                   │ untrusted
+                  │
                   ▼
        Promotion deterministic checks
                   │
                   ▼
-      immutable proposal + human review
+ immutable trajectory + human review
                   │ no activation
                   ▼
        后续 Provider/故障认证与发布
 ```
 
-Agent 加速语义抽取和初稿编写；编译器决定候选是否结构完整；人工与故障测试决定它是否有资格发布。任何单次线上请求都不能生成、批准并立即执行一个新 L0。
+L1 保留原始自然语言业务经验；L0.5 把参数、约束、流程阶段、风险、停止条件、成功/失败/回滚语义和受信 Capability 选项整理为人可读 YAML；L0 才是机器可执行的严格合同。Agent 加速语义抽取和初稿编写，编译器决定候选是否结构完整，人工与故障测试决定它是否有资格发布。任何单次线上请求都不能生成、批准并立即执行一个新 L0。
 
-### 2. 三个输入
+### 2. 输入与三阶段产物
 
 1. **L1 Agent Skill**：标准 `SKILL.md`，保留自然语言业务流程，明确参数、工具、风险和停止条件。
 2. **Capability Catalog**：由 Provider/API 所有者维护，声明 capability id、observation/effect/compensation 角色、tool、profile、输入和输出 Schema。
-3. **L0 candidate**：由人或 Agent 生成的 Atomic、Derived 或 Composite v2 YAML；在验证前一律不可信。
+3. **L0.5 Structured Skill**：可由工具从 L1 + Catalog 生成，也可由人补充；保持自然语言可读，同时用严格 Schema 固定范围。多个 Effect 无法唯一选择、缺少 Observer 或 Compensation 时写入 `unresolvedQuestions` 并阻断 L0。
+4. **L0 candidate**：由人或 Agent 依据 L0.5 生成的 Atomic、Derived 或 Composite v2 YAML；在验证前一律不可信。
 
 示例：
 
 - `network_runtime/l0/promotion_examples/url1-network-access/SKILL.md`
 - `network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml`
+- `network_runtime/l0/promotion_examples/url1-network-access/L0.5.yaml`
 - `network_runtime/l0/examples/s1-network-access-grant.yaml`
 
 ### 3. 使用
@@ -49,11 +56,21 @@ scripts/netopyu-l0 promote-inspect \
   --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md
 ```
 
+生成并先审查 L0.5：
+
+```bash
+scripts/netopyu-l0 promote-l05 \
+  --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md \
+  --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml \
+  --output artifacts/l0-promotion/url1-L0.5.yaml
+```
+
 生成供任意 Agent/LLM 使用的有界 Prompt Packet：
 
 ```bash
 scripts/netopyu-l0 promote-prompt \
   --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md \
+  --l05 artifacts/l0-promotion/url1-L0.5.yaml \
   --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml \
   --output artifacts/l0-promotion/url1-prompt.json
 ```
@@ -63,6 +80,7 @@ Agent 必须返回一个 L0 YAML 候选，或在信息不足时返回 `NEEDS_CLA
 ```bash
 scripts/netopyu-l0 promote-assess \
   --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md \
+  --l05 artifacts/l0-promotion/url1-L0.5.yaml \
   --candidate network_runtime/l0/examples/s1-network-access-grant.yaml \
   --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml
 ```
@@ -72,6 +90,7 @@ scripts/netopyu-l0 promote-assess \
 ```bash
 scripts/netopyu-l0 promote-package \
   --skill network_runtime/l0/promotion_examples/url1-network-access/SKILL.md \
+  --l05 artifacts/l0-promotion/url1-L0.5.yaml \
   --candidate network_runtime/l0/examples/s1-network-access-grant.yaml \
   --capabilities network_runtime/l0/promotion_examples/url1-network-access/capabilities.yaml \
   --output artifacts/l0-promotion/url1-proposal
@@ -83,11 +102,26 @@ scripts/netopyu-l0 promote-review \
   --reason "API schema, observer and rollback semantics reviewed"
 ```
 
-`approve` 只写入一次性 review 记录，不注册 Catalog、不产生审批 nonce，也不授予执行权限。
+Proposal 固定保存：
+
+```text
+00-capability-catalog.yaml
+01-L1-SKILL.md
+02-L0.5.yaml
+03-L0-authoring.yaml
+04-L0-compiled.json
+trajectory.json
+report.json
+```
+
+`trajectory.json` 按顺序记录每阶段格式、文件 hash 和 `previousSha256`，并计算整体 `trajectoryHash`。任一阶段被修改、阶段顺序变化或前后 hash 断链都无法 review。`approve` 只写入一次性 review 记录，不注册 Catalog、不产生审批 nonce，也不授予执行权限。
 
 ### 4. 自动检查
 
 - 标准 Skill 名称与目录一致、参数和允许工具可解析；
+- L0.5 精确绑定 L1 与 Capability Catalog hash，且阶段链连续；
+- L0.5 不得删除/增加 L1 参数、扩大 profile、降低风险或移除审批；
+- L0 必须使用 L0.5 允许的 Effect/Observation/Compensation，且不得留下未解决问题；
 - 所有 L0 required 参数都在 L1 中有说明；
 - primary effect tool 在 L1 的 `allowed-tools` 或 `tool_deps` 中；
 - Capability id、provider version、role 和 profile 精确匹配；
@@ -104,8 +138,18 @@ scripts/netopyu-l0 promote-review \
 
 转换器不能证明 Provider 的真实行为。发布前仍需认证 API 身份、Observer 独立性和 freshness、职责分离审批、timeout/写结果不确定、错误 postcondition、精确 rollback，以及 DSH/Hermes 的语义入口和模型选择准确率。将来可以在 Runtime UI 中调用同一 Promotion API，但仍只能生成 proposal，不能在线激活。
 
+### 6. 存量 L0 的反向可读基线
+
+新 Skill 使用真正的正向流程：人工领域经验先写 L1，经审查形成 L0.5，再生成 L0 candidate。存量 21 个合同的历史起点已经是受审 L0，因此项目从权威 L0 **反向 bootstrap** L1/L0.5，只用于补齐可读性和可解释性。
+
+每份存量档案仍运行完整 `assess_promotion()`：要求 L1/L0.5 边界不被最终 L0 扩大；去除 proposal-only 来源 labels 后，Promotion 编译结果必须与生产 Contract 语义 hash 一致；原始 authoring 重新编译后的完整 contract hash 也必须精确一致。该结果验证 Promotion 的结构闭环和现有合同的可读投影，不等于模型对任意自然语言的转换准确率。索引见 [生产 L0 轨迹](../network_runtime/l0/production_trajectories/INDEX.md)。
+
 ## English
 
-The Promotion Pipeline turns an Anthropic-standard `SKILL.md`, a trusted API Capability Catalog, and a human/Agent-authored L0 candidate into an immutable review proposal. The Agent accelerates semantic extraction but remains an untrusted candidate producer. Deterministic checks bind L1 parameter/tool coverage, API roles and schemas, L0 compilation, source hashes, and proposal integrity.
+The Promotion Pipeline preserves three explicit stages: the original natural-language `L1 SKILL.md`, a schema-valid but human-readable `L0.5 StructuredNaturalLanguageSkill`, and the strict L0 authoring/compiled contracts. L0.5 records parameters, constraints, workflow phases, risk, stop conditions, outcomes, and trusted capability options. Ambiguous effects or missing observation/compensation semantics remain unresolved questions and block promotion rather than being guessed.
+
+An immutable package stores the capability catalog, `01-L1-SKILL.md`, `02-L0.5.yaml`, `03-L0-authoring.yaml`, `04-L0-compiled.json`, and a `trajectory.json` hash chain. Deterministic checks prevent L0.5 from drifting from L1 or L0 from widening L0.5. Any file or link tampering blocks review. The Agent accelerates semantic extraction but remains an untrusted candidate producer.
 
 The pipeline deliberately cannot activate Runtime or grant execution authority. A human approval records one immutable review decision only. Provider identity, independent observation, approval separation of duty, indeterminate outcomes, rollback, Harness projection, and fault injection still require separate qualification. This keeps natural-language generalization in L1 while preserving deterministic execution semantics in L0.
+
+New Skills use the genuine forward path: domain authors write L1, review L0.5, and then produce an L0 candidate. The 21 existing contracts already began as reviewed L0, so their readable L1/L0.5 baselines are explicitly reverse-bootstrapped for explainability. Each archive still reruns `assess_promotion()`, requires semantic parity after proposal-only labels are removed, and requires an exact full contract hash after recompiling authoring. This validates structural conversion closure and readable projection of existing contracts; it is not a measurement of model accuracy on arbitrary prose. See the [production L0 trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).

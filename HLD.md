@@ -34,7 +34,10 @@ flowchart LR
     DSH --> P[NetOpYu Harness Adapter]
     P --> W[Python Worker / Bridge]
     W --> NR[Domain Effect Runtime]
+    NR --> IA[Identity & Approval Control Plane]
+    NR --> PS[Provider Release Admission]
     NR --> TG[Typed Tool Gateway]
+    PS --> TG
     TG --> NO[Network Observer MCP]
     TG --> NA[Durable Network Actor MCP]
     NO --> NL[Network Layer / Containerlab]
@@ -56,6 +59,8 @@ flowchart LR
 | Domain L1 Skills | 诊断、澄清、任务分解和跨域编排 | 不可信候选生成器 |
 | Shared Python Worker | 持久化 Unix Socket 调用、隔离异常、降低进程开销 | 受控执行入口 |
 | Domain Effect Runtime | 编译 Intent、生成计划、状态机、执行、验证、补偿和审计 | 领域效果控制面 |
+| Identity & Approval Control Plane | 本地验证 Harness 主体；企业模式验证 OIDC/JWKS + Gateway attestation，调用 PDP/Change Authority，绑定 requester/policy 并签发短时 proof | B1 已本地资格化；真实企业系统仍待认证 |
+| Provider Release Control Plane | 验证 Publisher/Qualifier/Deployer 独立签名、外部进程资格报告、环境 active release/deployment、artifact/Capability/result/L0 绑定和发布生命周期 | P1.4-B-ready 本地参考；组织 PKI/CI/真实 artifact/WORM 待现场 P1.4-B |
 | Network/Service L0 Registry | 固定步骤、目标字段、工具合同、验证/回滚策略 | 版本化策略根 |
 | Typed Tool Gateway | 合并本地 Network provider、MCP 与 OpenAPI，保留 source/identity/schema | 数据/效果适配层 |
 | Network Provider Capability Registry | 用 id/version/observer-or-actor role 固定 provider 语义 | 版本化边界合同 |
@@ -75,18 +80,29 @@ sequenceDiagram
     participant M as LLM / L1 Skill
     participant D as Harness Adapter
     participant R as Domain Effect Runtime
+    participant I as OIDC/JWKS + Gateway
+    participant P as PDP / Change Authority
+    participant S as Provider Release Registry
     participant B as Domain Provider
 
     M->>D: 候选工具 + 参数 + provenance
-    D->>R: prepare(l0_skill_id, arguments)
+    D->>R: prepare(l0_skill_id, arguments, requester context)
+    R->>I: verify access JWT + Gateway attestation
+    R->>P: authorize observation/prepare
+    R->>S: admit active signed release and L0 binding
     R->>R: schema/target/risk/intent 校验
     R->>B: preflight read
     B-->>R: typed evidence
-    R-->>D: immutable plan + hashes
+    R-->>D: immutable plan + requester/policy hashes
     D-->>U: DSH 计划卡或 Hermes 精确 slash command
     U->>D: exact-plan approve / reject
     D->>D: bind one-shot adapter authorization
-    D->>R: execute(plan_id, hash, nonce)
+    D->>R: approve(plan, verified approver context)
+    R->>I: verify approver + Gateway attestation
+    R->>P: authorize approval + qualify change record
+    R-->>D: short-lived signed approval proof
+    D->>R: execute(plan_id, hash, nonce, approval proof)
+    R->>S: revalidate exact release evidence
     R->>B: revalidate precondition
     R->>B: execute once
     R->>B: independent verification read
@@ -139,7 +155,8 @@ sequenceDiagram
 
 | 数据 | 默认存储 | 内容约束 |
 |---|---|---|
-| Network plans/events | `network_runtime.sqlite` | 规范化参数、hash、状态、证据摘要 |
+| Network plans/events | `network_runtime.sqlite` | 规范化参数、requester/policy hash、审批证明摘要、状态和证据 |
+| Provider releases/events | 独立 `provider-releases.sqlite` | signed bundle、stage/publish/promote/rollback/deprecate 状态与生命周期哈希链 |
 | Actor operations/events | 每个 lab 的 `.state/network_actor.sqlite` | immutable operation、snapshot、desired state、lease、fence、Actor hash chain |
 | HITL/grants | `hitl.sqlite` | 审批状态、token digest、绑定和 continuation |
 | Hermes pending approval | 插件进程内存 | execution nonce 不进入模型或磁盘；重启失效 |
@@ -163,7 +180,7 @@ sequenceDiagram
 |---|---|
 | L0 Skill/ToolContract | 无；使用同一注册表和 contract hash |
 | 参数、Intent、风险、preflight | 无；Hermes 只转发候选输入到同一 `prepare` |
-| Plan schema/状态机 | 无；仍为 schema v6 和同一状态迁移 |
+| Plan schema/状态机 | 无；使用 schema v9 requester/policy/Provider-release/deployment binding 和同一状态迁移 |
 | verifier/compensator | 无；Adapter 不能替换或跳过 |
 | journal/audit | 无；同一 SQLite schema 与事件哈希链 |
 | 用户审批交互 | 有；DSH 为 plan card + Tool Guard，Hermes 为用户 slash command + 进程内 nonce binding |
@@ -175,7 +192,7 @@ sequenceDiagram
 
 ### 12. P0.5 验收结论
 
-P0.5 在本地 mock 范围完成；新增 Hermes Adapter 后，DSH 与 Hermes 的等价写请求具有相同 L0/Intent/风险/验证/回滚合同，并都达到 `verified_success` 与有效 hash-chain audit。Hermes 模型不可见 nonce，错误 hash、重复命令和进程重启后的旧批准均 fail closed。仍未完成的 P1 工作包括真实网络适配器逐项资格认证、Hermes Gateway 审批人身份不可抵赖、企业审批、生产故障注入、HA/DR、长期负载、真实 rollback 演练和变更治理。
+P0.5 在本地 mock 范围完成；新增 Hermes Adapter 后，DSH 与 Hermes 的等价写请求具有相同 L0/Intent/风险/验证/回滚合同，并都达到 `verified_success` 与有效 hash-chain audit。P1.3-A 在 schema v7 中加入 requester/policy；v8 加入 Provider release evidence；当前 schema v9 再绑定 active deployment digest。P1.3-B1 新增严格 OIDC/JWKS verifier、与 access token 交叉绑定的 Gateway sender attestation、HTTP PDP 和 Change Authority；B2-ready 接入包继续加入动态 mint、CA/mTLS、Doctor 和 live contract check。真实企业系统、HSM、外部不可变审批日志、HA/DR 和生产认证仍未完成。
 
 ### 13. P0.75-A 部署与数据流
 
@@ -289,7 +306,7 @@ Observer/Actor 仍运行于同一主机、OS account 和 Docker daemon，因此�
 Runtime 与 Provider 之间新增协议无关 Capability Gateway。Runtime 只识别 observation/effect、
 domain、identity、schema、effect semantics 和安全属性；MCP/OpenAPI/CLI/厂商协议均在 Gateway
 之后。Observation 在调用前经过 PEP，校验主体、角色、resource scope、用途、clearance 与数据
-sensitivity。企业 PDP 尚未接入，本地 system principal 仅兼容 owner-only 原型。
+sensitivity。企业模式进一步用 OIDC/Gateway 验证主体并调用外部 PDP；本地 system principal 仅兼容 owner-only 原型。
 
 Harness 不再接收 Actor 原始执行结果，只接收 Runtime terminal envelope。跨 Service/Network
 业务使用 durable Saga 记录不可变步骤图、每步 plan id/hash、依赖、正向终态和反向补偿终态。
@@ -304,13 +321,35 @@ Saga 只协调受审 L0 计划，不直接持有 Provider 凭据或 execution no
 
 ### 20. L0 v2 authoring/compiler
 
-`network_runtime/l0/` 位于 L1 工作流与既有执行内核之间，但只承担合同开发和编译。作者可声明 Atomic、Constraint Derived、Extension Derived 或 Composite；Compiler 负责引用解析、继承展开、单调安全校验、DAG 校验和确定性 hash；Catalog 负责精确版本、同 Capability 多语义查询、解释、差异与 Saga 投影。Runtime 只消费编译产物，不允许模型在执行期修改继承、步骤、验证或补偿。
+`network_runtime/l0/` 位于 L1 工作流与执行内核之间。作者可声明 Atomic、Constraint Derived、Extension Derived 或 Composite；Compiler 负责引用解析、继承展开、单调安全校验、DAG 校验和确定性 hash；Catalog 负责精确版本、同 Capability 多语义查询、解释、差异与 Saga 投影。Runtime 只消费编译产物，不允许模型在执行期修改继承、步骤、验证或补偿。
 
-这降低了创建 S11 的重复代码，但没有把底层 API 的事务缺陷隐藏起来。一个可执行的 S1 仍必须有独立 Observation、验证和必要的 Compensation Provider。当前 REST 示例只认证 SDK/Compiler；接入 DSH 执行面需要完成 Gateway 和故障测试。
+全部 21 个内置受审写能力已经编译为 v2 Contract 并成为生产语义权威。`RuntimeBinding` 把每个精确 id/version 绑定到既有 ToolContract、verifier、可选 compensator 和 profile；这些对象只作为经过认证的实现 Adapter。prepare 和执行前重校验同时检查 Contract/Adapter parity，Provider 只接收由受限表达式引擎从已批准输入渲染的 Effect 参数。URL1 REST 示例没有真实 Provider，仍只认证 SDK/Promotion，不会自动进入生产 Catalog。完整迁移关系见 [docs/l0-v2-runtime-migration.md](docs/l0-v2-runtime-migration.md)。
+
+可解释性平面在 `network_runtime/l0/production_trajectories/` 为每个生产 L0 保存 Capability Catalog、L1、L0.5、L0 authoring/compiled 和 hash chain。`runtime-validate` 重新运行 Promotion 结构门禁和编译 round trip，要求 21/21 语义投影与生产 Contract 一致。该平面只读解释生产权威；反向 bootstrap 的 L1/L0.5 不进入 Harness Skill Registry，也不自动发布合同。
 
 ### 21. L1 → L0 Promotion
 
-Promotion 是独立于生产执行路径的开发组件。它读取标准 `SKILL.md`、受信 Capability Catalog 和 Agent/人工候选，输出带来源 hash 的不可变 proposal。静态检查覆盖参数、工具边界、API role/schema、profile、风险和 L0 v2 编译；人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
+Promotion 是独立于生产执行路径的开发组件。它保存 `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill → L0 authoring/compiled Contract` 三阶段轨迹。L0.5 用人可读 YAML 固定参数、约束、流程、风险、停止条件、结果语义和受信 Capability 选项；静态检查阻止 L0.5 偏离 L1 或 L0 扩大 L0.5。Proposal 以逐级 hash 链保存全部阶段，人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
+
+### 22. P1.4-B-ready Provider 发布、外部资格与部署证明
+
+Provider 发布控制面位于 Capability SPI 的部署入口，不取代 Runtime 的事务职责。Manifest 固定 artifact digest、Provider identity/version、Capability/schema/result contract 和允许的 L0 contract hash；不同 Ed25519 信任根分别代表 Publisher 与独立 Qualifier。Qualifier 必须通过固定 9 项故障套件，发布注册表才允许 `stage → publish → environment promote`。breaking release 还需精确 `supersedes` 与审批引用。
+
+`NETOPYU_PROVIDER_ADMISSION=enforced` 时，部署配置选择 Provider id，Runtime discovery 必须与环境 active bundle 和非过期 deployment attestation 精确一致。PreparedPlan schema v9 把 release/manifest/qualification/deployment digest 纳入审批 hash；执行时重新 admission。同 release 重新部署或任何 artifact/identity/schema/result/L0 漂移都会以 `precondition_changed` 终止并证明 write 未发送。B-ready 已在仓库外临时目录以独立 JSONL 进程、真实重启、OCI/SBOM/provenance 必需 digest 和三角色签名完成本地资格化；fixture 仍由本仓库拥有，真实 artifact 服务、组织根/CI/实验室/HSM 和外部 WORM 仍属 P1.4-B 现场工作。
+
+### 23. P1.8 L1/模型资格层
+
+P1.8 Evaluation Layer 位于 Harness/模型与 Runtime 之外，不进入生产调用链。它从真实 Profile Tool metadata 和 DSH Skill manifest 生成只读 Capability cards，经 BM25 生成有界候选，再让被测 Adapter 返回严格 `L1Decision`。该决定没有 Tool handle、execution nonce、approval proof 或 Provider credential，不能执行任何效果。
+
+版本化 160 场景 Oracle 将候选召回与最终 Skill/Tool 选择分开，并独立测量参数、追问、多步 workflow、安全拒绝、领域边界、语言切片、token 和本机时延。只有完整数据集及 immutable model artifact digest 才能形成资格记录；子集、规则基线或无 digest tag 不能成为模型认证。Runtime 的 Core-72 与 P1.8 必须分别报告：前者证明固定 L1 下的 L0 控制，后者显式暴露模型参与误差。
+
+P1.8-B1 增加一条官方 DSH headless Agent/Session/LLM 影子路径。它在启动前固定 DSH 版本并精确审计活动插件白名单，关闭 Skill、Tool、shell、FS、Web、子代理、遥测、远程 Provider 和全部 NetOpYu effect；模型与 session 只存在隔离临时 home。其输出仍投影为同一 `L1Decision`，可与 direct reference 做完整同口径比较。B1 不测实际 Skill loading/tool-call；该能力只允许由未来无效果 capture Tool 的 B2 测量。
+
+P1.8-C1 把 Skill 与 Tool-call 纳入同一条 DSH 实际会话，但保持零效果边界。启动前校验并预加载 digest-bound L0.5 风格 Skill，精确白名单只增加 `l1-protocol-controller`；模型仅能调用五个互斥的强类型 proposal Tool。Loopback Protocol Governor 强制第一轮 Tool-call、禁止并行调用并提供最多两次隐藏格式修复，随后由确定性控制器补全可信 Catalog 元数据并校验目标、显式参数、必填项、workflow、receipt、Skill digest 和完整 transcript。失败关闭为无有效决定，永远不连接 Runtime、Provider、设备或审批。
+
+当前 C1 的 7B、160/160 基线证明该协议显著提高了结构化捕获与端到端准确率，但 5% safety escape 使其不具备资格，且隐藏修复的 token/cost 未完整计量。C2 在下一段补齐这些控制；固定 Oracle 百分比仍不得表述为生产成功概率。
+
+P1.8-C2 在 C1 与本地模型之间增加 loopback Protocol Firewall，并在模型之外加载摘要绑定的 Guard Policy。Guard 只做拒绝、越界和弃权，不能生成选择或参数；Firewall 对每次流式响应做 typed/candidate contract 校验，逐次累计 usage，并在确定危险/越界且尝试耗尽时仅合成无参数安全 capture。正式 7B 基线固定最多三次模型尝试，覆盖原 160 加 24 条提示覆盖、Unicode、过期授权、命令注入和反误杀场景；报告分别展示模型首轮与最终 safety。
 
 ---
 
@@ -347,6 +386,8 @@ This document defines the system boundary, logical components, deployment topolo
 | Domain L1 Skills | Diagnosis, clarification, decomposition, orchestration | Untrusted candidate producer |
 | Shared Python Worker | Persistent Unix-socket invocation and fault isolation | Controlled execution entry |
 | Domain Effect Runtime | Intent compilation, plans, state machine, execution, verification, compensation, audit | Domain effect control plane |
+| Identity & Approval Control Plane | Verifies local Harness subjects or enterprise OIDC/JWKS plus Gateway attestations, calls PDP/change authorities, binds requester/policy, and signs/verifies proofs | B1 locally qualified; real enterprise systems remain unqualified |
+| Provider Release Control Plane | Verifies independent Publisher/Qualifier/Deployer signatures, external-process qualification, active release/deployment, and artifact/Capability/result/L0 bindings | P1.4-B-ready local reference; organizational CI/PKI/artifact services/WORM remain site work |
 | Network/Service L0 Registry | Fixed steps, target fields, tool/verifier/rollback contracts | Versioned policy root |
 | Typed Tool Gateway | Preserves local/MCP/OpenAPI source, provider identity, and schema | Data/effect adapter |
 | Network Observer MCP | Identity-pinned read evidence only | Independent observation boundary |
@@ -360,7 +401,7 @@ This document defines the system boundary, logical components, deployment topolo
 
 ### 5. Mutation flow
 
-The model proposes a tool, arguments, and provenance. The Runtime validates schema and targets, compiles an immutable intent, reads preflight evidence, and returns a hashed plan. DSH presents an exact plan card; Hermes returns a user-only slash command containing the exact plan id/hash while keeping the nonce process-local. The Runtime revalidates state, sends the effect once, reads an independent postcondition, and either reaches `verified_success`, performs contractual compensation, or escalates to manual intervention. Every transition is appended to a tamper-evident journal.
+The model proposes a tool, arguments, and provenance. Runtime admits the exact signed release and deployment proof, then returns a schema-v9 plan binding requester, policy, release, and deployment evidence. Execution revalidates every binding before sending the effect once, independently verifies the postcondition, and compensates or escalates when needed.
 
 Preparation, rejection, expiry, authorization mismatch, and state drift close before the write. Once a write may have been sent, uncertainty must enter verification, compensation, or manual intervention; model inference is not accepted.
 
@@ -387,7 +428,7 @@ The P1 production target uses independent domain deployments, enterprise identit
 
 ### 8.1 Hermes impact on Domain Effect Runtime
 
-Hermes does not change the L0 registry, ToolContracts, compilation, intent/risk/preflight, schema-v6 plan state machine, verifier, compensator, journal, or audit. It changes only the human-interaction edge: DSH uses a plan card and Tool Guard, while Hermes uses a user slash command and a process-local hidden nonce binding. `netopyu_skill_view` and the Skill hook start reviewed workflows, and read handlers record prerequisite observations. Restart loses pending Hermes authorization safely; DSH still has richer durable HITL recovery, batch, and deferred UX. The local A/B gate proves equal stable plan fields, `verified_success`, valid audit, hidden nonces, and duplicate blocking. It is a contract test, not a Hermes Gateway, model-quality, real-network, or performance certification.
+Hermes does not change the L0 registry, ToolContracts, compilation, intent/risk/preflight, schema-v9 plan state machine, Provider admission, verifier, compensator, journal, or audit. Schema v9 binds requester/policy plus release and deployment evidence. In enforced mode both adapters pass model-hidden enterprise credentials to the Worker; Runtime verifies enterprise authority and the active signed release/deployment before any write.
 
 ### 9. P0.5 acceptance
 
@@ -490,8 +531,9 @@ CAS support.
 A transport-neutral Capability Gateway separates Runtime semantics from MCP,
 OpenAPI, CLI, and vendor protocols. Observation authorization checks subject,
 role, resource scope, purpose, clearance, and sensitivity before a Provider
-call. An enterprise PDP is not yet connected; the implicit local system
-principal is owner-only prototype compatibility.
+call. Enforced mode additionally verifies OIDC/Gateway credentials and obtains
+an external PDP decision; the implicit local system principal is owner-only
+prototype compatibility.
 
 Harnesses receive only a Runtime terminal envelope, never raw Actor execution
 states. A durable Saga binds immutable Service/Network step definitions and
@@ -508,10 +550,32 @@ JSON, Markdown, and HTML reports separate fixed-scenario control coverage from a
 
 ### 17. L0 v2 authoring/compiler
 
-`network_runtime/l0/` sits between L1 workflows and the qualified execution kernel, but only for contract development and compilation. Authors declare Atomic, Constraint Derived, Extension Derived, or Composite effects. The Compiler resolves references, flattens derivation, enforces monotonic safety and DAG rules, and hashes deterministically. The Catalog provides exact versions, multiple semantic contracts per capability, explanations, diffs, graphs, and Saga projection. Runtime consumes immutable compiled artifacts and gives the model no execution-time control over derivation, steps, verification, or compensation.
+`network_runtime/l0/` sits between L1 workflows and the qualified execution kernel. Authors declare Atomic, Constraint Derived, Extension Derived, or Composite effects. The Compiler resolves references, flattens derivation, enforces monotonic safety and DAG rules, and hashes deterministically. The Catalog provides exact versions, multiple semantic contracts per capability, explanations, diffs, graphs, and Saga projection. Runtime consumes immutable compiled artifacts and gives the model no execution-time control over derivation, steps, verification, or compensation.
 
-This removes duplicate S11 code without concealing a weak API transaction. An executable S1 still needs an independent Observation, verifier, and compensation Provider where required. The REST examples qualify the SDK/Compiler only; DSH activation requires Gateway and fault-injection qualification.
+All 21 built-in reviewed mutation capabilities are compiled v2 contracts and are now the production semantic authority. An exact `RuntimeBinding` connects each id/version to the existing qualified ToolContract, verifier, optional compensator, and profile as implementation adapters. Prepare and execution-time revalidation enforce contract/adapter parity, while a restricted expression engine renders only approved effect arguments for the Provider. The URL1 REST examples have no real Provider and remain SDK/Promotion examples outside the production Catalog. See [docs/l0-v2-runtime-migration.md](docs/l0-v2-runtime-migration.md).
+
+The explainability plane under `network_runtime/l0/production_trajectories/` preserves a Capability Catalog, L1, L0.5, L0 authoring/compiled artifacts, and a hash chain for every production L0. `runtime-validate` reruns Promotion structure and exact compiler round trips for 21/21 semantic projections. This plane is a read-only explanation of production authority; reverse-bootstrapped L1/L0.5 artifacts never enter the Harness Skill Registry or auto-publish a contract.
 
 ### 18. L1 → L0 promotion
 
-Promotion is a development component outside the production execution path. It consumes a standard `SKILL.md`, trusted Capability Catalog, and Agent/human candidate, then emits a source-hashed immutable proposal. Static checks cover parameters, tool boundaries, API roles/schemas, profiles, risk, and L0 v2 compilation. Human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
+Promotion is a development component outside the production execution path. It preserves a three-stage `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill → L0 authoring/compiled contract` trajectory. Human-readable L0.5 YAML fixes parameters, constraints, workflow, risk, stop conditions, outcomes, and trusted capability options. Static checks prevent L0.5 drift from L1 and L0 widening of L0.5. The proposal stores every stage in a predecessor-linked hash chain; human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
+
+### 19. P1.4-B-ready Provider publication, external qualification, and deployment evidence
+
+The Provider release control plane sits at the Capability SPI deployment entry and does not replace Runtime transaction semantics. A Manifest binds the artifact digest, Provider identity/version, Capability schemas, result contract, and allowed L0 hashes. Separate Ed25519 trust roots represent the Publisher and independent Qualifier. A fixed nine-case fault suite must pass before the durable registry permits stage, publication, and per-environment promotion; breaking releases additionally require exact supersession and an approval reference.
+
+With enforced admission, discovery must match the active signed bundle and non-expired deployment attestation. Schema-v9 plans bind release, manifest, qualification, and deployment digests; same-release redeployment drift also terminates before write. B-ready qualifies a copied repository-external process with real restart plus required OCI/SBOM/provenance digest mappings and three independent roles. Independently owned repositories/CI/labs, organizational HSM roots, real artifact-content verification, and external WORM audit remain P1.4-B site qualification.
+
+### 20. P1.8 L1/model qualification layer
+
+The P1.8 Evaluation Layer is outside both Runtime and the production invocation path. It builds read-only capability cards from current Profile tool metadata and DSH Skill manifests, performs bounded lexical candidate generation, and asks the tested adapter for a strict, non-executing `L1Decision`. No tool handle, execution nonce, approval proof, or Provider credential is available.
+
+A versioned 160-case Oracle separates candidate recall from final Skill/Tool choice and measures arguments, clarification, workflow ordering, safety refusal, domain boundaries, language slices, tokens, and local latency. Only a complete run bound to an immutable model artifact digest is qualification-eligible. Core-72 and P1.8 remain separate reports: the former proves L0 controls under a fixed L1 decision; the latter exposes model-participation error.
+
+P1.8-B1 adds an official DSH headless Agent/Session/LLM shadow path. Before model access it pins the DSH version, audits an exact active-plugin allowlist, and disables Skills, tools, shells, filesystem tools, Web, subagents, telemetry, remote providers, and every NetOpYu effect. Model/session material lives only in an isolated temporary home. Output is projected into the same `L1Decision` for a full direct-reference comparison. B1 does not measure actual Skill loading or tool calls; only a future no-effect capture-tool B2 may do so.
+
+P1.8-C1 puts Skill loading and Tool calls in the same real DSH session while preserving a zero-effect boundary. A digest-bound L0.5-style Skill is validated and preloaded before startup, and the exact plugin allowlist adds only `l1-protocol-controller`. The model can invoke exactly five mutually exclusive typed proposal Tools. A loopback Protocol Governor forces a first-round Tool call, disables parallel calls, permits at most two hidden formatting repairs, and hands the proposal to a deterministic controller that validates targets, explicit arguments, required fields, workflow, receipt, Skill digest, and the complete transcript. Any failure closes with no valid decision, and no Runtime, Provider, device, or approval connection exists.
+
+The C1 7B full 160/160 baseline demonstrates substantially better structured capture and end-to-end accuracy, but its 5% safety-escape rate is disqualifying and hidden-repair cost is incomplete. The following C2 layer closes those accounting and deterministic-safety gaps; fixed Oracle percentages remain non-production probabilities.
+
+P1.8-C2 inserts a loopback Protocol Firewall between C1 and the local model and loads a digest-bound Guard Policy outside the model. The Guard may only refuse, classify out of scope, or abstain; it cannot create a selection or arguments. The Firewall validates every streamed typed/candidate contract, meters every actual attempt, and on exhausted definitively unsafe/unrelated requests may synthesize only an argument-free safe capture. The formal 7B baseline limits each case to three model attempts and covers the original 160 plus 24 prompt-override, Unicode, stale-authority, command-injection, and false-positive cases. First-attempt and final safety are reported separately.

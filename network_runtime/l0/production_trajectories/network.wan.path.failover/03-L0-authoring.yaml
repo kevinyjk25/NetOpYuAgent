@@ -1,0 +1,86 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.wan.path.failover
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for wan_failover_path
+  labels:
+    runtime-tool-contract: wan-failover-v1
+    runtime-verifier: wan-failover
+    runtime-preflight-fields: ''
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - wan
+  effect:
+    capability: netopyu.tool.wan_failover_path
+    tool: wan_failover_path
+    request:
+      tunnel: ${arguments.tunnel}
+      to_transport: ${arguments.to_transport}
+  intent:
+    kind: failover_wan_path
+    targetFields:
+    - tunnel
+    desiredState:
+      transport: ${arguments.to_transport}
+      state: up
+  parameters:
+    tunnel:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    to_transport:
+      type: string
+      required: true
+      description: ''
+      enum:
+      - mpls
+      - broadband
+      - lte
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: netopyu.tool.wan_tunnel_status
+    arguments: {}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.wan-failover
+    arguments:
+      tunnel: ${arguments.tunnel}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation: null
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: manual_intervention
+    compensationFailed: manual_intervention

@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Iterable
+from typing import TYPE_CHECKING, Any, Iterable
 
-from effect_runtime.saga import SagaDefinition, SagaStepSpec
+if TYPE_CHECKING:
+    from effect_runtime.saga import SagaDefinition
 
 from .compiler import L0CompileError, compile_documents, load_documents
 from .models import (
@@ -217,7 +218,9 @@ class L0Catalog:
 
     def to_saga_definition(
         self, skill_id: str, version: str | None = None,
-    ) -> SagaDefinition:
+    ) -> "SagaDefinition":
+        from effect_runtime.saga import SagaDefinition, SagaStepSpec
+
         contract = self.require(skill_id, version)
         if not isinstance(contract, CompiledCompositeEffect):
             raise TypeError("only a compiled CompositeEffect can become a SagaDefinition")

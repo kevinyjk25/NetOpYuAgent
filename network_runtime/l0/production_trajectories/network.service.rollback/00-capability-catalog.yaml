@@ -1,0 +1,113 @@
+apiVersion: netopyu.io/capability-catalog/v1
+provider: netopyu.production.rollback_service
+version: 1.0.0
+capabilities:
+- id: netopyu.tool.rollback_service
+  role: effect
+  profiles:
+  - lan
+  inputs:
+    service:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    version:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    environment:
+      type: string
+      required: false
+      description: ''
+      enum:
+      - prod
+      - staging
+      - dev
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: rollback_service
+- id: netopyu.tool.service_health
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    service:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    environment:
+      type: string
+      required: false
+      description: ''
+      enum:
+      - prod
+      - staging
+      - dev
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+- id: netopyu.verifier.service-health
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    service:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean

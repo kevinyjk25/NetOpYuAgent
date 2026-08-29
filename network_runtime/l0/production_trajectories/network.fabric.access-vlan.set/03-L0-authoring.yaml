@@ -1,0 +1,142 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.fabric.access-vlan.set
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for fabric_set_access_vlan
+  labels:
+    runtime-tool-contract: fabric-access-vlan-v1
+    runtime-verifier: fabric-access-vlan
+    runtime-preflight-fields: device_id,interface
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - dc
+  effect:
+    capability: network.fabric.access-vlan.set
+    tool: fabric_set_access_vlan
+    request:
+      device_id: ${arguments.device_id}
+      interface: ${arguments.interface}
+      vlan_id: ${arguments.vlan_id}
+      reason: ${arguments.reason}
+      verification_probe_id: ${arguments.verification_probe_id}
+  intent:
+    kind: set_access_vlan
+    targetFields:
+    - device_id
+    - interface
+    desiredState:
+      vlan_id: ${arguments.vlan_id}
+  parameters:
+    device_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    interface:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    vlan_id:
+      type: integer
+      required: true
+      description: ''
+      enum: []
+      minimum: 1.0
+      maximum: 4094.0
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    verification_probe_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: network.fabric.access-vlan.get
+    arguments:
+      device_id: ${arguments.device_id}
+      interface: ${arguments.interface}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.fabric-access-vlan
+    arguments:
+      device_id: ${arguments.device_id}
+      interface: ${arguments.interface}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation:
+    capability: network.fabric.access-vlan.restore
+    tool: fabric_restore_access_vlan
+    arguments:
+      device_id: ${arguments.device_id}
+      interface: ${arguments.interface}
+    verification:
+      capability: netopyu.rollback-verifier.fabric-access-vlan-snapshot-v1
+      arguments:
+        device_id: ${arguments.device_id}
+        interface: ${arguments.interface}
+      predicates:
+      - field: restored
+        operator: equals
+        expected: true
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: compensate
+    compensationFailed: manual_intervention

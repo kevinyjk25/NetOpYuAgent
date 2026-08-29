@@ -1,0 +1,97 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.device.config.push
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for push_config
+  labels:
+    runtime-tool-contract: mock-config-push-v1
+    runtime-verifier: device-config
+    runtime-preflight-fields: device_id
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - lan
+  effect:
+    capability: netopyu.tool.push_config
+    tool: push_config
+    request:
+      device_id: ${arguments.device_id}
+      config_text: ${arguments.config_text}
+      dry_run: ${arguments.dry_run}
+  intent:
+    kind: configure_device
+    targetFields:
+    - device_id
+    desiredState:
+      requested_configuration_digest: ${intent.configuration_digest}
+  parameters:
+    device_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    config_text:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 65536
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    dry_run:
+      type: boolean
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: network.device.config.get
+    arguments:
+      device_id: ${arguments.device_id}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.device-config
+    arguments:
+      device_id: ${arguments.device_id}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation: null
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: manual_intervention
+    compensationFailed: manual_intervention

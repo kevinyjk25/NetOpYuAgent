@@ -30,6 +30,7 @@ class BackendSession:
     _openapi_clients: list[Any] = field(default_factory=list)
     _lab_providers: list[Any] = field(default_factory=list)
     _tool_store: Any | None = None
+    _provider_admission_gate: Any | None = None
 
     def describe_capability(self, tool_name: str) -> Any:
         """Return the canonical contract without exposing transport details."""
@@ -38,11 +39,36 @@ class BackendSession:
         metadata = self.metadata.get(tool_name)
         if metadata is None or tool_name not in self.callables:
             raise KeyError(f"unknown provider capability {tool_name!r}")
-        return CapabilityContract.from_metadata(
+        contract = CapabilityContract.from_metadata(
             tool_name,
             metadata,
             source=self.sources.get(tool_name, "unknown"),
         )
+        source = self.sources.get(tool_name, "unknown")
+        if self._provider_admission_gate is not None and (
+            source.startswith("mcp:") or source.startswith("openapi")
+        ):
+            if source.startswith("openapi") and contract.provider_identity == "openapi-unpinned":
+                from network_runtime.provider_release import ProviderReleaseError
+
+                raise ProviderReleaseError(
+                    "enforced OpenAPI Provider admission requires a deployment-owned provider_identity"
+                )
+            evidence = self._provider_admission_gate.admit(
+                contract,
+                provider_id=str(metadata.get("release_provider_id") or ""),
+                result_contract=str(metadata.get("result_contract") or ""),
+            )
+            metadata.update({
+                "provider_release_digest": evidence.release_digest,
+                "provider_manifest_digest": evidence.manifest_digest,
+                "provider_qualification_digest": evidence.qualification_digest,
+                "provider_deployment_digest": evidence.deployment_digest,
+                "release_provider_id": evidence.provider_id,
+                "release_provider_version": evidence.provider_version,
+                "provider_l0_contract_hashes": list(evidence.l0_contract_hashes),
+            })
+        return contract
 
     async def invoke_observation(
         self, tool_name: str, arguments: dict[str, Any],
@@ -306,10 +332,18 @@ def _mcp_metadata(spec: Any) -> dict[str, Any]:
         "provider_kind": declared.get("provider_kind"),
         "profiles": list(declared_profiles),
         "internal_parameters": list(internal_parameters),
+        # Provider-id selection is deployment-owned configuration, never a
+        # self-assertion from model-visible MCP tool metadata.
+        "release_provider_id": str(getattr(spec, "release_provider_id", "") or ""),
     }
 
 
-def _openapi_metadata(operation: Any) -> dict[str, Any]:
+def _openapi_metadata(
+    operation: Any,
+    *,
+    release_provider_id: str = "",
+    provider_identity: str = "",
+) -> dict[str, Any]:
     parameters: dict[str, Any] = {}
     required: list[str] = []
     for parameter in operation.parameters:
@@ -332,6 +366,9 @@ def _openapi_metadata(operation: Any) -> dict[str, Any]:
         "tags": ["openapi", operation.method.lower(), *operation.tags],
         "domain": "external",
         "sensitivity": "internal",
+        "release_provider_id": release_provider_id,
+        "provider_identity": provider_identity or "openapi-unpinned",
+        "result_contract": "openapi-response-v1",
     }
 
 
@@ -348,6 +385,9 @@ def _external_action_type(name: str) -> str:
 
 async def open_backend(profile_id: str = "lan") -> BackendSession:
     mode = resolve_backend_mode()
+    from network_runtime.provider_release import provider_admission_from_environment
+
+    provider_admission = provider_admission_from_environment()
     if mode == "mock":
         from profiles import load_profile
 
@@ -373,6 +413,7 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
                 "warnings": ["Network results are simulated; MODE=pragmatic is required for real systems."],
             },
             _tool_store=tool_store,
+            _provider_admission_gate=provider_admission,
         )
 
     cfg = _load_app_config()
@@ -470,6 +511,7 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
             "trusted_for_writes": server.trusted_for_writes,
             "expected_server_name": server.expected_server_name,
             "expected_server_version": server.expected_server_version,
+            "release_provider_id": server.release_provider_id,
             "timeout": server.timeout,
         }
     mock_servers = [
@@ -529,7 +571,11 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
         openapi_clients.append(client)
         router.register_openapi(client)
         for operation in client.list_operations():
-            metadata[operation.tool_name()] = _openapi_metadata(operation)
+            metadata[operation.tool_name()] = _openapi_metadata(
+                operation,
+                release_provider_id=cfg.tools.openapi.release_provider_id,
+                provider_identity=cfg.tools.openapi.provider_identity,
+            )
 
     router.register_local(local_callables)
     callables = router.registry
@@ -609,4 +655,5 @@ async def open_backend(profile_id: str = "lan") -> BackendSession:
         _openapi_clients=openapi_clients,
         _lab_providers=lab_providers,
         _tool_store=tool_store,
+        _provider_admission_gate=provider_admission,
     )

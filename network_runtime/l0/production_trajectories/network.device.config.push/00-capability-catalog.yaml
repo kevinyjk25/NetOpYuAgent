@@ -1,0 +1,94 @@
+apiVersion: netopyu.io/capability-catalog/v1
+provider: netopyu.production.push_config
+version: 1.0.0
+capabilities:
+- id: netopyu.tool.push_config
+  role: effect
+  profiles:
+  - lan
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    config_text:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 65536
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    dry_run:
+      type: boolean
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: push_config
+- id: network.device.config.get
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+- id: netopyu.verifier.device-config
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean

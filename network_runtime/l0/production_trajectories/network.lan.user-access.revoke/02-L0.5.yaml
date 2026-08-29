@@ -1,0 +1,80 @@
+apiVersion: netopyu.io/l0.5-structured-skill/v1
+kind: StructuredNaturalLanguageSkill
+skillId: network_lan_user_access_revoke
+title: network.lan.user-access.revoke
+purpose: 以精确参数安全执行 network.lan.user-access.revoke，并通过独立证据验证结果。 / Safely execute network.lan.user-access.revoke
+  with exact inputs and independent evidence.
+profiles:
+- lan
+parameters:
+  user_id: 'user_id；必填 / Required string；最长长度 / maximum length: 4096。'
+  reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
+    4096。'
+constraints:
+- 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
+  inputs, target, and preflight.
+- '只允许 profile：lan。 / Allowed profiles only: lan.'
+- Provider 返回不能替代独立验证。 / A Provider response cannot replace independent verification.
+- 写结果不确定时先只读对账，禁止盲目重试。 / Reconcile read-only after an indeterminate result; never
+  retry blindly.
+- 验证失败时只能使用合同声明的补偿并独立验证恢复。 / On verification failure, use only contractual compensation
+  and independently verify restoration.
+workflow:
+- phase: validate
+  instruction: 校验每个已记录参数并解析关键身份，不得推断。 / Validate every documented parameter and resolve
+    critical identities without inference.
+  capabilityOptions: []
+- phase: preflight
+  instruction: 通过独立 Observation 读取当前状态并保留 revision 与回滚证据。 / Read current state through
+    an independent observation and preserve revision plus rollback evidence.
+  capabilityOptions:
+  - network.access.user.get
+- phase: approval
+  instruction: 在任何 Effect 前展示并绑定精确不可变变更。 / Present and bind the exact immutable change
+    before any effect.
+  capabilityOptions: []
+- phase: effect
+  instruction: 只用已批准且通过 Schema 的输入调用一次受审 Effect。 / Invoke one reviewed effect with
+    only approved and schema-valid inputs.
+  capabilityOptions:
+  - network.lan.user-access.revoke
+- phase: verification
+  instruction: 通过独立 Observation 判定成功，禁止只依赖写响应。 / Determine success from an independent
+    observation, never from the write response alone.
+  capabilityOptions:
+  - netopyu.verifier.lan-access-revoked
+- phase: compensation
+  instruction: 验证失败时恢复精确前态并独立验证恢复结果。 / On failed verification, restore the exact prior
+    state and independently verify restoration.
+  capabilityOptions:
+  - network.lan.user-access.grant
+capabilities:
+  effects:
+  - network.lan.user-access.revoke
+  observations:
+  - netopyu.rollback-verifier.inverse-tool-v1
+  - netopyu.verifier.lan-access-revoked
+  - network.access.user.get
+  compensations:
+  - network.lan.user-access.grant
+safety:
+  risk: high
+  approvalRequired: true
+  unknownOutcomePolicy: 任何重试前先只读对账，禁止盲目重复 Effect。 / Read-only reconciliation before
+    any retry; never blindly repeat an effect.
+  stopConditions:
+  - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
+    inputs, target, and preflight.
+  - 写结果不确定时先只读对账，禁止盲目重试。 / Reconcile read-only after an indeterminate result; never
+    retry blindly.
+  nonCompensableJustification: null
+outcomes:
+  success: 独立验证的目标状态或独立验证的精确补偿状态。 / Independently verified desired state or independently
+    verified exact compensation.
+  failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
+    explicit recovery state.
+  rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
+sourceSkillSha256: sha256:d34a50da016b82c70c69857513af684784c639ba065f8a2fd9b5f4a6674a367a
+capabilityCatalogSha256: sha256:8bc081bc94937adc7e89079ddb26d06c799fd964da88a1c1c7e981ad60752b23
+previousStageSha256: sha256:d34a50da016b82c70c69857513af684784c639ba065f8a2fd9b5f4a6674a367a
+unresolvedQuestions: []

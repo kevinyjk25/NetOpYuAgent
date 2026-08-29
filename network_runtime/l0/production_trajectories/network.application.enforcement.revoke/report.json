@@ -1,0 +1,39 @@
+{
+  "archiveFiles": {
+    "00-capability-catalog.yaml": "sha256:0e3f8d0b556664a1d046e975f55e9ee292e579f08b7a87cb1dab6f875ce296c4",
+    "01-L1-SKILL.md": "sha256:ca246596560a9dfe760615459ce99acdedb5ccd5a8eb1c7e038ab6b416ba65c5",
+    "02-L0.5.yaml": "sha256:f21b3fd1b0b675021937bdd3952310ccf293471d7d9de82e477d921aa5376880",
+    "03-L0-authoring.yaml": "sha256:63a94548370ec224205b7370b9478a4aab82bf73d3e0bc5dc97b3c69183d5de9",
+    "04-L0-compiled.json": "sha256:164ee7bd930bad946773d4b6e01f4363e71483842d0058d34050d80b40e72543",
+    "trajectory.json": "sha256:c891f95a9a1ea0df73b18fbf9a523f4c11447e80804751c187b96164f6396238"
+  },
+  "bootstrap": {
+    "claim": "structural semantic parity and exact compiler round trip; not independent natural-language inference",
+    "direction": "L0-to-readable-L1/L0.5-baseline",
+    "source": "reviewed-production-l0-v2"
+  },
+  "promotionAssessment": {
+    "autoActivated": false,
+    "executionEligible": false,
+    "findings": [],
+    "status": "ready_for_review",
+    "summary": {
+      "errors": 0,
+      "warnings": 0
+    }
+  },
+  "reportHash": "sha256:d8068a0e43514e8d8353af770d179021d0516fea91392140d7d0f6b7f5c9d6cb",
+  "roundTrip": {
+    "exactContractHash": true,
+    "productionContractHash": "sha256:a87f65e520314a51410a1097aef90e1a45cdb1bc6348c5bcef5237cf26d37550",
+    "productionSemanticHash": "sha256:a87f65e520314a51410a1097aef90e1a45cdb1bc6348c5bcef5237cf26d37550",
+    "promotionSemanticHash": "sha256:a87f65e520314a51410a1097aef90e1a45cdb1bc6348c5bcef5237cf26d37550",
+    "recompiledContractHash": "sha256:a87f65e520314a51410a1097aef90e1a45cdb1bc6348c5bcef5237cf26d37550",
+    "semanticParity": true
+  },
+  "schema": "netopyu.io/l0-production-trajectory/v1",
+  "skillId": "network.application.enforcement.revoke",
+  "tool": "network_revoke_app_enforcement",
+  "trajectoryHash": "sha256:8b8f28c295a2374e1c1e46b4be05e2fb83f9d1925fcdd7033fd16d74eac93ebf",
+  "version": "1.0.0"
+}

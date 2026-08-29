@@ -43,8 +43,12 @@ from .evidence import (
     typed_evidence as _evidence_value,
 )
 from .journal import NetworkJournal
+from .identity import ApprovalControlPlane
 from .l0_skills import REGISTRY as L0_SKILLS, L0SkillContract, compile_intent
+from .l0.models import CompiledAtomicEffect
+from .l0.runtime_loader import require_effect_arguments, validate_runtime_projection
 from .policies import ToolContract, project_arguments, resolve_contract
+from .provider_release import ProviderReleaseError
 from .validation import assess_risk, compile_parameters
 from .verifiers import REGISTRY as VERIFIERS, verify_operation
 from .workflows import WorkflowRuntime
@@ -72,6 +76,7 @@ class NetworkRuntime:
         execution_timeout_seconds: float | None = None,
         fault_hook: FaultHook | None = None,
         observation_policy: ObservationPolicy | None = None,
+        approval_control_plane: ApprovalControlPlane | None = None,
     ) -> None:
         if not 30 <= plan_ttl_seconds <= 3600:
             raise ValueError("plan_ttl_seconds must be between 30 and 3600")
@@ -84,6 +89,15 @@ class NetworkRuntime:
         )
         self.fault_hook = fault_hook
         self.observation_policy = observation_policy or ObservationPolicy()
+        if approval_control_plane is None:
+            from .enterprise import control_plane_from_environment
+
+            approval_control_plane = control_plane_from_environment(
+                key_path=self.journal_path.with_name(
+                    self.journal_path.name + ".approval.key"
+                ),
+            )
+        self.approval_control_plane = approval_control_plane
 
     async def _fault(self, stage: str, plan: PreparedPlan) -> None:
         if self.fault_hook is None:
@@ -100,6 +114,8 @@ class NetworkRuntime:
         *,
         session_id: str | None = None,
         l0_skill_id: str | None = None,
+        subject_context: dict[str, Any] | None = None,
+        harness: str = "local",
     ) -> dict[str, Any]:
         """Compile a request into an immutable plan before approval is shown."""
         backend = await self.backend_factory(profile_id)
@@ -110,6 +126,14 @@ class NetworkRuntime:
                 return {"ok": False, "status": "rejected", "errors": [
                     f"unknown tool {tool_name!r} in {backend.mode} backend"
                 ]}
+            try:
+                provider_capability = backend.describe_capability(tool_name)
+            except ProviderReleaseError as error:
+                return {
+                    "ok": False,
+                    "status": "rejected",
+                    "errors": [f"Provider release admission failed: {error}"],
+                }
             action_type = str(metadata.get("action_type", "read_only"))
             requires_approval = bool(metadata.get("hitl")) or action_type != "read_only"
             expected_l0 = (
@@ -235,6 +259,20 @@ class NetworkRuntime:
                         "status": "rejected",
                         "errors": ["Network L0 Skill references a stale tool contract; fail closed"],
                     }
+                released_l0_hashes = tuple(
+                    str(item) for item in metadata.get("provider_l0_contract_hashes") or ()
+                )
+                if (
+                    metadata.get("provider_release_digest")
+                    and l0_contract.contract_hash not in released_l0_hashes
+                ):
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [
+                            "active signed Provider release does not authorize this L0 contract"
+                        ],
+                    }
                 intent = compile_intent(
                     l0_contract,
                     profile=backend.profile_id,
@@ -243,6 +281,36 @@ class NetworkRuntime:
                     provenance=compiled.provenance,
                     targets=compiled.targets,
                 )
+                if not isinstance(l0_contract.compiled_contract, CompiledAtomicEffect):
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["write L0 is not an activated compiled AtomicEffect v2"],
+                    }
+                parity = validate_runtime_projection(
+                    compiled=l0_contract.compiled_contract,
+                    tool_name=tool_name,
+                    tool_contract_id=contract.contract_id,
+                    verifier_id=contract.verifier,
+                    compensator_id=contract.compensator,
+                    profile=backend.profile_id,
+                    arguments=compiled.arguments,
+                    intent=intent.to_dict(),
+                    resolver_context={
+                        "profile": backend.profile_id,
+                        "mode": backend.mode,
+                        "provider": source,
+                    },
+                )
+                if not parity.ok:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [
+                            "L0 v2 Runtime parity failed: " + error
+                            for error in parity.errors
+                        ],
+                    }
             if requires_approval and contract.verifier not in VERIFIERS.contract_ids():
                 return {
                     "ok": False,
@@ -276,6 +344,15 @@ class NetworkRuntime:
                     "preflight": [item.to_dict() for item in preflight],
                 }
             risk, reasons = assess_risk(tool_name, metadata, compiled.arguments)
+            capability_id = provider_capability.capability_id
+            requester = self.approval_control_plane.bind_requester(
+                subject_context,
+                harness=harness,
+                session_id=str(session_id or "local-session"),
+                profile=backend.profile_id,
+                capability_id=capability_id,
+            )
+            approval_mode = str(l0_contract.compiled_contract.spec.approval.mode)
             created = datetime.now(timezone.utc)
             expires = created + timedelta(seconds=self.plan_ttl_seconds)
             plan = PreparedPlan.create(
@@ -284,20 +361,28 @@ class NetworkRuntime:
                 tool_name=tool_name,
                 tool_version=contract.contract_id,
                 action_type=action_type,
-                provider_identity=str(metadata.get("provider_identity") or source),
-                input_schema_digest=str(
-                    metadata.get("input_schema_digest")
-                    or sha256_json(metadata.get("parameters") or {})
+                provider_identity=provider_capability.provider_identity,
+                provider_release_digest=str(
+                    metadata.get("provider_release_digest")
+                    or "unmanaged-local:" + sha256_json({
+                        "provider_identity": provider_capability.provider_identity,
+                        "provider_kind": provider_capability.provider_kind,
+                    }).removeprefix("sha256:")
                 ),
-                output_schema_digest=str(
-                    metadata.get("output_schema_digest")
-                    or sha256_json(metadata.get("output_schema") or {})
+                provider_manifest_digest=str(
+                    metadata.get("provider_manifest_digest") or "unmanaged-local"
                 ),
-                capability_id=str(metadata.get("capability_id") or l0_contract.skill_id),
-                capability_version=str(
-                    metadata.get("capability_version") or l0_contract.version
+                provider_qualification_digest=str(
+                    metadata.get("provider_qualification_digest") or "unmanaged-local"
                 ),
-                provider_role=str(metadata.get("provider_role") or "actor"),
+                provider_deployment_digest=str(
+                    metadata.get("provider_deployment_digest") or "unmanaged-local"
+                ),
+                input_schema_digest=provider_capability.input_schema_digest,
+                output_schema_digest=provider_capability.output_schema_digest,
+                capability_id=provider_capability.capability_id,
+                capability_version=provider_capability.capability_version,
+                provider_role=provider_capability.provider_role,
                 arguments=compiled.arguments,
                 argument_provenance=compiled.provenance,
                 targets=compiled.targets,
@@ -314,24 +399,43 @@ class NetworkRuntime:
                 step_contract=tuple(step.to_dict() for step in l0_contract.steps),
                 workflow_run_id=(workflow_context or {}).get("run_id"),
                 workflow_template_hash=(workflow_context or {}).get("template_hash"),
+                requester_identity=requester.to_dict(),
+                requester_digest=requester.digest,
+                approval_mode=approval_mode,
+                approval_policy_id=self.approval_control_plane.policy_id,
+                approval_policy_version=self.approval_control_plane.policy_version,
+                approval_policy_hash=self.approval_control_plane.policy_hash,
                 created_at=created.isoformat(),
                 expires_at=expires.isoformat(),
             )
             nonce = secrets.token_urlsafe(32)
             with NetworkJournal(self.journal_path) as journal:
                 journal.create(plan, nonce)
-                for step_id in ("validate_parameters", "compile_intent", "preflight"):
-                    journal.append_event(plan.plan_id, "l0_step_completed", {
+                journal.append_events(plan.plan_id, [
+                    ("l0_step_completed", {
                         "step_id": step_id,
                         "l0_contract_hash": l0_contract.contract_hash,
                         "intent_hash": intent.intent_hash,
                     })
+                    for step_id in ("validate_parameters", "compile_intent", "preflight")
+                ])
             return {
                 "ok": True,
                 "status": "plan_ready",
                 "plan": plan.to_dict(),
                 "execution_nonce": nonce,
                 "approval_summary": self._approval_summary(plan, source, backend.mode),
+                "identity_binding": {
+                    "subject_id": requester.subject_id,
+                    "issuer": requester.issuer,
+                    "harness": requester.harness,
+                    "session_id": requester.session_id,
+                    "assurance_level": requester.assurance_level,
+                    "local_simulation": requester.local_simulation,
+                    "requester_digest": requester.digest,
+                    "approval_policy_hash": plan.approval_policy_hash,
+                    "approval_mode": plan.approval_mode,
+                },
             }
         finally:
             await backend.close()
@@ -343,6 +447,8 @@ class NetworkRuntime:
         arguments: dict[str, Any],
         *,
         access_context: ObservationAccessContext | dict[str, Any] | None = None,
+        session_id: str | None = None,
+        harness: str = "local",
     ) -> str:
         """Strictly validate and invoke a read-only tool without a write lease."""
         backend = await self.backend_factory(profile_id)
@@ -356,9 +462,32 @@ class NetworkRuntime:
                 raise ApprovalError(
                     f"direct write invocation of {tool_name} is retired; use runtime prepare/execute"
                 )
-            subject = ObservationAccessContext.from_value(
-                access_context, profile=backend.profile_id,
-            )
+            if self.approval_control_plane.enforced:
+                if not isinstance(access_context, dict):
+                    raise ApprovalError(
+                        "enforced observation requires an OIDC/Gateway credential context"
+                    )
+                identity = self.approval_control_plane.bind_observer(
+                    access_context,
+                    harness=harness,
+                    session_id=str(session_id or ""),
+                    profile=backend.profile_id,
+                    capability_id=capability.capability_id,
+                    arguments=arguments,
+                )
+                subject = ObservationAccessContext.from_value({
+                    "subject_id": identity.subject_id,
+                    "roles": list(identity.roles),
+                    "scopes": list(identity.scopes),
+                    "purpose": identity.purpose,
+                    "clearance": identity.subject_attributes.get("clearance"),
+                    "authenticated": True,
+                    "session_id": identity.session_id,
+                }, profile=backend.profile_id)
+            else:
+                subject = ObservationAccessContext.from_value(
+                    access_context, profile=backend.profile_id,
+                )
             decision = self.observation_policy.authorize(
                 capability, arguments, subject,
             )
@@ -384,15 +513,46 @@ class NetworkRuntime:
         finally:
             await backend.close()
 
+    def approve(
+        self,
+        *,
+        plan_id: str,
+        plan_hash: str,
+        approval_request_id: str,
+        approver_contexts: list[dict[str, Any]],
+        change_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Issue a short-lived signed proof for one exact immutable plan."""
+        with NetworkJournal(self.journal_path) as journal:
+            plan = journal.get(plan_id)
+            if plan.plan_hash != plan_hash:
+                raise PlanIntegrityError("approval target hash does not match stored plan")
+            if plan.state != PlanState.PLAN_READY:
+                raise ApprovalError(f"plan {plan_id} is not awaiting approval")
+            if datetime.fromisoformat(plan.expires_at) <= datetime.now(timezone.utc):
+                raise ApprovalError("effect plan expired before approval")
+            issued = self.approval_control_plane.issue_proof(
+                plan,
+                approval_request_id=approval_request_id,
+                approver_contexts=approver_contexts,
+                change_context=change_context,
+            )
+            journal.append_event(plan.plan_id, "approval_proof_issued", {
+                "evidence": issued["evidence"],
+                "decision": "approved",
+            })
+            return issued
+
     async def execute(
         self,
         *,
         plan_id: str,
         plan_hash: str,
         execution_nonce: str,
-        approval_request_id: str,
-        approval_actor: str,
         allow_destructive: bool,
+        approval_proof: str | None = None,
+        approval_request_id: str | None = None,
+        approval_actor: str | None = None,
     ) -> ExecutionOutcome:
         """Consume a plan once, execute once, and never infer success sans evidence."""
         if not allow_destructive:
@@ -401,6 +561,30 @@ class NetworkRuntime:
             candidate = journal.get(plan_id)
             if candidate.plan_hash != plan_hash:
                 raise PlanIntegrityError("approved plan hash does not match stored plan")
+            if approval_proof is None:
+                if not str(approval_request_id or "").strip() or not str(approval_actor or "").strip():
+                    raise ApprovalError("a signed approval proof is required")
+                issued = self.approval_control_plane.issue_local_compatibility_proof(
+                    candidate,
+                    approval_request_id=str(approval_request_id),
+                    approval_actor=str(approval_actor),
+                )
+                approval_proof = str(issued["approval_proof"])
+            approval_evidence = self.approval_control_plane.verify_proof(
+                approval_proof, candidate,
+            )
+            proof_request_id = str(approval_evidence.get("approval_request_id") or "")
+            proof_actors = [
+                str(item.get("subject_id") or "")
+                for item in approval_evidence.get("approvers", [])
+                if isinstance(item, dict) and str(item.get("subject_id") or "")
+            ]
+            if not proof_request_id or not proof_actors:
+                raise ApprovalError("signed approval proof has no request or approver identity")
+            if approval_request_id and approval_request_id != proof_request_id:
+                raise ApprovalError("approval request id does not match the signed proof")
+            if approval_actor and approval_actor not in proof_actors:
+                raise ApprovalError("approval actor does not match the signed proof")
             if candidate.workflow_run_id and candidate.workflow_template_hash:
                 with WorkflowRuntime(self.journal_path) as workflow_runtime:
                     workflow_runtime.validate_plan_binding(
@@ -410,20 +594,68 @@ class NetworkRuntime:
                 plan_id=plan_id,
                 plan_hash=plan_hash,
                 execution_nonce=execution_nonce,
-                approval_request_id=approval_request_id,
-                approval_actor=approval_actor,
+                approval_request_id=proof_request_id,
+                approval_actor=",".join(proof_actors),
+                approval_evidence=approval_evidence,
             )
             journal.append_event(plan.plan_id, "l0_step_completed", {
                 "step_id": "approval",
                 "l0_skill_id": plan.l0_skill_id,
                 "intent_hash": plan.intent_hash,
+                "approval_proof_id": approval_evidence["proof_id"],
+                "approval_policy_hash": approval_evidence["policy_hash"],
             })
             backend: BackendSession | None = None
             result: str | None = None
             effect_dispatched = False
             try:
                 backend = await self.backend_factory(plan.profile)
-                contract = self._revalidate_contract(plan, backend)
+                try:
+                    contract = self._revalidate_contract(plan, backend)
+                    effect_arguments = require_effect_arguments(
+                        L0_SKILLS.get(plan.l0_skill_id, plan.l0_skill_version),
+                        plan.arguments,
+                    )
+                except PlanIntegrityError as error:
+                    journal.transition(
+                        plan.plan_id,
+                        PlanState.PRECONDITION_CHANGED,
+                        "execution_contract_changed",
+                        {"error": str(error), "write_sent": False},
+                    )
+                    evidence = (Evidence(
+                        evidence_type="execution_contract",
+                        source="domain-effect-runtime",
+                        target=plan.tool_name,
+                        observed_at=utc_now(),
+                        value={"error": str(error)},
+                        passed=False,
+                        predicate="execution contract equals the approved contract",
+                        expected={
+                            "provider_release_digest": plan.provider_release_digest,
+                            "provider_manifest_digest": plan.provider_manifest_digest,
+                            "provider_qualification_digest": plan.provider_qualification_digest,
+                            "provider_deployment_digest": plan.provider_deployment_digest,
+                            "l0_contract_hash": plan.l0_contract_hash,
+                        },
+                    ),)
+                    outcome = ExecutionOutcome(
+                        plan.plan_id,
+                        plan.plan_hash,
+                        PlanState.PRECONDITION_CHANGED,
+                        None,
+                        evidence,
+                        "approved execution contract changed; write was not sent",
+                    )
+                    journal.store_outcome(plan.plan_id, outcome.to_dict(), outcome.error)
+                    journal.release_locks(plan.plan_id)
+                    journal.append_event(plan.plan_id, "l0_step_failed", {
+                        "step_id": "revalidate",
+                        "reason": "execution_contract_changed",
+                    })
+                    self._skip_compensation(journal, plan, "write_not_sent")
+                    self._complete_audit(journal, plan, outcome.state)
+                    return outcome
                 if plan.workflow_run_id and plan.workflow_template_hash:
                     with WorkflowRuntime(self.journal_path) as workflow_runtime:
                         workflow_runtime.validate_plan_binding(
@@ -475,7 +707,7 @@ class NetworkRuntime:
                     effect_dispatched = True
                     result = _render(await asyncio.wait_for(
                         backend.invoke_effect(
-                            plan.tool_name, plan.arguments, plan=plan, phase="execute",
+                            plan.tool_name, effect_arguments, plan=plan, phase="execute",
                         ),
                         timeout=self.execution_timeout_seconds,
                     ))
@@ -805,6 +1037,10 @@ class NetworkRuntime:
         metadata = backend.metadata.get(plan.tool_name)
         if metadata is None or plan.tool_name not in backend.callables:
             raise PlanIntegrityError("approved tool is no longer registered")
+        try:
+            provider_capability = backend.describe_capability(plan.tool_name)
+        except ProviderReleaseError as error:
+            raise PlanIntegrityError(f"Provider release admission failed: {error}") from error
         action = str(metadata.get("action_type", "read_only"))
         requires_approval = bool(metadata.get("hitl")) or action != "read_only"
         contract = resolve_contract(
@@ -816,14 +1052,24 @@ class NetworkRuntime:
             metadata=metadata,
         )
         current_source = backend.sources.get(plan.tool_name, "unknown")
-        current_provider = str(metadata.get("provider_identity") or current_source)
-        current_input_digest = str(
-            metadata.get("input_schema_digest")
-            or sha256_json(metadata.get("parameters") or {})
+        current_provider = provider_capability.provider_identity
+        current_input_digest = provider_capability.input_schema_digest
+        current_output_digest = provider_capability.output_schema_digest
+        current_release_digest = str(
+            metadata.get("provider_release_digest")
+            or "unmanaged-local:" + sha256_json({
+                "provider_identity": provider_capability.provider_identity,
+                "provider_kind": provider_capability.provider_kind,
+            }).removeprefix("sha256:")
         )
-        current_output_digest = str(
-            metadata.get("output_schema_digest")
-            or sha256_json(metadata.get("output_schema") or {})
+        current_manifest_digest = str(
+            metadata.get("provider_manifest_digest") or "unmanaged-local"
+        )
+        current_qualification_digest = str(
+            metadata.get("provider_qualification_digest") or "unmanaged-local"
+        )
+        current_deployment_digest = str(
+            metadata.get("provider_deployment_digest") or "unmanaged-local"
         )
         current_l0 = L0_SKILLS.for_tool(
             plan.profile,
@@ -831,15 +1077,9 @@ class NetworkRuntime:
             skill_id=plan.l0_skill_id,
             version=plan.l0_skill_version,
         )
-        current_capability_id = str(
-            metadata.get("capability_id")
-            or (current_l0.skill_id if current_l0 is not None else "")
-        )
-        current_capability_version = str(
-            metadata.get("capability_version")
-            or (current_l0.version if current_l0 is not None else "")
-        )
-        current_provider_role = str(metadata.get("provider_role") or "actor")
+        current_capability_id = provider_capability.capability_id
+        current_capability_version = provider_capability.capability_version
+        current_provider_role = provider_capability.provider_role
         if (
             contract is None
             or contract.contract_id != plan.tool_version
@@ -848,6 +1088,10 @@ class NetworkRuntime:
             or action != plan.action_type
             or not requires_approval
             or current_provider != plan.provider_identity
+            or current_release_digest != plan.provider_release_digest
+            or current_manifest_digest != plan.provider_manifest_digest
+            or current_qualification_digest != plan.provider_qualification_digest
+            or current_deployment_digest != plan.provider_deployment_digest
             or current_input_digest != plan.input_schema_digest
             or current_output_digest != plan.output_schema_digest
             or current_capability_id != plan.capability_id
@@ -869,6 +1113,16 @@ class NetworkRuntime:
             or l0_contract.tool_contract_id != contract.contract_id
         ):
             raise PlanIntegrityError("Network L0 Skill contract changed after approval")
+        released_l0_hashes = tuple(
+            str(item) for item in metadata.get("provider_l0_contract_hashes") or ()
+        )
+        if (
+            metadata.get("provider_release_digest")
+            and l0_contract.contract_hash not in released_l0_hashes
+        ):
+            raise PlanIntegrityError(
+                "active signed Provider release no longer authorizes the approved L0 contract"
+            )
         intent = compile_intent(
             l0_contract,
             profile=plan.profile,
@@ -879,6 +1133,25 @@ class NetworkRuntime:
         )
         if intent.intent_hash != plan.intent_hash or intent.to_dict() != plan.intent_spec:
             raise PlanIntegrityError("approved intent is not bound to the L0 Skill plan")
+        if not isinstance(l0_contract.compiled_contract, CompiledAtomicEffect):
+            raise PlanIntegrityError("approved L0 is not a compiled AtomicEffect v2")
+        parity = validate_runtime_projection(
+            compiled=l0_contract.compiled_contract,
+            tool_name=plan.tool_name,
+            tool_contract_id=contract.contract_id,
+            verifier_id=contract.verifier,
+            compensator_id=contract.compensator,
+            profile=plan.profile,
+            arguments=plan.arguments,
+            intent=intent.to_dict(),
+            resolver_context={
+                "profile": plan.profile,
+                "mode": backend.mode,
+                "provider": current_source,
+            },
+        )
+        if not parity.ok:
+            raise PlanIntegrityError("L0 v2 Runtime parity changed: " + "; ".join(parity.errors))
         return contract
 
     @staticmethod
@@ -1136,6 +1409,10 @@ class NetworkRuntime:
             f"Arguments: {args}\n"
             f"Source: {source}; backend={mode}; contract={plan.tool_version}\n"
             f"Provider: {plan.provider_identity}\n"
+            f"Provider release: {plan.provider_release_digest}; manifest="
+            f"{plan.provider_manifest_digest}; qualification="
+            f"{plan.provider_qualification_digest}; deployment="
+            f"{plan.provider_deployment_digest}\n"
             f"Capability: {plan.capability_id}@{plan.capability_version} "
             f"({plan.provider_role})\n"
             f"Schemas: input={plan.input_schema_digest}; output={plan.output_schema_digest}\n"
@@ -1145,6 +1422,12 @@ class NetworkRuntime:
             f"desired={canonical_json(plan.intent_spec.get('desired_state', {}))}\n"
             f"Intent hash: {plan.intent_hash}\n"
             f"Verification: {plan.verification_contract}; rollback: {plan.rollback_contract or 'none'}\n"
+            f"Requester: {plan.requester_identity.get('subject_id')} via "
+            f"{plan.requester_identity.get('issuer')} "
+            f"(assurance={plan.requester_identity.get('assurance_level')})\n"
+            f"Approval: mode={plan.approval_mode}; policy="
+            f"{plan.approval_policy_id}@{plan.approval_policy_version} "
+            f"({plan.approval_policy_hash})\n"
             f"Workflow: {plan.workflow_run_id or 'standalone'}"
             f"{f' ({plan.workflow_template_hash})' if plan.workflow_template_hash else ''}\n"
             f"Expires: {plan.expires_at}\n"

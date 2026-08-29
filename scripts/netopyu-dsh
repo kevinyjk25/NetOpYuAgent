@@ -82,6 +82,11 @@ Commands:
   learning-review ID approve|reject REVIEWER  Review once; approval writes a proposal only
   reliability   Run local load/chaos/policy and harness-boundary retirement checks
   compare-runtime  Benchmark DSH-only versus DSH + Runtime; accepts benchmark CLI flags
+  compare-l1     Evaluate non-executing L1 routing; accepts P1.8 benchmark flags
+  compare-l1-dsh Evaluate the no-tool DSH headless shadow path for P1.8-B1
+  compare-l1-dsh-tools  Evaluate P1.8-B2 controlled Skill + capture Tool path
+  compare-l1-dsh-controlled  Evaluate P1.8-C deterministic Skill preload + one capture Tool
+  compare-l1-dsh-guarded  Evaluate P1.8-C2 guard + typed Protocol Firewall path
   retirement    Run the complete local retirement gate
   e2e           Run the complete offline migration regression suite
 
@@ -839,6 +844,41 @@ run_runtime_comparison() {
   "$PYTHON_BIN" -m evaluation.runtime_comparison "$@"
 }
 
+run_l1_comparison() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.l1_benchmark "$@"
+}
+
+run_l1_dsh_shadow() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.dsh_shadow "$@"
+}
+
+run_l1_dsh_tool_shadow() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.dsh_shadow_tool "$@"
+}
+
+run_l1_dsh_controlled() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.dsh_controlled_tool "$@"
+}
+
+run_l1_dsh_guarded() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.dsh_guarded_tool "$@"
+}
+
 run_e2e() {
   # The retirement gate must run from a clean checkout in CI. It validates
   # the plugin and bridge directly and does not require an installed DSH Web
@@ -852,9 +892,11 @@ run_e2e() {
   "$PYTHON_BIN" scripts/audit_harness_boundary.py || return 1
   printf '3/7 Node/plugin syntax\n'
   local plugin_source
-  for plugin_source in dsh-plugin-netopyu/src/*.js; do
+  for plugin_source in dsh-plugin-netopyu/src/*.js dsh-plugin-l1-shadow-capture/src/*.js dsh-plugin-l1-protocol-controller/src/*.js; do
     node --check "$plugin_source" || return 1
   done
+  node dsh-plugin-l1-shadow-capture/test/capture-smoke.mjs || return 1
+  node dsh-plugin-l1-protocol-controller/test/controller-smoke.mjs || return 1
   printf '4/7 Tool, HITL, A2A, memory and trajectory smoke\n'
   NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/hitl-smoke.mjs || return 1
   NETOPYU_DSH_BACKEND=mock node dsh-plugin-netopyu/test/workflow-smoke.mjs || return 1
@@ -910,6 +952,11 @@ case "$command" in
   learning-review) run_learning_review "$@" ;;
   reliability) run_reliability ;;
   compare-runtime) run_runtime_comparison "$@" ;;
+  compare-l1) run_l1_comparison "$@" ;;
+  compare-l1-dsh) run_l1_dsh_shadow "$@" ;;
+  compare-l1-dsh-tools) run_l1_dsh_tool_shadow "$@" ;;
+  compare-l1-dsh-controlled) run_l1_dsh_controlled "$@" ;;
+  compare-l1-dsh-guarded) run_l1_dsh_guarded "$@" ;;
   retirement) run_e2e ;;
   e2e) run_e2e ;;
   help|-h|--help|'') usage ;;

@@ -19,6 +19,7 @@ from .a2a_provider import delegate_a2a, discover_peers
 from .backend import resolve_backend_mode
 from .bridge import (
     _build_manifest,
+    approve_network_plan,
     audit_network_plan,
     backend_report,
     execute_network_plan,
@@ -79,6 +80,8 @@ async def dispatch(request: dict[str, Any]) -> Any:
                 request.get("access_context")
                 if isinstance(request.get("access_context"), dict) else None
             ),
+            session_id=(str(request.get("session_id")) if request.get("session_id") else None),
+            harness=str(request.get("harness") or "local"),
         )
         return {"ok": True, "result": result}
     if command == "runtime-prepare":
@@ -88,7 +91,14 @@ async def dispatch(request: dict[str, Any]) -> Any:
             l0_skill_id=(
                 str(request.get("l0_skill_id")) if request.get("l0_skill_id") else None
             ),
+            subject_context=(
+                request.get("subject_context")
+                if isinstance(request.get("subject_context"), dict) else None
+            ),
+            harness=str(request.get("harness") or "local"),
         )
+    if command == "runtime-approve":
+        return approve_network_plan(arguments)
     if command == "runtime-execute":
         return await execute_network_plan(
             arguments, allow_destructive=bool(request.get("allow_destructive")),

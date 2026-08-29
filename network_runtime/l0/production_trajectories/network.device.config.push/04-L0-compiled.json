@@ -1,0 +1,132 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:85c6dffde2d71ddd15a4a2970a350099d63fa13ce97e3333cc4910bcf84e181d",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for push_config",
+    "id": "network.device.config.push",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "device_id",
+      "runtime-tool-contract": "mock-config-push-v1",
+      "runtime-verifier": "device-config"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": null,
+    "effect": {
+      "capability": "netopyu.tool.push_config",
+      "internal": {},
+      "request": {
+        "config_text": "${arguments.config_text}",
+        "device_id": "${arguments.device_id}",
+        "dry_run": "${arguments.dry_run}"
+      },
+      "tool": "push_config"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "manual_intervention"
+    },
+    "intent": {
+      "desiredState": {
+        "requested_configuration_digest": "${intent.configuration_digest}"
+      },
+      "kind": "configure_device",
+      "targetFields": [
+        "device_id"
+      ]
+    },
+    "parameters": {
+      "config_text": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 65536,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "device_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "dry_run": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": null,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": false,
+        "resolver": null,
+        "sensitive": false,
+        "type": "boolean"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "device_id": "${arguments.device_id}"
+        },
+        "capability": "network.device.config.get",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "lan"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "device_id": "${arguments.device_id}"
+      },
+      "capability": "netopyu.verifier.device-config",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,124 @@
+apiVersion: netopyu.io/capability-catalog/v1
+provider: netopyu.production.revoke_user_access
+version: 1.0.0
+capabilities:
+- id: network.lan.user-access.revoke
+  role: effect
+  profiles:
+  - lan
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: revoke_user_access
+- id: network.access.user.get
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+- id: netopyu.verifier.lan-access-revoked
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean
+- id: network.lan.user-access.grant
+  role: compensation
+  profiles:
+  - lan
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean
+  tool: grant_user_access
+- id: netopyu.rollback-verifier.inverse-tool-v1
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean

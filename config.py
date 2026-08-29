@@ -21,6 +21,8 @@ class OpenAPIConfig:
     base_url: str = ""
     auth_type: str = "bearer"
     token_env: str = "NETOPS_API_TOKEN"
+    release_provider_id: str = ""
+    provider_identity: str = ""
 
 
 @dataclass
@@ -58,6 +60,7 @@ class PragmaticMCPServer:
     trusted_for_writes: bool = False
     expected_server_name: str = ""
     expected_server_version: str = ""
+    release_provider_id: str = ""
     timeout: float = 30.0
 
 
@@ -216,6 +219,7 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
         trusted_for_writes=bool(item.get("trusted_for_writes", False)),
         expected_server_name=str(item.get("expected_server_name", "")),
         expected_server_version=str(item.get("expected_server_version", "")),
+        release_provider_id=str(item.get("release_provider_id", "")),
         timeout=float(item.get("timeout", 30.0)),
     ) for item in map(_mapping, _list(pragmatic_raw.get("mcp_servers")))]
 
@@ -232,6 +236,14 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
                 base_url=os.getenv("OPENAPI_BASE_URL", str(openapi_raw.get("base_url", ""))),
                 auth_type=os.getenv("OPENAPI_AUTH_TYPE", str(openapi_raw.get("auth_type", "bearer"))),
                 token_env=os.getenv("OPENAPI_TOKEN_ENV", str(openapi_raw.get("token_env", "NETOPS_API_TOKEN"))),
+                release_provider_id=os.getenv(
+                    "NETOPYU_OPENAPI_RELEASE_PROVIDER_ID",
+                    str(openapi_raw.get("release_provider_id", "")),
+                ),
+                provider_identity=os.getenv(
+                    "NETOPYU_OPENAPI_PROVIDER_IDENTITY",
+                    str(openapi_raw.get("provider_identity", "")),
+                ),
             ),
             editable_hitl_tools=editable,
             schema_validation_enabled=bool(tools_raw.get("schema_validation_enabled", True)),

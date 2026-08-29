@@ -72,6 +72,8 @@ def _stable_plan(plan: dict[str, Any]) -> dict[str, Any]:
         "verification_contract", "rollback_contract", "l0_skill_id",
         "l0_skill_version", "l0_contract_hash", "intent_spec", "intent_hash",
         "step_contract", "workflow_template_hash",
+        "approval_mode", "approval_policy_id", "approval_policy_version",
+        "approval_policy_hash",
     )
     return {key: plan.get(key) for key in keys}
 
@@ -166,7 +168,7 @@ def run_comparison() -> dict[str, Any]:
                     "nonce_exposed_to_model": "execution_nonce" in hermes_prepared,
                 },
                 "expected_adapter_differences": [
-                    "plan ids, timestamps, plan hashes, approval ids and approval actors",
+                    "plan ids, timestamps, requester identities/digests, plan hashes, approval ids and approval actors",
                     "Hermes uses an explicit user-only slash command instead of a DSH approval card",
                     "Hermes pending authorization is process-local and is lost safely on restart",
                 ],

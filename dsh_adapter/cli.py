@@ -11,6 +11,7 @@ from typing import Any
 
 from .bridge import (
     audit_network_plan,
+    approve_network_plan,
     backend_report,
     build_l0_skill_catalog,
     build_manifest,
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     invoke = subparsers.add_parser("invoke")
     invoke.add_argument("--profile", default="lan")
     invoke.add_argument("--tool", required=True)
+    invoke.add_argument("--session")
 
     runtime_prepare = subparsers.add_parser("runtime-prepare")
     runtime_prepare.add_argument("--profile", default="lan")
@@ -61,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
     runtime_execute = subparsers.add_parser("runtime-execute")
     runtime_execute.add_argument("--profile", default="lan")
     runtime_execute.add_argument("--tool")
+
+    runtime_approve = subparsers.add_parser("runtime-approve")
+    runtime_approve.add_argument("--profile", default="lan")
+    runtime_approve.add_argument("--tool")
 
     runtime_inspect = subparsers.add_parser("runtime-inspect")
     runtime_inspect.add_argument("--plan", required=True)
@@ -137,13 +143,23 @@ def main(argv: list[str] | None = None) -> int:
                 raise TypeError("NETOPYU_DSH_ACCESS_CONTEXT must be a JSON object")
             result = asyncio.run(invoke_tool(
                 args.profile, args.tool, _read_arguments(), access_context=access_context,
+                session_id=args.session,
+                harness=os.environ.get("NETOPYU_HARNESS", "local"),
             ))
             payload = {"ok": True, "result": result}
         elif args.command == "runtime-prepare":
+            raw_subject = os.environ.get("NETOPYU_DSH_SUBJECT_CONTEXT", "")
+            subject_context = json.loads(raw_subject) if raw_subject else None
+            if subject_context is not None and not isinstance(subject_context, dict):
+                raise TypeError("NETOPYU_DSH_SUBJECT_CONTEXT must be a JSON object")
             payload = asyncio.run(prepare_network_plan(
                 args.profile, args.tool, _read_arguments(),
                 session_id=args.session, l0_skill_id=args.l0_skill,
+                subject_context=subject_context,
+                harness=os.environ.get("NETOPYU_HARNESS", "local"),
             ))
+        elif args.command == "runtime-approve":
+            payload = approve_network_plan(_read_arguments())
         elif args.command == "runtime-execute":
             payload = asyncio.run(execute_network_plan(
                 _read_arguments(),

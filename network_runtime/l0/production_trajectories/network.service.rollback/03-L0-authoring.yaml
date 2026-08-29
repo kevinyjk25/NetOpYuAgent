@@ -1,0 +1,102 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.service.rollback
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for rollback_service
+  labels:
+    runtime-tool-contract: service-rollback-v1
+    runtime-verifier: service-health
+    runtime-preflight-fields: service,environment
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - lan
+  effect:
+    capability: netopyu.tool.rollback_service
+    tool: rollback_service
+    request:
+      service: ${arguments.service}
+      version: ${arguments.version}
+      environment: ${arguments.environment}
+  intent:
+    kind: rollback_service
+    targetFields:
+    - service
+    desiredState:
+      service_health: healthy
+      rollback: complete
+  parameters:
+    service:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    version:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    environment:
+      type: string
+      required: true
+      description: ''
+      enum:
+      - prod
+      - staging
+      - dev
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: netopyu.tool.service_health
+    arguments:
+      service: ${arguments.service}
+      environment: ${arguments.environment}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.service-health
+    arguments:
+      service: ${arguments.service}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation: null
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: manual_intervention
+    compensationFailed: manual_intervention

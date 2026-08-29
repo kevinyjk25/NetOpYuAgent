@@ -327,19 +327,15 @@ async def _metadata_drift_case(
 
     runtime = NetworkRuntime(root / f"binding-drift-{index}.sqlite", backend_factory=factory)
     prepared = await _prepare(runtime, "lan", "grant_user_access", arguments)
-    blocked = False
-    detail = ""
-    try:
-        await _execute(runtime, prepared)
-    except PlanIntegrityError as error:
-        blocked = writes == 0
-        detail = str(error)
+    outcome = await _execute(runtime, prepared)
+    blocked = outcome.state == PlanState.PRECONDITION_CHANGED and writes == 0
+    detail = outcome.error or outcome.state.value
     return _case(
         factories, scenario_id, "approval_binding", zh, en,
         "审批绑定的 Provider 能力/Schema 任一字段变化时必须在写前停止。",
         direct_safe, "blocked" if direct_safe else "changed_contract_invoked",
         direct.provider_calls, direct.error or "Generic approval did not bind provider metadata.",
-        blocked, "blocked", writes, detail,
+        blocked, outcome.state.value, writes, detail, outcome.state.value,
     )
 
 

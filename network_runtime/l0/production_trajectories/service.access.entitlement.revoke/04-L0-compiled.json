@@ -1,0 +1,203 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:4c2334d0577c59c2a891523a375583ab30daa9eca1ad0ad7a42a0e906440c293",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for access_policy_revoke_entitlement",
+    "id": "service.access.entitlement.revoke",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "user_id,app_id",
+      "runtime-tool-contract": "service-entitlement-revoke-v1",
+      "runtime-verifier": "service-entitlement-revoked"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": {
+      "arguments": {
+        "app_id": "${arguments.app_id}",
+        "user_id": "${arguments.user_id}"
+      },
+      "capability": "netopyu.compensator.service-entitlement-snapshot-v1",
+      "tool": "access_policy_restore_entitlement",
+      "verification": {
+        "arguments": {
+          "app_id": "${arguments.app_id}",
+          "user_id": "${arguments.user_id}"
+        },
+        "capability": "netopyu.rollback-verifier.service-entitlement-snapshot-v1",
+        "predicates": [
+          {
+            "expected": true,
+            "field": "restored",
+            "operator": "equals"
+          }
+        ]
+      }
+    },
+    "effect": {
+      "capability": "netopyu.tool.access_policy_revoke_entitlement",
+      "internal": {},
+      "request": {
+        "app_id": "${arguments.app_id}",
+        "change_id": "${arguments.change_id}",
+        "correlation_id": "${arguments.correlation_id}",
+        "expected_revision": "${arguments.expected_revision}",
+        "reason": "${arguments.reason}",
+        "user_id": "${arguments.user_id}"
+      },
+      "tool": "access_policy_revoke_entitlement"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "compensate"
+    },
+    "intent": {
+      "desiredState": {
+        "allowed": false,
+        "roles": []
+      },
+      "kind": "revoke_service_entitlement",
+      "targetFields": [
+        "user_id",
+        "app_id"
+      ]
+    },
+    "parameters": {
+      "app_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "change_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "correlation_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": false,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "expected_revision": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": null,
+        "maximum": null,
+        "minLength": null,
+        "minimum": 0.0,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "integer"
+      },
+      "reason": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": 1,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "user_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "app_id": "${arguments.app_id}",
+          "user_id": "${arguments.user_id}"
+        },
+        "capability": "netopyu.tool.access_policy_get_entitlement",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "lan",
+      "dc"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "app_id": "${arguments.app_id}",
+        "user_id": "${arguments.user_id}"
+      },
+      "capability": "netopyu.verifier.service-entitlement-revoked",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

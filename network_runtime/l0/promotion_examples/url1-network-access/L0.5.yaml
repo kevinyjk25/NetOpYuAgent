@@ -1,0 +1,56 @@
+apiVersion: netopyu.io/l0.5-structured-skill/v1
+kind: StructuredNaturalLanguageSkill
+skillId: url1_network_access
+title: URL1 Network Access Grant
+purpose: Safely grant one user time-bounded access to one VLAN through the reviewed URL1 API.
+profiles:
+  - lan
+parameters:
+  user_id: Existing active user identifier.
+  vlan_id: Explicit VLAN identifier from 1 through 4094.
+  duration_minutes: Requested duration from 30 through 10080 minutes.
+  reason: Human-readable business reason of 5 through 512 characters.
+constraints:
+  - One user and one VLAN per execution.
+  - Human approval is mandatory.
+  - An API response alone is not success; independent readback is required.
+  - Unknown write outcome requires read-only reconciliation, never blind retry.
+workflow:
+  - phase: validate
+    instruction: Validate every documented parameter and resolve critical identities without inference.
+    capabilityOptions: []
+  - phase: preflight
+    instruction: Read current state through an independent observation and preserve revision plus rollback evidence.
+    capabilityOptions: [rest.network-access.get]
+  - phase: approval
+    instruction: Present and bind the exact immutable change before any effect.
+    capabilityOptions: []
+  - phase: effect
+    instruction: Invoke one reviewed effect with only approved and schema-valid inputs.
+    capabilityOptions: [rest.url1.network-access.grant]
+  - phase: verification
+    instruction: Determine success from an independent observation, never from the write response alone.
+    capabilityOptions: [rest.network-access.get]
+  - phase: compensation
+    instruction: On failed verification, restore the exact prior state and independently verify restoration.
+    capabilityOptions: [rest.network-access.restore]
+capabilities:
+  effects: [rest.url1.network-access.grant]
+  observations: [rest.network-access.get]
+  compensations: [rest.network-access.restore]
+safety:
+  risk: medium
+  approvalRequired: true
+  unknownOutcomePolicy: Read-only reconciliation before any retry; never blindly repeat an effect.
+  stopConditions:
+    - Human approval is mandatory.
+    - An API response alone is not success; independent readback is required.
+    - Unknown write outcome requires read-only reconciliation, never blind retry.
+outcomes:
+  success: Verified access state or verified restoration state
+  failure: No unverified success; fail closed or enter an explicit recovery state.
+  rollback: Exact pre-change state independently verified after compensation.
+sourceSkillSha256: sha256:5c3db23d3297cc4e04bb2d76c5ee949f8a2c05dca86387fa412794522a0ce39c
+capabilityCatalogSha256: sha256:b8dcf93fbca6f81133e0fe14ac598618322ca2a8a111428c4b4bf23bb632cff6
+previousStageSha256: sha256:5c3db23d3297cc4e04bb2d76c5ee949f8a2c05dca86387fa412794522a0ce39c
+unresolvedQuestions: []
