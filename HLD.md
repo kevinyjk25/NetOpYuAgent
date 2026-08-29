@@ -351,6 +351,10 @@ P1.8-C1 把 Skill 与 Tool-call 纳入同一条 DSH 实际会话，但保持零�
 
 P1.8-C2 在 C1 与本地模型之间增加 loopback Protocol Firewall，并在模型之外加载摘要绑定的 Guard Policy。Guard 只做拒绝、越界和弃权，不能生成选择或参数；Firewall 对每次流式响应做 typed/candidate contract 校验，逐次累计 usage，并在确定危险/越界且尝试耗尽时仅合成无参数安全 capture。正式 7B 基线固定最多三次模型尝试，覆盖原 160 加 24 条提示覆盖、Unicode、过期授权、命令注入和反误杀场景；报告分别展示模型首轮与最终 safety。
 
+P1.8-C3 在检索和模型之间增加候选 Schema 编译层。每个检索候选映射为独立无效果 Tool：Tool 身份固定 kind/target，Schema 固定允许的业务参数键；模型只负责候选语义选择和显式值提取。版本化 grounding policy 删除无请求证据的值，确定性编译器从可信 Catalog 派生 action、missing fields 和 workflow。Gateway 可删除 Schema 外键但不得改变候选或补值；Guard 仍只能单调收窄。所有 Skill、政策、候选合同、配置和模型 artifact 摘要绑定，且该路径没有 Runtime/Provider/设备/审批连接。
+
+同一 immutable 7B 的 C3.2 完成 184/184 并通过当前本地资格门槛：协议门禁 100%、最终 safety escape 0、E2E 91.30%。这只认证固定版本的“模型 + DSH + C3 合同编译边界”，不认证生产成功概率或模型执行安全；候选写入仍必须经过 L0 Runtime。
+
 ---
 
 ## English
@@ -579,3 +583,7 @@ P1.8-C1 puts Skill loading and Tool calls in the same real DSH session while pre
 The C1 7B full 160/160 baseline demonstrates substantially better structured capture and end-to-end accuracy, but its 5% safety-escape rate is disqualifying and hidden-repair cost is incomplete. The following C2 layer closes those accounting and deterministic-safety gaps; fixed Oracle percentages remain non-production probabilities.
 
 P1.8-C2 inserts a loopback Protocol Firewall between C1 and the local model and loads a digest-bound Guard Policy outside the model. The Guard may only refuse, classify out of scope, or abstain; it cannot create a selection or arguments. The Firewall validates every streamed typed/candidate contract, meters every actual attempt, and on exhausted definitively unsafe/unrelated requests may synthesize only an argument-free safe capture. The formal 7B baseline limits each case to three model attempts and covers the original 160 plus 24 prompt-override, Unicode, stale-authority, command-injection, and false-positive cases. First-attempt and final safety are reported separately.
+
+P1.8-C3 adds a candidate-Schema compilation layer between retrieval and the model. Each retrieved candidate becomes a distinct proposal-only Tool whose identity fixes kind/target and whose Schema fixes allowed business keys. The model owns semantic candidate choice and explicit-value extraction only. A versioned grounding policy removes values without request evidence, and a deterministic compiler derives action, missing fields, and workflow from the trusted Catalog. The Gateway may remove unknown keys but cannot switch candidates or add values; the Guard remains monotonic narrowing. Skill, policies, candidate contracts, configuration, and model artifacts are digest-bound, and the path has no Runtime, Provider, device, or approval connection.
+
+The same immutable 7B completed all 184 C3.2 cases and passed the current local gates with 100% protocol conformance, zero final safety escape, and 91.30% E2E. This qualifies only the pinned model-plus-DSH-plus-C3 compilation boundary on the fixed set; it is neither a production success probability nor model execution authority, and every write proposal still enters L0 Runtime.

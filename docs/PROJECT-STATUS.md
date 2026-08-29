@@ -65,7 +65,7 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 | P1.5 真实网络/厂商集成 | ⬜ | 见后续路线图 | 生产网络写入前必需 |
 | P1.6 分布式可靠性与 HA/DR | ⬜ | 见后续路线图 | 多实例生产部署前必需 |
 | P1.7 安全、审计、可观测性与 SLO | ⬜ | 见后续路线图 | 生产前必需 |
-| P1.8 L1/模型资格评测 | 🟡 | A/B1/B2/C1 完成 7B 160 基线；C2 完成 160+24 对抗集，最终 safety escape 0、E2E 61.96% | 协议 86.41%、workflow 50%、追问 36.67%；更强实用模型完整基线仍待完成 |
+| P1.8 L1/模型资格评测 | ✅ | C3.2 完成同一 7B 的 184/184：协议门禁 100%、最终 safety escape 0、E2E 91.30%，通过当前本地资格门槛 | 固定集通过不等于生产概率；跨域冲突、陈旧状态、长对话和多模型持续回归仍需扩展 |
 
 ### 3. 已完成能力清单（Done）
 
@@ -158,7 +158,7 @@ B-ready 测试把 fixture 复制到仓库外临时目录并以独立进程运行
 
 | 证据 | 当前结果 | 说明 |
 |---|---:|---|
-| Python gate | 316 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8 reference/B1/B2/C1/C2 DSH shadow、恢复等 |
+| Python gate | 333 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8 reference/B1/B2/C1/C2/C3 DSH shadow、恢复等 |
 | Core-72：DSH only | 5/64（7.8%） | 固定风险/故障 Oracle |
 | Core-72：DSH + Runtime | 64/64（100%） | 固定风险/故障 Oracle |
 | 有效操作 | 8/8 vs 8/8 | 两条路径都能完成无故障请求 |
@@ -170,7 +170,7 @@ B-ready 测试把 fixture 复制到仓库外临时目录并以独立进程运行
 
 Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**不测**模型的意图识别、Skill 选择、追问质量或参数提取准确率。P1.4-B-ready 后最近 3 个不同执行代码指纹趋势为 `stable`：Runtime 仍为 64/64，三版本本机中位 p50 7.599 ms、p95 8.680 ms；P1.8-B1 后复核的 50 样本 p50 为 7.281 ms。单次机器时延不是生产 SLO。
 
-#### 3.6 P1.8-A/B1/B2/C1/C2 L1/模型资格层
+#### 3.6 P1.8-A/B1/B2/C1/C2/C3 L1/模型资格层
 
 - 51 个不同语义原型、版本化 160 条语言/措辞 Oracle：28 Skill、36 Tool、32 workflow、30 clarification、20 safety refusal、14 out-of-scope；
 - 中文 75、英文 51、中英混合 34，覆盖 LAN/DC/WAN，数据集与生成源码精确一致；
@@ -194,6 +194,10 @@ Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**
 - P1.8-C2 新增版本化 Guard Policy、typed/candidate Protocol Firewall、完整实际调用计量和 24 条对抗/反误杀场景；Guard 只能拒绝、越界或弃权，不能选择 Capability 或补参数；
 - C2 7B 完成 184/184：原 160 子集选择/参数 F1/E2E 为 65.62%/69.09%/58.75%，最终 safety escape 0；新增 24 条 E2E 83.33%，整体 E2E 61.96%；
 - C2 仍不合格：协议有效率 86.41%、workflow 50%、clarification recall 36.67%；模型首轮 safety escape 9.38%，Guard 后才为 0。267 次模型调用、34 次修复和 121 次无效合同尝试已完整计量；版本化结果为 `data/l1_dsh_guarded_tool_observations.json`。
+- P1.8-C3 为本次 top-12 的每个候选动态生成独立无效果 Tool；Tool 身份固定 kind/target，候选专属 Schema 固定允许参数键，模型只保留候选选择与显式值提取；确定性 compiler 派生 action、missing fields 和 workflow；
+- 版本化 argument grounding 只接受请求中存在的证据，删除无来源值并执行受审别名归一化；Schema 外字段可被删除，但网关不得改变模型选择的候选或补值。Guard 仍是只收窄层，整个 C3 路径无 Runtime/Provider/设备/审批权限；
+- C3.2 同一 immutable 7B 完成 184/184 并通过当前门槛：协议门禁 100%、selection 94.12%、parameter F1 93.06%、clarification precision/recall 93.55%/96.67%、missing fields 93.33%、workflow 90.62%、E2E 91.30%、新增 24 条 E2E 100%、最终 safety escape 0；
+- C3.2 共 193 次模型调用、9 次修复；grounding 删除 40 个无来源字段，Schema 删除 24 个越界字段。模型首轮 safety escape 3.12%，最终 0 仍来自确定性 Guard。p50/p95 为 4.488/6.850 秒；版本化证据为 `data/l1_dsh_schema_compiler_observations.json`。
 
 ### 4. 后续路线图（To-do）
 
@@ -272,13 +276,14 @@ Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**
 - **P1.8-B2 已完成**：受控 Skill loading + 只记录 proposal、永不调用 Runtime/Provider 的 capture Tool，已完成 7B 160/160 失败基线并以 27B 单条证明成功路径；
 - **P1.8-C1 已完成**：确定性预装 L0.5 Skill + 类型化候选 Tool + 有界协议 Governor，完成同一 7B 的 160/160 对照；协议显著改善但 safety escape 5%，明确不合格；
 - **P1.8-C2 已完成**：确定性安全/领域 Guard、最多三次调用的 Protocol Firewall、完整 usage 计量及 24 条对抗/反误杀集；最终 safety escape 0，但 7B 仍未通过协议和语义门槛；
+- **P1.8-C3 已完成**：候选专属 Schema、候选身份绑定、显式参数 grounding、确定性 action/missing-field/workflow 编译和全调用计量；同一 7B 的 184/184 当前资格门槛全部通过；
 - 对 27B 和云模型分别运行完整准确率、拒绝率、token/成本和时延基线；
 - 已加入首批提示覆盖、Unicode 混淆、过期授权、命令注入和安全术语反误杀；仍需扩展跨域冲突、状态陈旧和长对话；
-- 继续降低协议失败和尾时延，恢复 workflow；不得通过 Oracle 特判、放宽合同或让 Guard 选择 Capability 来提高成绩；
+- 继续扩展未见分布、跨轮对话和 Catalog 漂移回归；不得通过 Oracle 特判、放宽合同或让 Guard 选择 Capability 来提高成绩；
 - L1 输出只能进入 L0 严格解析/校验，任何模型都不能成为审批、验证或回滚的权威；
 - 对成熟 L1 建立可审计的 L0.5 候选生成，但仍需机器门禁和人工 Promotion。
 
-当前核心判据已满足：A/B1/B2/C1 均有完整 7B 160 基线，C2 另有 184 条完整、指纹绑定基线并将固定集最终 safety escape 降为 0。P1.8 整体保持 🟡，直到至少一个可接受成本的更强模型完成全部 184 条、保持安全边界并通过协议与语义绝对门槛。
+当前本地核心判据已满足：C3.2 让同一可接受成本的 immutable 7B 完成全部 184 条，并同时通过协议、语义和最终安全绝对门槛，P1.8 本地范围标记完成。该结论只限定于摘要绑定的模型、DSH、Catalog、政策和固定数据集；生产前仍需持续多模型/未见分布测试，且任何候选执行都必须进入 L0 Runtime。
 
 #### P2 可选增强
 
@@ -360,7 +365,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 | P1.5 Real network/vendor integration | ⬜ | See roadmap | Required before production network writes |
 | P1.6 Distributed reliability and HA/DR | ⬜ | See roadmap | Required for multi-instance production |
 | P1.7 Security, audit, observability and SLOs | ⬜ | See roadmap | Required before production |
-| P1.8 L1/model qualification | 🟡 | A/B1/B2/C1 have full 7B 160-case baselines; C2 adds 24 adversarial cases, zero final safety escape, and 61.96% overall E2E | Protocol is 86.41%, workflow 50%, clarification recall 36.67%; a stronger-model full baseline remains |
+| P1.8 L1/model qualification | ✅ | C3.2 completes 184/184 with the same 7B: 100% protocol gates, zero final safety escape, 91.30% E2E, and passes the current local gates | Fixed-set qualification is not a production probability; unseen, stale-state, cross-domain, long-context, and multi-model regression remain |
 
 ### 3. Done
 
@@ -371,7 +376,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - All 21 keep source-controlled L1 prose, structured-natural-language L0.5, compiled L0, reports, exact round trips, and hash chains.
 - Containerlab covers campus/IDC/DMZ/dual-ISP OSPF/eBGP, topology/path queries, and BGP EVPN/VXLAN L2VPN.
 - Service capabilities are separated into MCP Providers; Network Observer and Network Actor are distinct boundaries.
-- The latest local gate reports 316 tests plus 81 subtests, 21/21 L0 bindings, 21/21 readable trajectories, 21/21 exact round trips, 21/21 Promotion-ready capabilities, and a passing retirement gate.
+- The latest local gate reports 333 tests plus 81 subtests, 21/21 L0 bindings, 21/21 readable trajectories, 21/21 exact round trips, 21/21 Promotion-ready capabilities, and a passing retirement gate.
 - Schema-v9 plans bind requester/policy plus Provider release/manifest/qualification/deployment evidence. Signature tampering, replay, identity/release/deployment switching, critical self-approval, missing tickets, and invalid windows fail closed.
 - P1.3-B1 verifies human OIDC access tokens and separate Gateway attestations over pinned JWKS, cross-binds them by `act_sub + subject_jti`, applies external PDP decisions to reads/prepares/approvals, and qualifies ticket revision/window/scope/risk through a Change Authority. Credentials remain model-hidden.
 - The B2-ready package adds per-session Gateway minting, explicit CA/mTLS with owner-only client keys, an offline secret-safe Doctor, and a no-effect live contract qualification command.
@@ -379,6 +384,8 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - P1.8-B2 adds an exact DSH Skill plus proposal-only capture path with no Runtime/Provider authority, stable configuration fingerprints, transcript sequence/schema/receipt gates, a complete 160-case 7B failure baseline, and a fully successful one-case `qwen3.6:27b` framework smoke.
 - P1.8-C1 adds a digest-bound preloaded L0.5 Skill, five typed proposal-only Tools, trusted Catalog metadata compilation, and a loopback protocol Governor. Its full 7B run improves capture/schema/contract/E2E to 98.75%/80%/68.13%/36.88%, with zero forbidden or duplicate Tool calls, but remains unqualified with 5% safety escape.
 - P1.8-C2 adds a versioned safety/domain Guard, typed/candidate Protocol Firewall, complete actual-attempt metering, and 24 adversarial/false-positive cases. The full 184-case 7B run has zero final safety escape and 61.96% E2E, but only 86.41% protocol validity and remains unqualified.
+- P1.8-C3 gives each retrieved candidate a distinct proposal-only Tool whose identity fixes kind/target and whose Schema fixes allowed business keys. A versioned grounding policy removes unsupported values, and a deterministic compiler derives action, missing fields, and workflow without selecting for the model or granting authority.
+- C3.2 completes all 184 cases and passes the current local gates: all protocol gates 100%, selection 94.12%, argument F1 93.06%, clarification precision/recall 93.55%/96.67%, workflow 90.62%, E2E 91.30%, adversarial E2E 100%, and final safety escape zero. There were 193 model calls and nine repairs; grounding removed 40 unsupported fields and Schema constraining removed 24 unknown fields. First-attempt safety escape remains 3.12%, so the Guard and L0 boundary remain essential.
 - Core-72 records DSH only at 5/64 controls (7.8%) and DSH + Runtime at 64/64 (100%), while both complete 8/8 valid operations.
 
 Core-72 deliberately fixes L1 decisions. It measures the deterministic Runtime increment, not LLM intent recognition, Skill selection, clarification, or parameter extraction. The P1.4-B-ready three-fingerprint trend is `stable`: Runtime remains 64/64, with a local median p50/p95 of 7.599/8.680 ms; the P1.8-B1 follow-up measured 7.281 ms p50. This is not a production SLO.
@@ -407,7 +414,7 @@ Add mTLS, centralized secrets, encryption, egress policy, external append-only/W
 
 #### P1.8 L1 and model qualification
 
-P1.8-A, B1, B2, and C1 provide complete, fingerprint-bound 160-case 7B baselines. C2 adds a complete 184-case run: the comparable base reaches 58.75% E2E and zero final safety escape, while the 24-case adversarial/false-positive extension reaches 83.33%. Raw first-attempt safety escape remains 9.38%, the deterministic Guard performs the closure, protocol validity is 86.41%, workflow is 50%, and clarification recall is 36.67%. All 267 real attempts, 34 repairs, and 121 invalid-contract attempts are metered. A practical stronger-model 184-case baseline plus broader stale/cross-domain/long-conversation work remain. Model quality and Guard rules must never replace Runtime safety.
+P1.8-C3.2 completes the current local qualification scope with the same immutable 7B artifact. All 184 cases pass the protocol, semantic, and final-safety gates; overall E2E is 91.30% and the adversarial extension is 100%. Candidate identity, argument-key bounds, grounding, missing fields, and workflow are deterministic, while the model retains semantic selection and explicit-value extraction. The record is fingerprint-bound and fully metered. Broader stale-state, cross-domain-conflict, long-conversation, Catalog-drift, unseen-distribution, and alternative-model runs remain continuous hardening, not prerequisites for the now-complete local phase. Model qualification and Guard results never replace Runtime safety.
 
 #### Optional P2 enhancements
 

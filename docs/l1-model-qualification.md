@@ -173,13 +173,29 @@ P1.8-C2 将模型原始行为和确定性安全结果分开计量。版本化 Gu
 
 C2 完成了 160 条原基线和 24 条新增对抗/反误杀集，共 184/184；新增集 E2E 83.33%，整体 E2E 61.96%。Guard 分类准确率 100%、固定集误杀 0%、最终 safety escape 0，但模型首轮 safety escape 仍为 9.38%，不能把最终结果表述成模型安全。267 次真实模型调用、34 次外层修复、121 次合同无效尝试的 usage 记录完整率为 100%。协议有效率只有 86.41%，workflow 和尾时延退步，因此 7B 继续不合格。版本化结果见 [`data/l1_dsh_guarded_tool_observations.json`](../data/l1_dsh_guarded_tool_observations.json)。
 
+P1.8-C3 把通用决策 Envelope 拆成候选专属 Tool：检索器先返回最多 12 个受信候选，DSH 再为每个候选生成一个 `select_candidate_NN`。Tool 名称与本次摘要绑定合同固定候选 kind/target；该 Tool 的 `additionalProperties=false` Schema 只列该候选允许的业务参数键，所有键在模型层保持 optional，使未显式给出的必填值可以由编译器形成 clarification，而不是诱导模型猜值。两个独立终态 Tool 只表达 refusal 和 out-of-scope，且不接受业务参数。
+
+模型仍负责候选语义选择和显式值提取。网关不得替模型选择正常候选：它只允许删除候选 Schema 外键，并保留模型实际 Tool 身份和已知键。随后版本化 grounding policy 逐字段证明值来自请求，删除无来源值并执行受审别名/casefold 归一化；确定性 compiler 从可信 Catalog 派生 `select_skill/select_tool/clarify`、missing fields 和 workflow。候选支配规则只消除受审的 Skill/primitive 重复，C3 版本化 Schema overlay 也不会修改冻结的 C1/C2 Catalog。所有政策、Skill、系统 Prompt、候选合同、DSH 配置和模型 artifact 都进入摘要/fingerprint。
+
+| 同一 7B、同一 184 条 | C2 | C3.2 | 变化 |
+|---|---:|---:|---:|
+| 协议有效 / 严格输出 | 86.41% / 85.33% | **100% / 100%** | +13.59 / +14.67pp |
+| 选择 / 参数 F1 | 63.73% / 67.46% | **94.12% / 93.06%** | +30.39 / +25.60pp |
+| 追问 precision / recall | 84.62% / 36.67% | **93.55% / 96.67%** | +8.93 / +60pp |
+| missing fields / workflow | 30% / 50% | **93.33% / 90.62%** | +63.33 / +40.62pp |
+| 最终 safety escape / E2E | 0% / 61.96% | **0% / 91.30%** | 0 / +29.34pp |
+| 模型调用 / 修复 | 267 / 34 | **193 / 9** | -74 / -25 |
+| 本机 p50 / p95 | 4.510 / 12.909 秒 | **4.488 / 6.850 秒** | -0.021 / -6.059 秒 |
+
+C3.2 完成 184/184 并通过当前绝对门槛；新增 24 条对抗/反误杀集 E2E 100%，所有协议门禁均为 100%，禁止/重复 Tool 和提前文本为 0。usage 记录完整率 100%；grounding 删除 40 个无来源字段，Schema 边界删除 24 个越界字段，16 次调用以相同候选和已知值安全收窄。模型首轮 safety escape 仍为 3.12%，最终 0 不能表述成模型原生安全。版本化证据见 [`data/l1_dsh_schema_compiler_observations.json`](../data/l1_dsh_schema_compiler_observations.json)。
+
 ### 8. 当前完成边界
 
 P1.8-A 已认证的对象是“OpenAI-compatible 模型 + 本文版本化参考 L1 Prompt + 当前 DSH Skill/Tool Catalog”。它直接调用与 DSH 设置相同的本地 Ollama endpoint，但没有经过 DSH 的完整 session loop、系统 Prompt 合成、Skill loading 与 tool-call round。因此这些分数不能写成“DSH UI 端到端准确率”。
 
 P1.8-B1 已完成 no-tool Harness-in-the-loop 对照：官方 DSH Agent/Session/LLM loop 把最终文本投影到同一 `L1Decision`，但所有 Skill/Tool 和 effect 都关闭，因此它只量化 DSH Prompt/session composition。
 
-P1.8-B2 的受控 Skill + capture Tool 构建、成功路径验证和 7B 160/160 完整失败基线也已完成。C1 证明预装结构化 Skill 和类型化 Tool 能缩小协议 GAP；C2 进一步把安全拒绝、领域边界、完整重试成本和 24 条对抗/反误杀场景纳入确定性控制。B2/C1/C2 均不连接 Runtime/Provider，仍不具有执行权。P1.8 整体继续保持黄色：C2 已把固定集最终 safety escape 降为 0，但协议、workflow、追问、参数和 E2E 仍未通过，仍需一个可接受成本的更强模型完成 184 条完整可比较基线。
+P1.8-B2 的受控 Skill + capture Tool 构建、成功路径验证和 7B 160/160 完整失败基线也已完成。C1 证明预装结构化 Skill 和类型化 Tool 能缩小协议 GAP；C2 把安全拒绝、领域边界、完整重试成本和 24 条对抗/反误杀场景纳入确定性控制；C3 则把候选身份、允许参数、参数来源、缺失字段与 workflow 收口到可审查合同。C3.2 已让同一可接受成本的 7B 在 184 条上通过当前协议、语义和最终安全门槛，因此 P1.8 本地阶段完成。全部路径仍不连接 Runtime/Provider、没有执行权；固定集通过不代表生产成功概率，跨域冲突、状态陈旧、长对话、Catalog 漂移和未见分布属于持续资格扩展。
 
 ## English
 
@@ -227,8 +243,12 @@ P1.8-C2 reports raw model behavior separately from deterministic safety outcomes
 
 The same 7B completed 184/184 C2 cases: the original comparable 160 plus 24 adversarial/false-positive cases. On the original 160, strict output reached 85%, selection 65.62%, argument F1 69.09%, clarification recall 36.67%, missing-field accuracy 30%, out-of-scope accuracy 100%, final safety escape zero, and E2E 58.75%. Workflow regressed to 50%, while p50/p95 became 4.646/13.083 seconds. The added set reached 83.33% E2E; all 184 reached 61.96%. Guard classification was 100% with zero fixed-set false positives, but first-attempt model safety escape remained 9.38%. All 267 model attempts, 34 outer repairs, and 121 invalid-contract attempts had complete usage accounting. Protocol validity remained only 86.41%, so the model is still unqualified. See [`data/l1_dsh_guarded_tool_observations.json`](../data/l1_dsh_guarded_tool_observations.json).
 
+P1.8-C3 replaces the generic decision envelope with one proposal-only Tool per retrieved candidate. Tool identity fixes candidate kind and target; its `additionalProperties=false` Schema exposes only that candidate's business keys. Fields remain optional at the model boundary so the compiler can produce clarification rather than encourage guessed required values. The model owns semantic candidate choice and explicit-value extraction. The gateway can delete unknown keys without changing the selected Tool, a versioned grounding policy removes values unsupported by the request, and the deterministic compiler derives action, missing fields, and workflow from the trusted Catalog. Guard authority remains limited to refusal, out-of-scope classification, and abstention.
+
+The same immutable 7B completed 184/184 C3.2 cases and passed the current absolute gates. Protocol and strict output were 100%, selection 94.12%, argument F1 93.06%, clarification precision/recall 93.55%/96.67%, missing-field accuracy 93.33%, workflow 90.62%, final safety escape zero, and E2E 91.30%; the adversarial extension reached 100% E2E. Versus C2, model calls fell from 267 to 193, repairs from 34 to 9, and local p50/p95 from 4.510/12.909 to 4.488/6.850 seconds. Grounding removed 40 unsupported fields and Schema constraining removed 24 unknown fields while preserving candidate identity. First-attempt safety escape remains 3.12%; final zero therefore does not imply native model safety. See [`data/l1_dsh_schema_compiler_observations.json`](../data/l1_dsh_schema_compiler_observations.json).
+
 ### 6. Current completion boundary
 
 P1.8-A qualifies an OpenAI-compatible model under the versioned reference L1 prompt and the current DSH Skill/Tool catalog. It uses the same local Ollama endpoint as DSH, but it does not traverse DSH's complete session loop, system-prompt composition, Skill loading, or tool-call rounds; its score is not DSH UI end-to-end accuracy.
 
-P1.8-B1 provides the no-tool Harness-in-the-loop comparison and measures DSH prompt/session composition. B2 measures real Skill loading and tool-call rounds. C1 measures typed protocol control. C2 adds deterministic safety narrowing, complete attempt metering, and a 24-case adversarial/false-positive extension while retaining raw first-attempt evidence. A, B1, B2, C1, and C2 remain non-authoritative and separate from execution. P1.8 remains yellow until a practical stronger model completes the full 184-case set with zero final safety escape and all absolute protocol and semantic gates.
+P1.8-B1 provides the no-tool Harness-in-the-loop comparison and measures DSH prompt/session composition. B2 measures real Skill loading and tool-call rounds. C1 measures typed protocol control. C2 adds deterministic safety narrowing, complete attempt metering, and a 24-case adversarial/false-positive extension while retaining raw first-attempt evidence. C3 binds candidate identity and argument keys in dynamic Tools, grounds values, and deterministically derives missing fields and workflow. The same practical 7B now passes all current 184-case gates, completing the local P1.8 phase. Every stage remains non-authoritative and separate from execution; unseen distributions, stale state, cross-domain conflict, long conversations, Catalog drift, and alternative models remain continuous qualification work.
