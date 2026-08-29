@@ -14,8 +14,10 @@ from network_runtime.contracts import (
     ApprovalError,
     OutcomeIndeterminateError,
     PlanIntegrityError,
+    PreparedPlan,
     ResourceConflictError,
     StateTransitionError,
+    sha256_json,
 )
 from network_runtime.journal import NetworkJournal
 from network_runtime.compensators import REGISTRY as COMPENSATORS
@@ -148,16 +150,25 @@ class NetworkRuntimeTests(unittest.TestCase):
         self.assertEqual(wrong["status"], "rejected")
         self.assertEqual(runtime.recent(), [])
 
-    def test_schema_v6_plan_binds_provider_capability_schema_intent_and_l0_steps(self) -> None:
+    def test_schema_v9_plan_binds_identity_policy_provider_release_intent_and_l0_steps(self) -> None:
         prepared = self.prepare("lan", "restart_service", {
             "service": "crm", "environment": "staging",
         })
         plan = prepared["plan"]
-        self.assertEqual(plan["schema_version"], 6)
+        self.assertEqual(plan["schema_version"], 9)
+        self.assertEqual(plan["requester_identity"]["subject_id"], "local-effect-runtime")
+        self.assertEqual(plan["requester_digest"], prepared["identity_binding"]["requester_digest"])
+        self.assertEqual(plan["approval_mode"], "single")
+        self.assertEqual(plan["approval_policy_id"], "netopyu.effect-approval")
+        self.assertTrue(plan["approval_policy_hash"].startswith("sha256:"))
         self.assertEqual(plan["provider_role"], "actor")
         self.assertTrue(plan["capability_id"])
         self.assertTrue(plan["capability_version"])
         self.assertEqual(plan["provider_identity"], "profile-mock")
+        self.assertTrue(plan["provider_release_digest"].startswith("unmanaged-local:"))
+        self.assertEqual(plan["provider_manifest_digest"], "unmanaged-local")
+        self.assertEqual(plan["provider_qualification_digest"], "unmanaged-local")
+        self.assertEqual(plan["provider_deployment_digest"], "unmanaged-local")
         self.assertTrue(plan["input_schema_digest"].startswith("sha256:"))
         self.assertTrue(plan["output_schema_digest"].startswith("sha256:"))
         self.assertEqual(plan["l0_skill_id"], "network.service.restart")
@@ -186,6 +197,137 @@ class NetworkRuntimeTests(unittest.TestCase):
             "validate_parameters", "compile_intent", "preflight", "approval",
             "revalidate", "execute", "execute", "verify", "verify", "audit",
         ])
+
+    def test_schema_v8_plan_hash_remains_read_compatible(self) -> None:
+        prepared = self.prepare("lan", "restart_service", {
+            "service": "crm", "environment": "staging",
+        })
+        legacy = dict(prepared["plan"])
+        legacy["schema_version"] = 8
+        legacy.pop("provider_deployment_digest")
+        immutable = dict(legacy)
+        immutable.pop("plan_hash")
+        immutable.pop("state")
+        legacy["plan_hash"] = sha256_json(immutable)
+        loaded = PreparedPlan.from_dict(legacy)
+        self.assertEqual(loaded.schema_version, 8)
+        self.assertEqual(loaded.provider_deployment_digest, "legacy-unbound")
+
+    def test_signed_provider_release_must_authorize_selected_l0_contract(self) -> None:
+        async def backend_factory(profile):
+            backend = await open_backend(profile)
+            backend.metadata["restart_service"] = dict(backend.metadata["restart_service"])
+            backend.metadata["restart_service"].update({
+                "provider_release_digest": "sha256:" + "a" * 64,
+                "provider_manifest_digest": "sha256:" + "b" * 64,
+                "provider_qualification_digest": "sha256:" + "c" * 64,
+                "provider_l0_contract_hashes": ["sha256:" + "0" * 64],
+            })
+            return backend
+
+        runtime = self.runtime(backend_factory=backend_factory)
+        prepared = self.prepare_with(runtime, "lan", "restart_service", {
+            "service": "crm", "environment": "staging",
+        })
+        self.assertEqual(prepared["status"], "rejected")
+        self.assertIn("does not authorize this L0 contract", prepared["errors"][0])
+        self.assertEqual(runtime.recent(), [])
+
+    def test_provider_release_switch_after_approval_is_terminal_without_write(self) -> None:
+        opens = 0
+        writes = 0
+        l0 = L0_SKILLS.for_tool("lan", "restart_service")
+        self.assertIsNotNone(l0)
+
+        async def backend_factory(profile):
+            nonlocal opens, writes
+            opens += 1
+            backend = await open_backend(profile)
+            metadata = dict(backend.metadata["restart_service"])
+            backend.metadata["restart_service"] = metadata
+            metadata.update({
+                "provider_release_digest": "sha256:" + ("a" if opens == 1 else "d") * 64,
+                "provider_manifest_digest": "sha256:" + "b" * 64,
+                "provider_qualification_digest": "sha256:" + "c" * 64,
+                "provider_l0_contract_hashes": [l0.contract_hash],
+            })
+            original = backend.callables["restart_service"]
+
+            async def counted(arguments):
+                nonlocal writes
+                writes += 1
+                return await original(arguments)
+
+            backend.callables["restart_service"] = counted
+            return backend
+
+        runtime = self.runtime(backend_factory=backend_factory)
+        prepared = self.prepare_with(runtime, "lan", "restart_service", {
+            "service": "crm", "environment": "staging",
+        })
+        self.assertEqual(prepared["status"], "plan_ready")
+        plan = prepared["plan"]
+        outcome = run(runtime.execute(
+            plan_id=plan["plan_id"], plan_hash=plan["plan_hash"],
+            execution_nonce=prepared["execution_nonce"],
+            approval_request_id="release-drift",
+            approval_actor="operator",
+            allow_destructive=True,
+        ))
+        self.assertEqual(outcome.state, PlanState.PRECONDITION_CHANGED)
+        self.assertEqual(writes, 0)
+        self.assertIn("write was not sent", outcome.error)
+        inspected = runtime.inspect(plan["plan_id"])
+        self.assertEqual(inspected["plan"]["state"], "precondition_changed")
+        self.assertTrue(runtime.audit(plan["plan_id"])["ok"])
+
+    def test_provider_deployment_switch_after_approval_is_terminal_without_write(self) -> None:
+        opens = 0
+        writes = 0
+        l0 = L0_SKILLS.for_tool("lan", "restart_service")
+        self.assertIsNotNone(l0)
+
+        async def backend_factory(profile):
+            nonlocal opens, writes
+            opens += 1
+            backend = await open_backend(profile)
+            metadata = dict(backend.metadata["restart_service"])
+            backend.metadata["restart_service"] = metadata
+            metadata.update({
+                "provider_release_digest": "sha256:" + "a" * 64,
+                "provider_manifest_digest": "sha256:" + "b" * 64,
+                "provider_qualification_digest": "sha256:" + "c" * 64,
+                "provider_deployment_digest": (
+                    "sha256:" + ("d" if opens == 1 else "e") * 64
+                ),
+                "provider_l0_contract_hashes": [l0.contract_hash],
+            })
+            original = backend.callables["restart_service"]
+
+            async def counted(arguments):
+                nonlocal writes
+                writes += 1
+                return await original(arguments)
+
+            backend.callables["restart_service"] = counted
+            return backend
+
+        runtime = self.runtime(backend_factory=backend_factory)
+        prepared = self.prepare_with(runtime, "lan", "restart_service", {
+            "service": "crm", "environment": "staging",
+        })
+        plan = prepared["plan"]
+        self.assertEqual(plan["provider_deployment_digest"], "sha256:" + "d" * 64)
+        outcome = run(runtime.execute(
+            plan_id=plan["plan_id"], plan_hash=plan["plan_hash"],
+            execution_nonce=prepared["execution_nonce"],
+            approval_request_id="deployment-drift",
+            approval_actor="operator",
+            allow_destructive=True,
+        ))
+        self.assertEqual(outcome.state, PlanState.PRECONDITION_CHANGED)
+        self.assertEqual(writes, 0)
+        self.assertTrue(runtime.audit(plan["plan_id"])["ok"])
 
     def test_plan_hash_nonce_and_terminal_state_are_one_shot(self) -> None:
         prepared = self.prepare("lan", "grant_user_access", {

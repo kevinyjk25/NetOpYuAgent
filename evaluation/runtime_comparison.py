@@ -36,7 +36,6 @@ from network_runtime import NetworkRuntime, PlanState
 from network_runtime.contracts import (
     ApprovalError,
     OutcomeIndeterminateError,
-    PlanIntegrityError,
 )
 from network_runtime.l0_skills import REGISTRY as L0_SKILLS
 
@@ -334,20 +333,16 @@ async def _provider_drift(root: Path) -> ScenarioObservation:
 
     runtime = NetworkRuntime(root / "provider-drift.sqlite", backend_factory=factory)
     prepared = await _prepare(runtime, "grant_user_access", arguments)
-    blocked = False
-    detail = ""
-    try:
-        await _execute(runtime, prepared)
-    except PlanIntegrityError as error:
-        blocked = writes == 0
-        detail = str(error)
+    outcome = await _execute(runtime, prepared)
+    blocked = outcome.state == PlanState.PRECONDITION_CHANGED and writes == 0
+    detail = outcome.error or outcome.state.value
     return ScenarioObservation(
         "provider-contract-drift", "approval_binding", "审批后 Provider 漂移",
         "Provider drift after approval",
         "审批后 Provider 身份或契约变化时不得发送写操作。",
         _observation(direct_safe, "blocked" if direct_safe else "write_sent_to_changed_provider",
                      direct.provider_calls, direct.error or "No provider-contract binding."),
-        _observation(blocked, "blocked", writes, detail),
+        _observation(blocked, outcome.state.value, writes, detail, outcome.state.value),
     )
 
 

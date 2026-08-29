@@ -10,7 +10,7 @@ from enum import StrEnum
 from typing import Any
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 9
 
 
 def utc_now() -> str:
@@ -136,6 +136,10 @@ class PreparedPlan:
     tool_version: str
     action_type: str
     provider_identity: str
+    provider_release_digest: str
+    provider_manifest_digest: str
+    provider_qualification_digest: str
+    provider_deployment_digest: str
     input_schema_digest: str
     output_schema_digest: str
     capability_id: str
@@ -157,6 +161,12 @@ class PreparedPlan:
     step_contract: tuple[dict[str, Any], ...]
     workflow_run_id: str | None
     workflow_template_hash: str | None
+    requester_identity: dict[str, Any]
+    requester_digest: str
+    approval_mode: str
+    approval_policy_id: str
+    approval_policy_version: str
+    approval_policy_hash: str
     created_at: str
     expires_at: str
     plan_hash: str
@@ -173,6 +183,10 @@ class PreparedPlan:
         tool_version: str,
         action_type: str,
         provider_identity: str,
+        provider_release_digest: str,
+        provider_manifest_digest: str,
+        provider_qualification_digest: str,
+        provider_deployment_digest: str,
         input_schema_digest: str,
         output_schema_digest: str,
         capability_id: str,
@@ -194,6 +208,12 @@ class PreparedPlan:
         step_contract: tuple[dict[str, Any], ...],
         workflow_run_id: str | None,
         workflow_template_hash: str | None,
+        requester_identity: dict[str, Any],
+        requester_digest: str,
+        approval_mode: str,
+        approval_policy_id: str,
+        approval_policy_version: str,
+        approval_policy_hash: str,
         created_at: str,
         expires_at: str,
     ) -> "PreparedPlan":
@@ -205,6 +225,10 @@ class PreparedPlan:
             "tool_version": tool_version,
             "action_type": action_type,
             "provider_identity": provider_identity,
+            "provider_release_digest": provider_release_digest,
+            "provider_manifest_digest": provider_manifest_digest,
+            "provider_qualification_digest": provider_qualification_digest,
+            "provider_deployment_digest": provider_deployment_digest,
             "input_schema_digest": input_schema_digest,
             "output_schema_digest": output_schema_digest,
             "capability_id": capability_id,
@@ -226,6 +250,12 @@ class PreparedPlan:
             "step_contract": list(step_contract),
             "workflow_run_id": workflow_run_id,
             "workflow_template_hash": workflow_template_hash,
+            "requester_identity": requester_identity,
+            "requester_digest": requester_digest,
+            "approval_mode": approval_mode,
+            "approval_policy_id": approval_policy_id,
+            "approval_policy_version": approval_policy_version,
+            "approval_policy_hash": approval_policy_hash,
             "created_at": created_at,
             "expires_at": expires_at,
         }
@@ -245,11 +275,57 @@ class PreparedPlan:
         return value
 
     def verify_integrity(self) -> None:
+        if self.schema_version >= 9 and not self.provider_deployment_digest:
+            raise PlanIntegrityError(
+                f"plan {self.plan_id} has no Provider deployment binding"
+            )
+        if self.schema_version >= 8 and not all((
+            self.provider_release_digest,
+            self.provider_manifest_digest,
+            self.provider_qualification_digest,
+        )):
+            raise PlanIntegrityError(
+                f"plan {self.plan_id} has no Provider release qualification binding"
+            )
+        if self.schema_version >= 7:
+            if sha256_json(self.requester_identity) != self.requester_digest:
+                raise PlanIntegrityError(
+                    f"plan {self.plan_id} requester identity digest does not match"
+                )
+            if self.approval_mode not in {"single", "dual"}:
+                raise PlanIntegrityError(f"plan {self.plan_id} has an invalid approval mode")
+            if not all((
+                self.approval_policy_id,
+                self.approval_policy_version,
+                self.approval_policy_hash,
+            )):
+                raise PlanIntegrityError(f"plan {self.plan_id} has no approval policy binding")
         payload = self.integrity_payload()
         if sha256_json(payload) == self.plan_hash:
             return
-        # Earlier plans predate first-class provider capability binding.
+        # Earlier plans predate requester identity and approval-policy binding.
         legacy_payload = dict(payload)
+        if self.schema_version < 9:
+            legacy_payload.pop("provider_deployment_digest", None)
+            if self.schema_version == 8 and sha256_json(legacy_payload) == self.plan_hash:
+                return
+        if self.schema_version < 8:
+            for field_name in (
+                "provider_release_digest", "provider_manifest_digest",
+                "provider_qualification_digest",
+            ):
+                legacy_payload.pop(field_name, None)
+            if self.schema_version == 7 and sha256_json(legacy_payload) == self.plan_hash:
+                return
+        if self.schema_version < 7:
+            for field_name in (
+                "requester_identity", "requester_digest", "approval_mode",
+                "approval_policy_id", "approval_policy_version", "approval_policy_hash",
+            ):
+                legacy_payload.pop(field_name, None)
+            if self.schema_version == 6 and sha256_json(legacy_payload) == self.plan_hash:
+                return
+        # Earlier plans predate first-class provider capability binding.
         if self.schema_version < 6:
             for field_name in ("capability_id", "capability_version", "provider_role"):
                 legacy_payload.pop(field_name, None)
@@ -293,6 +369,10 @@ class PreparedPlan:
             "tool_version": self.tool_version,
             "action_type": self.action_type,
             "provider_identity": self.provider_identity,
+            "provider_release_digest": self.provider_release_digest,
+            "provider_manifest_digest": self.provider_manifest_digest,
+            "provider_qualification_digest": self.provider_qualification_digest,
+            "provider_deployment_digest": self.provider_deployment_digest,
             "input_schema_digest": self.input_schema_digest,
             "output_schema_digest": self.output_schema_digest,
             "capability_id": self.capability_id,
@@ -314,6 +394,12 @@ class PreparedPlan:
             "step_contract": list(self.step_contract),
             "workflow_run_id": self.workflow_run_id,
             "workflow_template_hash": self.workflow_template_hash,
+            "requester_identity": self.requester_identity,
+            "requester_digest": self.requester_digest,
+            "approval_mode": self.approval_mode,
+            "approval_policy_id": self.approval_policy_id,
+            "approval_policy_version": self.approval_policy_version,
+            "approval_policy_hash": self.approval_policy_hash,
             "created_at": self.created_at,
             "expires_at": self.expires_at,
             "plan_hash": self.plan_hash,
@@ -330,6 +416,18 @@ class PreparedPlan:
             tool_version=str(value["tool_version"]),
             action_type=str(value["action_type"]),
             provider_identity=str(value.get("provider_identity", "legacy-unbound")),
+            provider_release_digest=str(
+                value.get("provider_release_digest", "legacy-unbound")
+            ),
+            provider_manifest_digest=str(
+                value.get("provider_manifest_digest", "legacy-unbound")
+            ),
+            provider_qualification_digest=str(
+                value.get("provider_qualification_digest", "legacy-unbound")
+            ),
+            provider_deployment_digest=str(
+                value.get("provider_deployment_digest", "legacy-unbound")
+            ),
             input_schema_digest=str(value.get("input_schema_digest", "legacy-unbound")),
             output_schema_digest=str(value.get("output_schema_digest", "legacy-unbound")),
             capability_id=str(value.get("capability_id", "legacy-unbound")),
@@ -351,6 +449,12 @@ class PreparedPlan:
             step_contract=tuple(value.get("step_contract") or ()),
             workflow_run_id=value.get("workflow_run_id"),
             workflow_template_hash=value.get("workflow_template_hash"),
+            requester_identity=dict(value.get("requester_identity") or {}),
+            requester_digest=str(value.get("requester_digest", "legacy-unbound")),
+            approval_mode=str(value.get("approval_mode", "single")),
+            approval_policy_id=str(value.get("approval_policy_id", "legacy-unbound")),
+            approval_policy_version=str(value.get("approval_policy_version", "legacy")),
+            approval_policy_hash=str(value.get("approval_policy_hash", "legacy-unbound")),
             created_at=str(value["created_at"]),
             expires_at=str(value["expires_at"]),
             plan_hash=str(value["plan_hash"]),

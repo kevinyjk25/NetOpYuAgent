@@ -26,7 +26,13 @@
 | `dsh_adapter/scoped_services.py` | session/operator memory 和 profile capability retrieval |
 | `effect_runtime/` | 领域中性 façade 与跨 Service/Network reconciliation |
 | `network_runtime/engine.py` | Domain Effect Runtime 共享主状态机 |
-| `network_runtime/contracts.py` | schema v6、Plan/Evidence/Outcome 与状态迁移 |
+| `network_runtime/contracts.py` | schema v9、Plan/Evidence/Outcome 与状态迁移；兼容读取 v8 及更早 hash shape |
+| `network_runtime/identity.py` | requester 主体规范化、策略判定、审批证明签发/校验与 local/enforced 模式 |
+| `network_runtime/enterprise.py` | 严格 JWT/JWKS cache、OIDC+Gateway 交叉绑定、动态 Gateway mint、显式 CA/mTLS、HTTP PDP、Change Authority 与环境装配 |
+| `network_runtime/enterprise_conformance.py` | 无泄密离线 Doctor 与无效果 live authority contract check |
+| `network_runtime/provider_release.py` | Provider Manifest/Qualification/Bundle/Trust、兼容检查、发布状态机、admission |
+| `network_runtime/provider_qualification.py` | 隔离 reference target 的固定 9 项故障资格执行器 |
+| `network_runtime/provider_release_cli.py` | schema/sign/bundle/verify/stage/publish/promote/rollback/deprecate/status/audit CLI |
 | `network_runtime/l0_skills.py` | L0 Skill/step/IntentSpec 注册表和 hash |
 | `network_runtime/validation.py` | 参数规范化、类型、来源、实体与风险校验 |
 | `network_runtime/policies.py` | 工具版本、preflight、verifier、compensator 合同 |
@@ -79,7 +85,7 @@ Hermes 使用官方 `plugin.yaml + register(ctx)` API：
 4. 先注册 `/netopyu-approve`、`/netopyu-deny` 和 A2A 等价命令，再注册工具；
 5. read handler 调用 Worker `invoke`，并以同一 task id 调用 `workflow-observe`；write handler 只调用 `runtime-prepare`；
 6. write handler 从模型可见结果删除 `execution_nonce`，将 nonce 与 plan id/hash 保存到 `PendingActions`；
-7. 只有 slash command handler 可原子领取绑定并调用 `runtime-execute`；
+7. 只有 slash command handler 可原子领取绑定，调用 `runtime-approve` 获取签名 proof，再调用 `runtime-execute`；
 8. 插件重启后 `PendingActions` 清空，Runtime 中尚未执行的计划保持不可执行并最终过期；
 9. canonical profile Skill 通过 `ctx.register_skill` 注册；`netopyu_skill_view` 或 Hermes `skill_view` hook 启动 reviewed workflow，写阶段采用 Harness-neutral 审批协议。
 
@@ -92,7 +98,7 @@ Worker 使用 Unix Domain Socket，消息为一行一个 JSON object。每个请
 ```json
 {
   "id": "correlation-id",
-  "command": "manifest|invoke|runtime-prepare|runtime-execute|runtime-inspect|runtime-audit|workflow-*",
+  "command": "manifest|invoke|runtime-prepare|runtime-approve|runtime-execute|runtime-inspect|runtime-audit|workflow-*",
   "profile": "lan",
   "tool": "restart_service",
   "args": {},
@@ -106,7 +112,9 @@ Worker 使用 Unix Domain Socket，消息为一行一个 JSON object。每个请
 
 - 非 object、超长、缺字段和未知 command 返回结构化错误，不终止 Worker；
 - `invoke` 只允许只读工具；任何直接写调用均拒绝；
-- `execute` 必须携带 plan id/hash、execution nonce、approval request、actor 和请求级 `allow_destructive=true`；
+- `prepare` 的写路径必须携带 Adapter 注入、模型不可编辑的 requester context；
+- `runtime-approve` 验证 approver role/scope、session、approval mode、职责分离、工单/窗口策略并签发短时 plan-bound proof；
+- `execute` 必须携带 plan id/hash、execution nonce、签名 approval proof 和请求级 `allow_destructive=true`；local compatibility actor 字符串在 `enforced` 模式被禁用；
 - Worker 每个请求建立独立 backend 生命周期并在结束时关闭客户端与结果 store；
 - Socket 残留只能在确认无监听者后删除。
 
@@ -178,7 +186,7 @@ L0 v2 在既有执行合同之上增加 authoring/compiler 层：
 
 `IntentSpec` 不包含自由文本执行指令。模型解释只能保留在 DSH 会话，不能成为 backend 命令。
 
-### 7. PreparedPlan schema v6
+### 7. PreparedPlan schema v9
 
 核心字段：
 
@@ -186,6 +194,8 @@ L0 v2 在既有执行合同之上增加 authoring/compiler 层：
 plan_id, profile, tool_name, tool_version, action_type
 provider_identity, input_schema_digest, output_schema_digest
 capability_id, capability_version, provider_role
+provider_release_digest, provider_manifest_digest, provider_qualification_digest
+provider_deployment_digest
 arguments, argument_provenance, targets
 risk_level, risk_reasons
 preflight[]
@@ -193,10 +203,12 @@ verification_contract, rollback_contract
 l0_skill_id, l0_skill_version, l0_contract_hash
 intent_spec, intent_hash, step_contract
 workflow_run_id, workflow_template_hash
+requester_identity, requester_digest
+approval_mode, approval_policy_id, approval_policy_version, approval_policy_hash
 created_at, expires_at, plan_hash, state, schema_version
 ```
 
-`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。schema v6 在 provider identity 和输入/输出 schema digest 之外，把 capability id/version/role 纳入批准边界；v5 及更早 hash 仅用于读取既有 journal，不能创建新计划。
+`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。schema v9 保留 v7 requester/policy 与 v8 active release/manifest/qualification 绑定，并增加 active deployment digest。v8 及更早 hash shape 仅用于读取既有 journal，不能创建新计划。
 
 ### 8. 状态机
 
@@ -241,7 +253,7 @@ stateDiagram-v2
 
 ### 10. Approval 与 Harness Guard
 
-DSH 插件从计划生成审批摘要。`allowed-once` 后：
+DSH 插件从计划生成审批摘要。`allowed-once` 后，Adapter 调用 `runtime-approve`；Runtime 验证 approver context 并签发 HMAC-SHA256、短时、精确绑定 plan/requester/policy/approver 的 approval proof。随后：
 
 - 生成随机 execution token；
 - SQLite 只保存 token SHA-256 digest；
@@ -257,14 +269,20 @@ Hermes Adapter 使用不同的交互层，但不改变 Runtime 合同：
 - write tool 只返回 `approval_required`、完整 plan 和 `/netopyu-approve PLAN_ID FULL_HASH`；
 - execution nonce 只保存在插件进程内的 `PendingActions`，不返回模型、不写日志、不落盘；
 - slash command handler 要求精确两个参数，以 constant-time hash 比较后先原子领取 pending binding；
-- handler 使用配置的 operator id 生成唯一 approval request id，再调用相同 `runtime-execute`；
+- handler 使用配置的 operator id 生成唯一 approval request id，调用 `runtime-approve` 获得模型不可见 proof，再调用相同 `runtime-execute`；
 - hash 错误不消费 binding；正确领取、过期或重启后均不能重用；
-- P0.5 的 operator id 是本地配置身份，不构成生产不可抵赖身份，P1 必须接企业身份上下文。
+- `local-simulation` verifier 只信任 owner-only Adapter/Worker/OS account；`enforced` 必须同时配置 OIDC、Gateway、PDP 和 Change Authority，并禁止 legacy actor string；
+- enforced read/write 的 context 只携带模型不可见的 `subject_token` 与 `gateway_token`。JWT verifier 固定 issuer/audience/非对称 algorithm，要求 exp/iat/nbf/jti/sid，限制 token lifetime，按 kid 缓存 JWKS 并在 unknown kid 时刷新一次；
+- subject access token 提供 subject/role/scope/clearance/assurance，Gateway attestation 提供 Harness/session/client，并以 `act_sub + subject_jti` 防止主体或 token substitution；
+- 配置 mint endpoint 时，verifier 先解码 access token，再以模型不可见 token、Harness/session/purpose 取得短时 attestation；全部 JWKS/mint/PDP/change client 共用显式 CA/mTLS context，client key 必须 owner-only，默认 `trust_env=false`；
+- `observation.read`、`effect.prepare` 和 `effect.approve` 分别调用 PDP。审批 obligation 只能收紧 required approver、SoD 和 ticket，不得放宽内置 L0 policy；
+- 带 ticket 的审批必须通过 Change Authority 验证状态、revision、活动窗口、profile/capability/targets 与 risk ceiling。公开 decision/change evidence 进入 plan requester digest 或签名 proof，access token、Gateway token 和控制面 bearer secret 不落 plan/journal；
+- DSH/Hermes 从进程配置读取 requester/approver token 和 change ticket。B1 已用本地真实 RS256/JWKS/HTTP 服务器验证协议和失败语义，但尚不构成生产不可抵赖身份。
 
 ### 11. Execute/Verify 算法
 
 1. 读取计划并校验 schema/hash/状态/TTL；
-2. 校验请求级破坏性授权和 approval identity；
+2. 验证 approval proof 的签名、TTL、plan/requester/policy/risk/mode 绑定；
 3. 原子消费 nonce；
 4. 转为 `executing`；
 5. 重新执行 preflight，并与原 snapshot 比较；
@@ -500,6 +518,34 @@ slash approval 也优先返回相同封装。
 
 Core-72 场景集固定为 72 项，包括 8 个有效操作和 64 个故障/风险控制，覆盖 LAN、DC、WAN 和跨域 Saga。时延 campaign 预热后交替运行两条路径，计量纯机器端到端时间并排除人工等待。`write_report()` 生成 `runtime-ab.json`、`runtime-ab.md` 与 `runtime-ab.html`；CLI 只有 Runtime 全部 Oracle 通过时才返回 0。时延不作硬门禁，防止不同主机性能造成错误失败。
 
+### 25. P1.4-B-ready Provider 发布算法
+
+`ProviderManifest` 是 `extra=forbid` 的规范 JSON 合同；每个 `ReleasedCapability` 精确固定 Capability id/version/kind/role、Provider identity、input/output schema digest、result contract、profile 和允许的 L0 contract hash。Publisher 签 Manifest；独立 Qualifier 签 9/9 `QualificationReport`；独立 Deployer 签 exact release/manifest/environment/artifact map 的短期 `ProviderDeploymentAttestation`。`ProviderTrustStore` 校验三种 role、provider scope、有效期、撤销、签名 TTL、必需 artifact，并拒绝同一公钥材料跨角色复用。
+
+`ExternalQualificationTarget` 通过持久 JSONL 子进程资格化仓库外目标；配置要求绝对 executable/cwd、argv-only、最小环境、超时和响应上限。wire request 绑定 UUID/schema，真实 `terminate → start` 验证 operation state 跨进程恢复；不从 bundle 动态 import 代码。
+
+`ProviderReleaseRegistry` 使用 SQLite durable transaction 保存 bundle、部署证明、状态和环境 active pointer。promote 把 exact deployment digest 原子绑定到 activation；严格策略下 rollback 必须携带目标 release 的新部署证明。同 release 证明续期会更新 pointer，而相同 release+deployment 才幂等。兼容升级与 breaking 审批规则保持不变。
+
+`ProviderAdmissionGate.admit()` 读取 active bundle 与 deployment，验证三类签名、资格新鲜度、部署时效和 exact artifact map，再精确比较 discovery。Backend 把四个 digest 与允许 L0 hash 写入 metadata；schema-v9 prepare 固定这些证据，execute 重复 admission。任何 release 或 deployment 漂移都返回 `precondition_changed`，保证 Provider write 计数为零。
+
+### 26. P1.8 L1 评测实现
+
+`evaluation.l1_contract` 定义 extra-forbid、frozen、有界的 `L1Scenario` 与 `L1Decision`。动作级校验阻止 selection 缺 target、selection 携带 missing fields、clarify 不列字段，以及 refuse/out-of-scope 携带可执行内容。`apiVersion` 是 Adapter 可补齐的 Runtime 常量；其他语义字段不得修补或猜测。
+
+`evaluation.l1_catalog` 从 `load_profile().tool_metadata` 和 `build_skill_manifest()` 构建 Tool/Skill cards，加入仅用于跨语言候选召回的受审 alias；`L1CandidateRetriever` 返回最多 12 项。`evaluation.l1_adapters` 提供透明 `model=none` 规则基线和 loopback-default OpenAI-compatible Adapter。模型请求 temperature=0、单次无重试、2 MB 上限、默认无环境代理；严格解析后再次校验 target 属于本次候选、selection 带齐 required values、workflow 精确等于候选合同、clarification 与候选缺参一致。报告只保存输出 digest 与脱敏错误，不保存模型正文。
+
+`evaluation.l1_scenarios` 构建并校验 160 条固定 Oracle，生成的 `data/l1_eval_set.jsonl` 纳入版本控制。`evaluation.l1_benchmark` 计算 strict output、candidate recall、action/selection、argument exact/F1、clarification precision/recall、workflow、out-of-scope、safety escape、over-refusal、Brier、token、p50/p95 和分类/语言切片，生成 JSON/Markdown/HTML。子集不可 `--record` 且永远 qualification-ineligible；正式模型 record/gate 必须绑定 `sha256` artifact digest。fingerprint 同时绑定模型 artifact、Prompt、数据集、Catalog 与 top-k，并与版本化和本地历史基线比较。每个 CaseScore 即时追加到同 fingerprint checkpoint；只有显式 `--resume` 才复用，避免长模型运行中断时丢失进度或无意复用旧成绩。
+
+`evaluation.dsh_shadow` 与 `evaluation/dsh_shadow.patch.yml` 实现 P1.8-B1。Adapter 为每次评测生成临时 `DSH_HOME` 和固定 Ollama settings，先执行 `--dump-config`：DSH 版本必须为受审 `0.1.1-rc.2`，活动 entry 必须精确等于 27 项基础白名单，54 项 Skill/Tool/effect/外部访问 entry 必须全部 disabled。任一漂移在模型调用前失败。每条场景以 argv-only headless 子进程执行，stdin 关闭、环境最小化、输出 2 MB/超时有界；正文只在临时文件/session 中存在，结束后删除。严格 Parser、候选 required values、workflow 和 clarification 校验与 reference 一致，checkpoint/report fingerprint 额外绑定 DSH config、settings、版本和 shadow evaluator 源码。
+
+`evaluation.dsh_shadow_tool` 和 `dsh-plugin-l1-shadow-capture` 实现 B2 的模型驱动 Skill 加载与双 Tool 影子路径。`evaluation.dsh_controlled_tool`、`evaluation/dsh_controlled_tool.patch.yml` 和 `dsh-plugin-l1-protocol-controller` 实现 C1 对照：受审 L0.5 Skill 在进程启动前读取、校验并摘要绑定，动态 Skill loader 保持关闭；五个无效果 typed proposal Tool 把 action 形状从自由字段变成互斥调用。Python 控制器只从本次候选 Catalog 推导 workflow、required missing fields 和缺参 clarification，不推断用户未表达的值。loopback Governor 将模型端 `tool_choice` 限定为 required，最多丢弃并修复两次无 Tool 响应，收到 capture 回执后生成固定终止文本；每次隐藏重试必须单独计数，transcript token 不得冒充完整成本。
+
+C1 启动审计固定 DSH 版本、28 个精确活动 entry、原 B1 disabled 集、插件绝对路径、五 Tool 精确集合、Skill/系统提示/配置/settings/evaluator digest。每个 transcript 仍验证单次 Tool、typed envelope、候选合同、回执/Skill digest、无额外或重复 Tool、无提前文本、正常终止和固定 stdout。capture 插件、Governor 与评测控制器均不得导入 Runtime/Provider/设备/审批 Adapter；非法结果只形成脱敏错误分类，不投影 `L1Decision`。
+
+`evaluation.l1_guard_policy` 校验并摘要绑定 `data/l1_c2_guard_policy.yaml`，对最多 4000 字符的请求做 NFKC 与零宽字符清理，再输出 `allow/refuse/out_of_scope`；selection 低于受审置信度门槛只产生弃权。`evaluation.l1_protocol_firewall` 仅监听 loopback，重组流式 Tool-call、解析本次 `CANDIDATES/USER_REQUEST`、重放 C1 的 typed/candidate compiler，并为每个上游尝试保存 usage 与脱敏摘要。它唯一可合成的 Tool 是无 target/arguments 的 refusal/out-of-scope；普通请求耗尽后返回无 Tool，使 C1 fail closed。
+
+`evaluation.dsh_guarded_tool` 组合不变的 C1 Adapter 与 Firewall，checkpoint 同时保存 CaseScore、C1 protocol trace 和 C2 guard trace。正式 C2 fingerprint 绑定 C1 evaluator、Guard/Firewall、政策、184 场景、Catalog、DSH/settings/model artifact 和 repair limit。原 160 与 24 条对抗集分别聚合，并保留首轮模型 safety、最终 safety、误杀、合成安全调用、完整 token、调用次数和尾时延。
+
 ---
 
 ## English
@@ -533,7 +579,13 @@ must reproduce the typed preflight evidence.
 | `dsh_adapter/backend.py` | Backend lifecycle and common paging tools |
 | `effect_runtime/` | Domain-neutral façade and Service/Network reconciliation |
 | `network_runtime/engine.py` | Shared deterministic effect state machine |
-| `network_runtime/contracts.py` | Schema v6 plans, evidence, outcomes, transitions |
+| `network_runtime/contracts.py` | Schema v9 plans, evidence, outcomes, transitions, and schema-v8-or-older hash-shape reads |
+| `network_runtime/identity.py` | Subject verification, approval policy, signed proofs, and local/enforced modes |
+| `network_runtime/enterprise.py` | Strict JWT/JWKS cache, OIDC/Gateway cross-binding, dynamic Gateway minting, explicit CA/mTLS, HTTP PDP/change adapters, and environment wiring |
+| `network_runtime/enterprise_conformance.py` | Secret-safe offline Doctor and no-effect live authority contract check |
+| `network_runtime/provider_release.py` | Provider release contracts, trust, compatibility, lifecycle registry, and admission |
+| `network_runtime/provider_qualification.py` | Fixed nine-case failure qualification against an isolated reference target |
+| `network_runtime/provider_release_cli.py` | Provider schema/sign/bundle/verify/lifecycle CLI |
 | `network_provider/` | Identity-pinned Observer MCP, durable Actor MCP/store, strict results |
 | `network_runtime/l0_skills.py` | Versioned L0 and IntentSpec registry |
 | `network_runtime/validation.py` | Normalization, schema, provenance, entity, and risk validation |
@@ -551,9 +603,11 @@ must reproduce the typed preflight evidence.
 
 DSH startup resolves configuration, loads Python manifests, projects only the active profile and allowed mutation surface, initializes persistent stores and services, registers tools, and attaches cleanup. A partial mutation surface must never survive startup failure.
 
-Hermes uses the official `plugin.yaml + register(ctx)` surface. It requires a healthy Worker and the public slash-command API before exposing mutations. Read handlers invoke the shared Worker and record reviewed-workflow observations under the same task id. `netopyu_skill_view` and the built-in `skill_view` hook start the matching reviewed workflow. Write handlers prepare only, remove the execution nonce from model-visible JSON, and retain it in process-local `PendingActions`. Only an exact user slash command may atomically claim that binding and call `runtime-execute`. Restart discards all pending bindings safely.
+Hermes uses the official `plugin.yaml + register(ctx)` surface. It requires a healthy Worker and the public slash-command API before exposing mutations. Read handlers invoke the shared Worker and record reviewed-workflow observations under the same task id. `netopyu_skill_view` and the built-in `skill_view` hook start the matching reviewed workflow. Write handlers prepare only, remove the execution nonce from model-visible JSON, and retain it in process-local `PendingActions`. Only an exact user slash command may atomically claim that binding, request a signed proof through `runtime-approve`, and call `runtime-execute`. Restart discards all pending bindings safely.
 
-The Worker accepts one JSON object per Unix-socket line. Malformed or unknown requests return structured errors without terminating the Worker. `invoke` is read-only. Mutation requires the plan-bound `execute` command with request-level authorization, nonce, approval identity, and L0 binding.
+The Worker accepts one JSON object per Unix-socket line. Malformed or unknown requests return structured errors without terminating the Worker. `invoke` is read-only. Mutation uses `runtime-prepare` with a model-inaccessible requester context, `runtime-approve` with an approver context, and `runtime-execute` with the signed proof, nonce, request-level authorization, and L0 binding. Enforced mode requires complete OIDC/JWKS, Gateway-attestation, PDP, and Change Authority configuration and rejects raw identities.
+
+The enterprise verifier pins issuer, audience, asymmetric algorithm and lifetime; caches JWKS by `kid`; and refreshes once for an unknown key. It derives roles, scopes, clearance, and assurance only from the access token. A separately signed Gateway assertion binds Harness/session/client and cross-binds the human credential through `act_sub + subject_jti`; an optional mint adapter creates that assertion per Harness session. JWKS, mint, PDP, and change clients share explicit CA/mTLS configuration, require an owner-only client key, and disable environment trust by default. PDP decisions cover observation, prepare, and approve. Change records qualify ticket status, revision, active window, profile, capability, targets, and risk ceiling. DSH/Hermes pass credentials from process secret configuration, never model arguments. The Doctor is offline and secret-safe; live contract qualification makes no effects. Local B2-ready tests do not replace real-enterprise B2 certification.
 
 ### 4. L0 and intent contracts
 
@@ -571,7 +625,7 @@ Compilation rejects unknown/missing/type-invalid arguments, invalid entities, un
 
 ### 5. Plan and state machine
 
-Schema-v6 `PreparedPlan` binds the complete effect description, provider identity, input/output schema digests, capability id/version/role, evidence, L0 contract, intent, workflow, TTL, and `plan_hash`. Approval and execution revalidate every binding; any change invalidates prior authorization. Older hash shapes are read compatibility only.
+Schema-v9 `PreparedPlan` binds the complete effect description, requester/policy evidence, and active release/manifest/qualification/deployment digests. Approval and execution revalidate every binding; any change invalidates prior authorization. Schema v8 and older hash shapes are read compatibility only.
 
 Only `verified_success` and `rollback_verified` represent verified outcomes. Rejection, expiry, changed preconditions, and manual intervention are safe terminal states. Illegal transitions raise `StateTransitionError`.
 
@@ -579,7 +633,7 @@ Only `verified_success` and `rollback_verified` represent verified outcomes. Rej
 
 Prepare resolves contracts, compiles parameters and intent, assesses risk, obtains fresh preflight evidence, verifies reviewed-workflow constraints, persists the plan, and returns either a plan or clarification/errors.
 
-A DSH allowed-once decision creates a random token whose digest is stored and atomically consumed. The grant binds the operator, request, tool, canonical arguments, plan id/hash, and expiry. Hermes instead binds the same plan to a process-local nonce hidden from the model and consumed only by `/netopyu-approve`. The Runtime independently validates and consumes the execution nonce in both paths.
+A DSH allowed-once decision or Hermes slash command calls `runtime-approve`. Runtime validates a Harness-injected approver context and emits a short-lived HMAC-SHA256 proof bound to the plan, requester, approval policy, approver, risk, and mode. Execution verifies that proof before atomically consuming the nonce. Hermes keeps both the nonce and proof outside model-visible results. The local verifier is an explicit OS-bound simulation; enforced mode requires an injected enterprise credential verifier and rejects legacy actor strings.
 
 Execution checks integrity and authorization, revalidates the precondition, sends the write once, and always uses a separate verifier. Verification failure invokes a registered compensator when safe; otherwise the plan escalates to manual intervention.
 
@@ -745,3 +799,29 @@ never replays a Provider write.
 `evaluation.runtime_comparison` implements two executors. The reference executor mirrors the DSH manifest's required/type/additional-properties schema and generic approval result before invoking `BackendSession` directly. The guarded executor calls the real `NetworkRuntime.prepare/execute/invoke_read/audit` surface. Each scenario returns a common `PathObservation` evaluated by a machine oracle.
 
 Core-72 contains 72 scenarios: eight valid operations and 64 fault/risk controls across LAN, DC, WAN, and cross-domain Saga behavior. After warm-up, latency trials alternate both paths and exclude human wait. `write_report()` emits JSON, Markdown, and HTML. The CLI exits zero only when Runtime passes every oracle; variable machine latency is reported but is not a hard gate.
+
+### 17. P1.4-B-ready Provider publication algorithm
+
+Strict models bind a Manifest to artifact, Provider, Capability/schema/result, profile, and allowed L0 hashes. Independent Publisher, Qualifier, and Deployer roles sign the Manifest, 9/9 failure report, and short-lived exact environment deployment observation. Trust rejects public-key material reuse across roles and can require OCI-image, SBOM, and provenance digests.
+
+An argv-only bounded JSONL adapter qualifies a repository-external persistent process and performs an actual restart. SQLite atomically binds deployment evidence to activation; strict rollback requires fresh target-release evidence, and same-release proof renewal is distinct from idempotent replay.
+
+Admission validates the active bundle and non-expired deployment proof, then exactly compares discovery. Schema-v9 plans bind all four release/deployment digests. Execution repeats admission; same-release redeployment drift also terminates before write.
+
+### 18. P1.8 L1 evaluation implementation
+
+`evaluation.l1_contract` defines frozen, bounded, extra-forbid scenario and decision models. Action-specific validators reject targetless selections, selections with missing fields, clarifications without exact missing fields, and executable content on refusal/out-of-scope decisions. Only the Runtime-owned schema constant may be defaulted.
+
+`evaluation.l1_catalog` builds Tool and Skill cards from current Profile metadata and DSH manifests; reviewed multilingual aliases improve candidate recall without making the final decision. `evaluation.l1_adapters` provides an explicit `model=none` plumbing baseline and a loopback-default OpenAI-compatible adapter with temperature zero, no retry, a 2 MB cap, disabled environment proxies, candidate-bound targets, output digests, and sanitized failures.
+
+`evaluation.l1_scenarios` owns the validated 160-case Oracle and generated versioned JSONL. `evaluation.l1_benchmark` reports strict output, candidate recall, selection, argument exact/F1, clarification precision/recall, workflow, domain/safety refusal, over-refusal, calibration, token, latency, category, and language metrics to JSON/Markdown/HTML. Partial runs are never qualification-eligible or recordable. Formal records bind an immutable model digest plus Prompt, dataset, Catalog, and top-k fingerprints and compare them with local and versioned baselines. Each CaseScore is appended to a fingerprint-bound checkpoint; only explicit `--resume` reuses it.
+
+`evaluation.dsh_shadow` and `evaluation/dsh_shadow.patch.yml` implement P1.8-B1. Each run creates an ephemeral DSH home and fixed Ollama settings, then audits `--dump-config` before model access: the exact reviewed DSH version and 27-entry active allowlist must match, while 54 Skill/tool/effect/external-access entries must be disabled. Each case uses an argv-only headless subprocess with closed stdin, a minimal environment, bounded timeout/output, strict candidate-contract validation, and fingerprint-bound checkpoints. The report additionally binds DSH config/settings/version and shadow-evaluator source digests; raw sessions are deleted with the temporary home.
+
+`evaluation.dsh_shadow_tool` plus `dsh-plugin-l1-shadow-capture` implement B2's model-driven Skill-load/two-Tool path. C1 is implemented by `evaluation.dsh_controlled_tool`, its overlay, and `dsh-plugin-l1-protocol-controller`: a reviewed L0.5 Skill is validated, preloaded, and digest-bound while the dynamic Skill loader remains disabled. Five proposal-only typed Tools encode mutually exclusive action shapes. The controller derives workflow, required missing fields, and safe incomplete-selection-to-clarification transitions only from the supplied trusted Catalog; it never invents user values.
+
+A loopback Governor requires a typed Tool on the first model round, permits at most two discarded protocol repairs, and synthesizes the fixed terminal text after the capture receipt. Startup pins the DSH version, exact 28-entry active allowlist, disabled effect surfaces, plugin path, five-Tool set, and Skill/prompt/config/settings/evaluator digests. Transcript gates still require one Tool, a valid typed envelope, candidate contract, receipt and Skill digest, no extra/duplicate/premature output, normal termination, and exact stdout. Hidden repairs are counted separately and transcript tokens are explicitly incomplete cost accounting. No C1 component can import or invoke Runtime, Providers, devices, or approval adapters.
+
+`evaluation.l1_guard_policy` validates and digest-binds `data/l1_c2_guard_policy.yaml`, applies NFKC and zero-width cleanup to bounded requests, and returns only allow/refuse/out-of-scope; low-confidence selection only abstains. `evaluation.l1_protocol_firewall` is loopback-only, reconstructs streamed Tool calls, parses the current candidates/request, reruns C1 typed/candidate compilation, and records usage plus sanitized digests for every upstream attempt. Its only synthetic Tool calls are argument-free refusal/out-of-scope captures; exhausted ordinary requests return no Tool and fail closed in C1.
+
+`evaluation.dsh_guarded_tool` composes the unchanged C1 Adapter with the Firewall. Its checkpoint preserves CaseScore, C1 protocol trace, and C2 guard trace. The C2 fingerprint binds C1, Guard/Firewall, policy, all 184 cases, Catalog, DSH/settings/model artifact, and repair limit. Base-160 and adversarial-24 metrics remain separate, including first-attempt versus final safety, false positives, synthetic safe captures, complete tokens, calls, and tail latency.

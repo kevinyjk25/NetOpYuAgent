@@ -14,7 +14,6 @@ from effect_runtime import EffectRuntime
 from integrations.clients.mcp_client import MCPCallResult, MCPClient
 from integrations.router.tool_router import ToolRouter
 from network_runtime import PlanState
-from network_runtime.contracts import PlanIntegrityError
 from network_runtime.evidence import failed_output
 from network_runtime.l0_skills import REGISTRY as L0_SKILLS
 from service_layer.store import ServiceStore, ServiceStoreError
@@ -173,7 +172,9 @@ class ServiceMCPTests(unittest.TestCase):
         prepared = self._prepare_grant(runtime)
         self.assertEqual(prepared["status"], "plan_ready")
         plan = prepared["plan"]
-        self.assertEqual(plan["schema_version"], 6)
+        self.assertEqual(plan["schema_version"], 9)
+        self.assertTrue(plan["provider_release_digest"].startswith("unmanaged-local:"))
+        self.assertEqual(plan["provider_deployment_digest"], "unmanaged-local")
         self.assertEqual(
             plan["provider_identity"],
             "mcp:access-policy-service:netopyu.all@1.0.0",
@@ -210,8 +211,9 @@ class ServiceMCPTests(unittest.TestCase):
 
         runtime = EffectRuntime(backend_factory=backend_factory)
         prepared = self._prepare_grant(runtime)
-        with self.assertRaises(PlanIntegrityError):
-            self._execute(runtime, prepared)
+        outcome = self._execute(runtime, prepared)
+        self.assertEqual(outcome.state, PlanState.PRECONDITION_CHANGED)
+        self.assertIn("write was not sent", outcome.error)
 
     def test_failed_service_postcondition_restores_exact_role_snapshot(self) -> None:
         async def backend_factory(profile: str):

@@ -141,6 +141,8 @@ async def invoke_tool(
     *,
     allow_destructive: bool | None = None,
     access_context: dict[str, Any] | None = None,
+    session_id: str | None = None,
+    harness: str = "local",
 ) -> str:
     """Invoke a strictly validated read.
 
@@ -150,6 +152,7 @@ async def invoke_tool(
     del allow_destructive
     return await EffectRuntime().invoke_read(
         profile_id, tool_name, arguments, access_context=access_context,
+        session_id=session_id, harness=harness,
     )
 
 
@@ -160,27 +163,59 @@ async def prepare_network_plan(
     *,
     session_id: str | None = None,
     l0_skill_id: str | None = None,
+    subject_context: dict[str, Any] | None = None,
+    harness: str = "local",
 ) -> dict[str, Any]:
     return await EffectRuntime().prepare(
         profile_id, tool_name, arguments,
         session_id=session_id, l0_skill_id=l0_skill_id,
+        subject_context=subject_context, harness=harness,
+    )
+
+
+def approve_network_plan(arguments: dict[str, Any]) -> dict[str, Any]:
+    approvers = arguments.get("approver_contexts")
+    if not isinstance(approvers, list) or not all(isinstance(item, dict) for item in approvers):
+        raise ValueError("runtime approval requires an approver_contexts array")
+    change_context = arguments.get("change_context")
+    if change_context is not None and not isinstance(change_context, dict):
+        raise ValueError("runtime approval change_context must be an object")
+    return EffectRuntime().approve(
+        plan_id=str(arguments.get("plan_id", "")),
+        plan_hash=str(arguments.get("plan_hash", "")),
+        approval_request_id=str(arguments.get("approval_request_id", "")),
+        approver_contexts=approvers,
+        change_context=change_context,
     )
 
 
 async def execute_network_plan(arguments: dict[str, Any], *, allow_destructive: bool) -> dict[str, Any]:
-    required = {
-        "plan_id", "plan_hash", "execution_nonce", "approval_request_id", "approval_actor",
-    }
+    required = {"plan_id", "plan_hash", "execution_nonce"}
     missing = sorted(name for name in required if not str(arguments.get(name, "")).strip())
     if missing:
         raise ValueError("runtime execute missing fields: " + ", ".join(missing))
+    if not str(arguments.get("approval_proof", "")).strip() and not (
+        str(arguments.get("approval_request_id", "")).strip()
+        and str(arguments.get("approval_actor", "")).strip()
+    ):
+        raise ValueError("runtime execute requires approval_proof or local compatibility approval fields")
     outcome = await EffectRuntime().execute(
         plan_id=str(arguments["plan_id"]),
         plan_hash=str(arguments["plan_hash"]),
         execution_nonce=str(arguments["execution_nonce"]),
-        approval_request_id=str(arguments["approval_request_id"]),
-        approval_actor=str(arguments["approval_actor"]),
         allow_destructive=allow_destructive,
+        approval_proof=(
+            str(arguments["approval_proof"])
+            if arguments.get("approval_proof") else None
+        ),
+        approval_request_id=(
+            str(arguments["approval_request_id"])
+            if arguments.get("approval_request_id") else None
+        ),
+        approval_actor=(
+            str(arguments["approval_actor"])
+            if arguments.get("approval_actor") else None
+        ),
     )
     return {
         **outcome.to_dict(),

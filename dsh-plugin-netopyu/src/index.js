@@ -28,6 +28,12 @@ function preparationFailure(prepared) {
 }
 
 function observationAccessContext(execution, operatorId, profile) {
+  if (process.env.NETOPYU_IDENTITY_MODE === 'enforced') {
+    return {
+      subject_token: process.env.NETOPYU_OIDC_TOKEN,
+      gateway_token: process.env.NETOPYU_GATEWAY_TOKEN,
+    }
+  }
   const sessionId = execution.agent?.session?.id
   return {
     subject_id: operatorId,
@@ -37,6 +43,34 @@ function observationAccessContext(execution, operatorId, profile) {
     purpose: 'interactive-network-operations',
     clearance: 'restricted',
     authenticated: true,
+  }
+}
+
+function effectSubjectContext(execution, operatorId, profile, role = 'requester') {
+  if (process.env.NETOPYU_IDENTITY_MODE === 'enforced') {
+    const prefix = role === 'approver' ? 'NETOPYU_APPROVER_' : 'NETOPYU_'
+    return {
+      subject_token: process.env[`${prefix}OIDC_TOKEN`],
+      gateway_token: process.env[`${prefix}GATEWAY_TOKEN`] ?? process.env.NETOPYU_GATEWAY_TOKEN,
+    }
+  }
+  const sessionId = execution.agent?.session?.id
+  const normalizedSession = sessionId === undefined ? 'dsh-sessionless' : String(sessionId)
+  const roles = role === 'approver'
+    ? ['network-approver', 'change-approver']
+    : ['network-operator', 'change-requester']
+  return {
+    subject_id: operatorId,
+    issuer: 'netopyu.local/dsh',
+    harness: 'dsh',
+    session_id: normalizedSession,
+    roles,
+    scopes: ['*', `profile:${profile}`],
+    purpose: role === 'approver' ? 'interactive-effect-approval' : 'interactive-effect-operation',
+    assurance_level: 1,
+    auth_method: 'dsh-local-adapter',
+    authenticated: true,
+    credential_id: `dsh:${normalizedSession}:${operatorId}:${role}`,
   }
 }
 
@@ -66,6 +100,25 @@ async function executePreparedPlan(bridge, prepared, requestId, operatorId, exec
     throw new Error('approved Network Runtime plan is missing')
   }
   try {
+    const approval = await callBridge({
+      ...bridge,
+      command: 'runtime-approve',
+      tool: plan.tool_name,
+      args: {
+        plan_id: plan.plan_id,
+        plan_hash: plan.plan_hash,
+        approval_request_id: requestId,
+        approver_contexts: [effectSubjectContext(
+          execution, operatorId, bridge.profile, 'approver',
+        )],
+        ...(bridge.changeContext ? { change_context: bridge.changeContext } : {}),
+      },
+      signal: execution.signal,
+      correlationId: `${String(execution.callId ?? requestId)}${suffix}:approve`,
+    })
+    if (typeof approval?.approval_proof !== 'string') {
+      throw new Error('Network Runtime did not issue a signed approval proof')
+    }
     const outcome = await callBridge({
       ...bridge,
       command: 'runtime-execute',
@@ -74,8 +127,7 @@ async function executePreparedPlan(bridge, prepared, requestId, operatorId, exec
         plan_id: plan.plan_id,
         plan_hash: plan.plan_hash,
         execution_nonce: prepared.execution_nonce,
-        approval_request_id: requestId,
-        approval_actor: operatorId,
+        approval_proof: approval.approval_proof,
       },
       signal: execution.signal,
       allowDestructive: true,
@@ -165,6 +217,10 @@ function toolDefinition(tool, bridge, toolGuard, approvalByToken, bindingByToken
         accessContext: observationAccessContext(
           execution, operatorId, bridge.profile,
         ),
+        sessionId: execution.agent?.session?.id === undefined
+          ? 'dsh-sessionless'
+          : String(execution.agent.session.id),
+        harness: 'dsh',
       })
       if (payload.ok !== true || typeof payload.result !== 'string') {
         throw new Error(payload.error ?? `invalid result from ${tool.name}`)
@@ -496,7 +552,15 @@ export async function apply(ctx, config = {}) {
   const projectRoot = resolve(config.projectRoot ?? process.env.NETOPYU_ROOT ?? inferredProjectRoot)
   const profile = config.profile ?? process.env.NETOPYU_PROFILE ?? 'lan'
   const python = config.pythonExecutable ?? await resolvePython(projectRoot)
-  const bridge = { projectRoot, python, profile }
+  const changeTicketId = String(
+    config.changeTicketId ?? process.env.NETOPYU_CHANGE_TICKET ?? '',
+  ).trim()
+  const bridge = {
+    projectRoot,
+    python,
+    profile,
+    changeContext: changeTicketId ? { ticket_id: changeTicketId } : undefined,
+  }
   const enableDestructive = config.enableDestructive ?? process.env.NETOPYU_DSH_ENABLE_DESTRUCTIVE === '1'
   const bridgeManifest = await callBridge({ ...bridge, command: 'manifest', includeDestructive: enableDestructive })
   if (!Array.isArray(bridgeManifest.tools)) throw new Error('NetOpYu manifest has no tools array')
@@ -656,8 +720,10 @@ export async function apply(ctx, config = {}) {
           args: execution.arguments,
           signal: execution.signal,
           correlationId: execution.callId,
-          sessionId: sessionId === undefined ? undefined : String(sessionId),
+          sessionId: sessionId === undefined ? 'dsh-sessionless' : String(sessionId),
           l0SkillId: tool.l0_skill_id,
+          subjectContext: effectSubjectContext(execution, operatorId, bridge.profile),
+          harness: 'dsh',
         })
         if (prepared.status !== 'plan_ready') {
           return { kind: 'deny', reason: `Network Runtime ${preparationFailure(prepared)}` }
@@ -685,8 +751,10 @@ export async function apply(ctx, config = {}) {
           args: replayArguments,
           signal: execution.signal,
           correlationId: execution.callId,
-          sessionId: sessionId === undefined ? undefined : String(sessionId),
+          sessionId: sessionId === undefined ? 'dsh-sessionless' : String(sessionId),
           l0SkillId: originalTool.l0_skill_id,
+          subjectContext: effectSubjectContext(execution, operatorId, bridge.profile),
+          harness: 'dsh',
         })
         if (prepared.status !== 'plan_ready') {
           return { kind: 'deny', reason: `Network Runtime recovery ${preparationFailure(prepared)}` }
@@ -713,8 +781,10 @@ export async function apply(ctx, config = {}) {
             args: operation.arguments,
             signal: execution.signal,
             correlationId: `${String(execution.callId ?? 'batch')}:prepare:${index}`,
-            sessionId: sessionId === undefined ? undefined : String(sessionId),
+            sessionId: sessionId === undefined ? 'dsh-sessionless' : String(sessionId),
             l0SkillId: operationTool.l0_skill_id,
+            subjectContext: effectSubjectContext(execution, operatorId, bridge.profile),
+            harness: 'dsh',
           })
           if (value.status !== 'plan_ready') {
             throw new Error(`operations[${index}] ${preparationFailure(value)}`)

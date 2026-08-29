@@ -48,7 +48,7 @@ export async function resolvePython(projectRoot) {
   }
 }
 
-export async function callBridge({ projectRoot, python, profile, command, tool, args, signal, includeDestructive = false, allowDestructive = false, correlationId, sessionId, l0SkillId, accessContext }) {
+export async function callBridge({ projectRoot, python, profile, command, tool, args, signal, includeDestructive = false, allowDestructive = false, correlationId, sessionId, l0SkillId, accessContext, subjectContext, harness }) {
   const requestId = randomUUID()
   const bridgeCorrelationId = String(correlationId ?? requestId)
   const workerSocket = process.env.NETOPYU_DSH_WORKER_SOCKET
@@ -61,6 +61,8 @@ export async function callBridge({ projectRoot, python, profile, command, tool, 
         include_destructive: includeDestructive,
         allow_destructive: allowDestructive,
         access_context: accessContext,
+        subject_context: subjectContext,
+        harness,
       }, signal)
     } catch (error) {
       if (!['ENOENT', 'ECONNREFUSED'].includes(error?.code)) throw error
@@ -68,7 +70,7 @@ export async function callBridge({ projectRoot, python, profile, command, tool, 
   }
   const commandArgs = ['-m', 'dsh_adapter.cli', command, '--profile', profile]
   if (tool !== undefined) commandArgs.push('--tool', tool)
-  if (command === 'runtime-prepare' && sessionId !== undefined) commandArgs.push('--session', String(sessionId))
+  if (['runtime-prepare', 'invoke'].includes(command) && sessionId !== undefined) commandArgs.push('--session', String(sessionId))
   if (command === 'runtime-prepare' && l0SkillId !== undefined) commandArgs.push('--l0-skill', String(l0SkillId))
   if (command === 'manifest' && includeDestructive) commandArgs.push('--include-destructive')
   const child = spawn(python, commandArgs, {
@@ -79,6 +81,8 @@ export async function callBridge({ projectRoot, python, profile, command, tool, 
       ...(allowDestructive ? { NETOPYU_DSH_ALLOW_DESTRUCTIVE: '1' } : {}),
       NETOPYU_DSH_CORRELATION_ID: bridgeCorrelationId,
       ...(accessContext ? { NETOPYU_DSH_ACCESS_CONTEXT: JSON.stringify(accessContext) } : {}),
+      ...(subjectContext ? { NETOPYU_DSH_SUBJECT_CONTEXT: JSON.stringify(subjectContext) } : {}),
+      ...(harness ? { NETOPYU_HARNESS: String(harness) } : {}),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   })

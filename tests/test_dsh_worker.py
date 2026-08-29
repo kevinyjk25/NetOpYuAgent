@@ -91,12 +91,43 @@ class TestPersistentDshWorker(unittest.TestCase):
                     "id": "prepared", "command": "runtime-prepare", "profile": "lan",
                     "tool": "restart_service",
                     "l0_skill_id": "network.service.restart",
+                    "session_id": "worker-session",
+                    "harness": "dsh",
+                    "subject_context": {
+                        "subject_id": "worker-requester",
+                        "issuer": "netopyu.local/dsh",
+                        "harness": "dsh",
+                        "session_id": "worker-session",
+                        "roles": ["network-operator"],
+                        "scopes": ["*"],
+                        "authenticated": True,
+                    },
                     "args": {"service": "crm", "environment": "staging"},
                 })
                 self.assertTrue(prepared["ok"])
                 self.assertEqual(prepared["payload"]["status"], "plan_ready")
                 plan_payload = prepared["payload"]
                 plan = plan_payload["plan"]
+                approval = self._request(socket_path, {
+                    "id": "approved", "command": "runtime-approve", "profile": "lan",
+                    "tool": "restart_service",
+                    "args": {
+                        "plan_id": plan["plan_id"],
+                        "plan_hash": plan["plan_hash"],
+                        "approval_request_id": "worker-test-approval",
+                        "approver_contexts": [{
+                            "subject_id": "worker-approver",
+                            "issuer": "netopyu.local/dsh",
+                            "harness": "dsh",
+                            "session_id": "worker-session",
+                            "roles": ["network-approver"],
+                            "scopes": ["*"],
+                            "authenticated": True,
+                        }],
+                    },
+                })
+                self.assertTrue(approval["ok"])
+                self.assertTrue(approval["payload"]["approval_proof"])
                 allowed = self._request(socket_path, {
                     "id": "allowed", "command": "runtime-execute", "profile": "lan",
                     "tool": "restart_service",
@@ -104,8 +135,7 @@ class TestPersistentDshWorker(unittest.TestCase):
                         "plan_id": plan["plan_id"],
                         "plan_hash": plan["plan_hash"],
                         "execution_nonce": plan_payload["execution_nonce"],
-                        "approval_request_id": "worker-test-approval",
-                        "approval_actor": "worker-test-operator",
+                        "approval_proof": approval["payload"]["approval_proof"],
                     },
                     "allow_destructive": True,
                     "correlation_id": "dsh-call-42",

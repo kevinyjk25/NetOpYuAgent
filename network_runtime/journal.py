@@ -53,6 +53,9 @@ class NetworkJournal:
                 nonce_consumed_at TEXT,
                 approval_request_id TEXT,
                 approval_actor TEXT,
+                approval_proof_id TEXT,
+                approval_proof_hash TEXT,
+                approval_evidence_json TEXT,
                 approved_at TEXT,
                 result_json TEXT,
                 error_text TEXT,
@@ -82,6 +85,13 @@ class NetworkJournal:
         """)
         self._ensure_column("plan_events", "prev_event_hash", "TEXT")
         self._ensure_column("plan_events", "event_hash", "TEXT")
+        self._ensure_column("plans", "approval_proof_id", "TEXT")
+        self._ensure_column("plans", "approval_proof_hash", "TEXT")
+        self._ensure_column("plans", "approval_evidence_json", "TEXT")
+        self._db.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_plans_approval_proof "
+            "ON plans(approval_proof_id) WHERE approval_proof_id IS NOT NULL"
+        )
         self._backfill_event_hashes()
         self._db.commit()
         os.chmod(self.path, 0o600)
@@ -220,6 +230,8 @@ class NetworkJournal:
                     "targets": list(plan.targets),
                     "l0_skill_id": plan.l0_skill_id,
                     "intent_hash": plan.intent_hash,
+                    "requester_digest": plan.requester_digest,
+                    "approval_policy_hash": plan.approval_policy_hash,
                 }, now,
             )
             self._db.commit()
@@ -228,14 +240,30 @@ class NetworkJournal:
         self, plan_id: str, event_type: str, payload: dict[str, Any] | None = None,
     ) -> None:
         """Append a hash-chained state-preserving runtime/skill event."""
+        self.append_events(plan_id, [(event_type, payload or {})])
+
+    def append_events(
+        self,
+        plan_id: str,
+        events: list[tuple[str, dict[str, Any]]],
+    ) -> None:
+        """Append related state-preserving evidence with one verified commit."""
+        if not events:
+            return
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
-                plan = self.get(plan_id)
-                self._append_event_locked(
-                    plan_id, plan.state.value, plan.state.value,
-                    event_type, payload or {}, utc_now(),
-                )
+                row = self._db.execute(
+                    "SELECT state FROM plans WHERE plan_id=?", (plan_id,),
+                ).fetchone()
+                if row is None:
+                    raise KeyError(f"unknown network plan {plan_id}")
+                state = PlanState(str(row["state"]))
+                for event_type, payload in events:
+                    self._append_event_locked(
+                        plan_id, state.value, state.value,
+                        event_type, payload, utc_now(),
+                    )
                 self._db.commit()
             except Exception:
                 self._db.rollback()
@@ -259,9 +287,22 @@ class NetworkJournal:
         execution_nonce: str,
         approval_request_id: str,
         approval_actor: str,
+        approval_evidence: dict[str, Any] | None = None,
     ) -> PreparedPlan:
         if not approval_request_id.strip() or not approval_actor.strip():
             raise ApprovalError("approval request and actor are required")
+        if approval_evidence is None:
+            approval_evidence = {
+                "schema": "netopyu.approval-proof/legacy-journal-compatibility",
+                "proof_id": f"legacy:{approval_request_id}",
+                "approval_request_id": approval_request_id,
+                "approvers": [{"subject_id": approval_actor}],
+            }
+            approval_evidence["proof_hash"] = sha256_json(approval_evidence)
+        proof_id = str(approval_evidence.get("proof_id") or "").strip()
+        proof_hash = str(approval_evidence.get("proof_hash") or "").strip()
+        if not proof_id or not proof_hash:
+            raise ApprovalError("approval proof evidence is incomplete")
         with self._lock:
             self._db.execute("BEGIN IMMEDIATE")
             try:
@@ -295,12 +336,20 @@ class NetworkJournal:
                 now = utc_now()
                 self._db.execute(
                     """UPDATE plans SET nonce_consumed_at=?, approval_request_id=?,
-                       approval_actor=?, approved_at=?, updated_at=? WHERE plan_id=?""",
-                    (now, approval_request_id, approval_actor, now, now, plan_id),
+                       approval_actor=?, approval_proof_id=?, approval_proof_hash=?,
+                       approval_evidence_json=?, approved_at=?, updated_at=? WHERE plan_id=?""",
+                    (
+                        now, approval_request_id, approval_actor, proof_id, proof_hash,
+                        canonical_json(approval_evidence), now, now, plan_id,
+                    ),
                 )
                 plan = self._transition_locked(plan, PlanState.APPROVED, "approval_bound", {
                     "approval_request_id": approval_request_id,
                     "approval_actor": approval_actor,
+                    "approval_proof_id": proof_id,
+                    "approval_proof_hash": proof_hash,
+                    "approval_policy_hash": approval_evidence.get("policy_hash"),
+                    "requester_digest": approval_evidence.get("requester_digest"),
                     "plan_hash": plan_hash,
                 })
                 plan = self._transition_locked(plan, PlanState.EXECUTING, "execution_started", {})
@@ -386,7 +435,8 @@ class NetworkJournal:
 
     def record(self, plan_id: str) -> dict[str, Any]:
         row = self._db.execute(
-            """SELECT state, approval_request_id, approval_actor, approved_at,
+            """SELECT state, approval_request_id, approval_actor, approval_proof_id,
+                      approval_proof_hash, approval_evidence_json, approved_at,
                       nonce_consumed_at, result_json, error_text, created_at, updated_at
                FROM plans WHERE plan_id=?""",
             (plan_id,),
@@ -397,6 +447,12 @@ class NetworkJournal:
             "state": row["state"],
             "approval_request_id": row["approval_request_id"],
             "approval_actor": row["approval_actor"],
+            "approval_proof_id": row["approval_proof_id"],
+            "approval_proof_hash": row["approval_proof_hash"],
+            "approval_evidence": (
+                json.loads(row["approval_evidence_json"])
+                if row["approval_evidence_json"] else None
+            ),
             "approved_at": row["approved_at"],
             "nonce_consumed": row["nonce_consumed_at"] is not None,
             "result": json.loads(row["result_json"]) if row["result_json"] else None,
@@ -416,7 +472,8 @@ class NetworkJournal:
         bounded = max(1, min(int(limit), 200))
         rows = self._db.execute(
             """SELECT plan_id, plan_hash, plan_json, state, created_at, updated_at,
-                      approval_request_id, approval_actor, error_text
+                      approval_request_id, approval_actor, approval_proof_id,
+                      approval_proof_hash, error_text
                FROM plans ORDER BY created_at DESC LIMIT ?""",
             (bounded,),
         ).fetchall()
@@ -435,15 +492,25 @@ class NetworkJournal:
                 "updated_at": row["updated_at"],
                 "approval_request_id": row["approval_request_id"],
                 "approval_actor": row["approval_actor"],
+                "approval_proof_id": row["approval_proof_id"],
+                "approval_proof_hash": row["approval_proof_hash"],
                 "error": row["error_text"],
             })
         return values
 
     def verify_event_chain(self, plan_id: str) -> dict[str, Any]:
-        if self._db.execute(
-            "SELECT 1 FROM plans WHERE plan_id=?", (plan_id,),
-        ).fetchone() is None:
+        plan_row = self._db.execute(
+            """SELECT plan_json, state, approval_proof_id, approval_proof_hash,
+                      approval_evidence_json FROM plans WHERE plan_id=?""",
+            (plan_id,),
+        ).fetchone()
+        if plan_row is None:
             raise KeyError(f"unknown network plan {plan_id}")
+        errors: list[dict[str, Any]] = []
+        try:
+            self.get(plan_id)
+        except (PlanIntegrityError, KeyError, TypeError, ValueError, json.JSONDecodeError) as error:
+            errors.append({"error": "plan_integrity_error", "detail": str(error)})
         rows = self._db.execute(
             """SELECT event_id, plan_id, from_state, to_state, event_type,
                       payload_json, prev_event_hash, event_hash, created_at
@@ -451,7 +518,7 @@ class NetworkJournal:
             (plan_id,),
         ).fetchall()
         expected_previous = GENESIS_EVENT_HASH
-        errors: list[dict[str, Any]] = []
+        approval_bound: dict[str, Any] | None = None
         for row in rows:
             actual_previous = row["prev_event_hash"]
             expected_hash = self._event_hash(
@@ -478,6 +545,42 @@ class NetworkJournal:
                     "actual": row["event_hash"],
                 })
             expected_previous = str(row["event_hash"] or "")
+            if row["event_type"] == "approval_bound":
+                try:
+                    approval_bound = json.loads(str(row["payload_json"]))
+                except json.JSONDecodeError:
+                    errors.append({
+                        "event_id": row["event_id"],
+                        "error": "approval_event_json_invalid",
+                    })
+        evidence_json = plan_row["approval_evidence_json"]
+        if evidence_json:
+            try:
+                evidence = json.loads(str(evidence_json))
+                declared_hash = str(evidence.pop("proof_hash", ""))
+                calculated_hash = sha256_json(evidence)
+                if (
+                    declared_hash != calculated_hash
+                    or str(plan_row["approval_proof_hash"] or "") != calculated_hash
+                ):
+                    errors.append({
+                        "error": "approval_evidence_hash_mismatch",
+                        "expected": calculated_hash,
+                        "actual": plan_row["approval_proof_hash"],
+                    })
+                if str(evidence.get("proof_id") or "") != str(plan_row["approval_proof_id"] or ""):
+                    errors.append({"error": "approval_proof_id_mismatch"})
+                if approval_bound is None:
+                    errors.append({"error": "approval_bound_event_missing"})
+                elif (
+                    approval_bound.get("approval_proof_id") != plan_row["approval_proof_id"]
+                    or approval_bound.get("approval_proof_hash") != plan_row["approval_proof_hash"]
+                ):
+                    errors.append({"error": "approval_event_binding_mismatch"})
+            except (TypeError, json.JSONDecodeError):
+                errors.append({"error": "approval_evidence_json_invalid"})
+        elif plan_row["approval_proof_id"] or plan_row["approval_proof_hash"]:
+            errors.append({"error": "approval_evidence_missing"})
         return {
             "ok": not errors,
             "plan_id": plan_id,
