@@ -22,6 +22,22 @@ revision and full snapshot. Present the exact change for approval. After the wri
 independent access-state endpoint and require `allowed=true`, the requested VLAN, and a newer revision.
 If verification fails, restore the exact pre-change snapshot and independently verify equality.
 
+## Exact Semantic Intent
+
+This marked block is the exact semantic anchor. Runtime must preserve it through L0.5 and L0 and
+must not infer a replacement from prose.
+
+<!-- netopyu:semantic-intents/v1 -->
+```yaml
+- effectCapability: rest.url1.network-access.grant
+  kind: grant_network_access
+  targetFields:
+    - user_id
+  desiredState:
+    allowed: true
+    vlan_id: "${arguments.vlan_id}"
+```
+
 ## Parameters
 
 - `user_id`: Existing active user identifier.

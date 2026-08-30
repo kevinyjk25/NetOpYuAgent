@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_wan_path_failover
 title: network.wan.path.failover
@@ -10,6 +10,14 @@ parameters:
   tunnel: 'tunnel；必填 / Required string；最长长度 / maximum length: 4096。'
   to_transport: 'to_transport；必填 / Required string；允许值 / allowed values: mpls, broadband,
     lte；最长长度 / maximum length: 4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.wan_failover_path
+  kind: failover_wan_path
+  targetFields:
+  - tunnel
+  desiredState:
+    transport: ${arguments.to_transport}
+    state: up
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -79,7 +87,7 @@ outcomes:
     explicit recovery state.
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
-sourceSkillSha256: sha256:ce53f4207c183a5e4e5dc06922c5c8d8dec886ccb281b13198066b553151d757
+sourceSkillSha256: sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c
 capabilityCatalogSha256: sha256:6f4f256ee23fb2e36e64f45ca91884ce878ff679edad87206bc4b271c6f67ec3
-previousStageSha256: sha256:ce53f4207c183a5e4e5dc06922c5c8d8dec886ccb281b13198066b553151d757
+previousStageSha256: sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c
 unresolvedQuestions: []

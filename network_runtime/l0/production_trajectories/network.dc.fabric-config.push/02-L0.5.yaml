@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_dc_fabric_config_push
 title: network.dc.fabric-config.push
@@ -12,6 +12,13 @@ parameters:
     maximum length: 500。'
   reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
     4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.dc_config_push
+  kind: configure_fabric
+  targetFields:
+  - node
+  desiredState:
+    requested_configuration_digest: ${intent.configuration_digest}
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -81,7 +88,7 @@ outcomes:
     explicit recovery state.
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
-sourceSkillSha256: sha256:64db3dedfc7c4dba5dc5c475b2f34b36582d48bbc410663217850565f84fd5ef
+sourceSkillSha256: sha256:02153e8d28f069fc141e030135c7041e63f2045b7cea17d7a3d33ef6c2b8200a
 capabilityCatalogSha256: sha256:41df148ba85b65f42f2bcb9a610def470197909aa97ec855510917d186030075
-previousStageSha256: sha256:64db3dedfc7c4dba5dc5c475b2f34b36582d48bbc410663217850565f84fd5ef
+previousStageSha256: sha256:02153e8d28f069fc141e030135c7041e63f2045b7cea17d7a3d33ef6c2b8200a
 unresolvedQuestions: []

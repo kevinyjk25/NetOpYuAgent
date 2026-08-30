@@ -31,13 +31,13 @@ L1 SKILL.md + 受信 Capability Catalog
        后续 Provider/故障认证与发布
 ```
 
-L1 保留原始自然语言业务经验；L0.5 把参数、约束、流程阶段、风险、停止条件、成功/失败/回滚语义和受信 Capability 选项整理为人可读 YAML；L0 才是机器可执行的严格合同。Agent 加速语义抽取和初稿编写，编译器决定候选是否结构完整，人工与故障测试决定它是否有资格发布。任何单次线上请求都不能生成、批准并立即执行一个新 L0。
+L1 保留原始自然语言业务经验，并用一个显式标记的小型 `semantic-intents/v1` YAML 块固定不可猜测的 effect capability、intent kind、targetFields 与 desiredState；L0.5 v2 把该锚点连同参数、约束、流程阶段、风险、停止条件、成功/失败/回滚语义和受信 Capability 选项整理为人可读 YAML；L0 才是机器可执行的严格合同。Agent 加速语义抽取和初稿编写，编译器决定候选是否结构完整，人工与故障测试决定它是否有资格发布。任何单次线上请求都不能生成、批准并立即执行一个新 L0。
 
 ### 2. 输入与三阶段产物
 
 1. **L1 Agent Skill**：标准 `SKILL.md`，保留自然语言业务流程，明确参数、工具、风险和停止条件。
 2. **Capability Catalog**：由 Provider/API 所有者维护，声明 capability id、observation/effect/compensation 角色、tool、profile、输入和输出 Schema。
-3. **L0.5 Structured Skill**：可由工具从 L1 + Catalog 生成，也可由人补充；保持自然语言可读，同时用严格 Schema 固定范围。多个 Effect 无法唯一选择、缺少 Observer 或 Compensation 时写入 `unresolvedQuestions` 并阻断 L0。
+3. **L0.5 Structured Skill v2**：可由工具从 L1 + Catalog 生成，也可由人补充；保持自然语言可读，同时用严格 Schema 固定范围。`semanticIntents` 必须逐字段复制 L1 锚点并按 effect capability 绑定；缺少锚点、多个 Effect 无法唯一选择、缺少 Observer 或 Compensation 时写入 `unresolvedQuestions` 并阻断 L0。
 4. **L0 candidate**：由人或 Agent 依据 L0.5 生成的 Atomic、Derived 或 Composite v2 YAML；在验证前一律不可信。
 
 示例：
@@ -120,6 +120,7 @@ report.json
 
 - 标准 Skill 名称与目录一致、参数和允许工具可解析；
 - L0.5 精确绑定 L1 与 Capability Catalog hash，且阶段链连续；
+- L1、L0.5 与 compiled L0 的 effect capability、intent kind、targetFields、desiredState 必须逐字段相等；缺失、增加或漂移均失败关闭；
 - L0.5 不得删除/增加 L1 参数、扩大 profile、降低风险或移除审批；
 - L0 必须使用 L0.5 允许的 Effect/Observation/Compensation，且不得留下未解决问题；
 - 所有 L0 required 参数都在 L1 中有说明；
@@ -176,7 +177,7 @@ scripts/netopyu-l0 promote-assess ... | \
 
 ## English
 
-The Promotion Pipeline preserves three explicit stages: the original natural-language `L1 SKILL.md`, a schema-valid but human-readable `L0.5 StructuredNaturalLanguageSkill`, and the strict L0 authoring/compiled contracts. L0.5 records parameters, constraints, workflow phases, risk, stop conditions, outcomes, and trusted capability options. Ambiguous effects or missing observation/compensation semantics remain unresolved questions and block promotion rather than being guessed.
+The Promotion Pipeline preserves three explicit stages: the original natural-language `L1 SKILL.md`, a schema-valid but human-readable `L0.5 StructuredNaturalLanguageSkill` v2, and strict L0 authoring/compiled contracts. L1 keeps prose natural but carries one visibly marked, compact `semantic-intents/v1` YAML anchor for semantics that must never be guessed. L0.5 records an exact capability-scoped copy alongside parameters, constraints, workflow phases, risk, stop conditions, outcomes, and trusted capability options. Missing or drifted intent, ambiguous effects, or missing observation/compensation semantics remain unresolved and block promotion.
 
 An immutable package stores the capability catalog, `01-L1-SKILL.md`, `02-L0.5.yaml`, `03-L0-authoring.yaml`, `04-L0-compiled.json`, and a `trajectory.json` hash chain. Deterministic checks prevent L0.5 from drifting from L1 or L0 from widening L0.5. Any file or link tampering blocks review. The Agent accelerates semantic extraction but remains an untrusted candidate producer.
 

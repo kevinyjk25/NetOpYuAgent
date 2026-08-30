@@ -27,6 +27,24 @@ metadata:
 
 以精确参数安全执行 network.deploy.rollback，并通过独立证据验证结果。 / Safely execute network.deploy.rollback with exact inputs and independent evidence.
 
+## 精确语义意图 / Exact Semantic Intent
+
+以下小型结构块是 L1、L0.5 与 L0 之间的可审计语义锚点；Runtime 必须逐字段保真，
+不得从周边自然语言猜测或补全。 / This small structured block is the auditable
+semantic anchor across L1, L0.5 and L0; Runtime must preserve every field and may
+not guess or complete it from surrounding prose.
+
+<!-- netopyu:semantic-intents/v1 -->
+```yaml
+- effectCapability: netopyu.tool.rollback_deploy
+  kind: rollback_deployment
+  targetFields:
+  - deploy_id
+  desiredState:
+    rolled_back: true
+    services_healthy: true
+```
+
 ## Parameters
 
 - `deploy_id`: deploy_id；必填 / Required string；最长长度 / maximum length: 4096。

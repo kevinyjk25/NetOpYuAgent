@@ -125,6 +125,117 @@ def main(argv: list[str] | None = None) -> int:
     workbench_export.add_argument("--proposal", required=True)
     workbench_export.add_argument("--output", required=True)
 
+    core_evaluation = sub.add_parser(
+        "core-eval-report",
+        help="recompute the dual-core semantic-compilation and Runtime evidence report",
+    )
+    core_evaluation.add_argument(
+        "--runtime-report", default="artifacts/runtime-ab/runtime-ab.json",
+    )
+    core_evaluation.add_argument(
+        "--forward-report", default="artifacts/promotion-forward-calibration/report.json",
+    )
+    core_evaluation.add_argument(
+        "--forward-model-report",
+        default="artifacts/promotion-forward-model/qwen3.5-9b/report.json",
+    )
+    core_evaluation.add_argument(
+        "--json", default="artifacts/core-capability-evaluation/current.json",
+    )
+    core_evaluation.add_argument(
+        "--markdown", default="docs/core-capability-evaluation-report.md",
+    )
+
+    forward_calibration = sub.add_parser(
+        "forward-eval-calibrate",
+        help="build the public 210-case reverse-bootstrap evaluator calibration matrix",
+    )
+    forward_calibration.add_argument(
+        "--output-root", default="artifacts/promotion-forward-calibration",
+    )
+    forward_calibration.add_argument(
+        "--markdown", default="docs/promotion-forward-qualification.md",
+    )
+    sub.add_parser(
+        "forward-eval-schema",
+        help="print Case, Label and Observation JSON Schemas for external qualification",
+    )
+    forward_seal = sub.add_parser(
+        "forward-eval-seal",
+        help="seal an external forward L1-to-L0 qualification case set",
+    )
+    forward_seal.add_argument("cases")
+    forward_seal.add_argument("--dataset-id", required=True)
+    forward_seal.add_argument("--version", required=True)
+    forward_seal.add_argument(
+        "--provenance",
+        choices=("independent_forward", "reverse_bootstrap_calibration"),
+        required=True,
+    )
+    forward_seal.add_argument("--output", required=True)
+    forward_review = sub.add_parser(
+        "forward-eval-adjudicate",
+        help="compare two independent label sets against one sealed forward data set",
+    )
+    forward_review.add_argument("cases")
+    forward_review.add_argument("manifest")
+    forward_review.add_argument("reviewer_one")
+    forward_review.add_argument("reviewer_two")
+    forward_review.add_argument("--output", required=True)
+    forward_score = sub.add_parser(
+        "forward-eval-score",
+        help="score repeated model observations without emitting prompts or labels",
+    )
+    forward_score.add_argument("cases")
+    forward_score.add_argument("manifest")
+    forward_score.add_argument("reviewer_one")
+    forward_score.add_argument("reviewer_two")
+    forward_score.add_argument("observations")
+    forward_score.add_argument("--output", required=True)
+    forward_record = sub.add_parser(
+        "forward-eval-record",
+        help="normalize one real agent result into a prompt-free qualification observation",
+    )
+    forward_record.add_argument("--case-id", required=True)
+    forward_record.add_argument("--repetition", required=True, type=int)
+    forward_record.add_argument("--model", required=True)
+    forward_record.add_argument("--model-artifact-digest", required=True)
+    forward_record.add_argument("--authoring-protocol-digest", required=True)
+    forward_record.add_argument("--catalog-snapshot-digest", required=True)
+    forward_record.add_argument(
+        "--disposition",
+        choices=("proposal", "clarify", "reject", "protocol_error"),
+        required=True,
+    )
+    forward_record.add_argument("--proposal")
+    forward_record.add_argument("--catalog-id")
+    forward_record.add_argument("--missing-field", action="append", default=[])
+    forward_record.add_argument("--latency-ms", required=True, type=float)
+    forward_record.add_argument("--model-calls", required=True, type=int)
+    forward_record.add_argument("--repair-attempts", type=int, default=0)
+    forward_record.add_argument("--input-tokens", type=int, default=0)
+    forward_record.add_argument("--output-tokens", type=int, default=0)
+    forward_model = sub.add_parser(
+        "forward-eval-run-model",
+        help="run a local Ollama model through real L1-to-L0 Promotion checks",
+    )
+    forward_model.add_argument("--model", default="qwen3.5:9b")
+    forward_model.add_argument("--base-url", default="http://127.0.0.1:11434")
+    forward_model.add_argument(
+        "--output-root", default="artifacts/promotion-forward-model/qwen3.5-9b",
+    )
+    forward_model.add_argument("--limit", type=int)
+    forward_model.add_argument("--repetitions", type=int, default=1)
+    forward_model.add_argument("--timeout-seconds", type=float, default=180.0)
+    forward_model.add_argument("--repair-limit", type=int, default=1)
+    forward_rescore = sub.add_parser(
+        "forward-eval-rescore-model",
+        help="re-run deterministic scoring over an existing model run without inference",
+    )
+    forward_rescore.add_argument(
+        "--output-root", default="artifacts/promotion-forward-model/qwen3.5-9b",
+    )
+
     sub.add_parser(
         "runtime-validate", help="validate the complete activated production L0 v2 catalog",
     )
@@ -229,6 +340,105 @@ def main(argv: list[str] | None = None) -> int:
                 export_workbench_html(args.proposal, args.output),
                 ensure_ascii=False, indent=2, sort_keys=True,
             ))
+            return 0
+        if args.command == "core-eval-report":
+            from network_runtime.l0.core_capability_evaluation import (
+                write_core_capability_evaluation,
+            )
+
+            print(json.dumps(
+                write_core_capability_evaluation(
+                    runtime_report_path=args.runtime_report,
+                    forward_report_path=args.forward_report,
+                    forward_model_report_path=args.forward_model_report,
+                    json_path=args.json,
+                    markdown_path=args.markdown,
+                ),
+                ensure_ascii=False, indent=2, sort_keys=True,
+            ))
+            return 0
+        if args.command.startswith("forward-eval-"):
+            from network_runtime.l0.forward_qualification import (
+                adjudicate_forward_labels,
+                forward_qualification_schemas,
+                qualify_forward_files,
+                record_forward_observation,
+                seal_forward_cases,
+                write_public_calibration,
+            )
+
+            if args.command in {
+                "forward-eval-run-model", "forward-eval-rescore-model",
+            }:
+                from network_runtime.l0.forward_model_runner import (
+                    rescore_public_model_evaluation,
+                    run_public_model_evaluation,
+                )
+
+                value = (
+                    run_public_model_evaluation(
+                        model=args.model,
+                        base_url=args.base_url,
+                        output_root=args.output_root,
+                        limit=args.limit,
+                        repetitions=args.repetitions,
+                        timeout_seconds=args.timeout_seconds,
+                        repair_limit=args.repair_limit,
+                    )
+                    if args.command == "forward-eval-run-model"
+                    else rescore_public_model_evaluation(args.output_root)
+                )
+            elif args.command == "forward-eval-schema":
+                value = forward_qualification_schemas()
+            elif args.command == "forward-eval-calibrate":
+                value = write_public_calibration(
+                    output_root=args.output_root,
+                    markdown_path=args.markdown,
+                )
+            elif args.command == "forward-eval-seal":
+                value = seal_forward_cases(
+                    args.cases,
+                    dataset_id=args.dataset_id,
+                    version=args.version,
+                    provenance=args.provenance,
+                )
+            elif args.command == "forward-eval-adjudicate":
+                value = adjudicate_forward_labels(
+                    args.cases, args.manifest, args.reviewer_one, args.reviewer_two,
+                )
+            elif args.command == "forward-eval-score":
+                value = qualify_forward_files(
+                    args.cases, args.manifest, args.reviewer_one,
+                    args.reviewer_two, args.observations,
+                )
+            else:
+                value = record_forward_observation(
+                    case_id=args.case_id,
+                    repetition=args.repetition,
+                    model=args.model,
+                    model_artifact_digest=args.model_artifact_digest,
+                    authoring_protocol_digest=args.authoring_protocol_digest,
+                    catalog_snapshot_digest=args.catalog_snapshot_digest,
+                    disposition=args.disposition,
+                    latency_ms=args.latency_ms,
+                    model_calls=args.model_calls,
+                    repair_attempts=args.repair_attempts,
+                    input_tokens=args.input_tokens,
+                    output_tokens=args.output_tokens,
+                    proposal_path=args.proposal,
+                    catalog_id=args.catalog_id,
+                    missing_fields=args.missing_field,
+                ).model_dump(by_alias=True, mode="json")
+            if hasattr(args, "output"):
+                destination = Path(args.output).expanduser().resolve()
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_text(
+                    json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
+            print(json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True))
+            if args.command == "forward-eval-score" and not value["qualified"]:
+                return 1
             return 0
         if args.command in {
             "runtime-trajectories-build", "runtime-trajectories-validate",

@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_node_drain
 title: network.node.drain
@@ -10,6 +10,16 @@ parameters:
   node_id: 'node_id；必填 / Required string；最长长度 / maximum length: 4096。'
   grace_period_s: 'grace_period_s；可选 / Optional integer；最小值 / minimum: 0；最大值 / maximum:
     3600。'
+semanticIntents:
+- effectCapability: netopyu.tool.drain_node
+  kind: drain_node
+  targetFields:
+  - node_id
+  desiredState:
+    drained: true
+    schedulable: false
+    pending: 0
+    failed: 0
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -79,7 +89,7 @@ outcomes:
     explicit recovery state.
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
-sourceSkillSha256: sha256:5fbf1c0dd60df5e1272fc18e9bf6c556060dd9f7f9629c691487ea3354793d16
+sourceSkillSha256: sha256:95264596fe369c9459f2c569a439300e7d6893015bf9049f9f4b1cb4c1578918
 capabilityCatalogSha256: sha256:409ba1601b9118d7142f629d4b237c5daf9a3b3ecbe45aebc93ec2be95630e4c
-previousStageSha256: sha256:5fbf1c0dd60df5e1272fc18e9bf6c556060dd9f7f9629c691487ea3354793d16
+previousStageSha256: sha256:95264596fe369c9459f2c569a439300e7d6893015bf9049f9f4b1cb4c1578918
 unresolvedQuestions: []

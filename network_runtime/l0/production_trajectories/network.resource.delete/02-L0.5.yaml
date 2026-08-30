@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_resource_delete
 title: network.resource.delete
@@ -9,6 +9,13 @@ profiles:
 parameters:
   resource_id: 'resource_id；必填 / Required string；最长长度 / maximum length: 4096。'
   force: force；可选 / Optional boolean。
+semanticIntents:
+- effectCapability: netopyu.tool.delete_resource
+  kind: delete_resource
+  targetFields:
+  - resource_id
+  desiredState:
+    exists: false
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -78,7 +85,7 @@ outcomes:
     explicit recovery state.
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
-sourceSkillSha256: sha256:f8e6655b189fd232da9793bca86427578296a79db636cd1f07d6e5f99054f2c1
+sourceSkillSha256: sha256:8e73140a795510a1793f552ae8df97911d0729943967c89f38beeccc50f3b3a2
 capabilityCatalogSha256: sha256:e795f84f557fe569dd74b77ba6980b540b92eb5775cd7f40f40cc93ca81292c0
-previousStageSha256: sha256:f8e6655b189fd232da9793bca86427578296a79db636cd1f07d6e5f99054f2c1
+previousStageSha256: sha256:8e73140a795510a1793f552ae8df97911d0729943967c89f38beeccc50f3b3a2
 unresolvedQuestions: []

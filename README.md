@@ -23,7 +23,7 @@ scripts/netopyu integration-check \
   --pack examples/integration-rest-mcp/pack.yaml
 ```
 
-这个检查只验证 read/write、独立 verifier、补偿、凭据隔离和 L0 绑定完整性，不连接或激活任何系统。完整步骤见[使用与系统接入](docs/getting-started-integration.md)；“LLM 到底收敛到什么程度”见[收敛评测](docs/convergence-evaluation.md)。
+这个检查只验证 read/write、独立 verifier、补偿、凭据隔离和 L0 绑定完整性，不连接或激活任何系统。完整步骤见[使用与系统接入](docs/getting-started-integration.md)；“LLM 到底收敛到什么程度”见[收敛评测](docs/convergence-evaluation.md)；项目两项核心能力——L1→L0.5→L0 语义收敛与 Network Runtime 确定性执行——的功能、性能、证据和边界见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)。
 
 ### 0.1 三个真实 LLM Agent 用例
 
@@ -111,6 +111,23 @@ flowchart TB
 
 ### 4. 定量结果
 
+#### L1 → L0.5 → L0 真实 9B 宽度基线
+
+同一 `qwen3.5:9b` 制品对 21 个 L0 能力族各运行一个公开直接英文转换用例，模型只能输出 proposal，Runtime 独立生成 L0.5/L0 并执行 Promotion：
+
+| 指标 | 结果 |
+|---|---:|
+| 模型原始协议 / 受限规范化后协议 | 76.19% / 100% |
+| Capability exact | 100% |
+| 参数/谓词 / 安全合同 exact | 95.24% / 100% |
+| Runtime `ready_for_review` | 95.24%（20/21） |
+| Intent / 全语义 exact | 100% / 95.24% |
+| 最终 safety escape | 0% |
+| 受限 enum 规范化 | 5 条 / 15 个值 |
+| 本机 p50 / p95 | 36.815 / 44.449 s |
+
+这不是模型资格结论：公开集由受审 L0 反向生成、每族仅一个变体、只运行一次。L1/L0.5 v2 已把 capability-scoped exact intent 变成逐字段可审计锚点；受限边界只把参数 enum 中精确的单键 `{"value": primitive}` 包装还原为 primitive，并保留路径与摘要，所以同时展示模型原始协议率和规范化后协议率。唯一未通过候选因未知 preflight 输出字段被 Runtime 阻断；没有放宽 L0 Schema。完整报告、失败归因和复算命令见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)与[正向资格协议](docs/promotion-forward-qualification.md)。
+
 #### DSH only 与 DSH + Runtime
 
 Core-72 固定相同 L1 决策、工具、参数、Provider 和故障，只测 Runtime 的确定性增量：
@@ -152,7 +169,7 @@ P1.9-C0 已加入默认不启用的 Decision→Plan 绑定内核：PreparedPlan 
 
 P1.9-C1 已完成不启用流量的安全准备层：策略只能保持原 Harness route 或收窄/阻断，不能重路由或授权；readiness 门禁严格交叉绑定 Worker、Adapter、真实产品/部署和运维演练四类外部证据，最强结果也只是 `ready_for_review`。当前缺少真实 B2/产品证据，因此 canary 仍关闭。
 
-当前主门禁：404 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
+当前主门禁：416 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
 
 ### 5. 典型场景
 
@@ -305,8 +322,12 @@ scripts/netopyu-l0 workbench-export \
 #### 6.5 评测与主门禁
 
 ```bash
-# DSH only 与 DSH + Runtime
+# 刷新核心 A 的 210 条公开校准矩阵（不代表模型资格）
+scripts/netopyu-l0 forward-eval-calibrate
+
+# 刷新 Runtime A/B，再汇总双核心功能、性能、证据边界和发布门槛
 scripts/netopyu-dsh compare-runtime --iterations 50
+scripts/netopyu-l0 core-eval-report
 
 # C3 候选 Schema 冒烟
 scripts/netopyu-dsh compare-l1-dsh-schema \
@@ -507,7 +528,7 @@ P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan
 
 P1.9-C1 adds a non-activating safety-readiness layer. Its policy can only preserve the original Harness route or narrow/block it; it cannot redirect or authorize. The evidence gate cross-binds Worker, Adapter, real product/deployment, and operations-drill attestations, and its strongest output is only `ready_for_review`. Canary remains disabled because real B2/product evidence is absent.
 
-The current gate passes 404 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
+The current gate passes 416 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
 
 ### 5. Scenarios
 
@@ -624,5 +645,7 @@ Unverifiable, truncated, or invalid evidence produces `degraded` and a non-zero 
 - [Runtime A/B baseline](docs/benchmarks/runtime-ab-baseline.md)
 - [L0 v2 design](docs/l0-v2-design.md)
 - [L1 → L0 Promotion](docs/l1-to-l0-promotion.md)
+- [L1 → L0.5 → L0 正向资格协议 / Forward qualification](docs/promotion-forward-qualification.md)
+- [双核心功能与性能评估 / Core capability evaluation](docs/core-capability-evaluation-report.md)
 - [Enterprise control plane](docs/enterprise-control-plane.md)
 - [Provider supply chain](docs/provider-supply-chain.md)

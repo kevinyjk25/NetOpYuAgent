@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_application_enforcement_revoke
 title: network.application.enforcement.revoke
@@ -13,6 +13,14 @@ parameters:
   change_id: 'change_id；必填 / Required string；最长长度 / maximum length: 4096。'
   reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
     4096。'
+semanticIntents:
+- effectCapability: network.application.enforcement.revoke
+  kind: revoke_network_application_enforcement
+  targetFields:
+  - user_id
+  - app_id
+  desiredState:
+    allowed: false
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -77,7 +85,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:ca246596560a9dfe760615459ce99acdedb5ccd5a8eb1c7e038ab6b416ba65c5
+sourceSkillSha256: sha256:dd930e5f6a2ea4465b8aac2c0c1d18eeab748c1ef210fcfeeb45d48cabf30297
 capabilityCatalogSha256: sha256:0e3f8d0b556664a1d046e975f55e9ee292e579f08b7a87cb1dab6f875ce296c4
-previousStageSha256: sha256:ca246596560a9dfe760615459ce99acdedb5ccd5a8eb1c7e038ab6b416ba65c5
+previousStageSha256: sha256:dd930e5f6a2ea4465b8aac2c0c1d18eeab748c1ef210fcfeeb45d48cabf30297
 unresolvedQuestions: []

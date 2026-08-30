@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_fabric_access_vlan_set
 title: network.fabric.access-vlan.set
@@ -14,6 +14,14 @@ parameters:
     4096。'
   verification_probe_id: 'verification_probe_id；可选 / Optional string；最长长度 / maximum
     length: 4096。'
+semanticIntents:
+- effectCapability: network.fabric.access-vlan.set
+  kind: set_access_vlan
+  targetFields:
+  - device_id
+  - interface
+  desiredState:
+    vlan_id: ${arguments.vlan_id}
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -78,7 +86,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:ced788f9ea5a63a0491d39cef278301515ea9478686f326e64115f48a48427e9
+sourceSkillSha256: sha256:b85ab68f09df043b0c87e9925a22857e15bf144f7693aed75472612ace08fb47
 capabilityCatalogSha256: sha256:a624b5b27ae885821779ed31ee4f6ac2ab2a552b82172d0148e684344262d27a
-previousStageSha256: sha256:ced788f9ea5a63a0491d39cef278301515ea9478686f326e64115f48a48427e9
+previousStageSha256: sha256:b85ab68f09df043b0c87e9925a22857e15bf144f7693aed75472612ace08fb47
 unresolvedQuestions: []

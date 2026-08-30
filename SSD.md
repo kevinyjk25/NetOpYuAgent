@@ -47,7 +47,7 @@
 | F-35 | Harness/模型只能消费 Runtime terminal envelope，不得把 Actor/Provider 中间态当作执行结果。 |
 | F-36 | 跨 Provider Saga 必须绑定不可变步骤定义和每步 plan id/hash；正向和补偿步骤均不得绕过 L0 审批、验证与审计。 |
 | F-37 | L0 v2 的约束、扩展和组合必须在编译期展开；Runtime 只接受不可变编译产物。约束不得放宽父合同，组合步骤必须绑定子合同的精确版本和 hash。 |
-| F-38 | L1 → L0 Promotion 必须保存 `L1 → L0.5 → L0` 三阶段及逐级 hash。L0.5 不得偏离 L1，L0 不得扩大 L0.5；Agent 输出仍是不可信候选，一次性人工 review 不得自动注册合同或授予执行权限。 |
+| F-38 | L1 → L0 Promotion 必须保存 `L1 → L0.5 → L0` 三阶段及逐级 hash。L1 对不可猜测 intent 使用显式标记语义块；L0.5 v2 必须逐字段保存 effect capability、kind、targetFields、desiredState，L0 必须精确匹配。任何缺失/漂移失败关闭；Agent 输出仍是不可信候选，一次性人工 review 不得自动注册合同或授予执行权限。 |
 | F-39 | 全部内置受审写能力必须由编译 L0 v2 Contract 驱动；旧 ToolContract/verifier/compensator 只能作为精确绑定的实现 Adapter。prepare 和执行前必须校验 parity，Effect 参数只能从已批准值按 v2 模板渲染；禁止新增裸 v1 L0。 |
 | F-40 | 每个生产 L0 必须保存 L1/L0.5/L0 authoring/compiled 和逐级 hash 轨迹；主门禁必须重新验证 Promotion semantic parity、精确 contract round trip 和文件完整性。反向 bootstrap 产物必须标注来源、不得注册到 Harness 或宣称为模型独立推导。 |
 | F-41 | schema-v10 写计划必须绑定经过 verifier 规范化的 requester/policy evidence，以及 Provider release/manifest/qualification/deployment digest；v9/v8 及更早只读兼容。 |
@@ -548,7 +548,7 @@ This document is the P0.5 system and security baseline for local mock, the prima
 | F-35 | Harness/model consumers receive only a Runtime terminal envelope and cannot treat Actor/Provider intermediate state as an outcome. |
 | F-36 | A cross-provider Saga binds an immutable step definition and per-step plan id/hash; forward and compensation steps never bypass L0 approval, verification, or audit. |
 | F-37 | L0 v2 constraints, extensions, and compositions are flattened at compile time; Runtime accepts only immutable compiled artifacts. Constraints cannot weaken a parent, and composite steps bind exact child versions and hashes. |
-| F-38 | L1 → L0 Promotion preserves `L1 → L0.5 → L0` stages in a predecessor-linked hash chain. L0.5 cannot drift from L1 and L0 cannot widen L0.5. Agent output remains untrusted, and one human review cannot register a contract or grant execution authority. |
+| F-38 | L1 → L0 Promotion preserves `L1 → L0.5 → L0` stages in a predecessor-linked hash chain. L1 uses an explicitly marked block for intent that must not be guessed; L0.5 v2 preserves effect capability, kind, target fields, and desired state field-for-field, and compiled L0 must match exactly. Missing or drifted intent fails closed. Agent output remains untrusted, and one human review cannot register a contract or grant execution authority. |
 | F-39 | Every built-in reviewed mutation is driven by a compiled L0 v2 contract. Legacy ToolContracts/verifiers/compensators are exact implementation adapters only. Prepare and execution-time revalidation enforce parity, effect arguments are rendered from approved values through v2 templates, and new raw v1 L0 registrations are forbidden. |
 | F-40 | Every production L0 preserves L1/L0.5/L0 authoring/compiled artifacts and predecessor hashes. The primary gate reruns Promotion semantic parity, exact contract round trips, and file integrity. Reverse-bootstrapped artifacts declare their origin, are never registered into the Harness, and cannot be claimed as independent model inference. |
 | F-41 | A schema-v10 mutation plan binds requester/policy evidence and Provider release/manifest/qualification/deployment digests; v9/v8 and older shapes are read-only compatibility. |

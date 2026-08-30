@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_device_config_edit
 title: network.device.config.edit
@@ -17,6 +17,13 @@ parameters:
     4096。'
   verification_probe_id: 'verification_probe_id；可选 / Optional string；最长长度 / maximum
     length: 4096。'
+semanticIntents:
+- effectCapability: network.device.config.edit
+  kind: configure_device
+  targetFields:
+  - device_id
+  desiredState:
+    requested_configuration_digest: ${intent.configuration_digest}
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -81,7 +88,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:03384add2ee0176ec55a563207f248f63b6902485f0cfc36ab4d6813b854a70e
+sourceSkillSha256: sha256:d76b01c93977b4b0d02c6bc51478e042c860feae791bc89316b2c8de44842d05
 capabilityCatalogSha256: sha256:de1b3e438cb0e45996f9b40747c871417016ba752fa4e1cb03efc431aa40417b
-previousStageSha256: sha256:03384add2ee0176ec55a563207f248f63b6902485f0cfc36ab4d6813b854a70e
+previousStageSha256: sha256:d76b01c93977b4b0d02c6bc51478e042c860feae791bc89316b2c8de44842d05
 unresolvedQuestions: []

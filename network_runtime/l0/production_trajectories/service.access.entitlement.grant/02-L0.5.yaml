@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: service_access_entitlement_grant
 title: service.access.entitlement.grant
@@ -16,6 +16,15 @@ parameters:
   reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
     4096。'
   correlation_id: 'correlation_id；可选 / Optional string；最长长度 / maximum length: 4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.access_policy_grant_entitlement
+  kind: grant_service_entitlement
+  targetFields:
+  - user_id
+  - app_id
+  desiredState:
+    allowed: true
+    role: ${arguments.role}
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -80,7 +89,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:e2d94a5e6fe7ea093a1310ca6b996485761b4025d83e4bb0f10da6bc9ea20eda
+sourceSkillSha256: sha256:eeefa274ddb9d956dd4b49cc3286954c6f7f3ae4ba8686fb3316f2e5b0ca31bb
 capabilityCatalogSha256: sha256:cf2fa5427a19106e6c54322ea2ad92195d132762ec140ad102f8305c079277f7
-previousStageSha256: sha256:e2d94a5e6fe7ea093a1310ca6b996485761b4025d83e4bb0f10da6bc9ea20eda
+previousStageSha256: sha256:eeefa274ddb9d956dd4b49cc3286954c6f7f3ae4ba8686fb3316f2e5b0ca31bb
 unresolvedQuestions: []

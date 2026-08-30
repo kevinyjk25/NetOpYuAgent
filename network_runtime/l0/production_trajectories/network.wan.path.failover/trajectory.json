@@ -12,20 +12,20 @@
       "file": "01-L1-SKILL.md",
       "format": "anthropic-skill-markdown",
       "previousSha256": null,
-      "sha256": "sha256:ce53f4207c183a5e4e5dc06922c5c8d8dec886ccb281b13198066b553151d757",
+      "sha256": "sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c",
       "stage": "L1"
     },
     {
       "file": "02-L0.5.yaml",
-      "format": "netopyu.io/l0.5-structured-skill/v1",
-      "previousSha256": "sha256:ce53f4207c183a5e4e5dc06922c5c8d8dec886ccb281b13198066b553151d757",
-      "sha256": "sha256:e34063b56dd593a99de867238b4ea5e1b288f3cb609ced266442367a9f8fc771",
+      "format": "netopyu.io/l0.5-structured-skill/v2",
+      "previousSha256": "sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c",
+      "sha256": "sha256:ce4f4d890a292f1d7937bb1dab173c83d820d582810dbd51be7e07cbdf89a48a",
       "stage": "L0.5"
     },
     {
       "file": "03-L0-authoring.yaml",
       "format": "netopyu.io/l0-effect/v2",
-      "previousSha256": "sha256:e34063b56dd593a99de867238b4ea5e1b288f3cb609ced266442367a9f8fc771",
+      "previousSha256": "sha256:ce4f4d890a292f1d7937bb1dab173c83d820d582810dbd51be7e07cbdf89a48a",
       "sha256": "sha256:3f1fb7a31b0afd7829a3b9692a398c85876b0c30f68a413d9028494c621792dc",
       "stage": "L0-authoring"
     },
@@ -38,5 +38,5 @@
       "stage": "L0-compiled"
     }
   ],
-  "trajectoryHash": "sha256:328c96aa8994d71f6c0a4ddbae9ea777881227119875446e13a8df58e84e1aef"
+  "trajectoryHash": "sha256:7d225bf0d4f88f685e439ddcb7c76a66f6cef3a929ff6007014cb22691aac218"
 }

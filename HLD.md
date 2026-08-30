@@ -331,7 +331,7 @@ Saga 只协调受审 L0 计划，不直接持有 Provider 凭据或 execution no
 
 ### 21. L1 → L0 Promotion
 
-Promotion 是独立于生产执行路径的开发组件。它保存 `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill → L0 authoring/compiled Contract` 三阶段轨迹。L0.5 用人可读 YAML 固定参数、约束、流程、风险、停止条件、结果语义和受信 Capability 选项；静态检查阻止 L0.5 偏离 L1 或 L0 扩大 L0.5。Proposal 以逐级 hash 链保存全部阶段，人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
+Promotion 是独立于生产执行路径的开发组件。它保存 `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill v2 → L0 authoring/compiled Contract` 三阶段轨迹。L1 用显式标记的小型语义块固定不可猜测的 effect capability、intent kind、targetFields 和 desiredState；L0.5 逐字段保存该 capability-scoped 锚点，并用人可读 YAML 固定参数、约束、流程、风险、停止条件、结果语义和受信 Capability 选项。静态检查阻止 L0.5 偏离 L1 或 L0 扩大/改变 L0.5 intent。Proposal 以逐级 hash 链保存全部阶段，人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
 
 ### 22. P1.4-B-ready Provider 发布、外部资格与部署证明
 
@@ -597,7 +597,7 @@ The explainability plane under `network_runtime/l0/production_trajectories/` pre
 
 ### 18. L1 → L0 promotion
 
-Promotion is a development component outside the production execution path. It preserves a three-stage `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill → L0 authoring/compiled contract` trajectory. Human-readable L0.5 YAML fixes parameters, constraints, workflow, risk, stop conditions, outcomes, and trusted capability options. Static checks prevent L0.5 drift from L1 and L0 widening of L0.5. The proposal stores every stage in a predecessor-linked hash chain; human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
+Promotion is a development component outside the production execution path. It preserves a three-stage `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill v2 → L0 authoring/compiled contract` trajectory. L1 contains a visibly marked compact semantic anchor for the effect capability, intent kind, target fields, and desired state that must not be guessed. Human-readable L0.5 YAML copies that capability-scoped anchor exactly and fixes parameters, constraints, workflow, risk, stop conditions, outcomes, and trusted capability options. Static checks prevent L0.5 drift from L1 and any L0 widening or intent change. The proposal stores every stage in a predecessor-linked hash chain; human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
 
 ### 19. P1.4-B-ready Provider publication, external qualification, and deployment evidence
 

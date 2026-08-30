@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: service_platform_restart
 title: service.platform.restart
@@ -16,6 +16,15 @@ parameters:
   reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
     4096。'
   correlation_id: 'correlation_id；可选 / Optional string；最长长度 / maximum length: 4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.platform_restart_service
+  kind: restart_platform_service
+  targetFields:
+  - service
+  - environment
+  desiredState:
+    status: healthy
+    rollout: complete
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -80,7 +89,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:e4da141647ae1c5a82cacc12654018d500047e872b6aae31027ecaa8c6f98e8d
+sourceSkillSha256: sha256:7e86abbe0172024cbcc11bdf406532be3e75dc7a0156faf010527086493057d7
 capabilityCatalogSha256: sha256:356c81b2b05290cfb18c38767b3c9a7b2f60e9c0f6def28e11c71f10595218e7
-previousStageSha256: sha256:e4da141647ae1c5a82cacc12654018d500047e872b6aae31027ecaa8c6f98e8d
+previousStageSha256: sha256:7e86abbe0172024cbcc11bdf406532be3e75dc7a0156faf010527086493057d7
 unresolvedQuestions: []
