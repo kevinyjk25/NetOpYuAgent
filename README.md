@@ -23,7 +23,7 @@ scripts/netopyu integration-check \
   --pack examples/integration-rest-mcp/pack.yaml
 ```
 
-这个检查只验证 read/write、独立 verifier、补偿、凭据隔离和 L0 绑定完整性，不连接或激活任何系统。完整步骤见[使用与系统接入](docs/getting-started-integration.md)；“LLM 到底收敛到什么程度”见[收敛评测](docs/convergence-evaluation.md)。
+这个检查只验证 read/write、独立 verifier、补偿、凭据隔离和 L0 绑定完整性，不连接或激活任何系统。完整步骤见[使用与系统接入](docs/getting-started-integration.md)；“LLM 到底收敛到什么程度”见[收敛评测](docs/convergence-evaluation.md)；项目两项核心能力——L1→L0.5→L0 语义收敛与 Network Runtime 确定性执行——的功能、性能、证据和边界见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)。
 
 ### 0.1 三个真实 LLM Agent 用例
 
@@ -305,8 +305,9 @@ scripts/netopyu-l0 workbench-export \
 #### 6.5 评测与主门禁
 
 ```bash
-# DSH only 与 DSH + Runtime
+# 先刷新 Runtime A/B，再汇总双核心功能、性能、证据边界和发布门槛
 scripts/netopyu-dsh compare-runtime --iterations 50
+scripts/netopyu-l0 core-eval-report
 
 # C3 候选 Schema 冒烟
 scripts/netopyu-dsh compare-l1-dsh-schema \
@@ -624,5 +625,6 @@ Unverifiable, truncated, or invalid evidence produces `degraded` and a non-zero 
 - [Runtime A/B baseline](docs/benchmarks/runtime-ab-baseline.md)
 - [L0 v2 design](docs/l0-v2-design.md)
 - [L1 → L0 Promotion](docs/l1-to-l0-promotion.md)
+- [双核心功能与性能评估 / Core capability evaluation](docs/core-capability-evaluation-report.md)
 - [Enterprise control plane](docs/enterprise-control-plane.md)
 - [Provider supply chain](docs/provider-supply-chain.md)

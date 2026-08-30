@@ -125,6 +125,20 @@ def main(argv: list[str] | None = None) -> int:
     workbench_export.add_argument("--proposal", required=True)
     workbench_export.add_argument("--output", required=True)
 
+    core_evaluation = sub.add_parser(
+        "core-eval-report",
+        help="recompute the dual-core semantic-compilation and Runtime evidence report",
+    )
+    core_evaluation.add_argument(
+        "--runtime-report", default="artifacts/runtime-ab/runtime-ab.json",
+    )
+    core_evaluation.add_argument(
+        "--json", default="artifacts/core-capability-evaluation/current.json",
+    )
+    core_evaluation.add_argument(
+        "--markdown", default="docs/core-capability-evaluation-report.md",
+    )
+
     sub.add_parser(
         "runtime-validate", help="validate the complete activated production L0 v2 catalog",
     )
@@ -227,6 +241,20 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "workbench-export":
             print(json.dumps(
                 export_workbench_html(args.proposal, args.output),
+                ensure_ascii=False, indent=2, sort_keys=True,
+            ))
+            return 0
+        if args.command == "core-eval-report":
+            from network_runtime.l0.core_capability_evaluation import (
+                write_core_capability_evaluation,
+            )
+
+            print(json.dumps(
+                write_core_capability_evaluation(
+                    runtime_report_path=args.runtime_report,
+                    json_path=args.json,
+                    markdown_path=args.markdown,
+                ),
                 ensure_ascii=False, indent=2, sort_keys=True,
             ))
             return 0
