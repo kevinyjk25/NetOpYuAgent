@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_resource_failover
 title: network.resource.failover
@@ -9,6 +9,14 @@ profiles:
 parameters:
   resource_id: 'resource_id；必填 / Required string；最长长度 / maximum length: 4096。'
   target: 'target；必填 / Required string；最长长度 / maximum length: 4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.failover
+  kind: failover_resource
+  targetFields:
+  - resource_id
+  desiredState:
+    primary: ${arguments.target}
+    healthy: true
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -78,7 +86,7 @@ outcomes:
     explicit recovery state.
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
-sourceSkillSha256: sha256:693e54059a198380db7164e37f2a6fe2d00fcfa777c21c144fd374c68812019a
+sourceSkillSha256: sha256:445b8bc0c641f74d384941dd7c23516e6bfbaadbb6ea120b3cc5d67840fa71bc
 capabilityCatalogSha256: sha256:7e65d0347ed498744fe06b5ebe346684eb1c988d120d74d9c8aa446a1e1bde75
-previousStageSha256: sha256:693e54059a198380db7164e37f2a6fe2d00fcfa777c21c144fd374c68812019a
+previousStageSha256: sha256:445b8bc0c641f74d384941dd7c23516e6bfbaadbb6ea120b3cc5d67840fa71bc
 unresolvedQuestions: []

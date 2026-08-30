@@ -21,6 +21,10 @@ from .production_trajectory import validate_production_trajectories
 REPORT_SCHEMA = "netopyu.io/core-capability-evaluation/v1"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RUNTIME_REPORT = PROJECT_ROOT / "artifacts/runtime-ab/runtime-ab.json"
+DEFAULT_FORWARD_REPORT = PROJECT_ROOT / "artifacts/promotion-forward-calibration/report.json"
+DEFAULT_FORWARD_MODEL_REPORT = (
+    PROJECT_ROOT / "artifacts/promotion-forward-model/qwen3.5-9b/report.json"
+)
 DEFAULT_JSON_REPORT = PROJECT_ROOT / "artifacts/core-capability-evaluation/current.json"
 DEFAULT_MARKDOWN_REPORT = PROJECT_ROOT / "docs/core-capability-evaluation-report.md"
 
@@ -67,7 +71,94 @@ def _load_runtime_evidence(path: str | Path) -> dict[str, Any]:
     }
 
 
-def _build_semantic_compilation_evidence() -> dict[str, Any]:
+def _load_forward_calibration(path: str | Path) -> dict[str, Any]:
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        return {
+            "status": "not_generated",
+            "qualificationEligible": False,
+            "caseCount": 0,
+            "familyCount": 0,
+            "source": str(source),
+            "claim": "Run scripts/netopyu-l0 forward-eval-calibrate.",
+        }
+    value = json.loads(source.read_text(encoding="utf-8"))
+    if value.get("schema") != "netopyu.io/promotion-forward-calibration/v1":
+        raise ValueError("forward calibration report Schema is invalid")
+    coverage = value["coverage"]
+    return {
+        "status": value["status"],
+        "qualificationEligible": bool(value["qualificationEligible"]),
+        "caseCount": coverage["case_count"],
+        "familyCount": coverage["family_count"],
+        "variantsPerFamily": coverage["variants_per_family"],
+        "source": str(source.relative_to(PROJECT_ROOT))
+        if source.is_relative_to(PROJECT_ROOT) else str(source),
+        "sourceDigest": sha256_json(value),
+        "claim": value["claimBoundary"],
+    }
+
+
+def _load_forward_model_run(path: str | Path) -> dict[str, Any]:
+    source = Path(path).expanduser().resolve()
+    if not source.is_file():
+        return {
+            "status": "not_run",
+            "qualified": False,
+            "caseCount": 0,
+            "familyCount": 0,
+            "repetitions": 0,
+            "metrics": {
+                name: 0.0 for name in (
+                    "protocol_completion_rate", "raw_protocol_completion_rate",
+                    "bounded_normalization_rate", "capability_exact_match",
+                    "parameter_predicate_exact_match", "intent_exact_match",
+                    "safety_contract_exact_match", "runtime_promotion_ready_rate",
+                    "semantic_contract_exact_match", "safety_escape_rate",
+                )
+            },
+            "latency": {"p50": 0.0, "p95": 0.0},
+            "efficiency": {
+                "mean_model_calls": 0.0, "mean_repair_attempts": 0.0,
+                "syntax_normalization_events": 0,
+                "syntax_normalized_observations": 0,
+            },
+            "claim": "Run scripts/netopyu-l0 forward-eval-run-model --limit 21.",
+        }
+    value = json.loads(source.read_text(encoding="utf-8"))
+    if value.get("schema") != "netopyu.io/promotion-forward-model-run/v1":
+        raise ValueError("forward model-run report Schema is invalid")
+    cases_path = Path(value["artifacts"]["cases"])
+    families: set[str] = set()
+    if cases_path.is_file():
+        for line in cases_path.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                families.add(str(json.loads(line)["family"]))
+    return {
+        "status": value["status"],
+        "qualified": bool(value["qualified"]),
+        "model": value["model"],
+        "modelArtifactDigest": value["model_artifact_digest"],
+        "authoringProtocolDigest": value["authoring_protocol_digest"],
+        "catalogSnapshotDigest": value["catalog_snapshot_digest"],
+        "caseCount": value["dataset"]["case_count"],
+        "familyCount": len(families),
+        "repetitions": value["dataset"]["repetitions"],
+        "metrics": value["metrics"],
+        "latency": value["latency"],
+        "efficiency": value["efficiency"],
+        "failureCounts": value.get("failure_counts", {}),
+        "source": str(source.relative_to(PROJECT_ROOT))
+        if source.is_relative_to(PROJECT_ROOT) else str(source),
+        "sourceDigest": sha256_json(value),
+        "claim": value["claimBoundary"],
+    }
+
+
+def _build_semantic_compilation_evidence(
+    forward_report_path: str | Path,
+    forward_model_report_path: str | Path,
+) -> dict[str, Any]:
     example = PROJECT_ROOT / "network_runtime/l0/promotion_examples/url1-network-access"
     assessment = assess_promotion(
         skill_path=example / "SKILL.md",
@@ -111,17 +202,23 @@ def _build_semantic_compilation_evidence() -> dict[str, Any]:
             "realLlmEvidence": "single documented DSH golden path; not a benchmark",
             "activationAuthority": False,
         },
+        "forwardQualificationProtocol": _load_forward_calibration(
+            forward_report_path,
+        ),
+        "realModelForwardRun": _load_forward_model_run(
+            forward_model_report_path,
+        ),
         "performance": {
-            "forwardModelAccuracy": "not_statistically_qualified",
-            "conversionAvailability": "not_measured",
-            "conversionLatency": "not_measured",
+            "forwardModelAccuracy": "public_reverse_calibration_only_not_qualified",
+            "conversionAvailability": "measured_on_21_family_single_run_only",
+            "conversionLatency": "measured_on_local_qwen3.5_9b_single_run_only",
         },
         "notMeasured": [
             "unseen natural-language requirement extraction recall",
             "expert-gold L0.5 and L0 exact match",
             "valid no-edit proposal yield and ambiguity-block rate",
-            "repeated 9B/27B runs, repair exhaustion and model-call count",
-            "conversion latency, concurrency, soak, HA, DR and production SLO",
+            "three repeated 9B runs and any 27B comparison under the same protocol",
+            "conversion concurrency, soak, HA, DR and production SLO",
         ],
     }
 
@@ -179,7 +276,10 @@ def _build_deterministic_runtime_evidence(path: str | Path) -> dict[str, Any]:
 
 
 def build_core_capability_evaluation(
-    *, runtime_report_path: str | Path = DEFAULT_RUNTIME_REPORT,
+    *,
+    runtime_report_path: str | Path = DEFAULT_RUNTIME_REPORT,
+    forward_report_path: str | Path = DEFAULT_FORWARD_REPORT,
+    forward_model_report_path: str | Path = DEFAULT_FORWARD_MODEL_REPORT,
 ) -> dict[str, Any]:
     """Build a source-derived snapshot for both core capability families."""
 
@@ -200,7 +300,9 @@ def build_core_capability_evaluation(
             "A ready_for_review proposal is not approved, published, activated or executable.",
             "Real vendor qualification, distributed availability and production SLO remain open.",
         ],
-        "capabilityA": _build_semantic_compilation_evidence(),
+        "capabilityA": _build_semantic_compilation_evidence(
+            forward_report_path, forward_model_report_path,
+        ),
         "capabilityB": _build_deterministic_runtime_evidence(runtime_report_path),
         "combinedConclusion": {
             "semanticGap": "bounded by staged evidence and fail-closed review gates; unseen-language accuracy is not yet qualified",
@@ -262,6 +364,8 @@ def render_core_capability_evaluation_markdown(report: dict[str, Any]) -> str:
     fixed = a["fixedForwardSample"]
     metrics = fixed["metrics"]
     reverse = a["reverseBootstrap"]
+    forward = a["forwardQualificationProtocol"]
+    model_run = a["realModelForwardRun"]
     b = report["capabilityB"]
     comparison = b["comparison"]
     latency = b["latency"]
@@ -291,7 +395,7 @@ Service / Network Provider + 独立 Verifier
 
 | 核心 | 已实现功能 | 当前量化结论 | 尚未证明 |
 |---|---|---|---|
-| A：分阶段语义合约编译 | 三阶段留痕、双段映射、语义丢失告警、安全门禁、防篡改审查 | 固定 URL1 样例 gate 通过；{metrics['preserved']}/{metrics['totalRequirements']} preserved，{metrics['non_machine_verifiable']} 项需人工判断 | 未见自然语言的正向模型准确率、转换成功率、p50/p95 与 HA |
+| A：分阶段语义合约编译 | 三阶段留痕、双段映射、语义丢失告警、安全门禁、防篡改审查 | 固定 URL1 gate 通过；9B 实跑 {model_run['caseCount']} 条/{model_run['familyCount']} 能力族，Runtime 可审率 {_percent(model_run.get('metrics', {}).get('runtime_promotion_ready_rate', 0) * 100)} | 私有独立正向准确率、三次重复与 HA 尚未取得 |
 | B：确定性 Effect 事务 Runtime | 不可变计划、审批绑定、执行前重校验、独立验证、对账、补偿、Saga、审计 | Core-72：有效请求 {comparison['valid_completion']['dshPlusRuntime']['passed']}/{comparison['valid_completion']['dshPlusRuntime']['total']}；风险/故障 Oracle {comparison['control_effectiveness']['dshPlusRuntime']['passed']}/{comparison['control_effectiveness']['dshPlusRuntime']['total']} | 真实厂商设备、人工审批时延、并发长稳、分布式 HA 与生产 SLO |
 
 项目当前已经分别回答了“语义如何被约束”和“确定操作如何安全落地”，但还不能声称任意自然语言或真实生产环境达到 100% 准确、稳定或可用。
@@ -325,11 +429,31 @@ Service / Network Provider + 独立 Verifier
 
 另有 {reverse['contracts']} 个存量合同轨迹通过 Promotion 与精确 round-trip，但方向是受审 L0 反向生成 L1/L0.5 基线，只证明结构闭环和编译一致性，不证明模型正向泛化。
 
-#### 2.3 当前性能与资格缺口
+#### 2.3 真实 qwen3.5:9b 单次前向基线
 
-- Agent 正向 authoring 目前只开放 `lan-user-access` 一个可信 Catalog；真实 DSH/LLM 只有单次 Golden Path，不是统计基准。
-- 尚未测量正向转换准确率、合法输入 proposal yield、歧义阻断率、修复耗尽率、模型调用数、转换 p50/p95、并发、长稳和 HA。
-- 下一步应使用至少 200 个独立人工标注用例、双人仲裁、私有 holdout、同义改写/中英文/冲突/恶意扩权切片；固定安全集关键语义、Effect 和审批弱化逃逸必须为 0。
+| 指标 | 结果 |
+|---|---:|
+| 用例 / 能力族 / 重复 | {model_run['caseCount']} / {model_run['familyCount']} / {model_run['repetitions']} |
+| 模型原始严格协议完成 | {_percent(model_run['metrics'].get('raw_protocol_completion_rate', model_run['metrics']['protocol_completion_rate']) * 100)} |
+| 受限规范化后协议完成 | {_percent(model_run['metrics']['protocol_completion_rate'] * 100)} |
+| Capability exact match | {_percent(model_run['metrics']['capability_exact_match'] * 100)} |
+| 参数/谓词 exact match | {_percent(model_run['metrics']['parameter_predicate_exact_match'] * 100)} |
+| Intent exact match | {_percent(model_run['metrics']['intent_exact_match'] * 100)} |
+| 安全合同 exact match | {_percent(model_run['metrics']['safety_contract_exact_match'] * 100)} |
+| Runtime ready_for_review | {_percent(model_run['metrics']['runtime_promotion_ready_rate'] * 100)} |
+| 全语义 exact match / safety escape | {_percent(model_run['metrics']['semantic_contract_exact_match'] * 100)} / {_percent(model_run['metrics']['safety_escape_rate'] * 100)} |
+| 本机 p50 / p95 | {model_run['latency']['p50'] / 1000:.3f} / {model_run['latency']['p95'] / 1000:.3f} s |
+| 平均模型调用 / 修复 | {model_run['efficiency']['mean_model_calls']:.3f} / {model_run['efficiency']['mean_repair_attempts']:.3f} |
+| 受限 enum 规范化 | {model_run['efficiency'].get('syntax_normalized_observations', 0)} 条 / {model_run['efficiency'].get('syntax_normalization_events', 0)} 个值 |
+
+这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族上的真实模型调用，不是 evaluator self-check。L1/L0.5 v2 现在以 capability-scoped、逐字段可比的语义锚点保存 intent；本轮 intent exact 为 {_percent(model_run['metrics']['intent_exact_match'] * 100)}。模型原始协议与受限规范化后协议被分别计量：规范化只接受参数 enum 内精确的一键 `value` primitive 包装，并记录路径和前后摘要，不放宽 L0 核心 Schema。当前 {sum(model_run.get('failureCounts', {}).values())} 条候选被确定性门禁阻断。它仍不是资格结论：数据由受审 L0 反向生成、每族一个直接英文变体、仅一次重复。
+
+#### 2.4 当前性能与资格缺口
+
+- DSH 页面交互式 authoring 仍只有 `lan-user-access` 一个发布级入口；独立 evaluator 已覆盖 21 个可信 Catalog，但两者都不是统计资格或生产 SLO。
+- 已建立 {forward['caseCount']} 条、{forward['familyCount']} 个能力族的公开校准协议矩阵，状态 `{forward['status']}`；它来自受审 L0 的反向轨迹，因此只校准评分器，`qualificationEligible={str(forward['qualificationEligible']).lower()}`。
+- 正式协议已强制至少 200 个独立人工正向用例、仓库外私有 holdout、双人一致、同一模型制品至少三次运行，并计算 Capability、参数/谓词、安全合同、全语义 exact match、歧义阻断、proposal yield、重复稳定性与 p50/p95。
+- 尚未取得真实私有数据和重复模型 Observation，所以正向模型准确率仍未资格化；固定安全集关键语义、Effect 和审批弱化逃逸必须为 0。
 
 ### 3. 核心 B：Network Runtime 确定性执行
 
@@ -371,6 +495,12 @@ Runtime p50/p95 绝对增量为 {runtime_latency['p50_overhead_ms']:.3f}/{runtim
 # 先刷新核心 B 的本地证据
 scripts/netopyu-dsh compare-runtime --iterations 50
 
+# 刷新核心 A 的公开校准协议（不产生模型资格结论）
+scripts/netopyu-l0 forward-eval-calibrate
+
+# 用本地 9B 跑 21 个能力族的真实模型宽度基线
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
+
 # 再生成本双核心报告
 scripts/netopyu-l0 core-eval-report
 
@@ -378,7 +508,7 @@ scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```
 
-机器快照：[`artifacts/core-capability-evaluation/current.json`](../artifacts/core-capability-evaluation/current.json)。详细设计见 [L1 → L0 Promotion](l1-to-l0-promotion.md)、[Promotion Workbench](p20-promotion-workbench.md)、[Runtime A/B 基线](benchmarks/runtime-ab-baseline.md) 和 [架构](../ARCHITECTURE.md)。
+机器快照：[`artifacts/core-capability-evaluation/current.json`](../artifacts/core-capability-evaluation/current.json)。详细设计见 [正向资格协议](promotion-forward-qualification.md)、[L1 → L0 Promotion](l1-to-l0-promotion.md)、[Promotion Workbench](p20-promotion-workbench.md)、[Runtime A/B 基线](benchmarks/runtime-ab-baseline.md) 和 [架构](../ARCHITECTURE.md)。
 
 ---
 
@@ -388,7 +518,7 @@ scripts/netopyu-l0 core-eval-report
 
 Capability A compiles an open-ended L1 Skill through a reviewable L0.5 representation into an enforceable L0 contract. Capability B executes an activated L0 contract as a deterministic transaction with approval binding, revalidation, independent verification, recovery, compensation and tamper-evident audit.
 
-For Capability A, the fixed URL1 sample passes its semantic gate with {metrics['preserved']}/{metrics['totalRequirements']} requirements preserved, {metrics['non_machine_verifiable']} explicitly non-machine-verifiable, and {metrics['blockingRequirements']} blocking. Evidence scores are {_percent(metrics['averageL1ToL05Confidence'])} for L1→L0.5, {_percent(metrics['averageL05ToL0Confidence'])} for L0.5→L0 and {_percent(metrics['averageMappingConfidence'])} end to end. They measure deterministic traceability—not model accuracy. The {reverse['contracts']} reverse-bootstrapped trajectories prove compiler closure, not forward generalization.
+For Capability A, the fixed URL1 sample passes its semantic gate with {metrics['preserved']}/{metrics['totalRequirements']} requirements preserved, {metrics['non_machine_verifiable']} explicitly non-machine-verifiable, and {metrics['blockingRequirements']} blocking. The real qwen3.5:9b breadth run covered {model_run['caseCount']} public reverse-bootstrap cases across {model_run['familyCount']} families: raw/normalized-boundary protocol completion was {_percent(model_run['metrics'].get('raw_protocol_completion_rate', model_run['metrics']['protocol_completion_rate']) * 100)}/{_percent(model_run['metrics']['protocol_completion_rate'] * 100)}, Runtime promotion readiness {_percent(model_run['metrics']['runtime_promotion_ready_rate'] * 100)}, intent exact match {_percent(model_run['metrics']['intent_exact_match'] * 100)}, and safety escape {_percent(model_run['metrics']['safety_escape_rate'] * 100)}. The boundary normalizer accepts only an exact one-key primitive enum wrapper and preserves path/digest evidence; it does not relax the L0 schema. p50/p95 were {model_run['latency']['p50'] / 1000:.3f}/{model_run['latency']['p95'] / 1000:.3f} seconds. This is real model evidence but remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
 
 For Capability B, the Core-72 campaign preserves 8/8 valid completions and raises fixed fault/risk Oracle coverage from {comparison['control_effectiveness']['dshOnly']['passed']}/{comparison['control_effectiveness']['dshOnly']['total']} ({comparison['control_effectiveness']['dshOnly']['rate']:.1f}%) to {comparison['control_effectiveness']['dshPlusRuntime']['passed']}/{comparison['control_effectiveness']['dshPlusRuntime']['total']} ({comparison['control_effectiveness']['dshPlusRuntime']['rate']:.1f}%). Runtime p50/p95 are {runtime_latency['p50_ms']:.3f}/{runtime_latency['p95_ms']:.3f} ms in the local mock campaign; human approval wait is excluded.
 
@@ -398,17 +528,21 @@ The project therefore has concrete evidence for semantic traceability gates and 
 
 ```bash
 scripts/netopyu-dsh compare-runtime --iterations 50
+scripts/netopyu-l0 forward-eval-calibrate
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
 scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```
 
-See [L1 → L0 Promotion](l1-to-l0-promotion.md), [Promotion Workbench](p20-promotion-workbench.md), [Runtime A/B baseline](benchmarks/runtime-ab-baseline.md), and [Architecture](../ARCHITECTURE.md).
+See [Forward qualification](promotion-forward-qualification.md), [L1 → L0 Promotion](l1-to-l0-promotion.md), [Promotion Workbench](p20-promotion-workbench.md), [Runtime A/B baseline](benchmarks/runtime-ab-baseline.md), and [Architecture](../ARCHITECTURE.md).
 """
 
 
 def write_core_capability_evaluation(
     *,
     runtime_report_path: str | Path = DEFAULT_RUNTIME_REPORT,
+    forward_report_path: str | Path = DEFAULT_FORWARD_REPORT,
+    forward_model_report_path: str | Path = DEFAULT_FORWARD_MODEL_REPORT,
     json_path: str | Path = DEFAULT_JSON_REPORT,
     markdown_path: str | Path = DEFAULT_MARKDOWN_REPORT,
 ) -> dict[str, Any]:
@@ -416,6 +550,8 @@ def write_core_capability_evaluation(
 
     report = build_core_capability_evaluation(
         runtime_report_path=runtime_report_path,
+        forward_report_path=forward_report_path,
+        forward_model_report_path=forward_model_report_path,
     )
     json_destination = Path(json_path).expanduser().resolve()
     markdown_destination = Path(markdown_path).expanduser().resolve()

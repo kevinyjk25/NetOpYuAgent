@@ -45,6 +45,11 @@ class ProductionL0TrajectoryTests(unittest.TestCase):
                 production = CATALOG.require(definition.skill_id, definition.version)
                 self.assertIn(definition.skill_id, l1.body)
                 self.assertEqual(l05.unresolved_questions, ())
+                self.assertEqual(len(l05.semantic_intents), 1)
+                self.assertEqual(
+                    l05.semantic_intents[0].intent_spec(),
+                    production.spec.intent,
+                )
                 self.assertEqual(report["promotionAssessment"]["findings"], [])
                 self.assertTrue(report["roundTrip"]["semanticParity"])
                 self.assertEqual(

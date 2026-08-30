@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_lan_user_access_grant
 title: network.lan.user-access.grant
@@ -10,6 +10,13 @@ parameters:
   user_id: 'user_id；必填 / Required string；最长长度 / maximum length: 4096。'
   reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
     4096。'
+semanticIntents:
+- effectCapability: network.lan.user-access.grant
+  kind: grant_network_access
+  targetFields:
+  - user_id
+  desiredState:
+    admitted: true
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -74,7 +81,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:f4f7fcec8188342261a2761089b95637199b25c66c8d8f8f7d83eb4dd1437fd7
+sourceSkillSha256: sha256:bd44d3f774f128ac4e5d216c88f5fac9424cf5f9534b9d0b128f630ddd2cbe6d
 capabilityCatalogSha256: sha256:1bae0832091dde7abab54df829334bb4fb299733861fea0163d505d7ca06a058
-previousStageSha256: sha256:f4f7fcec8188342261a2761089b95637199b25c66c8d8f8f7d83eb4dd1437fd7
+previousStageSha256: sha256:bd44d3f774f128ac4e5d216c88f5fac9424cf5f9534b9d0b128f630ddd2cbe6d
 unresolvedQuestions: []

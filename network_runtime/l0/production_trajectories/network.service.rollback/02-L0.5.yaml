@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_service_rollback
 title: network.service.rollback
@@ -11,6 +11,14 @@ parameters:
   version: 'version；必填 / Required string；最长长度 / maximum length: 4096。'
   environment: 'environment；必填 / Required string；允许值 / allowed values: prod, staging,
     dev；最长长度 / maximum length: 4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.rollback_service
+  kind: rollback_service
+  targetFields:
+  - service
+  desiredState:
+    service_health: healthy
+    rollback: complete
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -80,7 +88,7 @@ outcomes:
     explicit recovery state.
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
-sourceSkillSha256: sha256:9e2b46e62cb71df9ded98b2cc773493963d729602426ef02a20f611058bd6ec0
+sourceSkillSha256: sha256:671ec6a802b91f902f3d3285e153aab96c86b22623bc87ced99b2f32f7dd074f
 capabilityCatalogSha256: sha256:4cc699505a371a4a9fb36e3cff9d9ec4e35e1c938e400e867d0f114036a9f32d
-previousStageSha256: sha256:9e2b46e62cb71df9ded98b2cc773493963d729602426ef02a20f611058bd6ec0
+previousStageSha256: sha256:671ec6a802b91f902f3d3285e153aab96c86b22623bc87ced99b2f32f7dd074f
 unresolvedQuestions: []

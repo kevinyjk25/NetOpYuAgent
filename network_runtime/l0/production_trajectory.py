@@ -28,7 +28,7 @@ from .production import (
     ProductionDefinition,
     authoring_document,
 )
-from .promotion import assess_promotion, build_l05_spec, l05_yaml
+from .promotion import L05_API_VERSION, assess_promotion, build_l05_spec, l05_yaml
 
 
 ARCHIVE_SCHEMA = "netopyu.io/l0-production-trajectory/v1"
@@ -143,6 +143,12 @@ def _l1_text(
         "人工介入，禁止盲目重试。 / The reviewed contract has no safe automatic inverse; "
         "verification failure requires manual intervention and never a blind retry."
     )
+    semantic_intents = yaml.safe_dump([
+        {
+            "effectCapability": contract.spec.effect.capability,
+            **contract.spec.intent.model_dump(by_alias=True, mode="json"),
+        }
+    ], sort_keys=False, allow_unicode=True).strip()
     body = f"""# {definition.skill_id}
 
 > 本文件是从已受审生产 L0 反向生成的可读基线，用于解释与 round-trip 验证；它不是新的执行授权。  
@@ -151,6 +157,18 @@ def _l1_text(
 ## 目标 / Purpose
 
 {purpose}
+
+## 精确语义意图 / Exact Semantic Intent
+
+以下小型结构块是 L1、L0.5 与 L0 之间的可审计语义锚点；Runtime 必须逐字段保真，
+不得从周边自然语言猜测或补全。 / This small structured block is the auditable
+semantic anchor across L1, L0.5 and L0; Runtime must preserve every field and may
+not guess or complete it from surrounding prose.
+
+<!-- netopyu:semantic-intents/v1 -->
+```yaml
+{semantic_intents}
+```
 
 ## Parameters
 
@@ -310,6 +328,10 @@ def _refine_l05_workflow(l05: Any, contract: CompiledAtomicEffect) -> Any:
 
     raw = l05.model_dump(by_alias=True, mode="json")
     spec = contract.spec
+    raw["semanticIntents"] = [{
+        "effectCapability": spec.effect.capability,
+        **spec.intent.model_dump(by_alias=True, mode="json"),
+    }]
     choices = {
         "preflight": [item.capability for item in spec.preflight],
         "effect": [spec.effect.capability],
@@ -346,7 +368,7 @@ def _trajectory_text(
 ) -> str:
     stage_values = (
         ("L1", "anthropic-skill-markdown", _STAGE_FILES[0], l1_text),
-        ("L0.5", "netopyu.io/l0.5-structured-skill/v1", _STAGE_FILES[1], l05_text),
+        ("L0.5", L05_API_VERSION, _STAGE_FILES[1], l05_text),
         ("L0-authoring", "netopyu.io/l0-effect/v2", _STAGE_FILES[2], authoring_text),
         ("L0-compiled", "netopyu.io/l0-effect-compiled/v2", _STAGE_FILES[3], compiled_text),
     )

@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: network_application_enforcement_apply
 title: network.application.enforcement.apply
@@ -13,6 +13,14 @@ parameters:
   change_id: 'change_id；必填 / Required string；最长长度 / maximum length: 4096。'
   reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
     4096。'
+semanticIntents:
+- effectCapability: network.application.enforcement.apply
+  kind: apply_network_application_enforcement
+  targetFields:
+  - user_id
+  - app_id
+  desiredState:
+    allowed: true
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -77,7 +85,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:e660e5a830797a8431f85ef3e925db7b968a916a6179f07dbac8fa756efca5cc
+sourceSkillSha256: sha256:93891540e97e49d78fcd292741cab0102a748c70b7f65d7d140bc39e59eabe58
 capabilityCatalogSha256: sha256:824c1e82dc7e012172506830100af8a44bb1cede32d3ec887d5fe64db292f75f
-previousStageSha256: sha256:e660e5a830797a8431f85ef3e925db7b968a916a6179f07dbac8fa756efca5cc
+previousStageSha256: sha256:93891540e97e49d78fcd292741cab0102a748c70b7f65d7d140bc39e59eabe58
 unresolvedQuestions: []

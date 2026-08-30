@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: service_access_entitlement_revoke
 title: service.access.entitlement.revoke
@@ -15,6 +15,15 @@ parameters:
   reason: 'reason；必填 / Required string；最短长度 / minimum length: 1；最长长度 / maximum length:
     4096。'
   correlation_id: 'correlation_id；可选 / Optional string；最长长度 / maximum length: 4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.access_policy_revoke_entitlement
+  kind: revoke_service_entitlement
+  targetFields:
+  - user_id
+  - app_id
+  desiredState:
+    allowed: false
+    roles: []
 constraints:
 - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
   inputs, target, and preflight.
@@ -79,7 +88,7 @@ outcomes:
   failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:2fcb7736582b2e1e2b72be2f853fab71976580b71508e82f001d33ab49594298
+sourceSkillSha256: sha256:2f68595ab15b730fed1561b54aee05c799b6c3246c56f19274ed0725385dd111
 capabilityCatalogSha256: sha256:ff70dc96fb35f8ad6ad9ad9fadb295c8989c585af13693cb9d01f66e03e679ff
-previousStageSha256: sha256:2fcb7736582b2e1e2b72be2f853fab71976580b71508e82f001d33ab49594298
+previousStageSha256: sha256:2f68595ab15b730fed1561b54aee05c799b6c3246c56f19274ed0725385dd111
 unresolvedQuestions: []

@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v1
+apiVersion: netopyu.io/l0.5-structured-skill/v2
 kind: StructuredNaturalLanguageSkill
 skillId: url1_network_access
 title: URL1 Network Access Grant
@@ -10,6 +10,13 @@ parameters:
   vlan_id: Explicit VLAN identifier from 1 through 4094.
   duration_minutes: Requested duration from 30 through 10080 minutes.
   reason: Human-readable business reason of 5 through 512 characters.
+semanticIntents:
+  - effectCapability: rest.url1.network-access.grant
+    kind: grant_network_access
+    targetFields: [user_id]
+    desiredState:
+      allowed: true
+      vlan_id: "${arguments.vlan_id}"
 constraints:
   - One user and one VLAN per execution.
   - Human approval is mandatory.
@@ -50,7 +57,7 @@ outcomes:
   success: Verified access state or verified restoration state
   failure: No unverified success; fail closed or enter an explicit recovery state.
   rollback: Exact pre-change state independently verified after compensation.
-sourceSkillSha256: sha256:5c3db23d3297cc4e04bb2d76c5ee949f8a2c05dca86387fa412794522a0ce39c
+sourceSkillSha256: sha256:2c94dfe31e5a2cbcdd11687f9585ed2f0c173063ea09a11bc89c5eca763db00c
 capabilityCatalogSha256: sha256:044bacca07a7a7dba78233420e944d5b4ef480aa69fa42130ca93924caa96012
-previousStageSha256: sha256:5c3db23d3297cc4e04bb2d76c5ee949f8a2c05dca86387fa412794522a0ce39c
+previousStageSha256: sha256:2c94dfe31e5a2cbcdd11687f9585ed2f0c173063ea09a11bc89c5eca763db00c
 unresolvedQuestions: []

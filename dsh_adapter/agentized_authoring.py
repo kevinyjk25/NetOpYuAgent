@@ -61,6 +61,21 @@ state, require approval for the exact change, grant access once, and verify the
 new state independently. If verification fails, restore the previous state and
 verify restoration. Never retry an uncertain write blindly.
 
+## Exact Semantic Intent
+
+This marked block is the review anchor that Runtime preserves field-for-field;
+do not omit it or ask the model to infer a replacement from prose.
+
+<!-- netopyu:semantic-intents/v1 -->
+```yaml
+- effectCapability: network.lan.user-access.grant
+  kind: grant_network_access
+  targetFields:
+    - user_id
+  desiredState:
+    admitted: true
+```
+
 ## Parameters
 - `user_id`: Exact enterprise user identifier.
 - `reason`: Required audit reason supplied by the operator.

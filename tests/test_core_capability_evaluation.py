@@ -77,9 +77,9 @@ def test_report_covers_both_core_capabilities_without_overclaiming(tmp_path: Pat
     )
     fixed = report["capabilityA"]["fixedForwardSample"]
     assert fixed["status"] == "ready_for_review"
-    assert fixed["metrics"]["totalRequirements"] == 24
-    assert fixed["metrics"]["averageL1ToL05Confidence"] == 97.5
-    assert fixed["metrics"]["averageL05ToL0Confidence"] == 90.0
+    assert fixed["metrics"]["totalRequirements"] == 28
+    assert fixed["metrics"]["averageL1ToL05Confidence"] == 91.43
+    assert fixed["metrics"]["averageL05ToL0Confidence"] == 80.61
     assert report["capabilityA"]["reverseBootstrap"]["exactRoundTrips"] == 21
 
     runtime = report["capabilityB"]

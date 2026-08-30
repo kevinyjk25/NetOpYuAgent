@@ -1,7 +1,7 @@
 # 项目进展与路线图 / Project Status and Roadmap
 
-> 最后核验 / Last verified: 2026-08-30
-> 当前里程碑 / Current milestone: **P2.4 真实 LLM Agent Golden Paths 本地完成；P1.9 真实证据与 canary 仍关闭 / P2.4 real-LLM Agent Golden Paths locally complete; P1.9 real evidence and canary remain open**
+> 最后核验 / Last verified: 2026-08-31
+> 当前里程碑 / Current milestone: **P2.5 L0.5 v2 意图保真与受限 enum 规范化完成，21 能力族 9B 复测 20/21 可审；独立私有资格仍开放 / P2.5 L0.5 v2 intent preservation and bounded enum normalization complete; the 21-family 9B rerun yields 20/21 reviewable candidates while independent private qualification remains open**
 
 本文档是项目阶段、已完成事项和后续工作的唯一汇总入口。README 说明项目是什么；HLD、LLD、SSD 和 ARCHITECTURE 说明如何设计；本文档只回答三个问题：现在到哪里、哪些确实完成、下一步做什么。
 
@@ -52,6 +52,7 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 - **P2.2 本地 Evidence Plane 已完成**：五类现有证据源以只读方式形成隐私最小化的统一事件链、指标、事故与离线时间线；缺链、截断或完整性失败明确降级；
 - **P2.3 用户接入与收敛评测已完成**：统一 CLI、三条 Golden Path、只读 Doctor、严格 Integration Pack、源码化脱敏基线和逐层失败驾驶舱已落地；明确区分固定集控制、模型资格和未证明的生产泛化；
 - **P2.4 真实 LLM Agent Golden Paths 已完成**：DSH 页面已用 `qwen3.5:9b` 实跑 Runtime L1→L0、L1→L0.5→L0 proposal 和四系统 MCP 访问三个用例；新增统一发现入口、样例 Skill、独立 MCP 演示配置和逐阶段可见证据；
+- **P2.5 核心 A 结构修复与 9B 复测已完成**：L0.5 升级为 v2，21/21 L1/L0.5 增加 capability-scoped exact-intent 锚点；模型边界新增只接受精确 enum primitive 包装的受限、留证规范化。同一 `qwen3.5:9b` 复测为原始/规范化后协议 76.19%/100%、Capability/intent/safety 100%、参数谓词/全语义/Runtime 可审 95.24%、safety escape 0%；1 条未知 preflight 字段被失败关闭；
 - **生产环境尚未认证**：企业身份、真实审批、真实厂商设备、分布式高可用、不可变远端审计、灾备和生产 SLO 仍是后续工作。
 
 因此，身份侧已具备 P1.3-B2 现场接入条件，Provider 侧已完成 P1.4-B-ready 接入协议。下一步是把这两个 ready 包接入真实组织系统、独立 Provider 仓库/CI、签名根和 artifact 服务，而不是扩建另一套 Agent Framework。
@@ -84,6 +85,7 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 | P2.2 Evidence Plane | ✅ | Runtime/Decision/Saga/Provider/Promotion 五类只读 adapter、统一事件/指标/事故和离线 HTML | 本地只读投影；无远端 WORM、告警/SLO 或跨实例 trace |
 | P2.3 用户接入与收敛评测 | ✅ | Golden Path、Doctor、能力发现、proposal-only Integration Pack、Runtime/L1 统一驾驶舱与 368 条脱敏 trace | 固定集证据；没有 Provider 激活权威，也没有证明生产泛化 |
 | P2.4 真实 LLM Agent 用例 | ✅ | 9B 模型实际选择 L1/调用 L0；Agent 化 Promotion；身份/应用/变更/权限四 MCP 进程联动 | 本地模拟数据与单次 UI 证据；不是模型泛化率、生产 SLO 或外部系统认证 |
+| P2.5 核心 A 正向资格协议 | ✅ | 210 条/21 能力族公开校准、L0.5 v2 exact-intent、受限 enum 规范化、21 能力族真实 9B 复测 | 公开反向数据与单次运行不能资格化模型；仍有 1 条 predicate 偏移被 Runtime 阻断 |
 
 ### 3. 已完成能力清单（Done）
 
@@ -176,7 +178,7 @@ B-ready 测试把 fixture 复制到仓库外临时目录并以独立进程运行
 
 | 证据 | 当前结果 | 说明 |
 |---|---:|---|
-| Python gate | 404 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.4、恢复等 |
+| Python gate | 416 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.5、恢复等 |
 | Core-72：DSH only | 5/64（7.8%） | 固定风险/故障 Oracle |
 | Core-72：DSH + Runtime | 64/64（100%） | 固定风险/故障 Oracle |
 | 有效操作 | 8/8 vs 8/8 | 两条路径都能完成无故障请求 |
@@ -257,7 +259,7 @@ Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**
 - **已完成 P1.4-B-ready 外部资格协议**：绝对 argv/cwd、最小环境、受限 JSONL、固定 9/9、真实 restart 和持久状态；
 - **已完成三角色部署 admission**：required artifacts、短期 deployment attestation、严格 promote/rollback、schema-v9 四 digest binding 与部署 drift 零写入；
 - **P1.4-B 现场待完成**：独立拥有的 Provider 仓库/CI/实验室、企业 signing/HSM 根、真实 OCI/SBOM/SLSA 验证和外部 WORM lifecycle audit；
-- 建立真正的正向 L1 → L0.5 → L0 转换评测；当前 reverse bootstrap 证明的是可解释性和 round-trip，不等于自动正向编译准确率；
+- **已完成 P2.5 正向转换协议、exact-intent 表达、受限 enum 规范化和 21 族 9B 复测**；下一步用仓库外私有集、双人真值和至少三次重复 Observation 取得资格证据；
 - 为人工评审提供合同 diff、依赖图、风险、验证和补偿证据。
 
 完成判据：一个仓库外 Provider 可通过签名发布、隔离验收、灰度启用和一键退回上一合同版本，且不能绕过 Runtime 注册表。
@@ -364,15 +366,25 @@ Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**
 - 驾驶舱 self-contained、只读、无外部请求和控制接口；真实私有 holdout、现场集成与生产泛化仍未完成；
 - 使用与接入见 [使用与系统接入](getting-started-integration.md)，指标边界见 [LLM 收敛评测](convergence-evaluation.md)。
 
+#### P2.5 核心 A 正向资格协议（协议与公开单次模型证据完成，私有资格开放）
+
+- `ForwardCase` 与 `ForwardLabel` 分离；正式用例必须来自仓库外、至少 200 条、10 个能力族、LAN/DC/WAN、中英文和 5 类挑战；
+- manifest 只保存覆盖统计和 digest，不包含 Prompt/Label；两名不同 reviewer 必须对密封全集完全一致；
+- 同一报告只接受一个模型名和一个不可变 artifact digest，每条 case 重复次数一致且资格要求至少三次；
+- 聚合测量协议完成、disposition、Capability、参数/谓词、安全合同、全语义 exact match、歧义阻断、合法 proposal yield、重复稳定性、模型调用/修复和 p50/p95；
+- 风险/审批弱化、删除 preflight/独立验证/补偿或不安全处理未知写结果均计为 safety escape，资格门槛为 0；
+- 210 条公开矩阵来自 21 个受审 L0 的反向轨迹，只能校准 evaluator 和多能力覆盖，明确 `qualificationEligible=false`；
+- 真实 Agent proposal 可通过 `forward-eval-record` 从 Runtime 权威制品投影为无 Prompt Observation；完整协议见 [正向资格报告](promotion-forward-qualification.md)。
+
 ### 5. 推荐实施顺序
 
 建议下一步不要同时横向增加大量协议或 Skill，而按一个真实纵切面推进：
 
 1. **本地持续回归 P2.1/P2.2/P2.3**：Catalog 变更通过兼容/消费者影响门禁，Evidence adapter 随 schema 演进，Integration Pack 与驾驶舱合同保持稳定；
-2. **外部条件具备后：P1.9-B2 人工/产品证据闭环**，使用真实 sealed holdout、双人真值和完整 Harness 产品实跑；
-3. **P1.3-B2/P1.4-B/P1.5 现场资格化**，依次接入企业身份、独立供应链和真实厂商纵切面；
-4. **P1.6–P1.7 生产平台化**，把本地 Catalog/Evidence 接入 HA、密钥、远端不可变审计、可观测性和 SLO；
-5. 只依据真实证据推进 P1.9 canary。
+2. **完成 P2.5 外部资格证据**：exact intent、受限 enum 规范化和 21 族复测已完成；随后独立编写并密封 200+ 正向用例，完成双 reviewer 仲裁和同一 9B 制品至少三次运行，结构稳定后再评估 27B；
+3. **外部条件具备后：P1.9-B2 人工/产品证据闭环**，使用真实 sealed holdout、双人真值和完整 Harness 产品实跑；
+4. **P1.3-B2/P1.4-B/P1.5 现场资格化**，依次接入企业身份、独立供应链和真实厂商纵切面；
+5. **P1.6–P1.7 生产平台化**，把本地 Catalog/Evidence 接入 HA、密钥、远端不可变审计、可观测性和 SLO；只依据真实证据推进 P1.9 canary。
 
 ### 6. 当前明确边界
 
@@ -410,7 +422,7 @@ scripts/netopyu-dsh retirement
 
 The migration from the legacy general-purpose L0 agent framework to **DSH/Hermes Harness Adapters plus the NetOpYu Domain Effect Runtime** is complete as a repeatable local reference implementation.
 
-The current milestone is **local completion of P2.4 real-LLM Agent Golden Paths**. Users now have three paste-ready DSH cases covering prompt-to-L1-to-L0 execution, proposal-only L1-to-L0.5-to-L0 authoring, and four-system MCP integration. P1.9 canary remains closed because real human/product/organization evidence is still absent.
+The current milestone is **local completion of L0.5 v2 exact-intent preservation, bounded/audited enum normalization, and a rerun of the real qwen3.5:9b breadth baseline across 21 families**. The rerun yields 100% capability/intent/safety exact match, 95.24% parameter/full-semantic/Runtime review readiness, and zero safety escape; one predicate drift is fail-closed. Public reverse data and one repetition remain deliberately ineligible for qualification.
 
 This does **not** mean production certification. Enterprise identity and approval, real vendor systems, distributed HA, remote immutable audit, disaster recovery, and production SLOs remain open.
 
@@ -442,6 +454,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 | P2.2 Evidence Plane | ✅ | Five read-only adapters, unified events/metrics/incidents, and offline HTML | Local projection; remote WORM, alerts/SLOs, and cross-instance tracing remain external |
 | P2.3 Product entry and convergence | ✅ | Golden Paths, Doctor, capability discovery, proposal-only Integration Pack, unified Runtime/L1 cockpit, and 368 redacted traces | Fixed-set evidence only; no Provider activation authority and no proven production generalization |
 | P2.4 Real-LLM Agent use cases | ✅ | Actual 9B L1/L0 selection and execution, agent-assisted Promotion, and four independent MCP service processes | Simulated local data and single-run UI evidence; not model generalization, production SLO, or external-system certification |
+| P2.5 Core-A forward qualification | ✅ | 210-case/21-family calibration, L0.5 v2 exact-intent preservation, bounded enum normalization, and a real 21-family qwen3.5:9b rerun | Public reverse data and one repetition do not qualify the model; one predicate drift remains fail-closed |
 
 ### 3. Done
 
@@ -452,12 +465,13 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - All 21 keep source-controlled L1 prose, structured-natural-language L0.5, compiled L0, reports, exact round trips, and hash chains.
 - Containerlab covers campus/IDC/DMZ/dual-ISP OSPF/eBGP, topology/path queries, and BGP EVPN/VXLAN L2VPN.
 - Service capabilities are separated into MCP Providers; Network Observer and Network Actor are distinct boundaries.
-- The latest gate reports 404 tests plus 81 subtests, retirement 7/7, 21/21 L0 bindings, 21/21 readable trajectories, 21/21 exact round trips, and 21/21 Promotion/Catalog coverage.
+- The latest gate reports 416 tests plus 81 subtests; retirement remains 7/7 with 21/21 L0 bindings, readable trajectories, exact round trips, and Promotion/Catalog coverage.
 - P2.0 adds a fail-closed, read-only Promotion projection and self-contained offline editor. Edited documents remain untrusted drafts, and even approved reviews remain inactive.
 - P2.1 adds a digest-bound governed Catalog with separated owners/stewards, scoped delegation, exact dependencies, consumer impact, and compatibility analysis. Its decisions cannot authorize Runtime reads/effects or Provider publication.
 - P2.2 adds read-only Runtime/Decision/Saga/Provider/Promotion adapters, privacy-minimized digest chains, operational metrics, incidents, and a self-contained no-control timeline. Unverifiable, truncated, or invalid evidence is degraded.
 - P2.3 adds one product CLI, three Golden Paths, a read-only Doctor, strict proposal-only Integration Packs, and a digest-bound cockpit over Runtime A/B plus 368 redacted L1 traces. It cannot connect or activate a Provider and always marks production generalization as unproven.
 - P2.4 adds three real-LLM DSH journeys, a user-authored sample Skill, proposal-only authoring Tools with visible lineage, and a service-only configuration that talks to four independent MCP subprocesses. The records remain simulated and the single-run evidence is not a production metric.
+- P2.5 adds strict Case/Label/Observation/Manifest/Adjudication/Report contracts, a 210-case public calibration matrix, L0.5 v2 exact-intent anchors, bounded/audited enum normalization, private-set sealing, two-reviewer consensus, repeated artifact scoring, and fixed exact-match/safety/latency gates. The real qwen3.5:9b rerun across 21 families measures 76.19% raw and 100% normalized-boundary protocol completion, 100% capability/intent/safety exact, 95.24% parameter/full-semantic/Runtime readiness, zero safety escape, and 36.815/44.449-second p50/p95. It remains a diagnostic public single-run baseline, not qualification.
 - Schema-v9 plans bind requester/policy plus Provider release/manifest/qualification/deployment evidence. Signature tampering, replay, identity/release/deployment switching, critical self-approval, missing tickets, and invalid windows fail closed.
 - P1.3-B1 verifies human OIDC access tokens and separate Gateway attestations over pinned JWKS, cross-binds them by `act_sub + subject_jti`, applies external PDP decisions to reads/prepares/approvals, and qualifies ticket revision/window/scope/risk through a Change Authority. Credentials remain model-hidden.
 - The B2-ready package adds per-session Gateway minting, explicit CA/mTLS with owner-only client keys, an offline secret-safe Doctor, and a no-effect live contract qualification command.
@@ -525,10 +539,10 @@ Five read-only adapters project Runtime, Decision, Saga, Provider release, and P
 ### 5. Recommended sequence
 
 1. Keep P2.1/P2.2 gates and the P2.3 Integration Pack/cockpit in local regression as schemas evolve.
-2. When external conditions exist, close P1.9-B2 with a real sealed holdout, independent adjudication, and full Harness product evidence.
-3. Qualify P1.3-B2, P1.4-B, and one P1.5 vendor vertical slice against independently owned systems.
-4. Build P1.6–P1.7 HA/DR, security, remote immutable audit, observability, and SLO foundations around the local Catalog/Evidence contracts.
-5. Advance P1.9 canary only from measured real evidence.
+2. Exact intent, bounded enum normalization, and the 21-family 9B rerun are complete. Next close the evidence gap with an independently authored external 200+ case set, two-reviewer consensus, and at least three runs of the immutable 9B artifact; evaluate 27B only after the protocol remains structurally stable.
+3. When external conditions exist, close P1.9-B2 with a real sealed holdout, independent adjudication, and full Harness product evidence.
+4. Qualify P1.3-B2, P1.4-B, and one P1.5 vendor vertical slice against independently owned systems.
+5. Build P1.6–P1.7 HA/DR, security, remote immutable audit, observability, and SLO foundations; advance P1.9 canary only from measured real evidence.
 
 ### 6. Maintenance rule
 

@@ -30,6 +30,7 @@ from .models import (
     CompiledContract,
     CompositeEffectManifest,
     DerivedEffectManifest,
+    IntentSpec,
     ParameterSpec,
     value_matches_type,
 )
@@ -37,10 +38,15 @@ from .models import (
 
 PROMOTION_SCHEMA = "netopyu.io/l0-promotion-report/v2"
 CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v1"
-L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v1"
+L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v2"
 TRAJECTORY_SCHEMA = "netopyu.io/l0-promotion-trajectory/v1"
 SEMANTIC_COVERAGE_SCHEMA = "netopyu.io/l0-semantic-coverage/v1"
 _DIRECT_ARGUMENT = re.compile(r"^\$\{\s*arguments\.([A-Za-z_][A-Za-z0-9_]*)\s*\}$")
+_L1_INTENT_BLOCK = re.compile(
+    r"<!--\s*netopyu:semantic-intents/v1\s*-->\s*"
+    r"```ya?ml\s*\n(?P<body>.*?)\n```",
+    re.DOTALL | re.IGNORECASE,
+)
 
 
 class PromotionError(ValueError):
@@ -117,6 +123,30 @@ class L05Outcomes(_StrictModel):
     rollback: str
 
 
+class L05SemanticIntent(_StrictModel):
+    """Exact, capability-scoped intent preserved across L1 -> L0.5 -> L0."""
+
+    effect_capability: str = Field(alias="effectCapability")
+    kind: str
+    target_fields: tuple[str, ...] = Field(alias="targetFields")
+    desired_state: dict[str, Any] = Field(alias="desiredState")
+
+    @model_validator(mode="after")
+    def validate_intent(self) -> "L05SemanticIntent":
+        if not self.effect_capability.strip() or not self.kind.strip():
+            raise ValueError("semantic intent capability and kind cannot be empty")
+        if not self.target_fields or len(set(self.target_fields)) != len(self.target_fields):
+            raise ValueError("semantic intent targetFields must be non-empty and unique")
+        return self
+
+    def intent_spec(self) -> IntentSpec:
+        return IntentSpec(
+            kind=self.kind,
+            targetFields=self.target_fields,
+            desiredState=self.desired_state,
+        )
+
+
 class StructuredNaturalLanguageSkill(_StrictModel):
     """Human-reviewable bridge between free-form L1 and executable L0."""
 
@@ -127,6 +157,7 @@ class StructuredNaturalLanguageSkill(_StrictModel):
     purpose: str
     profiles: tuple[str, ...]
     parameters: dict[str, str]
+    semantic_intents: tuple[L05SemanticIntent, ...] = Field(alias="semanticIntents")
     constraints: tuple[str, ...]
     workflow: tuple[L05WorkflowStep, ...]
     capabilities: L05CapabilityOptions
@@ -143,6 +174,9 @@ class StructuredNaturalLanguageSkill(_StrictModel):
             raise ValueError("L0.5 previousStageSha256 must bind the L1 source hash")
         if not self.profiles:
             raise ValueError("L0.5 profiles cannot be empty")
+        capabilities = [item.effect_capability for item in self.semantic_intents]
+        if len(set(capabilities)) != len(capabilities):
+            raise ValueError("L0.5 semanticIntents must be unique per effect capability")
         return self
 
 
@@ -204,6 +238,29 @@ def load_capability_catalog(path: str | Path) -> tuple[CapabilityCatalogManifest
     return catalog, _file_digest(source), source
 
 
+def extract_l1_semantic_intents(source: SkillSource) -> tuple[L05SemanticIntent, ...]:
+    """Read the optional machine-checkable intent block from an L1 Skill.
+
+    Arbitrary prose is never guessed into executable intent.  Authors keep the
+    surrounding Skill natural-language-first, but exact effect/target/state
+    semantics use one small, visibly marked YAML block that can be compared at
+    every later stage.
+    """
+
+    matches = list(_L1_INTENT_BLOCK.finditer(source.parsed.body))
+    if not matches:
+        return ()
+    if len(matches) != 1:
+        raise PromotionError("L1 Skill must contain at most one semantic intent block")
+    try:
+        raw = yaml.safe_load(matches[0].group("body"))
+        if not isinstance(raw, list) or not raw:
+            raise PromotionError("L1 semantic intent block must be a non-empty YAML list")
+        return tuple(L05SemanticIntent.model_validate(item) for item in raw)
+    except (yaml.YAMLError, ValidationError, TypeError) as error:
+        raise PromotionError(f"invalid L1 semantic intent block: {error}") from error
+
+
 def build_l05_spec(
     *, skill_path: str | Path, capability_catalog_path: str | Path,
 ) -> StructuredNaturalLanguageSkill:
@@ -225,6 +282,7 @@ def build_l05_spec(
         if item.role == "effect" and item.tool in source.declared_tools
     ))
     effect_options = declared_effects or grouped["effect"]
+    semantic_intents = extract_l1_semantic_intents(source)
     constraints = tuple(str(item) for item in source.definition.get("constraints", ()))
     non_compensable_justification = next((
         item.split(":", 1)[1].strip()
@@ -236,6 +294,20 @@ def build_l05_spec(
         unresolved.append(
             "Select exactly one primary effect capability; the trusted catalog "
             f"currently offers {list(effect_options)}."
+        )
+    if not semantic_intents:
+        unresolved.append(
+            "Declare the exact capability-scoped semantic intent in the marked "
+            "L1 semantic-intents block; Runtime will not infer intent from prose."
+        )
+    unknown_intent_effects = sorted({
+        item.effect_capability for item in semantic_intents
+        if item.effect_capability not in effect_options
+    })
+    if unknown_intent_effects:
+        unresolved.append(
+            "Semantic intent references effect capabilities outside the trusted L1/catalog "
+            f"intersection: {unknown_intent_effects}."
         )
     if not grouped["observation"]:
         unresolved.append(
@@ -310,6 +382,7 @@ def build_l05_spec(
             str(name): str(value)
             for name, value in (source.definition.get("parameters") or {}).items()
         },
+        semanticIntents=semantic_intents,
         constraints=constraints,
         workflow=workflow,
         capabilities=L05CapabilityOptions(
@@ -497,7 +570,7 @@ def _classify_requirement(text: str) -> str:
 def _requirement_criticality(category: str) -> str:
     if category in {
         "approval", "risk", "precondition", "parameter_integrity", "effect",
-        "verification", "unknown_outcome", "compensation",
+        "verification", "unknown_outcome", "compensation", "semantic_intent",
     }:
         return "safety_critical"
     if category in {"parameter", "profile", "preflight"}:
@@ -588,6 +661,12 @@ def _source_requirements(source: SkillSource) -> list[dict[str, Any]]:
         add("parameter", f"parameters.{name}", f"{name}: {text}")
         if _classify_requirement(text) == "precondition":
             add("precondition", f"parameters.{name}#precondition", text)
+    for index, intent in enumerate(extract_l1_semantic_intents(source)):
+        add(
+            "semantic_intent",
+            f"semanticIntents[{index}]",
+            canonical_json(intent.model_dump(by_alias=True, mode="json")),
+        )
     profiles = tuple(str(item) for item in source.definition.get("profiles") or ("default",))
     add("profile", "metadata.profiles", "Allowed profiles: " + ", ".join(profiles))
     source_risk = str(source.definition.get("risk_level", "low"))
@@ -614,7 +693,18 @@ def _l05_evidence(
     text = str(requirement["source"]["text"])
     normalized = _normalized_requirement_text(text)
     values: list[dict[str, Any]] = []
-    if category == "parameter":
+    if category == "semantic_intent":
+        try:
+            index = int(requirement["source"]["path"].split("[", 1)[1].rstrip("]"))
+        except (ValueError, IndexError):
+            index = -1
+        if 0 <= index < len(l05.semantic_intents):
+            values.append(_evidence(
+                "L0.5",
+                f"semanticIntents[{index}]",
+                l05.semantic_intents[index].model_dump(by_alias=True, mode="json"),
+            ))
+    elif category == "parameter":
         name = requirement["source"]["path"].split(".", 1)[1]
         if name in l05.parameters:
             values.append(_evidence("L0.5", f"parameters.{name}", l05.parameters[name]))
@@ -733,6 +823,7 @@ def _semantic_requirement_mapping(
         hint = "Map this rule to a predicate/capability or explicitly certify it as manual."
     elif not l05_evidence:
         l05_fix_paths = {
+            "semantic_intent": "semanticIntents",
             "parameter": "parameters",
             "profile": "profiles",
             "risk": "safety.risk",
@@ -751,6 +842,42 @@ def _semantic_requirement_mapping(
             "L0.5", l05_fix_paths.get(category, "constraints"),
             "Add an explicit structured constraint/workflow mapping, then regenerate L0.",
         )
+    elif category == "semantic_intent":
+        try:
+            expected = json.loads(source_text)
+        except json.JSONDecodeError:
+            expected = {}
+        l05_value = (
+            l05_evidence[0]["value"] if l05_evidence else {}
+        )
+        compiled_values = [
+            {
+                "effectCapability": item.spec.effect.capability,
+                **item.spec.intent.model_dump(by_alias=True, mode="json"),
+            }
+            for item in atomics
+        ]
+        l0_evidence.extend(
+            _evidence("L0", f"atomics[{index}].spec.intent", value)
+            for index, value in enumerate(compiled_values)
+        )
+        if canonical_json(l05_value) != canonical_json(expected):
+            fail(
+                "weakened",
+                "L0.5 semantic intent is not an exact copy of the marked L1 intent.",
+                "L0.5", "semanticIntents",
+                "Restore kind, targetFields, desiredState, and effectCapability exactly from L1.",
+            )
+        elif not any(
+            canonical_json(value) == canonical_json(expected)
+            for value in compiled_values
+        ):
+            fail(
+                "weakened",
+                "No compiled L0 atomic effect exactly preserves this L0.5 semantic intent.",
+                "L0", "spec.intent",
+                "Align effect capability, intent kind, targetFields, and desiredState with L0.5.",
+            )
     elif category == "parameter":
         name = requirement["source"]["path"].split(".", 1)[1]
         specs = [item.spec.parameters.get(name) for item in atomics]
@@ -1464,8 +1591,40 @@ def _validate_l05_contract(
             child = catalog.require(step.skill_ref.id, step.skill_ref.version)
             if isinstance(child, CompiledAtomicEffect):
                 atomics.append(child)
+    intents_by_effect = {
+        item.effect_capability: item for item in l05.semantic_intents
+    }
+    compiled_effects = {item.spec.effect.capability for item in atomics}
+    unimplemented_intents = sorted(set(intents_by_effect) - compiled_effects)
+    if unimplemented_intents:
+        _finding(
+            findings, "error", "L05_INTENT_UNIMPLEMENTED",
+            "L0.5 declares semantic intents with no compiled L0 effect",
+            unimplemented_intents,
+        )
     for atomic in atomics:
         spec = atomic.spec
+        staged_intent = intents_by_effect.get(spec.effect.capability)
+        if staged_intent is None:
+            _finding(
+                findings, "error", "L05_INTENT_MISSING",
+                "L0.5 has no exact semantic intent for this L0 effect capability",
+                spec.effect.capability,
+            )
+        elif canonical_json(staged_intent.intent_spec().model_dump(
+            by_alias=True, mode="json",
+        )) != canonical_json(spec.intent.model_dump(by_alias=True, mode="json")):
+            _finding(
+                findings, "error", "L05_INTENT_DRIFT",
+                "L0 intent must exactly preserve L0.5 kind, targetFields and desiredState",
+                {
+                    "effectCapability": spec.effect.capability,
+                    "l0.5": staged_intent.intent_spec().model_dump(
+                        by_alias=True, mode="json",
+                    ),
+                    "l0": spec.intent.model_dump(by_alias=True, mode="json"),
+                },
+            )
         required_parameters = {
             name for name, parameter in spec.parameters.items()
             if parameter.required and parameter.fixed is None
@@ -1536,6 +1695,23 @@ def _validate_l05_source(
         _finding(
             findings, "error", "L05_SKILL_ID_MISMATCH",
             "L0.5 skillId does not match the L1 Skill",
+        )
+    source_intents = extract_l1_semantic_intents(source)
+    if canonical_json([
+        item.model_dump(by_alias=True, mode="json") for item in l05.semantic_intents
+    ]) != canonical_json([
+        item.model_dump(by_alias=True, mode="json") for item in source_intents
+    ]):
+        _finding(
+            findings, "error", "L05_INTENT_DRIFT_FROM_L1",
+            "L0.5 semanticIntents must exactly preserve the marked L1 intent block",
+            {
+                "l1": [item.model_dump(by_alias=True, mode="json") for item in source_intents],
+                "l0.5": [
+                    item.model_dump(by_alias=True, mode="json")
+                    for item in l05.semantic_intents
+                ],
+            },
         )
     source_parameters = set(source.definition.get("parameters") or {})
     if set(l05.parameters) != source_parameters:

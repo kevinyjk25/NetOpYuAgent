@@ -1,6 +1,6 @@
 # NetOpYu 双核心功能与性能评估 / Core Capability Evaluation
 
-> 自动生成于 `2026-08-30T10:59:41.165944+00:00`；摘要 `sha256:8327e7f686fb88004170991ab232c0200606e2dbd3395943d82fe00c3dd8b49c`。这是工程证据报告，不构成专利可授权性或生产 SLA 结论。
+> 自动生成于 `2026-08-30T18:00:35.873820+00:00`；摘要 `sha256:fcd28a24af73e6eb5c644e1fa5460767dfb197e192e9504703d79d884e6a30ed`。这是工程证据报告，不构成专利可授权性或生产 SLA 结论。
 
 ## 中文
 
@@ -21,7 +21,7 @@ Service / Network Provider + 独立 Verifier
 
 | 核心 | 已实现功能 | 当前量化结论 | 尚未证明 |
 |---|---|---|---|
-| A：分阶段语义合约编译 | 三阶段留痕、双段映射、语义丢失告警、安全门禁、防篡改审查 | 固定 URL1 样例 gate 通过；22/24 preserved，2 项需人工判断 | 未见自然语言的正向模型准确率、转换成功率、p50/p95 与 HA |
+| A：分阶段语义合约编译 | 三阶段留痕、双段映射、语义丢失告警、安全门禁、防篡改审查 | 固定 URL1 gate 通过；9B 实跑 21 条/21 能力族，Runtime 可审率 95.24% | 私有独立正向准确率、三次重复与 HA 尚未取得 |
 | B：确定性 Effect 事务 Runtime | 不可变计划、审批绑定、执行前重校验、独立验证、对账、补偿、Saga、审计 | Core-72：有效请求 8/8；风险/故障 Oracle 64/64 | 真实厂商设备、人工审批时延、并发长稳、分布式 HA 与生产 SLO |
 
 项目当前已经分别回答了“语义如何被约束”和“确定操作如何安全落地”，但还不能声称任意自然语言或真实生产环境达到 100% 准确、稳定或可用。
@@ -41,25 +41,45 @@ Service / Network Provider + 独立 Verifier
 | 指标 | 结果 |
 |---|---:|
 | 状态 / semantic gate | `ready_for_review` / `passed` |
-| Requirement | 24 |
-| Preserved | 22 |
-| Non-machine-verifiable | 2 |
+| Requirement | 28 |
+| Preserved | 23 |
+| Non-machine-verifiable | 5 |
 | Blocking | 0 |
-| L1 → L0.5 证据分 | 97.50% |
-| L0.5 → L0 证据分 | 90.00% |
-| 端到端映射证据分 | 91.29% |
-| 机器执行约束覆盖 | 91.67% |
+| L1 → L0.5 证据分 | 91.43% |
+| L0.5 → L0 证据分 | 80.61% |
+| 端到端映射证据分 | 83.96% |
+| 机器执行约束覆盖 | 82.14% |
 | 语义表示覆盖 | 100.00% |
 
 这些是**可追溯证据分，不是 LLM 准确率**。`non_machine_verifiable` 表示语言仍可见但没有确定性 L0 谓词，必须人工审查。
 
 另有 21 个存量合同轨迹通过 Promotion 与精确 round-trip，但方向是受审 L0 反向生成 L1/L0.5 基线，只证明结构闭环和编译一致性，不证明模型正向泛化。
 
-#### 2.3 当前性能与资格缺口
+#### 2.3 真实 qwen3.5:9b 单次前向基线
 
-- Agent 正向 authoring 目前只开放 `lan-user-access` 一个可信 Catalog；真实 DSH/LLM 只有单次 Golden Path，不是统计基准。
-- 尚未测量正向转换准确率、合法输入 proposal yield、歧义阻断率、修复耗尽率、模型调用数、转换 p50/p95、并发、长稳和 HA。
-- 下一步应使用至少 200 个独立人工标注用例、双人仲裁、私有 holdout、同义改写/中英文/冲突/恶意扩权切片；固定安全集关键语义、Effect 和审批弱化逃逸必须为 0。
+| 指标 | 结果 |
+|---|---:|
+| 用例 / 能力族 / 重复 | 21 / 21 / 1 |
+| 模型原始严格协议完成 | 76.19% |
+| 受限规范化后协议完成 | 100.00% |
+| Capability exact match | 100.00% |
+| 参数/谓词 exact match | 95.24% |
+| Intent exact match | 100.00% |
+| 安全合同 exact match | 100.00% |
+| Runtime ready_for_review | 95.24% |
+| 全语义 exact match / safety escape | 95.24% / 0.00% |
+| 本机 p50 / p95 | 36.815 / 44.449 s |
+| 平均模型调用 / 修复 | 1.000 / 0.000 |
+| 受限 enum 规范化 | 5 条 / 15 个值 |
+
+这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族上的真实模型调用，不是 evaluator self-check。L1/L0.5 v2 现在以 capability-scoped、逐字段可比的语义锚点保存 intent；本轮 intent exact 为 100.00%。模型原始协议与受限规范化后协议被分别计量：规范化只接受参数 enum 内精确的一键 `value` primitive 包装，并记录路径和前后摘要，不放宽 L0 核心 Schema。当前 1 条候选被确定性门禁阻断。它仍不是资格结论：数据由受审 L0 反向生成、每族一个直接英文变体、仅一次重复。
+
+#### 2.4 当前性能与资格缺口
+
+- DSH 页面交互式 authoring 仍只有 `lan-user-access` 一个发布级入口；独立 evaluator 已覆盖 21 个可信 Catalog，但两者都不是统计资格或生产 SLO。
+- 已建立 210 条、21 个能力族的公开校准协议矩阵，状态 `protocol_ready_model_not_qualified`；它来自受审 L0 的反向轨迹，因此只校准评分器，`qualificationEligible=false`。
+- 正式协议已强制至少 200 个独立人工正向用例、仓库外私有 holdout、双人一致、同一模型制品至少三次运行，并计算 Capability、参数/谓词、安全合同、全语义 exact match、歧义阻断、proposal yield、重复稳定性与 p50/p95。
+- 尚未取得真实私有数据和重复模型 Observation，所以正向模型准确率仍未资格化；固定安全集关键语义、Effect 和审批弱化逃逸必须为 0。
 
 ### 3. 核心 B：Network Runtime 确定性执行
 
@@ -109,6 +129,12 @@ Runtime p50/p95 绝对增量为 7.391/8.288 ms；人工审批等待不计入。�
 # 先刷新核心 B 的本地证据
 scripts/netopyu-dsh compare-runtime --iterations 50
 
+# 刷新核心 A 的公开校准协议（不产生模型资格结论）
+scripts/netopyu-l0 forward-eval-calibrate
+
+# 用本地 9B 跑 21 个能力族的真实模型宽度基线
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
+
 # 再生成本双核心报告
 scripts/netopyu-l0 core-eval-report
 
@@ -116,7 +142,7 @@ scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```
 
-机器快照：[`artifacts/core-capability-evaluation/current.json`](../artifacts/core-capability-evaluation/current.json)。详细设计见 [L1 → L0 Promotion](l1-to-l0-promotion.md)、[Promotion Workbench](p20-promotion-workbench.md)、[Runtime A/B 基线](benchmarks/runtime-ab-baseline.md) 和 [架构](../ARCHITECTURE.md)。
+机器快照：[`artifacts/core-capability-evaluation/current.json`](../artifacts/core-capability-evaluation/current.json)。详细设计见 [正向资格协议](promotion-forward-qualification.md)、[L1 → L0 Promotion](l1-to-l0-promotion.md)、[Promotion Workbench](p20-promotion-workbench.md)、[Runtime A/B 基线](benchmarks/runtime-ab-baseline.md) 和 [架构](../ARCHITECTURE.md)。
 
 ---
 
@@ -126,7 +152,7 @@ scripts/netopyu-l0 core-eval-report
 
 Capability A compiles an open-ended L1 Skill through a reviewable L0.5 representation into an enforceable L0 contract. Capability B executes an activated L0 contract as a deterministic transaction with approval binding, revalidation, independent verification, recovery, compensation and tamper-evident audit.
 
-For Capability A, the fixed URL1 sample passes its semantic gate with 22/24 requirements preserved, 2 explicitly non-machine-verifiable, and 0 blocking. Evidence scores are 97.50% for L1→L0.5, 90.00% for L0.5→L0 and 91.29% end to end. They measure deterministic traceability—not model accuracy. The 21 reverse-bootstrapped trajectories prove compiler closure, not forward generalization.
+For Capability A, the fixed URL1 sample passes its semantic gate with 23/28 requirements preserved, 5 explicitly non-machine-verifiable, and 0 blocking. The real qwen3.5:9b breadth run covered 21 public reverse-bootstrap cases across 21 families: raw/normalized-boundary protocol completion was 76.19%/100.00%, Runtime promotion readiness 95.24%, intent exact match 100.00%, and safety escape 0.00%. The boundary normalizer accepts only an exact one-key primitive enum wrapper and preserves path/digest evidence; it does not relax the L0 schema. p50/p95 were 36.815/44.449 seconds. This is real model evidence but remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
 
 For Capability B, the Core-72 campaign preserves 8/8 valid completions and raises fixed fault/risk Oracle coverage from 5/64 (7.8%) to 64/64 (100.0%). Runtime p50/p95 are 7.704/8.681 ms in the local mock campaign; human approval wait is excluded.
 
@@ -136,8 +162,10 @@ The project therefore has concrete evidence for semantic traceability gates and 
 
 ```bash
 scripts/netopyu-dsh compare-runtime --iterations 50
+scripts/netopyu-l0 forward-eval-calibrate
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
 scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```
 
-See [L1 → L0 Promotion](l1-to-l0-promotion.md), [Promotion Workbench](p20-promotion-workbench.md), [Runtime A/B baseline](benchmarks/runtime-ab-baseline.md), and [Architecture](../ARCHITECTURE.md).
+See [Forward qualification](promotion-forward-qualification.md), [L1 → L0 Promotion](l1-to-l0-promotion.md), [Promotion Workbench](p20-promotion-workbench.md), [Runtime A/B baseline](benchmarks/runtime-ab-baseline.md), and [Architecture](../ARCHITECTURE.md).

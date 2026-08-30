@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 from pathlib import Path
 import subprocess
@@ -251,11 +251,16 @@ def _qualified_reports() -> tuple[dict[str, object], dict[str, object]]:
 
 def _external_evidence(
     worker: dict[str, object], adapter: dict[str, object],
+    *, checked_at: datetime = NOW,
 ) -> tuple[dict[str, object], dict[str, object]]:
+    product_issued = checked_at - timedelta(hours=1)
+    product_expires = checked_at + timedelta(hours=23)
+    ops_issued = checked_at - timedelta(minutes=30)
+    ops_expires = checked_at + timedelta(hours=23, minutes=30)
     product_body: dict[str, object] = {
         "apiVersion": CANARY_PRODUCT_EVIDENCE_SCHEMA,
-        "issued_at": "2026-08-29T11:00:00Z",
-        "expires_at": "2026-08-30T11:00:00Z",
+        "issued_at": product_issued.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "expires_at": product_expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "bindings": _D,
         "worker_report_digest": worker["report_digest"],
         "adapter_report_digest": adapter["report_digest"],
@@ -292,8 +297,8 @@ def _external_evidence(
         }
     ops_body: dict[str, object] = {
         "apiVersion": CANARY_OPS_EVIDENCE_SCHEMA,
-        "issued_at": "2026-08-29T11:30:00Z",
-        "expires_at": "2026-08-30T11:30:00Z",
+        "issued_at": ops_issued.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "expires_at": ops_expires.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "bindings": _D,
         "product_evidence_digest": product["evidence_digest"],
         "limits": {
@@ -409,7 +414,9 @@ def test_readiness_gate_fails_closed_for_missing_tampered_stale_or_unbound_evide
 
 def test_canary_readiness_cli_has_no_configuration_side_effect(tmp_path: Path) -> None:
     worker, adapter = _qualified_reports()
-    product, ops = _external_evidence(worker, adapter)
+    product, ops = _external_evidence(
+        worker, adapter, checked_at=datetime.now(timezone.utc),
+    )
     paths = []
     for name, value in (
         ("worker", worker), ("adapter", adapter), ("product", product), ("ops", ops),

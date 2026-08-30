@@ -41,7 +41,7 @@ class L0PromotionTests(unittest.TestCase):
         self.assertIn("atomic", packet["outputSchemas"])
         self.assertEqual(
             packet["structuredSkill"]["document"]["apiVersion"],
-            "netopyu.io/l0.5-structured-skill/v1",
+            "netopyu.io/l0.5-structured-skill/v2",
         )
         self.assertIn("do not guess", " ".join(packet["trustBoundary"]).lower())
 
@@ -52,8 +52,43 @@ class L0PromotionTests(unittest.TestCase):
         )
         self.assertEqual(spec.skill_id, "url1_network_access")
         self.assertEqual(spec.capabilities.effects, ("rest.url1.network-access.grant",))
+        self.assertEqual(spec.semantic_intents[0].kind, "grant_network_access")
         self.assertEqual(spec.unresolved_questions, ())
         self.assertIn("workflow:", l05_yaml(spec))
+
+    def test_missing_or_drifted_exact_intent_fails_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "url1-network-access"
+            root.mkdir()
+            skill = root / "SKILL.md"
+            skill.write_text(
+                SKILL.read_text(encoding="utf-8").replace(
+                    "netopyu:semantic-intents/v1", "netopyu:untrusted-intent-note",
+                ),
+                encoding="utf-8",
+            )
+            missing = build_l05_spec(
+                skill_path=skill, capability_catalog_path=CAPABILITIES,
+            )
+            self.assertEqual(missing.semantic_intents, ())
+            self.assertTrue(any(
+                "will not infer intent" in item for item in missing.unresolved_questions
+            ))
+
+            raw = yaml.safe_load(L05.read_text(encoding="utf-8"))
+            raw["semanticIntents"][0]["desiredState"]["allowed"] = False
+            drifted = Path(directory) / "drifted-L0.5.yaml"
+            drifted.write_text(
+                yaml.safe_dump(raw, sort_keys=False), encoding="utf-8",
+            )
+            assessment = assess_promotion(
+                skill_path=SKILL, l05_path=drifted,
+                candidate_path=CANDIDATE, capability_catalog_path=CAPABILITIES,
+            )
+            self.assertEqual(assessment.report["status"], "blocked")
+            codes = {item["code"] for item in assessment.report["findings"]}
+            self.assertIn("L05_INTENT_DRIFT_FROM_L1", codes)
+            self.assertIn("L05_INTENT_DRIFT", codes)
 
     def test_candidate_is_source_bound_and_ready_only_for_review(self) -> None:
         assessment = assess_promotion(
