@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import fcntl
 import json
 import os
 import signal
@@ -16,6 +17,9 @@ from runtime.tracing import configure as configure_tracing
 from runtime.tracing import start_span
 
 from .a2a_provider import delegate_a2a, discover_peers
+from .agentized_authoring import (
+    authoring_template, authoring_trace, capture_authoring, submit_authoring,
+)
 from .backend import resolve_backend_mode
 from .bridge import (
     _build_manifest,
@@ -140,6 +144,14 @@ async def dispatch(request: dict[str, Any]) -> Any:
         return await delegate_a2a(**arguments)
     if command == "skill-manifest":
         return build_skill_manifest(profile, resolve_backend_mode())
+    if command == "agent-authoring-template":
+        return authoring_template()
+    if command == "agent-authoring-capture":
+        return capture_authoring(arguments)
+    if command == "agent-authoring-submit":
+        return submit_authoring(arguments)
+    if command == "agent-authoring-trace":
+        return authoring_trace(str(arguments.get("attempt_id") or ""))
     if command == "l1-decision-shadow":
         tool_declarations = arguments.get("tool_declarations")
         if not isinstance(tool_declarations, list):
@@ -232,21 +244,57 @@ async def _handle(
         "error_type": error_type,
         "duration_ms": round((time.perf_counter() - started) * 1000, 2),
     }, ensure_ascii=False), flush=True)
-    writer.write((json.dumps(response, ensure_ascii=False) + "\n").encode())
     try:
+        writer.write((json.dumps(response, ensure_ascii=False) + "\n").encode())
         await writer.drain()
+    except (BrokenPipeError, ConnectionError):
+        # A Web process may be cancelled or restarted while a comparatively
+        # slow backend request is still completing.  The result is no longer
+        # observable by that client, but it must not surface as an unhandled
+        # asyncio callback exception or destabilize the shared Worker.
+        pass
     finally:
         writer.close()
-        await writer.wait_closed()
+        try:
+            await writer.wait_closed()
+        except (BrokenPipeError, ConnectionError):
+            pass
 
 
 def _remove_stale_socket(path: Path) -> None:
     if not path.exists() and not path.is_symlink():
         return
     if path.is_socket():
+        # Never unlink a socket owned by a live Worker.  Without this probe a
+        # manually started second Worker could silently orphan the first one,
+        # producing split-brain manifests and sparse/corrupted shared logs.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(0.25)
+            try:
+                client.connect(str(path))
+            except (ConnectionRefusedError, FileNotFoundError, TimeoutError):
+                pass
+            else:
+                raise RuntimeError(f"bridge worker socket is already active: {path}")
         path.unlink()
         return
     raise RuntimeError(f"refusing to replace non-socket worker path: {path}")
+
+
+def _claim_worker_lock(path: Path) -> int:
+    """Hold an owner-only process lock for one Worker socket namespace."""
+
+    lock_path = path.with_name(path.name + ".lock")
+    descriptor = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    os.fchmod(descriptor, 0o600)
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as error:
+        os.close(descriptor)
+        raise RuntimeError(
+            f"another bridge worker already owns lock: {lock_path}"
+        ) from error
+    return descriptor
 
 
 async def serve(path: Path) -> None:
@@ -263,7 +311,12 @@ async def serve(path: Path) -> None:
     await NetworkRuntime().recover_inflight()
     path = path.expanduser().resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
-    _remove_stale_socket(path)
+    lock_descriptor = _claim_worker_lock(path)
+    try:
+        _remove_stale_socket(path)
+    except Exception:
+        os.close(lock_descriptor)
+        raise
     try:
         concurrency = int(
             os.getenv("NETOPYU_WORKER_CONCURRENCY")
@@ -297,6 +350,7 @@ async def serve(path: Path) -> None:
         await server.wait_closed()
         if path.is_socket():
             path.unlink()
+        os.close(lock_descriptor)
 
 
 def main() -> None:

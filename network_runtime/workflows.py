@@ -146,6 +146,15 @@ _REVIEWED: dict[str, dict[str, Any]] = {
             _require("check_nac_policy", "user_id", permit=False),
         )},
     },
+    "agentized_lan_access_remediation": {
+        "version": "1.0.0", "allowed": (
+            "get_user_access", "check_nac_policy", "grant_user_access",
+        ),
+        "writes": {"grant_user_access": (
+            _require("get_user_access", "user_id", admitted=False),
+            _require("check_nac_policy", "user_id", permit=False),
+        )},
+    },
     "dc_app_access_diagnose": {
         "version": "1.0.0", "allowed": (
             "dc_list_apps", "dc_check_user_app_access", "dc_get_app_acl", "dc_grant_app_access",
@@ -198,6 +207,20 @@ _REVIEWED: dict[str, dict[str, Any]] = {
         "terminal_writes": (
             "network_apply_app_enforcement", "network_revoke_app_enforcement",
         ),
+    },
+    "enterprise_access_mcp_agent": {
+        "version": "1.0.0",
+        "allowed": (
+            "identity_get_user", "application_get", "access_policy_evaluate",
+            "access_policy_get_entitlement", "change_validate_window",
+            "access_policy_grant_entitlement",
+        ),
+        "writes": {"access_policy_grant_entitlement": (
+            _require("identity_get_user", "user_id", identity_active=True),
+            _require("access_policy_evaluate", "user_id", "app_id", eligible=True),
+            _require("access_policy_get_entitlement", "user_id", "app_id", allowed=False),
+            _require("change_validate_window", "change_id", permitted=True),
+        )},
     },
 }
 

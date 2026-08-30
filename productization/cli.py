@@ -114,6 +114,96 @@ def _journeys() -> dict[str, Any]:
     }
 
 
+def _agent_usecases() -> dict[str, Any]:
+    authoring_source = (
+        PROJECT_ROOT
+        / "examples"
+        / "agentized"
+        / "restore-employee-lan-access"
+        / "SKILL.md"
+    )
+    sample_skill = authoring_source.read_text(encoding="utf-8").strip()
+    runtime_prompt = (
+        "请使用 agentized-lan-access-remediation Skill 检查用户 erin 的网络准入；"
+        "如果被阻止，请恢复。变更原因：CHG-1001 新员工入职。"
+        "最终分开说明 LLM 决策、L1 Skill、L0 contract 和验证证据。"
+    )
+    authoring_prompt = "\n".join(
+        (
+            "请使用 l1-to-l0-agent-authoring Skill，把下面 BEGIN/END 之间的完整文本作为用户输入的 L1 Skill 数据，",
+            "转换成 L0.5 和 L0 待审候选；逐阶段说明转换逻辑、Runtime 校验和仍需人工审查的事项。",
+            "不要从文件路径读取，也不要激活或执行候选。",
+            "<BEGIN_L1_SKILL>",
+            sample_skill,
+            "<END_L1_SKILL>",
+        )
+    )
+    external_prompt = (
+        "请使用 enterprise-access-mcp-agent Skill，通过真实本地 MCP 外部系统检查并为用户 "
+        "erin 开通 crm 的 sales-rep 权限。change_id=CHG-1001，"
+        "reason=CHG-1001 新员工 CRM 入职授权。必须分别读取身份、应用、业务审批变更和权限系统；"
+        "满足条件才提交 L0 计划。最终列出每条数据的 MCP source，并区分业务变更审批和 DSH 一次性执行审批。"
+    )
+    cases = [
+        {
+            "id": "runtime-l1-l0",
+            "whatItProves": "LLM selects L1 guidance while L0 Runtime owns the approved, verified effect",
+            "backend": "mock",
+            "start": (
+                "NETOPYU_PROFILE=lan NETOPYU_DSH_BACKEND=mock "
+                "NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 "
+                "NETOPYU_OLLAMA_MODEL=qwen3.5:9b scripts/netopyu-dsh restart"
+            ),
+            "prompt": runtime_prompt,
+            "expectedTerminal": "verified_success or a fail-closed no-write reason",
+            "effectBoundary": "approval-gated local simulation",
+        },
+        {
+            "id": "l1-to-l0-authoring",
+            "whatItProves": "LLM translates prose, while trusted catalogs and deterministic checks produce a proposal-only trajectory",
+            "backend": "mock",
+            "start": (
+                "NETOPYU_PROFILE=lan NETOPYU_DSH_BACKEND=mock "
+                "NETOPYU_OLLAMA_MODEL=qwen3.5:9b scripts/netopyu-dsh restart"
+            ),
+            "prompt": authoring_prompt,
+            "sourceReference": str(authoring_source.relative_to(PROJECT_ROOT)),
+            "workspaceIndependent": True,
+            "expectedTerminal": "ready_for_review",
+            "effectBoundary": "no registration, activation, approval, or execution authority",
+        },
+        {
+            "id": "external-mcp-access",
+            "whatItProves": "An Agent reads four independent MCP systems before an L0-governed business write",
+            "backend": "pragmatic",
+            "start": (
+                "NETOPYU_PROFILE=lan NETOPYU_DSH_BACKEND=pragmatic "
+                "NETOPYU_CONFIG_PATH=config.agentized-service-demo.yaml "
+                "NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 "
+                "NETOPYU_OLLAMA_MODEL=qwen3.5:9b scripts/netopyu-dsh restart"
+            ),
+            "prompt": external_prompt,
+            "expectedTerminal": "verified_success with fresh mcp:access-policy-service evidence",
+            "effectBoundary": "simulated business data over real MCP subprocess boundaries",
+        },
+    ]
+    return {
+        "apiVersion": "netopyu.io/agentized-use-cases/v1",
+        "model": "qwen3.5:9b",
+        "oneTimeSetup": [
+            "ollama pull qwen3.5:9b",
+            "NETOPYU_OLLAMA_MODEL=qwen3.5:9b scripts/netopyu-dsh settings-sync",
+            "scripts/netopyu-dsh model qwen3.5:9b",
+        ],
+        "ui": "http://127.0.0.1:3080/",
+        "cases": cases,
+        "guide": "docs/AGENTIZED-USE-CASES.md",
+        "claimBoundary": (
+            "These are local end-to-end demonstrations, not production success-probability or vendor-device certification."
+        ),
+    }
+
+
 def _doctor() -> tuple[dict[str, Any], bool]:
     checks: list[dict[str, Any]] = []
 
@@ -236,6 +326,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("journeys", help="show the three supported Golden Paths")
+    agent_usecases = sub.add_parser(
+        "agent-usecases", help="show real-LLM DSH prompts and startup commands",
+    )
+    agent_usecases.add_argument(
+        "--case",
+        choices=("runtime-l1-l0", "l1-to-l0-authoring", "external-mcp-access"),
+    )
+    agent_usecases.add_argument(
+        "--prompt-only", action="store_true",
+        help="print only the paste-ready prompt for the selected case",
+    )
     sub.add_parser("doctor", help="read-only local readiness inspection")
     capabilities = sub.add_parser("capabilities", help="discover governed capabilities")
     capabilities.add_argument("--catalog", default=str(DEFAULT_CATALOG))
@@ -255,6 +356,21 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "journeys":
             _print(_journeys())
+            return 0
+        if args.command == "agent-usecases":
+            usecases = _agent_usecases()
+            if args.prompt_only and not args.case:
+                raise ValueError("--prompt-only requires --case")
+            if args.case:
+                selected = next(
+                    item for item in usecases["cases"] if item["id"] == args.case
+                )
+                if args.prompt_only:
+                    print(selected["prompt"])
+                else:
+                    _print(selected)
+            else:
+                _print(usecases)
             return 0
         if args.command == "doctor":
             report, ok = _doctor()

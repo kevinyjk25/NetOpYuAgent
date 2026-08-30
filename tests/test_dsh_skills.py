@@ -6,8 +6,8 @@ from dsh_adapter.skills import build_skill_manifest
 
 
 class TestDshSkillProjection(unittest.TestCase):
-    def test_every_profile_projects_exact_legacy_catalog(self):
-        expected = {"default": 1, "lan": 12, "dc": 5, "wan": 1}
+    def test_every_profile_projects_exact_catalog(self):
+        expected = {"default": 2, "lan": 14, "dc": 6, "wan": 2}
         for profile, count in expected.items():
             with self.subTest(profile=profile):
                 manifest = build_skill_manifest(profile, "mock")
@@ -21,5 +21,5 @@ class TestDshSkillProjection(unittest.TestCase):
         names = {skill["name"] for skill in build_skill_manifest("dc", "mock")["skills"]}
         self.assertEqual(names, {
             "read-stored-result", "dc-app-access-diagnose", "dc-evpn-troubleshoot",
-            "dc-lb-health-check", "dc-path-troubleshoot",
+            "dc-lb-health-check", "dc-path-troubleshoot", "l1-to-l0-agent-authoring",
         })

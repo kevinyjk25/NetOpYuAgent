@@ -25,6 +25,9 @@ from .bridge import (
     start_network_workflow,
 )
 from .a2a_provider import delegate_a2a, discover_peers
+from .agentized_authoring import (
+    authoring_template, authoring_trace, capture_authoring, submit_authoring,
+)
 from .scoped_services import recall_memory, search_capabilities
 from .evaluation import parity_report
 from .learning import mine_candidates, review_candidate
@@ -138,6 +141,16 @@ def main(argv: list[str] | None = None) -> int:
 
     skill_manifest = subparsers.add_parser("skill-manifest")
     skill_manifest.add_argument("--profile", default="lan")
+
+    agent_authoring_template = subparsers.add_parser("agent-authoring-template")
+    agent_authoring_template.add_argument("--profile", default="lan")
+    agent_authoring_capture = subparsers.add_parser("agent-authoring-capture")
+    agent_authoring_capture.add_argument("--profile", default="lan")
+    agent_authoring_submit = subparsers.add_parser("agent-authoring-submit")
+    agent_authoring_submit.add_argument("--profile", default="lan")
+    agent_authoring_trace = subparsers.add_parser("agent-authoring-trace")
+    agent_authoring_trace.add_argument("--profile", default="lan")
+    agent_authoring_trace.add_argument("--attempt")
 
     l1_decision_shadow = subparsers.add_parser("l1-decision-shadow")
     l1_decision_shadow.add_argument("--profile", default="lan")
@@ -277,6 +290,15 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "l1-decision-metrics":
             request = _read_arguments()
             payload = decision_metrics(limit=int(request.get("limit", 500)))
+        elif args.command == "agent-authoring-template":
+            payload = authoring_template()
+        elif args.command == "agent-authoring-capture":
+            payload = capture_authoring(_read_arguments())
+        elif args.command == "agent-authoring-submit":
+            payload = submit_authoring(_read_arguments())
+        elif args.command == "agent-authoring-trace":
+            request = {} if args.attempt else _read_arguments()
+            payload = authoring_trace(str(args.attempt or request.get("attempt_id") or ""))
         else:
             payload = build_skill_manifest(args.profile, resolve_backend_mode())
     except Exception as error:

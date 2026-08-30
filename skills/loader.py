@@ -94,6 +94,18 @@ class SkillLoader:
                 cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
                 if any(server.domain == "service" for server in cfg.pragmatic.mcp_servers):
                     service = self._load_folder(self._root / "skills" / "service", fatal=False)
+                    if not cfg.pragmatic.lab.enabled:
+                        # Service-only deployments must not advertise workflows
+                        # whose reviewed contract also depends on a Network Lab.
+                        # The pure MCP Agent Skill remains available.
+                        service = {
+                            skill_id: definition
+                            for skill_id, definition in service.items()
+                            if not any(
+                                str(tool).startswith(("network_", "lab_", "reconcile_"))
+                                for tool in definition.get("tool_deps", ())
+                            )
+                        }
                     defs.update(service)
             except (OSError, ValueError):
                 logger.warning("SkillLoader: service skill discovery skipped due to invalid config")

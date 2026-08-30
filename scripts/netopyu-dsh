@@ -36,6 +36,9 @@ OLLAMA_MODEL="${NETOPYU_OLLAMA_MODEL:-qwen3.5:27b}"
 OLLAMA_FAST_MODEL="${NETOPYU_OLLAMA_FAST_MODEL:-qwen2.5:7b}"
 WEB_HOST="${NETOPYU_DSH_HOST:-127.0.0.1}"
 WEB_PORT="${NETOPYU_DSH_PORT:-3080}"
+INSTANCE_HOST_FILE="$RUNTIME_ROOT/dsh.host"
+INSTANCE_PORT_FILE="$RUNTIME_ROOT/dsh.port"
+SOURCE_FINGERPRINT_FILE="$RUNTIME_ROOT/dsh-source.sha256"
 DSH_VERSION="0.1.1-rc.2"
 
 # Codex Desktop ships a suitable isolated Node/pnpm toolchain. Prefer normal
@@ -125,6 +128,10 @@ Environment overrides:
   NETOPYU_DSH_A2A_MAX_HOPS=3
   NETOPYU_DSH_LOCAL_DC_HOST=127.0.0.1
   NETOPYU_DSH_LOCAL_DC_PORT=8765
+
+One runtime root intentionally manages one DSH Web process. To move that
+process to another port, set NETOPYU_DSH_PORT and run restart. To run multiple
+ports concurrently, give every instance a different NETOPYU_DSH_RUNTIME.
 EOF
 }
 
@@ -165,6 +172,78 @@ check_python() {
     fail 'The Python interpreter cannot import dsh_adapter.cli.'
     return 1
   }
+}
+
+source_fingerprint() {
+  # DSH loads the plugin module and the Python-produced Skill manifest only at
+  # process startup.  Hash every source family that can change that projection
+  # so `start` cannot silently keep serving a stale Skill registry.
+  (
+    cd "$PROJECT_ROOT" || exit 1
+    find dsh-plugin-netopyu/src dsh_adapter skills profiles network_runtime \
+      -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.py' \
+      -o -name '*.md' -o -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) \
+      -print | LC_ALL=C sort | while IFS= read -r source_file; do
+        shasum -a 256 "$source_file"
+      done
+  ) | shasum -a 256 | awk '{print $1}'
+}
+
+check_skill_projection() {
+  local manifest
+  manifest="$(
+    cd "$PROJECT_ROOT" && "$PYTHON_BIN" -m dsh_adapter.cli skill-manifest \
+      --profile "${NETOPYU_PROFILE:-lan}"
+  )" || {
+    fail 'Unable to build the DSH Skill projection.'
+    return 1
+  }
+  printf '%s' "$manifest" | "$PYTHON_BIN" -c '
+import json, sys
+skills = json.load(sys.stdin).get("skills", [])
+names = {skill.get("name") for skill in skills}
+required = {"l1-to-l0-agent-authoring"}
+missing = sorted(required - names)
+if missing:
+    print("missing required DSH Skill(s): " + ", ".join(missing), file=sys.stderr)
+    raise SystemExit(1)
+' || {
+    fail 'The source Skill projection is incomplete.'
+    return 1
+  }
+}
+
+managed_host() {
+  if [[ -s "$INSTANCE_HOST_FILE" ]]; then
+    cat "$INSTANCE_HOST_FILE"
+  else
+    printf '%s\n' "$WEB_HOST"
+  fi
+}
+
+managed_port() {
+  if [[ -s "$INSTANCE_PORT_FILE" ]]; then
+    cat "$INSTANCE_PORT_FILE"
+  else
+    printf '%s\n' "$WEB_PORT"
+  fi
+}
+
+clear_instance_metadata() {
+  rm -f "$PID_FILE" "$INSTANCE_HOST_FILE" "$INSTANCE_PORT_FILE" "$SOURCE_FINGERPRINT_FILE"
+}
+
+record_instance_metadata() {
+  local pid="$1" fingerprint="$2"
+  printf '%s\n' "$pid" >"$PID_FILE"
+  printf '%s\n' "$WEB_HOST" >"$INSTANCE_HOST_FILE"
+  printf '%s\n' "$WEB_PORT" >"$INSTANCE_PORT_FILE"
+  printf '%s\n' "$fingerprint" >"$SOURCE_FINGERPRINT_FILE"
+}
+
+source_is_fresh() {
+  [[ -s "$SOURCE_FINGERPRINT_FILE" ]] || return 1
+  [[ "$(<"$SOURCE_FINGERPRINT_FILE")" == "$(source_fingerprint)" ]]
 }
 
 check_runtime() {
@@ -588,6 +667,12 @@ doctor() {
   else
     failures=$((failures + 1))
   fi
+  if check_python && check_skill_projection; then
+    printf '  PASS required DSH Skill projection (l1-to-l0-agent-authoring)\n'
+  else
+    printf '  FAIL required DSH Skill projection\n' >&2
+    failures=$((failures + 1))
+  fi
   if check_ollama; then printf '  PASS Ollama model %s\n' "$OLLAMA_MODEL"; else failures=$((failures + 1)); fi
   if check_network_backend; then
     printf '  PASS network backend configuration\n'
@@ -619,18 +704,25 @@ doctor() {
 
 pid_is_running() {
   [[ -f "$PID_FILE" ]] || return 1
-  local pid identity
+  local pid identity command_line expected_host expected_port
   pid="$(<"$PID_FILE")"
   [[ "$pid" =~ ^[0-9]+$ ]] || return 1
-  if kill -0 "$pid" 2>/dev/null; then
+  expected_host="$(managed_host)"
+  expected_port="$(managed_port)"
+  command_line="$(ps -p "$pid" -o command= 2>/dev/null || true)"
+  identity="$(lsof -nP -p "$pid" 2>/dev/null || true)"
+  # Guard against PID reuse: a live unrelated process must never be accepted
+  # merely because kill -0 succeeds. Prefer the runtime+listener identity;
+  # retain the command-line check for the short interval before Web binds.
+  if [[ "$identity" == *"$RUNTIME_ROOT"* \
+    && "$identity" == *"TCP $expected_host:$expected_port (LISTEN)"* ]]; then
     return 0
   fi
-  # Sandboxed operators may be allowed to inspect a process but not signal it,
-  # including `kill -0`. In that case accept only a strong lsof identity match:
-  # the PID must have files under this DSH runtime and own the configured port.
-  command -v lsof >/dev/null 2>&1 || return 1
-  identity="$(lsof -nP -p "$pid" 2>/dev/null || true)"
-  [[ "$identity" == *"$RUNTIME_ROOT"* && "$identity" == *"TCP $WEB_HOST:$WEB_PORT (LISTEN)"* ]]
+  if kill -0 "$pid" 2>/dev/null \
+    && [[ "$command_line" == *"$RUNTIME_ROOT"* || "$command_line" == *"@deepseek-ai/dsh"* ]]; then
+    return 0
+  fi
+  return 1
 }
 
 port_is_listening() {
@@ -658,36 +750,52 @@ run_foreground() {
 }
 
 start_background() {
+  local current_fingerprint existing_host existing_port
+  current_fingerprint="$(source_fingerprint)" || return 1
   if pid_is_running; then
+    existing_host="$(managed_host)"
+    existing_port="$(managed_port)"
+    if [[ "$existing_host" != "$WEB_HOST" || "$existing_port" != "$WEB_PORT" ]]; then
+      fail "This runtime already manages http://$existing_host:$existing_port. Use restart to move it, or set a distinct NETOPYU_DSH_RUNTIME for another concurrent port."
+      return 1
+    fi
+    if ! source_is_fresh; then
+      fail 'DSH is running with a stale plugin/Skill source snapshot. Run: scripts/netopyu-dsh restart'
+      return 1
+    fi
     # Reconcile the companion Worker as well; an already-running Web process
     # must not cause `start` to skip recovery of a missing bridge Worker.
     start_worker || return 1
     printf 'NetOpYu DSH is already running (PID %s).\n' "$(<"$PID_FILE")"
     return 0
   fi
+  if [[ -f "$PID_FILE" || -f "$INSTANCE_HOST_FILE" || -f "$INSTANCE_PORT_FILE" ]]; then
+    clear_instance_metadata
+  fi
   if port_is_listening; then
-    rm -f "$PID_FILE"
     fail "Port $WEB_HOST:$WEB_PORT is already used by an unmanaged process; refusing to report a false DSH start."
     return 1
   fi
-  check_node && check_python && check_runtime && check_ollama && check_network_backend || return 1
+  check_node && check_python && check_runtime && check_ollama \
+    && check_network_backend && check_skill_projection || return 1
   start_worker || return 1
   mkdir -p "$LOG_DIR" "$(dirname "$HITL_STORE")"
   runtime_env
   cd "$PROJECT_ROOT" || return 1
   nohup "$DSH_BIN" web --host "$WEB_HOST" --port "$WEB_PORT" --no-open >"$LOG_FILE" 2>&1 &
   local pid=$!
-  printf '%s\n' "$pid" >"$PID_FILE"
+  record_instance_metadata "$pid" "$current_fingerprint"
   local attempt
   for attempt in {1..30}; do
     if ! kill -0 "$pid" 2>/dev/null; then
       printf 'DSH exited during startup. Recent log:\n' >&2
       tail -n 50 "$LOG_FILE" >&2
-      rm -f "$PID_FILE"
+      clear_instance_metadata
       return 1
     fi
     if curl --silent --fail --max-time 1 "http://$WEB_HOST:$WEB_PORT/" >/dev/null 2>&1; then
       printf 'NetOpYu DSH is running: http://%s:%s (PID %s)\n' "$WEB_HOST" "$WEB_PORT" "$pid"
+      printf 'Source fingerprint: %s\n' "$current_fingerprint"
       printf 'Log: %s\n' "$LOG_FILE"
       return 0
     fi
@@ -699,7 +807,7 @@ start_background() {
 stop_background() {
   if ! pid_is_running; then
     printf 'NetOpYu DSH is not running.\n'
-    rm -f "$PID_FILE"
+    clear_instance_metadata
     return 0
   fi
   local pid command_line identity attempt
@@ -716,7 +824,7 @@ stop_background() {
   kill -TERM "$pid" || return 1
   for attempt in {1..10}; do
     if ! kill -0 "$pid" 2>/dev/null; then
-      rm -f "$PID_FILE"
+      clear_instance_metadata
       printf 'NetOpYu DSH stopped.\n'
       return 0
     fi
@@ -727,14 +835,22 @@ stop_background() {
 
 show_status() {
   if pid_is_running; then
-    printf 'RUNNING pid=%s url=http://%s:%s\n' "$(<"$PID_FILE")" "$WEB_HOST" "$WEB_PORT"
+    local actual_host actual_port
+    actual_host="$(managed_host)"
+    actual_port="$(managed_port)"
+    if source_is_fresh; then
+      printf 'RUNNING pid=%s url=http://%s:%s source=fresh\n' "$(<"$PID_FILE")" "$actual_host" "$actual_port"
+    else
+      printf 'STALE_SOURCE pid=%s url=http://%s:%s action=restart\n' "$(<"$PID_FILE")" "$actual_host" "$actual_port"
+      return 2
+    fi
   elif port_is_listening; then
     printf 'UNMANAGED_LISTENER url=http://%s:%s (not started by this launcher)\n' "$WEB_HOST" "$WEB_PORT"
     [[ ! -f "$PID_FILE" ]] || printf 'Stale PID file: %s\n' "$PID_FILE"
     return 2
   else
     printf 'STOPPED url=http://%s:%s\n' "$WEB_HOST" "$WEB_PORT"
-    [[ ! -f "$PID_FILE" ]] || printf 'Stale PID file: %s\n' "$PID_FILE"
+    [[ ! -f "$PID_FILE" ]] || printf 'Stale instance metadata: %s\n' "$PID_FILE"
     return 1
   fi
 }
@@ -1068,7 +1184,9 @@ case "$command" in
   start) start_background ;;
   foreground) run_foreground ;;
   stop) stop_background ;;
-  restart) stop_background && start_background ;;
+  # The Worker captures backend/configuration at process start.  A Web-only
+  # restart would therefore keep serving the previous mock/pragmatic backend.
+  restart) stop_background && stop_worker && start_background ;;
   status) show_status ;;
   worker-start) start_worker ;;
   worker-stop) stop_worker ;;

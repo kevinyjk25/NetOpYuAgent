@@ -134,6 +134,36 @@ report.json
 - L1、Capability Catalog、候选、编译结果和 proposal 全部绑定 SHA-256；
 - Proposal 文件被修改后不能通过 review。
 
+#### 4.1 需求级语义覆盖门禁
+
+字段和 hash 自洽不等于自然语言语义完整。Promotion 现在把 L1 的参数、
+profile、风险、审批、前置条件、参数不得推断、preflight、单次 Effect、独立
+验证、未知结果处理和补偿要求拆成带稳定 `requirementId` 的原子要求，并在
+`report.json.semanticCoverage` 中保存三级证据：
+
+```text
+L1 source text/path → L0.5 path/value → compiled L0 path/predicate/capability
+```
+
+每条要求的判定为 `preserved`、`strengthened`、`weakened`、`missing`、
+`ambiguous` 或 `non_machine_verifiable`。安全关键要求出现 `missing`、
+`weakened` 或 `ambiguous` 会阻断 package/review；L0 出现 L1 未声明的额外
+Effect 同样阻断。每条失败都携带 `fix.file`、`fix.path` 和 `fix.hint`，因此
+使用者能直接判断应修改 L1、L0.5、L0 authoring 还是 Capability Catalog。
+
+查看摘要和待处理项：
+
+```bash
+scripts/netopyu-l0 promote-assess ... | jq '.semanticCoverage.summary'
+scripts/netopyu-l0 promote-assess ... | \
+  jq '.semanticCoverage.requirements[] | select(.verdict != "preserved" and .verdict != "strengthened")'
+```
+
+`semanticCoverage.gate=passed` 只表示确定性提取到的要求通过，不是任意自然
+语言等价证明。无法机器执行的业务规则必须保留为
+`non_machine_verifiable` 并由独立 reviewer 认证；LLM 只能建议拆分和映射，
+不能自行关闭安全门禁。
+
 ### 5. 仍需人工/实验认证
 
 转换器不能证明 Provider 的真实行为。发布前仍需认证 API 身份、Observer 独立性和 freshness、职责分离审批、timeout/写结果不确定、错误 postcondition、精确 rollback，以及 DSH/Hermes 的语义入口和模型选择准确率。将来可以在 Runtime UI 中调用同一 Promotion API，但仍只能生成 proposal，不能在线激活。
@@ -151,5 +181,14 @@ The Promotion Pipeline preserves three explicit stages: the original natural-lan
 An immutable package stores the capability catalog, `01-L1-SKILL.md`, `02-L0.5.yaml`, `03-L0-authoring.yaml`, `04-L0-compiled.json`, and a `trajectory.json` hash chain. Deterministic checks prevent L0.5 from drifting from L1 or L0 from widening L0.5. Any file or link tampering blocks review. The Agent accelerates semantic extraction but remains an untrusted candidate producer.
 
 The pipeline deliberately cannot activate Runtime or grant execution authority. A human approval records one immutable review decision only. Provider identity, independent observation, approval separation of duty, indeterminate outcomes, rollback, Harness projection, and fault injection still require separate qualification. This keeps natural-language generalization in L1 while preserving deterministic execution semantics in L0.
+
+Promotion also emits a requirement-level `semanticCoverage` matrix. Stable
+requirement IDs link the original L1 clause to L0.5 evidence and concrete
+compiled-L0 paths. Missing or weakened requirements block promotion; ambiguous
+safety-critical mappings and undeclared extra effects block it as well. Every
+row includes an exact fix file/path/hint. `non_machine_verifiable` rules remain
+visible for independent review. A passing gate covers deterministically
+extracted requirements only; it is not a proof of equivalence for arbitrary
+natural language, and an LLM cannot close the gate by assertion.
 
 New Skills use the genuine forward path: domain authors write L1, review L0.5, and then produce an L0 candidate. The 21 existing contracts already began as reviewed L0, so their readable L1/L0.5 baselines are explicitly reverse-bootstrapped for explainability. Each archive still reruns `assess_promotion()`, requires semantic parity after proposal-only labels are removed, and requires an exact full contract hash after recompiling authoring. This validates structural conversion closure and readable projection of existing contracts; it is not a measurement of model accuracy on arbitrary prose. See the [production L0 trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).

@@ -39,6 +39,12 @@ flowchart LR
 - `workbench-list`：列出目录下的直接子 proposal；目录名只以摘要形式输出，无效包安全标记为 `invalid`。
 - `workbench-inspect`：输出机器可读的审查投影、语义差异、轨迹、合同图和控制边界。
 - `workbench-export`：生成无外部依赖的本地 HTML；CSP 禁止网络、插件、frame 和外部资源。
+- 三栏语义映射视图：L1 原文、L0.5 结构化证据和 L0 可执行约束并排显示；两条显式转换边分别显示 `L1 → L0.5` 与 `L0.5 → L0` 的置信度、判定和语言丢失。悬停、键盘聚焦或点击任一节点，会按同一个 `requirementId` 联动高亮整条链路，点击可固定选择。
+- 响应式链路：宽屏为 `L1 → 评分① → L0.5 → 评分② → L0` 五段横向视图，窄屏自动改为纵向完整链路，不再通过横向滚动隐藏 L0。
+- 渐进披露：默认只显示 requirement 原文摘要、两段分数和最终判定；点击摘要或告警后才展开完整证据。可一键展开风险项或收起全部，避免正常项占满首屏。
+- 可解释映射置信度：以来源可追溯性 10%、L0.5 表达 15%、L0 enforcement 20%、语义保真判定 55% 进行确定性加权。分数是转换证据完整度，不是 LLM 自报概率或生产成功率。
+- 语言丢失评估：区分 `l1_to_l05_loss`、`l05_to_l0_loss`、`semantic_weakening`、`ambiguous_mapping` 和 `manual_semantic_gap`，并显示风险比例与判定解释。
+- 自动告警与修复定位：阻断项优先、低置信度次之；告警直接给出需要修改的阶段、文件、字段路径和建议动作，并支持“只看告警”和搜索。
 - HTML 编辑器：编辑结构化 L0.5 的 JSON/YAML 兼容表示并下载草稿；Reset 可恢复原始不可变内容。
 - 原子合同图按 Runtime 阶段展示；组合合同边按实际 `dependsOn` 展示，不把文件顺序误当依赖。
 
@@ -83,6 +89,16 @@ The Workbench is **not** a publication or execution control plane. It exposes no
 ### 2. Trust and data flow
 
 The Workbench validates the report and exact file manifest, every package digest, the predecessor-linked trajectory, report-to-stage bindings, the compiled contract hash/id/version/kind, the review-v2 authority flags, regular-file semantics, and the 2 MB per-file bound. It then emits a privacy-minimized view. Reviewer identity and reason appear only as digests.
+
+The page now renders a linked, three-lane requirement explorer: L1 source,
+L0.5 structured evidence, and concrete L0 enforcement. Hover, focus, and click
+highlight the same `requirementId` across all three stages. Every mapping has a
+deterministic, component-level confidence score and language-loss assessment;
+low-confidence or blocking mappings are promoted into an alert list with an
+exact stage, file, field path, and repair hint. The score measures traceability
+evidence, not model confidence or production success probability. Legacy
+packages without this gate remain viewable as `not_evaluated`, but cannot pass
+independent promotion review until regenerated.
 
 An edited document is always an untrusted L0.5 draft. It must pass a new deterministic assessment, packaging, and independent review. No Workbench output is automatically loaded by the Runtime.
 

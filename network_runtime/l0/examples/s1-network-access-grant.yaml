@@ -60,8 +60,11 @@ spec:
       capability: rest.network-access.get
       arguments:
         user_id: "${arguments.user_id}"
-      snapshotFields: [allowed, vlan_id, expires_at, revision]
+      snapshotFields: [active, allowed, vlan_id, expires_at, revision]
       predicates:
+        - field: active
+          operator: equals
+          expected: true
         - field: revision
           operator: exists
 

@@ -60,6 +60,13 @@ def test_workbench_projects_integrity_trajectory_diff_and_no_authority(tmp_path:
         "risk_not_weakened": True,
         "approval_not_weakened": True,
     }
+    assert view["semantic_coverage"]["gate"] == "passed"
+    assert view["semantic_coverage"]["summary"]["blockingRequirements"] == 0
+    assert any(
+        item["category"] == "precondition"
+        and item["l0Evidence"]
+        for item in view["semantic_coverage"]["requirements"]
+    )
     assert all(value is False for key, value in view["controls"].items() if key in {
         "same_session_approval", "runtime_registration", "execution_authority",
     })
@@ -100,6 +107,29 @@ def test_workbench_export_is_self_contained_draft_only_and_escapes_script_data(
     assert "fetch(" not in rendered
     assert "XMLHttpRequest" not in rendered
     assert "Download untrusted L0.5 draft" in rendered
+    assert "Semantic coverage gate" in rendered
+    assert "coverage-summary" in rendered
+    assert "semantic-map" in rendered
+    assert "semantic-detail" in rendered
+    assert "L1 · 自然语言意图与约束" in rendered
+    assert "L0.5 · 结构化自然语言证据" in rendered
+    assert "L0 · 可执行确定性约束" in rendered
+    assert "① L1 → L0.5" in rendered
+    assert "② L0.5 → L0" in rendered
+    assert "averageL05ToL0Confidence" in rendered
+    assert "transitionAssessments" in rendered
+    assert "semantic-link" in rendered
+    assert "semantic-case:not(.expanded) .semantic-row" in rendered
+    assert "aria-expanded" in rendered
+    assert "expand-risk" in rendered
+    assert "collapse-all" in rendered
+    assert "展开风险项" in rendered
+    assert "收起全部" in rendered
+    assert "dataset.requirementId" in rendered
+    assert "pointerenter" in rendered
+    assert "mappingConfidence" in rendered
+    assert "languageLoss" in rendered
+    assert "只看告警" in rendered
     assert "+'\\n'" in rendered
     assert "approve" not in rendered.split("<button", 1)[-1].split("</button>", 1)[0]
 
