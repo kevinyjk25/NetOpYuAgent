@@ -18,6 +18,8 @@ data/tool_results.db
 data/tool_results.sqlite
 data/local_dc_peer.sqlite
 data/service_layer.sqlite
+data/agentized_service_layer.sqlite
+data/l0-proposals/
 
 # Generated local test/runtime artifacts
 artifacts/

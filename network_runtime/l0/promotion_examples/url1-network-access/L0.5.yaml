@@ -51,6 +51,6 @@ outcomes:
   failure: No unverified success; fail closed or enter an explicit recovery state.
   rollback: Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:5c3db23d3297cc4e04bb2d76c5ee949f8a2c05dca86387fa412794522a0ce39c
-capabilityCatalogSha256: sha256:b8dcf93fbca6f81133e0fe14ac598618322ca2a8a111428c4b4bf23bb632cff6
+capabilityCatalogSha256: sha256:044bacca07a7a7dba78233420e944d5b4ef480aa69fa42130ca93924caa96012
 previousStageSha256: sha256:5c3db23d3297cc4e04bb2d76c5ee949f8a2c05dca86387fa412794522a0ce39c
 unresolvedQuestions: []

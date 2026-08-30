@@ -649,6 +649,124 @@ function trajectoryDefinition(hitlStore) {
   }
 }
 
+function agentizedAuthoringDefinitions(bridge) {
+  const output = {
+    schema: { type: 'string' },
+    render: (_args, value) => [{ type: 'text', text: value }],
+  }
+  const template = {
+    name: 'netopyu_l0_authoring_template',
+    description: 'Read the proposal-only L1 Skill template, trusted capability catalog, and model/runtime responsibility boundary before translating a user-authored Skill.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output,
+    presentCall: () => ({ card: 'generic', title: 'L1 to L0 authoring template', kind: 'read', rawInput: '{}' }),
+    async execute(_args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-template', signal: execution.signal })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  const capture = {
+    name: 'netopyu_l0_authoring_capture',
+    description: 'Capture the exact user-authored L1 SKILL.md as immutable proposal input and return a draft_id. This performs no translation, registration, activation, or execution.',
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_markdown: { type: 'string', description: 'Exact complete user-authored L1 SKILL.md, including YAML frontmatter and Markdown body.' },
+      },
+      required: ['skill_markdown'],
+      additionalProperties: false,
+    },
+    output,
+    presentCall: args => ({ card: 'generic', title: 'Capture L1 Skill source', kind: 'read', rawInput: JSON.stringify({ skill_bytes: Buffer.byteLength(args.skill_markdown ?? '') }) }),
+    async execute(args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-capture', args, signal: execution.signal, correlationId: execution.callId })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  const submit = {
+    name: 'netopyu_l0_authoring_submit',
+    description: 'Submit an LLM-translated L1 Skill as an untrusted L0.5/L0 proposal. Runtime validates requirement-level semantic coverage against a trusted catalog, blocks missing or weakened safety semantics, compiles it, returns authoritative artifact_paths, records the full trajectory, and never activates it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        catalog_id: { type: 'string', enum: ['lan-user-access'] },
+        draft_id: { type: 'string', description: 'ID returned by netopyu_l0_authoring_capture for this exact L1 source.' },
+        l0_id: { type: 'string' },
+        profiles: { type: 'array', items: { type: 'string', enum: ['lan'] }, minItems: 1, uniqueItems: true },
+        parameters: { type: 'object' },
+        effect_capability: { type: 'string' },
+        observation_capability: { type: 'string' },
+        verification_capability: { type: 'string' },
+        compensation_capability: { type: 'string' },
+        compensation_verification_capability: { type: 'string' },
+        effect_request: { type: 'object' },
+        intent: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string' },
+            target_fields: { type: 'array', items: { type: 'string' }, minItems: 1, uniqueItems: true },
+            desired_state: { type: 'object' },
+          },
+          required: ['kind', 'target_fields', 'desired_state'],
+          additionalProperties: false,
+        },
+        preflight: {
+          type: 'object',
+          properties: {
+            arguments: { type: 'object' },
+            snapshot_fields: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            predicates: { type: 'array', items: { type: 'object' }, minItems: 1, description: 'Machine-checkable predicates for every L1 precondition; facts existence alone does not prove facts.status is active.' },
+          },
+          required: ['arguments', 'snapshot_fields', 'predicates'],
+          additionalProperties: false,
+        },
+        verification_arguments: { type: 'object' },
+        verification_predicates: { type: 'array', items: { type: 'object' }, minItems: 1 },
+        compensation_arguments: { type: 'object' },
+        compensation_verification_arguments: { type: 'object' },
+        compensation_verification_predicates: { type: 'array', items: { type: 'object' }, minItems: 1 },
+        risk: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        approval_mode: { type: 'string', enum: ['single', 'dual'] },
+        translation_logic: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Requirement-level explanations linking L1 clauses to L0.5 structure and concrete L0 paths.' },
+      },
+      required: [
+        'draft_id', 'profiles', 'parameters', 'effect_capability',
+        'observation_capability', 'verification_capability',
+        'compensation_capability', 'compensation_verification_capability',
+        'effect_request', 'intent', 'preflight', 'verification_arguments',
+        'verification_predicates', 'compensation_arguments',
+        'compensation_verification_arguments',
+        'compensation_verification_predicates', 'risk', 'approval_mode',
+        'translation_logic',
+      ],
+      additionalProperties: false,
+    },
+    output,
+    presentCall: args => ({ card: 'generic', title: 'Validate L1 to L0 proposal', kind: 'read', rawInput: JSON.stringify({ catalog_id: args.catalog_id, draft_id: args.draft_id, translation_keys: Object.keys(args).filter(key => !['catalog_id', 'draft_id'].includes(key)).sort() }) }),
+    async execute(args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-submit', args, signal: execution.signal, correlationId: execution.callId })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  const trace = {
+    name: 'netopyu_l0_authoring_trace',
+    description: 'Read the model-versus-Runtime responsibility trace and authoritative artifact_paths for one L1 to L0 proposal attempt. Never infer artifact filenames.',
+    parameters: {
+      type: 'object',
+      properties: { attempt_id: { type: 'string' } },
+      required: ['attempt_id'],
+      additionalProperties: false,
+    },
+    output,
+    presentCall: args => ({ card: 'generic', title: 'L1 to L0 trajectory', kind: 'read', rawInput: JSON.stringify(args) }),
+    async execute(args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-trace', args, signal: execution.signal })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  return [template, capture, submit, trace]
+}
+
 export async function apply(ctx, config = {}) {
   const projectRoot = resolve(config.projectRoot ?? process.env.NETOPYU_ROOT ?? inferredProjectRoot)
   const profile = config.profile ?? process.env.NETOPYU_PROFILE ?? 'lan'
@@ -763,6 +881,7 @@ export async function apply(ctx, config = {}) {
   )
   for (const tool of hitlTools) ctx.tools.register(tool)
   ctx.tools.register(trajectoryDefinition(hitlStore))
+  for (const tool of agentizedAuthoringDefinitions(bridge)) ctx.tools.register(tool)
 
   ctx.on('session/event', (session, event) => {
     hitlStore.recordTrajectory(session.id, `session:${String(event.type)}`, {

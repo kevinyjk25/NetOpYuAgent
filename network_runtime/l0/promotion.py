@@ -39,6 +39,7 @@ PROMOTION_SCHEMA = "netopyu.io/l0-promotion-report/v2"
 CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v1"
 L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v1"
 TRAJECTORY_SCHEMA = "netopyu.io/l0-promotion-trajectory/v1"
+SEMANTIC_COVERAGE_SCHEMA = "netopyu.io/l0-semantic-coverage/v1"
 _DIRECT_ARGUMENT = re.compile(r"^\$\{\s*arguments\.([A-Za-z_][A-Za-z0-9_]*)\s*\}$")
 
 
@@ -434,6 +435,820 @@ def _finding(
     if evidence is not None:
         value["evidence"] = evidence
     findings.append(value)
+
+
+def _normalized_requirement_text(value: str) -> str:
+    return " ".join(value.casefold().split()).strip(" .;,:，。；：")
+
+
+def _requirement_id(category: str, source_path: str, text: str) -> str:
+    digest = hashlib.sha256(
+        f"{category}\n{source_path}\n{_normalized_requirement_text(text)}".encode("utf-8")
+    ).hexdigest()[:12]
+    return f"REQ-{category.upper().replace('_', '-')}-{digest}"
+
+
+def _classify_requirement(text: str) -> str:
+    value = _normalized_requirement_text(text)
+    if any(token in value for token in (
+        "unknown write", "uncertain write", "indeterminate", "blind retry",
+        "read-only reconciliation", "不确定", "盲目重试", "只读对账",
+    )):
+        return "unknown_outcome"
+    if any(token in value for token in (
+        "approval", "approve", "hitl", "审批", "批准",
+    )):
+        return "approval"
+    if any(token in value for token in (
+        "rollback", "restore", "restoration", "compensat", "previous state",
+        "pre-change", "回滚", "恢复", "补偿", "前态",
+    )):
+        return "compensation"
+    if any(token in value for token in (
+        "write response", "api response", "provider response", "readback",
+        "independent verification", "independently verify", "verify the new",
+        "verification", "verifier", "after the write", "after write",
+        "写响应", "返回不能", "独立验证", "回读", "写入后",
+    )):
+        return "verification"
+    if any(token in value for token in (
+        "current state", "read first", "snapshot", "revision", "preflight",
+        "re-read", "drift", "读取当前", "先读取", "快照", "版本号", "重读", "漂移",
+    )):
+        return "preflight"
+    if any(token in value for token in (
+        "inactive", "active user", "active employee", "identity is unknown",
+        "existing user", "身份", "用户存在", "活跃", "禁用", "停用",
+    )):
+        return "precondition"
+    if any(token in value for token in (
+        "never infer", "do not infer", "without inference", "without inferring", "do not invent",
+        "不得推断", "禁止推断", "不得编造",
+    )):
+        return "parameter_integrity"
+    if any(token in value for token in (
+        "exactly once", "grant access once", "send once", "invoke once",
+        "effect once", "调用一次", "只发送一次", "发送一次", "写入一次",
+    )):
+        return "effect"
+    return "business_rule"
+
+
+def _requirement_criticality(category: str) -> str:
+    if category in {
+        "approval", "risk", "precondition", "parameter_integrity", "effect",
+        "verification", "unknown_outcome", "compensation",
+    }:
+        return "safety_critical"
+    if category in {"parameter", "profile", "preflight"}:
+        return "operational"
+    return "business"
+
+
+def _body_directives(source: SkillSource) -> list[str]:
+    """Extract reviewable prose statements from the complete Skill body.
+
+    The Runtime does not pretend to understand arbitrary prose.  This bounded
+    extraction makes otherwise easy-to-lose safety and business sentences
+    visible.  Example sections and code fences are excluded; unclassified
+    prose remains a human-review responsibility in the coverage matrix.
+    """
+
+    paragraphs: list[str] = []
+    current: list[str] = []
+    section = ""
+    in_code = False
+
+    def flush() -> None:
+        if current:
+            paragraphs.append(" ".join(current))
+            current.clear()
+
+    for raw in source.parsed.body.splitlines():
+        stripped = raw.strip()
+        if stripped.startswith("```"):
+            flush()
+            in_code = not in_code
+            continue
+        if in_code:
+            continue
+        if stripped.startswith("## "):
+            flush()
+            section = stripped[3:].strip().casefold()
+            continue
+        if stripped.startswith("#"):
+            flush()
+            continue
+        if not stripped:
+            flush()
+            continue
+        if any(token in section for token in (
+            "example", "示例", "样例", "parameter", "参数",
+        )):
+            continue
+        cleaned = re.sub(r"^(?:>|[-*+]\s+|\d+[.)]\s+)", "", stripped).strip()
+        if cleaned:
+            current.append(cleaned)
+    flush()
+    statements: list[str] = []
+    for paragraph in paragraphs:
+        for item in re.split(r"(?<=[.!?。！？])\s+", paragraph):
+            statement = item.strip()
+            if not statement or (statement.startswith("/") and statements):
+                continue
+            statements.append(statement)
+    return statements
+
+
+def _source_requirements(source: SkillSource) -> list[dict[str, Any]]:
+    values: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    def add(category: str, source_path: str, text: str) -> None:
+        normalized = _normalized_requirement_text(text)
+        key = (category, normalized)
+        if not normalized or key in seen:
+            return
+        seen.add(key)
+        values.append({
+            "id": _requirement_id(category, source_path, text),
+            "category": category,
+            "criticality": _requirement_criticality(category),
+            "source": {
+                "stage": "L1",
+                "file": "01-L1-SKILL.md",
+                "path": source_path,
+                "text": text,
+                "sha256": _text_digest(text),
+            },
+        })
+
+    for name, description in (source.definition.get("parameters") or {}).items():
+        text = str(description)
+        add("parameter", f"parameters.{name}", f"{name}: {text}")
+        if _classify_requirement(text) == "precondition":
+            add("precondition", f"parameters.{name}#precondition", text)
+    profiles = tuple(str(item) for item in source.definition.get("profiles") or ("default",))
+    add("profile", "metadata.profiles", "Allowed profiles: " + ", ".join(profiles))
+    source_risk = str(source.definition.get("risk_level", "low"))
+    add("risk", "metadata.risk_level", f"Risk must be at least {source_risk}.")
+    if bool(source.definition.get("requires_hitl")):
+        add("approval", "metadata.requires_hitl", "Human approval is required.")
+    for index, text in enumerate(source.definition.get("constraints") or ()):
+        add(_classify_requirement(str(text)), f"constraints[{index}]", str(text))
+    for index, text in enumerate(source.definition.get("steps") or ()):
+        add(_classify_requirement(str(text)), f"steps[{index}]", str(text))
+    for index, text in enumerate(_body_directives(source)):
+        add(_classify_requirement(text), f"body[{index}]", text)
+    return values
+
+
+def _evidence(stage: str, path: str, value: Any) -> dict[str, Any]:
+    return {"stage": stage, "path": path, "value": value}
+
+
+def _l05_evidence(
+    requirement: dict[str, Any], l05: StructuredNaturalLanguageSkill,
+) -> list[dict[str, Any]]:
+    category = requirement["category"]
+    text = str(requirement["source"]["text"])
+    normalized = _normalized_requirement_text(text)
+    values: list[dict[str, Any]] = []
+    if category == "parameter":
+        name = requirement["source"]["path"].split(".", 1)[1]
+        if name in l05.parameters:
+            values.append(_evidence("L0.5", f"parameters.{name}", l05.parameters[name]))
+    elif category == "profile":
+        values.append(_evidence("L0.5", "profiles", list(l05.profiles)))
+    elif category == "risk":
+        values.append(_evidence("L0.5", "safety.risk", l05.safety.risk))
+    elif category == "approval":
+        values.append(_evidence(
+            "L0.5", "safety.approvalRequired", l05.safety.approval_required,
+        ))
+    elif category == "unknown_outcome":
+        values.append(_evidence(
+            "L0.5", "safety.unknownOutcomePolicy", l05.safety.unknown_outcome_policy,
+        ))
+    elif category == "precondition":
+        corpus = [
+            *l05.constraints, *l05.safety.stop_conditions,
+            *(item.instruction for item in l05.workflow if item.phase in {"validate", "preflight"}),
+            *l05.parameters.values(),
+        ]
+        identity_tokens = (
+            "active", "inactive", "identity", "existing", "unknown",
+            "身份", "活跃", "禁用", "停用", "存在",
+        )
+        for index, item in enumerate(corpus):
+            item_normalized = _normalized_requirement_text(str(item))
+            if (
+                item_normalized == normalized
+                or any(token in normalized and token in item_normalized for token in identity_tokens)
+            ):
+                values.append(_evidence("L0.5", f"preconditionEvidence[{index}]", item))
+    elif category == "parameter_integrity":
+        for index, step in enumerate(l05.workflow):
+            if step.phase == "validate" and any(token in step.instruction.casefold() for token in (
+                "without inference", "不得推断", "不得", "validate every",
+            )):
+                values.append(_evidence("L0.5", f"workflow[{index}].instruction", step.instruction))
+    elif category == "preflight":
+        for index, step in enumerate(l05.workflow):
+            if step.phase == "preflight":
+                values.append(_evidence("L0.5", f"workflow[{index}]", step.model_dump(by_alias=True, mode="json")))
+    elif category == "verification":
+        for index, step in enumerate(l05.workflow):
+            if step.phase == "verification":
+                values.append(_evidence("L0.5", f"workflow[{index}]", step.model_dump(by_alias=True, mode="json")))
+    elif category == "compensation":
+        for index, step in enumerate(l05.workflow):
+            if step.phase == "compensation":
+                values.append(_evidence("L0.5", f"workflow[{index}]", step.model_dump(by_alias=True, mode="json")))
+        values.append(_evidence("L0.5", "outcomes.rollback", l05.outcomes.rollback))
+    elif category == "effect":
+        for index, step in enumerate(l05.workflow):
+            if step.phase == "effect":
+                values.append(_evidence("L0.5", f"workflow[{index}]", step.model_dump(by_alias=True, mode="json")))
+    else:
+        for index, item in enumerate(l05.constraints):
+            if _normalized_requirement_text(item) == normalized:
+                values.append(_evidence("L0.5", f"constraints[{index}]", item))
+    return values
+
+
+def _compiled_atomics(
+    compiled: CompiledContract | None, catalog: L0Catalog | None,
+) -> list[CompiledAtomicEffect]:
+    if isinstance(compiled, CompiledAtomicEffect):
+        return [compiled]
+    if isinstance(compiled, CompiledCompositeEffect) and catalog is not None:
+        return [
+            child for step in compiled.steps
+            if isinstance((child := catalog.require(step.skill_ref.id, step.skill_ref.version)), CompiledAtomicEffect)
+        ]
+    return []
+
+
+def _number_range(value: str) -> tuple[float, float] | None:
+    match = re.search(
+        r"(?:from\s+)?(-?\d+(?:\.\d+)?)\s*(?:through|to|[-~至到])\s*(-?\d+(?:\.\d+)?)",
+        value.casefold(),
+    )
+    return (float(match.group(1)), float(match.group(2))) if match else None
+
+
+def _semantic_requirement_mapping(
+    requirement: dict[str, Any],
+    *,
+    l05: StructuredNaturalLanguageSkill,
+    atomics: list[CompiledAtomicEffect],
+) -> dict[str, Any]:
+    category = requirement["category"]
+    source_text = str(requirement["source"]["text"])
+    normalized = _normalized_requirement_text(source_text)
+    l05_evidence = _l05_evidence(requirement, l05)
+    l0_evidence: list[dict[str, Any]] = []
+    verdict = "preserved"
+    reason = "The requirement is represented in L0.5 and enforced by the compiled L0 contract."
+    fix_stage = "none"
+    fix_path = ""
+    hint = "No change required."
+
+    def fail(value: str, why: str, stage: str, path: str, action: str) -> None:
+        nonlocal verdict, reason, fix_stage, fix_path, hint
+        verdict, reason, fix_stage, fix_path, hint = value, why, stage, path, action
+
+    if category == "business_rule":
+        verdict = "non_machine_verifiable"
+        reason = (
+            "The business-language rule has no deterministic L0 proof; it remains "
+            "visible for independent review."
+            if not l05_evidence else
+            "The business-language constraint is preserved in L0.5 but has no "
+            "deterministic L0 predicate mapping."
+        )
+        fix_stage = "L0.5"
+        fix_path = "constraints"
+        hint = "Map this rule to a predicate/capability or explicitly certify it as manual."
+    elif not l05_evidence:
+        l05_fix_paths = {
+            "parameter": "parameters",
+            "profile": "profiles",
+            "risk": "safety.risk",
+            "approval": "safety.approvalRequired",
+            "precondition": "constraints / safety.stopConditions",
+            "parameter_integrity": "workflow[phase=validate]",
+            "preflight": "workflow[phase=preflight]",
+            "verification": "workflow[phase=verification]",
+            "unknown_outcome": "safety.unknownOutcomePolicy",
+            "compensation": "workflow[phase=compensation] / outcomes.rollback",
+            "effect": "workflow[phase=effect]",
+        }
+        fail(
+            "missing",
+            "The L1 requirement has no explicit L0.5 representation.",
+            "L0.5", l05_fix_paths.get(category, "constraints"),
+            "Add an explicit structured constraint/workflow mapping, then regenerate L0.",
+        )
+    elif category == "parameter":
+        name = requirement["source"]["path"].split(".", 1)[1]
+        specs = [item.spec.parameters.get(name) for item in atomics]
+        specs = [item for item in specs if item is not None]
+        for index, spec in enumerate(specs):
+            l0_evidence.append(_evidence(
+                "L0", f"atomics[{index}].spec.parameters.{name}",
+                spec.model_dump(by_alias=True, mode="json"),
+            ))
+        expected_range = _number_range(source_text)
+        source_required = not any(token in normalized for token in (
+            "optional", "可选", "非必填",
+        ))
+        if not specs:
+            fail("missing", f"Parameter {name!r} is absent from L0.", "L0", f"spec.parameters.{name}", "Declare and bind the parameter in L0 authoring.")
+        elif source_required and any(not item.required for item in specs):
+            fail("weakened", f"L1 parameter {name!r} is not required by every L0 effect.", "L0", f"spec.parameters.{name}.required", "Make the parameter required in every affected L0 contract.")
+        elif expected_range and any(
+            (
+                item.type in {"integer", "number"}
+                and (
+                    item.minimum is None or item.maximum is None
+                    or item.minimum < expected_range[0] or item.maximum > expected_range[1]
+                )
+            )
+            or (
+                item.type in {"string", "array"}
+                and (
+                    item.min_length is None or item.max_length is None
+                    or item.min_length < expected_range[0] or item.max_length > expected_range[1]
+                )
+            )
+            for item in specs
+        ):
+            fail("weakened", f"L0 does not preserve the documented range {expected_range} for {name!r}.", "L0", f"spec.parameters.{name}", "Narrow minimum/maximum to the L1 range.")
+    elif category == "profile":
+        l0_profiles = {profile for item in atomics for profile in item.spec.profiles}
+        l0_evidence.append(_evidence("L0", "spec.profiles", sorted(l0_profiles)))
+        source_profiles = {
+            item.strip() for item in source_text.split(":", 1)[-1].split(",") if item.strip()
+        }
+        if not l0_profiles:
+            fail("missing", "L0 has no profile scope.", "L0", "spec.profiles", "Declare the exact supported profiles.")
+        elif not l0_profiles.issubset(set(l05.profiles)) or not set(l05.profiles).issubset(source_profiles):
+            fail("weakened", "The profile scope is wider than an earlier stage.", "L0.5", "profiles", "Narrow L0.5 and L0 profiles to the L1 scope.")
+    elif category == "risk":
+        ranks = {"low": 0, "medium": 1, "high": 2, "critical": 3}
+        risks = [item.spec.approval.risk for item in atomics]
+        l0_evidence.append(_evidence("L0", "spec.approval.risk", risks))
+        source_risk = source_text.rstrip(".").rsplit(" ", 1)[-1]
+        if ranks[l05.safety.risk] < ranks.get(source_risk, 0):
+            fail("weakened", "L0.5 risk is weaker than L1.", "L0.5", "safety.risk", "Raise L0.5 risk to at least the L1 level.")
+        elif not risks:
+            fail("missing", "L0 has no enforceable approval risk.", "L0", "spec.approval.risk", "Declare approval risk in L0.")
+        elif any(ranks[item] < ranks.get(source_risk, 0) for item in risks):
+            fail("weakened", "L0 risk is weaker than L1.", "L0", "spec.approval.risk", "Raise L0 approval risk to at least the L1 level.")
+        elif any(ranks[item] > ranks.get(source_risk, 0) for item in risks):
+            verdict = "strengthened"
+            reason = "L0 enforces a stronger risk classification than L1."
+    elif category == "approval":
+        approvals = [item.spec.approval.required for item in atomics]
+        l0_evidence.append(_evidence("L0", "spec.approval.required", approvals))
+        if not l05.safety.approval_required:
+            fail("weakened", "L0.5 removes mandatory L1 approval.", "L0.5", "safety.approvalRequired", "Set approvalRequired to true.")
+        elif not approvals or not all(approvals):
+            fail("weakened", "L0 does not require approval for every effect.", "L0", "spec.approval.required", "Require approval for every affected L0 effect.")
+    elif category == "precondition":
+        predicates = [
+            (atomic_index, observation_index, predicate_index, predicate)
+            for atomic_index, atomic in enumerate(atomics)
+            for observation_index, observation in enumerate(atomic.spec.preflight)
+            for predicate_index, predicate in enumerate(observation.predicates)
+        ]
+        for ai, oi, pi, predicate in predicates:
+            l0_evidence.append(_evidence(
+                "L0", f"atomics[{ai}].spec.preflight[{oi}].predicates[{pi}]",
+                predicate.model_dump(mode="json"),
+            ))
+        needs_active = any(token in normalized for token in (
+            "active", "inactive", "活跃", "禁用", "停用",
+        ))
+        active_enforced = any(
+            (
+                "active" in predicate.field.casefold()
+                and predicate.operator == "equals" and predicate.expected is True
+            ) or (
+                "status" in predicate.field.casefold()
+                and predicate.operator == "equals"
+                and str(predicate.expected).casefold() == "active"
+            )
+            for _, _, _, predicate in predicates
+        )
+        existence_enforced = active_enforced or any(
+            predicate.operator == "exists"
+            and any(token in predicate.field.casefold() for token in (
+                "user", "identity", "status", "active", "facts", "record",
+            ))
+            for _, _, _, predicate in predicates
+        )
+        if not predicates:
+            fail("missing", "L0 has no machine-checkable precondition predicate.", "L0", "spec.preflight.predicates", "Add an independent preflight predicate for this requirement.")
+        elif needs_active and not active_enforced:
+            fail("weakened", "L0 proves only that data exists; it does not prove the identity is active.", "L0", "spec.preflight.predicates", "Add an explicit status=active or active=true predicate backed by a declared observation field.")
+        elif not needs_active and not existence_enforced:
+            fail("ambiguous", "The identity/existence requirement is not explicitly proved by L0.", "L0", "spec.preflight.predicates", "Add an explicit existence predicate or mark the requirement for reviewed manual certification.")
+    elif category == "parameter_integrity":
+        parameter_items = [
+            (name, parameter)
+            for item in atomics for name, parameter in item.spec.parameters.items()
+        ]
+        parameters = [parameter for _, parameter in parameter_items]
+        direct_bindings = [
+            value for item in atomics for value in item.spec.effect.request.values()
+            if isinstance(value, str) and _DIRECT_ARGUMENT.fullmatch(value)
+        ]
+        l0_evidence.append(_evidence("L0", "spec.parameters", {
+            "required": sum(item.required for item in parameters),
+            "directEffectBindings": len(direct_bindings),
+        }))
+        named_parameters = {
+            name for name, _ in parameter_items if name.casefold() in normalized
+        }
+        if not parameters:
+            fail("missing", "L0 has no parameter contract for values L1 forbids the model to infer.", "L0", "spec.parameters", "Declare strict parameters and their sources.")
+        elif any(
+            name in named_parameters and not parameter.required
+            for name, parameter in parameter_items
+        ):
+            fail("weakened", "A parameter explicitly required by L1 can be omitted in L0.", "L0", "spec.parameters", "Require every explicitly named no-inference parameter.")
+    elif category == "preflight":
+        observations = [item for atomic in atomics for item in atomic.spec.preflight]
+        l0_evidence.extend(
+            _evidence("L0", f"spec.preflight[{index}]", item.model_dump(by_alias=True, mode="json"))
+            for index, item in enumerate(observations)
+        )
+        l05_preflight = " ".join(str(item["value"]) for item in l05_evidence).casefold()
+        if not any(token in l05_preflight for token in (
+            "read", "observation", "snapshot", "revision", "读取", "快照", "前态",
+        )):
+            fail("weakened", "L0.5 no longer requires observable preflight state.", "L0.5", "workflow[phase=preflight]", "Require independent read, predicates, and rollback evidence.")
+        elif not observations:
+            fail("missing", "L0 has no independent preflight observation.", "L0", "spec.preflight", "Add preflight observation, predicates, and snapshot fields.")
+        elif any(not item.snapshot_fields or not item.predicates for item in observations):
+            fail("weakened", "L0 preflight does not both preserve state and enforce a predicate.", "L0", "spec.preflight", "Add snapshot fields and machine-checkable predicates.")
+    elif category == "verification":
+        verifications = [item.spec.verification for item in atomics]
+        l0_evidence.extend(
+            _evidence("L0", f"atomics[{index}].spec.verification", item.model_dump(mode="json"))
+            for index, item in enumerate(verifications)
+        )
+        l05_verification = " ".join(str(item["value"]) for item in l05_evidence).casefold()
+        if not any(token in l05_verification for token in (
+            "independent", "never from", "write response", "readback", "独立", "写响应", "回读",
+        )):
+            fail("weakened", "L0.5 no longer requires independent verification.", "L0.5", "workflow[phase=verification]", "State that success requires independent observation rather than the write response.")
+        elif not verifications:
+            fail("missing", "L0 has no independent result verification.", "L0", "spec.verification", "Add an observation-backed verification contract.")
+        elif any(
+            verification.capability == atomics[index].spec.effect.capability
+            or not verification.predicates
+            for index, verification in enumerate(verifications)
+        ):
+            fail("weakened", "L0 verification is not independent and predicate-backed.", "L0", "spec.verification", "Use an independent observation capability with explicit predicates.")
+    elif category == "unknown_outcome":
+        policies = [item.spec.failure_policy.after_send_unknown for item in atomics]
+        l0_evidence.append(_evidence("L0", "spec.failurePolicy.afterSendUnknown", policies))
+        l05_policy = l05.safety.unknown_outcome_policy.casefold()
+        l05_safe = any(token in l05_policy for token in (
+            "read-only", "reconciliation", "never blind", "只读", "对账", "禁止盲目",
+        ))
+        if not l05_safe:
+            fail("weakened", "L0.5 no longer forbids blind retry after an uncertain write.", "L0.5", "safety.unknownOutcomePolicy", "Require read-only reconciliation or manual intervention before retry.")
+        elif not policies or any(item not in {"reconcile_read_only", "manual_intervention"} for item in policies):
+            fail("weakened", "L0 permits unsafe handling of an unknown write outcome.", "L0", "spec.failurePolicy.afterSendUnknown", "Use reconcile_read_only or manual_intervention.")
+    elif category == "compensation":
+        compensations = [item.spec.compensation for item in atomics]
+        l0_evidence.extend(
+            _evidence("L0", f"atomics[{index}].spec.compensation", (
+                item.model_dump(mode="json") if item is not None else None
+            ))
+            for index, item in enumerate(compensations)
+        )
+        l05_compensation = " ".join(str(item["value"]) for item in l05_evidence).casefold()
+        if not any(token in l05_compensation for token in (
+            "restore", "compensat", "rollback", "恢复", "补偿", "回滚",
+        )):
+            fail("weakened", "L0.5 no longer represents the L1 recovery requirement.", "L0.5", "workflow[phase=compensation]", "Describe compensation and independent restoration verification.")
+        elif not compensations or any(item is None for item in compensations):
+            manual_terminal = bool(l05.safety.non_compensable_justification) and all(
+                item.spec.failure_policy.verification_failed == "manual_intervention"
+                for item in atomics
+            )
+            if manual_terminal:
+                l0_evidence.append(_evidence(
+                    "L0", "spec.failurePolicy.verificationFailed",
+                    [item.spec.failure_policy.verification_failed for item in atomics],
+                ))
+                reason = (
+                    "The effect is explicitly justified as non-compensable and L0 "
+                    "fails into manual intervention rather than claiming restoration."
+                )
+            else:
+                fail("missing", "L1 requires recovery but L0 has no compensation for every effect.", "L0", "spec.compensation", "Declare compensation or explicitly justify a non-compensable effect in L0.5 and use manual_intervention.")
+        elif any(not item.verification.predicates for item in compensations if item is not None):
+            fail("weakened", "Compensation is not independently verified.", "L0", "spec.compensation.verification", "Add independent restoration verification predicates.")
+        elif any(token in normalized for token in ("exact snapshot", "exact pre-change", "精确前态", "精确快照")):
+            exact = all(
+                any("preflight" in str(value) for value in item.arguments.values())
+                and any(predicate.operator == "exact_snapshot" for predicate in item.verification.predicates)
+                for item in compensations if item is not None
+            )
+            if not exact:
+                fail("ambiguous", "L1 requires exact prior-state restoration but L0 does not bind and compare the snapshot exactly.", "L0", "spec.compensation", "Bind the preflight snapshot into compensation and verify with exact_snapshot.")
+    elif category == "effect":
+        effects = [item.spec.effect for item in atomics]
+        l0_evidence.extend(
+            _evidence("L0", f"atomics[{index}].spec.effect", item.model_dump(mode="json"))
+            for index, item in enumerate(effects)
+        )
+        if not effects:
+            fail("missing", "L0 has no bounded effect for the L1 action.", "L0", "spec.effect", "Bind the action to one reviewed effect capability.")
+    else:
+        verdict = "non_machine_verifiable"
+        reason = "No deterministic mapper exists for this requirement category."
+        fix_stage = "L0.5"
+        fix_path = "constraints"
+        hint = "Map this rule to a predicate/capability or explicitly certify it as manual."
+
+    if verdict == "preserved" and not l0_evidence:
+        fail("missing", "The requirement has no concrete L0 enforcement evidence.", "L0", "03-L0-authoring.yaml", "Add an explicit L0 binding or predicate.")
+    blocks = verdict in {"missing", "weakened"} or (
+        verdict == "ambiguous" and requirement["criticality"] == "safety_critical"
+    )
+    fidelity_scores = {
+        "preserved": 95,
+        "strengthened": 100,
+        "non_machine_verifiable": 20,
+        "ambiguous": 35,
+        "weakened": 10,
+        "missing": 0,
+    }
+    confidence_components = {
+        "sourceTraceability": 100,
+        "l05Representation": 100 if l05_evidence else 0,
+        "l0Enforcement": 100 if l0_evidence else 0,
+        "semanticFidelity": fidelity_scores[verdict],
+    }
+    confidence_weights = {
+        "sourceTraceability": 0.10,
+        "l05Representation": 0.15,
+        "l0Enforcement": 0.20,
+        "semanticFidelity": 0.55,
+    }
+    confidence_score = round(sum(
+        confidence_components[name] * weight
+        for name, weight in confidence_weights.items()
+    ))
+    confidence_band = (
+        "high" if confidence_score >= 85 else
+        "medium" if confidence_score >= 65 else
+        "low"
+    )
+    confidence_basis = [
+        "The L1 requirement is source-bound to an immutable path and digest.",
+        (
+            f"{len(l05_evidence)} explicit L0.5 evidence item(s) were found."
+            if l05_evidence else
+            "No explicit L0.5 evidence was found."
+        ),
+        (
+            f"{len(l0_evidence)} compiled L0 enforcement evidence item(s) were found."
+            if l0_evidence else
+            "No compiled L0 enforcement evidence was found."
+        ),
+        f"The deterministic semantic verdict is {verdict!r}.",
+    ]
+    if verdict == "preserved":
+        loss_type, loss_risk, loss_explanation = (
+            "none", 0,
+            "No detected semantic loss: the requirement is explicit in L0.5 and enforced in L0.",
+        )
+    elif verdict == "strengthened":
+        loss_type, loss_risk, loss_explanation = (
+            "strengthened_no_loss", 0,
+            "No detected loss: L0 narrows or strengthens the earlier safety requirement.",
+        )
+    elif verdict == "non_machine_verifiable":
+        loss_type, loss_risk, loss_explanation = (
+            "manual_semantic_gap", 55,
+            "The language is retained for review, but no deterministic L0 predicate proves it.",
+        )
+    elif verdict == "ambiguous":
+        loss_type, loss_risk, loss_explanation = (
+            "ambiguous_mapping", 75,
+            "The available evidence permits more than one interpretation and needs review.",
+        )
+    elif verdict == "weakened":
+        loss_type, loss_risk, loss_explanation = (
+            "semantic_weakening", 80,
+            "A restriction exists in later stages but is weaker than the L1 requirement.",
+        )
+    elif l05_evidence:
+        loss_type, loss_risk, loss_explanation = (
+            "l05_to_l0_loss", 100,
+            "The requirement reached L0.5 but has no concrete compiled L0 enforcement.",
+        )
+    else:
+        loss_type, loss_risk, loss_explanation = (
+            "l1_to_l05_loss", 100,
+            "The requirement was lost before or during the L1 to L0.5 translation.",
+        )
+    attention_required = confidence_band == "low" or verdict == "non_machine_verifiable"
+    l1_to_l05_verdict = (
+        "missing" if not l05_evidence else
+        verdict if verdict in {"weakened", "ambiguous"} and fix_stage == "L0.5" else
+        "preserved"
+    )
+    l1_to_l05_fidelity = {
+        "preserved": 100,
+        "ambiguous": 35,
+        "weakened": 10,
+        "missing": 0,
+    }[l1_to_l05_verdict]
+    l1_to_l05_score = round(40 + 0.60 * l1_to_l05_fidelity)
+    l1_to_l05_loss = {
+        "preserved": 0,
+        "ambiguous": 75,
+        "weakened": 80,
+        "missing": 100,
+    }[l1_to_l05_verdict]
+    if not l05_evidence:
+        l05_to_l0_verdict = "upstream_missing"
+        l05_to_l0_score = 0
+        l05_to_l0_loss = 100
+        l05_to_l0_explanation = (
+            "L0.5 has no source representation, so L0 enforcement cannot be "
+            "meaningfully compared until the upstream gap is fixed."
+        )
+    elif l1_to_l05_verdict in {"weakened", "ambiguous"}:
+        l05_to_l0_verdict = "upstream_unresolved"
+        l05_to_l0_score = 0
+        l05_to_l0_loss = 100
+        l05_to_l0_explanation = (
+            "The L0.5 input is already weakened or ambiguous; repair L1 to L0.5 "
+            "before treating the downstream comparison as authoritative."
+        )
+    else:
+        l05_to_l0_verdict = verdict
+        l05_to_l0_score = round(
+            15
+            + confidence_components["l0Enforcement"] * 0.30
+            + confidence_components["semanticFidelity"] * 0.55
+        )
+        l05_to_l0_loss = loss_risk
+        l05_to_l0_explanation = loss_explanation
+
+    def transition_band(score: int) -> str:
+        return "high" if score >= 85 else "medium" if score >= 65 else "low"
+
+    return {
+        **requirement,
+        "l05Evidence": l05_evidence,
+        "l0Evidence": l0_evidence,
+        "verdict": verdict,
+        "blocksPromotion": blocks,
+        "reason": reason,
+        "mappingConfidence": {
+            "score": confidence_score,
+            "band": confidence_band,
+            "method": "deterministic_evidence_v1",
+            "components": confidence_components,
+            "weights": confidence_weights,
+            "basis": confidence_basis,
+            "claimBoundary": (
+                "This is a deterministic traceability score, not model confidence or a "
+                "production success probability."
+            ),
+        },
+        "languageLoss": {
+            "type": loss_type,
+            "riskPercent": loss_risk,
+            "explanation": loss_explanation,
+        },
+        "transitionAssessments": {
+            "l1ToL05": {
+                "fromStage": "L1",
+                "toStage": "L0.5",
+                "score": l1_to_l05_score,
+                "band": transition_band(l1_to_l05_score),
+                "verdict": l1_to_l05_verdict,
+                "lossRiskPercent": l1_to_l05_loss,
+                "explanation": (
+                    "The L1 clause has explicit structured L0.5 evidence."
+                    if l1_to_l05_verdict == "preserved" else reason
+                ),
+            },
+            "l05ToL0": {
+                "fromStage": "L0.5",
+                "toStage": "L0",
+                "score": l05_to_l0_score,
+                "band": transition_band(l05_to_l0_score),
+                "verdict": l05_to_l0_verdict,
+                "lossRiskPercent": l05_to_l0_loss,
+                "explanation": l05_to_l0_explanation,
+            },
+        },
+        "attentionRequired": attention_required,
+        "alertLevel": "critical" if blocks else (
+            "warning" if attention_required else "none"
+        ),
+        "fix": {
+            "stage": fix_stage,
+            "file": "02-L0.5.yaml" if fix_stage == "L0.5" else (
+                "03-L0-authoring.yaml" if fix_stage == "L0" else None
+            ),
+            "path": fix_path,
+            "hint": hint,
+        },
+    }
+
+
+def _semantic_coverage(
+    *,
+    source: SkillSource,
+    l05: StructuredNaturalLanguageSkill,
+    compiled: CompiledContract | None,
+    catalog: L0Catalog | None,
+) -> dict[str, Any]:
+    requirements = _source_requirements(source)
+    atomics = _compiled_atomics(compiled, catalog)
+    mappings = [
+        _semantic_requirement_mapping(item, l05=l05, atomics=atomics)
+        for item in requirements
+    ]
+    counts = {
+        verdict: sum(item["verdict"] == verdict for item in mappings)
+        for verdict in (
+            "preserved", "strengthened", "weakened", "missing", "ambiguous",
+            "non_machine_verifiable",
+        )
+    }
+    total = len(mappings)
+    represented = counts["preserved"] + counts["strengthened"] + counts["non_machine_verifiable"]
+    machine_enforced = counts["preserved"] + counts["strengthened"]
+    blocked = sum(bool(item["blocksPromotion"]) for item in mappings)
+    attention = sum(bool(item["attentionRequired"]) for item in mappings)
+    low_confidence = sum(
+        item["mappingConfidence"]["band"] == "low" for item in mappings
+    )
+    language_loss = sum(
+        item["languageLoss"]["riskPercent"] > 0 for item in mappings
+    )
+    average_confidence = (
+        round(sum(item["mappingConfidence"]["score"] for item in mappings) / total, 2)
+        if total else 100.0
+    )
+    average_l1_to_l05_confidence = (
+        round(sum(
+            item["transitionAssessments"]["l1ToL05"]["score"] for item in mappings
+        ) / total, 2)
+        if total else 100.0
+    )
+    average_l05_to_l0_confidence = (
+        round(sum(
+            item["transitionAssessments"]["l05ToL0"]["score"] for item in mappings
+        ) / total, 2)
+        if total else 100.0
+    )
+    source_tools = set(source.declared_tools)
+    extra_effects = sorted({
+        atomic.spec.effect.tool
+        for atomic in atomics
+        if source_tools and atomic.spec.effect.tool and atomic.spec.effect.tool not in source_tools
+    })
+    return {
+        "schema": SEMANTIC_COVERAGE_SCHEMA,
+        "gate": "blocked" if blocked or extra_effects else "passed",
+        "claimBoundary": (
+            "Deterministic coverage of extracted requirements is not a proof of arbitrary "
+            "natural-language equivalence. Non-machine-verifiable rules require independent review."
+        ),
+        "summary": {
+            "totalRequirements": total,
+            **counts,
+            "blockingRequirements": blocked,
+            "attentionRequirements": attention,
+            "lowConfidenceRequirements": low_confidence,
+            "languageLossRequirements": language_loss,
+            "averageMappingConfidence": average_confidence,
+            "averageL1ToL05Confidence": average_l1_to_l05_confidence,
+            "averageL05ToL0Confidence": average_l05_to_l0_confidence,
+            "semanticCoveragePercent": round(100.0 * represented / total, 2) if total else 100.0,
+            "machineEnforcedPercent": round(100.0 * machine_enforced / total, 2) if total else 100.0,
+            "extraEffects": len(extra_effects),
+        },
+        "requirements": mappings,
+        "extraEffects": extra_effects,
+    }
 
 
 def _parameter_contract_is_subset(source: ParameterSpec, target: ParameterSpec) -> bool:
@@ -839,6 +1654,45 @@ def assess_promotion(
         if not bool(source.definition.get("requires_hitl")):
             _finding(findings, "warning", "L1_HITL_NOT_DECLARED", "source Skill does not declare HITL; L0 approval remains mandatory")
 
+    semantic_coverage = _semantic_coverage(
+        source=source,
+        l05=l05,
+        compiled=compiled,
+        catalog=catalog,
+    )
+    for requirement in semantic_coverage["requirements"]:
+        if not requirement["blocksPromotion"]:
+            continue
+        verdict = str(requirement["verdict"])
+        _finding(
+            findings,
+            "error",
+            f"SEMANTIC_REQUIREMENT_{verdict.upper()}",
+            requirement["reason"],
+            {
+                "requirementId": requirement["id"],
+                "category": requirement["category"],
+                "source": requirement["source"],
+                "fix": requirement["fix"],
+            },
+        )
+    if semantic_coverage["extraEffects"]:
+        _finding(
+            findings,
+            "error",
+            "SEMANTIC_EXTRA_EFFECT",
+            "L0 contains an effect outside the L1 declared tool boundary.",
+            {
+                "extraEffects": semantic_coverage["extraEffects"],
+                "fix": {
+                    "stage": "L0",
+                    "file": "03-L0-authoring.yaml",
+                    "path": "spec.effect",
+                    "hint": "Remove the undeclared effect or explicitly review and declare it in L1.",
+                },
+            },
+        )
+
     error_count = sum(item["severity"] == "error" for item in findings)
     warning_count = sum(item["severity"] == "warning" for item in findings)
     compiled_hash = (
@@ -884,6 +1738,7 @@ def assess_promotion(
         },
         "summary": {"errors": error_count, "warnings": warning_count},
         "findings": findings,
+        "semanticCoverage": semantic_coverage,
         "manualCertificationRequired": [
             "API authentication and provider identity qualification",
             "independent observer freshness and schema qualification",
@@ -1083,6 +1938,7 @@ def package_promotion(
         "ok": True, "status": "ready_for_review", "proposal": str(destination),
         "proposal_hash": report["proposalHash"],
         "trajectory_hash": trajectory["trajectoryHash"],
+        "semantic_coverage": report["semanticCoverage"]["summary"],
         "auto_activated": False,
     }
 
@@ -1136,6 +1992,19 @@ def review_promotion(
     report = json.loads(report_path.read_text(encoding="utf-8"))
     if report.get("status") != "ready_for_review":
         raise PromotionError("only a ready_for_review proposal can be reviewed")
+    semantic_coverage = report.get("semanticCoverage")
+    if (
+        not isinstance(semantic_coverage, dict)
+        or semantic_coverage.get("schema") != SEMANTIC_COVERAGE_SCHEMA
+        or semantic_coverage.get("gate") != "passed"
+        or not isinstance(semantic_coverage.get("summary"), dict)
+        or semantic_coverage["summary"].get("blockingRequirements") != 0
+        or semantic_coverage["summary"].get("extraEffects") != 0
+    ):
+        raise PromotionError(
+            "proposal lacks a passing requirement-level semantic coverage gate; "
+            "regenerate and reassess it"
+        )
     stored_hash = report.get("proposalHash")
     calculated_hash = sha256_json({
         key: value for key, value in report.items() if key != "proposalHash"

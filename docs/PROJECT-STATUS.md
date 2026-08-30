@@ -1,7 +1,7 @@
 # 项目进展与路线图 / Project Status and Roadmap
 
 > 最后核验 / Last verified: 2026-08-30
-> 当前里程碑 / Current milestone: **P2.3 用户接入与收敛评测本地完成；P1.9 真实证据与 canary 仍关闭 / P2.3 product entry and convergence evaluation locally complete; P1.9 real evidence and canary remain open**
+> 当前里程碑 / Current milestone: **P2.4 真实 LLM Agent Golden Paths 本地完成；P1.9 真实证据与 canary 仍关闭 / P2.4 real-LLM Agent Golden Paths locally complete; P1.9 real evidence and canary remain open**
 
 本文档是项目阶段、已完成事项和后续工作的唯一汇总入口。README 说明项目是什么；HLD、LLD、SSD 和 ARCHITECTURE 说明如何设计；本文档只回答三个问题：现在到哪里、哪些确实完成、下一步做什么。
 
@@ -47,10 +47,11 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 - **P1.9-B2 Adapter Hook parity 已完成**：生产 DSH JavaScript `agent/pre-step` 与 Hermes Python `pre_llm_call` 通过临时 owner-only Worker 实跑并比较完整输入/Decision 摘要；完整 DSH Web/Hermes CLI/UI 与部署身份仍待产品环境认证；
 - **P1.9-C0 绑定内核已完成、未启用**：PreparedPlan schema v10 可选绑定 proposal-only Decision、Harness route、请求/编译参数和 L0 合同；Journal 对 Decision id 建立唯一约束，错会话/目标/参数/摘要、重放和计划篡改均失败关闭；DSH/Hermes 配置边界继续拒绝 `canary`；
 - **P1.9-C1 本地安全准备层已完成、未启用**：纯策略只能保持原 Harness route 或收窄/阻断，写路径异常失败关闭；readiness 门禁交叉绑定 Worker/Adapter/产品/运维四类外部证据，最强结论仅为 `ready_for_review`；停用、告警、回退和审计手册已落地；
-- **P2.0 本地 Promotion Workbench 已完成**：不可变 proposal 校验、L1/L0.5/L0 语义 diff、轨迹/合同图、隐私最小化 review 投影和离线草稿编辑已落地；没有批准、注册、激活或执行 API；
+- **P2.0 本地 Promotion Workbench 已完成**：不可变 proposal 校验、需求级 L1/L0.5/L0 语义覆盖/偏移门禁、轨迹/合同图、隐私最小化 review 投影和离线草稿编辑已落地；缺失/削弱/关键歧义会定位并阻断，没有批准、注册、激活或执行 API；
 - **P2.1 本地 Capability Catalog 已完成**：21/21 已激活 L0 合同进入摘要绑定的 owner/steward、租户/环境、委派、依赖、消费者与兼容治理；Catalog 决策没有 Runtime read/write 或 Provider 发布权威；
 - **P2.2 本地 Evidence Plane 已完成**：五类现有证据源以只读方式形成隐私最小化的统一事件链、指标、事故与离线时间线；缺链、截断或完整性失败明确降级；
 - **P2.3 用户接入与收敛评测已完成**：统一 CLI、三条 Golden Path、只读 Doctor、严格 Integration Pack、源码化脱敏基线和逐层失败驾驶舱已落地；明确区分固定集控制、模型资格和未证明的生产泛化；
+- **P2.4 真实 LLM Agent Golden Paths 已完成**：DSH 页面已用 `qwen3.5:9b` 实跑 Runtime L1→L0、L1→L0.5→L0 proposal 和四系统 MCP 访问三个用例；新增统一发现入口、样例 Skill、独立 MCP 演示配置和逐阶段可见证据；
 - **生产环境尚未认证**：企业身份、真实审批、真实厂商设备、分布式高可用、不可变远端审计、灾备和生产 SLO 仍是后续工作。
 
 因此，身份侧已具备 P1.3-B2 现场接入条件，Provider 侧已完成 P1.4-B-ready 接入协议。下一步是把这两个 ready 包接入真实组织系统、独立 Provider 仓库/CI、签名根和 artifact 服务，而不是扩建另一套 Agent Framework。
@@ -78,10 +79,11 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 | P1.7 安全、审计、可观测性与 SLO | ⬜ | 见后续路线图 | 生产前必需 |
 | P1.8 L1/模型资格评测 | ✅ | C3.2 完成同一 7B 的 184/184：协议门禁 100%、最终 safety escape 0、E2E 91.30%，通过当前本地资格门槛 | 固定集通过不等于生产概率；跨域冲突、陈旧状态、长对话和多模型持续回归仍需扩展 |
 | P1.9 L1 Decision Plane | 🟡 | B1/B2 shadow 与资格执行器；C0 plan binding；C1 单调策略、证据门禁和 runbook | 真实私有集/人工真值、完整 Harness 产品/部署证据、canary 激活/enforced 和生产 SLO 尚未完成 |
-| P2.0 Promotion Workbench | ✅ | proposal 完整性/交叉绑定、语义 diff、L1→L0 图、Runtime 合同图、离线 L0.5 草稿编辑 | 单机静态审查工具；不批准、不注册、不激活，尚非多人生产控制台 |
+| P2.0 Promotion Workbench | ✅ | proposal 完整性/交叉绑定、需求级语义覆盖与偏移定位、L1→L0 图、Runtime 合同图、离线 L0.5 草稿编辑 | 单机静态审查工具；不批准、不注册、不激活，尚非多人生产控制台 |
 | P2.1 多团队 Capability Catalog | ✅ | 21/21 L0 精确覆盖；namespace、owner/steward、tenant/environment、委派、依赖、消费者与兼容性 | 本地治理投影；不授权 Runtime read/write，不替代企业 IAM/PDP 或独立发布系统 |
 | P2.2 Evidence Plane | ✅ | Runtime/Decision/Saga/Provider/Promotion 五类只读 adapter、统一事件/指标/事故和离线 HTML | 本地只读投影；无远端 WORM、告警/SLO 或跨实例 trace |
 | P2.3 用户接入与收敛评测 | ✅ | Golden Path、Doctor、能力发现、proposal-only Integration Pack、Runtime/L1 统一驾驶舱与 368 条脱敏 trace | 固定集证据；没有 Provider 激活权威，也没有证明生产泛化 |
+| P2.4 真实 LLM Agent 用例 | ✅ | 9B 模型实际选择 L1/调用 L0；Agent 化 Promotion；身份/应用/变更/权限四 MCP 进程联动 | 本地模拟数据与单次 UI 证据；不是模型泛化率、生产 SLO 或外部系统认证 |
 
 ### 3. 已完成能力清单（Done）
 
@@ -174,7 +176,7 @@ B-ready 测试把 fixture 复制到仓库外临时目录并以独立进程运行
 
 | 证据 | 当前结果 | 说明 |
 |---|---:|---|
-| Python gate | 392 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.3、恢复等 |
+| Python gate | 404 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.4、恢复等 |
 | Core-72：DSH only | 5/64（7.8%） | 固定风险/故障 Oracle |
 | Core-72：DSH + Runtime | 64/64（100%） | 固定风险/故障 Oracle |
 | 有效操作 | 8/8 vs 8/8 | 两条路径都能完成无故障请求 |
@@ -333,7 +335,7 @@ Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**
 #### P2.0 Promotion Workbench（本地完成）
 
 - 校验不可变 package、逐文件摘要、四阶段前驱链、report-to-stage 和 review 权威边界；
-- 展示 L1→L0.5→L0 语义差异、轨迹和 Runtime/Composite 依赖图；
+- 以三栏联动视图展示 L1→L0.5→L0 语义关系、可复算映射置信度、语言丢失、精确修复路径、轨迹和 Runtime/Composite 依赖图；
 - 导出带 CSP、无外部网络依赖的本地 HTML，并只允许下载不可信 L0.5 草稿；
 - `approve` 后仍为 `approved_not_active`；页面没有批准、注册、激活、Runtime 或 Provider API；
 - 设计、命令和边界见 [P2.0 Promotion Workbench](p20-promotion-workbench.md)。
@@ -408,7 +410,7 @@ scripts/netopyu-dsh retirement
 
 The migration from the legacy general-purpose L0 agent framework to **DSH/Hermes Harness Adapters plus the NetOpYu Domain Effect Runtime** is complete as a repeatable local reference implementation.
 
-The current milestone is **local completion of P2.3 product entry and convergence evaluation**. Users now have three Golden Paths, a read-only Doctor, strict proposal-only Integration Packs, and a digest-bound cockpit that separates probabilistic L1 errors from deterministic Runtime controls. P1.9 canary remains closed because real human/product/organization evidence is still absent.
+The current milestone is **local completion of P2.4 real-LLM Agent Golden Paths**. Users now have three paste-ready DSH cases covering prompt-to-L1-to-L0 execution, proposal-only L1-to-L0.5-to-L0 authoring, and four-system MCP integration. P1.9 canary remains closed because real human/product/organization evidence is still absent.
 
 This does **not** mean production certification. Enterprise identity and approval, real vendor systems, distributed HA, remote immutable audit, disaster recovery, and production SLOs remain open.
 
@@ -435,10 +437,11 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 | P1.7 Security, audit, observability and SLOs | ⬜ | See roadmap | Required before production |
 | P1.8 L1/model qualification | ✅ | C3.2 completes 184/184 with the same 7B: 100% protocol gates, zero final safety escape, 91.30% E2E, and passes the current local gates | Fixed-set qualification is not a production probability; unseen, stale-state, cross-domain, long-context, and multi-model regression remain |
 | P1.9 L1 Decision Plane | 🟡 | B1/B2 shadow and qualification, C0 plan binding, plus C1 monotonic policy, evidence gate, and runbook | Real private/adjudicated and full Harness product/deployment evidence, canary activation/enforced behavior, and production SLOs remain open |
-| P2.0 Promotion Workbench | ✅ | Package integrity/binding, semantic diff, lineage and Runtime contract graphs, offline L0.5 draft editing | Single-host static review tool; no approval, registration, or activation |
+| P2.0 Promotion Workbench | ✅ | Package integrity/binding, requirement-level semantic coverage/drift localization, lineage and Runtime contract graphs, offline L0.5 draft editing | Single-host static review tool; no approval, registration, or activation |
 | P2.1 Multi-team Capability Catalog | ✅ | Exact 21/21 L0 coverage, ownership/stewardship, scope, delegation, dependencies, consumers, and compatibility | Local governance projection; no Runtime read/write or publication authority |
 | P2.2 Evidence Plane | ✅ | Five read-only adapters, unified events/metrics/incidents, and offline HTML | Local projection; remote WORM, alerts/SLOs, and cross-instance tracing remain external |
 | P2.3 Product entry and convergence | ✅ | Golden Paths, Doctor, capability discovery, proposal-only Integration Pack, unified Runtime/L1 cockpit, and 368 redacted traces | Fixed-set evidence only; no Provider activation authority and no proven production generalization |
+| P2.4 Real-LLM Agent use cases | ✅ | Actual 9B L1/L0 selection and execution, agent-assisted Promotion, and four independent MCP service processes | Simulated local data and single-run UI evidence; not model generalization, production SLO, or external-system certification |
 
 ### 3. Done
 
@@ -449,11 +452,12 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - All 21 keep source-controlled L1 prose, structured-natural-language L0.5, compiled L0, reports, exact round trips, and hash chains.
 - Containerlab covers campus/IDC/DMZ/dual-ISP OSPF/eBGP, topology/path queries, and BGP EVPN/VXLAN L2VPN.
 - Service capabilities are separated into MCP Providers; Network Observer and Network Actor are distinct boundaries.
-- The latest gate reports 392 tests plus 81 subtests, retirement 7/7, 21/21 L0 bindings, 21/21 readable trajectories, 21/21 exact round trips, and 21/21 Promotion/Catalog coverage.
+- The latest gate reports 404 tests plus 81 subtests, retirement 7/7, 21/21 L0 bindings, 21/21 readable trajectories, 21/21 exact round trips, and 21/21 Promotion/Catalog coverage.
 - P2.0 adds a fail-closed, read-only Promotion projection and self-contained offline editor. Edited documents remain untrusted drafts, and even approved reviews remain inactive.
 - P2.1 adds a digest-bound governed Catalog with separated owners/stewards, scoped delegation, exact dependencies, consumer impact, and compatibility analysis. Its decisions cannot authorize Runtime reads/effects or Provider publication.
 - P2.2 adds read-only Runtime/Decision/Saga/Provider/Promotion adapters, privacy-minimized digest chains, operational metrics, incidents, and a self-contained no-control timeline. Unverifiable, truncated, or invalid evidence is degraded.
 - P2.3 adds one product CLI, three Golden Paths, a read-only Doctor, strict proposal-only Integration Packs, and a digest-bound cockpit over Runtime A/B plus 368 redacted L1 traces. It cannot connect or activate a Provider and always marks production generalization as unproven.
+- P2.4 adds three real-LLM DSH journeys, a user-authored sample Skill, proposal-only authoring Tools with visible lineage, and a service-only configuration that talks to four independent MCP subprocesses. The records remain simulated and the single-run evidence is not a production metric.
 - Schema-v9 plans bind requester/policy plus Provider release/manifest/qualification/deployment evidence. Signature tampering, replay, identity/release/deployment switching, critical self-approval, missing tickets, and invalid windows fail closed.
 - P1.3-B1 verifies human OIDC access tokens and separate Gateway attestations over pinned JWKS, cross-binds them by `act_sub + subject_jti`, applies external PDP decisions to reads/prepares/approvals, and qualifies ticket revision/window/scope/risk through a Change Authority. Credentials remain model-hidden.
 - The B2-ready package adds per-session Gateway minting, explicit CA/mTLS with owner-only client keys, an offline secret-safe Doctor, and a no-effect live contract qualification command.
@@ -504,7 +508,7 @@ P1.9-C0 implements the disabled Decision-to-plan kernel. C1 now adds monotonic r
 
 #### P2.0 Promotion Workbench (locally complete)
 
-P2.0 validates immutable package files, predecessor hashes, report-to-stage bindings, compiled identity/hash, and review authority flags. It projects semantic diffs and actual contract dependencies into a self-contained offline page. The editor exports only an untrusted draft; the page has no approve, register, activate, Runtime, or Provider API. See [P2.0 Promotion Workbench](p20-promotion-workbench.md).
+P2.0 validates immutable package files, predecessor hashes, report-to-stage bindings, compiled identity/hash, and review authority flags. Its self-contained page links each L1/L0.5/L0 requirement across three lanes and exposes deterministic confidence components, language-loss alerts, exact repair paths, semantic diffs, and actual contract dependencies. The editor exports only an untrusted draft; the page has no approve, register, activate, Runtime, or Provider API. See [P2.0 Promotion Workbench](p20-promotion-workbench.md).
 
 #### P2.1 Multi-team/tenant Capability Catalog (locally complete)
 

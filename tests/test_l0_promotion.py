@@ -76,6 +76,117 @@ class L0PromotionTests(unittest.TestCase):
             assessment.report["sourceSkill"]["sha256"],
         )
         self.assertTrue(assessment.report["candidate"]["compiledHash"].startswith("sha256:"))
+        coverage = assessment.report["semanticCoverage"]
+        self.assertEqual(coverage["gate"], "passed")
+        self.assertEqual(coverage["summary"]["blockingRequirements"], 0)
+        self.assertGreater(coverage["summary"]["totalRequirements"], 10)
+        self.assertGreater(coverage["summary"]["averageMappingConfidence"], 80)
+        self.assertGreater(coverage["summary"]["averageL1ToL05Confidence"], 80)
+        self.assertGreater(coverage["summary"]["averageL05ToL0Confidence"], 80)
+        self.assertEqual(
+            coverage["summary"]["lowConfidenceRequirements"],
+            coverage["summary"]["attentionRequirements"],
+        )
+        self.assertTrue(all(
+            item["source"]["path"]
+            and item["verdict"]
+            and item["mappingConfidence"]["method"] == "deterministic_evidence_v1"
+            and 0 <= item["mappingConfidence"]["score"] <= 100
+            and 0 <= item["languageLoss"]["riskPercent"] <= 100
+            for item in coverage["requirements"]
+        ))
+        self.assertTrue(all(
+            set(item["transitionAssessments"]) == {"l1ToL05", "l05ToL0"}
+            and item["transitionAssessments"]["l1ToL05"]["toStage"] == "L0.5"
+            and item["transitionAssessments"]["l05ToL0"]["toStage"] == "L0"
+            for item in coverage["requirements"]
+        ))
+        self.assertTrue(all(
+            round(sum(
+                item["mappingConfidence"]["components"][name] * weight
+                for name, weight in item["mappingConfidence"]["weights"].items()
+            )) == item["mappingConfidence"]["score"]
+            for item in coverage["requirements"]
+        ))
+
+    def test_semantic_gate_blocks_l05_that_drops_active_identity_requirement(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw = yaml.safe_load(L05.read_text(encoding="utf-8"))
+            raw["parameters"]["user_id"] = "User identifier."
+            l05 = Path(directory) / "L0.5.yaml"
+            l05.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+            assessment = assess_promotion(
+                skill_path=SKILL,
+                l05_path=l05,
+                candidate_path=CANDIDATE,
+                capability_catalog_path=CAPABILITIES,
+            )
+        self.assertEqual(assessment.report["status"], "blocked")
+        requirement = next(
+            item for item in assessment.report["semanticCoverage"]["requirements"]
+            if item["category"] == "precondition"
+            and item["source"]["path"] == "parameters.user_id#precondition"
+        )
+        self.assertEqual(requirement["verdict"], "missing")
+        self.assertEqual(requirement["fix"]["file"], "02-L0.5.yaml")
+
+    def test_semantic_gate_locates_weakened_active_preflight_predicate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw = yaml.safe_load(CANDIDATE.read_text(encoding="utf-8"))
+            raw["spec"]["preflight"][0]["predicates"] = [
+                {"field": "revision", "operator": "exists"},
+            ]
+            candidate = Path(directory) / "candidate.yaml"
+            candidate.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+            assessment = assess_promotion(
+                skill_path=SKILL,
+                l05_path=L05,
+                candidate_path=candidate,
+                capability_catalog_path=CAPABILITIES,
+            )
+        self.assertEqual(assessment.report["status"], "blocked")
+        requirement = next(
+            item for item in assessment.report["semanticCoverage"]["requirements"]
+            if item["category"] == "precondition"
+            and item["source"]["path"] == "parameters.user_id#precondition"
+        )
+        self.assertEqual(requirement["verdict"], "weakened")
+        self.assertTrue(requirement["blocksPromotion"])
+        self.assertEqual(requirement["mappingConfidence"]["band"], "low")
+        self.assertEqual(requirement["languageLoss"]["type"], "semantic_weakening")
+        self.assertTrue(requirement["attentionRequired"])
+        self.assertEqual(requirement["alertLevel"], "critical")
+        self.assertEqual(
+            requirement["transitionAssessments"]["l05ToL0"]["verdict"],
+            "weakened",
+        )
+        self.assertLess(
+            requirement["transitionAssessments"]["l05ToL0"]["score"], 65,
+        )
+        self.assertEqual(requirement["fix"]["path"], "spec.preflight.predicates")
+        self.assertIn("active", requirement["fix"]["hint"])
+
+    def test_semantic_gate_blocks_undeclared_extra_effect_tool(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw = yaml.safe_load(CANDIDATE.read_text(encoding="utf-8"))
+            raw["spec"]["effect"]["tool"] = "model_invented_effect"
+            candidate = Path(directory) / "candidate.yaml"
+            candidate.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+            assessment = assess_promotion(
+                skill_path=SKILL,
+                l05_path=L05,
+                candidate_path=candidate,
+                capability_catalog_path=CAPABILITIES,
+            )
+        self.assertEqual(assessment.report["semanticCoverage"]["gate"], "blocked")
+        self.assertEqual(
+            assessment.report["semanticCoverage"]["extraEffects"],
+            ["model_invented_effect"],
+        )
+        self.assertIn(
+            "SEMANTIC_EXTRA_EFFECT",
+            {item["code"] for item in assessment.report["findings"]},
+        )
 
     def test_missing_l1_parameter_blocks_promotion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -169,6 +280,24 @@ class L0PromotionTests(unittest.TestCase):
                 review_promotion(
                     proposal_directory=proposal, reviewer="network-reviewer",
                     decision="approve", reason="should fail",
+                )
+
+    def test_legacy_report_without_semantic_gate_cannot_be_reviewed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            proposal = Path(directory) / "proposal"
+            package_promotion(
+                skill_path=SKILL, candidate_path=CANDIDATE,
+                capability_catalog_path=CAPABILITIES, output_directory=proposal,
+                l05_path=L05,
+            )
+            report_path = proposal / "report.json"
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+            report.pop("semanticCoverage")
+            report_path.write_text(json.dumps(report), encoding="utf-8")
+            with self.assertRaisesRegex(PromotionError, "semantic coverage gate"):
+                review_promotion(
+                    proposal_directory=proposal, reviewer="network-reviewer",
+                    decision="approve", reason="legacy report",
                 )
 
 

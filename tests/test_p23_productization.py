@@ -106,6 +106,31 @@ def test_product_cli_golden_paths_and_evaluation(tmp_path: Path, capsys: pytest.
     journeys = json.loads(capsys.readouterr().out)
     assert journeys["recommendedOrder"] == ["understand", "local-demo", "integrate"]
 
+    assert main(["agent-usecases"]) == 0
+    agentized = json.loads(capsys.readouterr().out)
+    assert agentized["model"] == "qwen3.5:9b"
+    assert [item["id"] for item in agentized["cases"]] == [
+        "runtime-l1-l0", "l1-to-l0-authoring", "external-mcp-access",
+    ]
+    assert all(item["prompt"] for item in agentized["cases"])
+    authoring = next(
+        item for item in agentized["cases"] if item["id"] == "l1-to-l0-authoring"
+    )
+    assert authoring["workspaceIndependent"] is True
+    assert "<BEGIN_L1_SKILL>" in authoring["prompt"]
+    assert "name: restore-employee-lan-access" in authoring["prompt"]
+    assert "把文件 examples/" not in authoring["prompt"]
+    assert "production" in agentized["claimBoundary"].lower()
+
+    assert main([
+        "agent-usecases", "--case", "l1-to-l0-authoring", "--prompt-only",
+    ]) == 0
+    paste_ready = capsys.readouterr().out
+    assert paste_ready.startswith("请使用 l1-to-l0-agent-authoring Skill")
+    assert "<BEGIN_L1_SKILL>" in paste_ready
+    assert "name: restore-employee-lan-access" in paste_ready
+    assert "把文件 examples/" not in paste_ready
+
     assert main(["integration-check", "--pack", str(PACK)]) == 0
     assessment = json.loads(capsys.readouterr().out)
     assert assessment["activationAvailable"] is False
@@ -122,3 +147,10 @@ def test_demo_requires_explicit_local_approval(capsys: pytest.CaptureFixture[str
     report = json.loads(capsys.readouterr().out)
     assert report["ok"] is False
     assert "explicit" in report["error"]
+
+
+def test_agent_prompt_only_requires_exact_case(capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["agent-usecases", "--prompt-only"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["ok"] is False
+    assert "requires --case" in report["error"]

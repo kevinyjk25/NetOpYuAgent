@@ -11,6 +11,7 @@
 ```bash
 scripts/netopyu doctor       # 只读检查：哪些路径在本机可用
 scripts/netopyu journeys     # 三条 Golden Path：理解、演示、接入
+scripts/netopyu agent-usecases # 三个真实 LLM Agent 用例及可粘贴 Prompt
 scripts/netopyu evaluate     # 生成统一 JSON 和只读评测驾驶舱
 open artifacts/convergence/cockpit.html
 ```
@@ -23,6 +24,27 @@ scripts/netopyu integration-check \
 ```
 
 这个检查只验证 read/write、独立 verifier、补偿、凭据隔离和 L0 绑定完整性，不连接或激活任何系统。完整步骤见[使用与系统接入](docs/getting-started-integration.md)；“LLM 到底收敛到什么程度”见[收敛评测](docs/convergence-evaluation.md)。
+
+### 0.1 三个真实 LLM Agent 用例
+
+项目不再只提供预编排脚本。使用 `qwen3.5:9b` 在 DSH 页面可直接验证：
+
+1. 用户自然语言 → LLM → LAN L1 Skill → L0 计划/审批 → 独立验证；
+2. 用户提供自然语言 `SKILL.md` → LLM 翻译 → L0.5 → L0 待审候选与可见哈希轨迹；
+3. Agent 分别读取身份、应用、变更审批、权限四个真实 MCP 子进程 → L0 受控写入 → MCP 独立回读验证。
+
+```bash
+scripts/netopyu agent-usecases
+```
+
+只输出可直接粘贴的 L1→L0.5→L0 演示 Prompt：
+
+```bash
+scripts/netopyu agent-usecases \
+  --case l1-to-l0-authoring --prompt-only
+```
+
+完整启动命令、内嵌 `SKILL.md` 的可粘贴 Prompt、预期 Tool 链、UI 证据和边界见[真实 LLM Agent 用例](docs/AGENTIZED-USE-CASES.md)。Authoring 用例不依赖 DSH 会话工作区路径。业务数据仍是本地模拟；“真实”指模型、DSH Tool loop、MCP 进程边界和 Runtime 事务链均实际运行，不表示生产系统或厂商设备认证。
 
 ### 1. 设计
 
@@ -65,7 +87,7 @@ flowchart TB
 | L1 确定性收口 | 每个候选独立 Tool Schema；请求证据 grounding；确定性 action/missing-fields/workflow 编译 |
 | L1 决策面 | P1.9-B1/B2 shadow 与资格执行器；C0 plan binding；C1 单调收窄策略、外部证据门禁及回退手册；`proposal_only`、默认关闭 |
 | L0 Skill | 21 个生产注册合同；支持原子、约束、扩展和组合 Saga；保存 L1 → L0.5 → L0 可解释轨迹 |
-| Promotion Workbench | P2.0 本地只读校验、语义 diff、轨迹/合同图和 L0.5 草稿编辑；不批准、不注册、不激活 |
+| Promotion Workbench | P2.0 本地只读校验、需求级 L1→L0.5→L0 覆盖/偏移定位、轨迹/合同图和 L0.5 草稿编辑；安全语义丢失会阻断，不批准、不注册、不激活 |
 | Capability Catalog | P2.1 对 21/21 L0 合同做 owner/steward、租户/环境、委派、依赖、消费者和兼容治理；不授予 Runtime 权限 |
 | Evidence Plane | P2.2 只读聚合 Runtime/Decision/Saga/Provider/Promotion 证据，输出隐私最小化指标、事故和离线时间线 |
 | 产品入口与接入包 | P2.3 三条 Golden Path、只读 Doctor、能力发现、严格 proposal-only Integration Pack |
@@ -130,7 +152,7 @@ P1.9-C0 已加入默认不启用的 Decision→Plan 绑定内核：PreparedPlan 
 
 P1.9-C1 已完成不启用流量的安全准备层：策略只能保持原 Harness route 或收窄/阻断，不能重路由或授权；readiness 门禁严格交叉绑定 Worker、Adapter、真实产品/部署和运维演练四类外部证据，最强结果也只是 `ready_for_review`。当前缺少真实 B2/产品证据，因此 canary 仍关闭。
 
-当前主门禁：392 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
+当前主门禁：404 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
 
 ### 5. 典型场景
 
@@ -278,7 +300,7 @@ scripts/netopyu-l0 workbench-export \
   --proposal /path/to/proposal --output /tmp/netopyu-workbench.html
 ```
 
-页面只能下载不可信 L0.5 草稿；它没有批准、注册或激活能力。完整边界见 [P2.0 Promotion Workbench](docs/p20-promotion-workbench.md)。
+页面默认只显示每条 requirement 的原文摘要、L1→L0.5/L0.5→L0 两段分数和最终判定；点击关注项或告警后才展开三层完整证据，窄窗口也不会隐藏 L0。支持展开风险项、收起全部、联动高亮和精确修改定位。页面只能下载不可信 L0.5 草稿，没有批准、注册或激活能力。完整边界见 [P2.0 Promotion Workbench](docs/p20-promotion-workbench.md)。
 
 #### 6.5 评测与主门禁
 
@@ -388,6 +410,7 @@ Hermes 只是另一 Harness 入口，不复制或绕过 Runtime；详细使用�
 - [P2.0 Promotion Workbench](docs/p20-promotion-workbench.md)：本地审查投影、语义 diff、合同图和安全边界
 - [P2.1/P2.2 控制面](docs/p21-p22-control-planes.md)：Capability Catalog、Evidence Plane、命令与权威边界
 - [使用与系统接入](docs/getting-started-integration.md)：三条 Golden Path、Integration Pack 与外部系统接入验收
+- [真实 LLM Agent 用例](docs/AGENTIZED-USE-CASES.md)：三个页面 Prompt、Tool 链、MCP 集成和实跑边界
 - [LLM 收敛评测](docs/convergence-evaluation.md)：已解决、部分解决、未解决范围与逐层指标
 - [Runtime A/B 基线](docs/benchmarks/runtime-ab-baseline.md)：Core-72 Oracle 与趋势规则
 - [企业身份控制面](docs/enterprise-control-plane.md)：OIDC、PDP、Change 与 mTLS
@@ -403,11 +426,14 @@ Hermes 只是另一 Harness 入口，不复制或绕过 Runtime；详细使用�
 ```bash
 scripts/netopyu doctor
 scripts/netopyu journeys
+scripts/netopyu agent-usecases
 scripts/netopyu evaluate
 open artifacts/convergence/cockpit.html
 ```
 
 Validate an external-system proposal with `scripts/netopyu integration-check --pack examples/integration-rest-mcp/pack.yaml`. It checks read/write semantics, independent verification, compensation, credential isolation, and L0 bindings without contacting or activating anything. See [usage and integration](docs/getting-started-integration.md) and the [convergence evaluation](docs/convergence-evaluation.md).
+
+`scripts/netopyu agent-usecases` prints three paste-ready, real-LLM DSH journeys: prompt-to-L1-to-L0 execution, proposal-only L1-to-L0.5-to-L0 authoring, and identity/application/change/access-policy MCP integration. See [real-LLM Agent use cases](docs/AGENTIZED-USE-CASES.md). The business records are simulated; the DSH Tool loop, MCP subprocess boundaries, and Runtime transaction path execute for real locally.
 
 ### 1. Design
 
@@ -436,7 +462,7 @@ User → DSH/Hermes → Domain L1 Skills → Candidate Schema Compiler
 | L1 control | LAN/DC/WAN routing, clarification, workflows, safety refusal, candidate-specific Schema and grounding |
 | L1 Decision Plane | P1.9-B1 DSH/Hermes shadow plus B2 private-Oracle, dual-identity scoring, and real adapter-hook parity runners; proposal-only and disabled by default |
 | L0 contracts | 21 activated atomic/composed contracts with readable L1 → L0.5 → L0 trajectories |
-| Promotion Workbench | P2.0 local read-only validation, semantic diff, trajectory/contract graphs, and L0.5 draft editing; no approval, registration, or activation |
+| Promotion Workbench | P2.0 local read-only validation, requirement-level L1→L0.5→L0 coverage/drift localization, trajectory/contract graphs, and L0.5 draft editing; semantic loss blocks promotion; no approval, registration, or activation |
 | Capability Catalog | P2.1 owner/steward, tenant/environment, delegation, dependency, consumer, and compatibility governance for 21/21 L0 contracts; no Runtime authority |
 | Evidence Plane | P2.2 read-only Runtime/Decision/Saga/Provider/Promotion projection with privacy-minimized metrics, incidents, and an offline timeline |
 | Product front door | P2.3 Golden Paths, read-only Doctor, capability discovery, and a strict proposal-only Integration Pack |
@@ -481,7 +507,7 @@ P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan
 
 P1.9-C1 adds a non-activating safety-readiness layer. Its policy can only preserve the original Harness route or narrow/block it; it cannot redirect or authorize. The evidence gate cross-binds Worker, Adapter, real product/deployment, and operations-drill attestations, and its strongest output is only `ready_for_review`. Canary remains disabled because real B2/product evidence is absent.
 
-The current gate passes 392 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
+The current gate passes 404 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
 
 ### 5. Scenarios
 
@@ -560,7 +586,10 @@ scripts/netopyu-l0 workbench-export \
   --proposal /path/to/proposal --output /tmp/netopyu-workbench.html
 ```
 
-The page exports only an untrusted L0.5 draft and has no approval, registration, or activation path.
+The linked three-lane page correlates each L1 clause, L0.5 mapping, and L0
+enforcement by requirement ID, with deterministic confidence components,
+language-loss alerts, and exact repair paths. It exports only an untrusted L0.5
+draft and has no approval, registration, or activation path.
 
 Validate the governed Catalog or export the read-only Evidence Plane:
 

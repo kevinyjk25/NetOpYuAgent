@@ -50,6 +50,35 @@ class TestPersistentDshWorker(unittest.TestCase):
                 self.assertTrue(ping["ok"])
                 self.assertEqual(ping["payload"]["worker_pid"], process.pid)
 
+                contender = subprocess.run(
+                    [sys.executable, "-m", "dsh_adapter.worker", "--socket", str(socket_path)],
+                    cwd=Path(__file__).parents[1],
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                )
+                self.assertNotEqual(contender.returncode, 0)
+                self.assertIn("another bridge worker already owns lock", contender.stderr)
+                # A rejected contender must not unlink or replace the live
+                # socket owned by the original Worker.
+                still_live = self._request(
+                    socket_path, {"id": "still-live", "command": "ping"},
+                )
+                self.assertEqual(still_live["payload"]["worker_pid"], process.pid)
+
+                # Simulate a Web restart/cancellation after sending a request.
+                # The Worker must absorb a late response write without an
+                # unhandled asyncio callback exception.
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as abandoned:
+                    abandoned.connect(str(socket_path))
+                    abandoned.sendall(json.dumps({
+                        "id": "abandoned",
+                        "command": "manifest",
+                        "profile": "lan",
+                    }).encode() + b"\n")
+                time.sleep(0.2)
+
                 manifest = self._request(socket_path, {
                     "id": "manifest", "command": "manifest", "profile": "lan",
                     "include_destructive": False,
@@ -147,6 +176,8 @@ class TestPersistentDshWorker(unittest.TestCase):
             finally:
                 process.terminate()
                 process.wait(timeout=5)
+            stderr = process.stderr.read()
+            self.assertNotIn("Unhandled exception in client_connected_cb", stderr)
             log_rows = [json.loads(line) for line in process.stdout.read().splitlines()]
             correlated = next(row for row in log_rows if row["request_id"] == "allowed")
             self.assertEqual(correlated["correlation_id"], "dsh-call-42")
