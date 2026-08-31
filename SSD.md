@@ -503,6 +503,8 @@ P1.9-C1 门禁还必须证明：所有 policy 结果只有 unchanged/blocked 两
 
 - 模型 HTTP timeout/连接故障必须单列为 `model_transport`，逐 case checkpoint 后继续；不得触发语义 repair、物化 proposal、冒充语义失败或从总体分母/时延中删除；
 - 报告必须同时暴露 transport 失败数、总体指标和成功返回候选的条件语义结论；`--resume` 不得静默重试或覆盖既有失败证据；
+- 每次开始/恢复必须记录仅证明注册表可达与模型已注册的 preflight；连续 transport 故障达到阈值时，必须先 checkpoint 再暂停，不得继续消耗整批预算；
+- Prompt packet 必须保留完整 L1 与受信 Catalog 语义，使用稳定版本/序列化并进入 authoring protocol digest；体积优化不得放宽模型 Schema、Catalog validator 或 Promotion gate；
 - 正式评分必须使用 v2 Study/Manifest；模型制品、协议、Catalog、evaluator、重复次数和 author/reviewer/adjudicator 角色任一漂移必须在推理或评分前失败；
 - author、两名 reviewer、adjudicator 必须互斥；盲审包不得包含 gold label、模型输出或另一 reviewer 结果；
 - 两份 reviewer 原文件不得由仲裁改写；每条 Resolution 必须覆盖且只覆盖分歧，并精确绑定两份标签摘要和受登记 adjudicator；
@@ -838,6 +840,8 @@ The browser artifact must be self-contained, escape embedded data, and use a CSP
 
 - HTTP timeout/connection faults must be classified as `model_transport` and checkpointed per case before the batch continues. They must not trigger semantic repair, materialize a proposal, masquerade as semantic failure, or disappear from the overall denominator/latency.
 - Reports must expose transport-failure count, overall metrics, and the conditional semantic conclusion for returned proposals. Resume must never silently retry or overwrite prior fault evidence.
+- Every start/resume must record a preflight whose claim is limited to registry reachability and model registration. Once the consecutive transport threshold is reached, the runner must checkpoint first and pause rather than consume the rest of the batch budget.
+- The prompt packet must preserve complete L1 and trusted-Catalog semantics, use a stable version/serialization identity bound into the authoring-protocol digest, and never relax model Schema, Catalog validation, or Promotion gates for size.
 - Formal scoring uses a v2 Study/Manifest. Drift in the model artifact, protocol, Catalog, evaluator, repetitions, or author/reviewer/adjudicator roles fails before inference or scoring.
 - Case authors, two reviewers, and adjudicators are disjoint. Reviewer packets contain no gold label, model output, or other-reviewer result.
 - Adjudication never mutates either source label file. Resolutions cover exactly the disagreement set and bind both label digests plus an assigned adjudicator.

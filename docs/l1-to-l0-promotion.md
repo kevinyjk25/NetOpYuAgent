@@ -215,6 +215,14 @@ transport 故障并继续，而不会误报为协议语义失败或退出整批�
 p50/p95 31.528/79.384 秒必须保留两个超时，且仍只是反向公开单次回归，不是
 独立正向资格或生产成功概率。
 
+P2.5-D 不删除任何 L1/Catalog 语义，只把重复的缩进表示改为版本化紧凑 JSON
+packet，并将 packet/序列化身份纳入 authoring protocol digest。完整 210 条的
+Prompt 字节相对 v7 等价格式下降 18.98%。同一 21-family direct-en smoke 仍为
+21/21 全语义 exact/Runtime-ready，输入 token 下降 19.81%，p50/p95 下降
+18.10%/14.45%；双能力族 20 条全包装 smoke 也保持 20/20 exact/ready，输入
+token 下降 16.32%，p50/p95 下降 11.81%/13.84%。Runner 同时记录有限声明的模型注册表 preflight，并在连续两次
+transport 故障后先保存证据再暂停；恢复跳过旧失败而不会静默改写历史。
+
 ### 5. 仍需人工/实验认证
 
 转换器不能证明 Provider 的真实行为。发布前仍需认证 API 身份、Observer 独立性和 freshness、职责分离审批、timeout/写结果不确定、错误 postcondition、精确 rollback，以及 DSH/Hermes 的语义入口和模型选择准确率。将来可以在 Runtime UI 中调用同一 Promotion API，但仍只能生成 proposal，不能在线激活。
@@ -243,3 +251,5 @@ extracted requirements only; it is not a proof of equivalence for arbitrary
 natural language, and an LLM cannot close the gate by assertion.
 
 New Skills use the genuine forward path: domain authors write L1, review L0.5, and then produce an L0 candidate. The 21 existing contracts already began as reviewed L0, so their readable L1/L0.5 baselines are explicitly reverse-bootstrapped for explainability. Each archive still reruns `assess_promotion()`, requires semantic parity after proposal-only labels are removed, and requires an exact full contract hash after recompiling authoring. This validates structural conversion closure and readable projection of existing contracts; it is not a measurement of model accuracy on arbitrary prose. See the [production L0 trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
+
+P2.5-D preserves all L1 and trusted-Catalog semantics while replacing repeated pretty-printed transport with a versioned compact JSON packet. Packet and serialization identity are bound into the authoring-protocol digest. Across the 210 public prompts this reduces representation bytes by 18.98%; a same-artifact 21-family direct-English smoke retained 21/21 exact/Runtime-ready outcomes while reducing input tokens by 19.81% and p50/p95 by 18.10%/14.45%. A two-family 20-wrapper smoke also retained 20/20 exact/ready while reducing input tokens by 16.32% and p50/p95 by 11.81%/13.84%. Registry preflight evidence has an explicitly narrow claim, and the runner checkpoints then pauses after two consecutive transport failures; resume never rewrites the failed observations.

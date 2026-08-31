@@ -697,7 +697,9 @@ Adapter report 的 scope 固定为 `adapter_hook_to_worker`。它证明 Hook 提
 
 `network_runtime/l0/forward_model_runner.py` 的私有入口先验证 v2 manifest、完整 reviewer/仲裁、预注册 model/repetition，再解析本地模型制品和当前 protocol/Catalog/evaluator digest；任一漂移在推理前失败。输入以 owner-only 副本进入私有 output root，checkpoint 绑定全部输入摘要和 run fingerprint；恢复只能复用同一配置。模型只接收 Case Prompt 和受信 Catalog，不接收 reviewer label/resolution；评分在完整 Observation 形成后执行。
 
-`OllamaForwardAdapter.decide()` 捕获 `httpx.RequestError` 并返回无 proposal 的 `ModelReply(error_stage="model_transport")`；已发起的调用仍计入 `model_calls`，不消耗语义 repair。主循环将其写入 untrusted-output、error Observation、failure detail 与原子 checkpoint 后继续下一 case；报告单列 `model_transport_failures`，控制台也显示同一 stage。`--resume` 只跳过已有 checkpoint，不能静默重试或抹除 transport 失败。
+`OllamaForwardAdapter.decide()` 捕获 `httpx.HTTPError` 并返回无 proposal 的 `ModelReply(error_stage="model_transport")`；已发起的调用仍计入 `model_calls`，不消耗语义 repair。`service_preflight()` 在开始/恢复前验证注册表可达和精确模型摘要并保存带边界声明的事件。主循环将 transport 故障写入 untrusted-output、error Observation、failure detail 与原子 checkpoint；连续故障达到 `transport_failure_limit` 后再把 active-run 标记为 `paused_model_transport` 并抛出可读错误。`--resume` 只跳过已有 checkpoint，不能静默重试或抹除 transport 失败。
+
+`_case_prompt()` 使用 `netopyu-forward-prompt-packet/v1` 紧凑排序 JSON，同时保存 case 元数据、完整 L1 原文和机器生成的受信 Catalog guide。`PROMPT_PACKET_VERSION` 与 `PROMPT_SERIALIZATION` 进入 `authoring_protocol_digest()` 和运行配置，因此旧 checkpoint 不能与新 packet 混用。`_prompt_corpus_metrics()` 同时计算实际字节、v7 等价格式字节和摘要；这些是输入表示成本，不是 token 或语义准确率的替代指标。
 
 ---
 
@@ -1118,4 +1120,6 @@ The renderer embeds escaped JSON in a CSP-constrained self-contained page with n
 
 The private path in `network_runtime/l0/forward_model_runner.py` validates the v2 manifest, reviewer/adjudication completion, planned model/repetitions, and current artifact/protocol/Catalog/evaluator digests before inference. Owner-only input copies and every per-case checkpoint are bound to the run fingerprint; resume rejects any input drift. The model receives cases and trusted Catalog material but never reviewer labels or resolutions. Truth is loaded only for aggregate scoring after observations complete.
 
-`OllamaForwardAdapter.decide()` converts `httpx.RequestError` into a proposal-free `ModelReply(error_stage="model_transport")`. The attempted call is counted but consumes no semantic-repair budget. The main loop persists untrusted output, an error Observation, failure detail, and an atomic checkpoint before continuing; the report and progress stream expose the transport stage separately. Resume skips that immutable checkpoint and never silently retries or erases the fault.
+`OllamaForwardAdapter.decide()` converts `httpx.HTTPError` into a proposal-free `ModelReply(error_stage="model_transport")`. The attempted call is counted but consumes no semantic-repair budget. `service_preflight()` verifies registry reachability and the exact model digest before start/resume and records an explicitly limited health event. The loop persists untrusted output, an error Observation, failure detail, and an atomic checkpoint; once `transport_failure_limit` consecutive faults occur, it marks the active run `paused_model_transport` and returns a readable failure. Resume skips immutable checkpoints and never silently retries or erases a fault.
+
+`_case_prompt()` serializes case metadata, complete L1 prose, and the generated trusted Catalog guide as compact sorted `netopyu-forward-prompt-packet/v1` JSON. Packet version and serialization identity enter both the authoring-protocol digest and run configuration, preventing old checkpoints from mixing with a new representation. `_prompt_corpus_metrics()` records actual bytes, the v7-equivalent representation, and a corpus digest; representation bytes do not substitute for model-token or semantic metrics.

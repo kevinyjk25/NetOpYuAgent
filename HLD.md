@@ -395,6 +395,8 @@ P2.5-B 位于离线评测平面，不进入 Harness→Runtime 效果路径。v2 
 
 长运行模型服务的 HTTP timeout/连接错误在同一离线评测平面内被分类为 `model_transport`，逐 case 写入摘要绑定 checkpoint 后继续；它不会进入语义 repair 或 proposal 物化。报告同时给出总体率、成功返回候选的条件语义率和 transport 失败数，防止把模型服务可用性与 L1→L0 语义准确性混为一个黑盒数字。
 
+P2.5-D 在每次开始/恢复前记录 Ollama 注册表预检和精确制品摘要，但明确不把该预检解释为持续推理健康。连续 transport 故障达到配置阈值时，Runner 在写入触发故障的不可变 checkpoint 后进入 `paused_model_transport`；恢复不重试或覆盖既有失败。L1 与受信 Catalog 使用版本化紧凑 JSON packet 传输，packet 版本和序列化规则进入 authoring protocol digest，确定性 validator 和 Promotion 边界保持不变。
+
 ---
 
 ## English
@@ -666,3 +668,5 @@ The cockpit combines Core-72 Runtime A/B and model qualification into one digest
 P2.5-B is an offline evaluation plane outside the Harness-to-Runtime effect path. A v2 study freezes the model artifact, authoring protocol, Capability Catalog, evaluator, repetition count, and disjoint author/reviewer/adjudicator roles before cases are sealed. Reviewers receive separately shuffled private packets without gold or model outputs. Only disagreements enter the adjudicator packet, and each resolution binds both immutable source-label digests. The private runner executes the complete set for the registered repetitions with per-case checkpoint/resume and loads truth only for aggregate scoring. Local timestamps and role ids do not prove chronology, organizational identity, or production generalization; external signatures, trusted time, and independent custody remain production evidence.
 
 HTTP timeout and connection faults from long-running model service are classified as `model_transport` in the same offline plane and checkpointed per case before the batch continues. They never enter semantic repair or proposal materialization. Reports expose the overall rate, the conditional semantic rate of returned proposals, and transport-failure counts separately so serving availability is not conflated with L1-to-L0 semantic accuracy.
+
+P2.5-D records an Ollama registry preflight and exact artifact digest before every start or resume, while explicitly denying that registry reachability proves sustained inference health. When consecutive transport faults reach the configured threshold, the runner checkpoints the triggering evidence and enters `paused_model_transport`; resume neither retries nor overwrites prior faults. L1 plus trusted Catalog material travels in a versioned compact JSON packet whose version and serialization rule are bound into the authoring-protocol digest, without changing deterministic validation or Promotion authority.

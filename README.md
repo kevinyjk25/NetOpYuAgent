@@ -133,6 +133,8 @@ Capability Catalog v3 在 21/21 生产轨迹中把每个 Observation phase 的�
 
 这仍不是模型资格结论：公开集由受审 L0 反向生成、只运行一次，且两次服务超时说明本地可用性尚未达标。完整证据位于 [`artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json`](artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json)，详细边界见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)与[正向资格协议](docs/promotion-forward-qualification.md)。
 
+P2.5-D 进一步把等价 Catalog guide 封装为紧凑、排序稳定且版本化的 JSON packet，并将 packet 版本/序列化规则加入 authoring protocol digest。完整 210 条 Prompt 的 UTF-8 体积相对 v7 等价格式下降 18.98%。同一模型制品的 21-family direct-en 对照保持 21/21 全语义 exact/Runtime-ready、0 repair/失败，输入 token 69,227→55,511（-19.81%），p50 30.634→25.090 秒，p95 37.288→31.901 秒；同一双能力族的 20 条中英文/追踪/安全/Schema/对抗全包装对照也保持 20/20 exact/ready、0 repair/失败，输入 token -16.32%，p50/p95 -11.81%/-13.84%。Runner 还会记录模型注册表预检；连续 2 次 transport 故障时，先保存失败 checkpoint 再暂停，恢复后跳过既有证据而不静默重试。预检只证明注册表可达，不证明推理引擎持续健康。证据见 [21-family report](artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-21/report.json)和[全包装 report](artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-focused-20/report.json)。这些公开单次 smoke 只证明这次重构在所测切片未见回归，不是资格或生产成功概率。
+
 私有正向资格工作流现已可直接使用：预注册计划冻结模型/协议/Catalog/evaluator 与三次重复，case author、两名 reviewer、adjudicator 强制角色分离；盲审包不含 gold/model output，分歧 Resolution 同时绑定两份不可变原标签；私有 runner 支持逐 case checkpoint/resume。旧 v1 manifest 只可诊断，不能通过新资格门禁。项目没有自动生成“独立人工真值”，因此当前仍无私有资格结论。
 
 #### DSH only 与 DSH + Runtime
@@ -176,7 +178,7 @@ P1.9-C0 已加入默认不启用的 Decision→Plan 绑定内核：PreparedPlan 
 
 P1.9-C1 已完成不启用流量的安全准备层：策略只能保持原 Harness route 或收窄/阻断，不能重路由或授权；readiness 门禁严格交叉绑定 Worker、Adapter、真实产品/部署和运维演练四类外部证据，最强结果也只是 `ready_for_review`。当前缺少真实 B2/产品证据，因此 canary 仍关闭。
 
-当前主门禁：430 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog v3 phase proof 为 21/21。
+当前主门禁：434 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog v3 phase proof 为 21/21。
 
 ### 5. 典型场景
 
@@ -334,11 +336,13 @@ scripts/netopyu-l0 forward-eval-calibrate
 
 # 用本地 9B 跑完整公开矩阵；每条完成即写入事务式 checkpoint
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/my-public-run \
+  --transport-failure-limit 2
 
 # 若模型评测被中断，以完全相同的参数恢复；证据指纹不一致会拒绝续跑
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210 --resume
+  --output-root artifacts/promotion-forward-model/my-public-run \
+  --transport-failure-limit 2 --resume
 
 # 刷新 Runtime A/B，再汇总双核心功能、性能、证据边界和发布门槛
 scripts/netopyu-dsh compare-runtime --iterations 50
@@ -545,7 +549,7 @@ P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan
 
 P1.9-C1 adds a non-activating safety-readiness layer. Its policy can only preserve the original Harness route or narrow/block it; it cannot redirect or authorize. The evidence gate cross-binds Worker, Adapter, real product/deployment, and operations-drill attestations, and its strongest output is only `ready_for_review`. Canary remains disabled because real B2/product evidence is absent.
 
-The current gate passes 430 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
+The current gate passes 434 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
 
 ### 5. Scenarios
 

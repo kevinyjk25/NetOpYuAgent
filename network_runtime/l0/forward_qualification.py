@@ -1863,9 +1863,13 @@ def _calibration_markdown(report: dict[str, Any]) -> str:
 - 校准来源是 21 个已受审 L0 合同反向生成的 L1/L0.5 轨迹，只用于验证评分器、语义投影和覆盖矩阵。
 - 报告禁止输出 Prompt 和 Label，只保留聚合指标与 case-id digest。
 - Catalog v3 为每个 Observation phase 声明受信最低 `phasePredicates`；候选可以附加更强约束，但不能删除或改写最低证明。
-- v7 authoring protocol 生成逐案 Catalog guide，并在物化前执行确定性 capability/phase/output/proof 校验；HTTP transport 故障单列 checkpoint 后继续。
+- v7 逐案 Catalog guide/validator 收口 capability/phase/output/proof；v8 将等价 guide 封装为指纹绑定的紧凑稳定 JSON packet，并在连续 transport 故障时先 checkpoint 再暂停。
 
 {model_evidence}
+
+### P2.5-D 服务韧性与 Prompt 成本
+
+同一 `qwen3.5:9b` 制品的 21-family direct-en 对照保持 21/21 全语义 exact/Runtime-ready、0 repair/失败。相对 v7 对照，v8 输入 token 从 69,227 降为 55,511（-19.81%），p50 从 30.634 秒降为 25.090 秒（-18.10%），p95 从 37.288 秒降为 31.901 秒（-14.45%）；完整 210 条 Prompt 的表示字节下降 18.98%。同一双能力族 20 条中英文/追踪/安全/Schema/对抗包装对照也保持 20/20 exact/ready、0 repair/失败，输入 token 下降 16.32%，p50/p95 下降 11.81%/13.84%。每次 start/resume 保存只证明注册表可达/模型已注册的 preflight；连续 transport 故障达到阈值后，触发故障先进入不可变 checkpoint，运行再暂停。恢复跳过旧失败而不静默重试。这些公开单次对照是重构回归证据，不是模型资格或生产成功概率。
 
 ### 为什么当前不能宣称模型通过
 
@@ -1902,11 +1906,13 @@ scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
 
 # 运行完整 210 条公开反向校准；每条完成即写入指纹绑定 checkpoint
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/my-public-run \\
+  --transport-failure-limit 2
 
 # 中断后以完全相同的模型、数据和策略恢复；任一指纹不一致都会拒绝
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210 --resume
+  --output-root artifacts/promotion-forward-model/my-public-run \\
+  --transport-failure-limit 2 --resume
 
 # 查看仓库外 Case、Label、Observation 的严格 JSON Schema
 scripts/netopyu-l0 forward-eval-schema
@@ -1960,7 +1966,7 @@ scripts/netopyu-l0 forward-eval-score CASES.jsonl MANIFEST.json \\
 
 ## English
 
-The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates and protocol v7 supplies per-case deterministic authoring guidance. Model transport faults are checkpointed separately and never masquerade as semantic failures. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint author/reviewer/adjudicator roles before execution. Reviewer packets contain no gold/model output, and resolutions bind both immutable label digests. The public matrix is reverse-bootstrapped and single-run, so it cannot qualify model accuracy or production success probability.
+The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. A same-artifact 21-family comparison retained 21/21 exact/Runtime-ready outcomes while reducing input tokens by 19.81% and p50/p95 by 18.10%/14.45%; a two-family 20-wrapper comparison also retained 20/20 exact/ready while reducing input tokens by 16.32% and p50/p95 by 11.81%/13.84%. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint roles before execution. The public matrix and smokes are reverse-bootstrapped and single-run, so none qualifies model accuracy or production success probability.
 """
 
 

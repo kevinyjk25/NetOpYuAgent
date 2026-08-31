@@ -301,6 +301,13 @@ def main(argv: list[str] | None = None) -> int:
     forward_model.add_argument("--timeout-seconds", type=float, default=180.0)
     forward_model.add_argument("--repair-limit", type=int, default=1)
     forward_model.add_argument(
+        "--transport-failure-limit", type=int, default=2,
+        help=(
+            "pause after this many consecutive model transport failures; "
+            "0 disables the circuit breaker"
+        ),
+    )
+    forward_model.add_argument(
         "--resume", action="store_true",
         help="resume the fingerprint-bound active run from per-case checkpoints",
     )
@@ -320,6 +327,13 @@ def main(argv: list[str] | None = None) -> int:
     forward_private.add_argument("--repetitions", type=int, default=3)
     forward_private.add_argument("--timeout-seconds", type=float, default=180.0)
     forward_private.add_argument("--repair-limit", type=int, default=1)
+    forward_private.add_argument(
+        "--transport-failure-limit", type=int, default=2,
+        help=(
+            "pause after this many consecutive model transport failures; "
+            "0 disables the circuit breaker"
+        ),
+    )
     forward_private.add_argument("--resume", action="store_true")
     forward_rescore = sub.add_parser(
         "forward-eval-rescore-model",
@@ -513,6 +527,7 @@ def main(argv: list[str] | None = None) -> int:
                         repetitions=args.repetitions,
                         timeout_seconds=args.timeout_seconds,
                         repair_limit=args.repair_limit,
+                        transport_failure_limit=args.transport_failure_limit,
                         resume=args.resume,
                         private_cases_path=(
                             args.cases if args.command == "forward-eval-run-private" else None
