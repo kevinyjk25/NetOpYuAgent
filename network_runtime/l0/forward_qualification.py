@@ -39,7 +39,8 @@ TRAJECTORY_ROOT = PROJECT_ROOT / "network_runtime/l0/production_trajectories"
 DEFAULT_CALIBRATION_ROOT = PROJECT_ROOT / "artifacts/promotion-forward-calibration"
 DEFAULT_CALIBRATION_DOC = PROJECT_ROOT / "docs/promotion-forward-qualification.md"
 DEFAULT_MODEL_RUN_REPORT = (
-    PROJECT_ROOT / "artifacts/promotion-forward-model/qwen3.5-9b/report.json"
+    PROJECT_ROOT
+    / "artifacts/promotion-forward-model/qwen3.5-9b-public-210/report.json"
 )
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,127}$")
@@ -661,6 +662,32 @@ def _aggregate_scores(scores: list[dict[str, Any]]) -> dict[str, float]:
     }
 
 
+def _aggregate_slice(
+    indices: list[int],
+    *,
+    observations: list[ForwardObservation],
+    scores: list[dict[str, Any]],
+) -> dict[str, Any]:
+    selected_observations = [observations[index] for index in indices]
+    metrics = _aggregate_scores([scores[index] for index in indices])
+    metrics["raw_protocol_completion_rate"] = round(_rate(
+        item.raw_protocol_valid for item in selected_observations
+    ), 4)
+    metrics["bounded_normalization_rate"] = round(_rate(
+        item.syntax_normalization_count > 0 for item in selected_observations
+    ), 4)
+    latency = [item.latency_ms for item in selected_observations]
+    return {
+        "observation_count": len(selected_observations),
+        "metrics": metrics,
+        "latency": {
+            "unit": "milliseconds",
+            "p50": round(statistics.median(latency), 3),
+            "p95": round(_percentile(latency, 0.95), 3),
+        },
+    }
+
+
 def score_forward_observations(
     cases: list[ForwardCase],
     labels: dict[str, ForwardLabel],
@@ -729,6 +756,24 @@ def score_forward_observations(
         }
         stable_cases.append(len(payloads) == 1)
     metrics["repeat_stability"] = round(_rate(stable_cases), 4)
+
+    slice_indices: dict[str, dict[str, list[int]]] = {
+        "language": defaultdict(list),
+        "challenge": defaultdict(list),
+    }
+    for index, observation in enumerate(observations):
+        case = case_by_id[observation.case_id]
+        slice_indices["language"][case.language].append(index)
+        slice_indices["challenge"][case.challenge].append(index)
+    slices = {
+        dimension: {
+            name: _aggregate_slice(
+                indices, observations=observations, scores=scores,
+            )
+            for name, indices in sorted(groups.items())
+        }
+        for dimension, groups in slice_indices.items()
+    }
 
     failed: dict[str, list[str]] = defaultdict(list)
     for item, score in zip(observations, scores, strict=True):
@@ -801,6 +846,7 @@ def score_forward_observations(
             ).items())),
         },
         "metrics": metrics,
+        "slices": slices,
         "thresholds": thresholds,
         "gate_checks": gate_checks,
         "qualification_requirements": requirements,
@@ -1107,7 +1153,7 @@ def _real_model_markdown() -> str:
         return (
             "### 真实模型运行 / Real model run\n\n"
             "尚未运行。可执行 `scripts/netopyu-l0 forward-eval-run-model "
-            "--model qwen3.5:9b --limit 21`。\n"
+            "--model qwen3.5:9b --limit 210`。\n"
         )
     value = json.loads(DEFAULT_MODEL_RUN_REPORT.read_text(encoding="utf-8"))
     metrics = value["metrics"]
@@ -1117,11 +1163,17 @@ def _real_model_markdown() -> str:
     failure_summary = ", ".join(
         f"{name}={count}" for name, count in sorted(failure_counts.items())
     ) or "none"
-    return f"""### 真实 qwen3.5:9b 单次宽度基线
+    challenge_rows = "\n".join(
+        f"| {name} | {item['metrics']['protocol_completion_rate'] * 100:.2f}% | "
+        f"{item['metrics']['semantic_contract_exact_match'] * 100:.2f}% | "
+        f"{item['metrics']['runtime_promotion_ready_rate'] * 100:.2f}% |"
+        for name, item in sorted((value.get("slices") or {}).get("challenge", {}).items())
+    )
+    return f"""### 真实 qwen3.5:9b 公开包装鲁棒性基线
 
 | 指标 | 结果 |
 |---|---:|
-| 用例 / 能力族 / 重复 | {value['dataset']['case_count']} / 21 / {value['dataset']['repetitions']} |
+| 用例 / 能力族 / 变体 / 重复 | {value['dataset']['case_count']} / 21 / {value['dataset']['case_count'] // 21} / {value['dataset']['repetitions']} |
 | 原始协议 / 受限规范化后协议 | {metrics.get('raw_protocol_completion_rate', metrics['protocol_completion_rate']) * 100:.2f}% / {metrics['protocol_completion_rate'] * 100:.2f}% |
 | Capability exact | {metrics['capability_exact_match'] * 100:.2f}% |
 | 参数/谓词 / Safety exact | {metrics['parameter_predicate_exact_match'] * 100:.2f}% / {metrics['safety_contract_exact_match'] * 100:.2f}% |
@@ -1130,7 +1182,11 @@ def _real_model_markdown() -> str:
 | 受限 enum 规范化 | {efficiency.get('syntax_normalized_observations', 0)} 条 / {efficiency.get('syntax_normalization_events', 0)} 个值 |
 | 本机 p50 / p95 | {latency['p50'] / 1000:.3f} / {latency['p95'] / 1000:.3f} s |
 
-这是同一 9B 制品的真实模型调用，但只跑了公开反向矩阵中每族一个直接英文变体且仅一次重复。L1/L0.5 v2 显式意图锚点使 intent exact 达到 {metrics['intent_exact_match'] * 100:.2f}%；受限边界只将精确的 `{{"value": primitive}}` enum 包装还原为 primitive，并逐路径留证，不改变 L0 Schema。当前失败分布为 `{failure_summary}`；未通过的候选被 Runtime 失败关闭。原始协议率与规范化后协议率同时保留，因此不能把兼容处理伪装成模型原始正确。该结果仍是诊断基线，不是资格结论。
+| 包装变体 | 协议完成 | 全语义 exact | Runtime 可审 |
+|---|---:|---:|---:|
+{challenge_rows}
+
+这是同一 9B 制品在 21 个能力族、10 个中英文/追踪/安全/Schema/对抗包装上的真实模型调用，仅一次重复。该历史运行使用 L1/L0.5 v2 显式意图锚点，intent exact 为 {metrics['intent_exact_match'] * 100:.2f}%；受限边界只将精确的 `{{"value": primitive}}` enum 包装还原为 primitive，并逐路径留证，不改变 L0 Schema。历史失败分布为 `{failure_summary}`；未通过的候选被 Runtime 失败关闭。历史 `ready_for_review` 只证明当时的结构与 Catalog 自洽，不等于人工真值 exact：本轮存在一个可审但 phase capability 选择偏移的候选。当前 Catalog v2/L0.5 v3 已加入 phase-typed 门禁，并在不调用模型的重放中阻断该候选；重放结果见双核心评估。原始协议率与规范化后协议率同时保留，因此不能把兼容处理伪装成模型原始正确。该公开反向单次结果仍是诊断基线，不是私有资格或生产成功概率。
 """
 
 
@@ -1180,6 +1236,14 @@ scripts/netopyu-l0 forward-eval-calibrate
 
 # 真实运行本地 9B：21 个能力族各一个直接英文变体
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
+
+# 运行完整 210 条公开反向校准；每条完成即写入指纹绑定 checkpoint
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+
+# 中断后以完全相同的模型、数据和策略恢复；任一指纹不一致都会拒绝
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210 --resume
 
 # 查看仓库外 Case、Label、Observation 的严格 JSON Schema
 scripts/netopyu-l0 forward-eval-schema

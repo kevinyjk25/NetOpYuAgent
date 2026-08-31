@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: service_platform_restart
 title: service.platform.restart
@@ -63,6 +63,11 @@ workflow:
     state and independently verify restoration.
   capabilityOptions:
   - netopyu.compensator.service-platform-snapshot-v1
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions:
+  - netopyu.rollback-verifier.service-platform-snapshot-v1
 capabilities:
   effects:
   - netopyu.tool.platform_restart_service
@@ -72,6 +77,12 @@ capabilities:
   - netopyu.verifier.service-platform-healthy
   compensations:
   - netopyu.compensator.service-platform-snapshot-v1
+  preflightObservations:
+  - netopyu.tool.platform_get_service_health
+  successVerificationObservations:
+  - netopyu.verifier.service-platform-healthy
+  compensationVerificationObservations:
+  - netopyu.rollback-verifier.service-platform-snapshot-v1
 safety:
   risk: high
   approvalRequired: true
@@ -90,6 +101,6 @@ outcomes:
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:7e86abbe0172024cbcc11bdf406532be3e75dc7a0156faf010527086493057d7
-capabilityCatalogSha256: sha256:356c81b2b05290cfb18c38767b3c9a7b2f60e9c0f6def28e11c71f10595218e7
+capabilityCatalogSha256: sha256:1dfee1d79e8c6b9390d3e8a80ef0abaddf2c38e1da134c6837c0f25492470ed0
 previousStageSha256: sha256:7e86abbe0172024cbcc11bdf406532be3e75dc7a0156faf010527086493057d7
 unresolvedQuestions: []

@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.fabric_set_access_vlan
 version: 1.0.0
 capabilities:
@@ -110,6 +110,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.fabric-access-vlan
   role: observation
   profiles:
@@ -144,6 +146,8 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification
 - id: network.fabric.access-vlan.restore
   role: compensation
   profiles:
@@ -213,3 +217,5 @@ capabilities:
   outputs:
     restored:
       type: boolean
+  observationPhases:
+  - compensation_verification

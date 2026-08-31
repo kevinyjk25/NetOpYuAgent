@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: url1_network_access
 title: URL1 Network Access Grant
@@ -41,10 +41,16 @@ workflow:
   - phase: compensation
     instruction: On failed verification, restore the exact prior state and independently verify restoration.
     capabilityOptions: [rest.network-access.restore]
+  - phase: compensation_verification
+    instruction: Verify exact prior-state restoration through an independent observation; otherwise enter manual intervention.
+    capabilityOptions: [rest.network-access.get]
 capabilities:
   effects: [rest.url1.network-access.grant]
   observations: [rest.network-access.get]
   compensations: [rest.network-access.restore]
+  preflightObservations: [rest.network-access.get]
+  successVerificationObservations: [rest.network-access.get]
+  compensationVerificationObservations: [rest.network-access.get]
 safety:
   risk: medium
   approvalRequired: true
@@ -58,6 +64,6 @@ outcomes:
   failure: No unverified success; fail closed or enter an explicit recovery state.
   rollback: Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:2c94dfe31e5a2cbcdd11687f9585ed2f0c173063ea09a11bc89c5eca763db00c
-capabilityCatalogSha256: sha256:044bacca07a7a7dba78233420e944d5b4ef480aa69fa42130ca93924caa96012
+capabilityCatalogSha256: sha256:d5bb90efa85acb156b4cf98781afbdb90bc529fad539a35929e0cd0f41306087
 previousStageSha256: sha256:2c94dfe31e5a2cbcdd11687f9585ed2f0c173063ea09a11bc89c5eca763db00c
 unresolvedQuestions: []

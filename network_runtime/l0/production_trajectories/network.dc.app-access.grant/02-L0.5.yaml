@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: network_dc_app_access_grant
 title: network.dc.app-access.grant
@@ -58,6 +58,11 @@ workflow:
     state and independently verify restoration.
   capabilityOptions:
   - network.dc.app-access.revoke
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions:
+  - netopyu.rollback-verifier.inverse-tool-v1
 capabilities:
   effects:
   - network.dc.app-access.grant
@@ -67,6 +72,12 @@ capabilities:
   - network.dc.application-access.check
   compensations:
   - network.dc.app-access.revoke
+  preflightObservations:
+  - network.dc.application-access.check
+  successVerificationObservations:
+  - netopyu.verifier.dc-access-granted
+  compensationVerificationObservations:
+  - netopyu.rollback-verifier.inverse-tool-v1
 safety:
   risk: high
   approvalRequired: true
@@ -85,6 +96,6 @@ outcomes:
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:5ade15a9de1948c865445bcb12a7ed78f0d4b16db93db6ed9c0de5dd1dd1740e
-capabilityCatalogSha256: sha256:7fe123ff2cfb6d945b7441f8fb6c73b960275b735fcd2782f5c6e3b2670a2011
+capabilityCatalogSha256: sha256:10d98e4081dd2acf9eb4554c3c251356f741a1c8f23bc1f295077c7c4f21c74d
 previousStageSha256: sha256:5ade15a9de1948c865445bcb12a7ed78f0d4b16db93db6ed9c0de5dd1dd1740e
 unresolvedQuestions: []

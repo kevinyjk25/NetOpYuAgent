@@ -45,6 +45,19 @@ class ProductionL0TrajectoryTests(unittest.TestCase):
                 production = CATALOG.require(definition.skill_id, definition.version)
                 self.assertIn(definition.skill_id, l1.body)
                 self.assertEqual(l05.unresolved_questions, ())
+                self.assertEqual(
+                    l05.api_version, "netopyu.io/l0.5-structured-skill/v3",
+                )
+                self.assertTrue(l05.capabilities.preflight_observations)
+                self.assertTrue(
+                    l05.capabilities.success_verification_observations,
+                )
+                self.assertEqual(
+                    set(l05.capabilities.observations),
+                    set(l05.capabilities.preflight_observations)
+                    | set(l05.capabilities.success_verification_observations)
+                    | set(l05.capabilities.compensation_verification_observations),
+                )
                 self.assertEqual(len(l05.semantic_intents), 1)
                 self.assertEqual(
                     l05.semantic_intents[0].intent_spec(),

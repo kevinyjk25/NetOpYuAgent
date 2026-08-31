@@ -28,7 +28,13 @@ from .production import (
     ProductionDefinition,
     authoring_document,
 )
-from .promotion import L05_API_VERSION, assess_promotion, build_l05_spec, l05_yaml
+from .promotion import (
+    CAPABILITY_API_VERSION,
+    L05_API_VERSION,
+    assess_promotion,
+    build_l05_spec,
+    l05_yaml,
+)
 
 
 ARCHIVE_SCHEMA = "netopyu.io/l0-production-trajectory/v1"
@@ -248,6 +254,7 @@ def _capability_catalog(
         fields: dict[str, Any],
         *,
         tool: str | None = None,
+        observation_phase: str | None = None,
     ) -> None:
         entry = capabilities.setdefault(capability_id, {
             "id": capability_id,
@@ -260,6 +267,10 @@ def _capability_catalog(
             raise ProductionTrajectoryError(
                 f"capability {capability_id} has conflicting roles"
             )
+        if observation_phase is not None:
+            phases = entry.setdefault("observationPhases", [])
+            if observation_phase not in phases:
+                phases.append(observation_phase)
         if tool:
             entry["tool"] = tool
         for name, value in arguments.items():
@@ -281,12 +292,16 @@ def _capability_catalog(
     for observation in spec.preflight:
         fields = {name: None for name in observation.snapshot_fields}
         fields.update({item.field: item.expected for item in observation.predicates})
-        add(observation.capability, "observation", observation.arguments, fields)
+        add(
+            observation.capability, "observation", observation.arguments, fields,
+            observation_phase="preflight",
+        )
     add(
         spec.verification.capability,
         "observation",
         spec.verification.arguments,
         {item.field: item.expected for item in spec.verification.predicates},
+        observation_phase="success_verification",
     )
     if spec.compensation is not None:
         add(
@@ -304,9 +319,10 @@ def _capability_catalog(
                 item.field: item.expected
                 for item in spec.compensation.verification.predicates
             },
+            observation_phase="compensation_verification",
         )
     return {
-        "apiVersion": "netopyu.io/capability-catalog/v1",
+        "apiVersion": CAPABILITY_API_VERSION,
         "provider": f"netopyu.production.{definition.tool_name}",
         "version": definition.version,
         "capabilities": list(capabilities.values()),
@@ -338,6 +354,10 @@ def _refine_l05_workflow(l05: Any, contract: CompiledAtomicEffect) -> Any:
         "verification": [spec.verification.capability],
         "compensation": (
             [spec.compensation.capability]
+            if spec.compensation is not None else []
+        ),
+        "compensation_verification": (
+            [spec.compensation.verification.capability]
             if spec.compensation is not None else []
         ),
     }

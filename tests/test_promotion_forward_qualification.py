@@ -23,6 +23,12 @@ from network_runtime.l0.forward_qualification import (
     write_public_calibration,
 )
 from network_runtime.l0.forward_model_runner import (
+    MODEL_RUN_STATE_SCHEMA,
+    _file_digest,
+    _load_case_checkpoints,
+    _model_run_fingerprint,
+    _validate_resume_inputs,
+    _write_case_checkpoint,
     materialize_and_assess,
     normalize_model_decision_json,
 )
@@ -124,6 +130,92 @@ def test_enum_wrapper_normalizer_is_lossless_path_bounded_and_auditable() -> Non
     assert untouched == adversarial
     with pytest.raises(ValueError):
         ForwardModelDecision.model_validate(untouched)
+
+
+def test_model_run_checkpoint_is_atomic_bound_and_resumable(tmp_path: Path) -> None:
+    root = tmp_path / "model-run"
+    root.mkdir()
+    filenames = {
+        "cases": "cases.jsonl",
+        "reviewer_one": "reverse-reviewer-a.jsonl",
+        "reviewer_two": "reverse-reviewer-b.jsonl",
+        "manifest": "manifest.json",
+    }
+    for name, filename in filenames.items():
+        (root / filename).write_text(f"{name}\n", encoding="utf-8")
+    configuration = {
+        "model": "immutable-model",
+        "model_artifact_digest": sha256_json({"artifact": 1}),
+        "case_payload_digest": sha256_json({"cases": 1}),
+        "repetitions": 1,
+    }
+    run_id = "a" * 32
+    fingerprint = _model_run_fingerprint(configuration)
+    state = {
+        "schema": MODEL_RUN_STATE_SCHEMA,
+        "run_id": run_id,
+        "run_fingerprint": fingerprint,
+        "configuration": configuration,
+        "input_artifacts": {
+            name: {"sha256": _file_digest(root / filename)}
+            for name, filename in filenames.items()
+        },
+    }
+    _validate_resume_inputs(
+        state, expected_configuration=configuration, root=root,
+    )
+    with pytest.raises(ValueError, match="resume configuration mismatch"):
+        _validate_resume_inputs(
+            state,
+            expected_configuration={**configuration, "repetitions": 3},
+            root=root,
+        )
+
+    observation = ForwardObservation(
+        case_id="case-one",
+        repetition=1,
+        model="immutable-model",
+        model_artifact_digest=configuration["model_artifact_digest"],
+        authoring_protocol_digest=sha256_json({"protocol": 1}),
+        catalog_snapshot_digest=sha256_json({"catalog": 1}),
+        valid_protocol=True,
+        disposition="clarify",
+        missing_fields=("change_window",),
+        promotion_status="not_attempted",
+        blocking_requirements=0,
+        latency_ms=10,
+        model_calls=1,
+        repair_attempts=0,
+        output_digest=sha256_json({"output": 1}),
+    )
+    checkpoint_dir = root / "checkpoints" / run_id
+    checkpoint = _write_case_checkpoint(
+        checkpoint_dir,
+        run_id=run_id,
+        run_fingerprint=fingerprint,
+        position=1,
+        observation=observation,
+        failure=None,
+    )
+    observations, failures = _load_case_checkpoints(
+        checkpoint_dir,
+        run_id=run_id,
+        run_fingerprint=fingerprint,
+        expected_positions={("case-one", 1): 1},
+    )
+    assert observations[("case-one", 1)] == observation
+    assert failures == {}
+
+    tampered = json.loads(checkpoint.read_text(encoding="utf-8"))
+    tampered["position"] = 2
+    checkpoint.write_text(json.dumps(tampered), encoding="utf-8")
+    with pytest.raises(ValueError, match="checkpoint digest mismatch"):
+        _load_case_checkpoints(
+            checkpoint_dir,
+            run_id=run_id,
+            run_fingerprint=fingerprint,
+            expected_positions={("case-one", 1): 1},
+        )
 
 
 def _private_material(root: Path, *, repetitions: int = 3) -> dict[str, Path]:
@@ -273,6 +365,14 @@ def test_exact_repeated_observations_qualify_and_report_is_private(tmp_path: Pat
         "safety_escape_rate": 0.0,
         "repeat_stability": 1.0,
     }
+    assert report["slices"]["language"]["en"]["observation_count"] == 300
+    assert report["slices"]["language"]["zh"]["observation_count"] == 300
+    assert report["slices"]["challenge"]["challenge-0"][
+        "observation_count"
+    ] == 120
+    assert report["slices"]["challenge"]["challenge-0"]["metrics"][
+        "semantic_contract_exact_match"
+    ] == 1.0
     serialized = json.dumps(report, ensure_ascii=False)
     assert "independent private forward qualification prompt" not in serialized
     assert "target_id" not in report["failed_case_digests"]

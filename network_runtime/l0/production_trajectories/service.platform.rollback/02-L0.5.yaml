@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: service_platform_rollback
 title: service.platform.rollback
@@ -64,6 +64,11 @@ workflow:
     state and independently verify restoration.
   capabilityOptions:
   - netopyu.compensator.service-platform-snapshot-v1
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions:
+  - netopyu.rollback-verifier.service-platform-snapshot-v1
 capabilities:
   effects:
   - netopyu.tool.platform_rollback_service
@@ -73,6 +78,12 @@ capabilities:
   - netopyu.verifier.service-platform-healthy
   compensations:
   - netopyu.compensator.service-platform-snapshot-v1
+  preflightObservations:
+  - netopyu.tool.platform_get_service_health
+  successVerificationObservations:
+  - netopyu.verifier.service-platform-healthy
+  compensationVerificationObservations:
+  - netopyu.rollback-verifier.service-platform-snapshot-v1
 safety:
   risk: high
   approvalRequired: true
@@ -91,6 +102,6 @@ outcomes:
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:b22f239a29b2adef64caa8762e897a9d85fac0ff15eae48e4b3beac150ad2a63
-capabilityCatalogSha256: sha256:49ae5e4b060b6fbc3bb501f379158f2397653f5a08eb6d4889e583a4d514f42a
+capabilityCatalogSha256: sha256:5883af61e27260b6f875b6dbcc6f827c98e6144f0cdd3d47ce1f8dfa95fafbc1
 previousStageSha256: sha256:b22f239a29b2adef64caa8762e897a9d85fac0ff15eae48e4b3beac150ad2a63
 unresolvedQuestions: []

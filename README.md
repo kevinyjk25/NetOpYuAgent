@@ -86,9 +86,9 @@ flowchart TB
 | L1 智能编排 | LAN/DC/WAN Skill、缺参追问、多步 workflow、领域外拒绝和风险拒绝 |
 | L1 确定性收口 | 每个候选独立 Tool Schema；请求证据 grounding；确定性 action/missing-fields/workflow 编译 |
 | L1 决策面 | P1.9-B1/B2 shadow 与资格执行器；C0 plan binding；C1 单调收窄策略、外部证据门禁及回退手册；`proposal_only`、默认关闭 |
-| L0 Skill | 21 个生产注册合同；支持原子、约束、扩展和组合 Saga；保存 L1 → L0.5 → L0 可解释轨迹 |
+| L0 Skill | 21 个生产注册合同；支持原子、约束、扩展和组合 Saga；保存 L1 → L0.5 v3 → L0 可解释轨迹 |
 | Promotion Workbench | P2.0 本地只读校验、需求级 L1→L0.5→L0 覆盖/偏移定位、轨迹/合同图和 L0.5 草稿编辑；安全语义丢失会阻断，不批准、不注册、不激活 |
-| Capability Catalog | P2.1 对 21/21 L0 合同做 owner/steward、租户/环境、委派、依赖、消费者和兼容治理；不授予 Runtime 权限 |
+| Capability Catalog | v2 将 Observation 显式限定到 preflight、成功验证或补偿验证 phase；P2.1 对 21/21 L0 做 owner/steward、委派、依赖和兼容治理；不授予 Runtime 权限 |
 | Evidence Plane | P2.2 只读聚合 Runtime/Decision/Saga/Provider/Promotion 证据，输出隐私最小化指标、事故和离线时间线 |
 | 产品入口与接入包 | P2.3 三条 Golden Path、只读 Doctor、能力发现、严格 proposal-only Integration Pack |
 | 收敛驾驶舱 | P2.3 合并 Runtime A/B 与模型资格，按 retrieval/protocol/语义/参数/追问/workflow 首层归因 |
@@ -111,22 +111,25 @@ flowchart TB
 
 ### 4. 定量结果
 
-#### L1 → L0.5 → L0 真实 9B 宽度基线
+#### L1 → L0.5 → L0 真实 9B 包装鲁棒性基线
 
-同一 `qwen3.5:9b` 制品对 21 个 L0 能力族各运行一个公开直接英文转换用例，模型只能输出 proposal，Runtime 独立生成 L0.5/L0 并执行 Promotion：
+同一 `qwen3.5:9b` 制品对 21 个 L0 能力族各运行 10 个中英文、追踪、安全、Schema 和对抗包装用例。模型只能输出 proposal，Runtime 独立生成 L0.5/L0 并执行 Promotion：
 
 | 指标 | 结果 |
 |---|---:|
-| 模型原始协议 / 受限规范化后协议 | 76.19% / 100% |
-| Capability exact | 100% |
-| 参数/谓词 / 安全合同 exact | 95.24% / 100% |
-| Runtime `ready_for_review` | 95.24%（20/21） |
-| Intent / 全语义 exact | 100% / 95.24% |
+| 用例 / 能力族 / 包装变体 | 210 / 21 / 10 |
+| 模型原始协议 / 受限规范化后协议 | 76.19% / 99.52% |
+| Capability exact | 99.05% |
+| 参数/谓词 / 安全合同 exact | 96.67% / 99.52% |
+| 历史 Runtime `ready_for_review` | 97.14%（204/210） |
+| Intent / 全语义 exact | 99.52% / 96.67% |
 | 最终 safety escape | 0% |
-| 受限 enum 规范化 | 5 条 / 15 个值 |
-| 本机 p50 / p95 | 36.815 / 44.449 s |
+| 受限 enum 规范化 | 50 条 / 150 个值 |
+| 本机 p50 / p95 | 27.934 / 38.557 s |
 
-这不是模型资格结论：公开集由受审 L0 反向生成、每族仅一个变体、只运行一次。L1/L0.5 v2 已把 capability-scoped exact intent 变成逐字段可审计锚点；受限边界只把参数 enum 中精确的单键 `{"value": primitive}` 包装还原为 primitive，并保留路径与摘要，所以同时展示模型原始协议率和规范化后协议率。唯一未通过候选因未知 preflight 输出字段被 Runtime 阻断；没有放宽 L0 Schema。完整报告、失败归因和复算命令见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)与[正向资格协议](docs/promotion-forward-qualification.md)。
+这不是模型资格结论：公开集由受审 L0 反向生成且只运行一次。5 个 failover 候选因未知 preflight 输出字段被门禁阻断，1 个 service.restart 候选因合同自相矛盾在修复后仍协议失败；另有 1 个历史 `ready_for_review` 候选选择了错误的 preflight phase Capability。
+
+Capability Catalog v2 与 L0.5 v3 已完成 phase-typed 收口。对上述 210 条历史 Observation 做 0 次模型调用的当前 Runtime 重放后：209 条 proposal 中 203 条可审、6 条失败关闭；203/203 条历史全语义 exact-ready 全部保留，错误 phase 的 1 条 false-ready 被新增阻断，exact-ready 回归为 0。该数据只证明确定性门禁修复了已知 false-ready，不表示模型准确率提高。受限 enum 兼容只处理精确单键 primitive 包装并逐路径留证，不放宽 L0 Schema。详细切片、失败归因和证据边界见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)与[正向资格协议](docs/promotion-forward-qualification.md)。
 
 #### DSH only 与 DSH + Runtime
 
@@ -169,7 +172,7 @@ P1.9-C0 已加入默认不启用的 Decision→Plan 绑定内核：PreparedPlan 
 
 P1.9-C1 已完成不启用流量的安全准备层：策略只能保持原 Harness route 或收窄/阻断，不能重路由或授权；readiness 门禁严格交叉绑定 Worker、Adapter、真实产品/部署和运维演练四类外部证据，最强结果也只是 `ready_for_review`。当前缺少真实 B2/产品证据，因此 canary 仍关闭。
 
-当前主门禁：416 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
+当前主门禁：420 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
 
 ### 5. 典型场景
 
@@ -324,6 +327,14 @@ scripts/netopyu-l0 workbench-export \
 ```bash
 # 刷新核心 A 的 210 条公开校准矩阵（不代表模型资格）
 scripts/netopyu-l0 forward-eval-calibrate
+
+# 用本地 9B 跑完整公开矩阵；每条完成即写入事务式 checkpoint
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+
+# 若模型评测被中断，以完全相同的参数恢复；证据指纹不一致会拒绝续跑
+scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210 --resume
 
 # 刷新 Runtime A/B，再汇总双核心功能、性能、证据边界和发布门槛
 scripts/netopyu-dsh compare-runtime --iterations 50
@@ -528,7 +539,7 @@ P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan
 
 P1.9-C1 adds a non-activating safety-readiness layer. Its policy can only preserve the original Harness route or narrow/block it; it cannot redirect or authorize. The evidence gate cross-binds Worker, Adapter, real product/deployment, and operations-drill attestations, and its strongest output is only `ready_for_review`. Canary remains disabled because real B2/product evidence is absent.
 
-The current gate passes 416 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
+The current gate passes 420 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
 
 ### 5. Scenarios
 

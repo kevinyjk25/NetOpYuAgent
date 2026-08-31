@@ -195,6 +195,7 @@ def authoring_template() -> dict[str, Any]:
             {
                 "id": item.id,
                 "role": item.role,
+                "observationPhases": list(item.observation_phases),
                 "tool": item.tool,
                 "profiles": list(item.profiles),
                 "inputs": sorted(item.inputs),
@@ -297,6 +298,16 @@ def _build_candidate(
     for capability_id in (observation_id, verification_id, compensation_verifier_id):
         if capabilities[capability_id].role != "observation":
             raise PromotionError(f"{capability_id!r} is not an observation")
+    phase_selections = {
+        "preflight": observation_id,
+        "success_verification": verification_id,
+        "compensation_verification": compensation_verifier_id,
+    }
+    for phase, capability_id in phase_selections.items():
+        if not capabilities[capability_id].supports_observation_phase(phase):
+            raise PromotionError(
+                f"{capability_id!r} is not trusted for observation phase {phase}"
+            )
 
     parameters = _require_mapping(translation.get("parameters"), "translation.parameters")
     intent = _require_mapping(translation.get("intent"), "translation.intent")
@@ -434,14 +445,33 @@ def submit_authoring(arguments: dict[str, Any]) -> dict[str, Any]:
         "effects": [str(translation["effect_capability"])],
         "observations": list(dict.fromkeys(chosen_observations)),
         "compensations": [str(translation["compensation_capability"])],
+        "preflightObservations": [
+            str(translation["observation_capability"]),
+        ],
+        "successVerificationObservations": [
+            str(translation["verification_capability"]),
+        ],
+        "compensationVerificationObservations": [
+            str(translation["compensation_verification_capability"]),
+        ],
     }
     for step in l05_raw["workflow"]:
         if step["phase"] == "effect":
             step["capabilityOptions"] = l05_raw["capabilities"]["effects"]
-        elif step["phase"] in {"preflight", "verification"}:
-            step["capabilityOptions"] = l05_raw["capabilities"]["observations"]
+        elif step["phase"] == "preflight":
+            step["capabilityOptions"] = l05_raw["capabilities"][
+                "preflightObservations"
+            ]
+        elif step["phase"] == "verification":
+            step["capabilityOptions"] = l05_raw["capabilities"][
+                "successVerificationObservations"
+            ]
         elif step["phase"] == "compensation":
             step["capabilityOptions"] = l05_raw["capabilities"]["compensations"]
+        elif step["phase"] == "compensation_verification":
+            step["capabilityOptions"] = l05_raw["capabilities"][
+                "compensationVerificationObservations"
+            ]
     l05_raw["safety"]["risk"] = str(translation["risk"])
     l05_raw["safety"]["approvalRequired"] = True
     l05_raw["unresolvedQuestions"] = []

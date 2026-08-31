@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: network_lan_user_access_revoke
 title: network.lan.user-access.revoke
@@ -55,6 +55,11 @@ workflow:
     state and independently verify restoration.
   capabilityOptions:
   - network.lan.user-access.grant
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions:
+  - netopyu.rollback-verifier.inverse-tool-v1
 capabilities:
   effects:
   - network.lan.user-access.revoke
@@ -64,6 +69,12 @@ capabilities:
   - network.access.user.get
   compensations:
   - network.lan.user-access.grant
+  preflightObservations:
+  - network.access.user.get
+  successVerificationObservations:
+  - netopyu.verifier.lan-access-revoked
+  compensationVerificationObservations:
+  - netopyu.rollback-verifier.inverse-tool-v1
 safety:
   risk: high
   approvalRequired: true
@@ -82,6 +93,6 @@ outcomes:
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:3fe842139d9b2886cc56453e716030d8abd7aecb7ccf21bfacec58ebe79b63b9
-capabilityCatalogSha256: sha256:8bc081bc94937adc7e89079ddb26d06c799fd964da88a1c1c7e981ad60752b23
+capabilityCatalogSha256: sha256:460d2066f0d2e6ebf5225b148a7d7cf8e3d020a37884df1a8a1ef8b9c553016a
 previousStageSha256: sha256:3fe842139d9b2886cc56453e716030d8abd7aecb7ccf21bfacec58ebe79b63b9
 unresolvedQuestions: []

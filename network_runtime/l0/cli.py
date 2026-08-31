@@ -137,7 +137,17 @@ def main(argv: list[str] | None = None) -> int:
     )
     core_evaluation.add_argument(
         "--forward-model-report",
-        default="artifacts/promotion-forward-model/qwen3.5-9b/report.json",
+        default=(
+            "artifacts/promotion-forward-model/"
+            "qwen3.5-9b-public-210/report.json"
+        ),
+    )
+    core_evaluation.add_argument(
+        "--runtime-reassessment-report",
+        default=(
+            "artifacts/promotion-forward-model/qwen3.5-9b-public-210/"
+            "current-runtime-reassessment/report.json"
+        ),
     )
     core_evaluation.add_argument(
         "--json", default="artifacts/core-capability-evaluation/current.json",
@@ -228,11 +238,25 @@ def main(argv: list[str] | None = None) -> int:
     forward_model.add_argument("--repetitions", type=int, default=1)
     forward_model.add_argument("--timeout-seconds", type=float, default=180.0)
     forward_model.add_argument("--repair-limit", type=int, default=1)
+    forward_model.add_argument(
+        "--resume", action="store_true",
+        help="resume the fingerprint-bound active run from per-case checkpoints",
+    )
     forward_rescore = sub.add_parser(
         "forward-eval-rescore-model",
         help="re-run deterministic scoring over an existing model run without inference",
     )
     forward_rescore.add_argument(
+        "--output-root", default="artifacts/promotion-forward-model/qwen3.5-9b",
+    )
+    forward_reassess = sub.add_parser(
+        "forward-eval-reassess-runtime",
+        help=(
+            "replay stored semantic proposals through the current Runtime without "
+            "calling the model"
+        ),
+    )
+    forward_reassess.add_argument(
         "--output-root", default="artifacts/promotion-forward-model/qwen3.5-9b",
     )
 
@@ -351,6 +375,9 @@ def main(argv: list[str] | None = None) -> int:
                     runtime_report_path=args.runtime_report,
                     forward_report_path=args.forward_report,
                     forward_model_report_path=args.forward_model_report,
+                    runtime_reassessment_report_path=(
+                        args.runtime_reassessment_report
+                    ),
                     json_path=args.json,
                     markdown_path=args.markdown,
                 ),
@@ -369,14 +396,16 @@ def main(argv: list[str] | None = None) -> int:
 
             if args.command in {
                 "forward-eval-run-model", "forward-eval-rescore-model",
+                "forward-eval-reassess-runtime",
             }:
                 from network_runtime.l0.forward_model_runner import (
+                    reassess_public_model_evaluation,
                     rescore_public_model_evaluation,
                     run_public_model_evaluation,
                 )
 
-                value = (
-                    run_public_model_evaluation(
+                if args.command == "forward-eval-run-model":
+                    value = run_public_model_evaluation(
                         model=args.model,
                         base_url=args.base_url,
                         output_root=args.output_root,
@@ -384,10 +413,12 @@ def main(argv: list[str] | None = None) -> int:
                         repetitions=args.repetitions,
                         timeout_seconds=args.timeout_seconds,
                         repair_limit=args.repair_limit,
+                        resume=args.resume,
                     )
-                    if args.command == "forward-eval-run-model"
-                    else rescore_public_model_evaluation(args.output_root)
-                )
+                elif args.command == "forward-eval-rescore-model":
+                    value = rescore_public_model_evaluation(args.output_root)
+                else:
+                    value = reassess_public_model_evaluation(args.output_root)
             elif args.command == "forward-eval-schema":
                 value = forward_qualification_schemas()
             elif args.command == "forward-eval-calibrate":

@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.dc_revoke_app_access
 version: 1.0.0
 capabilities:
@@ -84,6 +84,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.dc-access-revoked
   role: observation
   profiles:
@@ -118,6 +120,8 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification
 - id: network.dc.app-access.grant
   role: compensation
   profiles:
@@ -187,3 +191,5 @@ capabilities:
   outputs:
     restored:
       type: boolean
+  observationPhases:
+  - compensation_verification
