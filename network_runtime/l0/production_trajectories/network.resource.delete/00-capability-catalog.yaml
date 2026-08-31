@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.delete_resource
 version: 1.0.0
 capabilities:
@@ -58,6 +58,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.mock-state
   role: observation
   profiles:
@@ -79,3 +81,5 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification

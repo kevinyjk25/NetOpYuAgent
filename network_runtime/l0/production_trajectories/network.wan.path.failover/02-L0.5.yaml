@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: network_wan_path_failover
 title: network.wan.path.failover
@@ -57,6 +57,10 @@ workflow:
     compensation; verification failure enters manual intervention and forbids blind
     retry.
   capabilityOptions: []
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions: []
 capabilities:
   effects:
   - netopyu.tool.wan_failover_path
@@ -64,6 +68,11 @@ capabilities:
   - netopyu.tool.wan_tunnel_status
   - netopyu.verifier.wan-failover
   compensations: []
+  preflightObservations:
+  - netopyu.tool.wan_tunnel_status
+  successVerificationObservations:
+  - netopyu.verifier.wan-failover
+  compensationVerificationObservations: []
 safety:
   risk: high
   approvalRequired: true
@@ -88,6 +97,6 @@ outcomes:
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
 sourceSkillSha256: sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c
-capabilityCatalogSha256: sha256:6f4f256ee23fb2e36e64f45ca91884ce878ff679edad87206bc4b271c6f67ec3
+capabilityCatalogSha256: sha256:fd3f5b06a2402b44b7ae0fd7628c2bdf35121f629f5a92ab682987ad92cb4aff
 previousStageSha256: sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c
 unresolvedQuestions: []

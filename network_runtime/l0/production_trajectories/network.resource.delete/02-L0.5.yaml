@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: network_resource_delete
 title: network.resource.delete
@@ -55,6 +55,10 @@ workflow:
     compensation; verification failure enters manual intervention and forbids blind
     retry.
   capabilityOptions: []
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions: []
 capabilities:
   effects:
   - netopyu.tool.delete_resource
@@ -62,6 +66,11 @@ capabilities:
   - netopyu.tool.mock_operation_status
   - netopyu.verifier.mock-state
   compensations: []
+  preflightObservations:
+  - netopyu.tool.mock_operation_status
+  successVerificationObservations:
+  - netopyu.verifier.mock-state
+  compensationVerificationObservations: []
 safety:
   risk: critical
   approvalRequired: true
@@ -86,6 +95,6 @@ outcomes:
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
 sourceSkillSha256: sha256:8e73140a795510a1793f552ae8df97911d0729943967c89f38beeccc50f3b3a2
-capabilityCatalogSha256: sha256:e795f84f557fe569dd74b77ba6980b540b92eb5775cd7f40f40cc93ca81292c0
+capabilityCatalogSha256: sha256:feaa1130757f82dd1d160607b336f26fce5182de78036f6b47c827efcb7d45e2
 previousStageSha256: sha256:8e73140a795510a1793f552ae8df97911d0729943967c89f38beeccc50f3b3a2
 unresolvedQuestions: []

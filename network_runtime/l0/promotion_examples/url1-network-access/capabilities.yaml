@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: example.url1-access-api
 version: 1.0.0
 
@@ -18,6 +18,7 @@ capabilities:
 
   - id: rest.network-access.get
     role: observation
+    observationPhases: [preflight, success_verification, compensation_verification]
     profiles: [lan]
     inputs:
       user_id: {type: string, required: true, minLength: 1, maxLength: 64}

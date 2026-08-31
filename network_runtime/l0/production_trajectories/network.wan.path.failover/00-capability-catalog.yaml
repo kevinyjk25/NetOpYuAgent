@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.wan_failover_path
 version: 1.0.0
 capabilities:
@@ -48,6 +48,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.wan-failover
   role: observation
   profiles:
@@ -69,3 +71,5 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification

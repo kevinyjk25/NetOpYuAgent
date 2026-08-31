@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.edit_device_config
 version: 1.0.0
 capabilities:
@@ -125,6 +125,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.device-config
   role: observation
   profiles:
@@ -147,6 +149,8 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification
 - id: network.device.config.restore
   role: compensation
   profiles:
@@ -205,3 +209,5 @@ capabilities:
   outputs:
     restored:
       type: boolean
+  observationPhases:
+  - compensation_verification

@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.restart_service
 version: 1.0.0
 capabilities:
@@ -77,6 +77,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.service-health
   role: observation
   profiles:
@@ -98,3 +100,5 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification

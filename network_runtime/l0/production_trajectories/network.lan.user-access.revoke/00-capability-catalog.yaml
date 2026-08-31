@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.revoke_user_access
 version: 1.0.0
 capabilities:
@@ -58,6 +58,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.lan-access-revoked
   role: observation
   profiles:
@@ -79,6 +81,8 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification
 - id: network.lan.user-access.grant
   role: compensation
   profiles:
@@ -122,3 +126,5 @@ capabilities:
   outputs:
     restored:
       type: boolean
+  observationPhases:
+  - compensation_verification

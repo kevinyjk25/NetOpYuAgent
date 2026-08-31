@@ -41,7 +41,7 @@ class L0PromotionTests(unittest.TestCase):
         self.assertIn("atomic", packet["outputSchemas"])
         self.assertEqual(
             packet["structuredSkill"]["document"]["apiVersion"],
-            "netopyu.io/l0.5-structured-skill/v2",
+            "netopyu.io/l0.5-structured-skill/v3",
         )
         self.assertIn("do not guess", " ".join(packet["trustBoundary"]).lower())
 
@@ -54,6 +54,17 @@ class L0PromotionTests(unittest.TestCase):
         self.assertEqual(spec.capabilities.effects, ("rest.url1.network-access.grant",))
         self.assertEqual(spec.semantic_intents[0].kind, "grant_network_access")
         self.assertEqual(spec.unresolved_questions, ())
+        self.assertEqual(
+            spec.capabilities.preflight_observations,
+            ("rest.network-access.get",),
+        )
+        self.assertEqual(
+            spec.capabilities.success_verification_observations,
+            ("rest.network-access.get",),
+        )
+        self.assertIn(
+            "compensation_verification", {item.phase for item in spec.workflow},
+        )
         self.assertIn("workflow:", l05_yaml(spec))
 
     def test_missing_or_drifted_exact_intent_fails_closed(self) -> None:
@@ -263,7 +274,10 @@ class L0PromotionTests(unittest.TestCase):
     def test_capability_role_mismatch_blocks_promotion(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             catalog = yaml.safe_load(CAPABILITIES.read_text(encoding="utf-8"))
-            catalog["capabilities"][1]["role"] = "effect"
+            catalog["capabilities"][0]["role"] = "observation"
+            catalog["capabilities"][0]["observationPhases"] = [
+                "preflight", "success_verification", "compensation_verification",
+            ]
             path = Path(directory) / "capabilities.yaml"
             path.write_text(yaml.safe_dump(catalog), encoding="utf-8")
             assessment = assess_promotion(
@@ -275,6 +289,76 @@ class L0PromotionTests(unittest.TestCase):
                 "CAPABILITY_ROLE_MISMATCH",
                 {item["code"] for item in assessment.report["findings"]},
             )
+
+    def test_wrong_observation_phase_fails_closed_with_precise_finding(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            catalog = yaml.safe_load(CAPABILITIES.read_text(encoding="utf-8"))
+            observation = catalog["capabilities"][1]
+            observation["observationPhases"] = [
+                "success_verification", "compensation_verification",
+            ]
+            preflight = json.loads(json.dumps(observation))
+            preflight["id"] = "rest.network-access.preflight"
+            preflight["observationPhases"] = ["preflight"]
+            catalog["capabilities"].append(preflight)
+            catalog_path = Path(directory) / "capabilities.yaml"
+            catalog_path.write_text(
+                yaml.safe_dump(catalog, sort_keys=False), encoding="utf-8",
+            )
+            l05 = build_l05_spec(
+                skill_path=SKILL, capability_catalog_path=catalog_path,
+            )
+            l05_path = Path(directory) / "L0.5.yaml"
+            l05_path.write_text(l05_yaml(l05), encoding="utf-8")
+            assessment = assess_promotion(
+                skill_path=SKILL, l05_path=l05_path,
+                candidate_path=CANDIDATE, capability_catalog_path=catalog_path,
+            )
+        self.assertEqual(assessment.report["status"], "blocked")
+        codes = {item["code"] for item in assessment.report["findings"]}
+        self.assertIn("CAPABILITY_PHASE_MISMATCH", codes)
+        self.assertIn("L05_PHASE_CAPABILITY_MISSING", codes)
+
+    def test_legacy_l05_is_parseable_but_requires_phase_scope_migration(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw = yaml.safe_load(L05.read_text(encoding="utf-8"))
+            raw["apiVersion"] = "netopyu.io/l0.5-structured-skill/v2"
+            l05_path = Path(directory) / "legacy-L0.5.yaml"
+            l05_path.write_text(
+                yaml.safe_dump(raw, sort_keys=False), encoding="utf-8",
+            )
+            assessment = assess_promotion(
+                skill_path=SKILL, l05_path=l05_path,
+                candidate_path=CANDIDATE, capability_catalog_path=CAPABILITIES,
+            )
+        self.assertEqual(assessment.report["status"], "blocked")
+        self.assertIn(
+            "L05_PHASE_SCOPE_UNDECLARED",
+            {item["code"] for item in assessment.report["findings"]},
+        )
+
+    def test_legacy_capability_catalog_is_parseable_but_not_promotable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw = yaml.safe_load(CAPABILITIES.read_text(encoding="utf-8"))
+            raw["apiVersion"] = "netopyu.io/capability-catalog/v1"
+            catalog_path = Path(directory) / "legacy-capabilities.yaml"
+            catalog_path.write_text(
+                yaml.safe_dump(raw, sort_keys=False), encoding="utf-8",
+            )
+            l05 = build_l05_spec(
+                skill_path=SKILL, capability_catalog_path=catalog_path,
+            )
+            l05_path = Path(directory) / "L0.5.yaml"
+            l05_path.write_text(l05_yaml(l05), encoding="utf-8")
+            assessment = assess_promotion(
+                skill_path=SKILL, l05_path=l05_path,
+                candidate_path=CANDIDATE, capability_catalog_path=catalog_path,
+            )
+        self.assertEqual(assessment.report["status"], "blocked")
+        self.assertIn(
+            "CAPABILITY_CATALOG_VERSION_LEGACY",
+            {item["code"] for item in assessment.report["findings"]},
+        )
 
     def test_review_is_one_shot_integrity_checked_and_never_activates(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

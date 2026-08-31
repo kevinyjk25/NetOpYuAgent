@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: network_service_restart
 title: network.service.restart
@@ -57,6 +57,10 @@ workflow:
     compensation; verification failure enters manual intervention and forbids blind
     retry.
   capabilityOptions: []
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions: []
 capabilities:
   effects:
   - netopyu.tool.restart_service
@@ -64,6 +68,11 @@ capabilities:
   - netopyu.tool.service_health
   - netopyu.verifier.service-health
   compensations: []
+  preflightObservations:
+  - netopyu.tool.service_health
+  successVerificationObservations:
+  - netopyu.verifier.service-health
+  compensationVerificationObservations: []
 safety:
   risk: high
   approvalRequired: true
@@ -88,6 +97,6 @@ outcomes:
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
 sourceSkillSha256: sha256:2e66b94ae053adde9366f58cd515cb4392fd2fb336f7df69c036a16227a6adf4
-capabilityCatalogSha256: sha256:6a6891e9d2a179feb43d55d3c8de0967f6ef3b7a467b6dd1ef0ee024256891f4
+capabilityCatalogSha256: sha256:adafe5649152e2df726b8e28bc94569f58822861f152174e1f0fba0e351faca6
 previousStageSha256: sha256:2e66b94ae053adde9366f58cd515cb4392fd2fb336f7df69c036a16227a6adf4
 unresolvedQuestions: []

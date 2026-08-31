@@ -37,8 +37,10 @@ from .models import (
 
 
 PROMOTION_SCHEMA = "netopyu.io/l0-promotion-report/v2"
-CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v1"
-L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v2"
+LEGACY_CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v1"
+CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v2"
+LEGACY_L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v2"
+L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v3"
 TRAJECTORY_SCHEMA = "netopyu.io/l0-promotion-trajectory/v1"
 SEMANTIC_COVERAGE_SCHEMA = "netopyu.io/l0-semantic-coverage/v1"
 _DIRECT_ARGUMENT = re.compile(r"^\$\{\s*arguments\.([A-Za-z_][A-Za-z0-9_]*)\s*\}$")
@@ -60,6 +62,11 @@ class _StrictModel(BaseModel):
 class CapabilityDefinition(_StrictModel):
     id: str
     role: Literal["observation", "effect", "compensation"]
+    observation_phases: tuple[
+        Literal[
+            "preflight", "success_verification", "compensation_verification",
+        ], ...
+    ] = Field(default=(), alias="observationPhases")
     tool: str | None = None
     profiles: tuple[str, ...]
     inputs: dict[str, ParameterSpec]
@@ -69,11 +76,20 @@ class CapabilityDefinition(_StrictModel):
     def require_profile(self) -> "CapabilityDefinition":
         if not self.profiles:
             raise ValueError("capability profiles cannot be empty")
+        if len(set(self.observation_phases)) != len(self.observation_phases):
+            raise ValueError("capability observationPhases must be unique")
+        if self.role != "observation" and self.observation_phases:
+            raise ValueError("only observation capabilities can declare observationPhases")
         return self
+
+    def supports_observation_phase(self, phase: str) -> bool:
+        return self.role == "observation" and phase in self.observation_phases
 
 
 class CapabilityCatalogManifest(_StrictModel):
-    api_version: Literal[CAPABILITY_API_VERSION] = Field(alias="apiVersion")
+    api_version: Literal[
+        LEGACY_CAPABILITY_API_VERSION, CAPABILITY_API_VERSION,
+    ] = Field(alias="apiVersion")
     provider: str
     version: str
     capabilities: tuple[CapabilityDefinition, ...]
@@ -85,6 +101,16 @@ class CapabilityCatalogManifest(_StrictModel):
             raise ValueError("capability ids must be unique")
         if not self.provider.strip() or not self.version.strip():
             raise ValueError("capability provider and version are required")
+        if self.api_version == CAPABILITY_API_VERSION:
+            untyped = [
+                item.id for item in self.capabilities
+                if item.role == "observation" and not item.observation_phases
+            ]
+            if untyped:
+                raise ValueError(
+                    "v2 observation capabilities require observationPhases: "
+                    + ", ".join(sorted(untyped))
+                )
         return self
 
     def by_id(self) -> dict[str, CapabilityDefinition]:
@@ -94,7 +120,7 @@ class CapabilityCatalogManifest(_StrictModel):
 class L05WorkflowStep(_StrictModel):
     phase: Literal[
         "validate", "preflight", "approval", "effect", "verification",
-        "compensation",
+        "compensation", "compensation_verification",
     ]
     instruction: str
     capability_options: tuple[str, ...] = Field(alias="capabilityOptions")
@@ -104,6 +130,15 @@ class L05CapabilityOptions(_StrictModel):
     effects: tuple[str, ...]
     observations: tuple[str, ...]
     compensations: tuple[str, ...]
+    preflight_observations: tuple[str, ...] = Field(
+        default=(), alias="preflightObservations",
+    )
+    success_verification_observations: tuple[str, ...] = Field(
+        default=(), alias="successVerificationObservations",
+    )
+    compensation_verification_observations: tuple[str, ...] = Field(
+        default=(), alias="compensationVerificationObservations",
+    )
 
 
 class L05Safety(_StrictModel):
@@ -150,7 +185,9 @@ class L05SemanticIntent(_StrictModel):
 class StructuredNaturalLanguageSkill(_StrictModel):
     """Human-reviewable bridge between free-form L1 and executable L0."""
 
-    api_version: Literal[L05_API_VERSION] = Field(alias="apiVersion")
+    api_version: Literal[LEGACY_L05_API_VERSION, L05_API_VERSION] = Field(
+        alias="apiVersion",
+    )
     kind: Literal["StructuredNaturalLanguageSkill"]
     skill_id: str = Field(alias="skillId")
     title: str
@@ -177,6 +214,30 @@ class StructuredNaturalLanguageSkill(_StrictModel):
         capabilities = [item.effect_capability for item in self.semantic_intents]
         if len(set(capabilities)) != len(capabilities):
             raise ValueError("L0.5 semanticIntents must be unique per effect capability")
+        if self.api_version == L05_API_VERSION:
+            phase_sets = (
+                self.capabilities.preflight_observations,
+                self.capabilities.success_verification_observations,
+                self.capabilities.compensation_verification_observations,
+            )
+            if not phase_sets[0] or not phase_sets[1]:
+                raise ValueError(
+                    "L0.5 v3 requires preflight and success-verification observations"
+                )
+            phase_union = set().union(*(set(values) for values in phase_sets))
+            if phase_union != set(self.capabilities.observations):
+                raise ValueError(
+                    "L0.5 observations must equal the union of phase-scoped observations"
+                )
+            workflow_phases = [item.phase for item in self.workflow]
+            required_phases = {
+                "validate", "preflight", "approval", "effect", "verification",
+                "compensation", "compensation_verification",
+            }
+            if len(set(workflow_phases)) != len(workflow_phases):
+                raise ValueError("L0.5 workflow phases must be unique")
+            if set(workflow_phases) != required_phases:
+                raise ValueError("L0.5 v3 workflow must declare every transaction phase")
         return self
 
 
@@ -277,6 +338,15 @@ def build_l05_spec(
         role: tuple(sorted(item.id for item in catalog.capabilities if item.role == role))
         for role in ("observation", "effect", "compensation")
     }
+    phase_observations = {
+        phase: tuple(sorted(
+            item.id for item in catalog.capabilities
+            if item.supports_observation_phase(phase)
+        ))
+        for phase in (
+            "preflight", "success_verification", "compensation_verification",
+        )
+    }
     declared_effects = tuple(sorted(
         item.id for item in catalog.capabilities
         if item.role == "effect" and item.tool in source.declared_tools
@@ -313,6 +383,18 @@ def build_l05_spec(
         unresolved.append(
             "Declare an independent observation capability for preflight and verification."
         )
+    elif not phase_observations["preflight"]:
+        unresolved.append(
+            "Declare an observation capability scoped to the preflight phase."
+        )
+    elif not phase_observations["success_verification"]:
+        unresolved.append(
+            "Declare an observation capability scoped to success verification."
+        )
+    if grouped["compensation"] and not phase_observations["compensation_verification"]:
+        unresolved.append(
+            "Declare an observation capability scoped to compensation verification."
+        )
     if not grouped["compensation"] and not non_compensable_justification:
         unresolved.append(
             "Declare a compensation capability or explicitly justify a non-compensable effect."
@@ -333,7 +415,7 @@ def build_l05_spec(
                 "Read current state through an independent observation and preserve "
                 "revision plus rollback evidence."
             ),
-            capabilityOptions=grouped["observation"],
+            capabilityOptions=phase_observations["preflight"],
         ),
         L05WorkflowStep(
             phase="approval",
@@ -357,7 +439,7 @@ def build_l05_spec(
                 "通过独立 Observation 判定成功，禁止只依赖写响应。 / Determine "
                 "success from an independent observation, never from the write response alone."
             ),
-            capabilityOptions=grouped["observation"],
+            capabilityOptions=phase_observations["success_verification"],
         ),
         L05WorkflowStep(
             phase="compensation",
@@ -366,6 +448,15 @@ def build_l05_spec(
                 "restore the exact prior state and independently verify restoration."
             ),
             capabilityOptions=grouped["compensation"],
+        ),
+        L05WorkflowStep(
+            phase="compensation_verification",
+            instruction=(
+                "通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / "
+                "Verify exact prior-state restoration through an independent observation; "
+                "otherwise enter manual intervention."
+            ),
+            capabilityOptions=phase_observations["compensation_verification"],
         ),
     )
     return StructuredNaturalLanguageSkill(
@@ -389,6 +480,13 @@ def build_l05_spec(
             effects=effect_options,
             observations=grouped["observation"],
             compensations=grouped["compensation"],
+            preflightObservations=phase_observations["preflight"],
+            successVerificationObservations=(
+                phase_observations["success_verification"]
+            ),
+            compensationVerificationObservations=(
+                phase_observations["compensation_verification"]
+            ),
         ),
         safety=L05Safety(
             risk=str(source.definition.get("risk_level", "low")),
@@ -1465,6 +1563,9 @@ def _validate_observation(
     profiles: tuple[str, ...],
     l0_parameters: dict[str, ParameterSpec],
     capabilities: dict[str, CapabilityDefinition],
+    required_phase: Literal[
+        "preflight", "success_verification", "compensation_verification",
+    ],
     context: str,
     findings: list[dict[str, Any]],
 ) -> None:
@@ -1474,6 +1575,22 @@ def _validate_observation(
         return
     if capability.role != "observation":
         _finding(findings, "error", "CAPABILITY_ROLE_MISMATCH", f"{context} must use an observation capability", capability.role)
+    elif not capability.observation_phases:
+        _finding(
+            findings, "error", "CAPABILITY_PHASE_UNDECLARED",
+            f"{context} observation does not declare a trusted transaction phase",
+            {"capability": capability.id, "requiredPhase": required_phase},
+        )
+    elif not capability.supports_observation_phase(required_phase):
+        _finding(
+            findings, "error", "CAPABILITY_PHASE_MISMATCH",
+            f"{context} observation is not trusted for {required_phase}",
+            {
+                "capability": capability.id,
+                "requiredPhase": required_phase,
+                "declaredPhases": list(capability.observation_phases),
+            },
+        )
     if not set(profiles).issubset(set(capability.profiles)):
         _finding(findings, "error", "CAPABILITY_PROFILE_MISMATCH", f"{context} does not support every L0 profile")
     _validate_call(
@@ -1519,14 +1636,16 @@ def _validate_atomic_capabilities(
             arguments=observation.arguments,
             fields=(*observation.snapshot_fields, *(item.field for item in observation.predicates)),
             profiles=spec.profiles, l0_parameters=spec.parameters,
-            capabilities=capabilities, context=f"preflight.{observation.id}", findings=findings,
+            capabilities=capabilities, required_phase="preflight",
+            context=f"preflight.{observation.id}", findings=findings,
         )
     _validate_observation(
         capability_id=spec.verification.capability,
         arguments=spec.verification.arguments,
         fields=(item.field for item in spec.verification.predicates),
         profiles=spec.profiles, l0_parameters=spec.parameters,
-        capabilities=capabilities, context="verification", findings=findings,
+        capabilities=capabilities, required_phase="success_verification",
+        context="verification", findings=findings,
     )
     if spec.compensation is not None:
         compensation = capabilities.get(spec.compensation.capability)
@@ -1544,7 +1663,8 @@ def _validate_atomic_capabilities(
             arguments=spec.compensation.verification.arguments,
             fields=(item.field for item in spec.compensation.verification.predicates),
             profiles=spec.profiles, l0_parameters=spec.parameters,
-            capabilities=capabilities, context="compensation.verification", findings=findings,
+            capabilities=capabilities, required_phase="compensation_verification",
+            context="compensation.verification", findings=findings,
         )
 
 
@@ -1573,6 +1693,7 @@ def _validate_l05_contract(
     l05: StructuredNaturalLanguageSkill,
     compiled: CompiledContract,
     catalog: L0Catalog,
+    capabilities: dict[str, CapabilityDefinition],
     findings: list[dict[str, Any]],
 ) -> None:
     if l05.unresolved_questions:
@@ -1591,6 +1712,58 @@ def _validate_l05_contract(
             child = catalog.require(step.skill_ref.id, step.skill_ref.version)
             if isinstance(child, CompiledAtomicEffect):
                 atomics.append(child)
+    if l05.api_version == LEGACY_L05_API_VERSION:
+        _finding(
+            findings, "error", "L05_PHASE_SCOPE_UNDECLARED",
+            "legacy L0.5 does not bind observations to transaction phases; migrate to v3",
+        )
+    phase_options = {
+        "preflight": l05.capabilities.preflight_observations,
+        "success_verification": l05.capabilities.success_verification_observations,
+        "compensation_verification": (
+            l05.capabilities.compensation_verification_observations
+        ),
+    }
+    workflow_phase_names = {
+        "preflight": "preflight",
+        "success_verification": "verification",
+        "compensation_verification": "compensation_verification",
+    }
+    workflow_options = {
+        phase: next((
+            step.capability_options for step in l05.workflow
+            if step.phase == workflow_phase_names[phase]
+        ), ())
+        for phase in phase_options
+    }
+    for phase, options in phase_options.items():
+        for capability_id in options:
+            capability = capabilities.get(capability_id)
+            if capability is None:
+                _finding(
+                    findings, "error", "L05_CAPABILITY_UNKNOWN",
+                    f"L0.5 {phase} option is absent from the trusted Catalog",
+                    capability_id,
+                )
+            elif not capability.supports_observation_phase(phase):
+                _finding(
+                    findings, "error", "L05_CAPABILITY_PHASE_MISMATCH",
+                    f"L0.5 exposes an observation outside its trusted {phase} phase",
+                    {
+                        "capability": capability_id,
+                        "phase": phase,
+                        "declaredPhases": list(capability.observation_phases),
+                    },
+                )
+        invalid_workflow_options = sorted(
+            set(workflow_options[phase]) - set(options)
+        )
+        if invalid_workflow_options:
+            _finding(
+                findings, "error", "L05_WORKFLOW_PHASE_MISMATCH",
+                f"L0.5 workflow exposes capabilities outside its {phase} allow-list",
+                invalid_workflow_options,
+            )
     intents_by_effect = {
         item.effect_capability: item for item in l05.semantic_intents
     }
@@ -1666,6 +1839,31 @@ def _validate_l05_contract(
                 "L0 observations are not allowed by L0.5",
                 unknown_observations,
             )
+        selected_by_phase = {
+            "preflight": {item.capability for item in spec.preflight},
+            "success_verification": {spec.verification.capability},
+            "compensation_verification": (
+                {spec.compensation.verification.capability}
+                if spec.compensation is not None else set()
+            ),
+        }
+        for phase, selected in selected_by_phase.items():
+            missing_phase_options = sorted(selected - set(phase_options[phase]))
+            if missing_phase_options:
+                _finding(
+                    findings, "error", "L05_PHASE_CAPABILITY_MISSING",
+                    f"L0 selects {phase} capabilities not allowed by L0.5",
+                    missing_phase_options,
+                )
+            missing_workflow_options = sorted(
+                selected - set(workflow_options[phase])
+            )
+            if missing_workflow_options:
+                _finding(
+                    findings, "error", "L05_WORKFLOW_CAPABILITY_MISSING",
+                    f"L0 selects {phase} capabilities absent from the L0.5 workflow",
+                    missing_workflow_options,
+                )
         if not set(spec.profiles).issubset(set(l05.profiles)):
             _finding(
                 findings, "error", "L05_PROFILE_MISMATCH",
@@ -1764,6 +1962,11 @@ def assess_promotion(
     candidate, candidate_digest, candidate_source = _load_candidate(candidate_path)
     bound = _bind_source(candidate, source, capability_digest, l05_digest)
     findings: list[dict[str, Any]] = []
+    if capabilities.api_version == LEGACY_CAPABILITY_API_VERSION:
+        _finding(
+            findings, "error", "CAPABILITY_CATALOG_VERSION_LEGACY",
+            "legacy Capability Catalog v1 has no enforceable phase-typing contract; migrate to v2",
+        )
     _validate_l05_source(source=source, l05=l05, findings=findings)
     compiled: CompiledContract | None = None
     catalog: L0Catalog | None = None
@@ -1803,6 +2006,7 @@ def assess_promotion(
             l05=l05,
             compiled=compiled,
             catalog=catalog,
+            capabilities=capabilities.by_id(),
             findings=findings,
         )
         atomics: list[CompiledAtomicEffect] = []

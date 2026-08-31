@@ -1,11 +1,11 @@
 {
   "archiveFiles": {
-    "00-capability-catalog.yaml": "sha256:1bae0832091dde7abab54df829334bb4fb299733861fea0163d505d7ca06a058",
+    "00-capability-catalog.yaml": "sha256:14df4e685a08dbc1c4d3d37d05a10ca05d534e6a37f04798b7a67d3f3fd4f082",
     "01-L1-SKILL.md": "sha256:bd44d3f774f128ac4e5d216c88f5fac9424cf5f9534b9d0b128f630ddd2cbe6d",
-    "02-L0.5.yaml": "sha256:c10198bddccffae1f98a30b3b0313507eed9f6f19fd15b7c7f732ec39323a60f",
+    "02-L0.5.yaml": "sha256:32ef53a3416c212626a1c634d4dc7c5a6870eae815a0c3b0bad4f07a03292962",
     "03-L0-authoring.yaml": "sha256:d605d6a9884a5847f35de16e2ab0aeffa1364e3a4fb91378a5c6addcb37abc27",
     "04-L0-compiled.json": "sha256:d792942bf3622289c59d66b31c07c68ee274dc929d3776ad4f0b7bfc6cb62f3a",
-    "trajectory.json": "sha256:6de38b1bbde8559ed51c09f4db29d1f97b2ac4d718dbdc5d1b594f19c958b0da"
+    "trajectory.json": "sha256:078fcb54dd0ac41b6cf23931879485fd8a98b94ba39d7eed7038390433d2ffbd"
   },
   "bootstrap": {
     "claim": "structural semantic parity and exact compiler round trip; not independent natural-language inference",
@@ -22,7 +22,7 @@
       "warnings": 0
     }
   },
-  "reportHash": "sha256:3ebb8637582e2bdfd8b98d7afdead383203fd1b023198f57295f55a9e1f16c20",
+  "reportHash": "sha256:6764624a24d1c9e6db203b8a51996e60de407504a6ec647f4812f8d15cef2767",
   "roundTrip": {
     "exactContractHash": true,
     "productionContractHash": "sha256:98206a9defa6e464800205dbf375abd5faf0bce9718e24cea392156a607efa68",
@@ -34,6 +34,6 @@
   "schema": "netopyu.io/l0-production-trajectory/v1",
   "skillId": "network.lan.user-access.grant",
   "tool": "grant_user_access",
-  "trajectoryHash": "sha256:ca66129e51f6442630ff601c8c24f823d2486af57c8a030b66a0a0104f504f48",
+  "trajectoryHash": "sha256:449c7c79414409e1fb38480824979a511a62b5d10f69fd5a324ba9d5bddbdceb",
   "version": "1.0.0"
 }

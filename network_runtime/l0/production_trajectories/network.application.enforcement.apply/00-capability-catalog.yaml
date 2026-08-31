@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v1
+apiVersion: netopyu.io/capability-catalog/v2
 provider: netopyu.production.network_apply_app_enforcement
 version: 1.0.0
 capabilities:
@@ -99,6 +99,8 @@ capabilities:
   outputs:
     facts:
       type: object
+  observationPhases:
+  - preflight
 - id: netopyu.verifier.network-app-enforcement-granted
   role: observation
   profiles:
@@ -134,6 +136,8 @@ capabilities:
   outputs:
     passed:
       type: boolean
+  observationPhases:
+  - success_verification
 - id: network.application.enforcement.restore
   role: compensation
   profiles:
@@ -205,3 +209,5 @@ capabilities:
   outputs:
     restored:
       type: boolean
+  observationPhases:
+  - compensation_verification

@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/l0.5-structured-skill/v2
+apiVersion: netopyu.io/l0.5-structured-skill/v3
 kind: StructuredNaturalLanguageSkill
 skillId: network_device_config_edit
 title: network.device.config.edit
@@ -62,6 +62,11 @@ workflow:
     state and independently verify restoration.
   capabilityOptions:
   - network.device.config.restore
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions:
+  - netopyu.rollback-verifier.device-config-snapshot-v1
 capabilities:
   effects:
   - network.device.config.edit
@@ -71,6 +76,12 @@ capabilities:
   - network.device.config.get
   compensations:
   - network.device.config.restore
+  preflightObservations:
+  - network.device.config.get
+  successVerificationObservations:
+  - netopyu.verifier.device-config
+  compensationVerificationObservations:
+  - netopyu.rollback-verifier.device-config-snapshot-v1
 safety:
   risk: high
   approvalRequired: true
@@ -89,6 +100,6 @@ outcomes:
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:d76b01c93977b4b0d02c6bc51478e042c860feae791bc89316b2c8de44842d05
-capabilityCatalogSha256: sha256:de1b3e438cb0e45996f9b40747c871417016ba752fa4e1cb03efc431aa40417b
+capabilityCatalogSha256: sha256:8d51d8f5c3c217cb15f75429bef56a52e5c66763448580680771abd96bc4cc37
 previousStageSha256: sha256:d76b01c93977b4b0d02c6bc51478e042c860feae791bc89316b2c8de44842d05
 unresolvedQuestions: []
