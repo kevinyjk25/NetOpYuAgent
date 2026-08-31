@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v2
+apiVersion: netopyu.io/capability-catalog/v3
 provider: netopyu.production.network_revoke_app_enforcement
 version: 1.0.0
 capabilities:
@@ -101,6 +101,11 @@ capabilities:
       type: object
   observationPhases:
   - preflight
+  phasePredicates:
+    preflight:
+    - field: facts
+      operator: exists
+      expected: null
 - id: netopyu.verifier.network-app-enforcement-revoked
   role: observation
   profiles:
@@ -138,6 +143,11 @@ capabilities:
       type: boolean
   observationPhases:
   - success_verification
+  phasePredicates:
+    success_verification:
+    - field: passed
+      operator: equals
+      expected: true
 - id: network.application.enforcement.restore
   role: compensation
   profiles:
@@ -211,3 +221,8 @@ capabilities:
       type: boolean
   observationPhases:
   - compensation_verification
+  phasePredicates:
+    compensation_verification:
+    - field: restored
+      operator: equals
+      expected: true

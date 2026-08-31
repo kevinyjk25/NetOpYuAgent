@@ -17,13 +17,13 @@ import time
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Callable, Iterable
 
 import httpx
 import yaml
 from pydantic import ValidationError
 
-from network_runtime.contracts import sha256_json, utc_now
+from network_runtime.contracts import canonical_json, sha256_json, utc_now
 from skills.skill_format import parse_skill_md
 
 from .forward_qualification import (
@@ -34,7 +34,10 @@ from .forward_qualification import (
     ForwardObservation,
     SemanticContract,
     TRAJECTORY_ROOT,
+    STUDY_MANIFEST_SCHEMA,
+    adjudicate_forward_labels,
     build_public_calibration,
+    evaluator_fingerprint,
     qualify_forward_files,
     record_forward_observation,
     seal_forward_cases,
@@ -54,7 +57,9 @@ MODEL_RUN_SCHEMA = "netopyu.io/promotion-forward-model-run/v1"
 MODEL_RUN_STATE_SCHEMA = "netopyu.io/promotion-forward-model-run-state/v1"
 MODEL_RUN_CHECKPOINT_SCHEMA = "netopyu.io/promotion-forward-model-checkpoint/v1"
 RUNTIME_REASSESSMENT_SCHEMA = "netopyu.io/promotion-runtime-reassessment/v1"
-PROTOCOL_VERSION = "netopyu-forward-authoring-9b/v3"
+PROTOCOL_VERSION = "netopyu-forward-authoring-9b/v7"
+CATALOG_AUTHORING_GUIDE_VERSION = "netopyu-catalog-authoring-guide/v2"
+CATALOG_DECISION_VALIDATOR_VERSION = "netopyu-catalog-decision-validator/v3"
 NORMALIZER_VERSION = "netopyu-enum-value-wrapper-normalizer/v1"
 NORMALIZER_RULES = {
     "allowed_path": "semantic_contract.parameters.*.enum[*]",
@@ -98,15 +103,18 @@ Security boundary:
   response is never independent verification.
 - Observation selection must follow the catalog's exact observationPhases declaration:
   preflight uses a capability declaring preflight and snapshots its state output
-  (normally an `exists` predicate whose expected value is null); success verification uses the dedicated verifier and
+  (for an existence check, `field` is the exact catalog output key, `operator` is
+  `exists`, and `expected` is null; never put `exists` in `field`); success verification uses the dedicated verifier and
   requires both success_verification scope and its `passed` output to equal true;
   compensation verification requires compensation_verification scope and the rollback
   verifier and requires its `restored` output to equal true. Every predicate list is
   mandatory and must reference an output actually declared by that selected capability.
 - If the L1 explicitly states there is no safe automatic inverse, set compensation and
   compensation-verification capabilities to null, their predicate list to empty,
-  requires_compensation=false, and verificationFailed=manual_intervention. Otherwise
-  select both compensation capabilities and use verificationFailed=compensate.
+  requires_compensation=false, and verificationFailed=manual_intervention. This changes
+  compensation only: it never removes required preflight or independent success
+  verification. Otherwise select both compensation capabilities and use
+  verificationFailed=compensate.
 
 Return only JSON conforming to {MODEL_DECISION_SCHEMA}. This output is an untrusted
 proposal and grants no execution authority."""
@@ -127,6 +135,7 @@ class ModelReply:
     normalized_digest: str | None = None
     validation_errors: tuple[str, ...] = ()
     error: str | None = None
+    error_stage: str | None = None
 
 
 def normalize_model_decision_json(
@@ -194,7 +203,12 @@ class OllamaForwardAdapter:
             return f"sha256:{digest}"
         return sha256_json({"model": self.model, "metadata": match})
 
-    def decide(self, *, user_prompt: str) -> ModelReply:
+    def decide(
+        self,
+        *,
+        user_prompt: str,
+        decision_validator: Callable[[ForwardModelDecision], tuple[str, ...]] | None = None,
+    ) -> ModelReply:
         messages: list[dict[str, str]] = [
             {"role": "system", "content": _SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
@@ -210,25 +224,44 @@ class OllamaForwardAdapter:
         validation_errors: list[str] = []
         with httpx.Client(timeout=self.timeout_seconds) as client:
             for repair in range(self.repair_limit + 1):
-                response = client.post(
-                    f"{self.base_url}/api/chat",
-                    json={
-                        "model": self.model,
-                        "stream": False,
-                        "think": False,
-                        "format": ForwardModelDecision.model_json_schema(by_alias=True),
-                        "messages": messages,
-                        "options": {
-                            "temperature": 0,
-                            "num_ctx": 16384,
-                            "num_predict": 4096,
-                            "seed": 20260830,
-                        },
-                    },
-                )
-                response.raise_for_status()
-                payload = response.json()
                 calls += 1
+                try:
+                    response = client.post(
+                        f"{self.base_url}/api/chat",
+                        json={
+                            "model": self.model,
+                            "stream": False,
+                            "think": False,
+                            "format": ForwardModelDecision.model_json_schema(by_alias=True),
+                            "messages": messages,
+                            "options": {
+                                "temperature": 0,
+                                "num_ctx": 16384,
+                                "num_predict": 4096,
+                                "seed": 20260830,
+                            },
+                        },
+                    )
+                    response.raise_for_status()
+                except httpx.RequestError as error:
+                    transport_error = f"{type(error).__name__}: {error}"
+                    return ModelReply(
+                        decision=None,
+                        raw_content=last_content,
+                        raw_digest=sha256_json({"content": last_content}),
+                        latency_ms=(time.monotonic() - started) * 1000,
+                        model_calls=calls,
+                        repair_attempts=repair,
+                        input_tokens=input_tokens,
+                        output_tokens=output_tokens,
+                        raw_protocol_valid=False,
+                        syntax_normalization_paths=last_normalization_paths,
+                        normalized_digest=last_normalized_digest,
+                        validation_errors=tuple(validation_errors),
+                        error=transport_error[:4000],
+                        error_stage="model_transport",
+                    )
+                payload = response.json()
                 input_tokens += int(payload.get("prompt_eval_count") or 0)
                 output_tokens += int(payload.get("eval_count") or 0)
                 last_content = str((payload.get("message") or {}).get("content") or "")
@@ -251,6 +284,12 @@ class OllamaForwardAdapter:
                         validation_errors.append(
                             "raw_protocol: " + f"{type(raw_error).__name__}: {raw_error}"[:3900]
                         )
+                    if decision_validator is not None:
+                        semantic_errors = decision_validator(decision)
+                        if semantic_errors:
+                            raise ValueError(
+                                "trusted_catalog: " + "; ".join(semantic_errors)
+                            )
                     return ModelReply(
                         decision=decision,
                         raw_content=last_content,
@@ -276,9 +315,19 @@ class OllamaForwardAdapter:
                             "role": "user",
                             "content": (
                                 "Your JSON failed strict validation. Correct only the JSON; "
-                                "do not add prose. If you already constructed a complete "
-                                "semantic_contract, preserve it and use disposition=proposal; "
-                                "do not delete it merely to make reject/clarify validate. "
+                                "do not add prose and do not change disposition merely to "
+                                "evade validation. Re-read the original L1 and trusted Catalog. "
+                                "When they define a complete contract, construct or preserve "
+                                "semantic_contract and use disposition=proposal. Catalog "
+                                "required=false is provider optionality and may be strengthened "
+                                "to L1 required=true; a generic object output is still a valid "
+                                "declared output. Clarify only for an authoring semantic truly "
+                                "absent from both inputs and list that semantic in missing_fields. "
+                                "A contract without an automatic compensator still requires "
+                                "preflight and independent success verification when the L1 "
+                                "requires them. Predicate field must be an exact output key "
+                                "from the selected phase capability; for existence use "
+                                "operator=exists and expected=null. "
                                 "Validation summary: " + last_error[:2000]
                             ),
                         },
@@ -307,6 +356,8 @@ def authoring_protocol_digest() -> str:
         "decision_schema": ForwardModelDecision.model_json_schema(by_alias=True),
         "normalizer_version": NORMALIZER_VERSION,
         "normalizer_rules": NORMALIZER_RULES,
+        "catalog_authoring_guide_version": CATALOG_AUTHORING_GUIDE_VERSION,
+        "catalog_decision_validator_version": CATALOG_DECISION_VALIDATOR_VERSION,
     })
 
 
@@ -325,7 +376,13 @@ def _parameter_view(raw: dict[str, Any]) -> dict[str, Any]:
 def _catalog_prompt(path: Path, *, catalog_id: str) -> tuple[str, str]:
     catalog, digest, _ = load_capability_catalog(path)
     capabilities: list[dict[str, Any]] = []
+    phase_options: dict[str, list[dict[str, Any]]] = {
+        "preflight": [],
+        "success_verification": [],
+        "compensation_verification": [],
+    }
     for item in catalog.capabilities:
+        output_keys = list(item.outputs)
         capabilities.append({
             "id": item.id,
             "role": item.role,
@@ -341,11 +398,48 @@ def _catalog_prompt(path: Path, *, catalog_id: str) -> tuple[str, str]:
                 for name, value in item.outputs.items()
             },
         })
+        for phase in item.observation_phases:
+            required_predicates = [
+                predicate.model_dump(by_alias=True, mode="json")
+                for predicate in item.phase_predicates.get(phase, ())
+            ]
+            phase_options[phase].append({
+                "capability": item.id,
+                "outputKeys": output_keys,
+                "requiredPredicates": required_predicates,
+                "predicateSyntax": {
+                    "existence": {
+                        "field": output_keys[0] if output_keys else "<declared-output-key>",
+                        "operator": "exists",
+                        "expected": None,
+                    },
+                    "rule": (
+                        "field is an exact outputKeys entry; operator carries the test. "
+                        "For Catalog v3 copy requiredPredicates exactly; never weaken or "
+                        "replace them. For older catalogs choose expected from L1 semantics, "
+                        "never from provider write response."
+                    ),
+                },
+            })
     packet = {
         "catalog_id": catalog_id,
         "catalog_sha256": digest,
         "provider": catalog.provider,
         "version": catalog.version,
+        "authoringGuide": {
+            "providerEnvelopeRule": (
+                "Catalog input required=false means the provider accepts omission; "
+                "L1/L0 may safely strengthen it to required=true. This is compatible."
+            ),
+            "phaseOptions": phase_options,
+            "phaseAvailability": {
+                phase: bool(options) for phase, options in phase_options.items()
+            },
+            "nonCompensableRule": (
+                "No safe automatic inverse removes compensation only. It does not "
+                "remove preflight or independent success verification."
+            ),
+        },
         "capabilities": capabilities,
     }
     return json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True), digest
@@ -506,6 +600,89 @@ def _candidate_from_semantic(
     return AtomicEffectManifest.model_validate(raw)
 
 
+def validate_forward_model_decision_against_catalog(
+    *, case: ForwardCase, decision: ForwardModelDecision,
+) -> tuple[str, ...]:
+    """Check one untrusted decision against the trusted Catalog before accepting it.
+
+    This is an authoring-time repair boundary, not an execution or activation path.
+    It deliberately reports only deterministic Catalog/phase/output facts that the
+    model can correct without gaining authority. Promotion remains the final gate.
+    """
+
+    if decision.disposition != "proposal":
+        return ()
+    semantic = decision.semantic_contract
+    if semantic is None:
+        return ("PROPOSAL_CONTRACT_MISSING",)
+    trajectory = TRAJECTORY_ROOT / case.family
+    catalog_path = trajectory / "00-capability-catalog.yaml"
+    errors: list[str] = []
+    try:
+        _candidate_from_semantic(
+            semantic, catalog_path=catalog_path, family=case.family,
+        )
+    except (ValidationError, ValueError) as error:
+        errors.append(f"CATALOG_CONTRACT_INVALID {str(error)[:1000]}")
+        return tuple(errors)
+
+    catalog, _, _ = load_capability_catalog(catalog_path)
+    capabilities = catalog.by_id()
+    phase_bindings = (
+        (
+            "preflight", semantic.preflight_capability,
+            semantic.preflight_predicates,
+        ),
+        (
+            "success_verification", semantic.verification_capability,
+            semantic.verification_predicates,
+        ),
+        (
+            "compensation_verification",
+            semantic.compensation_verification_capability,
+            semantic.compensation_verification_predicates,
+        ),
+    )
+    for phase, capability_id, predicates in phase_bindings:
+        if capability_id is None:
+            continue
+        capability = capabilities[capability_id]
+        allowed = sorted(capability.outputs)
+        for index, predicate in enumerate(predicates):
+            root_field = predicate.field.split(".", 1)[0]
+            if root_field not in capability.outputs:
+                errors.append(
+                    "CATALOG_OUTPUT_FIELD_UNKNOWN "
+                    f"phase={phase} capability={capability_id} "
+                    f"predicate[{index}].field={predicate.field!r} "
+                    f"allowed_outputs={allowed}; field must be one allowed output key"
+                )
+        required_predicates = capability.phase_predicates.get(phase, ())
+        if required_predicates:
+            required = {
+                canonical_json(item.model_dump(by_alias=True, mode="json"))
+                for item in required_predicates
+            }
+            actual = {
+                canonical_json(item.model_dump(by_alias=True, mode="json"))
+                for item in predicates
+            }
+            if not required.issubset(actual):
+                errors.append(
+                    "CATALOG_PHASE_PREDICATE_MISMATCH "
+                    f"phase={phase} capability={capability_id} "
+                    "candidate predicates must include every requiredPredicates entry="
+                    + json.dumps(
+                        [
+                            item.model_dump(by_alias=True, mode="json")
+                            for item in required_predicates
+                        ],
+                        ensure_ascii=False, sort_keys=True,
+                    )
+                )
+    return tuple(errors)
+
+
 def _l05_from_semantic(
     base: StructuredNaturalLanguageSkill, semantic: SemanticContract,
 ) -> StructuredNaturalLanguageSkill:
@@ -623,6 +800,21 @@ def _write_jsonl(path: Path, values: Iterable[Any]) -> None:
                    ensure_ascii=False, sort_keys=True) + "\n"
         for item in values
     ), encoding="utf-8")
+
+
+def _load_private_cases(path: str | Path) -> list[ForwardCase]:
+    source = Path(path).expanduser().resolve()
+    if not source.is_file() or source.stat().st_size > 32 * 1024 * 1024:
+        raise ValueError("private forward cases are missing or exceed 32 MiB")
+    cases = [
+        ForwardCase.model_validate_json(line)
+        for line in source.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    identifiers = [item.case_id for item in cases]
+    if not cases or len(identifiers) != len(set(identifiers)):
+        raise ValueError("private forward cases must be non-empty with unique ids")
+    return cases
 
 
 def _file_digest(path: Path) -> str:
@@ -766,9 +958,16 @@ def _validate_resume_inputs(
         "reviewer_one": "reverse-reviewer-a.jsonl",
         "reviewer_two": "reverse-reviewer-b.jsonl",
         "manifest": "manifest.json",
+        "study_plan": "study-plan.json",
+        "resolutions": "resolutions.jsonl",
     }
-    for name, filename in filenames.items():
-        item = artifacts.get(name)
+    required = {"cases", "reviewer_one", "reviewer_two", "manifest"}
+    if not required.issubset(artifacts):
+        raise ValueError("active model run input artifact binding is incomplete")
+    for name, item in artifacts.items():
+        filename = filenames.get(name)
+        if filename is None:
+            raise ValueError(f"active model run artifact binding is unknown: {name}")
         if not isinstance(item, dict) or not isinstance(item.get("sha256"), str):
             raise ValueError(f"active model run artifact binding is invalid: {name}")
         path = root / filename
@@ -782,6 +981,40 @@ def _catalog_snapshot_digest(cases: Iterable[ForwardCase]) -> str:
         path = TRAJECTORY_ROOT / family / "00-capability-catalog.yaml"
         snapshots[family] = "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
     return sha256_json(snapshots)
+
+
+def inspect_private_study_inputs(
+    cases_path: str | Path,
+    *,
+    model: str,
+    base_url: str = "http://127.0.0.1:11434",
+    timeout_seconds: float = 30.0,
+) -> dict[str, Any]:
+    """Resolve immutable run digests without inference or access to labels."""
+
+    cases = _load_private_cases(cases_path)
+    if {item.split for item in cases} != {"private_holdout"}:
+        raise ValueError("private study inspection accepts private_holdout cases only")
+    adapter = OllamaForwardAdapter(
+        model=model, base_url=base_url, timeout_seconds=timeout_seconds,
+        repair_limit=0,
+    )
+    return {
+        "schema": "netopyu.io/promotion-forward-study-inputs/v1",
+        "model": model,
+        "model_artifact_digest": adapter.artifact_digest(),
+        "authoring_protocol_digest": authoring_protocol_digest(),
+        "catalog_snapshot_digest": _catalog_snapshot_digest(cases),
+        "evaluator_fingerprint": evaluator_fingerprint(),
+        "case_count": len(cases),
+        "family_count": len({item.family for item in cases}),
+        "cases_digest": sha256_json([
+            item.model_dump(by_alias=True, mode="json")
+            for item in sorted(cases, key=lambda value: value.case_id)
+        ]),
+        "model_calls": 0,
+        "contains_prompts": False,
+    }
 
 
 def _error_observation(
@@ -824,27 +1057,104 @@ def run_public_model_evaluation(
     base_url: str = "http://127.0.0.1:11434",
     output_root: str | Path = DEFAULT_OUTPUT_ROOT,
     limit: int | None = None,
+    families: tuple[str, ...] = (),
+    case_ids: tuple[str, ...] = (),
     repetitions: int = 1,
     timeout_seconds: float = 180.0,
     repair_limit: int = 1,
     resume: bool = False,
+    private_cases_path: str | Path | None = None,
+    private_manifest_path: str | Path | None = None,
+    private_study_plan_path: str | Path | None = None,
+    private_reviewer_one_path: str | Path | None = None,
+    private_reviewer_two_path: str | Path | None = None,
+    private_resolutions_path: str | Path | None = None,
 ) -> dict[str, Any]:
-    if limit is not None and not 1 <= limit <= 210:
+    private_values = (
+        private_cases_path, private_manifest_path, private_study_plan_path,
+        private_reviewer_one_path, private_reviewer_two_path,
+    )
+    private_mode = any(value is not None for value in private_values)
+    if private_mode and any(value is None for value in private_values):
+        raise ValueError(
+            "private run requires cases, manifest, study plan and both reviewer files"
+        )
+    if private_mode and limit is not None:
+        raise ValueError("private qualification cannot use a partial --limit")
+    if private_mode and (families or case_ids):
+        raise ValueError("private qualification cannot filter families or case ids")
+    if not private_mode and limit is not None and not 1 <= limit <= 210:
         raise ValueError("limit must be between 1 and 210")
     if not 1 <= repetitions <= 10:
         raise ValueError("repetitions must be between 1 and 10")
-    all_cases, all_labels = build_public_calibration()
-    cases = _balanced_cases(all_cases, limit)
-    labels_by_id = {item.case_id: item for item in all_labels}
-    labels = [labels_by_id[item.case_id] for item in cases]
-    reviewer_one = [
-        item.model_copy(update={"reviewer_id": "public-reviewer-a"})
-        for item in labels
-    ]
-    reviewer_two = [
-        item.model_copy(update={"reviewer_id": "public-reviewer-b"})
-        for item in labels
-    ]
+    private_sources: dict[str, Path] = {}
+    if private_mode:
+        assert private_cases_path is not None
+        assert private_manifest_path is not None
+        assert private_study_plan_path is not None
+        assert private_reviewer_one_path is not None
+        assert private_reviewer_two_path is not None
+        private_sources = {
+            "cases": Path(private_cases_path).expanduser().resolve(),
+            "manifest": Path(private_manifest_path).expanduser().resolve(),
+            "study_plan": Path(private_study_plan_path).expanduser().resolve(),
+            "reviewer_one": Path(private_reviewer_one_path).expanduser().resolve(),
+            "reviewer_two": Path(private_reviewer_two_path).expanduser().resolve(),
+        }
+        if private_resolutions_path is not None:
+            private_sources["resolutions"] = Path(
+                private_resolutions_path
+            ).expanduser().resolve()
+        if any(not path.is_file() for path in private_sources.values()):
+            raise ValueError("one or more private qualification inputs are missing")
+        cases = _load_private_cases(private_sources["cases"])
+        private_manifest = json.loads(
+            private_sources["manifest"].read_text(encoding="utf-8")
+        )
+        if private_manifest.get("apiVersion") != STUDY_MANIFEST_SCHEMA:
+            raise ValueError("private model run requires a pre-registered v2 manifest")
+        adjudication = adjudicate_forward_labels(
+            private_sources["cases"], private_sources["manifest"],
+            private_sources["reviewer_one"], private_sources["reviewer_two"],
+            study_plan_path=private_sources["study_plan"],
+            resolutions_path=private_sources.get("resolutions"),
+        )
+        if not adjudication["qualification_eligible"]:
+            raise ValueError("private reviewer/adjudication evidence is not qualification-ready")
+        if private_manifest.get("planned_model") != model:
+            raise ValueError("requested model differs from the pre-registered study")
+        if private_manifest.get("repetitions") != repetitions:
+            raise ValueError("requested repetitions differ from the pre-registered study")
+        reviewer_one: list[ForwardLabel] = []
+        reviewer_two: list[ForwardLabel] = []
+    else:
+        all_cases, all_labels = build_public_calibration()
+        available_families = {item.family for item in all_cases}
+        unknown_families = sorted(set(families) - available_families)
+        available_case_ids = {item.case_id for item in all_cases}
+        unknown_case_ids = sorted(set(case_ids) - available_case_ids)
+        if unknown_families:
+            raise ValueError(f"unknown public families: {unknown_families}")
+        if unknown_case_ids:
+            raise ValueError(f"unknown public case ids: {unknown_case_ids}")
+        selected_cases = [
+            item for item in all_cases
+            if (not families or item.family in families)
+            and (not case_ids or item.case_id in case_ids)
+        ]
+        if not selected_cases:
+            raise ValueError("public case filters selected no cases")
+        cases = _balanced_cases(selected_cases, limit)
+        labels_by_id = {item.case_id: item for item in all_labels}
+        labels = [labels_by_id[item.case_id] for item in cases]
+        reviewer_one = [
+            item.model_copy(update={"reviewer_id": "public-reviewer-a"})
+            for item in labels
+        ]
+        reviewer_two = [
+            item.model_copy(update={"reviewer_id": "public-reviewer-b"})
+            for item in labels
+        ]
     root = Path(output_root).expanduser().resolve()
     root.mkdir(parents=True, exist_ok=True)
     cases_path = root / "cases.jsonl"
@@ -852,6 +1162,8 @@ def run_public_model_evaluation(
     second_path = root / "reverse-reviewer-b.jsonl"
     observations_path = root / "observations.jsonl"
     manifest_path = root / "manifest.json"
+    study_plan_path = root / "study-plan.json"
+    resolutions_path = root / "resolutions.jsonl"
     evaluator_path = root / "evaluator-report.json"
     active_state_path = root / "active-run.json"
     adapter = OllamaForwardAdapter(
@@ -863,6 +1175,14 @@ def run_public_model_evaluation(
     model_digest = adapter.artifact_digest()
     protocol_digest = authoring_protocol_digest()
     catalog_digest = _catalog_snapshot_digest(cases)
+    if private_mode:
+        for key, actual in (
+            ("model_artifact_digest", model_digest),
+            ("authoring_protocol_digest", protocol_digest),
+            ("catalog_snapshot_digest", catalog_digest),
+        ):
+            if private_manifest.get(key) != actual:
+                raise ValueError(f"private study runtime binding drift: {key}")
     configuration: dict[str, Any] = {
         "model": model,
         "model_artifact_digest": model_digest,
@@ -871,13 +1191,29 @@ def run_public_model_evaluation(
         "case_payload_digest": sha256_json([
             item.model_dump(by_alias=True, mode="json") for item in cases
         ]),
-        "reviewer_one_payload_digest": sha256_json([
-            item.model_dump(by_alias=True, mode="json") for item in reviewer_one
-        ]),
-        "reviewer_two_payload_digest": sha256_json([
-            item.model_dump(by_alias=True, mode="json") for item in reviewer_two
-        ]),
+        "reviewer_one_payload_digest": (
+            _file_digest(private_sources["reviewer_one"])
+            if private_mode else sha256_json([
+                item.model_dump(by_alias=True, mode="json") for item in reviewer_one
+            ])
+        ),
+        "reviewer_two_payload_digest": (
+            _file_digest(private_sources["reviewer_two"])
+            if private_mode else sha256_json([
+                item.model_dump(by_alias=True, mode="json") for item in reviewer_two
+            ])
+        ),
+        "study_plan_digest": (
+            _file_digest(private_sources["study_plan"]) if private_mode else None
+        ),
+        "resolutions_digest": (
+            _file_digest(private_sources["resolutions"])
+            if "resolutions" in private_sources else None
+        ),
+        "private_study": private_mode,
         "limit": limit,
+        "families": sorted(set(families)),
+        "case_ids": sorted(set(case_ids)),
         "repetitions": repetitions,
         "repair_limit": repair_limit,
         "case_count": len(cases),
@@ -924,19 +1260,33 @@ def run_public_model_evaluation(
         run_id = secrets.token_hex(16)
         checkpoint_dir = root / "checkpoints" / run_id
         checkpoint_dir.mkdir(parents=True, exist_ok=False)
-        _write_jsonl(cases_path, cases)
-        _write_jsonl(first_path, reviewer_one)
-        _write_jsonl(second_path, reviewer_two)
-        manifest = seal_forward_cases(
-            cases_path,
-            dataset_id="public-model-forward-calibration",
-            version="v1",
-            provenance="reverse_bootstrap_calibration",
-        )
-        manifest_path.write_text(
-            json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
+        if private_mode:
+            copies = {
+                "cases": cases_path,
+                "manifest": manifest_path,
+                "study_plan": study_plan_path,
+                "reviewer_one": first_path,
+                "reviewer_two": second_path,
+            }
+            if "resolutions" in private_sources:
+                copies["resolutions"] = resolutions_path
+            for name, destination in copies.items():
+                destination.write_bytes(private_sources[name].read_bytes())
+                destination.chmod(0o600)
+        else:
+            _write_jsonl(cases_path, cases)
+            _write_jsonl(first_path, reviewer_one)
+            _write_jsonl(second_path, reviewer_two)
+            manifest = seal_forward_cases(
+                cases_path,
+                dataset_id="public-model-forward-calibration",
+                version="v1",
+                provenance="reverse_bootstrap_calibration",
+            )
+            manifest_path.write_text(
+                json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+                encoding="utf-8",
+            )
         observations_by_key = {}
         failures_by_key = {}
         resumed_from_checkpoints = 0
@@ -956,6 +1306,18 @@ def run_public_model_evaluation(
                 "reviewer_one": {"path": str(first_path), "sha256": _file_digest(first_path)},
                 "reviewer_two": {"path": str(second_path), "sha256": _file_digest(second_path)},
                 "manifest": {"path": str(manifest_path), "sha256": _file_digest(manifest_path)},
+                **({
+                    "study_plan": {
+                        "path": str(study_plan_path),
+                        "sha256": _file_digest(study_plan_path),
+                    },
+                } if private_mode else {}),
+                **({
+                    "resolutions": {
+                        "path": str(resolutions_path),
+                        "sha256": _file_digest(resolutions_path),
+                    },
+                } if private_mode and resolutions_path.is_file() else {}),
             },
             "checkpoint_dir": str(checkpoint_dir),
         }
@@ -990,7 +1352,14 @@ def run_public_model_evaluation(
             if key in observations_by_key:
                 continue
             prompt, _ = _case_prompt(case)
-            reply = adapter.decide(user_prompt=prompt)
+            reply = adapter.decide(
+                user_prompt=prompt,
+                decision_validator=lambda decision, selected_case=case: (
+                    validate_forward_model_decision_against_catalog(
+                        case=selected_case, decision=decision,
+                    )
+                ),
+            )
             destination = proposal_root / case.case_id / f"r{repetition}"
             destination.mkdir(parents=True, exist_ok=True)
             (destination / "untrusted-model-output.json").write_text(
@@ -1030,7 +1399,7 @@ def run_public_model_evaluation(
                 failure = {
                     "case_id": case.case_id,
                     "repetition": str(repetition),
-                    "stage": "model_protocol",
+                    "stage": reply.error_stage or "model_protocol",
                     "error": error[:500],
                 }
                 persist_checkpoint(
@@ -1042,7 +1411,7 @@ def run_public_model_evaluation(
                     "total": len(cases) * repetitions,
                     "case_id": case.case_id,
                     "repetition": repetition,
-                    "state": "protocol_error",
+                    "state": reply.error_stage or "protocol_error",
                 }, ensure_ascii=False), flush=True)
                 continue
             decision = reply.decision
@@ -1162,6 +1531,10 @@ def run_public_model_evaluation(
     _write_jsonl(observations_path, observations)
     evaluator = qualify_forward_files(
         cases_path, manifest_path, first_path, second_path, observations_path,
+        study_plan_path=study_plan_path if private_mode else None,
+        resolutions_path=(
+            resolutions_path if private_mode and resolutions_path.is_file() else None
+        ),
     )
     evaluator_path.write_text(
         json.dumps(evaluator, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -1170,8 +1543,11 @@ def run_public_model_evaluation(
     report: dict[str, Any] = {
         "schema": MODEL_RUN_SCHEMA,
         "generatedAt": utc_now(),
-        "status": "public_calibration_only_not_qualified",
-        "qualified": False,
+        "status": (
+            evaluator["status"] if private_mode
+            else "public_calibration_only_not_qualified"
+        ),
+        "qualified": bool(evaluator["qualified"] if private_mode else False),
         "model": model,
         "run_id": run_id,
         "run_fingerprint": run_fingerprint,
@@ -1184,6 +1560,7 @@ def run_public_model_evaluation(
         "metrics": evaluator["metrics"],
         "slices": evaluator["slices"],
         "gate_checks": evaluator["gate_checks"],
+        "qualification_requirements": evaluator["qualification_requirements"],
         "latency": evaluator["latency"],
         "efficiency": evaluator["efficiency"],
         "failed_case_digests": evaluator["failed_case_digests"],
@@ -1192,6 +1569,9 @@ def run_public_model_evaluation(
         ).items())),
         "model_protocol_failures": sum(
             item["stage"] == "model_protocol" for item in failures
+        ),
+        "model_transport_failures": sum(
+            item["stage"] == "model_transport" for item in failures
         ),
         "runtime_materialization_failures": sum(
             item["stage"] == "runtime_materialization" for item in failures
@@ -1202,15 +1582,24 @@ def run_public_model_evaluation(
             "cases": str(cases_path),
             "observations": str(observations_path),
             "manifest": str(manifest_path),
+            **({"study_plan": str(study_plan_path)} if private_mode else {}),
+            **({"resolutions": str(resolutions_path)}
+               if private_mode and resolutions_path.is_file() else {}),
             "evaluator_report": str(evaluator_path),
             "proposals": str(proposal_root),
             "active_run": str(active_state_path),
             "checkpoints": str(checkpoint_dir),
         },
         "claimBoundary": (
-            "This is a real qwen model run over a public reverse-bootstrap calibration "
-            "matrix. It measures this fixed artifact/protocol path but is not independent "
-            "model qualification or a production success probability."
+            (
+                "This report qualifies only the sealed private data set, exact model "
+                "artifact, authoring protocol, Catalog, evaluator and Runtime versions. "
+                "It is not a production success probability."
+            ) if private_mode else (
+                "This is a real qwen model run over a public reverse-bootstrap calibration "
+                "matrix. It measures this fixed artifact/protocol path but is not independent "
+                "model qualification or a production success probability."
+            )
         ),
     }
     report["reportDigest"] = sha256_json(report)
@@ -1249,9 +1638,17 @@ def rescore_public_model_evaluation(
     missing = [name for name, path in paths.items() if not path.is_file()]
     if missing:
         raise ValueError("model rescore artifacts are incomplete: " + ", ".join(missing))
+    manifest = json.loads(paths["manifest"].read_text(encoding="utf-8"))
+    private_mode = manifest.get("apiVersion") == STUDY_MANIFEST_SCHEMA
+    study_plan = root / "study-plan.json"
+    resolutions = root / "resolutions.jsonl"
+    if private_mode and not study_plan.is_file():
+        raise ValueError("private model rescore is missing study-plan.json")
     evaluator = qualify_forward_files(
         paths["cases"], paths["manifest"], paths["reviewer_one"],
         paths["reviewer_two"], paths["observations"],
+        study_plan_path=study_plan if private_mode else None,
+        resolutions_path=(resolutions if private_mode and resolutions.is_file() else None),
     )
     paths["evaluator"].write_text(
         json.dumps(evaluator, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -1262,9 +1659,14 @@ def rescore_public_model_evaluation(
         raise ValueError("model run report schema is invalid")
     for key in (
         "metrics", "slices", "gate_checks", "latency", "efficiency",
-        "failed_case_digests",
+        "failed_case_digests", "qualification_requirements", "dataset",
     ):
         report[key] = evaluator[key]
+    report["status"] = (
+        evaluator["status"] if private_mode
+        else "public_calibration_only_not_qualified"
+    )
+    report["qualified"] = bool(evaluator["qualified"] if private_mode else False)
     report["evaluator_report_digest"] = evaluator["reportDigest"]
     report["rescoredAt"] = utc_now()
     report["rescoreMode"] = (
@@ -1303,6 +1705,11 @@ def reassess_public_model_evaluation(
     """
 
     root = Path(output_root).expanduser().resolve()
+    if (root / "study-plan.json").is_file():
+        raise ValueError(
+            "public Runtime reassessment cannot consume private study material; "
+            "use deterministic private rescore with its bound adjudication"
+        )
     paths = {
         "cases": root / "cases.jsonl",
         "labels": root / "reverse-reviewer-a.jsonl",

@@ -180,8 +180,8 @@ L0 v2 在既有执行合同之上增加 authoring/compiler 层：
 1. `load_skill_source()` 使用统一 `skills.skill_format` 解析标准 `SKILL.md`；
 2. `CapabilityCatalogManifest` 固定 Provider/version、capability role、profile 和输入输出 Schema；
 3. `build_l05_spec()` 生成严格 `StructuredNaturalLanguageSkill`，以自然语言 YAML 固定参数、约束、六阶段 workflow、Capability 选项、风险、停止条件、结果和来源 hash；
-4. `extract_l1_semantic_intents()` 只解析显式 `semantic-intents/v1` YAML 标记块；缺少或非法时不得从 prose 猜测，L0.5 v2 保留 capability-scoped `semanticIntents`；`promotion_prompt()` 输出包含 L1、L0.5、Catalog、L0 Schema 和禁止猜测规则的有界 JSON packet；
-5. `assess_promotion()` 检查 L0.5 不得偏离 L1，且每个 compiled atomic 的 effect capability、intent kind、targetFields、desiredState 与 L0.5 精确一致，再把 source/catalog/L0.5 hash 注入候选 labels 并严格编译；
+4. `extract_l1_semantic_intents()` 只解析显式 `semantic-intents/v1` YAML 标记块；缺少或非法时不得从 prose 猜测，L0.5 v3 保留 capability-scoped `semanticIntents`；`promotion_prompt()` 输出包含 L1、L0.5、Catalog、L0 Schema 和禁止猜测规则的有界 JSON packet；
+5. `assess_promotion()` 检查 L0.5 不得偏离 L1、compiled atomic 必须包含 Catalog v3 每个 phase 的最低证明谓词，且 effect capability、intent kind、targetFields、desiredState 与 L0.5 精确一致，再把 source/catalog/L0.5 hash 注入候选 labels 并严格编译；
 6. `package_promotion()` 保存 Capability Catalog、编号 L1/L0.5/L0 文件及逐级 `previousSha256` 的 `trajectory.json`；
 7. `review_promotion()` 重算 proposal、所有文件、阶段顺序和 trajectory hash，最多写入一个 approve/reject 记录；
 8. 所有报告固定 `executionEligible=false`、`autoActivated=false`，不存在 Runtime loader 副作用。
@@ -691,6 +691,14 @@ Adapter report 的 scope 固定为 `adapter_hook_to_worker`。它证明 Hook 提
 - `evaluation/cockpit.py` 在导出前复核快照摘要，用 JSON 转义、DOM `textContent` 和 CSP 生成 self-contained 页面；无 fetch/XHR、表单、审批、激活或执行接口。
 - `data/convergence_baseline.json` 是源码化脱敏快照，使新 clone 无需重跑数小时模型评测即可查看现状；原始报告可生成新的非权威快照。
 
+### 31. P2.5-B 私有正向资格实现
+
+`network_runtime/l0/forward_qualification.py` 定义 Study Plan v1、Manifest v2、Reviewer Label、Resolution、Adjudication 与 Report。Plan digest 绑定模型 artifact、authoring protocol、Catalog snapshot、evaluator fingerprint、重复次数和互斥角色；v2 seal 将 Case digest 与 Plan 交叉绑定。`build_forward_review_packet()` 使用 manifest+reviewer+case 的摘要排序生成不同盲审序列且不放入 gold/model output；`build_forward_resolution_packet()` 只输出分歧，Resolution 校验 adjudicator 角色及两份原标签 digest。`qualify_forward_files()` 只有在预注册、run binding、角色分离、覆盖和全部指标门禁通过时返回 qualified；v1 只读兼容。
+
+`network_runtime/l0/forward_model_runner.py` 的私有入口先验证 v2 manifest、完整 reviewer/仲裁、预注册 model/repetition，再解析本地模型制品和当前 protocol/Catalog/evaluator digest；任一漂移在推理前失败。输入以 owner-only 副本进入私有 output root，checkpoint 绑定全部输入摘要和 run fingerprint；恢复只能复用同一配置。模型只接收 Case Prompt 和受信 Catalog，不接收 reviewer label/resolution；评分在完整 Observation 形成后执行。
+
+`OllamaForwardAdapter.decide()` 捕获 `httpx.RequestError` 并返回无 proposal 的 `ModelReply(error_stage="model_transport")`；已发起的调用仍计入 `model_calls`，不消耗语义 repair。主循环将其写入 untrusted-output、error Observation、failure detail 与原子 checkpoint 后继续下一 case；报告单列 `model_transport_failures`，控制台也显示同一 stage。`--resume` 只跳过已有 checkpoint，不能静默重试或抹除 transport 失败。
+
 ---
 
 ## English
@@ -781,7 +789,7 @@ L0 v2 is the production semantic authority as well as the authoring/compiler lay
 
 `network_runtime.l0.production` compiles all 21 built-in reviewed mutation capabilities. `network_runtime.l0.runtime_loader` binds each exact `(l0_id, version)` to an existing qualified ToolContract, verifier, optional compensator, and profile, then validates parameters, desired state, preflight, and adapter parity. `network_runtime.l0.expressions` permits path reads from approved roots only; calls/operators and unknown resolvers fail closed. `NetworkRuntime.prepare()` and execution-time revalidation both enforce the v2 contract, and effect dispatch sends only fields rendered by the v2 request template from approved arguments. The URL1 REST examples have no real Provider and remain outside the production Catalog.
 
-`network_runtime.l0.promotion` implements the offline L1 → L0 path as a three-stage trajectory. It parses the standard Skill, reads only an explicitly marked `semantic-intents/v1` YAML block for non-guessable intent, binds a versioned Capability Catalog, builds a strict but human-readable `StructuredNaturalLanguageSkill` v2, and includes L1 plus L0.5 in the bounded Agent prompt. Assessment requires exact effect capability, intent kind, target fields, and desired-state parity across L1, L0.5, and every compiled atomic before strict compilation. Packaging stores numbered L1/L0.5/L0 artifacts and a predecessor-linked `trajectory.json`; review recalculates every file, stage order, and trajectory hash before recording one decision. Every report remains non-executable and non-activated; no Runtime loader side effect exists.
+`network_runtime.l0.promotion` implements the offline L1 → L0 path as a three-stage trajectory. It parses the standard Skill, reads only an explicitly marked `semantic-intents/v1` YAML block for non-guessable intent, binds Capability Catalog v3, builds a strict but human-readable `StructuredNaturalLanguageSkill` v3, and includes L1 plus L0.5 in the bounded Agent prompt. Assessment requires every phase to contain its trusted minimum proof predicates plus exact effect capability, intent kind, target fields, and desired-state parity across L1, L0.5, and every compiled atomic before strict compilation. Packaging stores numbered L1/L0.5/L0 artifacts and a predecessor-linked `trajectory.json`; review recalculates every file, stage order, and trajectory hash before recording one decision. Every report remains non-executable and non-activated; no Runtime loader side effect exists.
 
 `network_runtime.l0.production_trajectory` builds source-controlled explanation archives for all 21 existing production L0 contracts. It reverse-bootstraps a standard L1 and L0.5 from the authoritative contract, derives a capability catalog containing only the roles/schemas used by that contract, and invokes the same `assess_promotion()`. Validation requires zero findings, equal semantic hashes after proposal-only labels are removed, an exact full contract hash after recompiling authoring, compiled JSON equality with the Runtime Catalog, and intact stage/predecessor hashes. Every report declares the reverse-bootstrap origin so it cannot be misrepresented as independent model inference.
 
@@ -1103,3 +1111,11 @@ The renderer embeds escaped JSON in a CSP-constrained self-contained page with n
 - `evaluation/convergence.py` accepts exact Runtime/L1 schemas, removes prompts and argument values, retains boolean case gates, and computes one first-failure layer. Inputs and output are digest-bound.
 - `evaluation/cockpit.py` revalidates the snapshot and generates a self-contained CSP page using escaped JSON and DOM text insertion, with no network, approval, activation, or execution surface.
 - `data/convergence_baseline.json` is the source-controlled redacted clone-time baseline; fresh raw reports generate a new non-authoritative snapshot.
+
+### 23. P2.5-B private forward-qualification implementation
+
+`network_runtime/l0/forward_qualification.py` defines Study Plan v1, Manifest v2, reviewer labels, digest-bound resolutions, adjudication, and aggregate reports. The plan binds the model artifact, authoring protocol, Catalog snapshot, evaluator fingerprint, repetitions, and disjoint roles; sealing cross-binds private cases. Reviewer packets use reviewer-specific digest ordering and contain no gold/model output. Resolution packets contain disagreements only, and every decision validates the assigned adjudicator plus both immutable source-label digests. Qualification additionally requires pre-registration, exact run binding, role separation, coverage, and every metric gate; v1 remains read-only diagnostic compatibility.
+
+The private path in `network_runtime/l0/forward_model_runner.py` validates the v2 manifest, reviewer/adjudication completion, planned model/repetitions, and current artifact/protocol/Catalog/evaluator digests before inference. Owner-only input copies and every per-case checkpoint are bound to the run fingerprint; resume rejects any input drift. The model receives cases and trusted Catalog material but never reviewer labels or resolutions. Truth is loaded only for aggregate scoring after observations complete.
+
+`OllamaForwardAdapter.decide()` converts `httpx.RequestError` into a proposal-free `ModelReply(error_stage="model_transport")`. The attempted call is counted but consumes no semantic-repair budget. The main loop persists untrusted output, an error Observation, failure detail, and an atomic checkpoint before continuing; the report and progress stream expose the transport stage separately. Resume skips that immutable checkpoint and never silently retries or erases the fault.

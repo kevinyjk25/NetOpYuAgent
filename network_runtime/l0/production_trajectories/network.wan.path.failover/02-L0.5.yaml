@@ -97,6 +97,6 @@ outcomes:
   rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
     and separate verification are required.
 sourceSkillSha256: sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c
-capabilityCatalogSha256: sha256:fd3f5b06a2402b44b7ae0fd7628c2bdf35121f629f5a92ab682987ad92cb4aff
+capabilityCatalogSha256: sha256:118882805534957a1e250c0bafa2b0cdd2084f297fe0b3aa8c588a9fadf25fe3
 previousStageSha256: sha256:5d6bd68adf7eccbe0e945ac7c8acc6b41317831ce861ebc8cde516ab2c36aa0c
 unresolvedQuestions: []

@@ -36,7 +36,7 @@ L1 保留原始自然语言业务经验，并用一个显式标记的小型 `sem
 ### 2. 输入与三阶段产物
 
 1. **L1 Agent Skill**：标准 `SKILL.md`，保留自然语言业务流程，明确参数、工具、风险和停止条件。
-2. **Capability Catalog v2**：由 Provider/API 所有者维护，声明 capability id、observation/effect/compensation 角色、tool、profile、输入和输出 Schema；每个 Observation 还必须声明 `observationPhases`。
+2. **Capability Catalog v3**：由 Provider/API 所有者维护，声明 capability id、observation/effect/compensation 角色、tool、profile、输入和输出 Schema；每个 Observation 还必须声明 `observationPhases` 及各阶段不可弱化的最低 `phasePredicates`。
 3. **L0.5 Structured Skill v3**：可由工具从 L1 + Catalog 生成，也可由人补充；保持自然语言可读，同时用严格 Schema 固定范围。`semanticIntents` 必须逐字段复制 L1 锚点并按 effect capability 绑定；`preflightObservations`、`successVerificationObservations` 和 `compensationVerificationObservations` 分别限定三个确定阶段。缺少锚点、多个 Effect 无法唯一选择、缺少必要 Observer 或 Compensation 时写入 `unresolvedQuestions` 并阻断 L0。
 4. **L0 candidate**：由人或 Agent 依据 L0.5 生成的 Atomic、Derived 或 Composite v2 YAML；在验证前一律不可信。
 
@@ -168,35 +168,52 @@ scripts/netopyu-l0 promote-assess ... | \
 #### 4.2 Phase-typed Observation 门禁
 
 `role: observation` 只说明 Capability 是读取能力，不能说明它适合前置检查、
-成功验证还是补偿验证。Catalog v2 将这三个语义作为 Provider owner 审查的
-显式类型：
+成功验证还是补偿验证。Catalog v3 将阶段和最低证明谓词都作为 Provider owner
+审查的显式合同：
 
 ```yaml
-apiVersion: netopyu.io/capability-catalog/v2
+apiVersion: netopyu.io/capability-catalog/v3
 capabilities:
   - id: network.resource.get
     role: observation
     observationPhases: [preflight]
+    phasePredicates:
+      preflight: [{field: facts, operator: exists}]
   - id: network.resource.verify
     role: observation
     observationPhases: [success_verification]
+    phasePredicates:
+      success_verification: [{field: passed, operator: equals, expected: true}]
   - id: network.resource.rollback-verify
     role: observation
     observationPhases: [compensation_verification]
+    phasePredicates:
+      compensation_verification: [{field: restored, operator: equals, expected: true}]
 ```
 
 模型收到的可信 Catalog Packet 包含同一 phase 元数据；候选物化边界先拒绝
-错误选择，Promotion 再按 L0 实际位置独立复核。未声明 phase 返回
+错误选择，Promotion 再按 L0 实际位置独立复核。候选可以在 Catalog 已声明
+输出字段上增加更强谓词，但必须包含全部 `phasePredicates`；仅检查 `passed`
+字段存在不能替代 `passed == true`。未声明 phase 返回
 `CAPABILITY_PHASE_UNDECLARED`，选错 phase 返回
-`CAPABILITY_PHASE_MISMATCH`；L0.5 允许列表或 workflow 与 L0 不一致也会以
+`CAPABILITY_PHASE_MISMATCH`，遗漏/改写最低证明返回
+`CAPABILITY_PHASE_PREDICATE_MISMATCH`；L0.5 允许列表或 workflow 与 L0 不一致也会以
 `L05_*_PHASE_*` finding 失败关闭。旧 Catalog v1 与 L0.5 v2 仍可被解析以便
-诊断，但不能 Promotion；应重新运行 `promote-l05` 并由 Provider owner 审查
-三个 phase，而不是由模型猜测。
+诊断；Catalog v2 虽有 phase 类型但没有受信证明，因此同样不能通过当前
+Promotion。应重新运行 `promote-l05` 并由 Provider owner 审查三个 phase 及其
+最低证明，而不是由模型猜测。
 
 对已保存的 210 条 9B Observation 做当前 Runtime 重放时没有调用模型：
 203/203 条历史全语义 exact-ready 候选保持可审，唯一一条选错 preflight
 Capability 的历史 false-ready 被新增阻断，exact-ready 回归为 0。该重放只
 证明这次确定性门禁修复已知缺口，不是新的模型准确率证据。
+
+最终 v7 又完整运行同一公开 210 条矩阵：208 个成功返回的 proposal 全部达到
+全语义 exact 和当前 Runtime-ready，0 个 changed/blocked；另两条是本机 Ollama
+`model_transport` 超时，没有产生语义候选。Runner 现会逐例 checkpoint 这类
+transport 故障并继续，而不会误报为协议语义失败或退出整批。总体 99.05% 和
+p50/p95 31.528/79.384 秒必须保留两个超时，且仍只是反向公开单次回归，不是
+独立正向资格或生产成功概率。
 
 ### 5. 仍需人工/实验认证
 
@@ -210,7 +227,7 @@ Capability 的历史 false-ready 被新增阻断，exact-ready 回归为 0。该
 
 ## English
 
-The Promotion Pipeline preserves three explicit stages: the original natural-language `L1 SKILL.md`, a schema-valid but human-readable `L0.5 StructuredNaturalLanguageSkill` v3, and strict L0 authoring/compiled contracts. L1 keeps prose natural but carries one visibly marked, compact `semantic-intents/v1` YAML anchor for semantics that must never be guessed. L0.5 records an exact capability-scoped copy alongside parameters, constraints, workflow phases, risk, stop conditions, outcomes, and trusted capability options. Capability Catalog v2 assigns each Observation to `preflight`, `success_verification`, and/or `compensation_verification`; the materializer and Promotion both fail closed on an undeclared or mismatched phase. Legacy Catalog v1 and L0.5 v2 can be parsed for migration diagnostics but cannot be promoted. Missing or drifted intent, ambiguous effects, or missing observation/compensation semantics remain unresolved and block promotion.
+The Promotion Pipeline preserves three explicit stages: the original natural-language `L1 SKILL.md`, a schema-valid but human-readable `L0.5 StructuredNaturalLanguageSkill` v3, and strict L0 authoring/compiled contracts. L1 keeps prose natural but carries one visibly marked, compact `semantic-intents/v1` YAML anchor for semantics that must never be guessed. L0.5 records an exact capability-scoped copy alongside parameters, constraints, workflow phases, risk, stop conditions, outcomes, and trusted capability options. Capability Catalog v3 assigns each Observation to `preflight`, `success_verification`, and/or `compensation_verification` and binds minimum `phasePredicates` for each phase. Candidates may add stronger predicates over declared outputs but cannot omit or alter the minimum proof. Catalog v1/v2 and L0.5 v2 remain readable for migration diagnostics but cannot pass current Promotion. Missing or drifted intent, ambiguous effects, or missing observation/compensation semantics remain unresolved and block promotion.
 
 An immutable package stores the capability catalog, `01-L1-SKILL.md`, `02-L0.5.yaml`, `03-L0-authoring.yaml`, `04-L0-compiled.json`, and a `trajectory.json` hash chain. Deterministic checks prevent L0.5 from drifting from L1 or L0 from widening L0.5. Any file or link tampering blocks review. The Agent accelerates semantic extraction but remains an untrusted candidate producer.
 

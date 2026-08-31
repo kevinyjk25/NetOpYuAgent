@@ -24,11 +24,11 @@ DEFAULT_RUNTIME_REPORT = PROJECT_ROOT / "artifacts/runtime-ab/runtime-ab.json"
 DEFAULT_FORWARD_REPORT = PROJECT_ROOT / "artifacts/promotion-forward-calibration/report.json"
 DEFAULT_FORWARD_MODEL_REPORT = (
     PROJECT_ROOT
-    / "artifacts/promotion-forward-model/qwen3.5-9b-public-210/report.json"
+    / "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json"
 )
 DEFAULT_RUNTIME_REASSESSMENT_REPORT = (
     PROJECT_ROOT
-    / "artifacts/promotion-forward-model/qwen3.5-9b-public-210"
+    / "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210"
     / "current-runtime-reassessment/report.json"
 )
 DEFAULT_JSON_REPORT = PROJECT_ROOT / "artifacts/core-capability-evaluation/current.json"
@@ -422,6 +422,16 @@ def render_core_capability_evaluation_markdown(report: dict[str, Any]) -> str:
     reverse = a["reverseBootstrap"]
     forward = a["forwardQualificationProtocol"]
     model_run = a["realModelForwardRun"]
+    model_failure_counts = model_run.get("failureCounts") or {}
+    model_transport_failures = int(
+        model_failure_counts.get("model_transport") or 0
+    )
+    returned_proposals = max(
+        0,
+        model_run["caseCount"]
+        - model_transport_failures
+        - int(model_failure_counts.get("model_protocol") or 0),
+    )
     reassessment = a["currentRuntimeReassessment"]
     reassessment_counts = reassessment.get("counts") or {}
     challenge_rows = _forward_challenge_rows(model_run)
@@ -501,6 +511,8 @@ Service / Network Provider + 独立 Verifier
 | 安全合同 exact match | {_percent(model_run['metrics']['safety_contract_exact_match'] * 100)} |
 | Runtime ready_for_review | {_percent(model_run['metrics']['runtime_promotion_ready_rate'] * 100)} |
 | 全语义 exact match / safety escape | {_percent(model_run['metrics']['semantic_contract_exact_match'] * 100)} / {_percent(model_run['metrics']['safety_escape_rate'] * 100)} |
+| 成功返回 proposal 的 exact / Runtime ready | {reassessment_counts.get('exact_ready_preserved', 0)}/{returned_proposals} / {reassessment_counts.get('current_ready', 0)}/{returned_proposals} |
+| 模型协议 / transport / Promotion 失败 | {int(model_failure_counts.get('model_protocol') or 0)} / {model_transport_failures} / {int(model_failure_counts.get('promotion_assessment') or 0)} |
 | 本机 p50 / p95 | {model_run['latency']['p50'] / 1000:.3f} / {model_run['latency']['p95'] / 1000:.3f} s |
 | 平均模型调用 / 修复 | {model_run['efficiency']['mean_model_calls']:.3f} / {model_run['efficiency']['mean_repair_attempts']:.3f} |
 | 受限 enum 规范化 | {model_run['efficiency'].get('syntax_normalized_observations', 0)} 条 / {model_run['efficiency'].get('syntax_normalization_events', 0)} 个值 |
@@ -509,7 +521,7 @@ Service / Network Provider + 独立 Verifier
 |---|---:|---:|---:|
 {challenge_rows}
 
-这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族、每族 10 个中英文/追踪/安全/Schema/对抗包装上的真实模型调用，不是 evaluator self-check。L1/L0.5 v3 以 capability-scoped、逐字段可比的语义锚点保存 intent，并把 preflight、success-verification、compensation-verification 显式分型；本轮历史 intent exact 为 {_percent(model_run['metrics']['intent_exact_match'] * 100)}。模型原始协议与受限规范化后协议被分别计量：规范化只接受参数 enum 内精确的一键 `value` primitive 包装，并记录路径和前后摘要，不放宽 L0 核心 Schema。历史结果仍不是资格结论：数据由受审 L0 反向生成且仅一次重复。
+这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族、每族 10 个中英文/追踪/安全/Schema/对抗包装上的最终 v7 真实模型调用，不是 evaluator self-check。Catalog v3 将 phase-scoped 最低证明收回受信合同；模型原始协议与受限规范化后协议被分别计量，规范化不放宽 L0 核心 Schema。`model_transport` 不触发语义 repair 或 proposal 物化，仍保留在总体分母和时延中。该结果仍不是资格结论：数据由受审 L0 反向生成且仅一次重复。
 
 #### 2.4 Phase-typed Capability 当前 Runtime 重放
 
@@ -517,12 +529,13 @@ Service / Network Provider + 独立 Verifier
 |---|---:|
 | 重放 Observation / 模型调用 | {reassessment.get('observations', 0)} / {reassessment.get('modelCalls', 0)} |
 | 当前 ready / fail-closed | {reassessment_counts.get('current_ready', 0)} / {reassessment_counts.get('current_fail_closed', 0)} |
+| 无 proposal、重放不适用 | {reassessment_counts.get('not_applicable', 0)} |
 | 历史 exact-ready 保留 | {reassessment_counts.get('exact_ready_preserved', 0)}/{reassessment_counts.get('historical_exact_ready', 0)} |
 | 历史错误可审候选新增阻断 | {reassessment_counts.get('false_ready_closed', 0)} |
 | exact-ready 回归 | {reassessment_counts.get('exact_ready_regressed', 0)} |
 | 结论 | `{reassessment.get('status', 'not_generated')}` |
 
-该重放没有调用模型，也没有改写 {reassessment.get('observations', 0)} 条历史 Observation；它只把已保存的规范化语义 proposal 送入当前 Catalog v2/L0.5 v3 Runtime。结果新增阻断 {reassessment_counts.get('false_ready_closed', 0)} 条历史错误可审候选，同时保留 {reassessment_counts.get('exact_ready_preserved', 0)}/{reassessment_counts.get('historical_exact_ready', 0)} 条历史全语义 exact 且可审候选。它只证明确定性门禁对已知 false-ready 的增量，不证明模型准确率提高。
+该重放没有调用模型，也没有改写 {reassessment.get('observations', 0)} 条 Observation；它只把已保存的规范化语义 proposal 送入当前 Catalog v3/L0.5 v3 Runtime。它保留 {reassessment_counts.get('exact_ready_preserved', 0)}/{reassessment_counts.get('historical_exact_ready', 0)} 条全语义 exact 且可审候选；transport 失败因没有 proposal 而不适用。它只证明确定性门禁对已保存候选的稳定性，不证明模型准确率或生产概率。
 
 #### 2.5 当前性能与资格缺口
 
@@ -576,11 +589,11 @@ scripts/netopyu-l0 forward-eval-calibrate
 
 # 用本地 9B 跑 21 能力族 × 10 包装变体；支持 --resume
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
 
 # 不调用模型，用当前 Runtime 重放历史 proposal
 scripts/netopyu-l0 forward-eval-reassess-runtime \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
 
 # 再生成本双核心报告
 scripts/netopyu-l0 core-eval-report
@@ -599,7 +612,7 @@ scripts/netopyu-l0 core-eval-report
 
 Capability A compiles an open-ended L1 Skill through a reviewable L0.5 representation into an enforceable L0 contract. Capability B executes an activated L0 contract as a deterministic transaction with approval binding, revalidation, independent verification, recovery, compensation and tamper-evident audit.
 
-For Capability A, the fixed URL1 sample passes its semantic gate with {metrics['preserved']}/{metrics['totalRequirements']} requirements preserved, {metrics['non_machine_verifiable']} explicitly non-machine-verifiable, and {metrics['blockingRequirements']} blocking. The real qwen3.5:9b robustness run covered {model_run['caseCount']} public reverse-bootstrap cases across {model_run['familyCount']} families and ten bilingual/trace/safety/schema/adversarial wrappers per family: raw/normalized-boundary protocol completion was {_percent(model_run['metrics'].get('raw_protocol_completion_rate', model_run['metrics']['protocol_completion_rate']) * 100)}/{_percent(model_run['metrics']['protocol_completion_rate'] * 100)}, full-semantic exact match {_percent(model_run['metrics']['semantic_contract_exact_match'] * 100)}, historical Runtime promotion readiness {_percent(model_run['metrics']['runtime_promotion_ready_rate'] * 100)}, and safety escape {_percent(model_run['metrics']['safety_escape_rate'] * 100)}. A no-model-call replay through the current phase-typed Runtime preserved {reassessment_counts.get('exact_ready_preserved', 0)}/{reassessment_counts.get('historical_exact_ready', 0)} historically exact-ready proposals and fail-closed {reassessment_counts.get('false_ready_closed', 0)} known false-ready phase selection. The bounded normalizer preserves path/digest evidence and does not relax the L0 schema. p50/p95 were {model_run['latency']['p50'] / 1000:.3f}/{model_run['latency']['p95'] / 1000:.3f} seconds. This remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
+For Capability A, the fixed URL1 sample passes its semantic gate with {metrics['preserved']}/{metrics['totalRequirements']} requirements preserved, {metrics['non_machine_verifiable']} explicitly non-machine-verifiable, and {metrics['blockingRequirements']} blocking. The final-v7 qwen3.5:9b run covered {model_run['caseCount']} public reverse-bootstrap cases across {model_run['familyCount']} families and ten bilingual/trace/safety/schema/adversarial wrappers per family. Raw/normalized-boundary protocol completion was {_percent(model_run['metrics'].get('raw_protocol_completion_rate', model_run['metrics']['protocol_completion_rate']) * 100)}/{_percent(model_run['metrics']['protocol_completion_rate'] * 100)}, full-semantic/Runtime readiness was {_percent(model_run['metrics']['semantic_contract_exact_match'] * 100)}/{_percent(model_run['metrics']['runtime_promotion_ready_rate'] * 100)}, and safety escape was {_percent(model_run['metrics']['safety_escape_rate'] * 100)}. All {returned_proposals} returned proposals remained exact/current-Runtime-ready; {model_transport_failures} local transport faults remained in the denominator and p50/p95 were {model_run['latency']['p50'] / 1000:.3f}/{model_run['latency']['p95'] / 1000:.3f} seconds. This closes the known public semantic regression but remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
 
 For Capability B, the Core-72 campaign preserves 8/8 valid completions and raises fixed fault/risk Oracle coverage from {comparison['control_effectiveness']['dshOnly']['passed']}/{comparison['control_effectiveness']['dshOnly']['total']} ({comparison['control_effectiveness']['dshOnly']['rate']:.1f}%) to {comparison['control_effectiveness']['dshPlusRuntime']['passed']}/{comparison['control_effectiveness']['dshPlusRuntime']['total']} ({comparison['control_effectiveness']['dshPlusRuntime']['rate']:.1f}%). Runtime p50/p95 are {runtime_latency['p50_ms']:.3f}/{runtime_latency['p95_ms']:.3f} ms in the local mock campaign; human approval wait is excluded.
 
@@ -611,9 +624,9 @@ The project therefore has concrete evidence for semantic traceability gates and 
 scripts/netopyu-dsh compare-runtime --iterations 50
 scripts/netopyu-l0 forward-eval-calibrate
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
 scripts/netopyu-l0 forward-eval-reassess-runtime \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
 scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```

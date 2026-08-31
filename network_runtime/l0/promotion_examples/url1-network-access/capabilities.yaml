@@ -1,4 +1,4 @@
-apiVersion: netopyu.io/capability-catalog/v2
+apiVersion: netopyu.io/capability-catalog/v3
 provider: example.url1-access-api
 version: 1.0.0
 
@@ -19,6 +19,16 @@ capabilities:
   - id: rest.network-access.get
     role: observation
     observationPhases: [preflight, success_verification, compensation_verification]
+    phasePredicates:
+      preflight:
+        - {field: active, operator: equals, expected: true}
+        - {field: revision, operator: exists}
+      success_verification:
+        - {field: allowed, operator: equals, expected: true}
+        - {field: vlan_id, operator: equals, expected: "${arguments.vlan_id}"}
+        - {field: revision, operator: greater_than, expected: "${preflight.access-state.revision}"}
+      compensation_verification:
+        - {field: state, operator: exact_snapshot, expected: "${preflight.access-state.snapshot}"}
     profiles: [lan]
     inputs:
       user_id: {type: string, required: true, minLength: 1, maxLength: 64}

@@ -111,25 +111,29 @@ flowchart TB
 
 ### 4. 定量结果
 
-#### L1 → L0.5 → L0 真实 9B 包装鲁棒性基线
+#### L1 → L0.5 → L0 最终 v7 真实 9B 公开基线
 
 同一 `qwen3.5:9b` 制品对 21 个 L0 能力族各运行 10 个中英文、追踪、安全、Schema 和对抗包装用例。模型只能输出 proposal，Runtime 独立生成 L0.5/L0 并执行 Promotion：
 
 | 指标 | 结果 |
 |---|---:|
 | 用例 / 能力族 / 包装变体 | 210 / 21 / 10 |
-| 模型原始协议 / 受限规范化后协议 | 76.19% / 99.52% |
-| Capability exact | 99.05% |
-| 参数/谓词 / 安全合同 exact | 96.67% / 99.52% |
-| 历史 Runtime `ready_for_review` | 97.14%（204/210） |
-| Intent / 全语义 exact | 99.52% / 96.67% |
+| 模型原始协议 / 受限规范化后协议 | 75.24% / 99.05% |
+| Capability / 参数+谓词 exact | 99.05% / 99.05% |
+| Safety / Intent / 全语义 exact | 99.05% / 99.05% / 99.05% |
+| Runtime `ready_for_review` | 99.05%（208/210；成功返回候选 208/208） |
 | 最终 safety escape | 0% |
 | 受限 enum 规范化 | 50 条 / 150 个值 |
-| 本机 p50 / p95 | 27.934 / 38.557 s |
+| 模型协议 / Promotion / 物化失败 | 0 / 0 / 0 |
+| 本地 Ollama transport 超时 | 2（均为 180 s） |
+| 模型 repair | 0 |
+| 本机 p50 / p95 | 31.528 / 79.384 s |
 
-这不是模型资格结论：公开集由受审 L0 反向生成且只运行一次。5 个 failover 候选因未知 preflight 输出字段被门禁阻断，1 个 service.restart 候选因合同自相矛盾在修复后仍协议失败；另有 1 个历史 `ready_for_review` 候选选择了错误的 preflight phase Capability。
+Capability Catalog v3 在 21/21 生产轨迹中把每个 Observation phase 的最低证明谓词纳入受信合同；候选可以增加更强约束，但不能删除或改写最低证明。authoring protocol v7 自动生成逐案 Catalog guide，并在物化前校验 capability/phase/output/proof。相较历史 210 条运行，参数/谓词与全语义 exact 从 96.67% 提升到 99.05%，Runtime-ready 从 97.14% 提升到 99.05%；208 个实际返回候选全部 exact 且通过当前 Runtime 重放，0 个 changed/blocked。代价是输入 token 增加，且本机 Ollama 运行中出现进程退化：p95 从 38.557 秒升至 79.384 秒并产生 2 次 transport 超时。评测器现会把传输失败逐例 checkpoint 为 `model_transport` 后继续，避免误报为语义失败或让整批退出。
 
-Capability Catalog v2 与 L0.5 v3 已完成 phase-typed 收口。对上述 210 条历史 Observation 做 0 次模型调用的当前 Runtime 重放后：209 条 proposal 中 203 条可审、6 条失败关闭；203/203 条历史全语义 exact-ready 全部保留，错误 phase 的 1 条 false-ready 被新增阻断，exact-ready 回归为 0。该数据只证明确定性门禁修复了已知 false-ready，不表示模型准确率提高。受限 enum 兼容只处理精确单键 primitive 包装并逐路径留证，不放宽 L0 Schema。详细切片、失败归因和证据边界见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)与[正向资格协议](docs/promotion-forward-qualification.md)。
+这仍不是模型资格结论：公开集由受审 L0 反向生成、只运行一次，且两次服务超时说明本地可用性尚未达标。完整证据位于 [`artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json`](artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json)，详细边界见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)与[正向资格协议](docs/promotion-forward-qualification.md)。
+
+私有正向资格工作流现已可直接使用：预注册计划冻结模型/协议/Catalog/evaluator 与三次重复，case author、两名 reviewer、adjudicator 强制角色分离；盲审包不含 gold/model output，分歧 Resolution 同时绑定两份不可变原标签；私有 runner 支持逐 case checkpoint/resume。旧 v1 manifest 只可诊断，不能通过新资格门禁。项目没有自动生成“独立人工真值”，因此当前仍无私有资格结论。
 
 #### DSH only 与 DSH + Runtime
 
@@ -144,7 +148,7 @@ Core-72 固定相同 L1 决策、工具、参数、Provider 和故障，只测 R
 | 结果判定与恢复 | 0/12 | 12/12 |
 | 补偿与回滚 | 0/8 | 8/8 |
 
-最近三个不同 Runtime 指纹的本机趋势为 `stable`，Runtime p50/p95 中位数为 7.599/8.680 ms。人工审批等待不计入时延，该数据不是生产 SLO。完整 Oracle 与方法见[定量基线](docs/benchmarks/runtime-ab-baseline.md)。
+最近三个不同 Runtime 指纹的本机趋势为 `stable`，Runtime p50/p95 中位数为 7.704/8.681 ms；本轮实现指纹此前已记录，因此没有重复累计，当前 50 次本机复测为 6.996/7.993 ms。人工审批等待不计入时延，该数据不是生产 SLO。完整 Oracle 与方法见[定量基线](docs/benchmarks/runtime-ab-baseline.md)。
 
 #### L1 + Candidate Schema Compiler
 
@@ -172,7 +176,7 @@ P1.9-C0 已加入默认不启用的 Decision→Plan 绑定内核：PreparedPlan 
 
 P1.9-C1 已完成不启用流量的安全准备层：策略只能保持原 Harness route 或收窄/阻断，不能重路由或授权；readiness 门禁严格交叉绑定 Worker、Adapter、真实产品/部署和运维演练四类外部证据，最强结果也只是 `ready_for_review`。当前缺少真实 B2/产品证据，因此 canary 仍关闭。
 
-当前主门禁：420 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog 为 21/21。
+当前主门禁：430 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog v3 phase proof 为 21/21。
 
 ### 5. 典型场景
 
@@ -330,11 +334,11 @@ scripts/netopyu-l0 forward-eval-calibrate
 
 # 用本地 9B 跑完整公开矩阵；每条完成即写入事务式 checkpoint
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
 
 # 若模型评测被中断，以完全相同的参数恢复；证据指纹不一致会拒绝续跑
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210 --resume
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210 --resume
 
 # 刷新 Runtime A/B，再汇总双核心功能、性能、证据边界和发布门槛
 scripts/netopyu-dsh compare-runtime --iterations 50
@@ -535,11 +539,13 @@ On the same scope, `qwen3.6:27b` improved E2E/selection/argument F1 to 95.11%/96
 
 P1.9-B2 now provides two qualification levels. The shared-Worker runner scores protocol, selection, arguments, clarification, workflow, safety, repeatability, semantic parity, and p50/p95. The adapter runner executes the production DSH JavaScript `agent/pre-step` and Hermes Python `pre_llm_call` hooks through a temporary owner-only Worker and compares prompt/catalog/candidate/policy plus full Decision digests. Both are verified, but no real human-adjudicated baseline is stored and neither certifies DSH Web/Hermes CLI/UI or deployment identity.
 
+P2.5 private forward qualification now has a usable pre-registered workflow: the exact model artifact, protocol, Catalog, evaluator and repetition count are frozen before execution; author, two reviewers and adjudicator are disjoint; reviewer packets are independently shuffled and contain no gold/model outputs; any resolution binds both immutable reviewer-label digests. The final public v7 run completed all 210 cases: 208/210 exact and Runtime-ready, with the two remaining cases classified as local Ollama transport timeouts rather than semantic or Promotion failures. All 208 returned proposals remain exact-ready under a no-model-call current-Runtime replay. Local p50/p95 was 31.528/79.384 seconds, so functional closure improved while model-serving tail latency regressed. This is still reverse-bootstrap, single-run evidence—not qualification or a production probability.
+
 P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan schema v10 can bind a canary Decision, observed Harness route, request/compiled arguments, and L0 contract into one plan hash, while a Journal uniqueness constraint prevents one Decision from binding two plans. DSH/Hermes still accept only `off/shadow`; canary cannot start before real B2 evidence exists.
 
 P1.9-C1 adds a non-activating safety-readiness layer. Its policy can only preserve the original Harness route or narrow/block it; it cannot redirect or authorize. The evidence gate cross-binds Worker, Adapter, real product/deployment, and operations-drill attestations, and its strongest output is only `ready_for_review`. Canary remains disabled because real B2/product evidence is absent.
 
-The current gate passes 420 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and exact Catalog coverage.
+The current gate passes 430 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
 
 ### 5. Scenarios
 

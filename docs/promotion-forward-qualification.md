@@ -1,43 +1,48 @@
 # L1 → L0.5 → L0 正向资格协议 / Forward Qualification
 
-> 生成于 `2026-08-31T02:16:56.950805+00:00`。当前仓库数据是公开反向校准集，不是模型正向准确率证据。
+> 生成于 `2026-08-31T07:36:59.748626+00:00`。当前仓库数据是公开反向校准集，不是模型正向准确率证据。
 
 ## 中文
 
 ### 当前完成
 
-- 已建立独立 Case、双 Reviewer Label、模型 Observation、密封 Manifest、Adjudication 和聚合 Report 六类协议。
+- 已建立独立 Case、预注册 Study Plan、v2 密封 Manifest、双 Reviewer Label、摘要绑定 Resolution、模型 Observation、Adjudication 和聚合 Report 协议。
+- 已提供 reviewer 专属乱序盲审包、只含分歧的仲裁包，以及支持 checkpoint/resume 的私有 9B 三次运行入口；原始 reviewer 文件不需要也不允许因仲裁而改写。
 - 公开校准矩阵包含 **210 条**、**21 个能力族**、每族 **10 个**提示/语言/安全包装变体。
 - 校准来源是 21 个已受审 L0 合同反向生成的 L1/L0.5 轨迹，只用于验证评分器、语义投影和覆盖矩阵。
 - 报告禁止输出 Prompt 和 Label，只保留聚合指标与 case-id digest。
+- Catalog v3 为每个 Observation phase 声明受信最低 `phasePredicates`；候选可以附加更强约束，但不能删除或改写最低证明。
+- v7 authoring protocol 生成逐案 Catalog guide，并在物化前执行确定性 capability/phase/output/proof 校验；HTTP transport 故障单列 checkpoint 后继续。
 
-### 真实 qwen3.5:9b 公开包装鲁棒性基线
+### 最终 v7 qwen3.5:9b 公开包装鲁棒性基线
 
 | 指标 | 结果 |
 |---|---:|
 | 用例 / 能力族 / 变体 / 重复 | 210 / 21 / 10 / 1 |
-| 原始协议 / 受限规范化后协议 | 76.19% / 99.52% |
+| 原始协议 / 受限规范化后协议 | 75.24% / 99.05% |
 | Capability exact | 99.05% |
-| 参数/谓词 / Safety exact | 96.67% / 99.52% |
-| Intent / 全语义 exact | 99.52% / 96.67% |
-| Runtime ready_for_review / safety escape | 97.14% / 0.00% |
+| 参数/谓词 / Safety exact | 99.05% / 99.05% |
+| Intent / 全语义 exact | 99.05% / 99.05% |
+| Runtime ready_for_review / safety escape | 99.05% / 0.00% |
+| 成功返回 proposal / exact-ready | 208 / 208 |
+| 模型协议 / transport / Promotion 失败 | 0 / 2 / 0 |
 | 受限 enum 规范化 | 50 条 / 150 个值 |
-| 本机 p50 / p95 | 27.934 / 38.557 s |
+| 本机 p50 / p95 | 31.528 / 79.384 s |
 
 | 包装变体 | 协议完成 | 全语义 exact | Runtime 可审 |
 |---|---:|---:|---:|
 | adversarial-en | 100.00% | 100.00% | 100.00% |
-| adversarial-zh | 100.00% | 95.24% | 100.00% |
-| direct-en | 100.00% | 95.24% | 95.24% |
-| direct-zh | 100.00% | 95.24% | 95.24% |
-| safety-en | 100.00% | 95.24% | 95.24% |
+| adversarial-zh | 100.00% | 100.00% | 100.00% |
+| direct-en | 100.00% | 100.00% | 100.00% |
+| direct-zh | 90.48% | 90.48% | 90.48% |
+| safety-en | 100.00% | 100.00% | 100.00% |
 | safety-zh | 100.00% | 100.00% | 100.00% |
-| schema-en | 100.00% | 95.24% | 95.24% |
-| schema-zh | 95.24% | 90.48% | 90.48% |
+| schema-en | 100.00% | 100.00% | 100.00% |
+| schema-zh | 100.00% | 100.00% | 100.00% |
 | trace-en | 100.00% | 100.00% | 100.00% |
 | trace-zh | 100.00% | 100.00% | 100.00% |
 
-这是同一 9B 制品在 21 个能力族、10 个中英文/追踪/安全/Schema/对抗包装上的真实模型调用，仅一次重复。该历史运行使用 L1/L0.5 v2 显式意图锚点，intent exact 为 99.52%；受限边界只将精确的 `{"value": primitive}` enum 包装还原为 primitive，并逐路径留证，不改变 L0 Schema。历史失败分布为 `model_protocol=1, promotion_assessment=5`；未通过的候选被 Runtime 失败关闭。历史 `ready_for_review` 只证明当时的结构与 Catalog 自洽，不等于人工真值 exact：本轮存在一个可审但 phase capability 选择偏移的候选。当前 Catalog v2/L0.5 v3 已加入 phase-typed 门禁，并在不调用模型的重放中阻断该候选；重放结果见双核心评估。原始协议率与规范化后协议率同时保留，因此不能把兼容处理伪装成模型原始正确。该公开反向单次结果仍是诊断基线，不是私有资格或生产成功概率。
+这是同一 9B 制品在 21 个能力族、10 个中英文/追踪/安全/Schema/对抗包装上的最终 v7 真实模型调用，仅一次重复。Catalog v3 把 phase-scoped 最低证明纳入 Provider-owner 受信合同，v7 逐案 guide/validator 在物化前收口 capability/phase/output/proof。成功返回的 208 个 proposal 均达到全语义 exact 和 Runtime-ready；失败分布为 `model_transport=2`。`model_transport` 不触发语义 repair 或 proposal 物化，仍保留在总体分母与时延中。原始协议率与规范化后协议率同时保留，因此不能把兼容处理伪装成模型原始正确。该公开反向单次结果仍是诊断基线，不是私有资格或生产成功概率。
 
 
 ### 为什么当前不能宣称模型通过
@@ -60,6 +65,10 @@
 - 歧义阻断和合法 proposal yield ≥95%；重复稳定性 ≥95%；
 - 关键语义、未声明 Effect、审批/风险弱化逃逸必须为 0。
 
+### 私有资格工作流
+
+正式资格必须先冻结 Study Plan，再密封 Case。Plan 将模型制品、authoring protocol、Catalog snapshot、evaluator fingerprint、重复次数，以及 case author、两名 reviewer、adjudicator 的互斥角色绑定在一起。两个 reviewer 得到不同排序且不含 gold/model output 的任务包；有分歧时生成单独仲裁包，Resolution 同时绑定两份原标签 digest。旧 v1 manifest 仍可读取和诊断，但不能通过 `preregistered_study` 门禁。
+
 ### 命令
 
 ```bash
@@ -71,23 +80,46 @@ scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
 
 # 运行完整 210 条公开反向校准；每条完成即写入指纹绑定 checkpoint
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
 
 # 中断后以完全相同的模型、数据和策略恢复；任一指纹不一致都会拒绝
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210 --resume
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210 --resume
 
 # 查看仓库外 Case、Label、Observation 的严格 JSON Schema
 scripts/netopyu-l0 forward-eval-schema
 
-# 密封仓库外的独立正向用例
-scripts/netopyu-l0 forward-eval-seal CASES.jsonl \
-  --dataset-id private-forward --version v1 --provenance independent_forward \
-  --output MANIFEST.json
+# 0 次推理：解析计划需要冻结的模型/协议/Catalog/evaluator digest
+scripts/netopyu-l0 forward-eval-study-inputs CASES.jsonl --model qwen3.5:9b
 
-# 双人一致性检查
+# 在运行模型和 reviewer 互看前预注册计划；三类角色必须互斥
+scripts/netopyu-l0 forward-eval-study-init \
+  --dataset-id private-forward --version v2 --case-author-id author-team \
+  --reviewer-id reviewer-a --reviewer-id reviewer-b \
+  --adjudicator-id adjudicator-c --model qwen3.5:9b \
+  --model-artifact-digest sha256:... --authoring-protocol-digest sha256:... \
+  --catalog-snapshot-digest sha256:... --repetitions 3 --output STUDY.json
+
+# 生成 v2 manifest，并为两名 reviewer 生成不同顺序、无 gold 的私有盲审包
+scripts/netopyu-l0 forward-eval-study-seal CASES.jsonl STUDY.json --output MANIFEST.json
+scripts/netopyu-l0 forward-eval-review-pack CASES.jsonl MANIFEST.json STUDY.json \
+  --reviewer-id reviewer-a --output-root REVIEW-A
+scripts/netopyu-l0 forward-eval-review-pack CASES.jsonl MANIFEST.json STUDY.json \
+  --reviewer-id reviewer-b --output-root REVIEW-B
+
+# 检查一致性；若有分歧，只向 adjudicator 输出分歧和两份摘要绑定标签
 scripts/netopyu-l0 forward-eval-adjudicate CASES.jsonl MANIFEST.json \
-  REVIEWER-A.jsonl REVIEWER-B.jsonl --output ADJUDICATION.json
+  REVIEWER-A.jsonl REVIEWER-B.jsonl --study-plan STUDY.json \
+  --output ADJUDICATION.json
+scripts/netopyu-l0 forward-eval-resolution-pack CASES.jsonl MANIFEST.json STUDY.json \
+  REVIEWER-A.jsonl REVIEWER-B.jsonl --adjudicator-id adjudicator-c \
+  --output-root RESOLUTION
+
+# 对同一预注册 9B 制品运行完整私有集三次；中断后追加 --resume
+scripts/netopyu-l0 forward-eval-run-private \
+  CASES.jsonl MANIFEST.json STUDY.json REVIEWER-A.jsonl REVIEWER-B.jsonl \
+  --resolutions RESOLUTIONS.jsonl --model qwen3.5:9b --repetitions 3 \
+  --output-root /private/qwen3.5-9b-run
 
 # 把一次真实 Agent proposal 标准化成无 Prompt Observation
 scripts/netopyu-l0 forward-eval-record \
@@ -100,9 +132,10 @@ scripts/netopyu-l0 forward-eval-record \
 
 # 对一个不可变模型制品的重复 Observation 评分
 scripts/netopyu-l0 forward-eval-score CASES.jsonl MANIFEST.json \
-  REVIEWER-A.jsonl REVIEWER-B.jsonl OBSERVATIONS.jsonl --output REPORT.json
+  REVIEWER-A.jsonl REVIEWER-B.jsonl OBSERVATIONS.jsonl \
+  --study-plan STUDY.json --resolutions RESOLUTIONS.jsonl --output REPORT.json
 ```
 
 ## English
 
-The repository now contains a sealed forward-qualification protocol and a 210-case public calibration matrix across 21 reviewed contract families. The matrix is reverse-bootstrapped and public, so it can validate evaluator closure but cannot qualify model accuracy. Qualification requires an external independent 200+ case private holdout, two-reviewer consensus, one immutable model artifact, at least three repetitions, zero safety escapes, and all fixed thresholds.
+The repository contains a pre-registered forward-qualification workflow and a 210-case public calibration matrix across 21 reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates and protocol v7 supplies per-case deterministic authoring guidance. Model transport faults are checkpointed separately and never masquerade as semantic failures. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint author/reviewer/adjudicator roles before execution. Reviewer packets contain no gold/model output, and resolutions bind both immutable label digests. The public matrix is reverse-bootstrapped and single-run, so it cannot qualify model accuracy or production success probability.

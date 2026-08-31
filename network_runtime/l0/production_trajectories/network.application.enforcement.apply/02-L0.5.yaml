@@ -97,6 +97,6 @@ outcomes:
     explicit recovery state.
   rollback: 补偿后必须独立验证精确前态。 / Exact pre-change state independently verified after compensation.
 sourceSkillSha256: sha256:93891540e97e49d78fcd292741cab0102a748c70b7f65d7d140bc39e59eabe58
-capabilityCatalogSha256: sha256:3ebc3f3297389f34f96e2eb3b76975c254e1ad07bf780e4b1cf3825fc0e8b11a
+capabilityCatalogSha256: sha256:5ed667ac29630148b466a2b89d64e1e58fd54d40a33737b69ad47e1450239f4c
 previousStageSha256: sha256:93891540e97e49d78fcd292741cab0102a748c70b7f65d7d140bc39e59eabe58
 unresolvedQuestions: []

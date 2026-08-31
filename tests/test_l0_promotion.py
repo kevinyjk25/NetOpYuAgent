@@ -212,6 +212,27 @@ class L0PromotionTests(unittest.TestCase):
         self.assertEqual(requirement["fix"]["path"], "spec.preflight.predicates")
         self.assertIn("active", requirement["fix"]["hint"])
 
+    def test_catalog_v3_blocks_weakened_success_proof_predicate(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            raw = yaml.safe_load(CANDIDATE.read_text(encoding="utf-8"))
+            raw["spec"]["verification"]["predicates"][0] = {
+                "field": "allowed", "operator": "exists",
+            }
+            candidate = Path(directory) / "candidate.yaml"
+            candidate.write_text(
+                yaml.safe_dump(raw, sort_keys=False), encoding="utf-8",
+            )
+            assessment = assess_promotion(
+                skill_path=SKILL, l05_path=L05,
+                candidate_path=candidate,
+                capability_catalog_path=CAPABILITIES,
+            )
+        self.assertEqual(assessment.report["status"], "blocked")
+        self.assertIn(
+            "CAPABILITY_PHASE_PREDICATE_MISMATCH",
+            {item["code"] for item in assessment.report["findings"]},
+        )
+
     def test_semantic_gate_blocks_undeclared_extra_effect_tool(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             raw = yaml.safe_load(CANDIDATE.read_text(encoding="utf-8"))
@@ -278,6 +299,15 @@ class L0PromotionTests(unittest.TestCase):
             catalog["capabilities"][0]["observationPhases"] = [
                 "preflight", "success_verification", "compensation_verification",
             ]
+            catalog["capabilities"][0]["phasePredicates"] = {
+                "preflight": [{"field": "accepted", "operator": "exists"}],
+                "success_verification": [
+                    {"field": "accepted", "operator": "equals", "expected": True},
+                ],
+                "compensation_verification": [
+                    {"field": "accepted", "operator": "equals", "expected": True},
+                ],
+            }
             path = Path(directory) / "capabilities.yaml"
             path.write_text(yaml.safe_dump(catalog), encoding="utf-8")
             assessment = assess_promotion(
@@ -297,9 +327,13 @@ class L0PromotionTests(unittest.TestCase):
             observation["observationPhases"] = [
                 "success_verification", "compensation_verification",
             ]
+            observation["phasePredicates"].pop("preflight")
             preflight = json.loads(json.dumps(observation))
             preflight["id"] = "rest.network-access.preflight"
             preflight["observationPhases"] = ["preflight"]
+            preflight["phasePredicates"] = {
+                "preflight": [{"field": "active", "operator": "equals", "expected": True}],
+            }
             catalog["capabilities"].append(preflight)
             catalog_path = Path(directory) / "capabilities.yaml"
             catalog_path.write_text(

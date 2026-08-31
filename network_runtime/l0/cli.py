@@ -139,13 +139,13 @@ def main(argv: list[str] | None = None) -> int:
         "--forward-model-report",
         default=(
             "artifacts/promotion-forward-model/"
-            "qwen3.5-9b-public-210/report.json"
+            "qwen3.5-9b-p25c-v7-public-210/report.json"
         ),
     )
     core_evaluation.add_argument(
         "--runtime-reassessment-report",
         default=(
-            "artifacts/promotion-forward-model/qwen3.5-9b-public-210/"
+            "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/"
             "current-runtime-reassessment/report.json"
         ),
     )
@@ -170,6 +170,56 @@ def main(argv: list[str] | None = None) -> int:
         "forward-eval-schema",
         help="print Case, Label and Observation JSON Schemas for external qualification",
     )
+    forward_inputs = sub.add_parser(
+        "forward-eval-study-inputs",
+        help="resolve private-study model/protocol/catalog digests without inference",
+    )
+    forward_inputs.add_argument("cases")
+    forward_inputs.add_argument("--model", required=True)
+    forward_inputs.add_argument("--base-url", default="http://127.0.0.1:11434")
+    forward_inputs.add_argument("--timeout-seconds", type=float, default=30.0)
+    forward_study = sub.add_parser(
+        "forward-eval-study-init",
+        help="pre-register immutable model inputs and separated private-study roles",
+    )
+    forward_study.add_argument("--dataset-id", required=True)
+    forward_study.add_argument("--version", required=True)
+    forward_study.add_argument("--case-author-id", action="append", required=True)
+    forward_study.add_argument("--reviewer-id", action="append", required=True)
+    forward_study.add_argument("--adjudicator-id", action="append", required=True)
+    forward_study.add_argument("--model", required=True)
+    forward_study.add_argument("--model-artifact-digest", required=True)
+    forward_study.add_argument("--authoring-protocol-digest", required=True)
+    forward_study.add_argument("--catalog-snapshot-digest", required=True)
+    forward_study.add_argument("--repetitions", type=int, default=3)
+    forward_study.add_argument("--output", required=True)
+    forward_study_seal = sub.add_parser(
+        "forward-eval-study-seal",
+        help="seal private forward cases against a pre-registered study plan",
+    )
+    forward_study_seal.add_argument("cases")
+    forward_study_seal.add_argument("study_plan")
+    forward_study_seal.add_argument("--output", required=True)
+    forward_review_packet = sub.add_parser(
+        "forward-eval-review-pack",
+        help="create one blinded reviewer packet without model outputs or gold labels",
+    )
+    forward_review_packet.add_argument("cases")
+    forward_review_packet.add_argument("manifest")
+    forward_review_packet.add_argument("study_plan")
+    forward_review_packet.add_argument("--reviewer-id", required=True)
+    forward_review_packet.add_argument("--output-root", required=True)
+    forward_resolution_packet = sub.add_parser(
+        "forward-eval-resolution-pack",
+        help="create a private packet containing reviewer disagreements only",
+    )
+    forward_resolution_packet.add_argument("cases")
+    forward_resolution_packet.add_argument("manifest")
+    forward_resolution_packet.add_argument("study_plan")
+    forward_resolution_packet.add_argument("reviewer_one")
+    forward_resolution_packet.add_argument("reviewer_two")
+    forward_resolution_packet.add_argument("--adjudicator-id", required=True)
+    forward_resolution_packet.add_argument("--output-root", required=True)
     forward_seal = sub.add_parser(
         "forward-eval-seal",
         help="seal an external forward L1-to-L0 qualification case set",
@@ -191,6 +241,8 @@ def main(argv: list[str] | None = None) -> int:
     forward_review.add_argument("manifest")
     forward_review.add_argument("reviewer_one")
     forward_review.add_argument("reviewer_two")
+    forward_review.add_argument("--study-plan")
+    forward_review.add_argument("--resolutions")
     forward_review.add_argument("--output", required=True)
     forward_score = sub.add_parser(
         "forward-eval-score",
@@ -201,6 +253,8 @@ def main(argv: list[str] | None = None) -> int:
     forward_score.add_argument("reviewer_one")
     forward_score.add_argument("reviewer_two")
     forward_score.add_argument("observations")
+    forward_score.add_argument("--study-plan")
+    forward_score.add_argument("--resolutions")
     forward_score.add_argument("--output", required=True)
     forward_record = sub.add_parser(
         "forward-eval-record",
@@ -235,6 +289,14 @@ def main(argv: list[str] | None = None) -> int:
         "--output-root", default="artifacts/promotion-forward-model/qwen3.5-9b",
     )
     forward_model.add_argument("--limit", type=int)
+    forward_model.add_argument(
+        "--family", action="append", default=[],
+        help="run only one public calibration family; may be repeated",
+    )
+    forward_model.add_argument(
+        "--case-id", action="append", default=[],
+        help="run only one public calibration case id; may be repeated",
+    )
     forward_model.add_argument("--repetitions", type=int, default=1)
     forward_model.add_argument("--timeout-seconds", type=float, default=180.0)
     forward_model.add_argument("--repair-limit", type=int, default=1)
@@ -242,6 +304,23 @@ def main(argv: list[str] | None = None) -> int:
         "--resume", action="store_true",
         help="resume the fingerprint-bound active run from per-case checkpoints",
     )
+    forward_private = sub.add_parser(
+        "forward-eval-run-private",
+        help="run one pre-registered private study through the real model/Promotion path",
+    )
+    forward_private.add_argument("cases")
+    forward_private.add_argument("manifest")
+    forward_private.add_argument("study_plan")
+    forward_private.add_argument("reviewer_one")
+    forward_private.add_argument("reviewer_two")
+    forward_private.add_argument("--resolutions")
+    forward_private.add_argument("--model", required=True)
+    forward_private.add_argument("--base-url", default="http://127.0.0.1:11434")
+    forward_private.add_argument("--output-root", required=True)
+    forward_private.add_argument("--repetitions", type=int, default=3)
+    forward_private.add_argument("--timeout-seconds", type=float, default=180.0)
+    forward_private.add_argument("--repair-limit", type=int, default=1)
+    forward_private.add_argument("--resume", action="store_true")
     forward_rescore = sub.add_parser(
         "forward-eval-rescore-model",
         help="re-run deterministic scoring over an existing model run without inference",
@@ -387,33 +466,72 @@ def main(argv: list[str] | None = None) -> int:
         if args.command.startswith("forward-eval-"):
             from network_runtime.l0.forward_qualification import (
                 adjudicate_forward_labels,
+                build_forward_resolution_packet,
+                build_forward_review_packet,
+                create_forward_study_plan,
                 forward_qualification_schemas,
                 qualify_forward_files,
                 record_forward_observation,
                 seal_forward_cases,
+                seal_forward_study,
                 write_public_calibration,
             )
 
             if args.command in {
-                "forward-eval-run-model", "forward-eval-rescore-model",
-                "forward-eval-reassess-runtime",
+                "forward-eval-run-model", "forward-eval-run-private",
+                "forward-eval-rescore-model",
+                "forward-eval-reassess-runtime", "forward-eval-study-inputs",
             }:
                 from network_runtime.l0.forward_model_runner import (
+                    inspect_private_study_inputs,
                     reassess_public_model_evaluation,
                     rescore_public_model_evaluation,
                     run_public_model_evaluation,
                 )
 
-                if args.command == "forward-eval-run-model":
+                if args.command == "forward-eval-study-inputs":
+                    value = inspect_private_study_inputs(
+                        args.cases, model=args.model, base_url=args.base_url,
+                        timeout_seconds=args.timeout_seconds,
+                    )
+                elif args.command in {
+                    "forward-eval-run-model", "forward-eval-run-private",
+                }:
                     value = run_public_model_evaluation(
                         model=args.model,
                         base_url=args.base_url,
                         output_root=args.output_root,
-                        limit=args.limit,
+                        limit=(args.limit if args.command == "forward-eval-run-model" else None),
+                        families=(
+                            tuple(args.family)
+                            if args.command == "forward-eval-run-model" else ()
+                        ),
+                        case_ids=(
+                            tuple(args.case_id)
+                            if args.command == "forward-eval-run-model" else ()
+                        ),
                         repetitions=args.repetitions,
                         timeout_seconds=args.timeout_seconds,
                         repair_limit=args.repair_limit,
                         resume=args.resume,
+                        private_cases_path=(
+                            args.cases if args.command == "forward-eval-run-private" else None
+                        ),
+                        private_manifest_path=(
+                            args.manifest if args.command == "forward-eval-run-private" else None
+                        ),
+                        private_study_plan_path=(
+                            args.study_plan if args.command == "forward-eval-run-private" else None
+                        ),
+                        private_reviewer_one_path=(
+                            args.reviewer_one if args.command == "forward-eval-run-private" else None
+                        ),
+                        private_reviewer_two_path=(
+                            args.reviewer_two if args.command == "forward-eval-run-private" else None
+                        ),
+                        private_resolutions_path=(
+                            args.resolutions if args.command == "forward-eval-run-private" else None
+                        ),
                     )
                 elif args.command == "forward-eval-rescore-model":
                     value = rescore_public_model_evaluation(args.output_root)
@@ -426,6 +544,33 @@ def main(argv: list[str] | None = None) -> int:
                     output_root=args.output_root,
                     markdown_path=args.markdown,
                 )
+            elif args.command == "forward-eval-study-init":
+                value = create_forward_study_plan(
+                    dataset_id=args.dataset_id,
+                    version=args.version,
+                    case_author_ids=args.case_author_id,
+                    reviewer_ids=args.reviewer_id,
+                    adjudicator_ids=args.adjudicator_id,
+                    model=args.model,
+                    model_artifact_digest=args.model_artifact_digest,
+                    authoring_protocol_digest=args.authoring_protocol_digest,
+                    catalog_snapshot_digest=args.catalog_snapshot_digest,
+                    repetitions=args.repetitions,
+                )
+            elif args.command == "forward-eval-study-seal":
+                value = seal_forward_study(args.cases, args.study_plan)
+            elif args.command == "forward-eval-review-pack":
+                value = build_forward_review_packet(
+                    args.cases, args.manifest, args.study_plan,
+                    reviewer_id=args.reviewer_id, output_root=args.output_root,
+                )
+            elif args.command == "forward-eval-resolution-pack":
+                value = build_forward_resolution_packet(
+                    args.cases, args.manifest, args.study_plan,
+                    args.reviewer_one, args.reviewer_two,
+                    adjudicator_id=args.adjudicator_id,
+                    output_root=args.output_root,
+                )
             elif args.command == "forward-eval-seal":
                 value = seal_forward_cases(
                     args.cases,
@@ -436,11 +581,15 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "forward-eval-adjudicate":
                 value = adjudicate_forward_labels(
                     args.cases, args.manifest, args.reviewer_one, args.reviewer_two,
+                    study_plan_path=args.study_plan,
+                    resolutions_path=args.resolutions,
                 )
             elif args.command == "forward-eval-score":
                 value = qualify_forward_files(
                     args.cases, args.manifest, args.reviewer_one,
                     args.reviewer_two, args.observations,
+                    study_plan_path=args.study_plan,
+                    resolutions_path=args.resolutions,
                 )
             else:
                 value = record_forward_observation(
