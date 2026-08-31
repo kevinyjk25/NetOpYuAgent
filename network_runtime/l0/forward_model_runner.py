@@ -57,9 +57,11 @@ MODEL_RUN_SCHEMA = "netopyu.io/promotion-forward-model-run/v1"
 MODEL_RUN_STATE_SCHEMA = "netopyu.io/promotion-forward-model-run-state/v1"
 MODEL_RUN_CHECKPOINT_SCHEMA = "netopyu.io/promotion-forward-model-checkpoint/v1"
 RUNTIME_REASSESSMENT_SCHEMA = "netopyu.io/promotion-runtime-reassessment/v1"
-PROTOCOL_VERSION = "netopyu-forward-authoring-9b/v7"
+PROTOCOL_VERSION = "netopyu-forward-authoring-9b/v8"
 CATALOG_AUTHORING_GUIDE_VERSION = "netopyu-catalog-authoring-guide/v2"
 CATALOG_DECISION_VALIDATOR_VERSION = "netopyu-catalog-decision-validator/v3"
+PROMPT_PACKET_VERSION = "netopyu-forward-prompt-packet/v1"
+PROMPT_SERIALIZATION = "json-compact-sort-keys/v1"
 NORMALIZER_VERSION = "netopyu-enum-value-wrapper-normalizer/v1"
 NORMALIZER_RULES = {
     "allowed_path": "semantic_contract.parameters.*.enum[*]",
@@ -138,6 +140,10 @@ class ModelReply:
     error_stage: str | None = None
 
 
+class ModelRunPausedError(ValueError):
+    """The evidence run paused after a bounded model-service fault streak."""
+
+
 def normalize_model_decision_json(
     content: str,
 ) -> tuple[dict[str, Any], tuple[str, ...], str]:
@@ -190,18 +196,55 @@ class OllamaForwardAdapter:
         self.timeout_seconds = timeout_seconds
         self.repair_limit = repair_limit
 
-    def artifact_digest(self) -> str:
-        with httpx.Client(timeout=self.timeout_seconds) as client:
-            response = client.get(f"{self.base_url}/api/tags")
-            response.raise_for_status()
-            models = response.json().get("models") or []
-        match = next((item for item in models if item.get("name") == self.model), None)
+    def service_preflight(self) -> dict[str, Any]:
+        """Check API/model registry reachability without claiming inference health."""
+
+        started = time.monotonic()
+        try:
+            with httpx.Client(timeout=self.timeout_seconds) as client:
+                response = client.get(f"{self.base_url}/api/tags")
+                response.raise_for_status()
+                payload = response.json()
+        except (httpx.HTTPError, json.JSONDecodeError, TypeError) as error:
+            raise ValueError(
+                "Ollama registry preflight failed: "
+                f"{type(error).__name__}: {error}"
+            ) from error
+        if not isinstance(payload, dict):
+            raise ValueError("Ollama registry preflight returned a non-object response")
+        models = payload.get("models") or []
+        if not isinstance(models, list):
+            raise ValueError("Ollama registry preflight returned an invalid models list")
+        match = next((
+            item for item in models
+            if isinstance(item, dict) and item.get("name") == self.model
+        ), None)
         if match is None:
             raise ValueError(f"Ollama model is not installed: {self.model}")
         digest = str(match.get("digest") or "")
         if len(digest) == 64 and all(char in "0123456789abcdef" for char in digest):
-            return f"sha256:{digest}"
-        return sha256_json({"model": self.model, "metadata": match})
+            artifact_digest = f"sha256:{digest}"
+        else:
+            artifact_digest = sha256_json({"model": self.model, "metadata": match})
+        return {
+            "schema": "netopyu.io/model-service-preflight/v1",
+            "checkedAt": utc_now(),
+            "provider": "ollama",
+            "base_url": str(httpx.URL(self.base_url).copy_with(
+                username=None, password=None,
+            )),
+            "model": self.model,
+            "model_artifact_digest": artifact_digest,
+            "registry_reachable": True,
+            "model_registered": True,
+            "latency_ms": round((time.monotonic() - started) * 1000, 3),
+            "claimBoundary": (
+                "Registry reachability does not prove inference-engine stability."
+            ),
+        }
+
+    def artifact_digest(self) -> str:
+        return str(self.service_preflight()["model_artifact_digest"])
 
     def decide(
         self,
@@ -243,7 +286,10 @@ class OllamaForwardAdapter:
                         },
                     )
                     response.raise_for_status()
-                except httpx.RequestError as error:
+                    payload = response.json()
+                    if not isinstance(payload, dict):
+                        raise TypeError("Ollama chat response must be one JSON object")
+                except (httpx.HTTPError, json.JSONDecodeError, TypeError) as error:
                     transport_error = f"{type(error).__name__}: {error}"
                     return ModelReply(
                         decision=None,
@@ -261,7 +307,6 @@ class OllamaForwardAdapter:
                         error=transport_error[:4000],
                         error_stage="model_transport",
                     )
-                payload = response.json()
                 input_tokens += int(payload.get("prompt_eval_count") or 0)
                 output_tokens += int(payload.get("eval_count") or 0)
                 last_content = str((payload.get("message") or {}).get("content") or "")
@@ -358,6 +403,8 @@ def authoring_protocol_digest() -> str:
         "normalizer_rules": NORMALIZER_RULES,
         "catalog_authoring_guide_version": CATALOG_AUTHORING_GUIDE_VERSION,
         "catalog_decision_validator_version": CATALOG_DECISION_VALIDATOR_VERSION,
+        "prompt_packet_version": PROMPT_PACKET_VERSION,
+        "prompt_serialization": PROMPT_SERIALIZATION,
     })
 
 
@@ -442,7 +489,9 @@ def _catalog_prompt(path: Path, *, catalog_id: str) -> tuple[str, str]:
         },
         "capabilities": capabilities,
     }
-    return json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True), digest
+    return json.dumps(
+        packet, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ), digest
 
 
 def _case_prompt(case: ForwardCase) -> tuple[str, str]:
@@ -450,19 +499,65 @@ def _case_prompt(case: ForwardCase) -> tuple[str, str]:
     catalog_text, catalog_digest = _catalog_prompt(
         trajectory / "00-capability-catalog.yaml", catalog_id=case.family,
     )
-    return (
-        "FORWARD CASE\n"
-        f"case_id: {case.case_id}\n"
-        f"family: {case.family}\n"
-        f"profile: {case.profile}\n"
-        f"language: {case.language}\n"
-        f"challenge: {case.challenge}\n\n"
-        "TRUSTED CAPABILITY CATALOG\n"
-        f"{catalog_text}\n\n"
-        "UNTRUSTED L1 SKILL REQUEST\n"
-        f"{case.prompt}",
-        catalog_digest,
-    )
+    packet = {
+        "apiVersion": PROMPT_PACKET_VERSION,
+        "case": {
+            "case_id": case.case_id,
+            "family": case.family,
+            "profile": case.profile,
+            "language": case.language,
+            "challenge": case.challenge,
+        },
+        "trustedCapabilityCatalog": json.loads(catalog_text),
+        "untrustedL1SkillRequest": case.prompt,
+    }
+    return json.dumps(
+        packet, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ), catalog_digest
+
+
+def _prompt_corpus_metrics(cases: Iterable[ForwardCase]) -> dict[str, Any]:
+    case_list = list(cases)
+    prompts = [_case_prompt(case)[0] for case in case_list]
+    sizes = [len(prompt.encode("utf-8")) for prompt in prompts]
+    legacy_sizes: list[int] = []
+    for case in case_list:
+        trajectory = TRAJECTORY_ROOT / case.family
+        catalog_text, _ = _catalog_prompt(
+            trajectory / "00-capability-catalog.yaml", catalog_id=case.family,
+        )
+        pretty_catalog = json.dumps(
+            json.loads(catalog_text), ensure_ascii=False, indent=2, sort_keys=True,
+        )
+        legacy_prompt = (
+            "FORWARD CASE\n"
+            f"case_id: {case.case_id}\n"
+            f"family: {case.family}\n"
+            f"profile: {case.profile}\n"
+            f"language: {case.language}\n"
+            f"challenge: {case.challenge}\n\n"
+            "TRUSTED CAPABILITY CATALOG\n"
+            f"{pretty_catalog}\n\n"
+            "UNTRUSTED L1 SKILL REQUEST\n"
+            f"{case.prompt}"
+        )
+        legacy_sizes.append(len(legacy_prompt.encode("utf-8")))
+    total = sum(sizes)
+    legacy_total = sum(legacy_sizes)
+    return {
+        "packet_version": PROMPT_PACKET_VERSION,
+        "serialization": PROMPT_SERIALIZATION,
+        "case_count": len(prompts),
+        "system_prompt_bytes": len(_SYSTEM_PROMPT.encode("utf-8")),
+        "total_user_prompt_bytes": total,
+        "mean_user_prompt_bytes": round(total / len(sizes), 3) if sizes else 0,
+        "max_user_prompt_bytes": max(sizes, default=0),
+        "legacy_v7_equivalent_user_prompt_bytes": legacy_total,
+        "byte_reduction_vs_v7_equivalent": (
+            round((legacy_total - total) / legacy_total, 6) if legacy_total else 0
+        ),
+        "prompt_corpus_digest": sha256_json(prompts),
+    }
 
 
 def _argument_bindings(capability: Any, semantic: SemanticContract) -> dict[str, Any]:
@@ -946,7 +1041,8 @@ def _validate_resume_inputs(
     if state.get("run_fingerprint") != fingerprint:
         raise ValueError(
             "resume configuration mismatch: model artifact, protocol, data set, "
-            "catalog snapshot, repetitions, or repair policy changed"
+            "catalog snapshot, repetitions, repair policy, or transport-failure "
+            "policy changed"
         )
     if state.get("configuration") != expected_configuration:
         raise ValueError("resume configuration payload mismatch")
@@ -1062,6 +1158,7 @@ def run_public_model_evaluation(
     repetitions: int = 1,
     timeout_seconds: float = 180.0,
     repair_limit: int = 1,
+    transport_failure_limit: int = 2,
     resume: bool = False,
     private_cases_path: str | Path | None = None,
     private_manifest_path: str | Path | None = None,
@@ -1087,6 +1184,8 @@ def run_public_model_evaluation(
         raise ValueError("limit must be between 1 and 210")
     if not 1 <= repetitions <= 10:
         raise ValueError("repetitions must be between 1 and 10")
+    if not 0 <= transport_failure_limit <= 100:
+        raise ValueError("transport_failure_limit must be between 0 and 100")
     private_sources: dict[str, Path] = {}
     if private_mode:
         assert private_cases_path is not None
@@ -1172,9 +1271,11 @@ def run_public_model_evaluation(
         timeout_seconds=timeout_seconds,
         repair_limit=repair_limit,
     )
-    model_digest = adapter.artifact_digest()
+    service_preflight = adapter.service_preflight()
+    model_digest = str(service_preflight["model_artifact_digest"])
     protocol_digest = authoring_protocol_digest()
     catalog_digest = _catalog_snapshot_digest(cases)
+    prompt_metrics = _prompt_corpus_metrics(cases)
     if private_mode:
         for key, actual in (
             ("model_artifact_digest", model_digest),
@@ -1216,6 +1317,9 @@ def run_public_model_evaluation(
         "case_ids": sorted(set(case_ids)),
         "repetitions": repetitions,
         "repair_limit": repair_limit,
+        "transport_failure_limit": transport_failure_limit,
+        "prompt_packet_version": PROMPT_PACKET_VERSION,
+        "prompt_serialization": PROMPT_SERIALIZATION,
         "case_count": len(cases),
     }
     run_fingerprint = _model_run_fingerprint(configuration)
@@ -1246,7 +1350,9 @@ def run_public_model_evaluation(
         )
         resumed_from_checkpoints = len(observations_by_key)
         state["status"] = "running"
+        state.pop("pause", None)
         state["resume_count"] = int(state.get("resume_count") or 0) + 1
+        state.setdefault("service_preflights", []).append(service_preflight)
         state["completed_observations"] = resumed_from_checkpoints
         state["updatedAt"] = utc_now()
         _write_json_atomic(active_state_path, state)
@@ -1300,6 +1406,8 @@ def run_public_model_evaluation(
             "expected_observations": len(expected_positions),
             "completed_observations": 0,
             "resume_count": 0,
+            "service_preflights": [service_preflight],
+            "pause_history": [],
             "configuration": configuration,
             "input_artifacts": {
                 "cases": {"path": str(cases_path), "sha256": _file_digest(cases_path)},
@@ -1346,6 +1454,7 @@ def run_public_model_evaluation(
         state["updatedAt"] = utc_now()
         _write_json_atomic(active_state_path, state)
 
+    consecutive_transport_failures = 0
     for repetition in range(1, repetitions + 1):
         for position, case in enumerate(cases, start=1):
             key = (case.case_id, repetition)
@@ -1360,6 +1469,10 @@ def run_public_model_evaluation(
                     )
                 ),
             )
+            if reply.error_stage == "model_transport":
+                consecutive_transport_failures += 1
+            else:
+                consecutive_transport_failures = 0
             destination = proposal_root / case.case_id / f"r{repetition}"
             destination.mkdir(parents=True, exist_ok=True)
             (destination / "untrusted-model-output.json").write_text(
@@ -1413,6 +1526,38 @@ def run_public_model_evaluation(
                     "repetition": repetition,
                     "state": reply.error_stage or "protocol_error",
                 }, ensure_ascii=False), flush=True)
+                if (
+                    reply.error_stage == "model_transport"
+                    and transport_failure_limit
+                    and consecutive_transport_failures >= transport_failure_limit
+                ):
+                    pause = {
+                        "code": "MODEL_TRANSPORT_CIRCUIT_OPEN",
+                        "pausedAt": utc_now(),
+                        "case_id": case.case_id,
+                        "repetition": repetition,
+                        "consecutive_failures": consecutive_transport_failures,
+                        "failure_limit": transport_failure_limit,
+                        "completed_observations": len(observations_by_key),
+                        "expected_observations": len(expected_positions),
+                        "resume_command": "rerun the same command with --resume",
+                        "evidencePolicy": (
+                            "The triggering failure is checkpointed and will not be "
+                            "silently retried or erased on resume."
+                        ),
+                    }
+                    state["status"] = "paused_model_transport"
+                    state["pause"] = pause
+                    state.setdefault("pause_history", []).append(pause)
+                    state["updatedAt"] = utc_now()
+                    _write_json_atomic(active_state_path, state)
+                    raise ModelRunPausedError(
+                        "model run paused after "
+                        f"{consecutive_transport_failures} consecutive transport failures; "
+                        f"checkpointed {len(observations_by_key)}/{len(expected_positions)} "
+                        f"observations in {active_state_path}; restore the model service "
+                        "and rerun the same command with --resume"
+                    )
                 continue
             decision = reply.decision
             if decision.disposition != "proposal":
@@ -1553,6 +1698,10 @@ def run_public_model_evaluation(
         "run_fingerprint": run_fingerprint,
         "resumed_from_checkpoints": resumed_from_checkpoints,
         "checkpoint_count": len(observations_by_key),
+        "model_service_preflights": state.get("service_preflights", []),
+        "model_service_pause_history": state.get("pause_history", []),
+        "transport_failure_limit": transport_failure_limit,
+        "prompt_packet": prompt_metrics,
         "model_artifact_digest": model_digest,
         "authoring_protocol_digest": protocol_digest,
         "catalog_snapshot_digest": catalog_digest,

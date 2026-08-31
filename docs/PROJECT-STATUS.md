@@ -1,7 +1,7 @@
 # 项目进展与路线图 / Project Status and Roadmap
 
 > 最后核验 / Last verified: 2026-08-31
-> 当前里程碑 / Current milestone: **P2.5-C 公共开发集协议硬化完成：Catalog v3 phase proof、逐案 guide、受限语义修复与 9B 聚焦回归已落地；真实独立用例与人工证据仍开放 / P2.5-C public-development hardening complete with Catalog-v3 phase proofs, per-case guides, bounded semantic repair and focused 9B regression; real independent cases and human evidence remain open**
+> 当前里程碑 / Current milestone: **P2.5-D 模型服务韧性与 Prompt 成本收口完成：可审计 preflight、证据保留熔断/恢复和 authoring protocol v8 紧凑 packet 已落地；真实独立用例与人工证据仍开放 / P2.5-D model-service resilience and prompt-cost closure complete with auditable preflight, evidence-preserving circuit-break/resume, and compact authoring-protocol-v8 packets; real independent cases and human evidence remain open**
 
 本文档是项目阶段、已完成事项和后续工作的唯一汇总入口。README 说明项目是什么；HLD、LLD、SSD 和 ARCHITECTURE 说明如何设计；本文档只回答三个问题：现在到哪里、哪些确实完成、下一步做什么。
 
@@ -52,9 +52,10 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 - **P2.2 本地 Evidence Plane 已完成**：五类现有证据源以只读方式形成隐私最小化的统一事件链、指标、事故与离线时间线；缺链、截断或完整性失败明确降级；
 - **P2.3 用户接入与收敛评测已完成**：统一 CLI、三条 Golden Path、只读 Doctor、严格 Integration Pack、源码化脱敏基线和逐层失败驾驶舱已落地；明确区分固定集控制、模型资格和未证明的生产泛化；
 - **P2.4 真实 LLM Agent Golden Paths 已完成**：DSH 页面已用 `qwen3.5:9b` 实跑 Runtime L1→L0、L1→L0.5→L0 proposal 和四系统 MCP 访问三个用例；新增统一发现入口、样例 Skill、独立 MCP 演示配置和逐阶段可见证据；
-- **P2.5 核心 A 最终 v7 公开 210 条 9B 鲁棒性基线已完成**：L0.5 v3/Catalog v3 在 21/21 轨迹保存 capability-scoped exact-intent、三类 Observation phase 和最低证明；208 个成功返回 proposal 为 208/208 全语义 exact/current-Runtime-ready，0 模型协议/Promotion/物化失败、0 repair、0 safety escape；2 条本机 Ollama transport 超时使总体 normalized/full-semantic/Runtime-ready 为 99.05%，p50/p95 31.528/79.384 秒；
+- **P2.5 核心 A 最终 v8 公开 210 条 9B 鲁棒性基线已完成**：L0.5 v3/Catalog v3 在 21/21 轨迹保存 capability-scoped exact-intent、三类 Observation phase 和最低证明；210/210 全语义 exact/current-Runtime-ready，0 模型协议/transport/Promotion/物化失败、0 repair、0 safety escape，p50/p95 27.179/37.285 秒；无模型当前 Runtime 重放保持 210/210 exact-ready；
 - **P2.5-B 私有资格工作流已完成**：Study Plan 在运行前冻结模型制品、协议、Catalog、evaluator、重复次数和互斥角色；两名 reviewer 使用独立乱序且无 gold/model output 的盲审包；分歧由独立 adjudicator 在不改写原标签的情况下解析并绑定双标签 digest；同一私有集可用真实 9B runner 三次运行、逐 case checkpoint/resume 和聚合评分；
 - **P2.5-C 公共协议硬化与完整回归已完成**：Capability Catalog v3 为 21/21 生产轨迹声明 phase-scoped 最低证明谓词；Promotion 与模型前置 validator 禁止删除/改写该证明；最终 v7 已从 20 条聚焦集、21-family smoke 扩展到完整 210 条公共矩阵。模型返回的 208 个候选全部 exact/ready；Runner 也已把 transport timeout 从语义失败中分离并可 checkpoint 后继续。该结果仍不替代独立私有资格；
+- **P2.5-D 模型服务韧性与 Prompt 成本已完成**：authoring protocol v8 使用语义等价的紧凑稳定 JSON packet，并将版本/序列化绑定指纹；完整 v8 210 条达到 210/210 exact/current-Runtime-ready、0 repair/失败。相对最终 v7，输入 token 下降 18.89%，p50/p95 下降 13.79%/53.03%，transport 故障 2→0；210 条 Prompt 字节下降 18.98%。每次 start/resume 记录有限声明的注册表 preflight，连续 transport 故障先 checkpoint 再暂停，恢复不重试或改写旧证据；
 - **生产环境尚未认证**：企业身份、真实审批、真实厂商设备、分布式高可用、不可变远端审计、灾备和生产 SLO 仍是后续工作。
 
 因此，身份侧已具备 P1.3-B2 现场接入条件，Provider 侧已完成 P1.4-B-ready 接入协议。下一步是把这两个 ready 包接入真实组织系统、独立 Provider 仓库/CI、签名根和 artifact 服务，而不是扩建另一套 Agent Framework。
@@ -87,7 +88,7 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 | P2.2 Evidence Plane | ✅ | Runtime/Decision/Saga/Provider/Promotion 五类只读 adapter、统一事件/指标/事故和离线 HTML | 本地只读投影；无远端 WORM、告警/SLO 或跨实例 trace |
 | P2.3 用户接入与收敛评测 | ✅ | Golden Path、Doctor、能力发现、proposal-only Integration Pack、Runtime/L1 统一驾驶舱与 368 条脱敏 trace | 固定集证据；没有 Provider 激活权威，也没有证明生产泛化 |
 | P2.4 真实 LLM Agent 用例 | ✅ | 9B 模型实际选择 L1/调用 L0；Agent 化 Promotion；身份/应用/变更/权限四 MCP 进程联动 | 本地模拟数据与单次 UI 证据；不是模型泛化率、生产 SLO 或外部系统认证 |
-| P2.5 正向资格 | ✅ | A：210 条公开 9B 基线；B：预注册私有工作流；C：Catalog v3 phase proof、v7 guide/semantic repair 与 20 条聚焦回归 | 工具链和已知缺陷回归完成；真实仓库外独立用例和人工真值尚未取得，当前没有私有资格结论 |
+| P2.5 正向资格 | ✅ | A：210 条公开 9B 基线；B：预注册私有工作流；C：Catalog v3 phase proof/v7 回归；D：v8 紧凑 packet 与可恢复服务熔断 | 工具链和已知缺陷回归完成；真实仓库外独立用例和人工真值尚未取得，当前没有私有资格结论 |
 
 ### 3. 已完成能力清单（Done）
 
@@ -180,7 +181,7 @@ B-ready 测试把 fixture 复制到仓库外临时目录并以独立进程运行
 
 | 证据 | 当前结果 | 说明 |
 |---|---:|---|
-| Python gate | 430 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.5、恢复等 |
+| Python gate | 434 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.5、恢复等 |
 | Core-72：DSH only | 5/64（7.8%） | 固定风险/故障 Oracle |
 | Core-72：DSH + Runtime | 64/64（100%） | 固定风险/故障 Oracle |
 | 有效操作 | 8/8 vs 8/8 | 两条路径都能完成无故障请求 |
@@ -385,7 +386,8 @@ Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**
 - `forward-eval-run-model` 支持重复 `--family`/`--case-id` 聚焦公开开发回归。v7 的两个受影响家族 20 条结果为全部 exact/ready，raw/受限规范化协议 50%/100%，0 repair、0 失败，p50/p95 30.591/35.355 秒；这是开发集缺陷关闭证据，不是独立资格；
 - 同一 v7 的 21-family direct-en 均衡 smoke 为 21/21 全 exact/ready，raw/受限规范化协议 76.19%/100%，0 repair/failure，p50/p95 30.634/37.288 秒；它降低“只适配两个家族”的担忧，但不覆盖其余 9 类包装或重复稳定性；
 - 最终 v7 已完整重跑 210 条：208 个返回 proposal 为 208/208 全语义 exact 且当前 Runtime-ready，0 模型协议/Promotion/物化失败、0 repair、0 safety escape；2 条因本机 Ollama 进程退化发生 180 秒 `model_transport` 超时，总体 normalized/full-semantic/Runtime-ready 为 99.05%，p50/p95 31.528/79.384 秒；
-- 长模型 Runner 现将 `httpx` transport 故障逐例记录到摘要绑定 checkpoint 后继续，控制台和报告与语义协议失败分栏；首次故障不再使整批退出。该修复通过 18 条针对性测试及 430 tests + 81 subtests 全量门禁；
+- 最终 v8 已完整重跑同一 210 条：210/210 全语义 exact/current-Runtime-ready，0 repair、0 模型协议/transport/Promotion/物化失败；相对 v7 输入 token -18.89%，p50/p95 -13.79%/-53.03%，transport 2→0；当前 Runtime 无模型重放保持 210/210 exact-ready；
+- 长模型 Runner 将 `httpx` transport 故障逐例记录到摘要绑定 checkpoint；孤立故障继续，连续故障达到阈值则先保全证据再暂停，控制台/报告与语义失败分栏。P2.5 评测文件 22 条测试和全量 434 tests + 81 subtests 均通过；
 
 ### 5. 推荐实施顺序
 
@@ -433,7 +435,9 @@ scripts/netopyu-dsh retirement
 
 The migration from the legacy general-purpose L0 agent framework to **DSH/Hermes Harness Adapters plus the NetOpYu Domain Effect Runtime** is complete as a repeatable local reference implementation.
 
-The current milestone is **completion of the final-v7 qwen3.5:9b public robustness baseline across 210 cases, 21 families and ten bilingual/trace/safety/schema/adversarial wrappers**. It measures 75.24% raw and 99.05% bounded-normalized protocol completion. All 208 returned proposals are exact and current-Runtime-ready with zero protocol, Promotion, materialization, repair, or safety-escape event; two local Ollama requests timed out at the transport boundary. Overall full-semantic/Runtime-ready is 99.05%, with 31.528/79.384-second p50/p95. Known semantic defects are closed on the full matrix, while serving availability and tail latency remain open. Public reverse data and one repetition remain deliberately ineligible for qualification.
+The current milestone is **completion of the final-v8 qwen3.5:9b public robustness baseline across 210 cases, 21 families and ten bilingual/trace/safety/schema/adversarial wrappers**. It measures 76.19% raw and 100% bounded-normalized protocol completion. All 210 proposals are full-semantic exact and current-Runtime-ready with zero protocol, transport, Promotion, materialization, repair, or safety-escape event; a no-model current-Runtime replay preserves 210/210 exact-ready outcomes. Local p50/p95 is 27.179/37.285 seconds. Public reverse data and one repetition remain deliberately ineligible for qualification.
+
+P2.5-D closes the local serving-control and prompt-cost issues without changing Runtime authority. Authoring protocol v8 uses a versioned compact JSON packet, reducing the 210-prompt representation by 18.98%. Versus final v7, the full same-artifact 210-case run reduces input tokens by 18.89%, p50/p95 by 13.79%/53.03%, raises exact/readiness by 0.95 percentage points, and reduces transport faults from two to zero. Start/resume records a narrowly claimed registry preflight; consecutive transport faults are checkpointed before the run pauses, and resume never retries or rewrites failed evidence. This public single-run comparison is regression evidence, not qualification or a production probability.
 
 This does **not** mean production certification. Enterprise identity and approval, real vendor systems, distributed HA, remote immutable audit, disaster recovery, and production SLOs remain open.
 
@@ -465,7 +469,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 | P2.2 Evidence Plane | ✅ | Five read-only adapters, unified events/metrics/incidents, and offline HTML | Local projection; remote WORM, alerts/SLOs, and cross-instance tracing remain external |
 | P2.3 Product entry and convergence | ✅ | Golden Paths, Doctor, capability discovery, proposal-only Integration Pack, unified Runtime/L1 cockpit, and 368 redacted traces | Fixed-set evidence only; no Provider activation authority and no proven production generalization |
 | P2.4 Real-LLM Agent use cases | ✅ | Actual 9B L1/L0 selection and execution, agent-assisted Promotion, and four independent MCP service processes | Simulated local data and single-run UI evidence; not model generalization, production SLO, or external-system certification |
-| P2.5 forward qualification | ✅ | A: public 210-case baseline; B: pre-registered private workflow; C: Catalog-v3 phase proofs, v7 guide/semantic repair, and focused regression | Tooling and known-defect regression are complete; no real external cases or human truth exist, so there is no private qualification result |
+| P2.5 forward qualification | ✅ | A: public 210-case baseline; B: pre-registered private workflow; C: Catalog-v3 phase proofs/v7 regression; D: compact v8 packet and resumable service circuit breaker | Tooling and known-defect regression are complete; no real external cases or human truth exist, so there is no private qualification result |
 
 ### 3. Done
 
@@ -476,7 +480,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - All 21 keep source-controlled L1 prose, structured-natural-language L0.5, compiled L0, reports, exact round trips, and hash chains.
 - Containerlab covers campus/IDC/DMZ/dual-ISP OSPF/eBGP, topology/path queries, and BGP EVPN/VXLAN L2VPN.
 - Service capabilities are separated into MCP Providers; Network Observer and Network Actor are distinct boundaries.
-- The latest gate reports 430 tests plus 81 subtests; retirement remains 7/7 with 21/21 L0 bindings, readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
+- The latest gate reports 434 tests plus 81 subtests; retirement remains 7/7 with 21/21 L0 bindings, readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
 - P2.0 adds a fail-closed, read-only Promotion projection and self-contained offline editor. Edited documents remain untrusted drafts, and even approved reviews remain inactive.
 - P2.1 adds a digest-bound governed Catalog with separated owners/stewards, scoped delegation, exact dependencies, consumer impact, and compatibility analysis. Its decisions cannot authorize Runtime reads/effects or Provider publication.
 - P2.2 adds read-only Runtime/Decision/Saga/Provider/Promotion adapters, privacy-minimized digest chains, operational metrics, incidents, and a self-contained no-control timeline. Unverifiable, truncated, or invalid evidence is degraded.
@@ -484,7 +488,8 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - P2.4 adds three real-LLM DSH journeys, a user-authored sample Skill, proposal-only authoring Tools with visible lineage, and a service-only configuration that talks to four independent MCP subprocesses. The records remain simulated and the single-run evidence is not a production metric.
 - P2.5 adds strict Case/Label/Observation/Manifest/Adjudication/Report contracts, a 210-case public calibration matrix, L0.5 v3 exact-intent anchors, phase-typed Observations, bounded/audited enum normalization, slice metrics, and digest-bound checkpoints. P2.5-B now pre-registers the model artifact, protocol, Catalog, evaluator, repetition count and disjoint author/reviewer/adjudicator roles; emits reviewer-specific shuffled packets without gold/model output; preserves both original label files while binding resolutions to both digests; and runs the exact private study with checkpoint/resume. Legacy v1 manifests remain readable but cannot pass the pre-registration gate. The historical qwen3.5:9b public run measures 76.19% raw and 99.52% normalized-boundary protocol completion, 99.05% capability exact, 96.67% parameter/full-semantic exact, 97.14% historical Runtime readiness, zero safety escape, and 27.934/38.557-second p50/p95. A no-model-call replay preserved 203/203 exact-ready proposals and closed one known phase false-ready with zero exact-ready regression. It remains diagnostic, not private qualification.
 - P2.5-C upgrades all 21 trajectory catalogs to v3 `phasePredicates`. Promotion and the pre-materialization validator require every trusted phase-proof predicate while allowing additional declared-field restrictions. The final full v7 run completed 210/210 observations; all 208 returned proposals were exact/current-Runtime-ready with zero semantic/Promotion/materialization failure, while two requests were explicitly classified as local `model_transport` timeouts. Overall normalized/full-semantic/Runtime-ready was 99.05%, safety escape zero, and p50/p95 31.528/79.384 seconds. This is complete public regression evidence, not private qualification or production probability.
-- Long-running model evaluation now writes one atomic, digest-bound checkpoint per case and supports strict `--resume`; model, protocol, catalogs, cases/reviewers, repetitions, and repair-policy mismatches fail closed instead of mixing evidence. HTTP transport faults are captured per case and the batch continues instead of aborting or misclassifying the fault as semantic protocol failure.
+- P2.5-D uses a compact, stable JSON authoring packet and binds its version/serialization identity into the protocol/run fingerprint. The 210-prompt representation is 18.98% smaller. The full same-artifact v8 run reached 210/210 exact/current-Runtime-ready with zero repair/failure; versus final v7 it reduced input tokens by 18.89%, p50/p95 by 13.79%/53.03%, and transport faults from two to zero. Registry preflight claims reachability only; the consecutive-fault circuit breaker checkpoints before pausing and resume preserves all prior fault evidence.
+- Long-running model evaluation now writes one atomic, digest-bound checkpoint per case and supports strict `--resume`; model, protocol, catalogs, cases/reviewers, repetitions, repair policy, and transport-failure policy mismatches fail closed instead of mixing evidence. HTTP transport faults are captured per case; healthy isolated faults remain visible, while a streak pauses the batch before it wastes the remaining budget.
 - Schema-v9 plans bind requester/policy plus Provider release/manifest/qualification/deployment evidence. Signature tampering, replay, identity/release/deployment switching, critical self-approval, missing tickets, and invalid windows fail closed.
 - P1.3-B1 verifies human OIDC access tokens and separate Gateway attestations over pinned JWKS, cross-binds them by `act_sub + subject_jti`, applies external PDP decisions to reads/prepares/approvals, and qualifies ticket revision/window/scope/risk through a Change Authority. Credentials remain model-hidden.
 - The B2-ready package adds per-session Gateway minting, explicit CA/mTLS with owner-only client keys, an offline secret-safe Doctor, and a no-effect live contract qualification command.

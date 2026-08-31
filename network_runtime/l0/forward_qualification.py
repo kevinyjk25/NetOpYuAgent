@@ -43,7 +43,7 @@ DEFAULT_CALIBRATION_ROOT = PROJECT_ROOT / "artifacts/promotion-forward-calibrati
 DEFAULT_CALIBRATION_DOC = PROJECT_ROOT / "docs/promotion-forward-qualification.md"
 DEFAULT_MODEL_RUN_REPORT = (
     PROJECT_ROOT
-    / "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json"
+    / "artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210/report.json"
 )
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,127}$")
@@ -1805,6 +1805,7 @@ def _real_model_markdown() -> str:
     metrics = value["metrics"]
     latency = value["latency"]
     efficiency = value["efficiency"]
+    prompt_packet = value.get("prompt_packet") or {}
     failure_counts = value.get("failure_counts", {})
     failure_summary = ", ".join(
         f"{name}={count}" for name, count in sorted(failure_counts.items())
@@ -1823,7 +1824,7 @@ def _real_model_markdown() -> str:
         f"{item['metrics']['runtime_promotion_ready_rate'] * 100:.2f}% |"
         for name, item in sorted((value.get("slices") or {}).get("challenge", {}).items())
     )
-    return f"""### 最终 v7 qwen3.5:9b 公开包装鲁棒性基线
+    return f"""### 最终 v8 qwen3.5:9b 公开包装鲁棒性基线
 
 | 指标 | 结果 |
 |---|---:|
@@ -1836,13 +1837,15 @@ def _real_model_markdown() -> str:
 | 成功返回 proposal / exact-ready | {returned_proposals} / {round(metrics['semantic_contract_exact_match'] * value['dataset']['case_count'])} |
 | 模型协议 / transport / Promotion 失败 | {protocol_failures} / {transport_failures} / {int(failure_counts.get('promotion_assessment') or 0)} |
 | 受限 enum 规范化 | {efficiency.get('syntax_normalized_observations', 0)} 条 / {efficiency.get('syntax_normalization_events', 0)} 个值 |
+| 输入 / 输出 token | {efficiency.get('total_input_tokens', 0):,} / {efficiency.get('total_output_tokens', 0):,} |
+| Prompt 表示字节 / 相对 v7 | {prompt_packet.get('total_user_prompt_bytes', 0):,} / -{prompt_packet.get('byte_reduction_vs_v7_equivalent', 0) * 100:.2f}% |
 | 本机 p50 / p95 | {latency['p50'] / 1000:.3f} / {latency['p95'] / 1000:.3f} s |
 
 | 包装变体 | 协议完成 | 全语义 exact | Runtime 可审 |
 |---|---:|---:|---:|
 {challenge_rows}
 
-这是同一 9B 制品在 21 个能力族、10 个中英文/追踪/安全/Schema/对抗包装上的最终 v7 真实模型调用，仅一次重复。Catalog v3 把 phase-scoped 最低证明纳入 Provider-owner 受信合同，v7 逐案 guide/validator 在物化前收口 capability/phase/output/proof。成功返回的 {returned_proposals} 个 proposal 均达到全语义 exact 和 Runtime-ready；失败分布为 `{failure_summary}`。`model_transport` 不触发语义 repair 或 proposal 物化，仍保留在总体分母与时延中。原始协议率与规范化后协议率同时保留，因此不能把兼容处理伪装成模型原始正确。该公开反向单次结果仍是诊断基线，不是私有资格或生产成功概率。
+这是同一 9B 制品在 21 个能力族、10 个中英文/追踪/安全/Schema/对抗包装上的最终 v8 真实模型调用，仅一次重复。Catalog v3 把 phase-scoped 最低证明纳入 Provider-owner 受信合同；v8 以指纹绑定的紧凑 JSON packet 传输逐案 guide，并在物化前收口 capability/phase/output/proof。成功返回的 {returned_proposals} 个 proposal 均达到全语义 exact 和 Runtime-ready；失败分布为 `{failure_summary}`。原始协议率与规范化后协议率同时保留，因此不能把受限兼容处理伪装成模型原始正确。该公开反向单次结果仍是诊断基线，不是私有资格或生产成功概率。
 """
 
 
@@ -1863,9 +1866,13 @@ def _calibration_markdown(report: dict[str, Any]) -> str:
 - 校准来源是 21 个已受审 L0 合同反向生成的 L1/L0.5 轨迹，只用于验证评分器、语义投影和覆盖矩阵。
 - 报告禁止输出 Prompt 和 Label，只保留聚合指标与 case-id digest。
 - Catalog v3 为每个 Observation phase 声明受信最低 `phasePredicates`；候选可以附加更强约束，但不能删除或改写最低证明。
-- v7 authoring protocol 生成逐案 Catalog guide，并在物化前执行确定性 capability/phase/output/proof 校验；HTTP transport 故障单列 checkpoint 后继续。
+- v7 逐案 Catalog guide/validator 收口 capability/phase/output/proof；v8 将等价 guide 封装为指纹绑定的紧凑稳定 JSON packet，并在连续 transport 故障时先 checkpoint 再暂停。
 
 {model_evidence}
+
+### P2.5-D 服务韧性与 Prompt 成本
+
+最终 v8 已完整运行 210 条：210/210 全语义 exact/current-Runtime-ready，0 repair、0 模型协议/transport/Promotion/物化失败。相对最终 v7，输入 token 下降 18.89%，p50/p95 下降 13.79%/53.03%，全语义 exact 与 Runtime-ready 均提高 0.95 个百分点，transport 故障从 2 降为 0；相对更早的历史 210 基线，输入 token 仅增加 1.31%，输出 token 下降 3.96%，p50/p95 下降 2.70%/3.30%，全语义 exact 提高 3.33 个百分点。完整 210 条 Prompt 表示字节相对 v7 等价格式下降 18.98%。每次 start/resume 保存只证明注册表可达/模型已注册的 preflight；连续 transport 故障达到阈值后，触发故障先进入不可变 checkpoint，运行再暂停。恢复跳过旧失败而不静默重试。这些公开单次对照是重构回归证据，不是模型资格或生产成功概率。
 
 ### 为什么当前不能宣称模型通过
 
@@ -1902,11 +1909,13 @@ scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
 
 # 运行完整 210 条公开反向校准；每条完成即写入指纹绑定 checkpoint
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/my-public-run \\
+  --transport-failure-limit 2
 
 # 中断后以完全相同的模型、数据和策略恢复；任一指纹不一致都会拒绝
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210 --resume
+  --output-root artifacts/promotion-forward-model/my-public-run \\
+  --transport-failure-limit 2 --resume
 
 # 查看仓库外 Case、Label、Observation 的严格 JSON Schema
 scripts/netopyu-l0 forward-eval-schema
@@ -1960,7 +1969,7 @@ scripts/netopyu-l0 forward-eval-score CASES.jsonl MANIFEST.json \\
 
 ## English
 
-The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates and protocol v7 supplies per-case deterministic authoring guidance. Model transport faults are checkpointed separately and never masquerade as semantic failures. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint author/reviewer/adjudicator roles before execution. Reviewer packets contain no gold/model output, and resolutions bind both immutable label digests. The public matrix is reverse-bootstrapped and single-run, so it cannot qualify model accuracy or production success probability.
+The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. The final same-artifact v8 run completed all 210 wrappers with 210/210 full-semantic exact/current-Runtime-ready outcomes and zero repair or failure. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, exact/readiness rose 0.95 percentage points, and transport faults fell from two to zero. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint roles before execution. This public reverse-bootstrap, single-run result is regression evidence—not model qualification or a production success probability.
 """
 
 

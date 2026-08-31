@@ -29,13 +29,19 @@ from network_runtime.l0.forward_qualification import (
 )
 from network_runtime.l0.forward_model_runner import (
     MODEL_RUN_STATE_SCHEMA,
+    ModelReply,
+    ModelRunPausedError,
     OllamaForwardAdapter,
+    PROMPT_PACKET_VERSION,
+    _case_prompt,
     _file_digest,
     _catalog_prompt,
     _load_case_checkpoints,
     _model_run_fingerprint,
+    _prompt_corpus_metrics,
     _validate_resume_inputs,
     _write_case_checkpoint,
+    authoring_protocol_digest,
     materialize_and_assess,
     normalize_model_decision_json,
     run_public_model_evaluation,
@@ -194,6 +200,36 @@ def test_catalog_prompt_exposes_machine_generated_authoring_guide() -> None:
     assert "required=true" in guide["providerEnvelopeRule"]
 
 
+def test_case_prompt_is_compact_structured_and_protocol_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    cases, _ = build_public_calibration()
+    prompt, _ = _case_prompt(cases[0])
+    packet = json.loads(prompt)
+    assert packet["apiVersion"] == PROMPT_PACKET_VERSION
+    assert packet["case"]["case_id"] == cases[0].case_id
+    assert packet["untrustedL1SkillRequest"] == cases[0].prompt
+    assert packet["trustedCapabilityCatalog"]["catalog_id"] == cases[0].family
+    assert "\n" not in prompt
+
+    digest = authoring_protocol_digest()
+    monkeypatch.setattr(
+        "network_runtime.l0.forward_model_runner.PROMPT_PACKET_VERSION",
+        "netopyu-forward-prompt-packet/test-drift",
+    )
+    assert authoring_protocol_digest() != digest
+
+
+def test_compact_prompt_packet_reduces_public_corpus_bytes() -> None:
+    cases, _ = build_public_calibration()
+    metrics = _prompt_corpus_metrics(cases)
+    assert metrics["case_count"] == 210
+    assert metrics["total_user_prompt_bytes"] < (
+        metrics["legacy_v7_equivalent_user_prompt_bytes"]
+    )
+    assert metrics["byte_reduction_vs_v7_equivalent"] >= 0.15
+
+
 def test_model_adapter_repairs_catalog_semantics_without_activation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -293,6 +329,46 @@ def test_model_adapter_returns_auditable_transport_failure(
     assert reply.error == "ReadTimeout: fixture timed out"
 
 
+def test_model_service_preflight_has_narrow_auditable_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class RegistryResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, object]:
+            return {
+                "models": [{"name": "fixture", "digest": "a" * 64}],
+            }
+
+    class RegistryClient:
+        def __init__(self, *args: object, **kwargs: object) -> None:
+            pass
+
+        def __enter__(self) -> "RegistryClient":
+            return self
+
+        def __exit__(self, *args: object) -> None:
+            return None
+
+        def get(self, url: str) -> RegistryResponse:
+            assert url == "http://fixture-user:fixture-pass@127.0.0.1:11434/api/tags"
+            return RegistryResponse()
+
+    monkeypatch.setattr(
+        "network_runtime.l0.forward_model_runner.httpx.Client", RegistryClient,
+    )
+    event = OllamaForwardAdapter(
+        model="fixture",
+        base_url="http://fixture-user:fixture-pass@127.0.0.1:11434",
+    ).service_preflight()
+    assert event["model_artifact_digest"] == "sha256:" + "a" * 64
+    assert event["base_url"] == "http://127.0.0.1:11434"
+    assert event["registry_reachable"] is True
+    assert event["model_registered"] is True
+    assert "does not prove inference-engine stability" in event["claimBoundary"]
+
+
 def test_model_run_checkpoint_is_atomic_bound_and_resumable(tmp_path: Path) -> None:
     root = tmp_path / "model-run"
     root.mkdir()
@@ -377,6 +453,83 @@ def test_model_run_checkpoint_is_atomic_bound_and_resumable(tmp_path: Path) -> N
             run_fingerprint=fingerprint,
             expected_positions={("case-one", 1): 1},
         )
+
+
+def test_model_run_pauses_on_transport_streak_and_resumes_without_retrying(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = sha256_json({"model": "fixture"})
+
+    def preflight(self: OllamaForwardAdapter) -> dict[str, object]:
+        return {
+            "schema": "netopyu.io/model-service-preflight/v1",
+            "checkedAt": "2026-08-31T00:00:00Z",
+            "provider": "ollama",
+            "base_url": self.base_url,
+            "model": self.model,
+            "model_artifact_digest": digest,
+            "registry_reachable": True,
+            "model_registered": True,
+            "latency_ms": 1.0,
+            "claimBoundary": "fixture",
+        }
+
+    transport_calls = 0
+
+    def fail_transport(
+        self: OllamaForwardAdapter, **_: object,
+    ) -> ModelReply:
+        nonlocal transport_calls
+        transport_calls += 1
+        return ModelReply(
+            decision=None, raw_content="", raw_digest=sha256_json({"raw": ""}),
+            latency_ms=10, model_calls=1, repair_attempts=0,
+            input_tokens=0, output_tokens=0, raw_protocol_valid=False,
+            error="ReadTimeout: fixture", error_stage="model_transport",
+        )
+
+    monkeypatch.setattr(OllamaForwardAdapter, "service_preflight", preflight)
+    monkeypatch.setattr(OllamaForwardAdapter, "decide", fail_transport)
+    root = tmp_path / "paused-run"
+    with pytest.raises(ModelRunPausedError, match="checkpointed 2/3"):
+        run_public_model_evaluation(
+            model="fixture", output_root=root, limit=3,
+            transport_failure_limit=2,
+        )
+    state = json.loads((root / "active-run.json").read_text())
+    assert state["status"] == "paused_model_transport"
+    assert state["completed_observations"] == 2
+    assert state["pause"]["code"] == "MODEL_TRANSPORT_CIRCUIT_OPEN"
+    assert len(list(Path(state["checkpoint_dir"]).glob("*.json"))) == 2
+    assert not (root / "report.json").exists()
+
+    def succeed_without_retry(
+        self: OllamaForwardAdapter, **_: object,
+    ) -> ModelReply:
+        decision = ForwardModelDecision(
+            disposition="clarify", reason="fixture ambiguity",
+            missing_fields=("change_window",),
+        )
+        return ModelReply(
+            decision=decision,
+            raw_content=decision.model_dump_json(by_alias=True),
+            raw_digest=sha256_json({"decision": "clarify"}),
+            latency_ms=5, model_calls=1, repair_attempts=0,
+            input_tokens=1, output_tokens=1,
+        )
+
+    monkeypatch.setattr(OllamaForwardAdapter, "decide", succeed_without_retry)
+    report = run_public_model_evaluation(
+        model="fixture", output_root=root, limit=3,
+        transport_failure_limit=2, resume=True,
+    )
+    assert transport_calls == 2
+    assert report["checkpoint_count"] == 3
+    assert report["model_transport_failures"] == 2
+    assert len(report["model_service_preflights"]) == 2
+    assert len(report["model_service_pause_history"]) == 1
+    completed = json.loads((root / "active-run.json").read_text())
+    assert completed["status"] == "complete"
 
 
 def _private_material(root: Path, *, repetitions: int = 3) -> dict[str, Path]:

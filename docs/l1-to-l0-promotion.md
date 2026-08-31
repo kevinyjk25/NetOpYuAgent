@@ -215,6 +215,15 @@ transport 故障并继续，而不会误报为协议语义失败或退出整批�
 p50/p95 31.528/79.384 秒必须保留两个超时，且仍只是反向公开单次回归，不是
 独立正向资格或生产成功概率。
 
+P2.5-D 不删除任何 L1/Catalog 语义，只把重复的缩进表示改为版本化紧凑 JSON
+packet，并将 packet/序列化身份纳入 authoring protocol digest。完整 210 条的
+Prompt 字节相对 v7 等价格式下降 18.98%。最终 v8 已完整运行 210 条并达到
+210/210 全语义 exact/current-Runtime-ready、0 repair/失败。相对最终 v7，输入
+token 下降 18.89%，p50/p95 下降 13.79%/53.03%，transport 故障从 2 降为 0；
+无模型当前 Runtime 重放保持 210/210 exact-ready。Runner 同时记录有限声明的
+模型注册表 preflight，并在连续两次 transport 故障后先保存证据再暂停；恢复
+跳过旧失败而不会静默改写历史。
+
 ### 5. 仍需人工/实验认证
 
 转换器不能证明 Provider 的真实行为。发布前仍需认证 API 身份、Observer 独立性和 freshness、职责分离审批、timeout/写结果不确定、错误 postcondition、精确 rollback，以及 DSH/Hermes 的语义入口和模型选择准确率。将来可以在 Runtime UI 中调用同一 Promotion API，但仍只能生成 proposal，不能在线激活。
@@ -243,3 +252,5 @@ extracted requirements only; it is not a proof of equivalence for arbitrary
 natural language, and an LLM cannot close the gate by assertion.
 
 New Skills use the genuine forward path: domain authors write L1, review L0.5, and then produce an L0 candidate. The 21 existing contracts already began as reviewed L0, so their readable L1/L0.5 baselines are explicitly reverse-bootstrapped for explainability. Each archive still reruns `assess_promotion()`, requires semantic parity after proposal-only labels are removed, and requires an exact full contract hash after recompiling authoring. This validates structural conversion closure and readable projection of existing contracts; it is not a measurement of model accuracy on arbitrary prose. See the [production L0 trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
+
+P2.5-D preserves all L1 and trusted-Catalog semantics while replacing repeated pretty-printed transport with a versioned compact JSON packet. Packet and serialization identity are bound into the authoring-protocol digest. Across the 210 public prompts this reduces representation bytes by 18.98%. The final same-artifact v8 run reached 210/210 full-semantic exact/current-Runtime-ready outcomes with zero repair/failure; versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, and transport faults fell from two to zero. A no-model current-Runtime replay preserved all 210 exact-ready proposals. Registry preflight evidence has an explicitly narrow claim, and the runner checkpoints then pauses after two consecutive transport failures; resume never rewrites failed observations.

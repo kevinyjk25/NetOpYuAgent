@@ -24,11 +24,11 @@ DEFAULT_RUNTIME_REPORT = PROJECT_ROOT / "artifacts/runtime-ab/runtime-ab.json"
 DEFAULT_FORWARD_REPORT = PROJECT_ROOT / "artifacts/promotion-forward-calibration/report.json"
 DEFAULT_FORWARD_MODEL_REPORT = (
     PROJECT_ROOT
-    / "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json"
+    / "artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210/report.json"
 )
 DEFAULT_RUNTIME_REASSESSMENT_REPORT = (
     PROJECT_ROOT
-    / "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210"
+    / "artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210"
     / "current-runtime-reassessment/report.json"
 )
 DEFAULT_JSON_REPORT = PROJECT_ROOT / "artifacts/core-capability-evaluation/current.json"
@@ -154,6 +154,7 @@ def _load_forward_model_run(path: str | Path) -> dict[str, Any]:
         "slices": value.get("slices", {}),
         "latency": value["latency"],
         "efficiency": value["efficiency"],
+        "promptPacket": value.get("prompt_packet", {}),
         "failureCounts": value.get("failure_counts", {}),
         "source": str(source.relative_to(PROJECT_ROOT))
         if source.is_relative_to(PROJECT_ROOT) else str(source),
@@ -521,7 +522,7 @@ Service / Network Provider + 独立 Verifier
 |---|---:|---:|---:|
 {challenge_rows}
 
-这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族、每族 10 个中英文/追踪/安全/Schema/对抗包装上的最终 v7 真实模型调用，不是 evaluator self-check。Catalog v3 将 phase-scoped 最低证明收回受信合同；模型原始协议与受限规范化后协议被分别计量，规范化不放宽 L0 核心 Schema。`model_transport` 不触发语义 repair 或 proposal 物化，仍保留在总体分母和时延中。该结果仍不是资格结论：数据由受审 L0 反向生成且仅一次重复。
+这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族、每族 10 个中英文/追踪/安全/Schema/对抗包装上的最终 v8 真实模型调用，不是 evaluator self-check。Catalog v3 将 phase-scoped 最低证明收回受信合同；紧凑、指纹绑定的 v8 packet 只改变传输表示，不放宽 L0 核心 Schema。模型原始协议与受限规范化后协议被分别计量。该结果仍不是资格结论：数据由受审 L0 反向生成且仅一次重复。
 
 #### 2.4 Phase-typed Capability 当前 Runtime 重放
 
@@ -589,11 +590,11 @@ scripts/netopyu-l0 forward-eval-calibrate
 
 # 用本地 9B 跑 21 能力族 × 10 包装变体；支持 --resume
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 
 # 不调用模型，用当前 Runtime 重放历史 proposal
 scripts/netopyu-l0 forward-eval-reassess-runtime \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 
 # 再生成本双核心报告
 scripts/netopyu-l0 core-eval-report
@@ -612,7 +613,7 @@ scripts/netopyu-l0 core-eval-report
 
 Capability A compiles an open-ended L1 Skill through a reviewable L0.5 representation into an enforceable L0 contract. Capability B executes an activated L0 contract as a deterministic transaction with approval binding, revalidation, independent verification, recovery, compensation and tamper-evident audit.
 
-For Capability A, the fixed URL1 sample passes its semantic gate with {metrics['preserved']}/{metrics['totalRequirements']} requirements preserved, {metrics['non_machine_verifiable']} explicitly non-machine-verifiable, and {metrics['blockingRequirements']} blocking. The final-v7 qwen3.5:9b run covered {model_run['caseCount']} public reverse-bootstrap cases across {model_run['familyCount']} families and ten bilingual/trace/safety/schema/adversarial wrappers per family. Raw/normalized-boundary protocol completion was {_percent(model_run['metrics'].get('raw_protocol_completion_rate', model_run['metrics']['protocol_completion_rate']) * 100)}/{_percent(model_run['metrics']['protocol_completion_rate'] * 100)}, full-semantic/Runtime readiness was {_percent(model_run['metrics']['semantic_contract_exact_match'] * 100)}/{_percent(model_run['metrics']['runtime_promotion_ready_rate'] * 100)}, and safety escape was {_percent(model_run['metrics']['safety_escape_rate'] * 100)}. All {returned_proposals} returned proposals remained exact/current-Runtime-ready; {model_transport_failures} local transport faults remained in the denominator and p50/p95 were {model_run['latency']['p50'] / 1000:.3f}/{model_run['latency']['p95'] / 1000:.3f} seconds. This closes the known public semantic regression but remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
+For Capability A, the fixed URL1 sample passes its semantic gate with {metrics['preserved']}/{metrics['totalRequirements']} requirements preserved, {metrics['non_machine_verifiable']} explicitly non-machine-verifiable, and {metrics['blockingRequirements']} blocking. The final-v8 qwen3.5:9b run covered {model_run['caseCount']} public reverse-bootstrap cases across {model_run['familyCount']} families and ten bilingual/trace/safety/schema/adversarial wrappers per family. Raw/normalized-boundary protocol completion was {_percent(model_run['metrics'].get('raw_protocol_completion_rate', model_run['metrics']['protocol_completion_rate']) * 100)}/{_percent(model_run['metrics']['protocol_completion_rate'] * 100)}, full-semantic/Runtime readiness was {_percent(model_run['metrics']['semantic_contract_exact_match'] * 100)}/{_percent(model_run['metrics']['runtime_promotion_ready_rate'] * 100)}, and safety escape was {_percent(model_run['metrics']['safety_escape_rate'] * 100)}. All {returned_proposals} returned proposals remained exact/current-Runtime-ready; {model_transport_failures} local transport faults remained in the denominator and p50/p95 were {model_run['latency']['p50'] / 1000:.3f}/{model_run['latency']['p95'] / 1000:.3f} seconds. This closes the known public semantic regression but remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
 
 For Capability B, the Core-72 campaign preserves 8/8 valid completions and raises fixed fault/risk Oracle coverage from {comparison['control_effectiveness']['dshOnly']['passed']}/{comparison['control_effectiveness']['dshOnly']['total']} ({comparison['control_effectiveness']['dshOnly']['rate']:.1f}%) to {comparison['control_effectiveness']['dshPlusRuntime']['passed']}/{comparison['control_effectiveness']['dshPlusRuntime']['total']} ({comparison['control_effectiveness']['dshPlusRuntime']['rate']:.1f}%). Runtime p50/p95 are {runtime_latency['p50_ms']:.3f}/{runtime_latency['p95_ms']:.3f} ms in the local mock campaign; human approval wait is excluded.
 
@@ -624,9 +625,9 @@ The project therefore has concrete evidence for semantic traceability gates and 
 scripts/netopyu-dsh compare-runtime --iterations 50
 scripts/netopyu-l0 forward-eval-calibrate
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 scripts/netopyu-l0 forward-eval-reassess-runtime \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```
