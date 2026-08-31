@@ -1,7 +1,7 @@
 # 项目进展与路线图 / Project Status and Roadmap
 
 > 最后核验 / Last verified: 2026-08-31
-> 当前里程碑 / Current milestone: **P2.5-D 模型服务韧性与 Prompt 成本收口完成：可审计 preflight、证据保留熔断/恢复和 authoring protocol v8 紧凑 packet 已落地；真实独立用例与人工证据仍开放 / P2.5-D model-service resilience and prompt-cost closure complete with auditable preflight, evidence-preserving circuit-break/resume, and compact authoring-protocol-v8 packets; real independent cases and human evidence remain open**
+> 当前里程碑 / Current milestone: **P2.5-E 外部资格交付入口完成：仓库外角色隔离工作区、严格 Schema、占位防误用和分阶段只读 Doctor 已落地；真实独立用例与人工证据仍开放 / P2.5-E external qualification delivery entry complete with a repository-external role-separated workspace, strict schemas, template-misuse protection, and a staged read-only Doctor; real independent cases and human evidence remain open**
 
 本文档是项目阶段、已完成事项和后续工作的唯一汇总入口。README 说明项目是什么；HLD、LLD、SSD 和 ARCHITECTURE 说明如何设计；本文档只回答三个问题：现在到哪里、哪些确实完成、下一步做什么。
 
@@ -56,6 +56,7 @@ Containerlab 网络仿真、Service Layer 模拟系统或后续真实外部系�
 - **P2.5-B 私有资格工作流已完成**：Study Plan 在运行前冻结模型制品、协议、Catalog、evaluator、重复次数和互斥角色；两名 reviewer 使用独立乱序且无 gold/model output 的盲审包；分歧由独立 adjudicator 在不改写原标签的情况下解析并绑定双标签 digest；同一私有集可用真实 9B runner 三次运行、逐 case checkpoint/resume 和聚合评分；
 - **P2.5-C 公共协议硬化与完整回归已完成**：Capability Catalog v3 为 21/21 生产轨迹声明 phase-scoped 最低证明谓词；Promotion 与模型前置 validator 禁止删除/改写该证明；最终 v7 已从 20 条聚焦集、21-family smoke 扩展到完整 210 条公共矩阵。模型返回的 208 个候选全部 exact/ready；Runner 也已把 transport timeout 从语义失败中分离并可 checkpoint 后继续。该结果仍不替代独立私有资格；
 - **P2.5-D 模型服务韧性与 Prompt 成本已完成**：authoring protocol v8 使用语义等价的紧凑稳定 JSON packet，并将版本/序列化绑定指纹；完整 v8 210 条达到 210/210 exact/current-Runtime-ready、0 repair/失败。相对最终 v7，输入 token 下降 18.89%，p50/p95 下降 13.79%/53.03%，transport 故障 2→0；210 条 Prompt 字节下降 18.98%。每次 start/resume 记录有限声明的注册表 preflight，连续 transport 故障先 checkpoint 再暂停，恢复不重试或改写旧证据；
+- **P2.5-E 外部资格交付入口已完成**：`forward-eval-study-kit` 在仓库外创建 Case author、双 Reviewer、Adjudicator、运行证据分区和摘要绑定 Schema/指南；`forward-eval-study-doctor` 只读检查模板误用、文件完整性、200+/10-family/5-challenge/LAN-DC-WAN/中英文覆盖、预注册漂移、密封绑定、双盲审/仲裁和至少三次运行，只输出计数、摘要、门禁与下一步；它不生成独立真值、身份或资格结论；
 - **生产环境尚未认证**：企业身份、真实审批、真实厂商设备、分布式高可用、不可变远端审计、灾备和生产 SLO 仍是后续工作。
 
 因此，身份侧已具备 P1.3-B2 现场接入条件，Provider 侧已完成 P1.4-B-ready 接入协议。下一步是把这两个 ready 包接入真实组织系统、独立 Provider 仓库/CI、签名根和 artifact 服务，而不是扩建另一套 Agent Framework。
@@ -181,7 +182,7 @@ B-ready 测试把 fixture 复制到仓库外临时目录并以独立进程运行
 
 | 证据 | 当前结果 | 说明 |
 |---|---:|---|
-| Python gate | 434 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.5、恢复等 |
+| Python gate | 438 tests + 81 subtests | Runtime、Adapter、Provider、Skill、身份控制面、外部资格/三角色部署证明、审批证明、P1.8、P1.9、P2.0–P2.5、恢复等 |
 | Core-72：DSH only | 5/64（7.8%） | 固定风险/故障 Oracle |
 | Core-72：DSH + Runtime | 64/64（100%） | 固定风险/故障 Oracle |
 | 有效操作 | 8/8 vs 8/8 | 两条路径都能完成无故障请求 |
@@ -387,7 +388,7 @@ Core-72 固定了 L1 决策，因此只量化 Runtime 的确定性增量；它**
 - 同一 v7 的 21-family direct-en 均衡 smoke 为 21/21 全 exact/ready，raw/受限规范化协议 76.19%/100%，0 repair/failure，p50/p95 30.634/37.288 秒；它降低“只适配两个家族”的担忧，但不覆盖其余 9 类包装或重复稳定性；
 - 最终 v7 已完整重跑 210 条：208 个返回 proposal 为 208/208 全语义 exact 且当前 Runtime-ready，0 模型协议/Promotion/物化失败、0 repair、0 safety escape；2 条因本机 Ollama 进程退化发生 180 秒 `model_transport` 超时，总体 normalized/full-semantic/Runtime-ready 为 99.05%，p50/p95 31.528/79.384 秒；
 - 最终 v8 已完整重跑同一 210 条：210/210 全语义 exact/current-Runtime-ready，0 repair、0 模型协议/transport/Promotion/物化失败；相对 v7 输入 token -18.89%，p50/p95 -13.79%/-53.03%，transport 2→0；当前 Runtime 无模型重放保持 210/210 exact-ready；
-- 长模型 Runner 将 `httpx` transport 故障逐例记录到摘要绑定 checkpoint；孤立故障继续，连续故障达到阈值则先保全证据再暂停，控制台/报告与语义失败分栏。P2.5 评测文件 22 条测试和全量 434 tests + 81 subtests 均通过；
+- 长模型 Runner 将 `httpx` transport 故障逐例记录到摘要绑定 checkpoint；孤立故障继续，连续故障达到阈值则先保全证据再暂停，控制台/报告与语义失败分栏。P2.5 评测文件 26 条测试和全量 438 tests + 81 subtests 均通过；
 
 ### 5. 推荐实施顺序
 
@@ -469,7 +470,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 | P2.2 Evidence Plane | ✅ | Five read-only adapters, unified events/metrics/incidents, and offline HTML | Local projection; remote WORM, alerts/SLOs, and cross-instance tracing remain external |
 | P2.3 Product entry and convergence | ✅ | Golden Paths, Doctor, capability discovery, proposal-only Integration Pack, unified Runtime/L1 cockpit, and 368 redacted traces | Fixed-set evidence only; no Provider activation authority and no proven production generalization |
 | P2.4 Real-LLM Agent use cases | ✅ | Actual 9B L1/L0 selection and execution, agent-assisted Promotion, and four independent MCP service processes | Simulated local data and single-run UI evidence; not model generalization, production SLO, or external-system certification |
-| P2.5 forward qualification | ✅ | A: public 210-case baseline; B: pre-registered private workflow; C: Catalog-v3 phase proofs/v7 regression; D: compact v8 packet and resumable service circuit breaker | Tooling and known-defect regression are complete; no real external cases or human truth exist, so there is no private qualification result |
+| P2.5 forward qualification | ✅ | A: public 210-case baseline; B: pre-registered private workflow; C: Catalog-v3 phase proofs/v7 regression; D: compact v8 packet/resumable circuit breaker; E: external role-separated kit and staged Doctor | Tooling and known-defect regression are complete; no real external cases or human truth exist, so there is no private qualification result |
 
 ### 3. Done
 
@@ -480,7 +481,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - All 21 keep source-controlled L1 prose, structured-natural-language L0.5, compiled L0, reports, exact round trips, and hash chains.
 - Containerlab covers campus/IDC/DMZ/dual-ISP OSPF/eBGP, topology/path queries, and BGP EVPN/VXLAN L2VPN.
 - Service capabilities are separated into MCP Providers; Network Observer and Network Actor are distinct boundaries.
-- The latest gate reports 434 tests plus 81 subtests; retirement remains 7/7 with 21/21 L0 bindings, readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
+- The latest gate reports 438 tests plus 81 subtests; retirement remains 7/7 with 21/21 L0 bindings, readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
 - P2.0 adds a fail-closed, read-only Promotion projection and self-contained offline editor. Edited documents remain untrusted drafts, and even approved reviews remain inactive.
 - P2.1 adds a digest-bound governed Catalog with separated owners/stewards, scoped delegation, exact dependencies, consumer impact, and compatibility analysis. Its decisions cannot authorize Runtime reads/effects or Provider publication.
 - P2.2 adds read-only Runtime/Decision/Saga/Provider/Promotion adapters, privacy-minimized digest chains, operational metrics, incidents, and a self-contained no-control timeline. Unverifiable, truncated, or invalid evidence is degraded.
@@ -489,6 +490,7 @@ Legend: ✅ locally complete; 🟡 prototype requiring production qualification;
 - P2.5 adds strict Case/Label/Observation/Manifest/Adjudication/Report contracts, a 210-case public calibration matrix, L0.5 v3 exact-intent anchors, phase-typed Observations, bounded/audited enum normalization, slice metrics, and digest-bound checkpoints. P2.5-B now pre-registers the model artifact, protocol, Catalog, evaluator, repetition count and disjoint author/reviewer/adjudicator roles; emits reviewer-specific shuffled packets without gold/model output; preserves both original label files while binding resolutions to both digests; and runs the exact private study with checkpoint/resume. Legacy v1 manifests remain readable but cannot pass the pre-registration gate. The historical qwen3.5:9b public run measures 76.19% raw and 99.52% normalized-boundary protocol completion, 99.05% capability exact, 96.67% parameter/full-semantic exact, 97.14% historical Runtime readiness, zero safety escape, and 27.934/38.557-second p50/p95. A no-model-call replay preserved 203/203 exact-ready proposals and closed one known phase false-ready with zero exact-ready regression. It remains diagnostic, not private qualification.
 - P2.5-C upgrades all 21 trajectory catalogs to v3 `phasePredicates`. Promotion and the pre-materialization validator require every trusted phase-proof predicate while allowing additional declared-field restrictions. The final full v7 run completed 210/210 observations; all 208 returned proposals were exact/current-Runtime-ready with zero semantic/Promotion/materialization failure, while two requests were explicitly classified as local `model_transport` timeouts. Overall normalized/full-semantic/Runtime-ready was 99.05%, safety escape zero, and p50/p95 31.528/79.384 seconds. This is complete public regression evidence, not private qualification or production probability.
 - P2.5-D uses a compact, stable JSON authoring packet and binds its version/serialization identity into the protocol/run fingerprint. The 210-prompt representation is 18.98% smaller. The full same-artifact v8 run reached 210/210 exact/current-Runtime-ready with zero repair/failure; versus final v7 it reduced input tokens by 18.89%, p50/p95 by 13.79%/53.03%, and transport faults from two to zero. Registry preflight claims reachability only; the consecutive-fault circuit breaker checkpoints before pausing and resume preserves all prior fault evidence.
+- P2.5-E adds a repository-external, role-separated study kit and a staged read-only Doctor. It validates managed-file integrity, rejects template markers, previews minimum private coverage, binds preregistration and sealing, checks independent review/adjudication, and requires at least three repetitions before reporting completion. It emits only counts, digests, gates, and next actions; it does not manufacture independent truth, identity proof, or qualification.
 - Long-running model evaluation now writes one atomic, digest-bound checkpoint per case and supports strict `--resume`; model, protocol, catalogs, cases/reviewers, repetitions, repair policy, and transport-failure policy mismatches fail closed instead of mixing evidence. HTTP transport faults are captured per case; healthy isolated faults remain visible, while a streak pauses the batch before it wastes the remaining budget.
 - Schema-v9 plans bind requester/policy plus Provider release/manifest/qualification/deployment evidence. Signature tampering, replay, identity/release/deployment switching, critical self-approval, missing tickets, and invalid windows fail closed.
 - P1.3-B1 verifies human OIDC access tokens and separate Gateway attestations over pinned JWKS, cross-binds them by `act_sub + subject_jti`, applies external PDP decisions to reads/prepares/approvals, and qualifies ticket revision/window/scope/risk through a Change Authority. Credentials remain model-hidden.

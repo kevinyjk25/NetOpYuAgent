@@ -170,6 +170,16 @@ def main(argv: list[str] | None = None) -> int:
         "forward-eval-schema",
         help="print Case, Label and Observation JSON Schemas for external qualification",
     )
+    forward_kit = sub.add_parser(
+        "forward-eval-study-kit",
+        help="create a role-separated external qualification workspace",
+    )
+    forward_kit.add_argument("--output-root", required=True)
+    forward_doctor = sub.add_parser(
+        "forward-eval-study-doctor",
+        help="inspect external qualification progress without exposing private truth",
+    )
+    forward_doctor.add_argument("--root", required=True)
     forward_inputs = sub.add_parser(
         "forward-eval-study-inputs",
         help="resolve private-study model/protocol/catalog digests without inference",
@@ -490,6 +500,10 @@ def main(argv: list[str] | None = None) -> int:
                 seal_forward_study,
                 write_public_calibration,
             )
+            from network_runtime.l0.forward_study_workspace import (
+                inspect_forward_qualification_study,
+                write_forward_qualification_kit,
+            )
 
             if args.command in {
                 "forward-eval-run-model", "forward-eval-run-private",
@@ -552,6 +566,10 @@ def main(argv: list[str] | None = None) -> int:
                     value = rescore_public_model_evaluation(args.output_root)
                 else:
                     value = reassess_public_model_evaluation(args.output_root)
+            elif args.command == "forward-eval-study-kit":
+                value = write_forward_qualification_kit(args.output_root)
+            elif args.command == "forward-eval-study-doctor":
+                value = inspect_forward_qualification_study(args.root)
             elif args.command == "forward-eval-schema":
                 value = forward_qualification_schemas()
             elif args.command == "forward-eval-calibrate":

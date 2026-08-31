@@ -138,6 +138,8 @@ Runner 会记录模型注册表预检；连续 2 次 transport 故障时，先�
 
 私有正向资格工作流现已可直接使用：预注册计划冻结模型/协议/Catalog/evaluator 与三次重复，case author、两名 reviewer、adjudicator 强制角色分离；盲审包不含 gold/model output，分歧 Resolution 同时绑定两份不可变原标签；私有 runner 支持逐 case checkpoint/resume。旧 v1 manifest 只可诊断，不能通过新资格门禁。项目没有自动生成“独立人工真值”，因此当前仍无私有资格结论。
 
+P2.5-E 新增 `forward-eval-study-kit` 与 `forward-eval-study-doctor`：前者在仓库外建立 author、双 Reviewer、Adjudicator 和运行证据分区；后者只输出计数、摘要、门禁和下一步，阻断模板占位、Schema/文件漂移、覆盖不足、预注册/密封/共识/报告换绑以及少于三次重复。它让外部评测人员知道怎么做，但不会替他们生成独立真值或把流程就绪冒充模型资格。
+
 #### DSH only 与 DSH + Runtime
 
 Core-72 固定相同 L1 决策、工具、参数、Provider 和故障，只测 Runtime 的确定性增量：
@@ -179,7 +181,7 @@ P1.9-C0 已加入默认不启用的 Decision→Plan 绑定内核：PreparedPlan 
 
 P1.9-C1 已完成不启用流量的安全准备层：策略只能保持原 Harness route 或收窄/阻断，不能重路由或授权；readiness 门禁严格交叉绑定 Worker、Adapter、真实产品/部署和运维演练四类外部证据，最强结果也只是 `ready_for_review`。当前缺少真实 B2/产品证据，因此 canary 仍关闭。
 
-当前主门禁：434 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog v3 phase proof 为 21/21。
+当前主门禁：438 tests + 81 subtests，retirement 7/7 通过；L0 生产合同/可读轨迹/精确 round-trip/Promotion/Catalog v3 phase proof 为 21/21。
 
 ### 5. 典型场景
 
@@ -344,6 +346,12 @@ scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
   --output-root artifacts/promotion-forward-model/my-public-run \
   --transport-failure-limit 2 --resume
+
+# 在仓库外创建独立正向资格工作区；不会生成用例或人工真值
+scripts/netopyu-l0 forward-eval-study-kit --output-root /private/forward-study
+
+# 每个阶段后查看完整性、覆盖、预注册、密封、盲审/仲裁和运行状态
+scripts/netopyu-l0 forward-eval-study-doctor --root /private/forward-study
 
 # 刷新 Runtime A/B，再汇总双核心功能、性能、证据边界和发布门槛
 scripts/netopyu-dsh compare-runtime --iterations 50
@@ -546,11 +554,13 @@ P1.9-B2 now provides two qualification levels. The shared-Worker runner scores p
 
 P2.5 private forward qualification now has a usable pre-registered workflow: the exact model artifact, protocol, Catalog, evaluator and repetition count are frozen before execution; author, two reviewers and adjudicator are disjoint; reviewer packets are independently shuffled and contain no gold/model outputs; any resolution binds both immutable reviewer-label digests. The final public v8 run completed all 210 cases with 210/210 full-semantic exact and current-Runtime-ready outcomes, zero repair/failure, and 27.179/37.285-second local p50/p95. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, and two transport faults fell to zero. This is still reverse-bootstrap, single-run evidence—not qualification or a production probability.
 
+P2.5-E adds `forward-eval-study-kit` and `forward-eval-study-doctor` for repository-external studies. The kit separates author, two reviewers, adjudicator, and run evidence; the Doctor reports only counts, digests, gates, and the next action. It rejects template markers, managed-file drift, insufficient coverage, preregistration drift, seal drift, incomplete consensus, and fewer than three repetitions. It never creates independent truth or upgrades workflow readiness into model qualification.
+
 P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan schema v10 can bind a canary Decision, observed Harness route, request/compiled arguments, and L0 contract into one plan hash, while a Journal uniqueness constraint prevents one Decision from binding two plans. DSH/Hermes still accept only `off/shadow`; canary cannot start before real B2 evidence exists.
 
 P1.9-C1 adds a non-activating safety-readiness layer. Its policy can only preserve the original Harness route or narrow/block it; it cannot redirect or authorize. The evidence gate cross-binds Worker, Adapter, real product/deployment, and operations-drill attestations, and its strongest output is only `ready_for_review`. Canary remains disabled because real B2/product evidence is absent.
 
-The current gate passes 434 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
+The current gate passes 438 tests plus 81 subtests and retirement 7/7; all 21 L0 contracts retain readable trajectories, exact round trips, Promotion checks, and Catalog-v3 phase-proof coverage.
 
 ### 5. Scenarios
 

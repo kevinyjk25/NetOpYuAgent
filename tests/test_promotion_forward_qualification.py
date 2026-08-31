@@ -20,12 +20,17 @@ from network_runtime.l0.forward_qualification import (
     build_forward_resolution_packet,
     build_forward_review_packet,
     create_forward_study_plan,
+    evaluator_fingerprint,
     forward_qualification_schemas,
     qualify_forward_files,
     record_forward_observation,
     seal_forward_cases,
     seal_forward_study,
     write_public_calibration,
+)
+from network_runtime.l0.forward_study_workspace import (
+    inspect_forward_qualification_study,
+    write_forward_qualification_kit,
 )
 from network_runtime.l0.forward_model_runner import (
     MODEL_RUN_STATE_SCHEMA,
@@ -614,6 +619,111 @@ def _private_material(root: Path, *, repetitions: int = 3) -> dict[str, Path]:
     paths["manifest"] = root / "manifest.json"
     paths["manifest"].write_text(json.dumps(manifest), encoding="utf-8")
     return paths
+
+
+def test_external_qualification_kit_is_safe_and_staged(tmp_path: Path) -> None:
+    root = tmp_path / "external-kit"
+    created = write_forward_qualification_kit(root)
+    assert created["phase"] == "authoring"
+    assert created["managedFiles"] == 10
+    assert (root / "schemas/case.schema.json").is_file()
+    assert (root / "templates/case.example.json").is_file()
+    assert (root / "author/cases.jsonl").read_text() == ""
+
+    status = inspect_forward_qualification_study(root)
+    assert status["ok"] is True
+    assert status["phase"] == "authoring"
+    assert status["gates"]["kit_integrity"]["status"] == "passed"
+    assert status["gates"]["cases"]["status"] == "pending"
+    assert "REPLACE_WITH_INDEPENDENT_PRIVATE_PROMPT" not in json.dumps(status)
+
+    with pytest.raises(ValueError, match="absent or empty"):
+        write_forward_qualification_kit(root)
+
+
+def test_workspace_delivery_is_outside_evaluator_fingerprint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original = Path.read_bytes
+    observed: list[Path] = []
+
+    def track(path: Path) -> bytes:
+        observed.append(path.resolve())
+        return original(path)
+
+    monkeypatch.setattr(Path, "read_bytes", track)
+    assert evaluator_fingerprint().startswith("sha256:")
+    relatives = {path.relative_to(ROOT).as_posix() for path in observed}
+    assert relatives == {
+        "network_runtime/l0/forward_qualification.py",
+        "network_runtime/l0/models.py",
+        "network_runtime/l0/promotion.py",
+    }
+    assert "network_runtime/l0/forward_study_workspace.py" not in relatives
+
+
+def test_external_qualification_doctor_rejects_template_and_tampering(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "external-kit"
+    write_forward_qualification_kit(root)
+    shutil.copyfile(
+        root / "templates/case.example.json",
+        root / "author/cases.jsonl",
+    )
+    status = inspect_forward_qualification_study(root)
+    assert status["phase"] == "blocked"
+    assert status["gates"]["cases"]["status"] == "failed"
+    assert "template markers" in status["gates"]["cases"]["detail"]
+
+    (root / "schemas/case.schema.json").write_text("{}\n", encoding="utf-8")
+    status = inspect_forward_qualification_study(root)
+    assert status["gates"]["kit_integrity"]["status"] == "failed"
+
+
+def test_external_qualification_doctor_closes_complete_private_study(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "external-kit"
+    write_forward_qualification_kit(root)
+    material = _private_material(tmp_path / "material")
+    shutil.copyfile(material["cases"], root / "author/cases.jsonl")
+    shutil.copyfile(material["study_plan"], root / "study-plan.json")
+    shutil.copyfile(material["manifest"], root / "manifest.json")
+    shutil.copyfile(material["first"], root / "reviewer-a/labels.jsonl")
+    shutil.copyfile(material["second"], root / "reviewer-b/labels.jsonl")
+    report = qualify_forward_files(
+        material["cases"], material["manifest"], material["first"],
+        material["second"], material["observations"],
+        study_plan_path=material["study_plan"],
+    )
+    (root / "run/report.json").write_text(
+        json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    status = inspect_forward_qualification_study(root)
+    assert status["ok"] is True
+    assert status["phase"] == "qualification_complete"
+    assert status["qualificationComplete"] is True
+    assert status["gates"]["cases"]["caseCount"] == 200
+    assert status["gates"]["independent_review"]["consensusCount"] == 200
+    assert status["gates"]["model_run"]["repetitions"] == 3
+    serialized = json.dumps(status, ensure_ascii=False)
+    assert "independent private forward qualification prompt" not in serialized
+
+    report["model"] = "different-model"
+    report_body = {
+        key: value for key, value in report.items() if key != "reportDigest"
+    }
+    report["reportDigest"] = sha256_json(report_body)
+    (root / "run/report.json").write_text(
+        json.dumps(report, ensure_ascii=False, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    drifted = inspect_forward_qualification_study(root)
+    assert drifted["phase"] == "blocked"
+    assert "pre-registration binding drift" in drifted["gates"]["model_run"]["detail"]
 
 
 def test_public_matrix_has_210_cases_but_cannot_qualify(tmp_path: Path) -> None:

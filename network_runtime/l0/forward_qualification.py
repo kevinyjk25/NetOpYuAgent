@@ -37,6 +37,7 @@ RESOLUTION_SCHEMA = "netopyu.io/promotion-forward-resolution/v1"
 ADJUDICATION_SCHEMA = "netopyu.io/promotion-forward-adjudication/v1"
 REPORT_SCHEMA = "netopyu.io/promotion-forward-qualification/v1"
 CALIBRATION_SCHEMA = "netopyu.io/promotion-forward-calibration/v1"
+EVALUATOR_FINGERPRINT_SCHEMA = "netopyu.io/promotion-forward-evaluator-fingerprint/v2"
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 TRAJECTORY_ROOT = PROJECT_ROOT / "network_runtime/l0/production_trajectories"
 DEFAULT_CALIBRATION_ROOT = PROJECT_ROOT / "artifacts/promotion-forward-calibration"
@@ -1141,16 +1142,28 @@ def _percentile(values: list[float], percentile: float) -> float:
 
 
 def evaluator_fingerprint() -> str:
-    sources = {}
+    qualification_path = PROJECT_ROOT / "network_runtime/l0/forward_qualification.py"
+    qualification_source = qualification_path.read_bytes()
+    render_boundary = b"\ndef _real_model_markdown() -> str:\n"
+    if render_boundary not in qualification_source:
+        raise ValueError("forward evaluator/render fingerprint boundary is missing")
+    evaluator_core = qualification_source.split(render_boundary, 1)[0]
+    sources = {
+        "network_runtime/l0/forward_qualification.py#evaluator-core": (
+            "sha256:" + hashlib.sha256(evaluator_core).hexdigest()
+        ),
+    }
     for relative in (
-        "network_runtime/l0/forward_qualification.py",
         "network_runtime/l0/promotion.py",
         "network_runtime/l0/models.py",
     ):
         sources[relative] = "sha256:" + hashlib.sha256(
             (PROJECT_ROOT / relative).read_bytes()
         ).hexdigest()
-    return sha256_json(sources)
+    return sha256_json({
+        "schema": EVALUATOR_FINGERPRINT_SCHEMA,
+        "sources": sources,
+    })
 
 
 def _capability_exact(expected: SemanticContract, actual: SemanticContract) -> bool:
@@ -1867,6 +1880,7 @@ def _calibration_markdown(report: dict[str, Any]) -> str:
 - 报告禁止输出 Prompt 和 Label，只保留聚合指标与 case-id digest。
 - Catalog v3 为每个 Observation phase 声明受信最低 `phasePredicates`；候选可以附加更强约束，但不能删除或改写最低证明。
 - v7 逐案 Catalog guide/validator 收口 capability/phase/output/proof；v8 将等价 guide 封装为指纹绑定的紧凑稳定 JSON packet，并在连续 transport 故障时先 checkpoint 再暂停。
+- P2.5-E 提供仓库外角色隔离工作区和只读 Doctor；它只生成 Schema、占位模板、目录与阶段门禁，不生成独立用例、Reviewer 真值或资格结论。
 
 {model_evidence}
 
@@ -1920,6 +1934,12 @@ scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
 # 查看仓库外 Case、Label、Observation 的严格 JSON Schema
 scripts/netopyu-l0 forward-eval-schema
 
+# 在仓库外创建角色隔离的资格工作区；已有非空目录会失败关闭
+scripts/netopyu-l0 forward-eval-study-kit --output-root /private/forward-study
+
+# 每一步后只读检查完整性、覆盖、预注册、密封、盲审/仲裁和运行状态
+scripts/netopyu-l0 forward-eval-study-doctor --root /private/forward-study
+
 # 0 次推理：解析计划需要冻结的模型/协议/Catalog/evaluator digest
 scripts/netopyu-l0 forward-eval-study-inputs CASES.jsonl --model qwen3.5:9b
 
@@ -1969,7 +1989,7 @@ scripts/netopyu-l0 forward-eval-score CASES.jsonl MANIFEST.json \\
 
 ## English
 
-The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. The final same-artifact v8 run completed all 210 wrappers with 210/210 full-semantic exact/current-Runtime-ready outcomes and zero repair or failure. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, exact/readiness rose 0.95 percentage points, and transport faults fell from two to zero. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint roles before execution. This public reverse-bootstrap, single-run result is regression evidence—not model qualification or a production success probability.
+The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. The final same-artifact v8 run completed all 210 wrappers with 210/210 full-semantic exact/current-Runtime-ready outcomes and zero repair or failure. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, exact/readiness rose 0.95 percentage points, and transport faults fell from two to zero. P2.5-E adds a repository-external, role-separated workspace and a read-only staged Doctor; it creates schemas and workflow controls but never manufactures independent cases, reviewer truth, identity proof, or qualification. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint roles before execution. This public reverse-bootstrap, single-run result is regression evidence—not model qualification or a production success probability.
 """
 
 
