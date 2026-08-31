@@ -111,29 +111,30 @@ flowchart TB
 
 ### 4. 定量结果
 
-#### L1 → L0.5 → L0 最终 v7 真实 9B 公开基线
+#### L1 → L0.5 → L0 最终 v8 真实 9B 公开基线
 
 同一 `qwen3.5:9b` 制品对 21 个 L0 能力族各运行 10 个中英文、追踪、安全、Schema 和对抗包装用例。模型只能输出 proposal，Runtime 独立生成 L0.5/L0 并执行 Promotion：
 
 | 指标 | 结果 |
 |---|---:|
 | 用例 / 能力族 / 包装变体 | 210 / 21 / 10 |
-| 模型原始协议 / 受限规范化后协议 | 75.24% / 99.05% |
-| Capability / 参数+谓词 exact | 99.05% / 99.05% |
-| Safety / Intent / 全语义 exact | 99.05% / 99.05% / 99.05% |
-| Runtime `ready_for_review` | 99.05%（208/210；成功返回候选 208/208） |
+| 模型原始协议 / 受限规范化后协议 | 76.19% / 100% |
+| Capability / 参数+谓词 exact | 100% / 100% |
+| Safety / Intent / 全语义 exact | 100% / 100% / 100% |
+| Runtime `ready_for_review` | 100%（210/210） |
 | 最终 safety escape | 0% |
 | 受限 enum 规范化 | 50 条 / 150 个值 |
 | 模型协议 / Promotion / 物化失败 | 0 / 0 / 0 |
-| 本地 Ollama transport 超时 | 2（均为 180 s） |
+| 本地 Ollama transport 超时 | 0 |
 | 模型 repair | 0 |
-| 本机 p50 / p95 | 31.528 / 79.384 s |
+| 输入 / 输出 token | 555,845 / 113,136 |
+| 本机 p50 / p95 | 27.179 / 37.285 s |
 
-Capability Catalog v3 在 21/21 生产轨迹中把每个 Observation phase 的最低证明谓词纳入受信合同；候选可以增加更强约束，但不能删除或改写最低证明。authoring protocol v7 自动生成逐案 Catalog guide，并在物化前校验 capability/phase/output/proof。相较历史 210 条运行，参数/谓词与全语义 exact 从 96.67% 提升到 99.05%，Runtime-ready 从 97.14% 提升到 99.05%；208 个实际返回候选全部 exact 且通过当前 Runtime 重放，0 个 changed/blocked。代价是输入 token 增加，且本机 Ollama 运行中出现进程退化：p95 从 38.557 秒升至 79.384 秒并产生 2 次 transport 超时。评测器现会把传输失败逐例 checkpoint 为 `model_transport` 后继续，避免误报为语义失败或让整批退出。
+Capability Catalog v3 在 21/21 生产轨迹中把每个 Observation phase 的最低证明谓词纳入受信合同；候选可以增加更强约束，但不能删除或改写最低证明。authoring protocol v8 使用紧凑、排序稳定且指纹绑定的 JSON packet，并在物化前校验 capability/phase/output/proof。210 个实际返回候选全部 exact；无模型调用的当前 Runtime 重放保持 210/210 exact-ready，0 changed/blocked。
 
-这仍不是模型资格结论：公开集由受审 L0 反向生成、只运行一次，且两次服务超时说明本地可用性尚未达标。完整证据位于 [`artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json`](artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json)，详细边界见[双核心功能与性能评估](docs/core-capability-evaluation-report.md)与[正向资格协议](docs/promotion-forward-qualification.md)。
+相对最终 v7，v8 输入 token 下降 18.89%，p50/p95 下降 13.79%/53.03%，全语义 exact 与 Runtime-ready 均提高 0.95 个百分点，transport 故障从 2 降为 0；相对更早的历史 210 基线，输入 token 只增加 1.31%，输出 token 下降 3.96%，p50/p95 下降 2.70%/3.30%，全语义 exact 提高 3.33 个百分点。完整 210 条 Prompt 表示字节相对 v7 等价格式下降 18.98%。
 
-P2.5-D 进一步把等价 Catalog guide 封装为紧凑、排序稳定且版本化的 JSON packet，并将 packet 版本/序列化规则加入 authoring protocol digest。完整 210 条 Prompt 的 UTF-8 体积相对 v7 等价格式下降 18.98%。同一模型制品的 21-family direct-en 对照保持 21/21 全语义 exact/Runtime-ready、0 repair/失败，输入 token 69,227→55,511（-19.81%），p50 30.634→25.090 秒，p95 37.288→31.901 秒；同一双能力族的 20 条中英文/追踪/安全/Schema/对抗全包装对照也保持 20/20 exact/ready、0 repair/失败，输入 token -16.32%，p50/p95 -11.81%/-13.84%。Runner 还会记录模型注册表预检；连续 2 次 transport 故障时，先保存失败 checkpoint 再暂停，恢复后跳过既有证据而不静默重试。预检只证明注册表可达，不证明推理引擎持续健康。证据见 [21-family report](artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-21/report.json)和[全包装 report](artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-focused-20/report.json)。这些公开单次 smoke 只证明这次重构在所测切片未见回归，不是资格或生产成功概率。
+Runner 会记录模型注册表预检；连续 2 次 transport 故障时，先保存失败 checkpoint 再暂停，恢复后跳过既有证据而不静默重试。预检只证明注册表可达，不证明推理引擎持续健康。完整证据见 [v8 全量报告](artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210/report.json)和[当前 Runtime 重放](artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210/current-runtime-reassessment/report.json)。公开集由受审 L0 反向生成且只运行一次，因此 100% 只表示固定公开矩阵本轮全部通过，不是模型资格或生产成功概率。
 
 私有正向资格工作流现已可直接使用：预注册计划冻结模型/协议/Catalog/evaluator 与三次重复，case author、两名 reviewer、adjudicator 强制角色分离；盲审包不含 gold/model output，分歧 Resolution 同时绑定两份不可变原标签；私有 runner 支持逐 case checkpoint/resume。旧 v1 manifest 只可诊断，不能通过新资格门禁。项目没有自动生成“独立人工真值”，因此当前仍无私有资格结论。
 
@@ -543,7 +544,7 @@ On the same scope, `qwen3.6:27b` improved E2E/selection/argument F1 to 95.11%/96
 
 P1.9-B2 now provides two qualification levels. The shared-Worker runner scores protocol, selection, arguments, clarification, workflow, safety, repeatability, semantic parity, and p50/p95. The adapter runner executes the production DSH JavaScript `agent/pre-step` and Hermes Python `pre_llm_call` hooks through a temporary owner-only Worker and compares prompt/catalog/candidate/policy plus full Decision digests. Both are verified, but no real human-adjudicated baseline is stored and neither certifies DSH Web/Hermes CLI/UI or deployment identity.
 
-P2.5 private forward qualification now has a usable pre-registered workflow: the exact model artifact, protocol, Catalog, evaluator and repetition count are frozen before execution; author, two reviewers and adjudicator are disjoint; reviewer packets are independently shuffled and contain no gold/model outputs; any resolution binds both immutable reviewer-label digests. The final public v7 run completed all 210 cases: 208/210 exact and Runtime-ready, with the two remaining cases classified as local Ollama transport timeouts rather than semantic or Promotion failures. All 208 returned proposals remain exact-ready under a no-model-call current-Runtime replay. Local p50/p95 was 31.528/79.384 seconds, so functional closure improved while model-serving tail latency regressed. This is still reverse-bootstrap, single-run evidence—not qualification or a production probability.
+P2.5 private forward qualification now has a usable pre-registered workflow: the exact model artifact, protocol, Catalog, evaluator and repetition count are frozen before execution; author, two reviewers and adjudicator are disjoint; reviewer packets are independently shuffled and contain no gold/model outputs; any resolution binds both immutable reviewer-label digests. The final public v8 run completed all 210 cases with 210/210 full-semantic exact and current-Runtime-ready outcomes, zero repair/failure, and 27.179/37.285-second local p50/p95. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, and two transport faults fell to zero. This is still reverse-bootstrap, single-run evidence—not qualification or a production probability.
 
 P1.9-C0 adds a disabled-by-default Decision-to-plan binding kernel. PreparedPlan schema v10 can bind a canary Decision, observed Harness route, request/compiled arguments, and L0 contract into one plan hash, while a Journal uniqueness constraint prevents one Decision from binding two plans. DSH/Hermes still accept only `off/shadow`; canary cannot start before real B2 evidence exists.
 

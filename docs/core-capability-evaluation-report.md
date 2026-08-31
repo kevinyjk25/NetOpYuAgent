@@ -1,6 +1,6 @@
 # NetOpYu 双核心功能与性能评估 / Core Capability Evaluation
 
-> 自动生成于 `2026-08-31T07:37:51.583992+00:00`；摘要 `sha256:8b72c89c2c4151887c66e075ccc910fa6ea25d6664421f218918ce235c96cb61`。这是工程证据报告，不构成专利可授权性或生产 SLA 结论。
+> 自动生成于 `2026-08-31T10:27:40.037842+00:00`；摘要 `sha256:db5433b577fc1339f61340f054bfb898a79b9ae66c056ff96c46a32af3c21bd2`。这是工程证据报告，不构成专利可授权性或生产 SLA 结论。
 
 ## 中文
 
@@ -21,7 +21,7 @@ Service / Network Provider + 独立 Verifier
 
 | 核心 | 已实现功能 | 当前量化结论 | 尚未证明 |
 |---|---|---|---|
-| A：分阶段语义合约编译 | 三阶段留痕、双段映射、语义丢失告警、安全门禁、防篡改审查 | 固定 URL1 gate 通过；9B 实跑 210 条/21 能力族，Runtime 可审率 99.05% | 私有独立正向准确率、三次重复与 HA 尚未取得 |
+| A：分阶段语义合约编译 | 三阶段留痕、双段映射、语义丢失告警、安全门禁、防篡改审查 | 固定 URL1 gate 通过；9B 实跑 210 条/21 能力族，Runtime 可审率 100.00% | 私有独立正向准确率、三次重复与 HA 尚未取得 |
 | B：确定性 Effect 事务 Runtime | 不可变计划、审批绑定、执行前重校验、独立验证、对账、补偿、Saga、审计 | Core-72：有效请求 8/8；风险/故障 Oracle 64/64 | 真实厂商设备、人工审批时延、并发长稳、分布式 HA 与生产 SLO |
 
 项目当前已经分别回答了“语义如何被约束”和“确定操作如何安全落地”，但还不能声称任意自然语言或真实生产环境达到 100% 准确、稳定或可用。
@@ -60,17 +60,17 @@ Service / Network Provider + 独立 Verifier
 | 指标 | 结果 |
 |---|---:|
 | 用例 / 能力族 / 重复 | 210 / 21 / 1 |
-| 模型原始严格协议完成 | 75.24% |
-| 受限规范化后协议完成 | 99.05% |
-| Capability exact match | 99.05% |
-| 参数/谓词 exact match | 99.05% |
-| Intent exact match | 99.05% |
-| 安全合同 exact match | 99.05% |
-| Runtime ready_for_review | 99.05% |
-| 全语义 exact match / safety escape | 99.05% / 0.00% |
-| 成功返回 proposal 的 exact / Runtime ready | 208/208 / 208/208 |
-| 模型协议 / transport / Promotion 失败 | 0 / 2 / 0 |
-| 本机 p50 / p95 | 31.528 / 79.384 s |
+| 模型原始严格协议完成 | 76.19% |
+| 受限规范化后协议完成 | 100.00% |
+| Capability exact match | 100.00% |
+| 参数/谓词 exact match | 100.00% |
+| Intent exact match | 100.00% |
+| 安全合同 exact match | 100.00% |
+| Runtime ready_for_review | 100.00% |
+| 全语义 exact match / safety escape | 100.00% / 0.00% |
+| 成功返回 proposal 的 exact / Runtime ready | 210/210 / 210/210 |
+| 模型协议 / transport / Promotion 失败 | 0 / 0 / 0 |
+| 本机 p50 / p95 | 27.179 / 37.285 s |
 | 平均模型调用 / 修复 | 1.000 / 0.000 |
 | 受限 enum 规范化 | 50 条 / 150 个值 |
 
@@ -79,7 +79,7 @@ Service / Network Provider + 独立 Verifier
 | adversarial-en | 100.00% | 100.00% | 100.00% |
 | adversarial-zh | 100.00% | 100.00% | 100.00% |
 | direct-en | 100.00% | 100.00% | 100.00% |
-| direct-zh | 90.48% | 90.48% | 90.48% |
+| direct-zh | 100.00% | 100.00% | 100.00% |
 | safety-en | 100.00% | 100.00% | 100.00% |
 | safety-zh | 100.00% | 100.00% | 100.00% |
 | schema-en | 100.00% | 100.00% | 100.00% |
@@ -87,21 +87,21 @@ Service / Network Provider + 独立 Verifier
 | trace-en | 100.00% | 100.00% | 100.00% |
 | trace-zh | 100.00% | 100.00% | 100.00% |
 
-这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族、每族 10 个中英文/追踪/安全/Schema/对抗包装上的最终 v7 真实模型调用，不是 evaluator self-check。Catalog v3 将 phase-scoped 最低证明收回受信合同；模型原始协议与受限规范化后协议被分别计量，规范化不放宽 L0 核心 Schema。`model_transport` 不触发语义 repair 或 proposal 物化，仍保留在总体分母和时延中。该结果仍不是资格结论：数据由受审 L0 反向生成且仅一次重复。
+这是同一 `qwen3.5:9b` 制品在 21 个公开反向能力族、每族 10 个中英文/追踪/安全/Schema/对抗包装上的最终 v8 真实模型调用，不是 evaluator self-check。Catalog v3 将 phase-scoped 最低证明收回受信合同；紧凑、指纹绑定的 v8 packet 只改变传输表示，不放宽 L0 核心 Schema。模型原始协议与受限规范化后协议被分别计量。该结果仍不是资格结论：数据由受审 L0 反向生成且仅一次重复。
 
 #### 2.4 Phase-typed Capability 当前 Runtime 重放
 
 | 指标 | 结果 |
 |---|---:|
 | 重放 Observation / 模型调用 | 210 / 0 |
-| 当前 ready / fail-closed | 208 / 0 |
-| 无 proposal、重放不适用 | 2 |
-| 历史 exact-ready 保留 | 208/208 |
+| 当前 ready / fail-closed | 210 / 0 |
+| 无 proposal、重放不适用 | 0 |
+| 历史 exact-ready 保留 | 210/210 |
 | 历史错误可审候选新增阻断 | 0 |
 | exact-ready 回归 | 0 |
 | 结论 | `stable` |
 
-该重放没有调用模型，也没有改写 210 条 Observation；它只把已保存的规范化语义 proposal 送入当前 Catalog v3/L0.5 v3 Runtime。它保留 208/208 条全语义 exact 且可审候选；transport 失败因没有 proposal 而不适用。它只证明确定性门禁对已保存候选的稳定性，不证明模型准确率或生产概率。
+该重放没有调用模型，也没有改写 210 条 Observation；它只把已保存的规范化语义 proposal 送入当前 Catalog v3/L0.5 v3 Runtime。它保留 210/210 条全语义 exact 且可审候选；transport 失败因没有 proposal 而不适用。它只证明确定性门禁对已保存候选的稳定性，不证明模型准确率或生产概率。
 
 #### 2.5 当前性能与资格缺口
 
@@ -163,11 +163,11 @@ scripts/netopyu-l0 forward-eval-calibrate
 
 # 用本地 9B 跑 21 能力族 × 10 包装变体；支持 --resume
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 
 # 不调用模型，用当前 Runtime 重放历史 proposal
 scripts/netopyu-l0 forward-eval-reassess-runtime \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 
 # 再生成本双核心报告
 scripts/netopyu-l0 core-eval-report
@@ -186,7 +186,7 @@ scripts/netopyu-l0 core-eval-report
 
 Capability A compiles an open-ended L1 Skill through a reviewable L0.5 representation into an enforceable L0 contract. Capability B executes an activated L0 contract as a deterministic transaction with approval binding, revalidation, independent verification, recovery, compensation and tamper-evident audit.
 
-For Capability A, the fixed URL1 sample passes its semantic gate with 23/28 requirements preserved, 5 explicitly non-machine-verifiable, and 0 blocking. The final-v7 qwen3.5:9b run covered 210 public reverse-bootstrap cases across 21 families and ten bilingual/trace/safety/schema/adversarial wrappers per family. Raw/normalized-boundary protocol completion was 75.24%/99.05%, full-semantic/Runtime readiness was 99.05%/99.05%, and safety escape was 0.00%. All 208 returned proposals remained exact/current-Runtime-ready; 2 local transport faults remained in the denominator and p50/p95 were 31.528/79.384 seconds. This closes the known public semantic regression but remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
+For Capability A, the fixed URL1 sample passes its semantic gate with 23/28 requirements preserved, 5 explicitly non-machine-verifiable, and 0 blocking. The final-v8 qwen3.5:9b run covered 210 public reverse-bootstrap cases across 21 families and ten bilingual/trace/safety/schema/adversarial wrappers per family. Raw/normalized-boundary protocol completion was 76.19%/100.00%, full-semantic/Runtime readiness was 100.00%/100.00%, and safety escape was 0.00%. All 210 returned proposals remained exact/current-Runtime-ready; 0 local transport faults remained in the denominator and p50/p95 were 27.179/37.285 seconds. This closes the known public semantic regression but remains reverse-bootstrapped, single-repeat, and ineligible for qualification.
 
 For Capability B, the Core-72 campaign preserves 8/8 valid completions and raises fixed fault/risk Oracle coverage from 5/64 (7.8%) to 64/64 (100.0%). Runtime p50/p95 are 6.996/7.993 ms in the local mock campaign; human approval wait is excluded.
 
@@ -198,9 +198,9 @@ The project therefore has concrete evidence for semantic traceability gates and 
 scripts/netopyu-dsh compare-runtime --iterations 50
 scripts/netopyu-l0 forward-eval-calibrate
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 scripts/netopyu-l0 forward-eval-reassess-runtime \
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210
 scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```

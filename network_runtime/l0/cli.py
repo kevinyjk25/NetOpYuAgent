@@ -139,13 +139,13 @@ def main(argv: list[str] | None = None) -> int:
         "--forward-model-report",
         default=(
             "artifacts/promotion-forward-model/"
-            "qwen3.5-9b-p25c-v7-public-210/report.json"
+            "qwen3.5-9b-p25d-v8-public-210/report.json"
         ),
     )
     core_evaluation.add_argument(
         "--runtime-reassessment-report",
         default=(
-            "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/"
+            "artifacts/promotion-forward-model/qwen3.5-9b-p25d-v8-public-210/"
             "current-runtime-reassessment/report.json"
         ),
     )
