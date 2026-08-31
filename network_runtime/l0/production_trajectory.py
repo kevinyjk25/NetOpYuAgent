@@ -255,6 +255,7 @@ def _capability_catalog(
         *,
         tool: str | None = None,
         observation_phase: str | None = None,
+        predicates: tuple[Any, ...] = (),
     ) -> None:
         entry = capabilities.setdefault(capability_id, {
             "id": capability_id,
@@ -271,6 +272,16 @@ def _capability_catalog(
             phases = entry.setdefault("observationPhases", [])
             if observation_phase not in phases:
                 phases.append(observation_phase)
+            serialized = [
+                item.model_dump(by_alias=True, mode="json") for item in predicates
+            ]
+            phase_predicates = entry.setdefault("phasePredicates", {})
+            existing = phase_predicates.get(observation_phase)
+            if existing is not None and existing != serialized:
+                raise ProductionTrajectoryError(
+                    f"capability {capability_id} has conflicting phase predicates"
+                )
+            phase_predicates[observation_phase] = serialized
         if tool:
             entry["tool"] = tool
         for name, value in arguments.items():
@@ -295,6 +306,7 @@ def _capability_catalog(
         add(
             observation.capability, "observation", observation.arguments, fields,
             observation_phase="preflight",
+            predicates=observation.predicates,
         )
     add(
         spec.verification.capability,
@@ -302,6 +314,7 @@ def _capability_catalog(
         spec.verification.arguments,
         {item.field: item.expected for item in spec.verification.predicates},
         observation_phase="success_verification",
+        predicates=spec.verification.predicates,
     )
     if spec.compensation is not None:
         add(
@@ -320,6 +333,7 @@ def _capability_catalog(
                 for item in spec.compensation.verification.predicates
             },
             observation_phase="compensation_verification",
+            predicates=spec.compensation.verification.predicates,
         )
     return {
         "apiVersion": CAPABILITY_API_VERSION,

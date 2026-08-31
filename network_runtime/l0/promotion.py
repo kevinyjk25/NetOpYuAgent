@@ -32,13 +32,15 @@ from .models import (
     DerivedEffectManifest,
     IntentSpec,
     ParameterSpec,
+    Predicate,
     value_matches_type,
 )
 
 
 PROMOTION_SCHEMA = "netopyu.io/l0-promotion-report/v2"
 LEGACY_CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v1"
-CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v2"
+PHASE_TYPED_CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v2"
+CAPABILITY_API_VERSION = "netopyu.io/capability-catalog/v3"
 LEGACY_L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v2"
 L05_API_VERSION = "netopyu.io/l0.5-structured-skill/v3"
 TRAJECTORY_SCHEMA = "netopyu.io/l0-promotion-trajectory/v1"
@@ -67,6 +69,11 @@ class CapabilityDefinition(_StrictModel):
             "preflight", "success_verification", "compensation_verification",
         ], ...
     ] = Field(default=(), alias="observationPhases")
+    phase_predicates: dict[
+        Literal[
+            "preflight", "success_verification", "compensation_verification",
+        ], tuple[Predicate, ...]
+    ] = Field(default_factory=dict, alias="phasePredicates")
     tool: str | None = None
     profiles: tuple[str, ...]
     inputs: dict[str, ParameterSpec]
@@ -80,6 +87,10 @@ class CapabilityDefinition(_StrictModel):
             raise ValueError("capability observationPhases must be unique")
         if self.role != "observation" and self.observation_phases:
             raise ValueError("only observation capabilities can declare observationPhases")
+        if self.role != "observation" and self.phase_predicates:
+            raise ValueError("only observation capabilities can declare phasePredicates")
+        if not set(self.phase_predicates).issubset(set(self.observation_phases)):
+            raise ValueError("phasePredicates must be scoped by observationPhases")
         return self
 
     def supports_observation_phase(self, phase: str) -> bool:
@@ -88,7 +99,8 @@ class CapabilityDefinition(_StrictModel):
 
 class CapabilityCatalogManifest(_StrictModel):
     api_version: Literal[
-        LEGACY_CAPABILITY_API_VERSION, CAPABILITY_API_VERSION,
+        LEGACY_CAPABILITY_API_VERSION, PHASE_TYPED_CAPABILITY_API_VERSION,
+        CAPABILITY_API_VERSION,
     ] = Field(alias="apiVersion")
     provider: str
     version: str
@@ -101,15 +113,30 @@ class CapabilityCatalogManifest(_StrictModel):
             raise ValueError("capability ids must be unique")
         if not self.provider.strip() or not self.version.strip():
             raise ValueError("capability provider and version are required")
-        if self.api_version == CAPABILITY_API_VERSION:
+        if self.api_version in {
+            PHASE_TYPED_CAPABILITY_API_VERSION, CAPABILITY_API_VERSION,
+        }:
             untyped = [
                 item.id for item in self.capabilities
                 if item.role == "observation" and not item.observation_phases
             ]
             if untyped:
                 raise ValueError(
-                    "v2 observation capabilities require observationPhases: "
+                    "v2+ observation capabilities require observationPhases: "
                     + ", ".join(sorted(untyped))
+                )
+        if self.api_version == CAPABILITY_API_VERSION:
+            incomplete = [
+                item.id for item in self.capabilities
+                if item.role == "observation" and (
+                    set(item.phase_predicates) != set(item.observation_phases)
+                    or any(not values for values in item.phase_predicates.values())
+                )
+            ]
+            if incomplete:
+                raise ValueError(
+                    "v3 observations require non-empty phasePredicates for every "
+                    "observationPhase: " + ", ".join(sorted(incomplete))
                 )
         return self
 
@@ -1560,6 +1587,7 @@ def _validate_observation(
     capability_id: str,
     arguments: dict[str, Any],
     fields: Iterable[str],
+    predicates: Iterable[Predicate],
     profiles: tuple[str, ...],
     l0_parameters: dict[str, ParameterSpec],
     capabilities: dict[str, CapabilityDefinition],
@@ -1569,6 +1597,7 @@ def _validate_observation(
     context: str,
     findings: list[dict[str, Any]],
 ) -> None:
+    predicate_values = tuple(predicates)
     capability = capabilities.get(capability_id)
     if capability is None:
         _finding(findings, "error", "CAPABILITY_UNKNOWN", f"{context} capability is not declared", capability_id)
@@ -1591,6 +1620,32 @@ def _validate_observation(
                 "declaredPhases": list(capability.observation_phases),
             },
         )
+    required_predicates = capability.phase_predicates.get(required_phase, ())
+    if required_predicates:
+        required = {
+            canonical_json(item.model_dump(by_alias=True, mode="json"))
+            for item in required_predicates
+        }
+        actual = {
+            canonical_json(item.model_dump(by_alias=True, mode="json"))
+            for item in predicate_values
+        }
+        if not required.issubset(actual):
+            _finding(
+                findings, "error", "CAPABILITY_PHASE_PREDICATE_MISMATCH",
+                f"{context} omits or changes the trusted {required_phase} proof",
+                {
+                    "capability": capability.id,
+                    "required": [
+                        item.model_dump(by_alias=True, mode="json")
+                        for item in required_predicates
+                    ],
+                    "actual": [
+                        item.model_dump(by_alias=True, mode="json")
+                        for item in predicate_values
+                    ],
+                },
+            )
     if not set(profiles).issubset(set(capability.profiles)):
         _finding(findings, "error", "CAPABILITY_PROFILE_MISMATCH", f"{context} does not support every L0 profile")
     _validate_call(
@@ -1635,6 +1690,7 @@ def _validate_atomic_capabilities(
             capability_id=observation.capability,
             arguments=observation.arguments,
             fields=(*observation.snapshot_fields, *(item.field for item in observation.predicates)),
+            predicates=observation.predicates,
             profiles=spec.profiles, l0_parameters=spec.parameters,
             capabilities=capabilities, required_phase="preflight",
             context=f"preflight.{observation.id}", findings=findings,
@@ -1643,6 +1699,7 @@ def _validate_atomic_capabilities(
         capability_id=spec.verification.capability,
         arguments=spec.verification.arguments,
         fields=(item.field for item in spec.verification.predicates),
+        predicates=spec.verification.predicates,
         profiles=spec.profiles, l0_parameters=spec.parameters,
         capabilities=capabilities, required_phase="success_verification",
         context="verification", findings=findings,
@@ -1662,6 +1719,7 @@ def _validate_atomic_capabilities(
             capability_id=spec.compensation.verification.capability,
             arguments=spec.compensation.verification.arguments,
             fields=(item.field for item in spec.compensation.verification.predicates),
+            predicates=spec.compensation.verification.predicates,
             profiles=spec.profiles, l0_parameters=spec.parameters,
             capabilities=capabilities, required_phase="compensation_verification",
             context="compensation.verification", findings=findings,
@@ -1962,10 +2020,12 @@ def assess_promotion(
     candidate, candidate_digest, candidate_source = _load_candidate(candidate_path)
     bound = _bind_source(candidate, source, capability_digest, l05_digest)
     findings: list[dict[str, Any]] = []
-    if capabilities.api_version == LEGACY_CAPABILITY_API_VERSION:
+    if capabilities.api_version in {
+        LEGACY_CAPABILITY_API_VERSION, PHASE_TYPED_CAPABILITY_API_VERSION,
+    }:
         _finding(
             findings, "error", "CAPABILITY_CATALOG_VERSION_LEGACY",
-            "legacy Capability Catalog v1 has no enforceable phase-typing contract; migrate to v2",
+            "Capability Catalog v1/v2 lacks an enforceable phase proof contract; migrate to v3",
         )
     _validate_l05_source(source=source, l05=l05, findings=findings)
     compiled: CompiledContract | None = None

@@ -331,7 +331,7 @@ Saga 只协调受审 L0 计划，不直接持有 Provider 凭据或 execution no
 
 ### 21. L1 → L0 Promotion
 
-Promotion 是独立于生产执行路径的开发组件。它保存 `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill v2 → L0 authoring/compiled Contract` 三阶段轨迹。L1 用显式标记的小型语义块固定不可猜测的 effect capability、intent kind、targetFields 和 desiredState；L0.5 逐字段保存该 capability-scoped 锚点，并用人可读 YAML 固定参数、约束、流程、风险、停止条件、结果语义和受信 Capability 选项。静态检查阻止 L0.5 偏离 L1 或 L0 扩大/改变 L0.5 intent。Proposal 以逐级 hash 链保存全部阶段，人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
+Promotion 是独立于生产执行路径的开发组件。它保存 `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill v3 → L0 authoring/compiled Contract` 三阶段轨迹。L1 用显式标记的小型语义块固定不可猜测的 effect capability、intent kind、targetFields 和 desiredState；L0.5 逐字段保存该 capability-scoped 锚点，并用人可读 YAML 固定参数、约束、流程、风险、停止条件、结果语义和受信 Capability 选项。Capability Catalog v3 进一步为每个 Observation phase 固定 Provider-owner 最低证明谓词；静态检查阻止候选遗漏/改写该证明、L0.5 偏离 L1 或 L0 扩大/改变 L0.5 intent。Proposal 以逐级 hash 链保存全部阶段，人工 review 只形成决策记录。Provider 认证、故障注入和显式发布是后续独立门禁，Runtime 不从 proposal 目录自动加载合同。
 
 ### 22. P1.4-B-ready Provider 发布、外部资格与部署证明
 
@@ -388,6 +388,12 @@ P2.2 位于独立观测平面。五个只读 adapter 从 Runtime Journal、L1 De
 P2.3 是体验与评测平面，不进入 Harness→Runtime 效果路径。统一 `scripts/netopyu` 提供三条 Golden Path、只读 Doctor、Catalog 能力发现、显式批准的临时 mock 演示和 proposal-only Integration Pack 校验。Pack 将外部 MCP/REST/NETCONF/SSH/Controller 描述为 read/write；write 必须声明幂等字段、风险、独立 read verifier、补偿和可选精确 L0 binding，凭据只允许环境引用且对模型不可见。
 
 收敛驾驶舱把 Core-72 Runtime A/B 和模型资格报告投影为同一摘要绑定快照，按 retrieval、protocol、semantic selection、parameter grounding、clarification 和 workflow 做首层失败归因。逐例投影删除 Prompt 和参数值；HTML 自包含、无网络请求且没有控制入口。它明确区分固定集已验证控制、固定集模型资格和未证明的生产泛化。
+
+### 28. P2.5-B 私有正向资格工作流
+
+P2.5-B 位于离线评测平面，不进入 Harness→Runtime 效果路径。v2 Study 先冻结模型制品、authoring protocol、Capability Catalog、evaluator、重复次数和互斥 author/reviewer/adjudicator；Case 随后密封。两名 reviewer 分别获得不同排序且不含 gold/model output 的私有任务包，分歧只进入独立仲裁包，最终 Resolution 绑定两份不可变原标签摘要。私有 Runner 对完整集合执行预注册次数并逐 case checkpoint/resume，之后才加载真值聚合评分。该本地流程不能证明创建顺序、人员身份或生产泛化，生产证据仍需外部签名/可信时间与独立保管。
+
+长运行模型服务的 HTTP timeout/连接错误在同一离线评测平面内被分类为 `model_transport`，逐 case 写入摘要绑定 checkpoint 后继续；它不会进入语义 repair 或 proposal 物化。报告同时给出总体率、成功返回候选的条件语义率和 transport 失败数，防止把模型服务可用性与 L1→L0 语义准确性混为一个黑盒数字。
 
 ---
 
@@ -597,7 +603,7 @@ The explainability plane under `network_runtime/l0/production_trajectories/` pre
 
 ### 18. L1 → L0 promotion
 
-Promotion is a development component outside the production execution path. It preserves a three-stage `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill v2 → L0 authoring/compiled contract` trajectory. L1 contains a visibly marked compact semantic anchor for the effect capability, intent kind, target fields, and desired state that must not be guessed. Human-readable L0.5 YAML copies that capability-scoped anchor exactly and fixes parameters, constraints, workflow, risk, stop conditions, outcomes, and trusted capability options. Static checks prevent L0.5 drift from L1 and any L0 widening or intent change. The proposal stores every stage in a predecessor-linked hash chain; human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
+Promotion is a development component outside the production execution path. It preserves a three-stage `L1 SKILL.md → L0.5 StructuredNaturalLanguageSkill v3 → L0 authoring/compiled contract` trajectory. L1 contains a visibly marked compact semantic anchor for the effect capability, intent kind, target fields, and desired state that must not be guessed. Human-readable L0.5 YAML copies that capability-scoped anchor exactly and fixes parameters, constraints, workflow, risk, stop conditions, outcomes, and trusted capability options. Capability Catalog v3 also binds Provider-owned minimum proof predicates to every Observation phase. Static checks prevent candidates from omitting or altering that proof, L0.5 drift from L1, and any L0 widening or intent change. The proposal stores every stage in a predecessor-linked hash chain; human review records a decision only. Provider qualification, fault injection, and explicit publication remain separate gates, and Runtime never auto-loads proposal directories.
 
 ### 19. P1.4-B-ready Provider publication, external qualification, and deployment evidence
 
@@ -654,3 +660,9 @@ P2.2 is an independent observation plane. Five read-only adapters project Runtim
 P2.3 is an experience/evaluation plane outside the Harness-to-Runtime effect path. `scripts/netopyu` exposes three Golden Paths, a read-only Doctor, Catalog discovery, an explicitly approved temporary mock demo, and proposal-only Integration Pack validation. Packs model MCP/REST/NETCONF/SSH/controller interfaces as read/write. Every write declares idempotency, risk, an independent read verifier, compensation, and an optional exact L0 binding; credentials are environment references and model-hidden.
 
 The cockpit combines Core-72 Runtime A/B and model qualification into one digest-bound projection with first-failure attribution across retrieval, protocol, semantic selection, parameter grounding, clarification, and workflow. Per-case evidence removes prompts and argument values. The HTML is self-contained, network-free, and exposes no controls. Fixed-set controls, fixed-set model qualification, and unproven production generalization remain distinct claims.
+
+### 25. P2.5-B private forward-qualification workflow
+
+P2.5-B is an offline evaluation plane outside the Harness-to-Runtime effect path. A v2 study freezes the model artifact, authoring protocol, Capability Catalog, evaluator, repetition count, and disjoint author/reviewer/adjudicator roles before cases are sealed. Reviewers receive separately shuffled private packets without gold or model outputs. Only disagreements enter the adjudicator packet, and each resolution binds both immutable source-label digests. The private runner executes the complete set for the registered repetitions with per-case checkpoint/resume and loads truth only for aggregate scoring. Local timestamps and role ids do not prove chronology, organizational identity, or production generalization; external signatures, trusted time, and independent custody remain production evidence.
+
+HTTP timeout and connection faults from long-running model service are classified as `model_transport` in the same offline plane and checkpointed per case before the batch continues. They never enter semantic repair or proposal materialization. Reports expose the overall rate, the conditional semantic rate of returned proposals, and transport-failure counts separately so serving availability is not conflated with L1-to-L0 semantic accuracy.

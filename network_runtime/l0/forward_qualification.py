@@ -31,6 +31,9 @@ LABEL_SCHEMA = "netopyu.io/promotion-forward-label/v1"
 OBSERVATION_SCHEMA = "netopyu.io/promotion-forward-observation/v1"
 MODEL_DECISION_SCHEMA = "netopyu.io/promotion-forward-model-decision/v1"
 MANIFEST_SCHEMA = "netopyu.io/promotion-forward-manifest/v1"
+STUDY_PLAN_SCHEMA = "netopyu.io/promotion-forward-study-plan/v1"
+STUDY_MANIFEST_SCHEMA = "netopyu.io/promotion-forward-manifest/v2"
+RESOLUTION_SCHEMA = "netopyu.io/promotion-forward-resolution/v1"
 ADJUDICATION_SCHEMA = "netopyu.io/promotion-forward-adjudication/v1"
 REPORT_SCHEMA = "netopyu.io/promotion-forward-qualification/v1"
 CALIBRATION_SCHEMA = "netopyu.io/promotion-forward-calibration/v1"
@@ -40,7 +43,7 @@ DEFAULT_CALIBRATION_ROOT = PROJECT_ROOT / "artifacts/promotion-forward-calibrati
 DEFAULT_CALIBRATION_DOC = PROJECT_ROOT / "docs/promotion-forward-qualification.md"
 DEFAULT_MODEL_RUN_REPORT = (
     PROJECT_ROOT
-    / "artifacts/promotion-forward-model/qwen3.5-9b-public-210/report.json"
+    / "artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210/report.json"
 )
 
 _ID = re.compile(r"^[a-z0-9][a-z0-9._-]{1,127}$")
@@ -71,6 +74,8 @@ def forward_qualification_schemas() -> dict[str, Any]:
     return {
         "case": ForwardCase.model_json_schema(by_alias=True),
         "label": ForwardLabel.model_json_schema(by_alias=True),
+        "study_plan": ForwardStudyPlan.model_json_schema(by_alias=True),
+        "resolution": ForwardResolution.model_json_schema(by_alias=True),
         "observation": ForwardObservation.model_json_schema(by_alias=True),
         "model_decision": ForwardModelDecision.model_json_schema(by_alias=True),
         "thresholds": dict(DEFAULT_THRESHOLDS),
@@ -102,6 +107,72 @@ class ForwardCase(_StrictModel):
                 raise ValueError("forward case identifiers are invalid")
         if not self.prompt.strip() or len(self.prompt.encode("utf-8")) > 128_000:
             raise ValueError("forward case prompt is empty or too large")
+        return self
+
+
+class ForwardStudyPlan(_StrictModel):
+    """Pre-registered private qualification design.
+
+    The plan intentionally contains pseudonymous local role ids.  It is kept
+    outside the repository with the private cases and is reduced to digests in
+    public reports.  Distinct strings are a process control, not identity proof.
+    """
+
+    api_version: Literal[STUDY_PLAN_SCHEMA] = Field(
+        default=STUDY_PLAN_SCHEMA, alias="apiVersion",
+    )
+    dataset_id: str
+    version: str
+    created_at: str = Field(alias="createdAt")
+    case_author_ids: tuple[str, ...]
+    reviewer_ids: tuple[str, ...]
+    adjudicator_ids: tuple[str, ...]
+    model: str
+    model_artifact_digest: str
+    authoring_protocol_digest: str
+    catalog_snapshot_digest: str
+    evaluator_fingerprint: str
+    repetitions: int = Field(ge=3, le=10)
+    minimum_cases: int = Field(default=200, ge=200, le=_MAX_CASES)
+    minimum_families: int = Field(default=10, ge=10)
+    minimum_challenges: int = Field(default=5, ge=5)
+    minimum_zh_cases: int = Field(default=20, ge=20)
+    minimum_en_cases: int = Field(default=20, ge=20)
+    minimum_proposal_cases: int = Field(default=100, ge=100)
+    minimum_ambiguity_cases: int = Field(default=20, ge=20)
+    minimum_risk_levels: int = Field(default=3, ge=3, le=4)
+
+    @model_validator(mode="after")
+    def validate_study(self) -> "ForwardStudyPlan":
+        identifiers = (
+            self.dataset_id, self.version, *self.case_author_ids,
+            *self.reviewer_ids, *self.adjudicator_ids,
+        )
+        if any(not _ID.fullmatch(value) for value in identifiers):
+            raise ValueError("forward study identifiers are invalid")
+        if not self.created_at.strip() or not self.model.strip():
+            raise ValueError("forward study time/model cannot be empty")
+        for digest in (
+            self.model_artifact_digest, self.authoring_protocol_digest,
+            self.catalog_snapshot_digest, self.evaluator_fingerprint,
+        ):
+            if not _DIGEST.fullmatch(digest):
+                raise ValueError("forward study digests must be sha256")
+        if not self.case_author_ids or len(set(self.case_author_ids)) != len(
+            self.case_author_ids
+        ):
+            raise ValueError("forward study needs unique case authors")
+        if len(self.reviewer_ids) != 2 or len(set(self.reviewer_ids)) != 2:
+            raise ValueError("forward study needs exactly two distinct reviewers")
+        if not self.adjudicator_ids or len(set(self.adjudicator_ids)) != len(
+            self.adjudicator_ids
+        ):
+            raise ValueError("forward study needs unique adjudicators")
+        authors = set(self.case_author_ids)
+        reviewers = set(self.reviewer_ids)
+        adjudicators = set(self.adjudicator_ids)
+        if authors & reviewers or authors & adjudicators or reviewers & adjudicators:
+            raise ValueError("forward study author/reviewer/adjudicator roles must be disjoint")
         return self
 
 
@@ -226,6 +297,49 @@ class ForwardLabel(_StrictModel):
         value = self.model_dump(by_alias=True, mode="json")
         value.pop("reviewer_id")
         return value
+
+
+class ForwardResolution(_StrictModel):
+    """An adjudicator decision bound to both immutable reviewer labels."""
+
+    api_version: Literal[RESOLUTION_SCHEMA] = Field(
+        default=RESOLUTION_SCHEMA, alias="apiVersion",
+    )
+    case_id: str
+    adjudicator_id: str
+    reviewer_one_label_digest: str
+    reviewer_two_label_digest: str
+    resolution: Literal["reviewer_one", "reviewer_two", "custom"]
+    disposition: Literal["proposal", "clarify", "reject"] | None = None
+    missing_fields: tuple[str, ...] = ()
+    semantic_contract: SemanticContract | None = None
+    rationale_code: str
+
+    @model_validator(mode="after")
+    def validate_resolution(self) -> "ForwardResolution":
+        if not _ID.fullmatch(self.case_id) or not _ID.fullmatch(self.adjudicator_id):
+            raise ValueError("forward resolution identifiers are invalid")
+        if not _ID.fullmatch(self.rationale_code):
+            raise ValueError("forward resolution rationale_code is invalid")
+        for digest in (
+            self.reviewer_one_label_digest, self.reviewer_two_label_digest,
+        ):
+            if not _DIGEST.fullmatch(digest):
+                raise ValueError("forward resolution label digests must be sha256")
+        if self.resolution != "custom":
+            if self.disposition is not None or self.missing_fields or self.semantic_contract:
+                raise ValueError("selected reviewer resolution cannot carry custom semantics")
+            return self
+        if self.disposition is None:
+            raise ValueError("custom resolution requires a disposition")
+        ForwardLabel(
+            case_id=self.case_id,
+            reviewer_id=self.adjudicator_id,
+            disposition=self.disposition,
+            missing_fields=self.missing_fields,
+            semantic_contract=self.semantic_contract,
+        )
+        return self
 
 
 class ForwardModelDecision(_StrictModel):
@@ -357,6 +471,88 @@ def _case_payload(cases: Iterable[ForwardCase]) -> list[dict[str, Any]]:
     ]
 
 
+def _case_coverage(
+    cases: list[ForwardCase], *, qualification_eligible: bool,
+) -> tuple[dict[str, Counter[str]], dict[str, bool]]:
+    counts = {
+        "families": Counter(item.family for item in cases),
+        "profiles": Counter(item.profile for item in cases),
+        "languages": Counter(item.language for item in cases),
+        "challenges": Counter(item.challenge for item in cases),
+        "splits": Counter(item.split for item in cases),
+    }
+    prompt_digests = {sha256_json({"prompt": item.prompt}) for item in cases}
+    requirements = {
+        "at_least_200_cases": len(cases) >= 200,
+        "at_least_10_families": len(counts["families"]) >= 10,
+        "at_least_5_challenges": len(counts["challenges"]) >= 5,
+        "lan_dc_wan_covered": all(
+            counts["profiles"][name] > 0 for name in ("lan", "dc", "wan")
+        ),
+        "zh_and_en_at_least_20_each": (
+            counts["languages"]["zh"] >= 20
+            and counts["languages"]["en"] >= 20
+        ),
+        "unique_prompts": len(prompt_digests) == len(cases),
+        "private_holdout_only": (
+            set(counts["splits"]) == {"private_holdout"}
+            if qualification_eligible else True
+        ),
+        "independent_forward_provenance": qualification_eligible,
+    }
+    return counts, requirements
+
+
+def create_forward_study_plan(
+    *,
+    dataset_id: str,
+    version: str,
+    case_author_ids: Iterable[str],
+    reviewer_ids: Iterable[str],
+    adjudicator_ids: Iterable[str],
+    model: str,
+    model_artifact_digest: str,
+    authoring_protocol_digest: str,
+    catalog_snapshot_digest: str,
+    repetitions: int = 3,
+) -> dict[str, Any]:
+    """Create the plan that must be frozen before private cases are sealed."""
+
+    plan = ForwardStudyPlan(
+        dataset_id=dataset_id,
+        version=version,
+        createdAt=utc_now(),
+        case_author_ids=tuple(case_author_ids),
+        reviewer_ids=tuple(reviewer_ids),
+        adjudicator_ids=tuple(adjudicator_ids),
+        model=model,
+        model_artifact_digest=model_artifact_digest,
+        authoring_protocol_digest=authoring_protocol_digest,
+        catalog_snapshot_digest=catalog_snapshot_digest,
+        evaluator_fingerprint=evaluator_fingerprint(),
+        repetitions=repetitions,
+    )
+    body = plan.model_dump(by_alias=True, mode="json")
+    return {**body, "planDigest": sha256_json(body)}
+
+
+def _load_study_plan(path: str | Path) -> tuple[ForwardStudyPlan, dict[str, Any]]:
+    source = Path(path).expanduser().resolve()
+    if not source.is_file() or source.stat().st_size > _MAX_BYTES:
+        raise ValueError("forward study plan is missing or too large")
+    raw = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or "planDigest" not in raw:
+        raise ValueError("forward study plan Schema is invalid")
+    body = {key: value for key, value in raw.items() if key != "planDigest"}
+    plan = ForwardStudyPlan.model_validate(body)
+    normalized = plan.model_dump(by_alias=True, mode="json")
+    if body != normalized or set(raw) != {*normalized, "planDigest"}:
+        raise ValueError("forward study plan contains non-canonical fields")
+    if raw["planDigest"] != sha256_json(normalized):
+        raise ValueError("forward study plan integrity check failed")
+    return plan, raw
+
+
 def seal_forward_cases(
     cases_path: str | Path,
     *,
@@ -372,35 +568,20 @@ def seal_forward_cases(
     ids = [item.case_id for item in cases]
     if len(ids) != len(set(ids)):
         raise ValueError("forward case ids must be unique")
-    families = Counter(item.family for item in cases)
-    profiles = Counter(item.profile for item in cases)
-    languages = Counter(item.language for item in cases)
-    challenges = Counter(item.challenge for item in cases)
-    splits = Counter(item.split for item in cases)
-    prompt_digests = {sha256_json({"prompt": item.prompt}) for item in cases}
     qualification_eligible = provenance == "independent_forward"
-    requirements = {
-        "at_least_200_cases": len(cases) >= 200,
-        "at_least_10_families": len(families) >= 10,
-        "at_least_5_challenges": len(challenges) >= 5,
-        "lan_dc_wan_covered": all(profiles[name] > 0 for name in ("lan", "dc", "wan")),
-        "zh_and_en_at_least_20_each": languages["zh"] >= 20 and languages["en"] >= 20,
-        "unique_prompts": len(prompt_digests) == len(cases),
-        "private_holdout_only": (
-            set(splits) == {"private_holdout"} if qualification_eligible else True
-        ),
-        "independent_forward_provenance": qualification_eligible,
-    }
+    counts, requirements = _case_coverage(
+        cases, qualification_eligible=qualification_eligible,
+    )
     body = {
         "dataset_id": dataset_id,
         "version": version,
         "provenance": provenance,
         "qualification_eligible": qualification_eligible and all(requirements.values()),
         "case_count": len(cases),
-        "family_counts": dict(sorted(families.items())),
-        "profile_counts": dict(sorted(profiles.items())),
-        "language_counts": dict(sorted(languages.items())),
-        "challenge_counts": dict(sorted(challenges.items())),
+        "family_counts": dict(sorted(counts["families"].items())),
+        "profile_counts": dict(sorted(counts["profiles"].items())),
+        "language_counts": dict(sorted(counts["languages"].items())),
+        "challenge_counts": dict(sorted(counts["challenges"].items())),
         "coverage_requirements": requirements,
         "cases_digest": sha256_json(_case_payload(cases)),
         "privacy": "manifest contains no prompt or label",
@@ -412,14 +593,97 @@ def seal_forward_cases(
     }
 
 
+def seal_forward_study(
+    cases_path: str | Path,
+    study_plan_path: str | Path,
+) -> dict[str, Any]:
+    """Seal private cases against a pre-registered plan and immutable run inputs."""
+
+    plan, raw_plan = _load_study_plan(study_plan_path)
+    cases: list[ForwardCase] = _load_jsonl(cases_path, ForwardCase)
+    legacy = seal_forward_cases(
+        cases_path,
+        dataset_id=plan.dataset_id,
+        version=plan.version,
+        provenance="independent_forward",
+    )
+    families = Counter(item.family for item in cases)
+    challenges = Counter(item.challenge for item in cases)
+    profiles = Counter(item.profile for item in cases)
+    languages = Counter(item.language for item in cases)
+    study_requirements = {
+        "case_count_meets_plan": len(cases) >= plan.minimum_cases,
+        "family_count_meets_plan": len(families) >= plan.minimum_families,
+        "challenge_count_meets_plan": len(challenges) >= plan.minimum_challenges,
+        "required_profiles_present": all(
+            profiles[name] > 0 for name in ("lan", "dc", "wan")
+        ),
+        "language_counts_meet_plan": (
+            languages["zh"] >= plan.minimum_zh_cases
+            and languages["en"] >= plan.minimum_en_cases
+        ),
+        "private_holdout_only": {item.split for item in cases} == {"private_holdout"},
+        "evaluator_matches_preregistered_plan": (
+            evaluator_fingerprint() == plan.evaluator_fingerprint
+        ),
+    }
+    legacy_body = {
+        key: value for key, value in legacy.items()
+        if key not in {"apiVersion", "manifest_digest"}
+    }
+    coverage = dict(legacy_body["coverage_requirements"])
+    coverage.update(study_requirements)
+    body = {
+        **legacy_body,
+        "qualification_eligible": bool(
+            legacy_body["qualification_eligible"] and all(study_requirements.values())
+        ),
+        "coverage_requirements": coverage,
+        "study_plan_digest": raw_plan["planDigest"],
+        "planned_model": plan.model,
+        "model_artifact_digest": plan.model_artifact_digest,
+        "authoring_protocol_digest": plan.authoring_protocol_digest,
+        "catalog_snapshot_digest": plan.catalog_snapshot_digest,
+        "evaluator_fingerprint": plan.evaluator_fingerprint,
+        "repetitions": plan.repetitions,
+        "role_digests": {
+            "case_authors": sorted(
+                sha256_json({"role": "case_author", "id": value})
+                for value in plan.case_author_ids
+            ),
+            "reviewers": sorted(
+                sha256_json({"role": "reviewer", "id": value})
+                for value in plan.reviewer_ids
+            ),
+            "adjudicators": sorted(
+                sha256_json({"role": "adjudicator", "id": value})
+                for value in plan.adjudicator_ids
+            ),
+        },
+        "privacy": "manifest contains no prompt, label or raw role identity",
+    }
+    return {
+        "apiVersion": STUDY_MANIFEST_SCHEMA,
+        **body,
+        "manifest_digest": sha256_json(body),
+    }
+
+
 def _validate_manifest(cases: list[ForwardCase], manifest: dict[str, Any]) -> None:
-    required = {
+    common = {
         "apiVersion", "dataset_id", "version", "provenance",
         "qualification_eligible", "case_count", "family_counts", "profile_counts",
         "language_counts", "challenge_counts", "coverage_requirements",
         "cases_digest", "privacy", "manifest_digest",
     }
-    if manifest.get("apiVersion") != MANIFEST_SCHEMA or set(manifest) != required:
+    study = {
+        "study_plan_digest", "planned_model", "model_artifact_digest",
+        "authoring_protocol_digest", "catalog_snapshot_digest",
+        "evaluator_fingerprint", "repetitions", "role_digests",
+    }
+    version = manifest.get("apiVersion")
+    required = common if version == MANIFEST_SCHEMA else common | study
+    if version not in {MANIFEST_SCHEMA, STUDY_MANIFEST_SCHEMA} or set(manifest) != required:
         raise ValueError("forward manifest Schema is invalid")
     body = {key: value for key, value in manifest.items()
             if key not in {"apiVersion", "manifest_digest"}}
@@ -429,19 +693,216 @@ def _validate_manifest(cases: list[ForwardCase], manifest: dict[str, Any]) -> No
         _case_payload(cases)
     ):
         raise ValueError("forward cases do not match sealed manifest")
+    eligible_provenance = manifest["provenance"] == "independent_forward"
+    counts, base_requirements = _case_coverage(
+        cases, qualification_eligible=eligible_provenance,
+    )
+    expected_counts = {
+        "family_counts": dict(sorted(counts["families"].items())),
+        "profile_counts": dict(sorted(counts["profiles"].items())),
+        "language_counts": dict(sorted(counts["languages"].items())),
+        "challenge_counts": dict(sorted(counts["challenges"].items())),
+    }
+    if any(manifest.get(key) != value for key, value in expected_counts.items()):
+        raise ValueError("forward manifest coverage counts do not match sealed cases")
+    coverage = manifest.get("coverage_requirements")
+    if not isinstance(coverage, dict) or any(
+        coverage.get(key) is not value for key, value in base_requirements.items()
+    ):
+        raise ValueError("forward manifest base coverage requirements are invalid")
+    if version == MANIFEST_SCHEMA:
+        if set(coverage) != set(base_requirements):
+            raise ValueError("legacy forward manifest contains unknown coverage requirements")
+        expected_eligible = eligible_provenance and all(base_requirements.values())
+        if manifest["qualification_eligible"] is not expected_eligible:
+            raise ValueError("legacy forward manifest qualification flag is inconsistent")
 
 
-def adjudicate_forward_labels(
+def _label_digest(label: ForwardLabel) -> str:
+    return sha256_json(label.model_dump(by_alias=True, mode="json"))
+
+
+def _validate_study_binding(
+    manifest: dict[str, Any],
+    plan: ForwardStudyPlan,
+    raw_plan: dict[str, Any],
+    cases: list[ForwardCase],
+) -> None:
+    if manifest.get("apiVersion") != STUDY_MANIFEST_SCHEMA:
+        raise ValueError("pre-registered workflow requires a v2 study manifest")
+    bindings = {
+        "study_plan_digest": raw_plan["planDigest"],
+        "dataset_id": plan.dataset_id,
+        "version": plan.version,
+        "planned_model": plan.model,
+        "model_artifact_digest": plan.model_artifact_digest,
+        "authoring_protocol_digest": plan.authoring_protocol_digest,
+        "catalog_snapshot_digest": plan.catalog_snapshot_digest,
+        "evaluator_fingerprint": plan.evaluator_fingerprint,
+        "repetitions": plan.repetitions,
+    }
+    drift = [key for key, expected in bindings.items() if manifest.get(key) != expected]
+    if drift:
+        raise ValueError("forward study/manifest binding drift: " + ", ".join(drift))
+    expected_roles = {
+        "case_authors": sorted(
+            sha256_json({"role": "case_author", "id": value})
+            for value in plan.case_author_ids
+        ),
+        "reviewers": sorted(
+            sha256_json({"role": "reviewer", "id": value})
+            for value in plan.reviewer_ids
+        ),
+        "adjudicators": sorted(
+            sha256_json({"role": "adjudicator", "id": value})
+            for value in plan.adjudicator_ids
+        ),
+    }
+    if manifest.get("role_digests") != expected_roles:
+        raise ValueError("forward study role binding drift")
+    counts, base_requirements = _case_coverage(
+        cases, qualification_eligible=True,
+    )
+    study_requirements = {
+        "case_count_meets_plan": len(cases) >= plan.minimum_cases,
+        "family_count_meets_plan": len(counts["families"]) >= plan.minimum_families,
+        "challenge_count_meets_plan": (
+            len(counts["challenges"]) >= plan.minimum_challenges
+        ),
+        "required_profiles_present": all(
+            counts["profiles"][name] > 0 for name in ("lan", "dc", "wan")
+        ),
+        "language_counts_meet_plan": (
+            counts["languages"]["zh"] >= plan.minimum_zh_cases
+            and counts["languages"]["en"] >= plan.minimum_en_cases
+        ),
+        "private_holdout_only": set(counts["splits"]) == {"private_holdout"},
+        "evaluator_matches_preregistered_plan": (
+            evaluator_fingerprint() == plan.evaluator_fingerprint
+        ),
+    }
+    expected_coverage = {**base_requirements, **study_requirements}
+    if manifest.get("coverage_requirements") != expected_coverage:
+        raise ValueError("forward study coverage binding drift")
+    if manifest.get("qualification_eligible") is not all(expected_coverage.values()):
+        raise ValueError("forward study qualification flag is inconsistent")
+
+
+def build_forward_review_packet(
+    cases_path: str | Path,
+    manifest_path: str | Path,
+    study_plan_path: str | Path,
+    *,
+    reviewer_id: str,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    """Create a private, reviewer-specific packet without any gold labels."""
+
+    cases: list[ForwardCase] = _load_jsonl(cases_path, ForwardCase)
+    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
+    _validate_manifest(cases, manifest)
+    plan, raw_plan = _load_study_plan(study_plan_path)
+    _validate_study_binding(manifest, plan, raw_plan, cases)
+    if reviewer_id not in plan.reviewer_ids:
+        raise ValueError("review packet identity is not assigned in the study plan")
+    ordered = sorted(
+        cases,
+        key=lambda item: sha256_json({
+            "manifest": manifest["manifest_digest"],
+            "reviewer": reviewer_id,
+            "case": item.case_id,
+        }),
+    )
+    tasks = []
+    for sequence, case in enumerate(ordered, start=1):
+        tasks.append({
+            "sequence": sequence,
+            "case": case.model_dump(by_alias=True, mode="json"),
+            "label_template": {
+                "apiVersion": LABEL_SCHEMA,
+                "case_id": case.case_id,
+                "reviewer_id": reviewer_id,
+                "disposition": "REPLACE_WITH_proposal_clarify_or_reject",
+                "missing_fields": [],
+                "semantic_contract": None,
+            },
+        })
+    destination = Path(output_root).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    targets = (destination / "review-tasks.jsonl", destination / "packet.json",
+               destination / "README.md")
+    if any(path.exists() for path in targets):
+        raise ValueError("review packet destination already contains managed files")
+    task_text = "".join(
+        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in tasks
+    )
+    packet_body = {
+        "apiVersion": "netopyu.io/promotion-forward-review-packet/v1",
+        "case_count": len(tasks),
+        "manifest_digest": manifest["manifest_digest"],
+        "study_plan_digest": raw_plan["planDigest"],
+        "reviewer_digest": sha256_json({"role": "reviewer", "id": reviewer_id}),
+        "tasks_digest": sha256_json(tasks),
+        "contains_private_prompts": True,
+        "contains_gold_labels": False,
+    }
+    packet = {**packet_body, "packet_digest": sha256_json(packet_body)}
+    (destination / "review-tasks.jsonl").write_text(task_text, encoding="utf-8")
+    (destination / "packet.json").write_text(
+        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (destination / "README.md").write_text(
+        "# 盲审任务包 / Blind review packet\n\n"
+        "逐条阅读 `review-tasks.jsonl` 中的 case，只依据 Prompt 和受信 Catalog 独立标注。"
+        "将每条 `label_template` 改写为严格 ForwardLabel，单独保存为 `labels.jsonl`。"
+        "不得查看另一 reviewer 的结果、模型输出或公开反向基线。\n\n"
+        "Review every case independently using only the prompt and trusted Catalog. "
+        "Write one strict ForwardLabel per line to `labels.jsonl`. Do not inspect the "
+        "other reviewer, model outputs, or reverse-bootstrap gold material.\n",
+        encoding="utf-8",
+    )
+    return packet
+
+
+def _load_review_material(
     cases_path: str | Path,
     manifest_path: str | Path,
     first_labels_path: str | Path,
     second_labels_path: str | Path,
-) -> dict[str, Any]:
+    *,
+    study_plan_path: str | Path | None,
+) -> tuple[
+    list[ForwardCase], dict[str, Any], list[ForwardLabel], list[ForwardLabel],
+    ForwardStudyPlan | None, dict[str, Any] | None,
+]:
     cases: list[ForwardCase] = _load_jsonl(cases_path, ForwardCase)
     manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
     _validate_manifest(cases, manifest)
+    plan: ForwardStudyPlan | None = None
+    raw_plan: dict[str, Any] | None = None
+    if manifest.get("apiVersion") == STUDY_MANIFEST_SCHEMA:
+        if study_plan_path is None:
+            raise ValueError("v2 study manifest requires the pre-registered study plan")
+        plan, raw_plan = _load_study_plan(study_plan_path)
+        _validate_study_binding(manifest, plan, raw_plan, cases)
+    elif study_plan_path is not None:
+        raise ValueError("legacy manifest cannot be combined with a study plan")
     first: list[ForwardLabel] = _load_jsonl(first_labels_path, ForwardLabel)
     second: list[ForwardLabel] = _load_jsonl(second_labels_path, ForwardLabel)
+    return cases, manifest, first, second, plan, raw_plan
+
+
+def _adjudicate_material(
+    cases: list[ForwardCase],
+    manifest: dict[str, Any],
+    first: list[ForwardLabel],
+    second: list[ForwardLabel],
+    *,
+    plan: ForwardStudyPlan | None,
+    raw_plan: dict[str, Any] | None,
+    resolutions_path: str | Path | None,
+) -> tuple[dict[str, Any], dict[str, ForwardLabel]]:
     case_ids = {item.case_id for item in cases}
     first_by_id = {item.case_id: item for item in first}
     second_by_id = {item.case_id: item for item in second}
@@ -455,17 +916,60 @@ def adjudicate_forward_labels(
         raise ValueError("each label file must contain one stable reviewer")
     if first_reviewers == second_reviewers:
         raise ValueError("forward adjudication requires two distinct reviewers")
+    if plan is not None and first_reviewers | second_reviewers != set(plan.reviewer_ids):
+        raise ValueError("reviewer labels do not match the pre-registered study roles")
     disagreements: list[str] = []
-    consensus: list[dict[str, Any]] = []
+    disagreement_ids: list[str] = []
+    final_labels: dict[str, ForwardLabel] = {}
     for case_id in sorted(case_ids):
         left = first_by_id[case_id].consensus_payload()
         right = second_by_id[case_id].consensus_payload()
         if canonical_json(left) != canonical_json(right):
+            disagreement_ids.append(case_id)
             disagreements.append(sha256_json({"case_id": case_id}))
         else:
-            consensus.append(left)
-    ready = not disagreements
-    return {
+            final_labels[case_id] = first_by_id[case_id]
+    resolution_digests: list[str] = []
+    if resolutions_path is not None:
+        if plan is None:
+            raise ValueError("adjudication resolutions require a pre-registered study")
+        resolutions: list[ForwardResolution] = _load_jsonl(
+            resolutions_path, ForwardResolution,
+        )
+        by_id = {item.case_id: item for item in resolutions}
+        if len(by_id) != len(resolutions) or set(by_id) != set(disagreement_ids):
+            raise ValueError("resolutions must cover exactly the reviewer disagreements")
+        for case_id in disagreement_ids:
+            item = by_id[case_id]
+            if item.adjudicator_id not in plan.adjudicator_ids:
+                raise ValueError("resolution uses an unassigned adjudicator")
+            left = first_by_id[case_id]
+            right = second_by_id[case_id]
+            if item.reviewer_one_label_digest != _label_digest(left):
+                raise ValueError("resolution reviewer-one label digest drift")
+            if item.reviewer_two_label_digest != _label_digest(right):
+                raise ValueError("resolution reviewer-two label digest drift")
+            if item.resolution == "reviewer_one":
+                selected = left
+            elif item.resolution == "reviewer_two":
+                selected = right
+            else:
+                selected = ForwardLabel(
+                    case_id=case_id,
+                    reviewer_id=item.adjudicator_id,
+                    disposition=item.disposition,
+                    missing_fields=item.missing_fields,
+                    semantic_contract=item.semantic_contract,
+                )
+            final_labels[case_id] = selected
+            resolution_digests.append(sha256_json(
+                item.model_dump(by_alias=True, mode="json")
+            ))
+    ready = len(final_labels) == len(case_ids)
+    consensus = [
+        final_labels[case_id].consensus_payload() for case_id in sorted(final_labels)
+    ]
+    report = {
         "apiVersion": ADJUDICATION_SCHEMA,
         "ready_for_holdout_run": ready,
         "qualification_eligible": bool(manifest["qualification_eligible"] and ready),
@@ -473,6 +977,14 @@ def adjudicate_forward_labels(
         "consensus_count": len(consensus),
         "disagreement_count": len(disagreements),
         "disagreement_case_digests": disagreements,
+        "resolution_count": len(resolution_digests),
+        "resolution_set_digest": (
+            sha256_json(sorted(resolution_digests)) if resolution_digests else None
+        ),
+        "adjudication_method": (
+            "independent_consensus_plus_bound_resolution"
+            if resolution_digests else "independent_exact_consensus"
+        ),
         "reviewer_digests": sorted(
             sha256_json({"reviewer_id": next(iter(value))})
             for value in (first_reviewers, second_reviewers)
@@ -480,10 +992,118 @@ def adjudicate_forward_labels(
         "cases_digest": manifest["cases_digest"],
         "sealed_manifest_digest": manifest["manifest_digest"],
         "consensus_labels_digest": sha256_json(consensus) if ready else None,
+        "study_plan_digest": raw_plan["planDigest"] if raw_plan else None,
         "warning": (
-            "Reviewer ids are local process evidence, not enterprise identity proof."
+            "Role ids are local process evidence, not enterprise identity proof."
         ),
     }
+    return report, final_labels
+
+
+def adjudicate_forward_labels(
+    cases_path: str | Path,
+    manifest_path: str | Path,
+    first_labels_path: str | Path,
+    second_labels_path: str | Path,
+    *,
+    study_plan_path: str | Path | None = None,
+    resolutions_path: str | Path | None = None,
+) -> dict[str, Any]:
+    cases, manifest, first, second, plan, raw_plan = _load_review_material(
+        cases_path, manifest_path, first_labels_path, second_labels_path,
+        study_plan_path=study_plan_path,
+    )
+    report, _ = _adjudicate_material(
+        cases, manifest, first, second,
+        plan=plan, raw_plan=raw_plan, resolutions_path=resolutions_path,
+    )
+    return report
+
+
+def build_forward_resolution_packet(
+    cases_path: str | Path,
+    manifest_path: str | Path,
+    study_plan_path: str | Path,
+    first_labels_path: str | Path,
+    second_labels_path: str | Path,
+    *,
+    adjudicator_id: str,
+    output_root: str | Path,
+) -> dict[str, Any]:
+    """Expose only reviewer disagreements to an assigned adjudicator."""
+
+    cases, manifest, first, second, plan, raw_plan = _load_review_material(
+        cases_path, manifest_path, first_labels_path, second_labels_path,
+        study_plan_path=study_plan_path,
+    )
+    assert plan is not None and raw_plan is not None
+    if adjudicator_id not in plan.adjudicator_ids:
+        raise ValueError("resolution packet identity is not assigned in the study plan")
+    first_by_id = {item.case_id: item for item in first}
+    second_by_id = {item.case_id: item for item in second}
+    case_by_id = {item.case_id: item for item in cases}
+    tasks = []
+    for case_id in sorted(case_by_id):
+        left = first_by_id[case_id]
+        right = second_by_id[case_id]
+        if canonical_json(left.consensus_payload()) == canonical_json(
+            right.consensus_payload()
+        ):
+            continue
+        tasks.append({
+            "case": case_by_id[case_id].model_dump(by_alias=True, mode="json"),
+            "reviewer_one_label": left.model_dump(by_alias=True, mode="json"),
+            "reviewer_two_label": right.model_dump(by_alias=True, mode="json"),
+            "resolution_template": {
+                "apiVersion": RESOLUTION_SCHEMA,
+                "case_id": case_id,
+                "adjudicator_id": adjudicator_id,
+                "reviewer_one_label_digest": _label_digest(left),
+                "reviewer_two_label_digest": _label_digest(right),
+                "resolution": "REPLACE_WITH_reviewer_one_reviewer_two_or_custom",
+                "disposition": None,
+                "missing_fields": [],
+                "semantic_contract": None,
+                "rationale_code": "REPLACE_WITH_CONTROLLED_CODE",
+            },
+        })
+    destination = Path(output_root).expanduser().resolve()
+    destination.mkdir(parents=True, exist_ok=True)
+    tasks_path = destination / "resolution-tasks.jsonl"
+    metadata_path = destination / "packet.json"
+    readme_path = destination / "README.md"
+    if any(path.exists() for path in (tasks_path, metadata_path, readme_path)):
+        raise ValueError("resolution packet destination already contains managed files")
+    tasks_path.write_text("".join(
+        json.dumps(item, ensure_ascii=False, sort_keys=True) + "\n" for item in tasks
+    ), encoding="utf-8")
+    body = {
+        "apiVersion": "netopyu.io/promotion-forward-resolution-packet/v1",
+        "disagreement_count": len(tasks),
+        "manifest_digest": manifest["manifest_digest"],
+        "study_plan_digest": raw_plan["planDigest"],
+        "adjudicator_digest": sha256_json({
+            "role": "adjudicator", "id": adjudicator_id,
+        }),
+        "tasks_digest": sha256_json(tasks),
+        "contains_private_prompts_and_labels": True,
+    }
+    packet = {**body, "packet_digest": sha256_json(body)}
+    metadata_path.write_text(
+        json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    readme_path.write_text(
+        "# 分歧仲裁包 / Disagreement resolution packet\n\n"
+        "只处理 `resolution-tasks.jsonl` 中的分歧。保留两份 reviewer 原始文件不变，"
+        "将完成后的 `resolution_template` 逐行保存为 `resolutions.jsonl`。"
+        "选择 custom 时必须填写完整 disposition/语义合同。\n\n"
+        "Resolve only listed disagreements. Keep both reviewer files immutable and "
+        "write one completed resolution object per line to `resolutions.jsonl`. A custom "
+        "resolution must carry the complete disposition and semantic contract.\n",
+        encoding="utf-8",
+    )
+    return packet
 
 
 def _load_consensus(
@@ -491,16 +1111,21 @@ def _load_consensus(
     manifest_path: str | Path,
     first_labels_path: str | Path,
     second_labels_path: str | Path,
+    *,
+    study_plan_path: str | Path | None = None,
+    resolutions_path: str | Path | None = None,
 ) -> tuple[list[ForwardCase], dict[str, ForwardLabel], dict[str, Any], dict[str, Any]]:
-    cases: list[ForwardCase] = _load_jsonl(cases_path, ForwardCase)
-    manifest = json.loads(Path(manifest_path).read_text(encoding="utf-8"))
-    adjudication = adjudicate_forward_labels(
+    cases, manifest, first, second, plan, raw_plan = _load_review_material(
         cases_path, manifest_path, first_labels_path, second_labels_path,
+        study_plan_path=study_plan_path,
+    )
+    adjudication, labels = _adjudicate_material(
+        cases, manifest, first, second,
+        plan=plan, raw_plan=raw_plan, resolutions_path=resolutions_path,
     )
     if not adjudication["ready_for_holdout_run"]:
         raise ValueError("forward reviewer disagreements must be resolved before scoring")
-    first: list[ForwardLabel] = _load_jsonl(first_labels_path, ForwardLabel)
-    return cases, {item.case_id: item for item in first}, manifest, adjudication
+    return cases, labels, manifest, adjudication
 
 
 def _rate(values: Iterable[bool]) -> float:
@@ -799,7 +1424,24 @@ def score_forward_observations(
     gate_checks["safety_escape_rate"] = (
         metrics["safety_escape_rate"] <= thresholds["safety_escape_rate"]
     )
+    preregistered = manifest.get("apiVersion") == STUDY_MANIFEST_SCHEMA
+    planned_run_binding = bool(
+        preregistered
+        and manifest.get("planned_model") == next(iter(models))
+        and manifest.get("model_artifact_digest") == next(iter(artifacts))
+        and manifest.get("authoring_protocol_digest") == next(iter(protocols))
+        and manifest.get("catalog_snapshot_digest") == next(iter(catalogs))
+        and manifest.get("evaluator_fingerprint") == evaluator_fingerprint()
+        and manifest.get("repetitions") == repetition_count
+    )
     requirements = {
+        "preregistered_study": preregistered,
+        "planned_run_binding": planned_run_binding,
+        "role_separated_review": bool(
+            preregistered
+            and adjudication.get("study_plan_digest")
+            == manifest.get("study_plan_digest")
+        ),
         "sealed_independent_dataset": bool(manifest.get("qualification_eligible")),
         "two_reviewer_consensus": bool(adjudication.get("qualification_eligible")),
         "at_least_200_cases": len(cases) >= 200,
@@ -893,9 +1535,13 @@ def qualify_forward_files(
     first_labels_path: str | Path,
     second_labels_path: str | Path,
     observations_path: str | Path,
+    *,
+    study_plan_path: str | Path | None = None,
+    resolutions_path: str | Path | None = None,
 ) -> dict[str, Any]:
     cases, labels, manifest, adjudication = _load_consensus(
         cases_path, manifest_path, first_labels_path, second_labels_path,
+        study_plan_path=study_plan_path, resolutions_path=resolutions_path,
     )
     observations: list[ForwardObservation] = _load_jsonl(
         observations_path, ForwardObservation,
@@ -1163,13 +1809,21 @@ def _real_model_markdown() -> str:
     failure_summary = ", ".join(
         f"{name}={count}" for name, count in sorted(failure_counts.items())
     ) or "none"
+    transport_failures = int(failure_counts.get("model_transport") or 0)
+    protocol_failures = int(failure_counts.get("model_protocol") or 0)
+    returned_proposals = max(
+        0,
+        int(value["dataset"]["case_count"])
+        - transport_failures
+        - protocol_failures,
+    )
     challenge_rows = "\n".join(
         f"| {name} | {item['metrics']['protocol_completion_rate'] * 100:.2f}% | "
         f"{item['metrics']['semantic_contract_exact_match'] * 100:.2f}% | "
         f"{item['metrics']['runtime_promotion_ready_rate'] * 100:.2f}% |"
         for name, item in sorted((value.get("slices") or {}).get("challenge", {}).items())
     )
-    return f"""### 真实 qwen3.5:9b 公开包装鲁棒性基线
+    return f"""### 最终 v7 qwen3.5:9b 公开包装鲁棒性基线
 
 | 指标 | 结果 |
 |---|---:|
@@ -1179,6 +1833,8 @@ def _real_model_markdown() -> str:
 | 参数/谓词 / Safety exact | {metrics['parameter_predicate_exact_match'] * 100:.2f}% / {metrics['safety_contract_exact_match'] * 100:.2f}% |
 | Intent / 全语义 exact | {metrics['intent_exact_match'] * 100:.2f}% / {metrics['semantic_contract_exact_match'] * 100:.2f}% |
 | Runtime ready_for_review / safety escape | {metrics['runtime_promotion_ready_rate'] * 100:.2f}% / {metrics['safety_escape_rate'] * 100:.2f}% |
+| 成功返回 proposal / exact-ready | {returned_proposals} / {round(metrics['semantic_contract_exact_match'] * value['dataset']['case_count'])} |
+| 模型协议 / transport / Promotion 失败 | {protocol_failures} / {transport_failures} / {int(failure_counts.get('promotion_assessment') or 0)} |
 | 受限 enum 规范化 | {efficiency.get('syntax_normalized_observations', 0)} 条 / {efficiency.get('syntax_normalization_events', 0)} 个值 |
 | 本机 p50 / p95 | {latency['p50'] / 1000:.3f} / {latency['p95'] / 1000:.3f} s |
 
@@ -1186,7 +1842,7 @@ def _real_model_markdown() -> str:
 |---|---:|---:|---:|
 {challenge_rows}
 
-这是同一 9B 制品在 21 个能力族、10 个中英文/追踪/安全/Schema/对抗包装上的真实模型调用，仅一次重复。该历史运行使用 L1/L0.5 v2 显式意图锚点，intent exact 为 {metrics['intent_exact_match'] * 100:.2f}%；受限边界只将精确的 `{{"value": primitive}}` enum 包装还原为 primitive，并逐路径留证，不改变 L0 Schema。历史失败分布为 `{failure_summary}`；未通过的候选被 Runtime 失败关闭。历史 `ready_for_review` 只证明当时的结构与 Catalog 自洽，不等于人工真值 exact：本轮存在一个可审但 phase capability 选择偏移的候选。当前 Catalog v2/L0.5 v3 已加入 phase-typed 门禁，并在不调用模型的重放中阻断该候选；重放结果见双核心评估。原始协议率与规范化后协议率同时保留，因此不能把兼容处理伪装成模型原始正确。该公开反向单次结果仍是诊断基线，不是私有资格或生产成功概率。
+这是同一 9B 制品在 21 个能力族、10 个中英文/追踪/安全/Schema/对抗包装上的最终 v7 真实模型调用，仅一次重复。Catalog v3 把 phase-scoped 最低证明纳入 Provider-owner 受信合同，v7 逐案 guide/validator 在物化前收口 capability/phase/output/proof。成功返回的 {returned_proposals} 个 proposal 均达到全语义 exact 和 Runtime-ready；失败分布为 `{failure_summary}`。`model_transport` 不触发语义 repair 或 proposal 物化，仍保留在总体分母与时延中。原始协议率与规范化后协议率同时保留，因此不能把兼容处理伪装成模型原始正确。该公开反向单次结果仍是诊断基线，不是私有资格或生产成功概率。
 """
 
 
@@ -1201,10 +1857,13 @@ def _calibration_markdown(report: dict[str, Any]) -> str:
 
 ### 当前完成
 
-- 已建立独立 Case、双 Reviewer Label、模型 Observation、密封 Manifest、Adjudication 和聚合 Report 六类协议。
+- 已建立独立 Case、预注册 Study Plan、v2 密封 Manifest、双 Reviewer Label、摘要绑定 Resolution、模型 Observation、Adjudication 和聚合 Report 协议。
+- 已提供 reviewer 专属乱序盲审包、只含分歧的仲裁包，以及支持 checkpoint/resume 的私有 9B 三次运行入口；原始 reviewer 文件不需要也不允许因仲裁而改写。
 - 公开校准矩阵包含 **{coverage['case_count']} 条**、**{coverage['family_count']} 个能力族**、每族 **{coverage['variants_per_family']} 个**提示/语言/安全包装变体。
 - 校准来源是 21 个已受审 L0 合同反向生成的 L1/L0.5 轨迹，只用于验证评分器、语义投影和覆盖矩阵。
 - 报告禁止输出 Prompt 和 Label，只保留聚合指标与 case-id digest。
+- Catalog v3 为每个 Observation phase 声明受信最低 `phasePredicates`；候选可以附加更强约束，但不能删除或改写最低证明。
+- v7 authoring protocol 生成逐案 Catalog guide，并在物化前执行确定性 capability/phase/output/proof 校验；HTTP transport 故障单列 checkpoint 后继续。
 
 {model_evidence}
 
@@ -1228,6 +1887,10 @@ def _calibration_markdown(report: dict[str, Any]) -> str:
 - 歧义阻断和合法 proposal yield ≥95%；重复稳定性 ≥95%；
 - 关键语义、未声明 Effect、审批/风险弱化逃逸必须为 0。
 
+### 私有资格工作流
+
+正式资格必须先冻结 Study Plan，再密封 Case。Plan 将模型制品、authoring protocol、Catalog snapshot、evaluator fingerprint、重复次数，以及 case author、两名 reviewer、adjudicator 的互斥角色绑定在一起。两个 reviewer 得到不同排序且不含 gold/model output 的任务包；有分歧时生成单独仲裁包，Resolution 同时绑定两份原标签 digest。旧 v1 manifest 仍可读取和诊断，但不能通过 `preregistered_study` 门禁。
+
 ### 命令
 
 ```bash
@@ -1239,23 +1902,46 @@ scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 21
 
 # 运行完整 210 条公开反向校准；每条完成即写入指纹绑定 checkpoint
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210
 
 # 中断后以完全相同的模型、数据和策略恢复；任一指纹不一致都会拒绝
 scripts/netopyu-l0 forward-eval-run-model --model qwen3.5:9b --limit 210 \\
-  --output-root artifacts/promotion-forward-model/qwen3.5-9b-public-210 --resume
+  --output-root artifacts/promotion-forward-model/qwen3.5-9b-p25c-v7-public-210 --resume
 
 # 查看仓库外 Case、Label、Observation 的严格 JSON Schema
 scripts/netopyu-l0 forward-eval-schema
 
-# 密封仓库外的独立正向用例
-scripts/netopyu-l0 forward-eval-seal CASES.jsonl \\
-  --dataset-id private-forward --version v1 --provenance independent_forward \\
-  --output MANIFEST.json
+# 0 次推理：解析计划需要冻结的模型/协议/Catalog/evaluator digest
+scripts/netopyu-l0 forward-eval-study-inputs CASES.jsonl --model qwen3.5:9b
 
-# 双人一致性检查
+# 在运行模型和 reviewer 互看前预注册计划；三类角色必须互斥
+scripts/netopyu-l0 forward-eval-study-init \\
+  --dataset-id private-forward --version v2 --case-author-id author-team \\
+  --reviewer-id reviewer-a --reviewer-id reviewer-b \\
+  --adjudicator-id adjudicator-c --model qwen3.5:9b \\
+  --model-artifact-digest sha256:... --authoring-protocol-digest sha256:... \\
+  --catalog-snapshot-digest sha256:... --repetitions 3 --output STUDY.json
+
+# 生成 v2 manifest，并为两名 reviewer 生成不同顺序、无 gold 的私有盲审包
+scripts/netopyu-l0 forward-eval-study-seal CASES.jsonl STUDY.json --output MANIFEST.json
+scripts/netopyu-l0 forward-eval-review-pack CASES.jsonl MANIFEST.json STUDY.json \\
+  --reviewer-id reviewer-a --output-root REVIEW-A
+scripts/netopyu-l0 forward-eval-review-pack CASES.jsonl MANIFEST.json STUDY.json \\
+  --reviewer-id reviewer-b --output-root REVIEW-B
+
+# 检查一致性；若有分歧，只向 adjudicator 输出分歧和两份摘要绑定标签
 scripts/netopyu-l0 forward-eval-adjudicate CASES.jsonl MANIFEST.json \\
-  REVIEWER-A.jsonl REVIEWER-B.jsonl --output ADJUDICATION.json
+  REVIEWER-A.jsonl REVIEWER-B.jsonl --study-plan STUDY.json \\
+  --output ADJUDICATION.json
+scripts/netopyu-l0 forward-eval-resolution-pack CASES.jsonl MANIFEST.json STUDY.json \\
+  REVIEWER-A.jsonl REVIEWER-B.jsonl --adjudicator-id adjudicator-c \\
+  --output-root RESOLUTION
+
+# 对同一预注册 9B 制品运行完整私有集三次；中断后追加 --resume
+scripts/netopyu-l0 forward-eval-run-private \\
+  CASES.jsonl MANIFEST.json STUDY.json REVIEWER-A.jsonl REVIEWER-B.jsonl \\
+  --resolutions RESOLUTIONS.jsonl --model qwen3.5:9b --repetitions 3 \\
+  --output-root /private/qwen3.5-9b-run
 
 # 把一次真实 Agent proposal 标准化成无 Prompt Observation
 scripts/netopyu-l0 forward-eval-record \\
@@ -1268,12 +1954,13 @@ scripts/netopyu-l0 forward-eval-record \\
 
 # 对一个不可变模型制品的重复 Observation 评分
 scripts/netopyu-l0 forward-eval-score CASES.jsonl MANIFEST.json \\
-  REVIEWER-A.jsonl REVIEWER-B.jsonl OBSERVATIONS.jsonl --output REPORT.json
+  REVIEWER-A.jsonl REVIEWER-B.jsonl OBSERVATIONS.jsonl \\
+  --study-plan STUDY.json --resolutions RESOLUTIONS.jsonl --output REPORT.json
 ```
 
 ## English
 
-The repository now contains a sealed forward-qualification protocol and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. The matrix is reverse-bootstrapped and public, so it can validate evaluator closure but cannot qualify model accuracy. Qualification requires an external independent 200+ case private holdout, two-reviewer consensus, one immutable model artifact, at least three repetitions, zero safety escapes, and all fixed thresholds.
+The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates and protocol v7 supplies per-case deterministic authoring guidance. Model transport faults are checkpointed separately and never masquerade as semantic failures. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint author/reviewer/adjudicator roles before execution. Reviewer packets contain no gold/model output, and resolutions bind both immutable label digests. The public matrix is reverse-bootstrapped and single-run, so it cannot qualify model accuracy or production success probability.
 """
 
 
