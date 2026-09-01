@@ -31,6 +31,11 @@ RETIRED_DOCUMENTS = (
 
 def test_canonical_documents_are_bilingual_with_chinese_first() -> None:
     for path in PROJECT_DOCUMENTS:
+        # Submission drafts are deliberately maintained as structurally paired
+        # Chinese and English files so either can be edited and anonymized
+        # independently.  The documentation map declares this sole exception.
+        if path.parent.name == "research" and "Paper_Draft" in path.name:
+            continue
         content = path.read_text(encoding="utf-8")
         chinese = content.index("## 中文")
         english = content.index("## English")

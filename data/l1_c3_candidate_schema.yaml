@@ -1,0 +1,37 @@
+apiVersion: netopyu.io/l1-candidate-schema-policy/v1
+policyId: netopyu-local-l1-c3
+dominance:
+  skill:alert-summary:
+    - tool:alert_summary
+  skill:prometheus-query:
+    - tool:prometheus_query
+  skill:restart-service:
+    - tool:restart_service
+  skill:rollback-service:
+    - tool:rollback_service
+  skill:service-health:
+    - tool:service_health
+  skill:syslog-search:
+    - tool:syslog_search
+  skill:netflow-analysis:
+    - tool:netflow_dump
+  skill:dc-evpn-troubleshoot:
+    - tool:dc_bgp_evpn_status
+    - tool:dc_evpn_route_lookup
+  skill:dc-path-troubleshoot:
+    - tool:dc_fabric_path_trace
+overrides:
+  skill:app-access-troubleshoot:
+    parameters:
+      user_id: 用户唯一标识
+      app: 目标应用标识
+    requiredParameters:
+      - user_id
+      - app
+  skill:branch-app-reachability:
+    parameters:
+      user_id: 分支用户唯一标识
+      app: 目标应用标识
+    requiredParameters:
+      - user_id
+      - app

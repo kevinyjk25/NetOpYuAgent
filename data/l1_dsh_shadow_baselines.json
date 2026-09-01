@@ -1,0 +1,45 @@
+{
+  "apiVersion": "netopyu.io/l1-dsh-shadow-baselines/v1",
+  "baselines": [
+    {
+      "adapter": "dsh-headless-shadow",
+      "candidate_top_k": 12,
+      "catalog_digest": "sha256:642839b44b639e8d7a6e78fb01d7caee09d1f2c5d25f462fe1b072751fe3ef0d",
+      "dataset_digest": "sha256:c9cf65cfaa15d5d5096a5eefc026463888f3d7aa71aca4078bece8b171fb48c2",
+      "dsh_config_digest": "sha256:cca9a3c053bbe134089ec44ffb44ee476be0736c84a95e805edde0bedaf09e31",
+      "dsh_settings_digest": "sha256:5b8a817d607d8e7bc03297f3e97e06e562baf30a369afc4be8e6782604fe1504",
+      "dsh_version": "0.1.1-rc.2",
+      "evaluator_fingerprint": "sha256:83b4c29579f86103ce157862f4b34634ccb4dccf8a9630e0174abf2539d72f7d",
+      "fingerprint": "sha256:b6882147b82ea1695c9d1db2907a2778b2f507e4d6c0ff505fef6d8ea414f26e",
+      "fingerprint_compatibility_note": "ES-P0 added optional Evidence provenance fields to network_runtime/contracts.py. The L1 evaluator logic, prompts, scenarios, catalog, DSH configuration, model artifact, canonical JSON behavior, and recorded metrics are unchanged; this is a source-fingerprint compatibility rebind, not a new model qualification.",
+      "metrics": {
+        "action_accuracy": 0.6375,
+        "candidate_recall": 1.0,
+        "clarification_recall": 0.0,
+        "end_to_end_accuracy": 0.5687,
+        "missing_fields_accuracy": 0.0,
+        "out_of_scope_accuracy": 0.9286,
+        "parameter_field_f1": 0.6243,
+        "safety_escape_rate": 0.0,
+        "selection_accuracy": 0.7292,
+        "strict_output_rate": 0.7688,
+        "workflow_accuracy": 0.625
+      },
+      "model": "qwen2.5:7b",
+      "model_artifact_digest": "sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "prompt_fingerprint": "sha256:0c1296a2b96af329ba276949c847710450c6bdd0e0088449c069a353766853df",
+      "qualified": false,
+      "recorded_at": "2026-08-28T19:27:50.847412+00:00",
+      "reference_adapter_delta": {
+        "clarification_recall": 0.0,
+        "end_to_end_accuracy": 0.0124,
+        "missing_fields_accuracy": 0.0,
+        "parameter_field_f1": 0.0032,
+        "safety_escape_rate": 0.0,
+        "selection_accuracy": 0.0313,
+        "workflow_accuracy": 0.0
+      },
+      "reference_fingerprint": "sha256:c30938d7b474ab674ea669b98633716f0f99d4f2f04d713a6627806e68fb0585"
+    }
+  ]
+}

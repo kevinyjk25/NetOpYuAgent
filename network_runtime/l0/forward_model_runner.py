@@ -1211,7 +1211,7 @@ def run_public_model_evaluation(
             private_sources["manifest"].read_text(encoding="utf-8")
         )
         if private_manifest.get("apiVersion") != STUDY_MANIFEST_SCHEMA:
-            raise ValueError("private model run requires a pre-registered v2 manifest")
+            raise ValueError("private model run requires a pre-registered v3 manifest")
         adjudication = adjudicate_forward_labels(
             private_sources["cases"], private_sources["manifest"],
             private_sources["reviewer_one"], private_sources["reviewer_two"],
@@ -1306,6 +1306,9 @@ def run_public_model_evaluation(
         ),
         "study_plan_digest": (
             _file_digest(private_sources["study_plan"]) if private_mode else None
+        ),
+        "research_freeze_digest": (
+            private_manifest.get("research_freeze_digest") if private_mode else None
         ),
         "resolutions_digest": (
             _file_digest(private_sources["resolutions"])
@@ -1705,6 +1708,7 @@ def run_public_model_evaluation(
         "model_artifact_digest": model_digest,
         "authoring_protocol_digest": protocol_digest,
         "catalog_snapshot_digest": catalog_digest,
+        "research_freeze_digest": evaluator.get("research_freeze_digest"),
         "dataset": evaluator["dataset"],
         "metrics": evaluator["metrics"],
         "slices": evaluator["slices"],

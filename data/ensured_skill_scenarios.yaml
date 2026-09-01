@@ -1,0 +1,44 @@
+schema: ensuredskill.io/es-p0-scenarios/v1
+cases:
+  - id: ES-NET-01
+    kind: valid_reversible_change
+    description: A fully evidenced reversible access change commits after independent verification.
+    expected_terminal: commit
+    effect_allowed: true
+    compensation_required: false
+    human_expected: false
+  - id: ES-NET-02
+    kind: missing_evidence
+    description: A mutation without fresh target-scoped evidence is blocked before dispatch.
+    expected_terminal: abort
+    effect_allowed: false
+    compensation_required: false
+    human_expected: false
+  - id: ES-NET-03
+    kind: high_risk
+    description: A high-blast-radius change is held for human approval or rejected.
+    expected_terminal: escalate
+    effect_allowed: false
+    compensation_required: false
+    human_expected: true
+  - id: ES-NET-04
+    kind: outcome_indeterminate
+    description: A write-side disconnect triggers read-only reconciliation; fresh independent state proves the desired outcome without a blind retry.
+    expected_terminal: commit
+    effect_allowed: true
+    compensation_required: false
+    human_expected: false
+  - id: ES-NET-05
+    kind: verification_mismatch
+    description: A postcondition mismatch invokes compensation and proves exact recovery.
+    expected_terminal: abort
+    effect_allowed: true
+    compensation_required: true
+    human_expected: false
+  - id: ES-NET-06
+    kind: partial_multi_step_failure
+    description: A composite failure compensates committed steps in reverse dependency order.
+    expected_terminal: abort
+    effect_allowed: true
+    compensation_required: true
+    human_expected: false
