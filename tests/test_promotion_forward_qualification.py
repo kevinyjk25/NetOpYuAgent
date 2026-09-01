@@ -53,6 +53,7 @@ from network_runtime.l0.forward_model_runner import (
     validate_forward_model_decision_against_catalog,
 )
 from network_runtime.l0.promotion import assess_promotion
+from network_runtime.l0.research_freeze import create_research_freeze_manifest
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -611,6 +612,7 @@ def _private_material(root: Path, *, repetitions: int = 3) -> dict[str, Path]:
         model_artifact_digest=artifact,
         authoring_protocol_digest=protocol,
         catalog_snapshot_digest=catalog_snapshot,
+        research_freeze_digest=sha256_json({"freeze": "fixture-v1"}),
         repetitions=repetitions,
     )
     paths["study_plan"] = root / "study-plan.json"
@@ -624,7 +626,7 @@ def _private_material(root: Path, *, repetitions: int = 3) -> dict[str, Path]:
 def test_external_qualification_kit_is_safe_and_staged(tmp_path: Path) -> None:
     root = tmp_path / "external-kit"
     created = write_forward_qualification_kit(root)
-    assert created["phase"] == "authoring"
+    assert created["phase"] == "research_freeze"
     assert created["managedFiles"] == 10
     assert (root / "schemas/case.schema.json").is_file()
     assert (root / "templates/case.example.json").is_file()
@@ -632,7 +634,7 @@ def test_external_qualification_kit_is_safe_and_staged(tmp_path: Path) -> None:
 
     status = inspect_forward_qualification_study(root)
     assert status["ok"] is True
-    assert status["phase"] == "authoring"
+    assert status["phase"] == "research_freeze"
     assert status["gates"]["kit_integrity"]["status"] == "passed"
     assert status["gates"]["cases"]["status"] == "pending"
     assert "REPLACE_WITH_INDEPENDENT_PRIVATE_PROMPT" not in json.dumps(status)
@@ -682,11 +684,24 @@ def test_external_qualification_doctor_rejects_template_and_tampering(
 
 
 def test_external_qualification_doctor_closes_complete_private_study(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "external-kit"
     write_forward_qualification_kit(root)
     material = _private_material(tmp_path / "material")
+    plan = json.loads(material["study_plan"].read_text(encoding="utf-8"))
+    freeze_digest = plan["research_freeze_digest"]
+    (root / "research-freeze.json").write_text(
+        json.dumps({"freezeDigest": freeze_digest}), encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "network_runtime.l0.forward_study_workspace."
+        "verify_research_freeze_manifest",
+        lambda _path: {
+            "ok": True, "freezeDigest": freeze_digest,
+            "integrityValid": True, "bindingsValid": True,
+        },
+    )
     shutil.copyfile(material["cases"], root / "author/cases.jsonl")
     shutil.copyfile(material["study_plan"], root / "study-plan.json")
     shutil.copyfile(material["manifest"], root / "manifest.json")
@@ -790,6 +805,7 @@ def test_study_plan_builds_blind_packets_and_rejects_role_overlap(tmp_path: Path
             model_artifact_digest=sha256_json({"model": "v1"}),
             authoring_protocol_digest=sha256_json({"protocol": "v1"}),
             catalog_snapshot_digest=sha256_json({"catalog": "v1"}),
+            research_freeze_digest=sha256_json({"freeze": "v1"}),
         )
 
     paths = _private_material(tmp_path / "material")
@@ -914,9 +930,22 @@ def test_private_runner_rejects_unplanned_model_before_inference(tmp_path: Path)
         )
 
 
-def test_cli_creates_preregistered_study_plan(tmp_path: Path) -> None:
+def test_cli_rejects_non_frozen_research_manifest(tmp_path: Path) -> None:
     digest = sha256_json({"fixture": "immutable"})
     output = tmp_path / "study-plan.json"
+    freeze_path = tmp_path / "research-freeze.json"
+    freeze = create_research_freeze_manifest(
+        freeze_path,
+        label="unit-test-freeze", model="qualification-model",
+        model_artifact_digest=digest,
+        provider_lab_digest=sha256_json({"lab": "fixture"}),
+        allow_dirty=True,
+    )
+    freeze["frozen"] = False
+    freeze["status"] = "preview_dirty_not_frozen"
+    body = {key: value for key, value in freeze.items() if key != "freezeDigest"}
+    freeze["freezeDigest"] = sha256_json(body)
+    freeze_path.write_text(json.dumps(freeze), encoding="utf-8")
     completed = subprocess.run(
         [
             str(ROOT / "scripts/netopyu-l0"), "forward-eval-study-init",
@@ -928,16 +957,15 @@ def test_cli_creates_preregistered_study_plan(tmp_path: Path) -> None:
             "--model-artifact-digest", digest,
             "--authoring-protocol-digest", digest,
             "--catalog-snapshot-digest", digest,
+            "--research-freeze", str(freeze_path),
             "--repetitions", "3", "--output", str(output),
         ],
         cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         timeout=30, check=False,
     )
-    assert completed.returncode == 0, completed.stderr
-    plan = json.loads(output.read_text())
-    assert plan["apiVersion"].endswith("study-plan/v1")
-    assert plan["reviewer_ids"] == ["reviewer-a", "reviewer-b"]
-    assert plan["planDigest"]
+    assert completed.returncode == 1
+    assert "requires an intact, current, frozen research manifest" in completed.stdout
+    assert not output.exists()
 
 
 def test_exact_repeated_observations_qualify_and_report_is_private(tmp_path: Path) -> None:
@@ -964,8 +992,22 @@ def test_exact_repeated_observations_qualify_and_report_is_private(tmp_path: Pat
         "runtime_promotion_ready_rate": 1.0,
         "valid_proposal_yield": 1.0,
         "safety_escape_rate": 0.0,
+        "critical_semantic_escape_rate": 0.0,
+        "undeclared_effect_escape_rate": 0.0,
+        "approval_risk_weakening_escape_rate": 0.0,
         "repeat_stability": 1.0,
     }
+    assert report["escape_analysis"]["critical_semantic_escape"] == {
+        "events": 0,
+        "samples": 600,
+        "rate": 0.0,
+        "oneSided95UpperWhenZero": 0.00498,
+    }
+    assert report["outcome_classification"]["samples"] == 600
+    assert sum(report["outcome_classification"]["counts"].values()) == 600
+    assert report["slices"]["family"]
+    assert report["slices"]["profile"]
+    assert report["slices"]["risk"]
     assert report["slices"]["language"]["en"]["observation_count"] == 300
     assert report["slices"]["language"]["zh"]["observation_count"] == 300
     assert report["slices"]["challenge"]["challenge-0"][

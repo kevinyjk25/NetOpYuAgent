@@ -1,12 +1,12 @@
 # L1 → L0.5 → L0 正向资格协议 / Forward Qualification
 
-> 生成于 `2026-08-31T11:12:51.736913+00:00`。当前仓库数据是公开反向校准集，不是模型正向准确率证据。
+> 生成于 `2026-09-01T04:25:40.846396+00:00`。当前仓库数据是公开反向校准集，不是模型正向准确率证据。
 
 ## 中文
 
 ### 当前完成
 
-- 已建立独立 Case、预注册 Study Plan、v2 密封 Manifest、双 Reviewer Label、摘要绑定 Resolution、模型 Observation、Adjudication 和聚合 Report 协议。
+- 已建立独立 Case、Research Freeze、v2 预注册 Study Plan、v3 密封 Manifest、双 Reviewer Label、摘要绑定 Resolution、模型 Observation、Adjudication 和 v2 聚合 Report 协议。
 - 已提供 reviewer 专属乱序盲审包、只含分歧的仲裁包，以及支持 checkpoint/resume 的私有 9B 三次运行入口；原始 reviewer 文件不需要也不允许因仲裁而改写。
 - 公开校准矩阵包含 **210 条**、**21 个能力族**、每族 **10 个**提示/语言/安全包装变体。
 - 校准来源是 21 个已受审 L0 合同反向生成的 L1/L0.5 轨迹，只用于验证评分器、语义投影和覆盖矩阵。
@@ -74,7 +74,7 @@
 
 ### 私有资格工作流
 
-正式资格必须先冻结 Study Plan，再密封 Case。Plan 将模型制品、authoring protocol、Catalog snapshot、evaluator fingerprint、重复次数，以及 case author、两名 reviewer、adjudicator 的互斥角色绑定在一起。两个 reviewer 得到不同排序且不含 gold/model output 的任务包；有分歧时生成单独仲裁包，Resolution 同时绑定两份原标签 digest。旧 v1 manifest 仍可读取和诊断，但不能通过 `preregistered_study` 门禁。
+正式资格必须先从干净提交生成 Research Freeze，再冻结 Study Plan，最后密封 Case。Freeze 联合绑定 Runtime kernel、21 个 Contract/trajectory、Harness boundary、Evaluator、authoring protocol、模型制品、Provider/lab fingerprint、依赖与 ES-P0 基线；脏工作树只能生成 `preview_dirty_not_frozen`。Plan 再绑定 freezeDigest、重复次数，以及 case author、两名 reviewer、adjudicator 的互斥角色。两个 reviewer 得到不同排序且不含 gold/model output 的任务包；有分歧时生成单独仲裁包，Resolution 同时绑定两份原标签 digest。旧 v1 manifest 仍可读取和诊断，但不能通过 `preregistered_study` 门禁。
 
 ### 命令
 
@@ -107,15 +107,25 @@ scripts/netopyu-l0 forward-eval-study-doctor --root /private/forward-study
 # 0 次推理：解析计划需要冻结的模型/协议/Catalog/evaluator digest
 scripts/netopyu-l0 forward-eval-study-inputs CASES.jsonl --model qwen3.5:9b
 
+# 仅干净提交可得到 frozen=true；--allow-dirty 只用于不可注册的本地预览
+scripts/netopyu-l0 research-freeze-create \
+  --label es-p1-v1 --model qwen3.5:9b --model-artifact-digest sha256:... \
+  --provider-lab-digest sha256:... \
+  --output /private/forward-study/research-freeze.json
+scripts/netopyu-l0 research-freeze-check \
+  --manifest /private/forward-study/research-freeze.json
+
 # 在运行模型和 reviewer 互看前预注册计划；三类角色必须互斥
 scripts/netopyu-l0 forward-eval-study-init \
   --dataset-id private-forward --version v2 --case-author-id author-team \
   --reviewer-id reviewer-a --reviewer-id reviewer-b \
   --adjudicator-id adjudicator-c --model qwen3.5:9b \
   --model-artifact-digest sha256:... --authoring-protocol-digest sha256:... \
-  --catalog-snapshot-digest sha256:... --repetitions 3 --output STUDY.json
+  --catalog-snapshot-digest sha256:... \
+  --research-freeze /private/forward-study/research-freeze.json \
+  --repetitions 3 --output STUDY.json
 
-# 生成 v2 manifest，并为两名 reviewer 生成不同顺序、无 gold 的私有盲审包
+# 生成 v3 manifest，并为两名 reviewer 生成不同顺序、无 gold 的私有盲审包
 scripts/netopyu-l0 forward-eval-study-seal CASES.jsonl STUDY.json --output MANIFEST.json
 scripts/netopyu-l0 forward-eval-review-pack CASES.jsonl MANIFEST.json STUDY.json \
   --reviewer-id reviewer-a --output-root REVIEW-A
@@ -153,4 +163,4 @@ scripts/netopyu-l0 forward-eval-score CASES.jsonl MANIFEST.json \
 
 ## English
 
-The repository contains a pre-registered forward-qualification workflow and a 210-case public calibration matrix across 21 reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. The final same-artifact v8 run completed all 210 wrappers with 210/210 full-semantic exact/current-Runtime-ready outcomes and zero repair or failure. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, exact/readiness rose 0.95 percentage points, and transport faults fell from two to zero. P2.5-E adds a repository-external, role-separated workspace and a read-only staged Doctor; it creates schemas and workflow controls but never manufactures independent cases, reviewer truth, identity proof, or qualification. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. A v2 private study still freezes the model artifact, protocol, Catalog, evaluator, repetitions, and disjoint roles before execution. This public reverse-bootstrap, single-run result is regression evidence—not model qualification or a production success probability.
+The repository contains a pre-registered forward-qualification workflow and a 210-case public calibration matrix across 21 reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. The final same-artifact v8 run completed all 210 wrappers with 210/210 full-semantic exact/current-Runtime-ready outcomes and zero repair or failure. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, exact/readiness rose 0.95 percentage points, and transport faults fell from two to zero. P2.5-E adds a repository-external, role-separated workspace and a read-only staged Doctor; it creates schemas and workflow controls but never manufactures independent cases, reviewer truth, identity proof, or qualification. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. ES-P1 now requires a clean-worktree Research Freeze that jointly binds Runtime, contracts, evaluator, authoring protocol, harness boundary, model artifact and environment before the v2 Study Plan and v3 private manifest can be created. Reports add family/profile/risk/disposition slices, Wilson intervals, zero-event upper bounds, and mutually exclusive outcomes. This public reverse-bootstrap, single-run result is regression evidence—not model qualification or a production success probability.

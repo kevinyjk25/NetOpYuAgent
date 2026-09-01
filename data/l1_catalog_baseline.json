@@ -1,0 +1,93 @@
+{
+  "apiVersion": "netopyu.io/l1-catalog-baseline/v1",
+  "backend_mode": "mock",
+  "catalog_policy_digest": "sha256:bc1d40bdb388e3ffa279440adccdc10a4c46320e6690896f0cd6fffdfb71a9f6",
+  "include_destructive": false,
+  "profiles": {
+    "dc": {
+      "candidate_count": 18,
+      "candidate_ids": [
+        "tool:dc_bgp_evpn_status",
+        "tool:dc_check_user_app_access",
+        "tool:dc_evpn_route_lookup",
+        "tool:dc_fabric_path_trace",
+        "tool:dc_get_app_acl",
+        "tool:dc_get_applied_config",
+        "tool:dc_list_apps",
+        "tool:dc_list_fabric",
+        "tool:dc_loadbalancer_pools",
+        "tool:dc_vxlan_vni_lookup",
+        "tool:process_stored_chunks",
+        "tool:read_stored_result",
+        "skill:dc-app-access-diagnose",
+        "skill:dc-evpn-troubleshoot",
+        "skill:dc-lb-health-check",
+        "skill:dc-path-troubleshoot",
+        "skill:l1-to-l0-agent-authoring",
+        "skill:read-stored-result"
+      ],
+      "catalog_digest": "sha256:649401c6e5224fd49a03a5df1c8357b13e4bb28de59e346ddbc5295f123fa3a4",
+      "skill_manifest_digest": "sha256:5d5a65959d47090820512c17eb381d7cf124e799926175670f48005907241666",
+      "tool_declarations_digest": "sha256:0b08c06e9cd98041afad64dab42248e0023efffe90bc7c32fbc574f21e09332c"
+    },
+    "lan": {
+      "candidate_count": 33,
+      "candidate_ids": [
+        "tool:alert_summary",
+        "tool:check_nac_policy",
+        "tool:device_info",
+        "tool:diff_device_config",
+        "tool:dns_lookup",
+        "tool:get_device_config",
+        "tool:get_user_access",
+        "tool:list_devices",
+        "tool:list_interfaces",
+        "tool:list_users",
+        "tool:mock_operation_status",
+        "tool:netflow_dump",
+        "tool:process_stored_chunks",
+        "tool:prometheus_query",
+        "tool:query_radius_logs",
+        "tool:read_stored_result",
+        "tool:service_health",
+        "tool:syslog_search",
+        "tool:validate_device_config",
+        "skill:agentized-lan-access-remediation",
+        "skill:alert-summary",
+        "skill:app-access-troubleshoot",
+        "skill:branch-app-reachability",
+        "skill:l1-to-l0-agent-authoring",
+        "skill:lan-new-employee-onboarding-access",
+        "skill:lan-user-access-diagnose",
+        "skill:netflow-analysis",
+        "skill:prometheus-query",
+        "skill:read-stored-result",
+        "skill:restart-service",
+        "skill:rollback-service",
+        "skill:service-health",
+        "skill:syslog-search"
+      ],
+      "catalog_digest": "sha256:2f3def2e0ce12e31025584683aaa8b433d107cc7ae585d7ecdb256ac395fc975",
+      "skill_manifest_digest": "sha256:ebb69a4fe10553df0ce9ff37dc0a06b9f17c06d9fa836dd1de1df3a38cf2cc3c",
+      "tool_declarations_digest": "sha256:51d261b2ecc1486fc453665a16f72076482953e4ea8cad5f5f1971af4d008d69"
+    },
+    "wan": {
+      "candidate_count": 9,
+      "candidate_ids": [
+        "tool:process_stored_chunks",
+        "tool:read_stored_result",
+        "tool:wan_circuit_status",
+        "tool:wan_list_edges",
+        "tool:wan_path_sla",
+        "tool:wan_route_lookup",
+        "tool:wan_tunnel_status",
+        "skill:l1-to-l0-agent-authoring",
+        "skill:read-stored-result"
+      ],
+      "catalog_digest": "sha256:b33912832f99da7f537a3f7460f5f426659fff4bc51a97c377d2e81c7ef674b2",
+      "skill_manifest_digest": "sha256:11e9eb09a4b9e1c5e097678a19295e025419330c29b07c1b6c8994fb3f2d8e30",
+      "tool_declarations_digest": "sha256:b756ad2eb552774d4b2eec5c6191b41e478570f6a2fc6dfb0cb93852574fa555"
+    }
+  },
+  "snapshot_digest": "sha256:141ed4dd41fe231e0ba0623bc6fb6fb596a508bab95d7189130e137c159bf2d6"
+}

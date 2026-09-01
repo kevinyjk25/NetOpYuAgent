@@ -164,6 +164,30 @@ def main(argv: list[str] | None = None) -> int:
         "--markdown", default="docs/core-capability-evaluation-report.md",
     )
 
+    research_freeze = sub.add_parser(
+        "research-freeze-create",
+        help=(
+            "bind Runtime, contracts, evaluator, model and environment for ES-P1"
+        ),
+    )
+    research_freeze.add_argument("--label", required=True)
+    research_freeze.add_argument("--model", required=True)
+    research_freeze.add_argument("--model-artifact-digest", required=True)
+    research_freeze.add_argument(
+        "--provider-lab-digest", required=True,
+        help="sha256 fingerprint of the Provider/lab configuration and fault seed",
+    )
+    research_freeze.add_argument("--output", required=True)
+    research_freeze.add_argument(
+        "--allow-dirty", action="store_true",
+        help="write an explicitly non-frozen local preview from a dirty worktree",
+    )
+    research_check = sub.add_parser(
+        "research-freeze-check",
+        help="recompute and verify every public ES-P1 research binding",
+    )
+    research_check.add_argument("--manifest", required=True)
+
     forward_calibration = sub.add_parser(
         "forward-eval-calibrate",
         help="build the public 210-case reverse-bootstrap evaluator calibration matrix",
@@ -209,6 +233,10 @@ def main(argv: list[str] | None = None) -> int:
     forward_study.add_argument("--model-artifact-digest", required=True)
     forward_study.add_argument("--authoring-protocol-digest", required=True)
     forward_study.add_argument("--catalog-snapshot-digest", required=True)
+    forward_study.add_argument(
+        "--research-freeze", required=True,
+        help="verified frozen ES-P1 research manifest",
+    )
     forward_study.add_argument("--repetitions", type=int, default=3)
     forward_study.add_argument("--output", required=True)
     forward_study_seal = sub.add_parser(
@@ -498,6 +526,43 @@ def main(argv: list[str] | None = None) -> int:
                 ensure_ascii=False, indent=2, sort_keys=True,
             ))
             return 0
+        if args.command in {"research-freeze-create", "research-freeze-check"}:
+            from network_runtime.l0.research_freeze import (
+                create_research_freeze_manifest,
+                verify_research_freeze_manifest,
+            )
+
+            if args.command == "research-freeze-create":
+                value = create_research_freeze_manifest(
+                    args.output,
+                    label=args.label,
+                    model=args.model,
+                    model_artifact_digest=args.model_artifact_digest,
+                    provider_lab_digest=args.provider_lab_digest,
+                    allow_dirty=args.allow_dirty,
+                )
+                printed = {
+                    "ok": bool(value["frozen"]),
+                    "status": value["status"],
+                    "frozen": value["frozen"],
+                    "freezeDigest": value["freezeDigest"],
+                    "output": str(Path(args.output).expanduser().resolve()),
+                    "commit": value["bindings"]["sourceState"]["commit"],
+                    "dirtyEntryCount": value["bindings"]["sourceState"][
+                        "dirtyEntryCount"
+                    ],
+                    "contractCount": value["bindings"]["contractCatalog"][
+                        "contractCount"
+                    ],
+                    "claimBoundary": value["claimBoundary"],
+                }
+                exit_code = 0
+            else:
+                value = verify_research_freeze_manifest(args.manifest)
+                printed = value
+                exit_code = 0 if value["ok"] else 1
+            print(json.dumps(printed, ensure_ascii=False, indent=2, sort_keys=True))
+            return exit_code
         if args.command.startswith("forward-eval-"):
             from network_runtime.l0.forward_qualification import (
                 adjudicate_forward_labels,
@@ -589,6 +654,15 @@ def main(argv: list[str] | None = None) -> int:
                     markdown_path=args.markdown,
                 )
             elif args.command == "forward-eval-study-init":
+                from network_runtime.l0.research_freeze import (
+                    verify_research_freeze_manifest,
+                )
+
+                freeze = verify_research_freeze_manifest(args.research_freeze)
+                if not freeze["ok"]:
+                    raise ValueError(
+                        "forward study requires an intact, current, frozen research manifest"
+                    )
                 value = create_forward_study_plan(
                     dataset_id=args.dataset_id,
                     version=args.version,
@@ -599,6 +673,7 @@ def main(argv: list[str] | None = None) -> int:
                     model_artifact_digest=args.model_artifact_digest,
                     authoring_protocol_digest=args.authoring_protocol_digest,
                     catalog_snapshot_digest=args.catalog_snapshot_digest,
+                    research_freeze_digest=str(freeze["freezeDigest"]),
                     repetitions=args.repetitions,
                 )
             elif args.command == "forward-eval-study-seal":

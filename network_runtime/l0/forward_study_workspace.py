@@ -28,6 +28,7 @@ from .forward_qualification import (
     forward_qualification_schemas,
     seal_forward_cases,
 )
+from .research_freeze import verify_research_freeze_manifest
 
 
 QUALIFICATION_KIT_SCHEMA = "netopyu.io/promotion-forward-qualification-kit/v1"
@@ -110,12 +111,14 @@ def write_forward_qualification_kit(output_root: str | Path) -> dict[str, Any]:
 Schema、角色隔离、密封、盲审、仲裁、重复运行和聚合评分；不会替你生成独立
 用例、Reviewer 真值、企业身份或资格结论。
 
-1. Case author 依据真实业务经验独立编写 `author/cases.jsonl`，不得复制公开反向
+1. Runtime team 在接触任何 private case/gold 前，用干净提交生成并校验
+   `research-freeze.json`；脏工作树 preview 不能进入预注册。
+2. Case author 依据真实业务经验独立编写 `author/cases.jsonl`，不得复制公开反向
    校准集或 `templates/` 中的占位内容。至少 200 条、10 个能力族、5 类挑战，
    LAN/DC/WAN 均覆盖，中英文各至少 20 条，split 必须为 `private_holdout`。
-2. 在任何模型运行或 Reviewer 看见对方结果前执行 `forward-eval-study-inputs`、
+   然后执行 `forward-eval-study-inputs`、
    `forward-eval-study-init` 和 `forward-eval-study-seal`，生成根目录下的
-   `study-plan.json` 与 `manifest.json`。
+   `study-plan.json` 与 `manifest.json`。预注册必须绑定同一 freezeDigest。
 3. 分别为两个预注册 Reviewer 生成盲审包；他们只能写各自的
    `reviewer-a/labels.jsonl`、`reviewer-b/labels.jsonl`。
 4. 有分歧时生成 adjudicator 包，并把绑定两份原标签摘要的决定写入
@@ -158,7 +161,8 @@ after every step; it reports only counts, digests, gates, and the next action.
             for relative in managed
         ],
         "workingFiles": [
-            "author/cases.jsonl", "study-plan.json", "manifest.json",
+            "author/cases.jsonl", "research-freeze.json", "study-plan.json",
+            "manifest.json",
             "reviewer-a/labels.jsonl", "reviewer-b/labels.jsonl",
             "adjudicator/resolutions.jsonl", "run/report.json",
         ],
@@ -177,8 +181,10 @@ after every step; it reports only counts, digests, gates, and the next action.
         "root": str(root),
         "kitDigest": manifest["kitDigest"],
         "managedFiles": len(managed),
-        "phase": "authoring",
-        "nextAction": "Independently author author/cases.jsonl, then run the Doctor.",
+        "phase": "research_freeze",
+        "nextAction": (
+            "Create and verify research-freeze.json from a clean research commit."
+        ),
         "claimBoundary": body["claimBoundary"],
     }
 
@@ -249,6 +255,23 @@ def inspect_forward_qualification_study(root_path: str | Path) -> dict[str, Any]
         except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
             gate("cases", "failed", str(error))
 
+    freeze_path = root / "research-freeze.json"
+    freeze: dict[str, Any] | None = None
+    if not freeze_path.is_file():
+        gate("research_freeze", "pending", "research-freeze.json is not present")
+    else:
+        try:
+            freeze = verify_research_freeze_manifest(freeze_path)
+            if not freeze["ok"]:
+                raise ValueError("research freeze is not intact, current and frozen")
+            gate(
+                "research_freeze", "passed",
+                "Runtime, contracts, evaluator, model and environment are frozen",
+                freezeDigest=freeze["freezeDigest"],
+            )
+        except (OSError, ValueError, TypeError, json.JSONDecodeError) as error:
+            gate("research_freeze", "failed", str(error))
+
     plan_path = root / "study-plan.json"
     plan: ForwardStudyPlan | None = None
     raw_plan: dict[str, Any] | None = None
@@ -259,6 +282,10 @@ def inspect_forward_qualification_study(root_path: str | Path) -> dict[str, Any]
             plan, raw_plan = _load_study_plan(plan_path)
             if plan.evaluator_fingerprint != evaluator_fingerprint():
                 raise ValueError("pre-registered evaluator fingerprint has drifted")
+            if freeze is None:
+                raise ValueError("a verified research freeze is required")
+            if plan.research_freeze_digest != freeze["freezeDigest"]:
+                raise ValueError("pre-registered research freeze digest has drifted")
             gate(
                 "preregistration", "passed", "study inputs and separated roles are frozen",
                 planDigest=raw_plan["planDigest"], repetitions=plan.repetitions,
@@ -351,6 +378,7 @@ def inspect_forward_qualification_study(root_path: str | Path) -> dict[str, Any]
                 "authoring_protocol_digest": plan.authoring_protocol_digest,
                 "catalog_snapshot_digest": plan.catalog_snapshot_digest,
                 "evaluator_fingerprint": plan.evaluator_fingerprint,
+                "research_freeze_digest": plan.research_freeze_digest,
             }
             if any(report.get(key) != value for key, value in bindings.items()):
                 raise ValueError("qualification report has pre-registration binding drift")
@@ -377,6 +405,9 @@ def inspect_forward_qualification_study(root_path: str | Path) -> dict[str, Any]
     if failed:
         phase = "blocked"
         next_action = "Repair failed gates: " + ", ".join(failed)
+    elif gates["research_freeze"]["status"] != "passed":
+        phase = "research_freeze"
+        next_action = "Freeze the clean implementation and environment before registration."
     elif gates["cases"]["status"] != "passed":
         phase = "authoring"
         next_action = "Independently author and coverage-check author/cases.jsonl."
@@ -411,6 +442,3 @@ def inspect_forward_qualification_study(root_path: str | Path) -> dict[str, Any]
             "identity proof, model qualification, or a production success probability."
         ),
     }
-
-
-

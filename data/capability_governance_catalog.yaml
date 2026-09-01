@@ -1,0 +1,680 @@
+apiVersion: netopyu.io/capability-governance-catalog/v1
+metadata:
+  id: netopyu-local
+  version: 1.0.0
+tenants:
+- id: local-lab
+  environments:
+  - local-simulation
+teams:
+- id: dc-operations
+  displayName: DC Operations
+- id: lan-operations
+  displayName: LAN Operations
+- id: network-platform
+  displayName: Network Platform
+- id: release-management
+  displayName: Release Management
+- id: risk-governance
+  displayName: Risk Governance
+- id: service-platform
+  displayName: Service Platform
+- id: wan-operations
+  displayName: WAN Operations
+capabilities:
+- id: network.application.enforcement.apply
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  - dc
+  domain: network
+  kind: effect
+  contractHash: sha256:c923493869d9a34d8d012bc70cab3fce34da5d4e69e8512cbec1bb5940c2a712
+  inputSchemaDigest: sha256:61322200f6e7aaf669e4359293051e6d4c68623bc8d92c60720d391fa59a2fd8
+  outputSchemaDigest: sha256:4195fe594cf78a7bff24a047014fcceca1ef84096e1752e4a24b0cdce24c4573
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:c923493869d9a34d8d012bc70cab3fce34da5d4e69e8512cbec1bb5940c2a712
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:c923493869d9a34d8d012bc70cab3fce34da5d4e69e8512cbec1bb5940c2a712
+- id: network.application.enforcement.revoke
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  - dc
+  domain: network
+  kind: effect
+  contractHash: sha256:a87f65e520314a51410a1097aef90e1a45cdb1bc6348c5bcef5237cf26d37550
+  inputSchemaDigest: sha256:61322200f6e7aaf669e4359293051e6d4c68623bc8d92c60720d391fa59a2fd8
+  outputSchemaDigest: sha256:5392399de265d4d7c5d2ae59b9a3f683c111a88fc91bf9fa9b9316c01f6b73fc
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:a87f65e520314a51410a1097aef90e1a45cdb1bc6348c5bcef5237cf26d37550
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:a87f65e520314a51410a1097aef90e1a45cdb1bc6348c5bcef5237cf26d37550
+- id: network.dc.app-access.grant
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - dc
+  domain: network
+  kind: effect
+  contractHash: sha256:c16600415f3e23496e8dcdf17f9a2b0c9b8171da2b2dd79d2fd65d24b8e80e08
+  inputSchemaDigest: sha256:6269a72e3c79a01dc4cb5d107a0d08677e966456fe120a638b4ad3126410fb40
+  outputSchemaDigest: sha256:87a216f50a6cef41a25648018c70fcd23cc796323ded162ff0944fbe3ec17917
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:c16600415f3e23496e8dcdf17f9a2b0c9b8171da2b2dd79d2fd65d24b8e80e08
+- id: network.dc.app-access.revoke
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - dc
+  domain: network
+  kind: effect
+  contractHash: sha256:72fd1cd9e44e4a5daf3217c8c94d51a14e1bc69d5da76fb7de13edbcb4d848c0
+  inputSchemaDigest: sha256:2e005909b72586f95dec6cbe8edc1234ce4dd692859b5e8d9f7fbd6e5819d636
+  outputSchemaDigest: sha256:5fff629797542909e65b6a7e87a825e7b01929a6f3ef538ed26aede649d0bede
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:72fd1cd9e44e4a5daf3217c8c94d51a14e1bc69d5da76fb7de13edbcb4d848c0
+- id: network.dc.fabric-config.push
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - dc
+  domain: network
+  kind: effect
+  contractHash: sha256:50aace0b4d246383b5fe2bbe00d0604916e48892cc8ec9eef45230212386b608
+  inputSchemaDigest: sha256:9556ea72a47c0b9c104b2aae2940ea3c402d3b70df081a1a12cc4fe36ab7836c
+  outputSchemaDigest: sha256:1100fbaabf5762c0138f338eb0e6276dd707b14778306ebe6f4986e8ec2ca518
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:50aace0b4d246383b5fe2bbe00d0604916e48892cc8ec9eef45230212386b608
+- id: network.deploy.rollback
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:52be2be9960d2cb06066f84ea04380d621874a7d628caa98dfd998afed0fe6cf
+  inputSchemaDigest: sha256:bee21cfc80cc013d552e6855c000f7b85681afb4da833c5af6065a75408991ca
+  outputSchemaDigest: sha256:6ca4003e53928d90870a41ecbd076277e78d3805f87e3abd699b664c797d5d45
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:52be2be9960d2cb06066f84ea04380d621874a7d628caa98dfd998afed0fe6cf
+- id: network.device.config.edit
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  - dc
+  domain: network
+  kind: effect
+  contractHash: sha256:af2b0ae18ab4863e2f00df16ed899e7fbc567d9eb2c9482a317bd410502a533b
+  inputSchemaDigest: sha256:a31571f57890a6d051ad821bf73c75087a1c6fa56d6d77f0a918dc17b32eed49
+  outputSchemaDigest: sha256:3cee52685730f6f39a76cb14bf051dde0768290fda521658459fe4cfa4c0700c
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:af2b0ae18ab4863e2f00df16ed899e7fbc567d9eb2c9482a317bd410502a533b
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:af2b0ae18ab4863e2f00df16ed899e7fbc567d9eb2c9482a317bd410502a533b
+- id: network.device.config.push
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:85c6dffde2d71ddd15a4a2970a350099d63fa13ce97e3333cc4910bcf84e181d
+  inputSchemaDigest: sha256:59f74cd50ce0bffcc91752c40a28e54531f5a2fb56b24725050c28cc77b85f8d
+  outputSchemaDigest: sha256:54946e99b50efc82e09ebaedbe7d3047a76c5eb70180c7bb559e8814653c7a0c
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:85c6dffde2d71ddd15a4a2970a350099d63fa13ce97e3333cc4910bcf84e181d
+- id: network.fabric.access-vlan.set
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - dc
+  domain: network
+  kind: effect
+  contractHash: sha256:b6240eca17d6d8cb2b894a2be46b0440f20a521e301b502bd5bb951da04ec434
+  inputSchemaDigest: sha256:3c64b4afce85f66536d7c2a3cccb41e9a646321f7dc3e9f369589e8600ea82e4
+  outputSchemaDigest: sha256:c1481223ac3ef06679b45f87b48d27494f28e744d3367bb301d8145c011d9477
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:b6240eca17d6d8cb2b894a2be46b0440f20a521e301b502bd5bb951da04ec434
+- id: network.lan.user-access.grant
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:98206a9defa6e464800205dbf375abd5faf0bce9718e24cea392156a607efa68
+  inputSchemaDigest: sha256:7a11b922044794f8c0ee2d6ea339a400b300a371ccb3d81f8eb6c791875b6986
+  outputSchemaDigest: sha256:eecdcb383722af931be2b639da82bb6715679d5551e9cf79f3ead92a21fa51ac
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:98206a9defa6e464800205dbf375abd5faf0bce9718e24cea392156a607efa68
+- id: network.lan.user-access.revoke
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:b15a708451cf486e32b4e3b6aca8f7aad6a0df326c7aa59a66527f73b3043909
+  inputSchemaDigest: sha256:7a11b922044794f8c0ee2d6ea339a400b300a371ccb3d81f8eb6c791875b6986
+  outputSchemaDigest: sha256:d6ac4974a869d7e12b99ce3d79ec888b11292ab129e8153761dea3d3c2d22f67
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:b15a708451cf486e32b4e3b6aca8f7aad6a0df326c7aa59a66527f73b3043909
+- id: network.node.drain
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:84cef55dd4ebc4e0fcd172f13145fd91b5e895c656870e739ab04043e442081d
+  inputSchemaDigest: sha256:7ec2b76983c1748adcee151972555d78a3004946dbecfadfbef2c1d161bc44c3
+  outputSchemaDigest: sha256:cbc901b3bfb0a6f0b60d5424df87d166d49da8791b4b83d34d55a83c93750a09
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:84cef55dd4ebc4e0fcd172f13145fd91b5e895c656870e739ab04043e442081d
+- id: network.resource.delete
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:583cca1ac7fc2793bd3ce2611764f60152f99d91ffb13d7aef0e046c5d189489
+  inputSchemaDigest: sha256:31a6bee610bf2ffba90bef9f61dfa97882220ac089de386ab5530511cc86c11a
+  outputSchemaDigest: sha256:bad906847ef82128539f6f78503f7a76d646f2789e17ab2e11e5757c8023009b
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:583cca1ac7fc2793bd3ce2611764f60152f99d91ffb13d7aef0e046c5d189489
+- id: network.resource.failover
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:bf8a83e0587cdb9f3d965f1523cd356eca24df7db9cc5df98802455a6bbf3ab5
+  inputSchemaDigest: sha256:0c6da18467ddadc67c2a01ac41b166096def22002e5d84d43745c2904bf32e2b
+  outputSchemaDigest: sha256:bad906847ef82128539f6f78503f7a76d646f2789e17ab2e11e5757c8023009b
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:bf8a83e0587cdb9f3d965f1523cd356eca24df7db9cc5df98802455a6bbf3ab5
+- id: network.service.restart
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:d31c148ae12efe111b833f42fb189bbf59b49df250c7ac83b225f816efd42579
+  inputSchemaDigest: sha256:104271ecddce912db8e4e4243b6344cefc002e058a3097d2db9d2be8fd9fa275
+  outputSchemaDigest: sha256:627a86831228759282d8566de5d902930a686feb64eb6121cae8b3092c7a4a8f
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:d31c148ae12efe111b833f42fb189bbf59b49df250c7ac83b225f816efd42579
+- id: network.service.rollback
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  domain: network
+  kind: effect
+  contractHash: sha256:3038d914744201716ab8a66885bd23f00b035fa72ee12510ca9b8f5f74469449
+  inputSchemaDigest: sha256:195dff875aabb6f26d4c0bc6d5cb9f252130341b31c170b148bc847a78546c40
+  outputSchemaDigest: sha256:627a86831228759282d8566de5d902930a686feb64eb6121cae8b3092c7a4a8f
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:3038d914744201716ab8a66885bd23f00b035fa72ee12510ca9b8f5f74469449
+- id: network.wan.path.failover
+  version: 1.0.0
+  namespace: network
+  ownerTeam: network-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - wan
+  domain: network
+  kind: effect
+  contractHash: sha256:561aa3fa37ce3fdefc9aa43d256c0435719262ab09d8388aed85d9f7f451e2b4
+  inputSchemaDigest: sha256:67cde39b17dcc2f048bbc7684c38577ed9631d80633ab7404f6d0fc0ca599371
+  outputSchemaDigest: sha256:670ed319c2f40a9050f0b81097ccb0a6032c488afea173b9054841238a918d6b
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: wan-runtime
+    teamId: wan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:561aa3fa37ce3fdefc9aa43d256c0435719262ab09d8388aed85d9f7f451e2b4
+- id: service.access.entitlement.grant
+  version: 1.0.0
+  namespace: service
+  ownerTeam: service-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  - dc
+  domain: service
+  kind: effect
+  contractHash: sha256:dea8e846f21fb01b00eb71d342f8ce979c88f3bbf26a63199fd67d826f67a896
+  inputSchemaDigest: sha256:67fcb28345e9acd02e8c79cceb3f82f939efaf52b9a0cf68a000cc9baaec1853
+  outputSchemaDigest: sha256:a6d764785250c174a10d231ea4d0c16662c5792dd97cdb415539c28a98e6cfa3
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:dea8e846f21fb01b00eb71d342f8ce979c88f3bbf26a63199fd67d826f67a896
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:dea8e846f21fb01b00eb71d342f8ce979c88f3bbf26a63199fd67d826f67a896
+- id: service.access.entitlement.revoke
+  version: 1.0.0
+  namespace: service
+  ownerTeam: service-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  - dc
+  domain: service
+  kind: effect
+  contractHash: sha256:4c2334d0577c59c2a891523a375583ab30daa9eca1ad0ad7a42a0e906440c293
+  inputSchemaDigest: sha256:de9dacd7cab44f6ae6a1665a370b3d870e58df54bf3a1443562c6e3c0ad79cd6
+  outputSchemaDigest: sha256:299269936fc74301dc26428b3a60b307be15214b437d632e4825d5cbbaa3c445
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:4c2334d0577c59c2a891523a375583ab30daa9eca1ad0ad7a42a0e906440c293
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:4c2334d0577c59c2a891523a375583ab30daa9eca1ad0ad7a42a0e906440c293
+- id: service.platform.restart
+  version: 1.0.0
+  namespace: service
+  ownerTeam: service-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  - dc
+  domain: service
+  kind: effect
+  contractHash: sha256:307126faced2875a89ede969db79f20fb57a2b280a54e27d13b521ddf4e074dc
+  inputSchemaDigest: sha256:a4bbaeb3a6adf9bfa5f92bd731ac2bd69fb2468edd09757b88052b63798aeb8f
+  outputSchemaDigest: sha256:51f04305d31f6968834a991a1deb5fa5ac35534aab74e672b5f7ede456d810e0
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:307126faced2875a89ede969db79f20fb57a2b280a54e27d13b521ddf4e074dc
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:307126faced2875a89ede969db79f20fb57a2b280a54e27d13b521ddf4e074dc
+- id: service.platform.rollback
+  version: 1.0.0
+  namespace: service
+  ownerTeam: service-platform
+  stewardTeam: risk-governance
+  tenant: local-lab
+  environments:
+  - local-simulation
+  profiles:
+  - lan
+  - dc
+  domain: service
+  kind: effect
+  contractHash: sha256:634c51f85d7ed7c472d41c87bc67e916f4cf2a6d19ad2cb5e5430cb6a0accb4e
+  inputSchemaDigest: sha256:05ff79d7c59e10b1bb4da9ad0c43bb88dbcea68bc69e143cb1634ae3858c90d8
+  outputSchemaDigest: sha256:51f04305d31f6968834a991a1deb5fa5ac35534aab74e672b5f7ede456d810e0
+  lifecycle: active
+  supersedes: null
+  dependencies: []
+  consumers:
+  - consumerId: lan-runtime
+    teamId: lan-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:634c51f85d7ed7c472d41c87bc67e916f4cf2a6d19ad2cb5e5430cb6a0accb4e
+  - consumerId: dc-runtime
+    teamId: dc-operations
+    environments:
+    - local-simulation
+    contractHash: sha256:634c51f85d7ed7c472d41c87bc67e916f4cf2a6d19ad2cb5e5430cb6a0accb4e
+delegations:
+- id: network-dc-proposal
+  delegatorTeam: network-platform
+  delegateeTeam: dc-operations
+  actions:
+  - discover
+  - propose_write
+  capabilityPatterns:
+  - network.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: network-lan-proposal
+  delegatorTeam: network-platform
+  delegateeTeam: lan-operations
+  actions:
+  - discover
+  - propose_write
+  capabilityPatterns:
+  - network.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: network-release
+  delegatorTeam: network-platform
+  delegateeTeam: release-management
+  actions:
+  - publish
+  - deprecate
+  capabilityPatterns:
+  - network.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: network-risk-review
+  delegatorTeam: network-platform
+  delegateeTeam: risk-governance
+  actions:
+  - discover
+  - review
+  capabilityPatterns:
+  - network.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: network-wan-proposal
+  delegatorTeam: network-platform
+  delegateeTeam: wan-operations
+  actions:
+  - discover
+  - propose_write
+  capabilityPatterns:
+  - network.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: service-dc-proposal
+  delegatorTeam: service-platform
+  delegateeTeam: dc-operations
+  actions:
+  - discover
+  - propose_write
+  capabilityPatterns:
+  - service.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: service-lan-proposal
+  delegatorTeam: service-platform
+  delegateeTeam: lan-operations
+  actions:
+  - discover
+  - propose_write
+  capabilityPatterns:
+  - service.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: service-release
+  delegatorTeam: service-platform
+  delegateeTeam: release-management
+  actions:
+  - publish
+  - deprecate
+  capabilityPatterns:
+  - service.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+- id: service-risk-review
+  delegatorTeam: service-platform
+  delegateeTeam: risk-governance
+  actions:
+  - discover
+  - review
+  capabilityPatterns:
+  - service.*
+  tenant: local-lab
+  environments:
+  - local-simulation
+  expiresAt: null
+catalogHash: sha256:fb57ccbc32a0d217e93d58b501a2eb5a8b59cbdf526fa62dd8f34af14165d437

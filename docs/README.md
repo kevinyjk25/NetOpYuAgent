@@ -11,6 +11,8 @@
 | 当前项目以什么理念、边界和完成判据为准 | [EnsuredSkill 原型权威准则](ENSUREDSKILL-PROTOTYPE.md) |
 | 项目是什么、有什么能力、如何开始 | [README](../README.md) |
 | 当前做到哪一步、还缺什么 | [项目进展与路线图](PROJECT-STATUS.md) |
+| ES-P0 后遵循什么研究原则、按什么顺序推进 | [后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md) |
+| 当前论文如何陈述系统与证据 | [中文论文 v0.4](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md) / [English paper v0.4](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md) |
 | 分层、依赖规则和架构决策 | [ARCHITECTURE](../ARCHITECTURE.md) |
 | 系统组件、部署和端到端数据流 | [HLD](../HLD.md) |
 | 接口、合同、状态机和异常处理 | [LLD](../LLD.md) |
@@ -38,13 +40,15 @@
 - [ES-P0 本地证据报告](ES-P0-EVIDENCE.md)：六场景、消融、9B/7B 三次配对、性能和外推边界。
 - [真实 Harness 冒烟摘要](benchmarks/real-harness-smoke-summary.json)：历史 fallback evaluator 的 DSH 配对轨迹，仅作前期探索证据。
 - [Promotion Workbench](p20-promotion-workbench.md)：并排语义审查、告警和离线编辑。
-- [正向资格协议](promotion-forward-qualification.md)：公开回归、私有正向用例、双盲审和重复运行。
+- [正向资格协议](promotion-forward-qualification.md)：Research Freeze、公开回归、私有正向用例、双盲审、重复运行和分层统计。
 - [生产 L0 轨迹索引](../network_runtime/l0/production_trajectories/INDEX.md)：21/21 可读三阶段制品。
 
 #### Runtime 与评测
 
 - [Runtime 组件基线](benchmarks/runtime-ab-baseline.md)：Core-72 事务控制回归；不是原生 DSH/Hermes Agent 对比。
 - [版本化 ES-P0 摘要](benchmarks/es-p0-evidence-summary.json)：可提交的最终指标与制品摘要。
+- [后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md)：Claim Registry、ES-P1/P2 Gate、统计规范和冻结范围。
+- [中文论文 v0.4](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md) / [English paper v0.4](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md)：与最终 ES-P0 摘要对齐的双语研究稿。
 - [历史双核心功能报告](core-capability-evaluation-report.md)：材料重构前的工程报告，仅作历史参考。
 
 #### 冻结的未来工程参考
@@ -68,7 +72,7 @@
 - `ARCHITECTURE.md`、`HLD.md`、`LLD.md`、`SSD.md` 分别拥有架构、组件、实现和安全设计事实；同一细节不在 README 重复展开。
 - 自动生成的评测报告只由对应命令刷新，不能手工把固定集结果改写成生产概率。
 - `artifacts/` 是运行证据和本地报告，不是源码设计文档；`data/` 中的基线与测试数据不能作为清理临时文件处理。
-- 所有项目级文档采用中文在前、英文在后的同文档双语结构。
+- 所有项目级文档采用中文在前、英文在后的同文档双语结构；面向独立投稿和逐段校对的中英文论文稿作为例外，保持两个结构一致的文件。
 
 ---
 
@@ -80,6 +84,8 @@
 |---|---|
 | What is the project and how do I start? | [README](../README.md) |
 | What is complete and what remains? | [Project status and roadmap](PROJECT-STATUS.md) |
+| What governs post-ES-P0 research? | [Research instruction v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md) |
+| How does the current paper state the system and evidence? | [English paper v0.4](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md) / [Chinese paper v0.4](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md) |
 | What are the layers, dependency rules, and ADRs? | [ARCHITECTURE](../ARCHITECTURE.md) |
 | What are the components, deployments, and end-to-end flows? | [HLD](../HLD.md) |
 | What are the interfaces, contracts, states, and failure paths? | [LLD](../LLD.md) |
@@ -90,11 +96,11 @@
 ### Topic index
 
 - Agent and L1: [Agent use cases](AGENTIZED-USE-CASES.md), [model qualification](l1-model-qualification.md), [Decision Plane](l1-decision-plane.md), [canary runbook](p19-canary-runbook.md), and [convergence evaluation](convergence-evaluation.md).
-- L0 and Promotion: [general progressive determinization](progressive-determinization.md), [general Effect Runtime A/B](general-effect-ab.md), [L0 v2 design](l0-v2-design.md), [Runtime migration](l0-v2-runtime-migration.md), [L1-to-L0 Promotion](l1-to-l0-promotion.md), [Workbench](p20-promotion-workbench.md), [forward qualification](promotion-forward-qualification.md), and the [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
-- Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
+- L0 and Promotion: [general progressive determinization](progressive-determinization.md), [general Effect Runtime A/B](general-effect-ab.md), [L0 v2 design](l0-v2-design.md), [Runtime migration](l0-v2-runtime-migration.md), [L1-to-L0 Promotion](l1-to-l0-promotion.md), [Workbench](p20-promotion-workbench.md), [Research Freeze and forward qualification](promotion-forward-qualification.md), and the [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
+- Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md), the [English paper](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md), the [Chinese paper](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
 - Frozen future-engineering reference: [enterprise control plane](enterprise-control-plane.md), [provider supply chain](provider-supply-chain.md), [Capability Catalog/Evidence Plane](p21-p22-control-planes.md), and the [P1.9 canary runbook](p19-canary-runbook.md).
 - Local labs: [FRR/OSPF](../labs/p075-a-frr/README.md), [campus/IDC](../labs/p075-a-campus-idc/README.md), [small production network](../labs/p075-b-small-production/README.md), and [EVPN/VXLAN](../labs/p075-c-evpn-vxlan/README.md).
 
 ### Source-of-truth rules
 
-`README.md` is the concise product entry. `docs/PROJECT-STATUS.md` is the only phase summary. The architecture, HLD, LLD, and SSD own their respective design facts. Generated evaluation reports must be refreshed by their commands and must not convert fixed-set evidence into a production probability. `artifacts/` contains run evidence, while versioned `data/` files are baselines or test inputs rather than disposable output. Project-level documents keep Chinese before English.
+`README.md` is the concise product entry. `docs/PROJECT-STATUS.md` is the only phase summary. The architecture, HLD, LLD, and SSD own their respective design facts. Generated evaluation reports must be refreshed by their commands and must not convert fixed-set evidence into a production probability. `artifacts/` contains run evidence, while versioned `data/` files are baselines or test inputs rather than disposable output. Project-level documents keep Chinese before English; the structurally matched Chinese and English submission drafts remain separate for independent editing and review.
