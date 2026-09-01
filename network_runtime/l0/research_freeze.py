@@ -59,6 +59,7 @@ _SOURCE_GROUPS: dict[str, tuple[str, ...]] = {
         "network_runtime/l0/promotion.py",
         "network_runtime/l0/research_freeze.py",
         "evaluation/ensured_skill_ablation.py",
+        "evaluation/dsh_adapter_parity.py",
         "evaluation/ensured_skill_evidence_report.py",
         "evaluation/ensured_skill_protocol.py",
         "evaluation/ensured_skill_runner.py",

@@ -102,7 +102,11 @@ execute/verify
   → abort | escalate
 ```
 
-每个 `OperationNode` 包含 id、phase、依赖、side_effect 和 resource set。图校验拒绝重复节点、缺失依赖、环和多个不受控 Effect 节点。图摘要写入计划，审批后重编译不一致会被识别为漂移。
+每个 `OperationNode` 包含 id、phase、依赖和 `side_effect`。图校验拒绝重复节点、缺失依赖、环和多个不受控 Effect 节点。图摘要写入计划，审批后重编译不一致会被识别为漂移。
+
+`effect_runtime/graph_scheduler.py` 是 fail-closed 调度门禁：节点必须按已审图和分支结果推进，Effect/Compensate 都是 one-shot，Commit 只能跟随独立 Verify 成功。`network_runtime/graph_runtime.py` 从哈希链事件重建调度状态；正常、审批拒绝、写前漂移、未知 Effect、补偿、恢复验证和启动恢复都写入 `graph_node_started/finished`。崩溃时未知的写边界只记录为 `skipped/indeterminate` 并进入只读 Reconcile，不伪造重校验成功，也不重放 Effect。
+
+`inspect()` 同时返回图执行摘要、按 snapshot/precheck/approval/revalidate/effect/verify/reconcile/compensate 拆分的 Runtime 时延，以及隐私最小化的 Evidence→Observation→Capability/Collector→Network Object DAG。Runtime 时延明确排除 Reasoning/LLM，DAG 只证明已记录的来源关系，不证明外部载荷天然真实。
 
 ### 4. prepare 算法
 
@@ -209,7 +213,7 @@ Journal 使用 SQLite 保存不可变 plan 和 append-only event hash chain。�
 
 ### 10. 冻结代码隔离
 
-`enterprise.py`、`provider_release.py` 和 `proposal_binding.py` 不再由默认核心路径顶层加载：本地 Runtime 直接构造本地审批；Provider admission 仅在显式环境开关下导入；L1 binding 仅在调用者确实提供 envelope 时导入。该隔离确保未来产品扩展不会反向定义 EnsuredSkill 内核。
+`enterprise.py`、`provider_release.py` 和 `proposal_binding.py` 不再由默认核心路径顶层加载：本地 Runtime 直接构造本地审批；Provider admission 仅在显式环境开关下导入；L1 binding 仅在调用者确实提供 envelope 时导入。DSH CLI 同样只在显式命令下导入 A2A、轨迹学习和历史 L1 shadow；能力检索 parity 已迁入 `evaluation/`，并使用内存状态而不是产品 SQLite。该隔离确保未来产品扩展或 Evaluator 不会反向定义 EnsuredSkill 内核。
 
 ---
 
@@ -225,7 +229,11 @@ Evidence evaluation requires exact semantic type, source capability, scope, asso
 
 A PreparedPlan binds normalized arguments and provenance, exact L0 and tool contracts, targets/resources/risk, preflight evidence, the typed transaction graph, approval, provider schema identity, TTL, and immutable digests.
 
-The normal graph is begin → snapshot → precheck → optional approval → revalidate → execute → verify → commit. Failures enter reconcile, optional compensate, verify-recovery, and abort or escalate. Post-send uncertainty is observed before any retry.
+The normal graph is begin → snapshot → precheck → optional approval → revalidate → execute → verify → commit. A pre-Effect rejection or drift reaches abort. An indeterminate Effect enters read-only reconciliation; failed verification enters optional compensation and recovery verification; unresolved state escalates. Post-send uncertainty is observed before any retry.
+
+`effect_runtime/graph_scheduler.py` is the fail-closed schedule gate: nodes advance only under the reviewed graph and prior outcome, Effect and Compensate are one-shot, and Commit requires successful independent Verify. `network_runtime/graph_runtime.py` reconstructs this cursor from hash-chained events. Crash recovery records unknown work as skipped/indeterminate and may reconcile by reads, but cannot replay Effect or invent successful revalidation.
+
+Runtime inspection returns graph conformance, per-stage Runtime latency, and a privacy-minimized Evidence → Observation → Capability/Collector → Network Object DAG. Runtime latency excludes Reasoning/LLM latency; recorded lineage is not itself proof that an external payload is true.
 
 ### 3. Runtime algorithms
 
@@ -243,4 +251,4 @@ Providers expose protocol-neutral Observation and Effect capabilities. MCP, REST
 
 SQLite stores immutable plans and an append-only event hash chain for local crash recovery. It is not a distributed or WORM guarantee. Tests cover contracts, evidence, guards, risk, state transitions, full transaction paths, fault injection, DSH/Provider integration, paired control/treatment runs, five ablations, and cross-model stability.
 
-Enterprise identity, provider supply-chain admission, and L1 canary binding are lazy optional extensions. The default prototype path does not import them, preventing frozen productization code from defining the reliability kernel.
+Enterprise identity, provider supply-chain admission, and L1 canary binding are lazy optional extensions. The DSH CLI also imports A2A, trajectory learning, and historical L1 shadow only for explicit commands. Retrieval parity now lives in `evaluation/` and uses memory-only state instead of product SQLite. The default prototype path therefore cannot let frozen productization or evaluator code define the reliability kernel.

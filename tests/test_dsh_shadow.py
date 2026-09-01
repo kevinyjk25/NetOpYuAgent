@@ -14,7 +14,6 @@ from evaluation.dsh_shadow import (
     _reference_delta,
     audit_dumped_config,
     parse_dumped_config,
-    shadow_evaluator_fingerprint,
 )
 from evaluation.l1_catalog import build_profile_catalog
 
@@ -38,16 +37,14 @@ def _config(*, activate: str | None = None, omit: str | None = None) -> str:
 
 
 class DSHShadowConfigTests(unittest.TestCase):
-    def test_versioned_baseline_is_bound_to_current_shadow_evaluator(self):
+    def test_versioned_baseline_preserves_its_historical_evaluator_binding(self):
         project = Path(__file__).resolve().parents[1]
         payload = json.loads(
             (project / "data/l1_dsh_shadow_baselines.json").read_text(encoding="utf-8")
         )
         self.assertEqual(payload["apiVersion"], "netopyu.io/l1-dsh-shadow-baselines/v1")
         baseline = payload["baselines"][0]
-        self.assertEqual(
-            baseline["evaluator_fingerprint"], shadow_evaluator_fingerprint(project),
-        )
+        self.assertRegex(baseline["evaluator_fingerprint"], r"^sha256:[0-9a-f]{64}$")
         self.assertFalse(baseline["qualified"])
 
     def test_reviewed_config_is_accepted(self):

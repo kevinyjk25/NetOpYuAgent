@@ -18,6 +18,8 @@
 | 接口、合同、状态机和异常处理 | [LLD](../LLD.md) |
 | 威胁模型、安全控制和验收门禁 | [SSD](../SSD.md) |
 | 两项核心能力到底达到什么效果 | [ES-P0 本地证据报告](ES-P0-EVIDENCE.md) |
+| 没有独立团队时如何自动生成、封存并接入合成用例 | [仓库外合成 Holdout](SYNTHETIC-HOLDOUT.md) |
+| 如何把 SkillsMP/GitHub 公开 Skill 安全纳入外部评测 | [ES-P1 公开 Skill 市场语料](ES-P1-PUBLIC-SKILL-CORPUS.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -26,8 +28,6 @@
 
 - [真实 LLM Agent 用例](AGENTIZED-USE-CASES.md)：DSH 页面 Prompt、Tool 链和外部 MCP 交互。
 - [L1 模型资格](l1-model-qualification.md)：固定评测集、模型门槛和解释边界。
-- [L1 Decision Plane](l1-decision-plane.md)：shadow、proposal-only、绑定与证据。
-- [P1.9 Canary 手册](p19-canary-runbook.md)：证据门禁、停用和回退。
 - [LLM 收敛评测](convergence-evaluation.md)：已解决、部分解决和未解决的问题。
 
 #### L0 与 Promotion
@@ -38,10 +38,14 @@
 - [通用渐进式确定化](progressive-determinization.md)：跨域边界、Anthropic Skill 包和风险路由。
 - [真实 Harness 自动 Runtime A/B](general-effect-ab.md)：原生 Agent 仅作为隔离 Control；Treatment 的不合格转换安全停机；旧单次工具基线已降级。
 - [ES-P0 本地证据报告](ES-P0-EVIDENCE.md)：六场景、消融、9B/7B 三次配对、性能和外推边界。
+- [仓库外合成 Holdout](SYNTHETIC-HOLDOUT.md)：240 条模型合成 Skill、双盲模型审阅、摘要封存、受控导入和正式 ES-P1 边界。
+- [ES-P1 公开 Skill 市场语料](ES-P1-PUBLIC-SKILL-CORPUS.md)：SkillsMP/GitHub 公开生态的采样、封存、零执行隔离和证据边界。
+- [ES-P1-Wild pilot 摘要](benchmarks/es-p1-wild-pilot-summary.json)：20 个静态接纳包、15 包 author kit，以及 9B 非权威草案辅助的通过、修复、失败和时延结果。
+- [ES-P1-Wild 测试 Skill 索引](benchmarks/es-p1-wild-skill-index.json)：15 个实际测试 Skill 的固定来源、commit、许可证、文件清单、任务槽位与草案状态。
 - [真实 Harness 冒烟摘要](benchmarks/real-harness-smoke-summary.json)：历史 fallback evaluator 的 DSH 配对轨迹，仅作前期探索证据。
 - [Promotion Workbench](p20-promotion-workbench.md)：并排语义审查、告警和离线编辑。
 - [正向资格协议](promotion-forward-qualification.md)：Research Freeze、公开回归、私有正向用例、双盲审、重复运行和分层统计。
-- [生产 L0 轨迹索引](../network_runtime/l0/production_trajectories/INDEX.md)：21/21 可读三阶段制品。
+- [存量 L0 轨迹索引](../network_runtime/l0/production_trajectories/INDEX.md)：21/21 可读三阶段制品；目录名是历史兼容名称，不代表生产认证。
 
 #### Runtime 与评测
 
@@ -56,6 +60,7 @@
 - [企业控制面](enterprise-control-plane.md)：OIDC、PDP、Change Authority 和 mTLS；`frozen_future_engineering`。
 - [Provider 供应链](provider-supply-chain.md)：release、qualification、deployment 和 admission；`frozen_future_engineering`。
 - [Capability Catalog 与 Evidence Plane](p21-p22-control-planes.md)：治理投影和统一证据；`frozen_future_engineering`。
+- [L1 Decision Plane](l1-decision-plane.md)：历史 shadow/proposal-only 产品化实验；当前仅保留无执行权边界与回归参考。
 - [P1.9 Canary 手册](p19-canary-runbook.md)：历史产品化准备；`frozen_future_engineering`。
 
 #### 本地网络实验
@@ -91,14 +96,16 @@
 | What are the interfaces, contracts, states, and failure paths? | [LLD](../LLD.md) |
 | What is the threat model and acceptance gate? | [SSD](../SSD.md) |
 | What evidence supports the two core capabilities? | [ES-P0 local evidence](ES-P0-EVIDENCE.md) |
+| How can I generate and seal synthetic cases before an independent ES-P1 study? | [Repository-external synthetic holdout](SYNTHETIC-HOLDOUT.md) |
+| How can public SkillsMP/GitHub Skills be evaluated safely? | [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md) |
 | How do I run a demo or integrate my systems? | [Usage and integration](getting-started-integration.md) |
 
 ### Topic index
 
-- Agent and L1: [Agent use cases](AGENTIZED-USE-CASES.md), [model qualification](l1-model-qualification.md), [Decision Plane](l1-decision-plane.md), [canary runbook](p19-canary-runbook.md), and [convergence evaluation](convergence-evaluation.md).
+- Agent and L1: [Agent use cases](AGENTIZED-USE-CASES.md), [model qualification](l1-model-qualification.md), and [convergence evaluation](convergence-evaluation.md).
 - L0 and Promotion: [general progressive determinization](progressive-determinization.md), [general Effect Runtime A/B](general-effect-ab.md), [L0 v2 design](l0-v2-design.md), [Runtime migration](l0-v2-runtime-migration.md), [L1-to-L0 Promotion](l1-to-l0-promotion.md), [Workbench](p20-promotion-workbench.md), [Research Freeze and forward qualification](promotion-forward-qualification.md), and the [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
-- Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md), the [English paper](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md), the [Chinese paper](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
-- Frozen future-engineering reference: [enterprise control plane](enterprise-control-plane.md), [provider supply chain](provider-supply-chain.md), [Capability Catalog/Evidence Plane](p21-p22-control-planes.md), and the [P1.9 canary runbook](p19-canary-runbook.md).
+- Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), the [synthetic holdout workflow](SYNTHETIC-HOLDOUT.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md), the [English paper](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md), the [Chinese paper](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
+- Frozen future-engineering reference: [enterprise control plane](enterprise-control-plane.md), [provider supply chain](provider-supply-chain.md), [Capability Catalog/Evidence Plane](p21-p22-control-planes.md), the historical [L1 Decision Plane](l1-decision-plane.md), and the [P1.9 canary runbook](p19-canary-runbook.md).
 - Local labs: [FRR/OSPF](../labs/p075-a-frr/README.md), [campus/IDC](../labs/p075-a-campus-idc/README.md), [small production network](../labs/p075-b-small-production/README.md), and [EVPN/VXLAN](../labs/p075-c-evpn-vxlan/README.md).
 
 ### Source-of-truth rules

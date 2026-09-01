@@ -11,6 +11,7 @@ import asyncio
 import inspect
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -51,11 +52,13 @@ from .evidence import (
     typed_evidence as _evidence_value,
 )
 from .journal import NetworkJournal
+from .graph_runtime import JournalGraphScheduler, stage_latency_summary
 from .identity import ApprovalControlPlane
 from .l0_skills import REGISTRY as L0_SKILLS, L0SkillContract, compile_intent
 from .l0.models import CompiledAtomicEffect
 from .l0.runtime_loader import require_effect_arguments, validate_runtime_projection
 from .policies import ToolContract, project_arguments, resolve_contract
+from .provenance import build_provenance_dag
 from .validation import assess_risk, assess_risk_decision, compile_parameters
 from .verifiers import REGISTRY as VERIFIERS, verify_operation
 from .workflows import WorkflowRuntime
@@ -63,6 +66,19 @@ from .workflows import WorkflowRuntime
 
 FaultHook = Callable[[str, PreparedPlan], Any]
 BackendFactory = Callable[[str], Awaitable[BackendSession]]
+
+
+def _evidence_ids(evidence: tuple[Evidence, ...]) -> tuple[str, ...]:
+    return tuple(sorted(
+        str(item.evidence_id or sha256_json({
+            "type": item.evidence_type,
+            "source": item.source,
+            "target": item.target,
+            "observed_at": item.observed_at,
+            "value_digest": sha256_json(item.value),
+        }))
+        for item in evidence
+    ))
 
 
 def _ensured_step_contract(graph: Any) -> tuple[dict[str, Any], ...]:
@@ -89,6 +105,7 @@ def _bind_contract_evidence(
     backend: BackendSession,
     associated_action: str,
     scope: tuple[str, ...],
+    parent_evidence_ids: tuple[str, ...] = (),
 ) -> tuple[tuple[Evidence, ...], tuple[EvidenceRecord, ...]]:
     """Bind observations to reviewed requirements without trusting prose."""
     bound: list[Evidence] = []
@@ -114,6 +131,7 @@ def _bind_contract_evidence(
                 "metadata": source_metadata,
             }),
             associated_action=associated_action,
+            parent_evidence_ids=parent_evidence_ids,
             evidence_id=f"{item.evidence_type}:{index}:{sha256_json(item.value)}",
         )
         payload = item.value if isinstance(item.value, dict) else {"value": item.value}
@@ -129,6 +147,7 @@ def _bind_contract_evidence(
             associated_action=str(attached.associated_action),
             payload=payload,
             valid=attached.passed is not False,
+            parent_evidence_ids=attached.parent_evidence_ids,
         ))
     return tuple(bound), tuple(records)
 
@@ -450,7 +469,9 @@ class NetworkRuntime:
                     "contract_id": contract.contract_id,
                 }
 
+            snapshot_started = time.perf_counter()
             preflight = await self._preflight(backend, contract, compiled.arguments)
+            snapshot_duration_ms = (time.perf_counter() - snapshot_started) * 1000.0
             if any(item.passed is False for item in preflight):
                 return {
                     "ok": False,
@@ -458,6 +479,7 @@ class NetworkRuntime:
                     "errors": ["preflight did not prove the target is safe and reachable"],
                     "preflight": [item.to_dict() for item in preflight],
                 }
+            precheck_started = time.perf_counter()
             if ensured_contract is not None:
                 preflight_requirements = [
                     item for item in ensured_contract.evidence
@@ -523,6 +545,7 @@ class NetworkRuntime:
                     if item.startswith("autonomy_decision=") else item
                     for item in reasons
                 ) + ("reviewed_contract_requires_approval",)
+            precheck_duration_ms = (time.perf_counter() - precheck_started) * 1000.0
             capability_id = provider_capability.capability_id
             requester = self.approval_control_plane.bind_requester(
                 subject_context,
@@ -627,6 +650,33 @@ class NetworkRuntime:
             try:
                 with NetworkJournal(self.journal_path) as journal:
                     journal.create(plan, nonce)
+                    graph_run = JournalGraphScheduler(plan, journal)
+                    preflight_ids = tuple(
+                        str(item.evidence_id) for item in plan.preflight
+                        if item.evidence_id
+                    )
+                    graph_run.start("snapshot")
+                    graph_run.finish(
+                        "snapshot",
+                        "succeeded",
+                        output_evidence_ids=preflight_ids,
+                        duration_ms=snapshot_duration_ms,
+                    )
+                    graph_run.start(
+                        "precheck",
+                        input_evidence_ids=preflight_ids,
+                    )
+                    graph_run.finish(
+                        "precheck",
+                        "succeeded",
+                        output_evidence_ids=preflight_ids,
+                        duration_ms=precheck_duration_ms,
+                        details={"risk_decision": risk_decision.decision.value},
+                    )
+                    graph_run.start(
+                        "approval",
+                        input_evidence_ids=preflight_ids,
+                    )
                     journal.append_events(plan.plan_id, [
                         ("ensured_contract_compiled", {
                             "contract_digest": ensured_contract.contract_digest,
@@ -827,6 +877,13 @@ class NetworkRuntime:
                 approval_actor=",".join(proof_actors),
                 approval_evidence=approval_evidence,
             )
+            graph_run = JournalGraphScheduler(plan, journal)
+            graph_run.finish(
+                "approval",
+                "succeeded",
+                output_evidence_ids=(str(approval_evidence["proof_id"]),),
+                details={"policy_hash": approval_evidence["policy_hash"]},
+            )
             journal.append_event(plan.plan_id, "l0_step_completed", {
                 "step_id": "approval",
                 "l0_skill_id": plan.l0_skill_id,
@@ -839,6 +896,10 @@ class NetworkRuntime:
             effect_dispatched = False
             try:
                 backend = await self.backend_factory(plan.profile)
+                graph_run.start(
+                    "revalidate",
+                    input_evidence_ids=_evidence_ids(plan.preflight),
+                )
                 try:
                     contract = self._revalidate_contract(plan, backend)
                     effect_arguments = require_effect_arguments(
@@ -846,6 +907,17 @@ class NetworkRuntime:
                         plan.arguments,
                     )
                 except PlanIntegrityError as error:
+                    graph_run.finish(
+                        "revalidate",
+                        "failed",
+                        details={"reason": "execution_contract_changed"},
+                    )
+                    graph_run.start("abort")
+                    graph_run.finish(
+                        "abort",
+                        "succeeded",
+                        details={"reason": "write_not_sent"},
+                    )
                     journal.transition(
                         plan.plan_id,
                         PlanState.PRECONDITION_CHANGED,
@@ -905,6 +977,21 @@ class NetworkRuntime:
                             if index < len(plan.preflight) else {"missing": True}
                         ),
                     ) for index, item in enumerate(current_preflight))
+                    graph_run.finish(
+                        "revalidate",
+                        "failed",
+                        output_evidence_ids=_evidence_ids(drift_evidence),
+                        details={"reason": "precondition_changed"},
+                    )
+                    graph_run.start(
+                        "abort",
+                        input_evidence_ids=_evidence_ids(drift_evidence),
+                    )
+                    graph_run.finish(
+                        "abort",
+                        "succeeded",
+                        details={"reason": "write_not_sent"},
+                    )
                     journal.transition(
                         plan.plan_id, PlanState.PRECONDITION_CHANGED,
                         "execution_precondition_changed",
@@ -923,12 +1010,21 @@ class NetworkRuntime:
                     self._skip_compensation(journal, plan, "write_not_sent")
                     self._complete_audit(journal, plan, outcome.state)
                     return outcome
+                graph_run.finish(
+                    "revalidate",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(plan.preflight),
+                )
                 journal.append_event(plan.plan_id, "l0_step_completed", {
                     "step_id": "revalidate",
                     "l0_skill_id": plan.l0_skill_id,
                     "intent_hash": plan.intent_hash,
                 })
                 await self._fault("before_send", plan)
+                graph_run.start(
+                    "execute",
+                    input_evidence_ids=_evidence_ids(plan.preflight),
+                )
                 journal.append_event(plan.plan_id, "l0_step_started", {
                     "step_id": "execute", "tool_name": plan.tool_name,
                 })
@@ -940,11 +1036,26 @@ class NetworkRuntime:
                         ),
                         timeout=self.execution_timeout_seconds,
                     ))
+                    effect_receipt_id = sha256_json({
+                        "plan_id": plan.plan_id,
+                        "tool_name": plan.tool_name,
+                        "result_digest": sha256_json(result),
+                    })
+                    await self._fault("after_send_before_verify", plan)
+                    graph_run.finish(
+                        "execute",
+                        "succeeded",
+                        output_evidence_ids=(effect_receipt_id,),
+                    )
                     journal.append_event(plan.plan_id, "l0_step_completed", {
                         "step_id": "execute", "result_received": True,
                     })
-                    await self._fault("after_send_before_verify", plan)
                 except (asyncio.TimeoutError, OutcomeIndeterminateError) as error:
+                    graph_run.finish(
+                        "execute",
+                        "indeterminate",
+                        details={"reason": type(error).__name__},
+                    )
                     journal.append_event(plan.plan_id, "l0_step_indeterminate", {
                         "step_id": "execute", "reason": type(error).__name__,
                     })
@@ -952,10 +1063,17 @@ class NetworkRuntime:
                         plan.plan_id, PlanState.OUTCOME_INDETERMINATE,
                         "write_outcome_indeterminate", {"error": str(error)},
                     )
-                    return await self._reconcile_indeterminate(journal, backend, plan, contract, result, error)
+                    return await self._reconcile_indeterminate(
+                        journal, backend, plan, contract, result, error, graph_run,
+                    )
                 except Exception as error:
                     # Once the callable started, a generic transport exception
                     # cannot prove that the remote system made no change.
+                    graph_run.finish(
+                        "execute",
+                        "indeterminate",
+                        details={"reason": type(error).__name__},
+                    )
                     journal.append_event(plan.plan_id, "l0_step_indeterminate", {
                         "step_id": "execute", "reason": type(error).__name__,
                     })
@@ -963,9 +1081,15 @@ class NetworkRuntime:
                         plan.plan_id, PlanState.OUTCOME_INDETERMINATE,
                         "write_raised_after_send", {"error": f"{type(error).__name__}: {error}"},
                     )
-                    return await self._reconcile_indeterminate(journal, backend, plan, contract, result, error)
+                    return await self._reconcile_indeterminate(
+                        journal, backend, plan, contract, result, error, graph_run,
+                    )
 
                 journal.transition(plan.plan_id, PlanState.VERIFYING, "verification_started", {})
+                graph_run.start(
+                    "verify",
+                    input_evidence_ids=(effect_receipt_id,),
+                )
                 journal.append_event(plan.plan_id, "l0_step_started", {
                     "step_id": "verify", "contract": plan.verification_contract,
                 })
@@ -973,11 +1097,26 @@ class NetworkRuntime:
                 evidence, passed, internal_rollback, verify_error = await self._verify(
                     backend, plan, contract, result,
                 )
+                graph_run.finish(
+                    "verify",
+                    "succeeded" if passed else "failed",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"internal_rollback": internal_rollback},
+                )
                 journal.append_event(plan.plan_id, "l0_step_completed", {
                     "step_id": "verify", "passed": passed,
                     "internal_rollback": internal_rollback,
                 })
                 if passed:
+                    graph_run.start(
+                        "commit",
+                        input_evidence_ids=_evidence_ids(evidence),
+                    )
+                    graph_run.finish(
+                        "commit",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                    )
                     journal.transition(
                         plan.plan_id, PlanState.VERIFIED_SUCCESS,
                         "verification_passed", {"evidence": [item.to_dict() for item in evidence]},
@@ -994,12 +1133,37 @@ class NetworkRuntime:
                     return outcome
                 if internal_rollback:
                     journal.transition(plan.plan_id, PlanState.ROLLING_BACK, "tool_reported_rollback", {})
+                    graph_run.start(
+                        "compensate",
+                        input_evidence_ids=_evidence_ids(evidence),
+                    )
                     journal.append_event(plan.plan_id, "l0_step_started", {
                         "step_id": "compensate", "mode": "tool_internal_rollback_verification",
                     })
                     restored = await self._verify_restored_preflight(backend, plan, contract)
                     evidence = (*evidence, restored)
+                    graph_run.finish(
+                        "compensate",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                        details={"mode": "tool_internal_rollback"},
+                    )
+                    graph_run.start(
+                        "verify_recovery",
+                        input_evidence_ids=_evidence_ids(evidence),
+                    )
                     if restored.passed is not True:
+                        graph_run.finish(
+                            "verify_recovery",
+                            "failed",
+                            output_evidence_ids=_evidence_ids(evidence),
+                        )
+                        graph_run.start("escalate")
+                        graph_run.finish(
+                            "escalate",
+                            "succeeded",
+                            details={"reason": "restoration_not_verified"},
+                        )
                         journal.transition(
                             plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                             "internal_rollback_not_independently_verified",
@@ -1015,6 +1179,18 @@ class NetworkRuntime:
                         })
                         self._complete_audit(journal, plan, outcome.state)
                         return outcome
+                    graph_run.finish(
+                        "verify_recovery",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                    )
+                    graph_run.start("abort")
+                    graph_run.finish(
+                        "abort",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                        details={"reason": "verified_recovery"},
+                    )
                     journal.append_event(plan.plan_id, "l0_step_completed", {
                         "step_id": "compensate", "mode": "tool_internal_rollback",
                         "passed": True,
@@ -1033,10 +1209,20 @@ class NetworkRuntime:
                     return outcome
                 return await self._rollback_or_escalate(
                     journal, backend, plan, contract, result, evidence, verify_error,
+                    graph_run,
                 )
             except (ApprovalError, PlanIntegrityError):
                 raise
             except Exception as error:
+                try:
+                    graph_run.fail_closed(error, effect_dispatched=effect_dispatched)
+                except Exception as graph_error:
+                    # Preserve the original failure while making graph-control
+                    # failure independently visible in the hash-chained audit.
+                    journal.append_event(plan.plan_id, "graph_fail_closed_error", {
+                        "original_error_type": type(error).__name__,
+                        "graph_error": f"{type(graph_error).__name__}: {graph_error}",
+                    })
                 current = journal.get(plan.plan_id)
                 if current.state == PlanState.EXECUTING:
                     journal.transition(
@@ -1084,11 +1270,18 @@ class NetworkRuntime:
 
     def inspect(self, plan_id: str) -> dict[str, Any]:
         with NetworkJournal(self.journal_path) as journal:
+            plan = journal.get(plan_id)
+            events = journal.events(plan_id)
+            record = journal.record(plan_id)
+            graph_run = JournalGraphScheduler(plan, journal)
             return {
-                "plan": journal.get(plan_id).to_dict(),
-                "events": journal.events(plan_id),
+                "plan": plan.to_dict(),
+                "events": events,
                 "audit": journal.verify_event_chain(plan_id),
-                "record": journal.record(plan_id),
+                "record": record,
+                "graph_execution": graph_run.summary(),
+                "graph_latency": stage_latency_summary(events),
+                "provenance": build_provenance_dag(plan, events, record),
             }
 
     def audit(self, plan_id: str) -> dict[str, Any]:
@@ -1110,9 +1303,25 @@ class NetworkRuntime:
                 try:
                     backend = await self.backend_factory(plan.profile)
                     contract = self._revalidate_contract(plan, backend)
+                    events = journal.events(plan_id)
+                    execution_claim = next(
+                        (
+                            str(item.get("event_hash") or "")
+                            for item in reversed(events)
+                            if item.get("event_type") == "execution_started"
+                        ),
+                        "",
+                    )
+                    record = journal.record(plan_id)
+                    graph_run = JournalGraphScheduler(plan, journal)
+                    graph_run.recover_indeterminate_effect_boundary(
+                        execution_claim_evidence=execution_claim,
+                        approval_proof_id=str(record.get("approval_proof_id") or ""),
+                    )
                     outcome = await self._reconcile_indeterminate(
                         journal, backend, plan, contract, None,
                         OutcomeIndeterminateError("runtime restarted during side-effect processing"),
+                        graph_run,
                     )
                     if outcome.state in TERMINAL_STATES:
                         finalized = await backend.finalize_effect(
@@ -1196,6 +1405,18 @@ class NetworkRuntime:
                 raise NetworkRuntimeError(
                     f"cannot reject plan {plan_id} from state {plan.state.value}"
                 )
+            graph_run = JournalGraphScheduler(plan, journal)
+            graph_run.finish(
+                "approval",
+                "failed",
+                details={"reason": "operator_rejected"},
+            )
+            graph_run.start("abort")
+            graph_run.finish(
+                "abort",
+                "succeeded",
+                details={"reason": "operator_rejected"},
+            )
             updated = journal.transition(
                 plan_id, PlanState.REJECTED, "approval_rejected",
                 {"reason": _bounded(reason, 1000)},
@@ -1419,13 +1640,6 @@ class NetworkRuntime:
         result: str | None,
     ) -> tuple[tuple[Evidence, ...], bool, bool, str | None]:
         verification = await verify_operation(backend, plan, contract, result)
-        if not verification.passed:
-            return (
-                verification.evidence,
-                False,
-                verification.internal_rollback,
-                verification.error,
-            )
         try:
             compiled = L0_SKILLS.get(
                 plan.l0_skill_id, plan.l0_skill_version,
@@ -1441,6 +1655,10 @@ class NetworkRuntime:
                 backend=backend,
                 associated_action=ensured_contract.operation,
                 scope=plan.targets,
+                parent_evidence_ids=tuple(
+                    str(item.evidence_id) for item in plan.preflight
+                    if item.evidence_id
+                ),
             )
             evidence_gate = evaluate_evidence(requirements, records)
             guard_gate = evaluate_guards(
@@ -1452,6 +1670,13 @@ class NetworkRuntime:
                 False,
                 verification.internal_rollback,
                 f"EnsuredSkill postcondition contract could not be evaluated: {error}",
+            )
+        if not verification.passed:
+            return (
+                evidence,
+                False,
+                verification.internal_rollback,
+                verification.error,
             )
         if not evidence_gate.allowed or not guard_gate.allowed:
             return (
@@ -1475,8 +1700,11 @@ class NetworkRuntime:
         contract: ToolContract,
         result: str | None,
         error: BaseException,
+        graph_run: JournalGraphScheduler | None = None,
     ) -> ExecutionOutcome:
         journal.transition(plan.plan_id, PlanState.VERIFYING, "reconciliation_started", {})
+        if graph_run is not None:
+            graph_run.start("reconcile")
         journal.append_event(plan.plan_id, "l0_step_started", {
             "step_id": "verify", "mode": "indeterminate_reconciliation",
         })
@@ -1488,12 +1716,39 @@ class NetworkRuntime:
             evidence = ()
             passed = internal_rollback = False
             verify_error = f"reconciliation failed: {type(verify_exception).__name__}: {verify_exception}"
+        if graph_run is not None:
+            graph_run.finish(
+                "reconcile",
+                "succeeded" if passed else "failed",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"internal_rollback": internal_rollback},
+            )
         journal.append_event(plan.plan_id, "l0_step_completed", {
             "step_id": "verify", "passed": passed,
             "internal_rollback": internal_rollback,
             "mode": "indeterminate_reconciliation",
         })
         if passed:
+            if graph_run is not None:
+                graph_run.start(
+                    "verify",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
+                graph_run.finish(
+                    "verify",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"mode": "reconciliation_observation"},
+                )
+                graph_run.start(
+                    "commit",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
+                graph_run.finish(
+                    "commit",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                )
             journal.transition(
                 plan.plan_id, PlanState.VERIFIED_SUCCESS,
                 "indeterminate_reconciled_success", {"evidence": [item.to_dict() for item in evidence]},
@@ -1509,12 +1764,40 @@ class NetworkRuntime:
             return outcome
         if internal_rollback:
             journal.transition(plan.plan_id, PlanState.ROLLING_BACK, "indeterminate_internal_rollback", {})
+            if graph_run is not None:
+                graph_run.start(
+                    "compensate",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
             journal.append_event(plan.plan_id, "l0_step_started", {
                 "step_id": "compensate", "mode": "indeterminate_internal_rollback_verification",
             })
             restored = await self._verify_restored_preflight(backend, plan, contract)
             evidence = (*evidence, restored)
+            if graph_run is not None:
+                graph_run.finish(
+                    "compensate",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"mode": "tool_internal_rollback"},
+                )
+                graph_run.start(
+                    "verify_recovery",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
             if restored.passed is not True:
+                if graph_run is not None:
+                    graph_run.finish(
+                        "verify_recovery",
+                        "failed",
+                        output_evidence_ids=_evidence_ids(evidence),
+                    )
+                    graph_run.start("escalate")
+                    graph_run.finish(
+                        "escalate",
+                        "succeeded",
+                        details={"reason": "restoration_not_verified"},
+                    )
                 journal.transition(
                     plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                     "indeterminate_rollback_not_verified",
@@ -1531,6 +1814,19 @@ class NetworkRuntime:
                 })
                 self._complete_audit(journal, plan, outcome.state)
                 return outcome
+            if graph_run is not None:
+                graph_run.finish(
+                    "verify_recovery",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                )
+                graph_run.start("abort")
+                graph_run.finish(
+                    "abort",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"reason": "verified_recovery"},
+                )
             journal.append_event(plan.plan_id, "l0_step_completed", {
                 "step_id": "compensate", "mode": "indeterminate_internal_rollback",
                 "passed": True,
@@ -1547,6 +1843,17 @@ class NetworkRuntime:
             journal.release_locks(plan.plan_id)
             self._complete_audit(journal, plan, outcome.state)
             return outcome
+        if graph_run is not None:
+            graph_run.start(
+                "escalate",
+                input_evidence_ids=_evidence_ids(evidence),
+            )
+            graph_run.finish(
+                "escalate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"reason": "indeterminate_not_reconciled"},
+            )
         journal.transition(
             plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
             "indeterminate_not_reconciled", {"error": str(error), "verification": verify_error},
@@ -1570,8 +1877,19 @@ class NetworkRuntime:
         result: str | None,
         evidence: tuple[Evidence, ...],
         verify_error: str | None,
+        graph_run: JournalGraphScheduler,
     ) -> ExecutionOutcome:
         if not contract.compensator:
+            graph_run.start(
+                "escalate",
+                input_evidence_ids=_evidence_ids(evidence),
+            )
+            graph_run.finish(
+                "escalate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"reason": "no_safe_compensation"},
+            )
             journal.transition(
                 plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                 "verification_failed_no_safe_rollback", {"error": verify_error},
@@ -1584,6 +1902,10 @@ class NetworkRuntime:
             self._complete_audit(journal, plan, outcome.state)
             return outcome
         journal.transition(plan.plan_id, PlanState.ROLLING_BACK, "rollback_started", {})
+        graph_run.start(
+            "compensate",
+            input_evidence_ids=_evidence_ids(evidence),
+        )
         journal.append_event(plan.plan_id, "l0_step_started", {
             "step_id": "compensate", "contract": plan.rollback_contract,
         })
@@ -1593,6 +1915,27 @@ class NetworkRuntime:
                 backend, plan, contract, self.execution_timeout_seconds,
             )
             all_evidence = (*evidence, *compensation.evidence)
+            graph_run.finish(
+                "compensate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(compensation.evidence),
+            )
+            graph_run.start(
+                "verify_recovery",
+                input_evidence_ids=_evidence_ids(all_evidence),
+            )
+            graph_run.finish(
+                "verify_recovery",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(all_evidence),
+            )
+            graph_run.start("abort")
+            graph_run.finish(
+                "abort",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(all_evidence),
+                details={"reason": "verified_recovery"},
+            )
             journal.transition(
                 plan.plan_id, PlanState.ROLLBACK_VERIFIED,
                 "rollback_verified", {"evidence": [item.to_dict() for item in all_evidence]},
@@ -1610,6 +1953,19 @@ class NetworkRuntime:
             self._complete_audit(journal, plan, outcome.state)
             return outcome
         except Exception as rollback_error:
+            if graph_run.scheduler.active_node_id == "compensate":
+                graph_run.finish(
+                    "compensate",
+                    "failed",
+                    details={"reason": type(rollback_error).__name__},
+                )
+            graph_run.start("escalate")
+            graph_run.finish(
+                "escalate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"reason": "compensation_failed"},
+            )
             journal.transition(
                 plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                 "rollback_failed", {"error": f"{type(rollback_error).__name__}: {rollback_error}"},
@@ -1647,6 +2003,9 @@ class NetworkRuntime:
         before = plan.preflight[0].value
         after = _evidence_value(contract.preflight_tool, output)
         passed = isinstance(before, dict) and same_snapshot(before, after)
+        parent_evidence_ids = tuple(
+            str(item.evidence_id) for item in plan.preflight if item.evidence_id
+        )
         return Evidence(
             evidence_type="rollback_postcondition",
             source=contract.preflight_tool,
@@ -1654,6 +2013,19 @@ class NetworkRuntime:
             observed_at=utc_now(), value=after, passed=passed,
             predicate="fresh independent read exactly matches typed preflight state",
             expected=before,
+            semantic_type="network.rollback.restoration",
+            source_capability=contract.preflight_tool,
+            scope=plan.targets,
+            collector_identity=backend.sources.get(
+                contract.preflight_tool, "local-runtime-observer",
+            ),
+            collector_digest=sha256_json({
+                "source": contract.preflight_tool,
+                "metadata": backend.metadata.get(contract.preflight_tool, {}),
+            }),
+            associated_action=plan.capability_id,
+            parent_evidence_ids=parent_evidence_ids,
+            evidence_id="rollback_postcondition:" + sha256_json(after),
         )
 
     @staticmethod

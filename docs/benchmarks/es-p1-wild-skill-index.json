@@ -1,0 +1,534 @@
+{
+  "apiVersion": "effect-runtime.io/public-skill-library-summary/v1",
+  "authorKitDigest": "sha256:d476e417f9218b138433c7cf9f4ddec3674c090d41c6f3ef9389820945ea3012",
+  "authority": "metadata_only_no_embedded_third_party_content_no_execution_authority",
+  "claimBoundary": "Versioned metadata index only. Follow each pinned source URL or regenerate the local read-only library to inspect package content. No Gold, Oracle, qualification, or execution authority.",
+  "containsThirdPartyFileContent": false,
+  "draftReportDigest": "sha256:da09d171a1c9f303dc179a029bad3dcffe95a1708b6fcefa9f0536674d2059ca",
+  "generatedAt": "2026-09-01T13:28:13.321963+00:00",
+  "indexDigest": "sha256:d794fc65e37257eed010ac431e9e4876e4e9b45deb1f98130116c75054c99c10",
+  "manifestDigest": "sha256:c6ad1ee3c9b6dc60a19c47d9e8fbdc9aaf055a4748bb277efbcc62552033c137",
+  "skills": [
+    {
+      "assignmentId": "wild-assignment-001",
+      "commitSha": "ed2438d42aa253c4ffee53ecce4267ae339c04c8",
+      "description": "Drive the `synch` CLI — a synchronicity node: initialize it, run its daemon, publish filesystem or API sources, retain replicas, materialize replica checkouts, join a control-plane-managed membership zone, delegate space-restricted access, read the unified tree, adopt selected content, build and serve Synchronicity sockets, pin, rotate keys, and recover a lost origin — and drive the control plane's own HTTP API with an org-scoped API key or a network-scoped join key, to enroll devices, manage networks and keys, and browse a cluster's files without a browser. Use whenever a task involves `synch`, `synch-s3`, a Synchronicity socket, a synchronicity cluster, a node's data directory, or the control-plane API.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [
+        "external-download",
+        "privilege-escalation"
+      ],
+      "language": "en",
+      "license": "MIT",
+      "name": "synch",
+      "packageDigest": "sha256:fe0028a11db8a87cb204341099b066c395ff7b91887c0e2851927acd5baf3c1d",
+      "packageId": "afk-surf-synchronicity-control-plane-priv-skill-skill-md-4cbd59a64d",
+      "pinnedSourceUrl": "https://github.com/afk-surf/synchronicity/tree/ed2438d42aa253c4ffee53ecce4267ae339c04c8/control-plane/priv/skill",
+      "repository": "afk-surf/synchronicity",
+      "sourcePath": "control-plane/priv/skill",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-001-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-001-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-001-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-002",
+      "commitSha": "ce4890e6d2def1ed50bd4ced197e6e2f2dad59c9",
+      "description": "Use when auditing ShelraCode against its local-first, privacy-aware guarantees — network/provider routing, secrets, strict-zero/local-only modes, shell/filesystem/process sandboxing, approvals, telemetry, and log redaction. Maps each check to a product invariant.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "Apache-2.0",
+      "name": "privacy-security",
+      "packageDigest": "sha256:fe8d411d06fcd934c60a7b1ffe402cee0b4242e8ed6d067973a3a2ab9344429f",
+      "packageId": "yosoyjavieruiz-shelracode-claude-skills-privacy-security-skill-md-c474b1e109",
+      "pinnedSourceUrl": "https://github.com/yosoyjavieruiz/shelracode/tree/ce4890e6d2def1ed50bd4ced197e6e2f2dad59c9/.claude/skills/privacy-security",
+      "repository": "yosoyjavieruiz/shelracode",
+      "sourcePath": ".claude/skills/privacy-security",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-002-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-002-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-002-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-003",
+      "commitSha": "2212e67faec9f6c9f30f361589dd4358caed4617",
+      "description": "Design and review FiveM local/network event contracts, handlers, callbacks, exports, cancellation, payload validation, naming, rate limits, and versioning.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "fivem-events",
+      "packageDigest": "sha256:22e252186a891fb80d98c19ccb2f5d6c874f1b9464c0d03ae3740d00768366d0",
+      "packageId": "codecrafter98-fivem-agent-skills-agents-skills-01-core-fivem-events-skil-48eb5ea0fe",
+      "pinnedSourceUrl": "https://github.com/codecrafter98/fivem-agent-skills/tree/2212e67faec9f6c9f30f361589dd4358caed4617/.agents/skills/01-core/fivem-events",
+      "repository": "codecrafter98/fivem-agent-skills",
+      "sourcePath": ".agents/skills/01-core/fivem-events",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-003-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-003-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-003-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-004",
+      "commitSha": "2212e67faec9f6c9f30f361589dd4358caed4617",
+      "description": "Systematically diagnose FiveM client/server/Lua/NUI/network/database/framework/resource errors and desynchronization.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "fivem-debugging",
+      "packageDigest": "sha256:da26bdf299835ad9304838fa5bb35a56a8b1e5579a53ebd8579251c3625be748",
+      "packageId": "codecrafter98-fivem-agent-skills-agents-skills-06-quality-fivem-debuggin-7facfaaf8b",
+      "pinnedSourceUrl": "https://github.com/codecrafter98/fivem-agent-skills/tree/2212e67faec9f6c9f30f361589dd4358caed4617/.agents/skills/06-quality/fivem-debugging",
+      "repository": "codecrafter98/fivem-agent-skills",
+      "sourcePath": ".agents/skills/06-quality/fivem-debugging",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-004-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-004-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-004-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-005",
+      "commitSha": "2212e67faec9f6c9f30f361589dd4358caed4617",
+      "description": "Design OneSync-aware FiveM networking: server-created entities, network IDs, ownership migration, culling, routing buckets, population, synchronization, and large-player behavior.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md",
+        "references/onesync-sources.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "fivem-onesync",
+      "packageDigest": "sha256:b09d620534b6de069161ded69491aca24a14e7670688430121b8367fd5e98b51",
+      "packageId": "codecrafter98-fivem-agent-skills-agents-skills-02-networking-fivem-onesy-02df839736",
+      "pinnedSourceUrl": "https://github.com/codecrafter98/fivem-agent-skills/tree/2212e67faec9f6c9f30f361589dd4358caed4617/.agents/skills/02-networking/fivem-onesync",
+      "repository": "codecrafter98/fivem-agent-skills",
+      "sourcePath": ".agents/skills/02-networking/fivem-onesync",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-005-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-005-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-005-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-006",
+      "commitSha": "2212e67faec9f6c9f30f361589dd4358caed4617",
+      "description": "Select, verify, and use FiveM/GTA natives correctly, including client/server context, hashes, parameters, return values, entity validity, network implications, and safer alternatives.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "fivem-native-expert",
+      "packageDigest": "sha256:4e464a2094129d42cf87d8b1daa6f011fc0ce428ba4a918c2e8c88eac1634b3a",
+      "packageId": "codecrafter98-fivem-agent-skills-agents-skills-01-core-fivem-native-expe-57dd4f267c",
+      "pinnedSourceUrl": "https://github.com/codecrafter98/fivem-agent-skills/tree/2212e67faec9f6c9f30f361589dd4358caed4617/.agents/skills/01-core/fivem-native-expert",
+      "repository": "codecrafter98/fivem-agent-skills",
+      "sourcePath": ".agents/skills/01-core/fivem-native-expert",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-006-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-006-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-006-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-007",
+      "commitSha": "d29efd6a3b9b2d89c53f7335e4e3c918de1c191a",
+      "description": "Hand a task to a Claude Code agent running natively on the user's Mac, when this session cannot do it itself. Use whenever a task needs something the Cowork VM does not have — the real network (SSH, cluster, cPanel, home LAN, any host), macOS-native tools (launchctl, security/Keychain, tmux, the Chrome extension), a long-running background agent, or continuity with an ongoing piece of work the user has been doing on the Mac (their lab, their sites, their tooling — the current list lives in bridge/agents.json). Also use it when the user says things like \"indítsd el a gépemen\", \"csináltasd meg a mac-mainnel\", \"add át a infra agentnek\", or mentions the bridge, bridge/requests, or a request id. Do not use it for work this session can finish on its own inside the mounted folder.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "agent-bridge",
+      "packageDigest": "sha256:a72fc5964a219beb3d63dfd833318d52d842caeecd083385d3c41c355f8fac62",
+      "packageId": "zsoltsziklai-claude-code-agent-spawner-desktop-skill-agent-bridge-skill--87ab5dff38",
+      "pinnedSourceUrl": "https://github.com/zsoltsziklai/claude-code-agent-spawner/tree/d29efd6a3b9b2d89c53f7335e4e3c918de1c191a/desktop-skill/agent-bridge",
+      "repository": "zsoltsziklai/claude-code-agent-spawner",
+      "sourcePath": "desktop-skill/agent-bridge",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-007-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-007-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-007-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-008",
+      "commitSha": "06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1",
+      "description": "Map public website requests, response shapes, rendering architecture, state management, data models, hydration, authentication boundaries, and console failures without collecting secrets.",
+      "draftStatus": "failed",
+      "draftedTaskCount": 0,
+      "filePaths": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "network-architecture-audit",
+      "packageDigest": "sha256:bec4558ccbacea12ffb643c2edb45f9a4cfe35ff729f6c1ffbcaa647a3cc8b86",
+      "packageId": "edenbuilds-touchline-skills-network-architecture-audit-skill-md-894c0829ce",
+      "pinnedSourceUrl": "https://github.com/edenbuilds/touchline/tree/06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1/skills/network-architecture-audit",
+      "repository": "edenbuilds/touchline",
+      "sourcePath": "skills/network-architecture-audit",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-008-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-008-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-008-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-009",
+      "commitSha": "06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1",
+      "description": "Perform deep browser-led reconnaissance of a target website before implementation, capturing responsive screenshots, DOM structure, fonts, assets, accessibility, console, and network evidence.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "website-recon",
+      "packageDigest": "sha256:508b106f75321e881cf4e1055a32634b232e8615d0a6e683d9185a0a39f71355",
+      "packageId": "edenbuilds-touchline-skills-website-recon-skill-md-e2834154b0",
+      "pinnedSourceUrl": "https://github.com/edenbuilds/touchline/tree/06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1/skills/website-recon",
+      "repository": "edenbuilds/touchline",
+      "sourcePath": "skills/website-recon",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-009-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-009-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-009-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-010",
+      "commitSha": "968407076c4ba0bc2112daab8b3e37352feb51c8",
+      "description": "Use when a human wants help to author or change a Gryph security policy that governs what an AI coding agent may do, often with an agent's help. Trigger whenever the user wants Gryph to block, allow, warn on, or require approval for an agent action, wants to write or change a policy rule, asks how to match a tool, command, file path, or URL, works with CEL conditions or context counters, wants to split policy into many files, or wants to dry-run a rule. Also trigger on phrases like \"write a gryph policy\", \"add a policy rule\", \"make gryph block X\", \"help me write a policy\", or \"policy for my agent\", even when the user does not name a file. This skill drafts a policy in a workspace directory and hands the user an install command. It never installs the policy and never writes into Gryph's config directory. It is not for changing the policy engine code.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [
+        "destructive-command"
+      ],
+      "language": "en",
+      "license": "Apache-2.0",
+      "name": "gryph-policy-authoring",
+      "packageDigest": "sha256:327f60371efe25a2207abfdfd4946b9111ac7aeae5a32c744784bb884666b3b1",
+      "packageId": "safedep-gryph-claude-skills-gryph-policy-authoring-skill-md-b22ca9da71",
+      "pinnedSourceUrl": "https://github.com/safedep/gryph/tree/968407076c4ba0bc2112daab8b3e37352feb51c8/.claude/skills/gryph-policy-authoring",
+      "repository": "safedep/gryph",
+      "sourcePath": ".claude/skills/gryph-policy-authoring",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-010-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-010-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-010-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-011",
+      "commitSha": "fe000455477c38644f35a9f504618e9ed74b2eff",
+      "description": "Work with 1lev1.com partnerships (\"rikmot\") from the agent - list and search missions, start/stop mission timers, log and review work hours, see open votes and pending profit-splits, and prepare new partnerships, missions and tasks for human approval. Use whenever the user mentions 1lev1, a rikma/partnership, \"my missions\", mission timers, hour logging, consensus votes, halukot/profit-split, or asks to turn repo work (issues, PRs, TODOs) into shared, equity-bearing work.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md",
+        "references/concepts.md",
+        "references/connect.md",
+        "references/tools.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "1lev1-platform",
+      "packageDigest": "sha256:f4356df6c14852834bd38bc32fdd3cec3524190f83ab9c4d0665bebba7642d31",
+      "packageId": "avi-adam-1lev1-agent-plugins-1lev1-skills-1lev1-platform-skill-md-1493359ced",
+      "pinnedSourceUrl": "https://github.com/avi-adam/1lev1-agent/tree/fe000455477c38644f35a9f504618e9ed74b2eff/plugins/1lev1/skills/1lev1-platform",
+      "repository": "avi-adam/1lev1-agent",
+      "sourcePath": "plugins/1lev1/skills/1lev1-platform",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-011-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-011-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-011-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-012",
+      "commitSha": "06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1",
+      "description": "Discover and safely evaluate external skills or repositories needed for a Touchline run using quarantine, license and manifest inspection, script review, and explicit approval before installation or execution.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md",
+        "agents/openai.yaml"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "MIT",
+      "name": "skill-scout",
+      "packageDigest": "sha256:75aeb17aa0877445e5095e7ad5ffd8e1f6767aa51d65f08e7ded67b7d013566a",
+      "packageId": "edenbuilds-touchline-skills-skill-scout-skill-md-e902f0fcfd",
+      "pinnedSourceUrl": "https://github.com/edenbuilds/touchline/tree/06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1/skills/skill-scout",
+      "repository": "edenbuilds/touchline",
+      "sourcePath": "skills/skill-scout",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-012-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-012-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-012-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-013",
+      "commitSha": "1a9bde3c514e107cfd790cc82b77be1f53f42b50",
+      "description": "Capture and use data lineage with OpenLineage and Marquez — emitting run/job/dataset events from Airflow, dbt, and Spark, column-level lineage, and using lineage for impact analysis, debugging, and backfill scoping. Use when setting up data lineage, integrating OpenLineage, tracing what a change breaks downstream, or scoping the blast radius of an incident.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "Apache-2.0",
+      "name": "managing-data-lineage-openlineage",
+      "packageDigest": "sha256:a5ac1c5ba0cdcb5a3cfa91eab582f57ab4f1aaf97336705631eaade72a2f0766",
+      "packageId": "unknown-333-awesome-data-engineering-skills-skills-managing-data-lineage-eb4b9b35da",
+      "pinnedSourceUrl": "https://github.com/unknown-333/awesome-data-engineering-skills/tree/1a9bde3c514e107cfd790cc82b77be1f53f42b50/skills/managing-data-lineage-openlineage",
+      "repository": "unknown-333/awesome-data-engineering-skills",
+      "sourcePath": "skills/managing-data-lineage-openlineage",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-013-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-013-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-013-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-014",
+      "commitSha": "1a9bde3c514e107cfd790cc82b77be1f53f42b50",
+      "description": "Systematically root-cause data pipeline failures and data incidents — job errors, wrong or missing data, duplicates, and freshness misses — by tracing lineage upstream, isolating the failing stage, reconciling against source, and planning a safe fix and backfill. Use when a pipeline fails, numbers look wrong, data is missing or duplicated, a dashboard is stale, or a stakeholder reports a data discrepancy.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "Apache-2.0",
+      "name": "debugging-data-pipelines",
+      "packageDigest": "sha256:c08722e43fdaa2187996bc7772eec355b9d373c7e4b2e83a85baaabbba1b61ed",
+      "packageId": "unknown-333-awesome-data-engineering-skills-skills-debugging-data-pipeli-26ec5cfd4e",
+      "pinnedSourceUrl": "https://github.com/unknown-333/awesome-data-engineering-skills/tree/1a9bde3c514e107cfd790cc82b77be1f53f42b50/skills/debugging-data-pipelines",
+      "repository": "unknown-333/awesome-data-engineering-skills",
+      "sourcePath": "skills/debugging-data-pipelines",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-014-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-014-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-014-03"
+        }
+      ]
+    },
+    {
+      "assignmentId": "wild-assignment-015",
+      "commitSha": "1a9bde3c514e107cfd790cc82b77be1f53f42b50",
+      "description": "Instrument data pipelines with observability — freshness and volume SLAs, run success/latency metrics, data quality monitors, anomaly detection, lineage, and actionable alerting that avoids fatigue. Use when pipelines fail silently, incidents are found by stakeholders instead of alerts, setting up monitoring/SLAs for data, or reducing noisy alerts.",
+      "draftStatus": "drafted",
+      "draftedTaskCount": 3,
+      "filePaths": [
+        "SKILL.md"
+      ],
+      "instructionRiskCodes": [],
+      "language": "en",
+      "license": "Apache-2.0",
+      "name": "implementing-pipeline-observability",
+      "packageDigest": "sha256:bf43085f5cdd2cf0c0bd3e2715f810d22654328718a80f6f2602d91738d297f8",
+      "packageId": "unknown-333-awesome-data-engineering-skills-skills-implementing-pipeline-25a9b1622c",
+      "pinnedSourceUrl": "https://github.com/unknown-333/awesome-data-engineering-skills/tree/1a9bde3c514e107cfd790cc82b77be1f53f42b50/skills/implementing-pipeline-observability",
+      "repository": "unknown-333/awesome-data-engineering-skills",
+      "sourcePath": "skills/implementing-pipeline-observability",
+      "taskSlots": [
+        {
+          "challenge": "nominal",
+          "slotId": "wild-assignment-015-01"
+        },
+        {
+          "challenge": "ambiguous_or_missing",
+          "slotId": "wild-assignment-015-02"
+        },
+        {
+          "challenge": "failure_or_adversarial",
+          "slotId": "wild-assignment-015-03"
+        }
+      ]
+    }
+  ],
+  "statistics": {
+    "displayableFileCount": 22,
+    "draftedSkillCount": 14,
+    "draftedTaskCount": 42,
+    "executionSurfaceFileCount": 0,
+    "failedDraftSkillCount": 1,
+    "fileCount": 22,
+    "referenceFileCount": 4,
+    "skillCount": 15,
+    "taskSlotCount": 45,
+    "thirdPartyExecutionAttempted": false
+  },
+  "summaryDigest": "sha256:2ba4378887cbc228876d03a213348aef903bd3b666cfde6b75fe1057d08050e6",
+  "thirdPartyExecutionAttempted": false
+}

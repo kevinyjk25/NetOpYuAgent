@@ -328,8 +328,13 @@ def build_transaction_graph(*, compensatable: bool) -> TypedExecutionGraph:
         nodes.extend([
             OperationNode("compensate", ExecutionPhase.COMPENSATE, ("execute",), side_effect=True),
             OperationNode("verify_recovery", ExecutionPhase.VERIFY_RECOVERY, ("compensate",)),
-            OperationNode("abort", ExecutionPhase.ABORT, ("verify_recovery",)),
         ])
+    # Abort is a first-class terminal for every operation.  It covers rejection
+    # and failed revalidation before Effect, while compensatable operations may
+    # also reach it after independently verified recovery.  Branch eligibility
+    # is enforced by TypedGraphScheduler, so this node deliberately has no AND
+    # dependency that would conflate those alternative paths.
+    nodes.append(OperationNode("abort", ExecutionPhase.ABORT))
     nodes.append(OperationNode("escalate", ExecutionPhase.ESCALATE, ("reconcile",)))
     return TypedExecutionGraph.create(nodes)
 
