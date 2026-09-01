@@ -17,6 +17,14 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from dsh_adapter.backend import BackendSession, open_backend
+from effect_runtime.reliability import (
+    AutonomyDecision,
+    EvidenceRecord,
+    build_transaction_graph,
+    contract_from_compiled_l0,
+    evaluate_evidence,
+    evaluate_guards,
+)
 
 from .contracts import (
     ApprovalError,
@@ -34,7 +42,7 @@ from .contracts import (
 )
 from .compensators import REGISTRY as COMPENSATORS, compensate_operation
 from .access import ObservationAccessContext, ObservationPolicy
-from .capabilities import CapabilityKind
+from .capabilities import CapabilityAdmissionError, CapabilityKind
 from .evidence import (
     bounded as _bounded,
     failed_output as _failed_output,
@@ -48,15 +56,81 @@ from .l0_skills import REGISTRY as L0_SKILLS, L0SkillContract, compile_intent
 from .l0.models import CompiledAtomicEffect
 from .l0.runtime_loader import require_effect_arguments, validate_runtime_projection
 from .policies import ToolContract, project_arguments, resolve_contract
-from .provider_release import ProviderReleaseError
-from .proposal_binding import ProposalBindingError, compile_plan_decision_binding
-from .validation import assess_risk, compile_parameters
+from .validation import assess_risk, assess_risk_decision, compile_parameters
 from .verifiers import REGISTRY as VERIFIERS, verify_operation
 from .workflows import WorkflowRuntime
 
 
 FaultHook = Callable[[str, PreparedPlan], Any]
 BackendFactory = Callable[[str], Awaitable[BackendSession]]
+
+
+def _ensured_step_contract(graph: Any) -> tuple[dict[str, Any], ...]:
+    """Bind the material-defined transaction graph into the approved plan."""
+    return tuple(
+        {
+            "step_id": node.id,
+            "phase": node.phase.value,
+            "condition": "dependencies_satisfied",
+            "failure_action": (
+                "reconcile_or_compensate" if node.side_effect else "fail_closed"
+            ),
+            "depends_on": list(node.depends_on),
+            "side_effect": node.side_effect,
+        }
+        for node in graph.nodes
+    )
+
+
+def _bind_contract_evidence(
+    evidence: tuple[Evidence, ...],
+    requirements: list[Any],
+    *,
+    backend: BackendSession,
+    associated_action: str,
+    scope: tuple[str, ...],
+) -> tuple[tuple[Evidence, ...], tuple[EvidenceRecord, ...]]:
+    """Bind observations to reviewed requirements without trusting prose."""
+    bound: list[Evidence] = []
+    records: list[EvidenceRecord] = []
+    for index, item in enumerate(evidence):
+        requirement = requirements[index] if index < len(requirements) else None
+        source_metadata = backend.metadata.get(item.source, {})
+        attached = item.bind_provenance(
+            semantic_type=(
+                requirement.semantic_type if requirement else item.evidence_type
+            ),
+            source_capability=(
+                requirement.source_capability if requirement else item.source
+            ),
+            scope=scope,
+            collector_identity=str(
+                source_metadata.get("provider_identity")
+                or backend.sources.get(item.source)
+                or "local-runtime-observer"
+            ),
+            collector_digest=sha256_json({
+                "source": item.source,
+                "metadata": source_metadata,
+            }),
+            associated_action=associated_action,
+            evidence_id=f"{item.evidence_type}:{index}:{sha256_json(item.value)}",
+        )
+        payload = item.value if isinstance(item.value, dict) else {"value": item.value}
+        payload = {**payload, "passed": item.passed}
+        bound.append(attached)
+        records.append(EvidenceRecord.create(
+            id=str(attached.evidence_id),
+            semantic_type=str(attached.semantic_type),
+            source_capability=str(attached.source_capability),
+            collector_identity=str(attached.collector_identity),
+            collected_at=attached.observed_at,
+            scope=attached.scope,
+            associated_action=str(attached.associated_action),
+            payload=payload,
+            valid=attached.passed is not False,
+        ))
+    return tuple(bound), tuple(records)
 
 def default_journal_path() -> Path:
     configured = (
@@ -91,13 +165,21 @@ class NetworkRuntime:
         self.fault_hook = fault_hook
         self.observation_policy = observation_policy or ObservationPolicy()
         if approval_control_plane is None:
-            from .enterprise import control_plane_from_environment
-
-            approval_control_plane = control_plane_from_environment(
-                key_path=self.journal_path.with_name(
-                    self.journal_path.name + ".approval.key"
-                ),
+            key_path = self.journal_path.with_name(
+                self.journal_path.name + ".approval.key"
             )
+            # Enterprise identity/PDP/change-system wiring is a frozen optional
+            # adapter.  The prototype core constructs its local approval
+            # boundary directly and imports the enterprise module only for an
+            # explicit enforced-mode experiment.
+            if os.environ.get("NETOPYU_IDENTITY_MODE", "local-simulation") == "enforced":
+                from .enterprise import control_plane_from_environment
+
+                approval_control_plane = control_plane_from_environment(
+                    key_path=key_path,
+                )
+            else:
+                approval_control_plane = ApprovalControlPlane(key_path=key_path)
         self.approval_control_plane = approval_control_plane
 
     async def _fault(self, stage: str, plan: PreparedPlan) -> None:
@@ -139,7 +221,7 @@ class NetworkRuntime:
                 ]}
             try:
                 provider_capability = backend.describe_capability(tool_name)
-            except ProviderReleaseError as error:
+            except CapabilityAdmissionError as error:
                 return {
                     "ok": False,
                     "status": "rejected",
@@ -232,6 +314,8 @@ class NetworkRuntime:
                 }
             l0_contract: L0SkillContract | None = None
             intent = None
+            ensured_contract = None
+            execution_graph = None
             if requires_approval:
                 candidates = L0_SKILLS.candidates_for_tool(backend.profile_id, tool_name)
                 l0_contract = L0_SKILLS.for_tool(
@@ -322,6 +406,20 @@ class NetworkRuntime:
                             for error in parity.errors
                         ],
                     }
+                try:
+                    ensured_contract = contract_from_compiled_l0(
+                        l0_contract.compiled_contract,
+                        compiled.arguments,
+                    )
+                    execution_graph = build_transaction_graph(
+                        compensatable=ensured_contract.compensation_operation is not None,
+                    )
+                except ValueError as error:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [f"EnsuredSkill reliability contract rejected: {error}"],
+                    }
             if requires_approval and contract.verifier not in VERIFIERS.contract_ids():
                 return {
                     "ok": False,
@@ -360,7 +458,71 @@ class NetworkRuntime:
                     "errors": ["preflight did not prove the target is safe and reachable"],
                     "preflight": [item.to_dict() for item in preflight],
                 }
+            if ensured_contract is not None:
+                preflight_requirements = [
+                    item for item in ensured_contract.evidence
+                    if item.phase.value == "precheck"
+                ]
+                preflight, preflight_records = _bind_contract_evidence(
+                    preflight,
+                    preflight_requirements,
+                    backend=backend,
+                    associated_action=ensured_contract.operation,
+                    scope=compiled.targets,
+                )
+                evidence_gate = evaluate_evidence(
+                    preflight_requirements,
+                    preflight_records,
+                )
+                if not evidence_gate.allowed:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["Evidence Contract is not satisfied; no action"],
+                        "evidence_gate": {
+                            "missing": list(evidence_gate.missing),
+                            "invalid": list(evidence_gate.invalid),
+                            "stale": list(evidence_gate.stale),
+                            "mismatched": list(evidence_gate.mismatched),
+                        },
+                    }
+                guard_gate = evaluate_guards(
+                    ensured_contract.guards,
+                    preflight_requirements,
+                    preflight_records,
+                )
+                if not guard_gate.allowed:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["EnsuredSkill Guard is not satisfied; no action"],
+                        "guard_gate": {
+                            "failed": list(guard_gate.failed),
+                            "unresolved": list(guard_gate.unresolved),
+                        },
+                    }
+            risk_decision = assess_risk_decision(
+                tool_name, metadata, compiled.arguments,
+                evidence_confidence=1.0,
+            )
+            if risk_decision.decision == AutonomyDecision.REJECT:
+                return {
+                    "ok": False,
+                    "status": "rejected",
+                    "errors": ["Risk Policy rejected this operation"],
+                    "risk_policy": {
+                        "decision": risk_decision.decision.value,
+                        "score": risk_decision.score,
+                        "reasons": list(risk_decision.reasons),
+                    },
+                }
             risk, reasons = assess_risk(tool_name, metadata, compiled.arguments)
+            if l0_contract.compiled_contract.spec.approval.required:
+                reasons = tuple(
+                    "autonomy_decision=ask_human"
+                    if item.startswith("autonomy_decision=") else item
+                    for item in reasons
+                ) + ("reviewed_contract_requires_approval",)
             capability_id = provider_capability.capability_id
             requester = self.approval_control_plane.bind_requester(
                 subject_context,
@@ -374,6 +536,14 @@ class NetworkRuntime:
             expires = created + timedelta(seconds=self.plan_ttl_seconds)
             l1_binding: dict[str, Any] | None = None
             if l1_decision_envelope is not None:
+                # Proposal binding belongs to the optional Reasoning adapter,
+                # not the Reliability kernel. Load it only when provenance is
+                # actually supplied.
+                from .proposal_binding import (
+                    ProposalBindingError,
+                    compile_plan_decision_binding,
+                )
+
                 try:
                     l1_binding = compile_plan_decision_binding(
                         l1_decision_envelope,
@@ -436,7 +606,11 @@ class NetworkRuntime:
                 l0_contract_hash=l0_contract.contract_hash,
                 intent_spec=intent.to_dict(),
                 intent_hash=intent.intent_hash,
-                step_contract=tuple(step.to_dict() for step in l0_contract.steps),
+                step_contract=_ensured_step_contract(
+                    execution_graph,
+                ) if execution_graph is not None else tuple(
+                    step.to_dict() for step in l0_contract.steps
+                ),
                 workflow_run_id=(workflow_context or {}).get("run_id"),
                 workflow_template_hash=(workflow_context or {}).get("template_hash"),
                 requester_identity=requester.to_dict(),
@@ -454,6 +628,13 @@ class NetworkRuntime:
                 with NetworkJournal(self.journal_path) as journal:
                     journal.create(plan, nonce)
                     journal.append_events(plan.plan_id, [
+                        ("ensured_contract_compiled", {
+                            "contract_digest": ensured_contract.contract_digest,
+                            "execution_graph_digest": execution_graph.graph_digest,
+                            "evidence_requirements": len(ensured_contract.evidence),
+                            "reversibility": ensured_contract.reversibility.value,
+                        }),
+                    ] + [
                         ("l0_step_completed", {
                             "step_id": step_id,
                             "l0_contract_hash": l0_contract.contract_hash,
@@ -1087,7 +1268,7 @@ class NetworkRuntime:
             raise PlanIntegrityError("approved tool is no longer registered")
         try:
             provider_capability = backend.describe_capability(plan.tool_name)
-        except ProviderReleaseError as error:
+        except CapabilityAdmissionError as error:
             raise PlanIntegrityError(f"Provider release admission failed: {error}") from error
         action = str(metadata.get("action_type", "read_only"))
         requires_approval = bool(metadata.get("hitl")) or action != "read_only"
@@ -1152,12 +1333,22 @@ class NetworkRuntime:
         if contract.compensator and contract.compensator not in COMPENSATORS.contract_ids():
             raise PlanIntegrityError("approved compensation contract is no longer registered")
         l0_contract = current_l0
+        current_step_contract: tuple[dict[str, Any], ...] = ()
+        if l0_contract is not None and isinstance(
+            l0_contract.compiled_contract, CompiledAtomicEffect,
+        ):
+            ensured = contract_from_compiled_l0(
+                l0_contract.compiled_contract, plan.arguments,
+            )
+            current_step_contract = _ensured_step_contract(build_transaction_graph(
+                compensatable=ensured.compensation_operation is not None,
+            ))
         if (
             l0_contract is None
             or plan.l0_skill_id != l0_contract.skill_id
             or plan.l0_skill_version != l0_contract.version
             or plan.l0_contract_hash != l0_contract.contract_hash
-            or plan.step_contract != tuple(step.to_dict() for step in l0_contract.steps)
+            or plan.step_contract != current_step_contract
             or l0_contract.tool_contract_id != contract.contract_id
         ):
             raise PlanIntegrityError("Network L0 Skill contract changed after approval")
@@ -1228,9 +1419,50 @@ class NetworkRuntime:
         result: str | None,
     ) -> tuple[tuple[Evidence, ...], bool, bool, str | None]:
         verification = await verify_operation(backend, plan, contract, result)
+        if not verification.passed:
+            return (
+                verification.evidence,
+                False,
+                verification.internal_rollback,
+                verification.error,
+            )
+        try:
+            compiled = L0_SKILLS.get(
+                plan.l0_skill_id, plan.l0_skill_version,
+            ).compiled_contract
+            ensured_contract = contract_from_compiled_l0(compiled, plan.arguments)
+            requirements = [
+                item for item in ensured_contract.evidence
+                if item.phase.value == "verify"
+            ]
+            evidence, records = _bind_contract_evidence(
+                verification.evidence,
+                requirements,
+                backend=backend,
+                associated_action=ensured_contract.operation,
+                scope=plan.targets,
+            )
+            evidence_gate = evaluate_evidence(requirements, records)
+            guard_gate = evaluate_guards(
+                ensured_contract.postconditions, requirements, records,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            return (
+                verification.evidence,
+                False,
+                verification.internal_rollback,
+                f"EnsuredSkill postcondition contract could not be evaluated: {error}",
+            )
+        if not evidence_gate.allowed or not guard_gate.allowed:
+            return (
+                evidence,
+                False,
+                verification.internal_rollback,
+                "EnsuredSkill postcondition Evidence/Guard is not satisfied",
+            )
         return (
-            verification.evidence,
-            verification.passed,
+            evidence,
+            True,
             verification.internal_rollback,
             verification.error,
         )

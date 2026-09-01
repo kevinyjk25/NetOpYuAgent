@@ -26,6 +26,11 @@ from .enterprise import (
 )
 from .l0_skills import IntentSpec, L0SkillContract
 from .proposal_binding import PLAN_DECISION_BINDING_SCHEMA, ProposalBindingError
+from .argument_binding import (
+    ARGUMENT_BINDING_SCHEMA,
+    ExactArgumentBinding,
+    validate_exact_argument_binding,
+)
 from .provider_release import (
     ProviderAdmissionGate,
     ProviderDeploymentAttestation,
@@ -70,6 +75,9 @@ __all__ = [
     "NetworkJournal",
     "NetworkRuntime",
     "PlanState",
+    "ARGUMENT_BINDING_SCHEMA",
+    "ExactArgumentBinding",
+    "validate_exact_argument_binding",
     "PLAN_DECISION_BINDING_SCHEMA",
     "PreparedPlan",
     "ProposalBindingError",

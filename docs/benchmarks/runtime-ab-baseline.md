@@ -1,5 +1,7 @@
 # DSH only vs DSH + Network Runtime / 定量基线
 
+> **Retired product claim / 产品口径已降级**：此处 “DSH only” 实际是固定意图后的 Schema/HITL/Provider 单次调用，不经过真实 DSH/Hermes Agent、Skill 加载或 LLM 多轮工具编排。数据继续用于事务控制组件回归，但不能再用于对比原生 Harness。真实对照见[Harness auto Runtime A/B](../general-effect-ab.md)。
+
 ## 中文
 
 ### 1. 比较目的

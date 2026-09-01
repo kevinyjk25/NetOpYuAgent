@@ -81,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     prompt_command.add_argument("--skill", required=True)
     prompt_command.add_argument("--capabilities", required=True)
     prompt_command.add_argument("--l05")
+    prompt_command.add_argument(
+        "--bound-script", action="append", default=[], metavar="PATH=CAPABILITY_ID",
+        help="package script path plus trusted Catalog Capability binding",
+    )
     prompt_command.add_argument("--output")
 
     for name, help_text in (
@@ -92,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--candidate", required=True)
         command.add_argument("--capabilities", required=True)
         command.add_argument("--l05")
+        command.add_argument(
+            "--bound-script", action="append", default=[], metavar="PATH=CAPABILITY_ID",
+            help="package script path plus trusted Catalog Capability binding",
+        )
         command.add_argument(
             "--dependencies", action="append", default=[],
             help="L0 manifest file/directory required by a derived/composite candidate",
@@ -170,6 +178,16 @@ def main(argv: list[str] | None = None) -> int:
         "forward-eval-schema",
         help="print Case, Label and Observation JSON Schemas for external qualification",
     )
+    forward_kit = sub.add_parser(
+        "forward-eval-study-kit",
+        help="create a role-separated external qualification workspace",
+    )
+    forward_kit.add_argument("--output-root", required=True)
+    forward_doctor = sub.add_parser(
+        "forward-eval-study-doctor",
+        help="inspect external qualification progress without exposing private truth",
+    )
+    forward_doctor.add_argument("--root", required=True)
     forward_inputs = sub.add_parser(
         "forward-eval-study-inputs",
         help="resolve private-study model/protocol/catalog digests without inference",
@@ -408,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
             value = promotion_prompt(
                 skill_path=args.skill, capability_catalog_path=args.capabilities,
                 l05_path=args.l05,
+                bound_scripts=args.bound_script,
             )
             if args.output:
                 destination = Path(args.output).expanduser().resolve()
@@ -423,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
                 capability_catalog_path=args.capabilities,
                 dependency_paths=args.dependencies,
                 l05_path=args.l05,
+                bound_scripts=args.bound_script,
             )
             print(json.dumps(assessment.report, ensure_ascii=False, indent=2, sort_keys=True))
             return 0 if assessment.report["status"] == "ready_for_review" else 1
@@ -432,6 +452,7 @@ def main(argv: list[str] | None = None) -> int:
                 capability_catalog_path=args.capabilities,
                 dependency_paths=args.dependencies, output_directory=args.output,
                 l05_path=args.l05,
+                bound_scripts=args.bound_script,
             ), ensure_ascii=False, indent=2, sort_keys=True))
             return 0
         if args.command == "promote-review":
@@ -489,6 +510,10 @@ def main(argv: list[str] | None = None) -> int:
                 seal_forward_cases,
                 seal_forward_study,
                 write_public_calibration,
+            )
+            from network_runtime.l0.forward_study_workspace import (
+                inspect_forward_qualification_study,
+                write_forward_qualification_kit,
             )
 
             if args.command in {
@@ -552,6 +577,10 @@ def main(argv: list[str] | None = None) -> int:
                     value = rescore_public_model_evaluation(args.output_root)
                 else:
                     value = reassess_public_model_evaluation(args.output_root)
+            elif args.command == "forward-eval-study-kit":
+                value = write_forward_qualification_kit(args.output_root)
+            elif args.command == "forward-eval-study-doctor":
+                value = inspect_forward_qualification_study(args.root)
             elif args.command == "forward-eval-schema":
                 value = forward_qualification_schemas()
             elif args.command == "forward-eval-calibrate":

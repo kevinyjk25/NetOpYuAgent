@@ -182,8 +182,8 @@ class NetworkRuntimeTests(unittest.TestCase):
         self.assertEqual(
             [item["step_id"] for item in plan["step_contract"]],
             [
-                "validate_parameters", "compile_intent", "preflight", "approval",
-                "revalidate", "execute", "verify", "audit",
+                "snapshot", "precheck", "approval", "revalidate", "execute",
+                "verify", "commit", "reconcile", "escalate",
             ],
         )
         outcome = self.execute(prepared)

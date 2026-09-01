@@ -1,0 +1,1 @@
+{"required":["instance_id","desired_size","window","reason","revision","snapshot_digest"]}

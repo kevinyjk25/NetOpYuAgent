@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -445,10 +444,3 @@ def compile_documents(documents: Iterable[AuthoringManifest]) -> list[CompiledCo
     for key in manifests:
         resolve(key)
     return [resolved[key] for key in sorted(resolved)]
-
-
-def compiled_json(contracts: Iterable[CompiledContract]) -> str:
-    return json.dumps(
-        [item.model_dump(by_alias=True, mode="json") for item in contracts],
-        ensure_ascii=False, indent=2, sort_keys=True,
-    ) + "\n"

@@ -18,7 +18,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
 )
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from .capabilities import CapabilityContract
+from .capabilities import CapabilityAdmissionError, CapabilityContract
 from .contracts import canonical_json, sha256_json
 from .l0.models import IDENTIFIER, SEMVER
 
@@ -46,7 +46,7 @@ _DIGEST_PREFIX = "sha256:"
 _RELEASE_STATES = {"staged", "published", "deprecated"}
 
 
-class ProviderReleaseError(RuntimeError):
+class ProviderReleaseError(CapabilityAdmissionError):
     """A release is untrusted, incompatible, or in an invalid lifecycle state."""
 
 

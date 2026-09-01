@@ -35,7 +35,7 @@ L1 保留原始自然语言业务经验，并用一个显式标记的小型 `sem
 
 ### 2. 输入与三阶段产物
 
-1. **L1 Agent Skill**：标准 `SKILL.md`，保留自然语言业务流程，明确参数、工具、风险和停止条件。
+1. **L1 Agent Skill 包**：标准 `SKILL.md` 加可选 `scripts/`、`references/`、`assets/`。包检查器在不执行脚本的前提下验证路径、引用、摘要和副作用绑定；Prompt v3 只披露从 `SKILL.md` 可达的资源。
 2. **Capability Catalog v3**：由 Provider/API 所有者维护，声明 capability id、observation/effect/compensation 角色、tool、profile、输入和输出 Schema；每个 Observation 还必须声明 `observationPhases` 及各阶段不可弱化的最低 `phasePredicates`。
 3. **L0.5 Structured Skill v3**：可由工具从 L1 + Catalog 生成，也可由人补充；保持自然语言可读，同时用严格 Schema 固定范围。`semanticIntents` 必须逐字段复制 L1 锚点并按 effect capability 绑定；`preflightObservations`、`successVerificationObservations` 和 `compensationVerificationObservations` 分别限定三个确定阶段。缺少锚点、多个 Effect 无法唯一选择、缺少必要 Observer 或 Compensation 时写入 `unresolvedQuestions` 并阻断 L0。
 4. **L0 candidate**：由人或 Agent 依据 L0.5 生成的 Atomic、Derived 或 Composite v2 YAML；在验证前一律不可信。
@@ -238,7 +238,9 @@ token 下降 18.89%，p50/p95 下降 13.79%/53.03%，transport 故障从 2 降�
 
 The Promotion Pipeline preserves three explicit stages: the original natural-language `L1 SKILL.md`, a schema-valid but human-readable `L0.5 StructuredNaturalLanguageSkill` v3, and strict L0 authoring/compiled contracts. L1 keeps prose natural but carries one visibly marked, compact `semantic-intents/v1` YAML anchor for semantics that must never be guessed. L0.5 records an exact capability-scoped copy alongside parameters, constraints, workflow phases, risk, stop conditions, outcomes, and trusted capability options. Capability Catalog v3 assigns each Observation to `preflight`, `success_verification`, and/or `compensation_verification` and binds minimum `phasePredicates` for each phase. Candidates may add stronger predicates over declared outputs but cannot omit or alter the minimum proof. Catalog v1/v2 and L0.5 v2 remain readable for migration diagnostics but cannot pass current Promotion. Missing or drifted intent, ambiguous effects, or missing observation/compensation semantics remain unresolved and block promotion.
 
-An immutable package stores the capability catalog, `01-L1-SKILL.md`, `02-L0.5.yaml`, `03-L0-authoring.yaml`, `04-L0-compiled.json`, and a `trajectory.json` hash chain. Deterministic checks prevent L0.5 from drifting from L1 or L0 from widening L0.5. Any file or link tampering blocks review. The Agent accelerates semantic extraction but remains an untrusted candidate producer.
+The source is a complete Anthropic Skill package: `SKILL.md` plus optional reachable `scripts/`, `references/`, and `assets/`. Package inspection validates paths, links, digests, and potential effect bindings without importing or executing scripts. Prompt v3 discloses reachable UTF-8 resources as untrusted evidence and binary assets by digest only.
+
+An immutable proposal stores the capability catalog, `01-L1-SKILL.md`, managed source resources under `01-L1-package/`, `02-L0.5.yaml`, `03-L0-authoring.yaml`, `04-L0-compiled.json`, and a `trajectory.json` hash chain. Deterministic checks prevent L0.5 from drifting from L1 or L0 from widening L0.5. Any file or link tampering blocks review. The Agent accelerates semantic extraction but remains an untrusted candidate producer.
 
 The pipeline deliberately cannot activate Runtime or grant execution authority. A human approval records one immutable review decision only. Provider identity, independent observation, approval separation of duty, indeterminate outcomes, rollback, Harness projection, and fault injection still require separate qualification. This keeps natural-language generalization in L1 while preserving deterministic execution semantics in L0.
 

@@ -635,6 +635,39 @@ def _finding(
     findings.append(value)
 
 
+def _skill_package_capability_errors(
+    package: dict[str, Any], capabilities: CapabilityCatalogManifest,
+) -> list[dict[str, str]]:
+    by_id = capabilities.by_id()
+    expected_roles = {
+        "provider_adapter": "effect",
+        "compensator": "compensation",
+        "preflight": "observation",
+        "verifier": "observation",
+    }
+    errors: list[dict[str, str]] = []
+    for resource in package.get("resources") or []:
+        binding = resource.get("capability_binding")
+        if not binding:
+            continue
+        capability = by_id.get(str(binding))
+        if capability is None:
+            errors.append({
+                "path": str(resource.get("path")),
+                "capability": str(binding),
+                "reason": "Capability id is absent from the trusted Catalog.",
+            })
+            continue
+        expected = expected_roles.get(str(resource.get("script_role")))
+        if expected and capability.role != expected:
+            errors.append({
+                "path": str(resource.get("path")),
+                "capability": str(binding),
+                "reason": f"Script role requires Catalog role {expected!r}, got {capability.role!r}.",
+            })
+    return errors
+
+
 def _normalized_requirement_text(value: str) -> str:
     return " ".join(value.casefold().split()).strip(" .;,:，。；：")
 
@@ -2006,8 +2039,14 @@ def assess_promotion(
     capability_catalog_path: str | Path,
     dependency_paths: Iterable[str | Path] = (),
     l05_path: str | Path | None = None,
+    bound_scripts: Iterable[str] = (),
 ) -> PromotionAssessment:
+    from effect_runtime.skill_package import inspect_skill_package
+
     source = load_skill_source(skill_path)
+    skill_package = inspect_skill_package(
+        skill_path, bound_scripts=bound_scripts,
+    )
     capabilities, capability_digest, capability_path = load_capability_catalog(
         capability_catalog_path,
     )
@@ -2020,6 +2059,17 @@ def assess_promotion(
     candidate, candidate_digest, candidate_source = _load_candidate(candidate_path)
     bound = _bind_source(candidate, source, capability_digest, l05_digest)
     findings: list[dict[str, Any]] = []
+    for item in skill_package["findings"]:
+        if item["severity"] == "error":
+            _finding(
+                findings, "error", f"SKILL_PACKAGE_{item['code']}",
+                item["message"], {"path": item["path"]},
+            )
+    for item in _skill_package_capability_errors(skill_package, capabilities):
+        _finding(
+            findings, "error", "SKILL_PACKAGE_CAPABILITY_BINDING_INVALID",
+            item["reason"], item,
+        )
     if capabilities.api_version in {
         LEGACY_CAPABILITY_API_VERSION, PHASE_TYPED_CAPABILITY_API_VERSION,
     }:
@@ -2152,6 +2202,7 @@ def assess_promotion(
             "declaredTools": sorted(source.declared_tools),
             "documentedParameters": sorted(source_parameters),
         },
+        "skillPackage": skill_package,
         "structuredSkill": {
             "apiVersion": l05.api_version,
             "skillId": l05.skill_id,
@@ -2212,16 +2263,32 @@ def promotion_prompt(
     skill_path: str | Path,
     capability_catalog_path: str | Path,
     l05_path: str | Path | None = None,
+    bound_scripts: Iterable[str] = (),
 ) -> str:
+    from effect_runtime.skill_package import build_skill_disclosure_packet
+
     source = load_skill_source(skill_path)
+    skill_package = build_skill_disclosure_packet(
+        skill_path, bound_scripts=bound_scripts,
+    )
+    if skill_package["gate"] != "passed":
+        codes = sorted({item["code"] for item in skill_package["findings"]})
+        raise PromotionError(
+            f"Skill package trust gate blocked authoring: {codes}"
+        )
     capabilities, digest, path = load_capability_catalog(capability_catalog_path)
+    binding_errors = _skill_package_capability_errors(skill_package, capabilities)
+    if binding_errors:
+        raise PromotionError(
+            f"Skill package Capability binding is invalid: {binding_errors}"
+        )
     l05 = _resolve_l05(
         skill_path=skill_path,
         capability_catalog_path=capability_catalog_path,
         l05_path=l05_path,
     )
     packet = {
-        "schema": "netopyu.io/l0-promotion-prompt/v2",
+        "schema": "netopyu.io/l0-promotion-prompt/v3",
         "task": (
             "Draft exactly one NetOpYu L0 v2 authoring YAML manifest from the "
             "source Agent Skill and trusted capability catalog."
@@ -2251,6 +2318,7 @@ def promotion_prompt(
             "path": str(source.path), "sha256": source.digest,
             "frontmatter": source.parsed.frontmatter, "body": source.parsed.body,
         },
+        "skillPackage": skill_package,
         "structuredSkill": {
             "sha256": _l05_digest(l05),
             "document": l05.model_dump(by_alias=True, mode="json"),
@@ -2276,12 +2344,14 @@ def package_promotion(
     output_directory: str | Path,
     dependency_paths: Iterable[str | Path] = (),
     l05_path: str | Path | None = None,
+    bound_scripts: Iterable[str] = (),
 ) -> dict[str, Any]:
     assessment = assess_promotion(
         skill_path=skill_path, candidate_path=candidate_path,
         capability_catalog_path=capability_catalog_path,
         dependency_paths=dependency_paths,
         l05_path=l05_path,
+        bound_scripts=bound_scripts,
     )
     if assessment.report["status"] != "ready_for_review" or assessment.compiled_contract is None:
         raise PromotionError("promotion is blocked; run promote-assess and resolve every error")
@@ -2314,6 +2384,18 @@ def package_promotion(
     for name, content in stage_files.items():
         (destination / name).write_text(content, encoding="utf-8")
 
+    source_package_files: dict[str, str] = {}
+    source_root = source.path.parent
+    for resource in assessment.report["skillPackage"]["resources"]:
+        if resource["kind"] not in {"scripts", "references", "assets"}:
+            continue
+        relative = Path(str(resource["path"]))
+        target_relative = Path("01-L1-package") / relative
+        target = destination / target_relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes((source_root / relative).read_bytes())
+        source_package_files[target_relative.as_posix()] = str(resource["sha256"])
+
     l1_digest = _text_digest(source.text)
     l05_digest = _l05_digest(l05)
     l0_authoring_digest = _text_digest(bound_text)
@@ -2325,6 +2407,11 @@ def package_promotion(
         "capabilityCatalog": {
             "file": "00-capability-catalog.yaml",
             "sha256": _text_digest(capability_text),
+        },
+        "sourcePackage": {
+            "digest": assessment.report["skillPackage"]["packageDigest"],
+            "files": source_package_files,
+            "executionBoundary": "Bundled scripts are archived as evidence and are not executed by Promotion.",
         },
         "stages": [
             {
@@ -2368,6 +2455,7 @@ def package_promotion(
         name: _text_digest(content)
         for name, content in {**stage_files, "trajectory.json": trajectory_text}.items()
     }
+    report["packageFiles"].update(source_package_files)
     report["trajectoryHash"] = trajectory["trajectoryHash"]
     report["proposalHash"] = sha256_json({
         key: value for key, value in report.items() if key != "proposalHash"

@@ -14,6 +14,14 @@ from typing import Any, Protocol, runtime_checkable
 from .contracts import sha256_json
 
 
+class CapabilityAdmissionError(RuntimeError):
+    """An optional provider extension rejected a capability before use.
+
+    This exception lives in the core Capability boundary so the EnsuredSkill
+    Runtime never has to import a frozen release/supply-chain implementation.
+    """
+
+
 class CapabilityKind(str, Enum):
     OBSERVATION = "observation"
     EFFECT = "effect"

@@ -1,6 +1,8 @@
 # NetOpYu 双核心功能与性能评估 / Core Capability Evaluation
 
-> 自动生成于 `2026-08-31T10:27:40.037842+00:00`；摘要 `sha256:db5433b577fc1339f61340f054bfb898a79b9ae66c056ff96c46a32af3c21bd2`。这是工程证据报告，不构成专利可授权性或生产 SLA 结论。
+> 自动生成于 `2026-08-31T11:13:01.664295+00:00`；摘要 `sha256:b3620e4066d308d1c8a38179271bcf8949bc302ed9e35fbcf6bbe737298cfb11`。这是工程证据报告，不构成专利可授权性或生产 SLA 结论。
+>
+> **口径更正（2026-09-01）**：本报告的 Core-72 控制组是固定意图后的单次 Provider 合同调用，并非 DSH/Hermes 原生 Agent+L1 Skill。其结果只作为 Runtime 组件回归，不得作为 Harness 产品效果证据。主实验已迁移到[真实 Harness 自动 Runtime A/B](general-effect-ab.md)。
 
 ## 中文
 

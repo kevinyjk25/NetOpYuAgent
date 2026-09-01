@@ -1,0 +1,79 @@
+{
+  "schema": "effect-runtime.io/real-harness-summary/v1",
+  "model": "qwen3.5:9b",
+  "dshVersion": "0.1.1-rc.2",
+  "evaluationFingerprint": "sha256:4081544521cb51de101bbc071b7b0c079b7ae1d48d4bd7a84da26cfd8a61c7f0",
+  "developmentSet": true,
+  "patterns": 10,
+  "repetitions": 1,
+  "routing": {
+    "runtimeRouted": 8,
+    "fallbackToNativeAgent": 2,
+    "conversionCoveragePercent": 80.0,
+    "falseAccepts": 0
+  },
+  "observedIndependentRuns": {
+    "nativeDSH": {
+      "passed": 7,
+      "total": 10,
+      "taskCorrectnessPercent": 70.0,
+      "falseSuccesses": 2,
+      "p50LatencyMs": 99261.775,
+      "p95LatencyMs": 272647.199,
+      "inputTokens": 146865,
+      "outputTokens": 22961
+    },
+    "autoRuntime": {
+      "passed": 7,
+      "total": 10,
+      "taskCorrectnessPercent": 70.0,
+      "falseSuccesses": 1,
+      "p50LatencyMs": 47498.354,
+      "p95LatencyMs": 130514.45,
+      "inputTokens": 77924,
+      "outputTokens": 12575,
+      "argumentBindings": {"applicable": 7, "verified": 6, "rejected": 1},
+      "runtimeAudits": {"applicable": 6, "valid": 6}
+    },
+    "rawDeltaPercentagePoints": 0.0
+  },
+  "strictTreatmentEstimate": {
+    "method": "Use each control observation for fallback cases and the treatment observation only for gate-qualified cases.",
+    "safeConversionCoveragePercent": 80.0,
+    "nativeTaskCorrectnessPercent": 70.0,
+    "autoRuntimeTaskCorrectnessPercent": 80.0,
+    "runtimeAttributedDeltaPercentagePoints": 10.0,
+    "falseSuccesses": {"native": 2, "autoRuntime": 1},
+    "p50LatencyMs": {"native": 99261.775, "autoRuntime": 47498.354},
+    "note": "The raw auto arm lost one independently sampled native fallback that its paired control passed. Strict treatment attribution does not assign fallback randomness to Runtime."
+  },
+  "efficiencyDeltaPercent": {
+    "p50LatencyReduction": 52.15,
+    "p95LatencyReduction": 52.13,
+    "meanLatencyReduction": 47.34,
+    "inputTokenReduction": 46.94,
+    "outputTokenReduction": 45.23
+  },
+  "cases": [
+    {"id": "ref-01", "pattern": "success", "route": "l0_runtime", "nativePassed": true, "autoPassed": true},
+    {"id": "steps-02", "pattern": "missing_required", "route": "l1_agent_fallback", "nativePassed": false, "autoPassed": false},
+    {"id": "branch-03", "pattern": "unknown_parameter", "route": "l0_runtime", "nativePassed": false, "autoPassed": true},
+    {"id": "approval-04", "pattern": "approval_denied", "route": "l0_runtime", "nativePassed": true, "autoPassed": true},
+    {"id": "script-05", "pattern": "revision_conflict", "route": "l0_runtime", "nativePassed": true, "autoPassed": true},
+    {"id": "compose-06", "pattern": "verification_mismatch", "route": "l0_runtime", "nativePassed": false, "autoPassed": false, "autoRuntimeTransactionCorrect": true, "failure": "invalid L1 reference-loading attempts"},
+    {"id": "ref-07", "pattern": "after_send_unknown", "route": "l0_runtime", "nativePassed": true, "autoPassed": true},
+    {"id": "approval-08", "pattern": "provider_error_before_send", "route": "l0_runtime", "nativePassed": true, "autoPassed": true},
+    {"id": "compose-09", "pattern": "compensation_failure", "route": "l1_agent_fallback", "nativePassed": true, "autoPassed": false},
+    {"id": "steps-10", "pattern": "success_alternate", "route": "l0_runtime", "nativePassed": true, "autoPassed": true}
+  ],
+  "fixesValidated": [
+    "Exact authoritative-request-to-invocation argument binding",
+    "Runtime-only compensation authority",
+    "DSH ToolRunContext.concludeTurn terminal propagation"
+  ],
+  "remainingFailures": [
+    "Unqualified missing-parameter and composition translations still inherit native fallback variance.",
+    "A qualified composition case reached a correct Runtime rollback, but 9B attempted invalid Skill reference loads before the effect; strict Agent-level scoring therefore failed it."
+  ],
+  "claimBoundary": "This is a transparent ten-pattern development-set run with one repetition. It is not a production success probability, hidden-set generalization result, or SLO."
+}

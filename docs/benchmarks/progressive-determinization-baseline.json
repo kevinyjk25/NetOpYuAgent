@@ -1,0 +1,193 @@
+{
+  "architecture": {
+    "domainBoundary": "Promotion, package trust, routing and transaction controls are domain-neutral; network Capability contracts remain the first reference profile.",
+    "referenceProfile": "network",
+    "runtime": "Effect Runtime",
+    "writeBoundary": "L1 direct writes are forbidden; writes require active L0 plus Effect Runtime."
+  },
+  "claimBoundary": "Fixture Oracle coverage, public reverse-bootstrap model results and routing scores are regression evidence, not production success probabilities.",
+  "heterogeneousSkillSuite": {
+    "artifact": "artifacts/progressive-determinization/skill-package-fixtures.json",
+    "claimBoundary": "Structural fixture coverage is not an LLM accuracy or production-success claim.",
+    "domains": [
+      "asset-inventory",
+      "cloud",
+      "cross-system",
+      "data",
+      "generic",
+      "iam",
+      "network",
+      "service-desk"
+    ],
+    "features": [
+      "approval",
+      "asset",
+      "clarification",
+      "compensation",
+      "condition-branch",
+      "critical",
+      "deterministic-transformer",
+      "independent-verification",
+      "irreversible",
+      "l1-l0-composition",
+      "multi-step",
+      "negative-gate",
+      "path-traversal",
+      "progressive-disclosure",
+      "read-only",
+      "reference",
+      "reversible-write",
+      "rollback",
+      "script",
+      "verification"
+    ],
+    "summary": {
+      "cases": 10,
+      "domains": 8,
+      "failed": 0,
+      "featureTypes": 20,
+      "oracleCoveragePercent": 100.0,
+      "passed": 10
+    }
+  },
+  "modelEvidence": {
+    "available": true,
+    "claimBoundary": "This is a real qwen model run over a public reverse-bootstrap calibration matrix. It measures this fixed artifact/protocol path but is not independent model qualification or a production success probability.",
+    "dataset": {
+      "case_count": 3,
+      "consensus_labels_digest": "sha256:545f3c04b5a5e9851696149a2049a40dab898eb83d1e34e1eccf367e54709cb5",
+      "disposition_counts": {
+        "proposal": 3
+      },
+      "manifest_digest": "sha256:84faa0810edb8af67d8466858169efa71b090a9266f5c7e15834f8dcdfac2e64",
+      "observation_count": 3,
+      "provenance": "reverse_bootstrap_calibration",
+      "repetitions": 1
+    },
+    "latency": {
+      "p50": 35629.407,
+      "p95": 38326.163,
+      "samples": 3,
+      "unit": "milliseconds"
+    },
+    "metrics": {
+      "ambiguity_block_rate": 0.0,
+      "bounded_normalization_rate": 0.0,
+      "capability_exact_match": 1.0,
+      "disposition_accuracy": 1.0,
+      "intent_exact_match": 1.0,
+      "parameter_predicate_exact_match": 1.0,
+      "protocol_completion_rate": 1.0,
+      "raw_protocol_completion_rate": 1.0,
+      "repeat_stability": 1.0,
+      "runtime_promotion_ready_rate": 1.0,
+      "safety_contract_exact_match": 1.0,
+      "safety_escape_rate": 0.0,
+      "semantic_contract_exact_match": 1.0,
+      "valid_proposal_yield": 1.0
+    },
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "qualified": false,
+    "schema": "netopyu.io/promotion-forward-model-run/v1",
+    "status": "public_calibration_only_not_qualified"
+  },
+  "networkAnchor": {
+    "decision": {
+      "confidence": {
+        "claimBoundary": "This routing score is not a production success probability.",
+        "method": "weighted_geometric_evidence_v1",
+        "score": 0.9064,
+        "scorePercent": 90.64,
+        "signals": [
+          {
+            "name": "semantic_mapping",
+            "score": 0.8396,
+            "weight": 0.3
+          },
+          {
+            "name": "l1_to_l05",
+            "score": 0.9143,
+            "weight": 0.15
+          },
+          {
+            "name": "l05_to_l0",
+            "score": 0.8061,
+            "weight": 0.15
+          },
+          {
+            "name": "package_traceability",
+            "score": 1.0,
+            "weight": 0.1
+          },
+          {
+            "name": "repeat_stability",
+            "score": 1.0,
+            "weight": 0.15
+          },
+          {
+            "name": "simulation_pass_rate",
+            "score": 1.0,
+            "weight": 0.15
+          }
+        ],
+        "threshold": 0.85,
+        "thresholdPercent": 85.0
+      },
+      "controls": {
+        "activationReviewed": false,
+        "approvalControlAvailable": false,
+        "autoActivationAllowed": false,
+        "autoExecutionAllowed": false,
+        "candidateL0Active": true,
+        "candidateL0ArtifactDigest": "sha256:df23a1033dd395db623d5a419cbe1794b1e679c41660fecc308bc22bb7088fda",
+        "candidateL0DigestBound": true,
+        "l1DirectWriteAllowed": false,
+        "referencedActiveL0": [],
+        "runtimeRequiredForWrite": true
+      },
+      "effectSemantics": "reversible",
+      "findings": [],
+      "hardGate": {
+        "failures": [],
+        "status": "passed"
+      },
+      "policy": {
+        "critical_threshold": 0.96,
+        "high_threshold": 0.92,
+        "hybrid_threshold": 0.7,
+        "low_threshold": 0.8,
+        "medium_threshold": 0.85,
+        "read_only_threshold": 0.7
+      },
+      "reason": "All hard gates passed and the active L0 meets its risk-tier threshold.",
+      "risk": "medium",
+      "route": "l0_runtime",
+      "schema": "effect-runtime.io/progressive-decision/v1"
+    },
+    "packageDigest": "sha256:28ba82f2690596988f7cf3aeaf51c081c2a57fa2f44fc34e04b70d3aafd7b4ca",
+    "packageGate": "passed",
+    "promotionStatus": "ready_for_review",
+    "semanticGate": "passed",
+    "semanticSummary": {
+      "ambiguous": 0,
+      "attentionRequirements": 5,
+      "averageL05ToL0Confidence": 80.61,
+      "averageL1ToL05Confidence": 91.43,
+      "averageMappingConfidence": 83.96,
+      "blockingRequirements": 0,
+      "extraEffects": 0,
+      "languageLossRequirements": 5,
+      "lowConfidenceRequirements": 5,
+      "machineEnforcedPercent": 82.14,
+      "missing": 0,
+      "non_machine_verifiable": 5,
+      "preserved": 23,
+      "semanticCoveragePercent": 100.0,
+      "strengthened": 0,
+      "totalRequirements": 28,
+      "weakened": 0
+    }
+  },
+  "schema": "effect-runtime.io/progressive-determinization-report/v1"
+}

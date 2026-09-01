@@ -2,6 +2,8 @@
 
 ## 中文
 
+> **当前定位：Reasoning Plane 的 proposal-only 历史参考。** shadow/canary/productization 路线冻结；任何 Decision 都不能绕过 active L0、Evidence/Guard 和 Runtime。
+
 ### 1. 目标与边界
 
 P1.8 证明了“候选专属 Schema + 请求证据 grounding + 确定性编译 + 单调 Guard”可以显著收窄模型输出，但 C3 是隔离评测路径。P1.9 把同一原则迁入正式 Harness 入口，形成独立的 L1 Decision Plane：它在 DSH/Hermes 与 L0 Runtime 之间产生一个严格、可观测、无执行权的意图候选。
@@ -182,6 +184,8 @@ C0 已实现第 5 项的计划合同；C1 已实现单调策略、第 8 项 runb
 ---
 
 ## English
+
+> **Current role: proposal-only Reasoning Plane reference.** Shadow/canary productization is frozen, and no Decision can bypass an active L0, Evidence/Guard, or the Runtime.
 
 ### 1. Purpose and boundary
 

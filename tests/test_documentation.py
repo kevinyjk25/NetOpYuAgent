@@ -2,6 +2,7 @@
 
 from pathlib import Path
 import re
+from urllib.parse import unquote
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -12,6 +13,14 @@ CANONICAL_DOCUMENTS = (
     "LLD.md",
     "SSD.md",
 )
+PROJECT_DOCUMENTS = tuple(
+    sorted(
+        [ROOT / name for name in CANONICAL_DOCUMENTS]
+        + list((ROOT / "docs").rglob("*.md"))
+        + list((ROOT / "labs").glob("*/README.md"))
+        + [ROOT / "network_runtime/l0/production_trajectories/INDEX.md"]
+    )
+)
 RETIRED_DOCUMENTS = (
     "DSH_MIGRATION.md",
     "L1_L0_SKILL_DEMO.md",
@@ -21,19 +30,28 @@ RETIRED_DOCUMENTS = (
 
 
 def test_canonical_documents_are_bilingual_with_chinese_first() -> None:
-    for name in CANONICAL_DOCUMENTS:
-        content = (ROOT / name).read_text(encoding="utf-8")
+    for path in PROJECT_DOCUMENTS:
+        content = path.read_text(encoding="utf-8")
         chinese = content.index("## 中文")
         english = content.index("## English")
-        assert chinese < english, f"{name} must place Chinese before English"
+        assert chinese < english, f"{path.relative_to(ROOT)} must place Chinese first"
 
 
 def test_local_document_links_resolve() -> None:
-    link_pattern = re.compile(r"\[[^\]]+\]\(([^)]+\.md)\)")
-    for name in CANONICAL_DOCUMENTS:
-        content = (ROOT / name).read_text(encoding="utf-8")
-        for target in link_pattern.findall(content):
-            assert (ROOT / target).is_file(), f"{name} links to missing {target}"
+    link_pattern = re.compile(r"(?<!!)\[[^\]]+\]\(([^)]+)\)")
+    for source in PROJECT_DOCUMENTS:
+        content = source.read_text(encoding="utf-8")
+        for raw_target in link_pattern.findall(content):
+            target = raw_target.strip().strip("<>").split(maxsplit=1)[0]
+            if target.startswith(("http://", "https://", "mailto:", "#")):
+                continue
+            path_text = unquote(target.split("#", 1)[0].split("?", 1)[0])
+            if not path_text:
+                continue
+            resolved = (source.parent / path_text).resolve()
+            assert resolved.exists(), (
+                f"{source.relative_to(ROOT)} links to missing {target}"
+            )
 
 
 def test_duplicate_migration_documents_stay_retired() -> None:

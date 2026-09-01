@@ -1,0 +1,79 @@
+{
+  "schema": "effect-runtime.io/real-harness-smoke-summary/v1",
+  "status": "protocol_smoke_not_statistical_baseline",
+  "generatedAt": "2026-08-31T17:44:28.873783+00:00",
+  "harness": {
+    "name": "dsh",
+    "version": "0.1.1-rc.2",
+    "realAgentSessionSkillToolLoop": true
+  },
+  "model": {
+    "name": "qwen3.5:9b",
+    "artifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "datasetDigest": "sha256:ef15968c5478493d4c2202437719a73f34319b329b831897fe8eb8dc9abb21f0",
+  "pairs": [
+    {
+      "caseId": "ref-01",
+      "pattern": "success",
+      "route": "l0_runtime",
+      "control": {
+        "passed": true,
+        "terminal": "verified_success",
+        "latencyMs": 85317.809,
+        "sessionDigest": "sha256:50cae1fdf950466fc4192f51eac97234214f2600353f07c2cc68c2c81fa7bd5c"
+      },
+      "autoRuntime": {
+        "passed": true,
+        "terminal": "verified_success",
+        "auditValid": true,
+        "latencyMs": 101991.095,
+        "sessionDigest": "sha256:0225dc68130596e439a1e4d9e418f66d2bca90f63fbc594ebf7025aba8f64b7d"
+      }
+    },
+    {
+      "caseId": "ref-06",
+      "pattern": "verification_mismatch",
+      "route": "l0_runtime",
+      "control": {
+        "passed": true,
+        "terminal": "rollback_verified",
+        "latencyMs": 93090.464,
+        "sessionDigest": "sha256:974f1aecc531dae81790b91455f83ed3ab2c0f88abfdb35d16977fcc25276a76"
+      },
+      "autoRuntime": {
+        "passed": true,
+        "terminal": "rollback_verified",
+        "auditValid": true,
+        "latencyMs": 64696.438,
+        "sessionDigest": "sha256:c3a4858895a9e1209ccd4d3dbb558311de014567e9eb35dbc787227958bb385f"
+      }
+    },
+    {
+      "caseId": "steps-02",
+      "pattern": "missing_required",
+      "route": "l1_agent_fallback",
+      "control": {
+        "passed": false,
+        "terminal": "rejected",
+        "writeEffects": 0,
+        "latencyMs": 263191.152,
+        "sessionDigest": "sha256:1c8e463c6df6287bb9a284fccd0cb055ed580181b892306eafc802bfb08801ee"
+      },
+      "autoRuntime": {
+        "passed": false,
+        "backendActuallyUsed": "l1_native",
+        "terminal": "rollback_verified",
+        "runtimeAuditApplicable": false,
+        "latencyMs": 176637.749,
+        "sessionDigest": "sha256:be75a050ac44797fa02c45dc900caf0e3095da9bf08592f880c8a0d338cb69a9"
+      },
+      "finding": "The unqualified translation correctly fell back. Both native runs failed the clarification Oracle and attempted an empty-reason write that the Tool boundary rejected. This is fallback quality, not a Runtime failure."
+    }
+  ],
+  "additionalDiagnostic": {
+    "caseId": "ref-01",
+    "finding": "An earlier native run applied the write, skipped the post-read, and nevertheless claimed verification; its paired Runtime run produced postcondition evidence and a valid audit. A subsequent native run did verify, demonstrating stochastic variance and the need for repeated trials."
+  },
+  "claimBoundary": "Three paired smoke cases plus one diagnostic run validate the causal protocol and fallback semantics. They are not a statistical performance claim, model qualification, production success probability, or SLO."
+}
