@@ -79,19 +79,19 @@ Commands:
   runtime PLAN  Show one plan, state transition journal, approval, and evidence
   runtime-audit PLAN  Verify the plan event hash chain and report tampering
   l0-skills     Show registered deterministic Network L0 Skill contracts
-  l1-decisions [LIMIT] [SESSION]  Show privacy-minimized P1.9 shadow decisions
-  l1-metrics [LIMIT]  Show P1.9 shadow protocol, agreement, escape, and latency metrics
-  l1-catalog-check  Verify current Tool/Skill candidates against the reviewed P1.9 baseline
-  l1-holdout-seal CASES DATASET VERSION  Print a prompt-free sealed holdout manifest
-  l1-holdout-adjudicate CASES MANIFEST REVIEW1 REVIEW2  Verify two independent label sets
-  l1-holdout-qualify CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]  Score same-model DSH/Hermes parity
-  l1-holdout-adapter-parity CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]  Run DSH/Hermes hooks through a temporary Worker
-  l1-canary-readiness WORKER ADAPTER PRODUCT OPS [OUTPUT]  Check evidence only; never activates canary
+  l1-decisions [LIMIT] [SESSION]  Inspect frozen historical shadow evidence
+  l1-metrics [LIMIT]  Inspect frozen historical shadow metrics
+  l1-catalog-check  Check the historical shadow Catalog baseline offline
+  l1-holdout-seal CASES DATASET VERSION  Frozen study tool: print a prompt-free manifest
+  l1-holdout-adjudicate CASES MANIFEST REVIEW1 REVIEW2  Frozen study tool: verify two label sets
+  l1-holdout-qualify CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]  Frozen DSH/Hermes study tool
+  l1-holdout-adapter-parity CASES MANIFEST REVIEW1 REVIEW2 MODEL [OUTPUT]  Frozen Adapter study tool
+  l1-canary-readiness WORKER ADAPTER PRODUCT OPS [OUTPUT]  Frozen evidence check; never activates canary
   demo-l1-l0    Run the isolated LAN/DC L1 Skill + L0 Skill walkthrough
   peers         Discover configured A2A peers and show their capabilities
   parity        Run the DSH capability retirement gate against the golden set
-  learning-mine Dry-run offline trajectory mining; add --apply to store candidates
-  learning-review ID approve|reject REVIEWER  Review once; approval writes a proposal only
+  learning-mine Frozen experiment: dry-run trajectory mining; --apply stores proposals only
+  learning-review ID approve|reject REVIEWER  Frozen experiment: review a proposal only
   reliability   Run local load/chaos/policy and harness-boundary retirement checks
   compare-runtime  Benchmark DSH-only versus DSH + Runtime; accepts benchmark CLI flags
   compare-harness  Real DSH L1 Agent versus confidence-gated L0 Runtime A/B
@@ -953,8 +953,9 @@ run_parity() {
   runtime_env
   cd "$PROJECT_ROOT" || return 1
   local report
-  report="$("$PYTHON_BIN" -m dsh_adapter.cli parity --profile "$NETOPYU_PROFILE" \
-    --golden "$PROJECT_ROOT/data/golden_set.jsonl" <<<'{}')" || return 1
+  report="$("$PYTHON_BIN" -m evaluation.dsh_adapter_parity \
+    --profile "$NETOPYU_PROFILE" \
+    --golden "$PROJECT_ROOT/data/golden_set.jsonl")" || return 1
   printf '%s' "$report" | "$PYTHON_BIN" -m json.tool
   printf '%s' "$report" | "$PYTHON_BIN" -c 'import json,sys; raise SystemExit(0 if json.load(sys.stdin).get("ok") else 1)'
 }

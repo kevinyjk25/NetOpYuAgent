@@ -58,8 +58,9 @@
 |---|---|---|
 | 独立泛化 | 透明开发集 | 仓库外、预注册、封存/私有用例和独立 Reviewer |
 | 真实网络资格 | 本地仿真 Provider 与 Containerlab/FRR | Cisco/Huawei/H3C 或控制器实验床 |
-| Typed Graph | 已生成、校验并绑定计划 | legacy engine 全部迁移到单一图调度器 |
-| Provenance | 单证据与计划绑定完成 | Evidence→Observation→Tool→Object 跨步骤 DAG |
+| Typed Graph | journal-backed scheduler 已门禁正常、拒绝、漂移、未知结果、补偿与崩溃恢复分支 | 后续把 legacy PlanState/L0 兼容事件收敛为图的派生视图 |
+| Provenance | 已生成 Evidence→Observation→Capability/Collector→Network Object 跨步骤 DAG | 在 ES-P2 检验真实 Provider collector/object 绑定 |
+| Stage latency | 已按图节点拆分 Runtime active 与 approval wait，并声明排除 Reasoning/LLM | 在真实 ES-P1 paired run 预注册 all/completed 与分层统计 |
 | Experience Compilation | authoring compilation 已完成 | 基于长期成功轨迹的独立研究协议 |
 | 生产工程 | 冻结 | 完成独立泛化和真实设备证据后再决策 |
 
@@ -75,8 +76,18 @@
 - [x] `Qualification Report v2` 增加 family/profile/language/challenge/expected-disposition/risk 分层，Wilson 95% 区间、零事件单侧 95% 上界和互斥结果分类；
 - [x] safety escape 拆为 critical semantic、undeclared effect、approval/risk weakening 三类，三类均为零才可能通过资格门；
 - [x] Freeze、预注册、密封、盲审/仲裁、重复评分和篡改检查的相关回归为 `29 passed`。
+- [x] 完成 I11 权威边界清理：DSH 产品 Adapter 不再导入 Evaluator/Golden Set，能力检索 parity 移入 `evaluation/` 且只使用内存状态；A2A、轨迹学习与历史 L1 shadow 改为命令触发时延迟加载；
+- [x] 活跃文档导航移除 P1.9 Decision Plane/Canary 产品化路线，真实 private holdout 与“只有协议工具”的边界已更正；冻结实现继续作为 fail-closed 回归，不计入当前能力；
+- [x] Runtime 语义收敛原型：Typed Graph 已成为 journal-backed 分支门禁；执行前安全中止不再依赖可补偿性；崩溃边界显式记录 `skipped/indeterminate` 并只读对账；`inspect()` 输出图一致性、跨步骤 Provenance DAG 与 stage latency；
+- [x] 当前仓库全量回归为 `539 passed, 81 subtests passed`（其中 Network Observer 的 6 项需本地 Docker socket）。ES-P0 证据报告中的 506 是当时冻结制品的历史计数，不回写成新的实验结果。
+- [x] 建立仓库外 synthetic evidence 通道：240 条模型生成候选经 Reviewer A/B 独立 Prompt 盲审、按需裁决和 Skill/Case/Role 摘要封存；覆盖 6 个 Skill 特征族、10 个事务/故障模式、6 个 MCP 域和 3 种语言组；受控 Loader 强制其 `officialEsP1QualificationEligible=false`；
+- [x] 完成 v3 synthetic evidence：240/240 Skill 包零 finding，9B 转译协议有效 240/240、可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对经 effect-budget v3 无模型重评分后，Treatment Task Completion 93.33% 对 Control 76.67%，unsafe 0 对 4，invalid 1 对 5，p50 64.3 秒对 103.6 秒；17/17 Runtime 审计有效。该结果是模型合成证据，不是独立泛化或生产概率。
+- [x] 完成 `ES-P1-Wild` 静态导入 pilot：SkillsMP 发现 100 个候选，处理 60 个后以许可证、无脚本、固定 commit 和摘要门禁接纳 20 个/13 仓库；第三方执行与可执行文件物化均为 0；严格 Runtime 包门禁 15 passed、5 blocked。尚无任务、Gold/Oracle 或 DSH paired run，不是 ES-P1 资格结果。
+- [x] 从 15 个通过门禁的公开 Skill 导出独立 author kit：45 个任务槽位、固定来源包、Task/Gold/Tool Catalog Schema 和全文件摘要；工作区不含 Runtime/Evaluator、模型输出或自动 Gold，避免基础设施伪造独立真值。
+- [x] 增加显式非权威的 9B 草案辅助通道：15 个 assignment 中 14 个通过协议与安全形状校验，覆盖 42/45 槽位；12 个需要修复调用，p50/p95 为 59.2/97.2 秒；1 个 Effect budget 矛盾被持续拒绝。草案不含 Gold/Oracle、不能进入 Runtime，仍需独立人工审阅。
+- [x] 建成测试 Skill 索引库：可搜索/筛选 15 个实际测试 Skill，点击查看 22 个封存文本文件、固定来源、许可证、45 个任务槽位和 42 个草案；页面离线只读、内容以纯文本展示、第三方执行为 0，并提供可提交的元数据索引。
 
-这些完成项证明“实验可以按预注册方式运行且不会悄悄漂移”，不证明隐藏集泛化。ES-P1 的核心未完成项仍是由 Runtime 团队之外的人在仓库外编写和审阅真实 private holdout。
+这些完成项证明“实验可以按预注册方式运行且不会悄悄漂移”，并新增模型合成泛化信号；仍不证明独立隐藏集泛化。ES-P1 的核心未完成项仍是由 Runtime 团队之外的人在仓库外编写和审阅真实 private holdout。合成数据不能替代该 Gate。
 
 | 顺序 | 阶段 | 要回答的问题 | 主要交付 | 进入下一阶段的门槛 |
 |---:|---|---|---|---|
@@ -90,13 +101,19 @@
 近期执行顺序：
 
 1. 从干净提交生成正式 Research Freeze，并保存 qwen3.5:9b 的真实模型制品 digest；
-2. 由 Runtime 团队之外的 Case Author 正向构造 200–500 条 private holdout；
-3. 两名独立 Reviewer 盲审，Adjudicator 只处理摘要绑定的分歧；
-4. 在模型运行前冻结排除/中止规则、paired statistics 和 latency breakdown；
-5. 对同一制品至少重复三次并生成只含聚合值的 Qualification Report v2；
-6. 若出现 critical escape，先定位抽象缺陷并创建新研究版本，不针对单 case 打补丁；
-7. ES-P1 通过后进入小范围 ES-P2，不追求厂商 breadth；
-8. 只有 ES-P1/ES-P2 证据支持后，才重新评估身份、供应链、HA/DR、WORM 和生产 SLO。
+2. 在已完成的 `ES-P1-Wild` 静态 pilot 上预注册正式采样，扩充语言和来源，并冻结 50–100 个公开 Skill；全部继续按不可信数据隔离，普通评测禁止执行 scripts/hooks/installers；
+3. 由独立人员审阅/重写 9B 草案并为通过包门禁的公开 Skill 补 fixture、Tool Catalog、Gold 与 Oracle，形成 200–500 条公开生态 paired cases；模型草案只能降低起草成本，不能充当独立真值；其结果只支持兼容性和外部有效性，不替代 private Gate；
+4. 由 Runtime 团队之外的 Case Author 正向构造 200–500 条 private holdout；
+5. 两名独立 Reviewer 盲审，Adjudicator 只处理摘要绑定的分歧；
+6. 在模型运行前冻结排除/中止规则、paired statistics、effect-call budget 和 latency breakdown；
+7. 对同一制品至少重复三次并生成只含聚合值的 Qualification Report v2；
+8. 专门修复 synthetic 暴露的两个 L1 边界：safe-stop 会话可用性，以及调用 Runtime 前把一般条件分支误判为事实；通过新版本合成/人工集验证，不对单 case 打补丁；
+9. 将恶意 Skill、脚本和提示注入放入独立 `ES-P1-Sec` 强隔离安全集，不在普通 Agent/Runtime 环境中试运行；
+10. 若出现 critical escape，先定位抽象缺陷并创建新研究版本；
+11. ES-P1-Private 通过后进入小范围 ES-P2，不追求厂商 breadth；
+12. 只有 ES-P1/ES-P2 证据支持后，才重新评估身份、供应链、HA/DR、WORM 和生产 SLO。
+
+公开市场语料的证据分层、采样规则与零执行边界见 [ES-P1 公开 Skill 市场语料](ES-P1-PUBLIC-SKILL-CORPUS.md)。
 
 详细原则、指标 Gate、角色边界和任务模板见[后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md)。
 
@@ -114,6 +131,18 @@ This is local transparent-development evidence—not production probability, hid
 
 The ES-P1 research infrastructure is now ready, but independent-generalization evidence has not yet been collected. Research Freeze v1 jointly binds Git cleanliness, Runtime, harness boundary, 21 contracts and readable trajectories, evaluator, authoring protocol, model artifact, environment, and the ES-P0 baseline. Study Plan v2 and private Manifest v3 require that verified freeze digest. Qualification Report v2 adds family/profile/risk/disposition slices, Wilson intervals, zero-event upper bounds, mutually exclusive outcomes, and separate critical-semantic, undeclared-effect, and approval/risk-weakening escapes. The focused freeze/qualification regression is 29/29 passing.
 
-These controls prove that an external study can be preregistered and drift-checked; they do not prove hidden-set generalization. The remaining ES-P1 work must be performed outside the Runtime team: independently author 200–500 private cases, obtain two blind reviews and bound adjudication, freeze exclusions/stopping rules, run the same 9B artifact at least three times, and publish only aggregate Qualification Report v2 evidence. The next semantic work is a single Typed Graph scheduler, a cross-step provenance DAG, and stage-level latency instrumentation without changing a frozen experimental version.
+These controls prove that an external study can be preregistered and drift-checked; they do not prove hidden-set generalization. The remaining ES-P1 work must be performed outside the Runtime team: independently author 200–500 private cases, obtain two blind reviews and bound adjudication, freeze exclusions/stopping rules, run the same 9B artifact at least three times, and publish only aggregate Qualification Report v2 evidence. The local Graph gate, provenance DAG, and Runtime-stage timing milestone is now implemented; it does not replace the required private paired evidence.
+
+The I11 authority cleanup is also complete. Product DSH adapter code no longer imports evaluator or golden-set modules; retrieval parity now lives in `evaluation/` and uses memory-only state. Frozen A2A, trajectory-learning, and historical L1-shadow extensions are loaded only when their explicit commands are invoked. Active documentation no longer presents P1.9 Decision Plane/Canary productization or holdout tooling as current evidence.
+
+The local Runtime-convergence prototype now uses a journal-backed Typed Graph scheduler to gate normal execution, rejection, precondition drift, indeterminate outcomes, compensation, and crash-boundary recovery. Unknown crash work is recorded as skipped/indeterminate and only reconciled by reads; Effect is never replayed. Runtime inspection exposes graph conformance, a privacy-minimized cross-step Evidence provenance DAG, and stage latency separated into Runtime-active and approval-wait time with an explicit Reasoning/LLM exclusion. The current repository regression is `539 passed, 81 subtests passed`; six Network Observer tests require the local Docker socket. The 506-test number in frozen ES-P0 evidence remains historical and is not rewritten.
+
+A separate repository-external synthetic evidence path is now operational. It sealed 240 model-authored cases after two blind model-review prompts and digest-bound packaging, covering six Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. The loader structurally fixes `officialEsP1QualificationEligible` to false. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from four to zero, and reduced p50 latency from 103.6 to 64.3 seconds. All 17 applicable Runtime audits were valid. Residual Treatment failures expose pre-Runtime L1 factual-decision and safe-stop availability limits. This is synthetic evidence, not independent generalization or a production probability.
+
+The `ES-P1-Wild` static-import pilot is now complete. SkillsMP discovery returned 100 candidates; the importer processed 60 and accepted 20 license-identified, script-free packages from 13 repositories at pinned commits. No third-party code was executed and no executable file was materialized. The strict Runtime package gate passed 15 and blocked five, exposing non-standard frontmatter and unresolved/out-of-bound references. Those 15 packages now have a sealed external author kit with 45 blank task slots and Task/Gold/Tool-Catalog schemas; it contains no Runtime/evaluator, model output, or generated Gold. The next step is to preregister a broader multilingual sample and have independent people fill and review 200–500 paired cases. Marketplace packages remain untrusted and `static_only`; a separate disposable `ES-P1-Sec` sandbox will cover malicious-package behavior. Public-market evidence cannot replace the formal private holdout gate. See [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md).
+
+An explicitly non-authoritative qwen3.5:9b draft-assistance lane has also been exercised on the 15-package author kit. Fourteen assignments and 42/45 slots passed protocol and safety-shape validation; 12 assignments needed repair calls, p50/p95 latency was 59.2/97.2 seconds, and one persistent proposal/effect-budget contradiction remained rejected. The artifact passed binding and digest inspection. It contains no trusted Gold or execution authority and only reduces blank-page work for independent authors.
+
+A digest-bound tested-Skill library now makes the corpus inspectable: users can search 15 Skills and click through 22 inert text files, exact provenance, licenses, 45 task slots, and 42 model drafts. The offline page has no installation or execution path and reports zero third-party execution. Git retains a metadata-only pinned index while complete third-party bodies remain in local generated artifacts.
 
 Only after ES-P1 passes will ES-P2 qualify the same abstractions on at least one real router and one controller or management path. ES-P3 scales the evidence and packages a paper-grade artifact. Trace-based Experience Compilation is ES-P4, a separate research line with no automatic activation. Production identity, supply chain, governance, HA/DR, WORM audit, and SLO engineering remain frozen until independent and real-network evidence justifies them. See the [v1.1 research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md).

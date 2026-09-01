@@ -56,7 +56,7 @@ scripts/netopyu evaluate \
 - Core-72 固定 L1，只测 Runtime，不用语义调参解释事务提升；
 - 基线跨语言、六类场景和 24 条对抗/反误杀集；
 - 模型 artifact、dataset、Catalog、Guard、Schema 和 evaluator 都绑定 digest；
-- P1.9 已提供仓库外密封 holdout、双 reviewer、重复运行和 DSH/Hermes parity 合同。
+- 已提供仓库外密封 holdout、双 reviewer、重复运行和 Harness parity 的**协议、Schema 与离线工具**；仓库内没有真实私有用例、人工真值或独立资格结果。
 
 但仓库还没有真实人工标注的私有 holdout，所以 `productionGeneralization` 必须是 `not_proven`。下一步有效投入不是继续公开集调参，而是收集未见、陈旧状态、长对话、跨域冲突和真实失败样本；在不向实现团队暴露标签的情况下运行重复资格和分层回归。
 

@@ -21,7 +21,7 @@ flowchart TB
 | 层 | 权威职责 | 明确边界 |
 |---|---|---|
 | Reasoning Plane | 会话、开放式理解、诊断、追问、计划和 L1 编排 | 只能提出候选；产品路径没有直接写权限 |
-| Reliability Runtime | Contract、Typed Graph、Evidence、Guard、Risk、事务、验证和补偿 | 不做开放式语言推理，不把模型 confidence 当权限 |
+| Reliability Runtime | Contract、journal-backed Typed Graph、跨步骤 Evidence、Guard、Risk、事务、验证和补偿 | 不做开放式语言推理，不把模型 confidence 当权限 |
 | Infrastructure Plane | 通过 MCP/API/CLI/NETCONF 提供事实和效果 | 不判断上层业务意图，不自报成功终态 |
 
 ### 两项核心能力
@@ -39,7 +39,7 @@ flowchart TB
 | L1 | LAN/DC/WAN Skill，缺参追问，多步 workflow，领域外和高风险拒绝 |
 | L0 | 21 个激活合同；原子、约束、扩展、组合 Saga；21/21 三阶段可解释轨迹 |
 | Promotion | L1/L0.5/L0 并排审查、语义映射、低置信告警、合同图、严格安全门禁 |
-| Runtime | ReliabilityContract、Typed Graph、Evidence provenance/gate、Guard、Risk、写前重校验、独立验证、补偿、恢复和审计 |
+| Runtime | ReliabilityContract、journal-backed Typed Graph gate、跨步骤 Evidence provenance、Guard、Risk、写前重校验、独立验证、补偿、恢复和分阶段时延 |
 | Provider | 协议无关 Observation/Effect Capability；Network Observer、Actor 和本地 Adapter |
 | 网络仿真 | Containerlab + FRR：OSPF、eBGP、VLAN、EVPN/VXLAN L2VPN、故障切换和真实容器转发 |
 | 评测 | 六类 ES-P0 事务场景、独立安全 scorer、五机制消融矩阵和真实 DSH 配对协议 |
@@ -61,6 +61,8 @@ Hermes/A2A、跨域业务 Lab、企业身份与审批、Provider 供应链、治
 | 7B Execution Precision / Autonomous Coverage | 50.00% / 20.00% | **100% / 36.67%** |
 
 9B 转译严格通过 58/60，7B 为 38/60，两者误接受均为 0。7B 两臂各有 18/30 次 DSH `EMPTY_RESPONSE`，因此只支持安全边界跨模型稳定，不代表 7B 可用性合格。完整实验矩阵、消融贡献、进程失败、复现命令和摘要见 [ES-P0 本地证据报告](docs/ES-P0-EVIDENCE.md)。固定集结果不是生产概率。
+
+仓库外自动数据通道已封存 240 条模型合成用例，覆盖 6 类 Anthropic Skill、10 类事务/故障、6 个 MCP 域和 3 类语言。qwen3.5:9b 转译协议有效 240/240，可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对中，Treatment 将 Task Completion 从 76.67% 提升至 93.33%，unsafe 从 4/30 降至 0/30，p50 从 103.6 秒降至 64.3 秒。它用于在正式人工 ES-P1 前发现价值和边界，**不冒充独立人工 holdout 或生产概率**。方法、完整指标和命令见[仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)。
 
 ### 支持的典型场景
 
@@ -131,18 +133,32 @@ scripts/netopyu-l0 forward-eval-study-kit --output-root /private/forward-study
 scripts/netopyu-l0 forward-eval-study-doctor --root /private/forward-study
 ```
 
+没有独立业务团队时，可先自动生成明确标记为 synthetic、且不能通过正式 ES-P1 门禁的封存用例：
+
+```bash
+scripts/netopyu-synthetic-study export /private/synthetic-study --cases 240
+cd /private/synthetic-study
+env -u PYTHONPATH python3 generate.py --model qwen3.5:9b --resume
+```
+
 检查通用 Anthropic Skill 包及其安全路由：
 
 ```bash
 scripts/netopyu-effect inspect-package --skill /path/to/my-skill
 python -m evaluation.progressive_skill_suite
 python -m evaluation.general_effect_model \
+  --dataset-root /private/synthetic-study \
   --model qwen3.5:9b --output-root artifacts/es-p0-9b-translation
 scripts/netopyu-harness-ab \
+  --dataset-root /private/synthetic-study \
   --model qwen3.5:9b \
   --translation-report artifacts/es-p0-9b-translation/model-translation.json \
   --output-root artifacts/es-p0-dsh-9b \
   --stratified-patterns --repetitions 3
+scripts/netopyu-synthetic-study report /private/synthetic-study \
+  --translation-report artifacts/es-p0-9b-translation/model-translation.json \
+  --dsh-report artifacts/es-p0-dsh-9b/real-harness-ab.json \
+  --output-root artifacts/es-p0-synthetic-evidence
 ```
 
 Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作见[使用与系统接入](docs/getting-started-integration.md)。
@@ -154,6 +170,7 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 - [架构与 ADR](ARCHITECTURE.md)
 - [高层设计](HLD.md)、[低层设计](LLD.md)、[安全设计](SSD.md)
 - [ES-P0 本地证据报告](docs/ES-P0-EVIDENCE.md)
+- [仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)
 - [通用渐进式确定化与跨域验证](docs/progressive-determinization.md)
 - [真实 Harness 自动 Runtime A/B](docs/general-effect-ab.md)
 - [L1 → L0 Promotion](docs/l1-to-l0-promotion.md)
@@ -187,11 +204,15 @@ The ES-P0 local research-prototype evidence loop is complete: provenance-aware e
 
 ### Capabilities and evidence
 
-The active prototype includes 21 reviewed L0 contracts and readable three-stage trajectories, LAN/DC/WAN L1 guidance, the DSH path, a provenance-aware reliability kernel, network Observation/Effect providers, Containerlab/FRR labs, and the ES-P0 evaluation protocol. Hermes/A2A, enterprise controls, supply-chain admission, governance, and extra domains are frozen experimental code rather than active capability claims.
+The active prototype includes 21 reviewed L0 contracts and readable three-stage trajectories, LAN/DC/WAN L1 guidance, the DSH path, a journal-backed Typed Graph gate, cross-step evidence provenance and stage latency, network Observation/Effect providers, Containerlab/FRR labs, and the ES-P0 evaluation protocol. Hermes/A2A, enterprise controls, supply-chain admission, governance, and extra domains are frozen experimental code rather than active capability claims.
 
 The local ES-P0 evidence loop is complete. In 30 real paired DSH sessions with `qwen3.5:9b`, treatment improved task completion from 50.00% to 86.67%, execution precision from 59.09% to 100%, and autonomous coverage from 43.33% to 76.67%; unsafe execution, false commits, and invalid actions fell from 20.00%/13.33%/33.33% to zero. With `qwen2.5:7b`, the same safety metrics also fell to zero, but 18/30 sessions in both arms failed at the DSH/model availability layer, so 7B is not availability-qualified. Translation false accepts were zero for both models. See the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md).
 
 These are transparent local development results, not production probability, hidden-set generalization, or vendor-device certification. Historical one-shot and native-fallback experiments remain component/exploratory evidence only.
+
+A repository-external synthetic path has sealed 240 model-authored cases across six Anthropic Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from 4/30 to 0/30, and reduced p50 latency from 103.6 to 64.3 seconds. This remains model-authored pre-ES-P1 evidence, not independent human qualification or a production probability. See the [synthetic holdout guide](docs/SYNTHETIC-HOLDOUT.md).
+
+For public-market coverage, a static-only SkillsMP/GitHub pilot accepted 20 pinned packages and exported 45 independent-author slots from the 15 packages that passed the strict Runtime package gate. A qwen3.5:9b helper produced 42 non-authoritative task drafts; one inconsistent package draft remained fail-closed. Human-authored Gold and Oracles are still required. Browse the versioned [tested-Skill index](docs/benchmarks/es-p1-wild-skill-index.json), or generate the full offline content browser as documented in the [ES-P1 public Skill-market corpus](docs/ES-P1-PUBLIC-SKILL-CORPUS.md).
 
 Production qualification remains open for vendor devices, enterprise identity/change systems, independently owned signing roots, distributed HA/DR, remote immutable audit, and production SLOs. EVPN L3VPN and MPLS L2/L3 VPN are outside the current lab coverage.
 
@@ -233,4 +254,4 @@ scripts/netopyu-effect inspect-package --skill /path/to/my-skill
 
 ### Documentation
 
-Start with the [documentation map](docs/README.md), [project status](docs/PROJECT-STATUS.md), [architecture](ARCHITECTURE.md), [HLD](HLD.md), [LLD](LLD.md), [SSD](SSD.md), and the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md).
+Start with the [documentation map](docs/README.md), [project status](docs/PROJECT-STATUS.md), [architecture](ARCHITECTURE.md), [HLD](HLD.md), [LLD](LLD.md), [SSD](SSD.md), the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md), and the [repository-external synthetic holdout](docs/SYNTHETIC-HOLDOUT.md).

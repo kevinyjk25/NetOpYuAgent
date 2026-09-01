@@ -21,6 +21,12 @@ from effect_runtime.reliability import (
     evaluate_evidence,
     evaluate_guards,
 )
+from effect_runtime.graph_scheduler import (
+    GraphScheduleError,
+    NodeOutcome,
+    TypedGraphScheduler,
+    graph_from_step_contract,
+)
 
 
 def test_no_evidence_no_action_checks_provenance_scope_and_freshness() -> None:
@@ -91,6 +97,58 @@ def test_transaction_state_machine_has_explicit_commit_and_recovery_paths() -> N
         recovery.transition(ExecutionPhase.EXECUTE)
 
 
+def test_typed_graph_scheduler_is_the_fail_closed_happy_path_gate() -> None:
+    graph = build_transaction_graph(compensatable=True)
+    scheduler = TypedGraphScheduler(graph)
+    for node_id in (
+        "snapshot", "precheck", "approval", "revalidate", "execute", "verify", "commit",
+    ):
+        scheduler.start(node_id)
+        scheduler.finish(node_id, NodeOutcome.SUCCEEDED)
+    assert scheduler.machine.phase == ExecutionPhase.COMMIT
+    with pytest.raises(GraphScheduleError, match="cannot run more than once"):
+        scheduler.start("execute")
+
+
+def test_typed_graph_scheduler_blocks_false_commit_and_controls_recovery() -> None:
+    graph = build_transaction_graph(compensatable=True)
+    scheduler = TypedGraphScheduler(graph)
+    for node_id in ("snapshot", "precheck", "approval", "revalidate", "execute"):
+        scheduler.start(node_id)
+        scheduler.finish(node_id, NodeOutcome.SUCCEEDED)
+    scheduler.start("verify")
+    scheduler.finish("verify", NodeOutcome.FAILED, evidence_ids=("evidence:verify",))
+    with pytest.raises(GraphScheduleError, match="commit requires"):
+        scheduler.start("commit")
+    scheduler.start("compensate")
+    scheduler.finish("compensate", NodeOutcome.SUCCEEDED)
+    scheduler.start("verify_recovery")
+    scheduler.finish("verify_recovery", NodeOutcome.SUCCEEDED)
+    scheduler.start("abort")
+    scheduler.finish("abort", NodeOutcome.SUCCEEDED)
+    assert scheduler.machine.phase == ExecutionPhase.ABORT
+
+
+def test_typed_graph_scheduler_allows_safe_abort_after_successful_revalidation() -> None:
+    scheduler = TypedGraphScheduler(build_transaction_graph(compensatable=False))
+    for node_id in ("snapshot", "precheck", "approval", "revalidate"):
+        scheduler.start(node_id)
+        scheduler.finish(node_id, NodeOutcome.SUCCEEDED)
+    scheduler.start("abort")
+    scheduler.finish("abort", NodeOutcome.SUCCEEDED)
+    assert scheduler.machine.phase == ExecutionPhase.ABORT
+
+
+def test_step_contract_reconstruction_rejects_unknown_dependencies() -> None:
+    with pytest.raises(ValueError, match="unknown dependency"):
+        graph_from_step_contract(({
+            "step_id": "execute",
+            "phase": "execute",
+            "depends_on": ["not-reviewed"],
+            "side_effect": True,
+        },))
+
+
 def test_typed_transaction_graph_binds_side_effect_and_compensation() -> None:
     graph = build_transaction_graph(compensatable=True)
     order = graph.topological_order()
@@ -99,6 +157,10 @@ def test_typed_transaction_graph_binds_side_effect_and_compensation() -> None:
     assert graph.graph_digest.startswith("sha256:")
     side_effects = {item.id for item in graph.nodes if item.side_effect}
     assert side_effects == {"execute", "compensate"}
+
+    irreversible = build_transaction_graph(compensatable=False)
+    assert "abort" in {item.id for item in irreversible.nodes}
+    assert "compensate" not in {item.id for item in irreversible.nodes}
 
     with pytest.raises(ValueError, match="invalid phase"):
         TypedExecutionGraph.create((

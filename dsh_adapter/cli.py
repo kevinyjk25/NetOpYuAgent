@@ -9,6 +9,10 @@ import os
 import sys
 from typing import Any
 
+from .agentized_authoring import (
+    authoring_template, authoring_trace, capture_authoring, submit_authoring,
+)
+from .backend import resolve_backend_mode
 from .bridge import (
     audit_network_plan,
     approve_network_plan,
@@ -24,23 +28,9 @@ from .bridge import (
     recent_network_plans,
     start_network_workflow,
 )
-from .a2a_provider import delegate_a2a, discover_peers
-from .agentized_authoring import (
-    authoring_template, authoring_trace, capture_authoring, submit_authoring,
-)
-from .scoped_services import recall_memory, search_capabilities
-from .evaluation import parity_report
-from .learning import mine_candidates, review_candidate
 from .reliability import run_local_reliability
+from .scoped_services import recall_memory, search_capabilities
 from .skills import build_skill_manifest
-from .backend import resolve_backend_mode
-from l1_runtime.service import (
-    close_decision,
-    decide_shadow,
-    decision_metrics,
-    observe_decision,
-    recent_decisions,
-)
 
 
 def _read_arguments() -> dict[str, Any]:
@@ -113,11 +103,6 @@ def main(argv: list[str] | None = None) -> int:
 
     a2a_delegate = subparsers.add_parser("a2a-delegate")
     a2a_delegate.add_argument("--profile", default="lan")
-
-    parity = subparsers.add_parser("parity")
-    parity.add_argument("--profile", default="lan")
-    parity.add_argument("--golden", required=True)
-    parity.add_argument("--include-destructive", action="store_true")
 
     trajectory_mine = subparsers.add_parser("trajectory-mine")
     trajectory_mine.add_argument("--source", required=True)
@@ -222,20 +207,23 @@ def main(argv: list[str] | None = None) -> int:
             request = _read_arguments()
             payload = asyncio.run(search_capabilities(profile_id=args.profile, **request))
         elif args.command == "a2a-peers":
+            from .a2a_provider import discover_peers
+
             payload = asyncio.run(discover_peers(**_read_arguments()))
         elif args.command == "a2a-delegate":
+            from .a2a_provider import delegate_a2a
+
             payload = asyncio.run(delegate_a2a(**_read_arguments()))
-        elif args.command == "parity":
-            payload = asyncio.run(parity_report(
-                profile_id=args.profile, golden_path=args.golden,
-                include_destructive=args.include_destructive,
-            ))
         elif args.command == "trajectory-mine":
+            from .learning import mine_candidates
+
             payload = mine_candidates(
                 source_database=args.source, review_database=args.database,
                 min_occurrences=args.min_occurrences, apply_changes=args.apply,
             )
         elif args.command == "trajectory-review":
+            from .learning import review_candidate
+
             payload = review_candidate(
                 review_database=args.database, candidate_id=args.candidate,
                 decision=args.decision, reviewer=args.reviewer, reason=args.reason,
@@ -247,6 +235,8 @@ def main(argv: list[str] | None = None) -> int:
                 request_count=args.requests, concurrency=args.concurrency,
             )
         elif args.command == "l1-decision-shadow":
+            from l1_runtime.service import decide_shadow
+
             request = _read_arguments()
             tool_declarations = request.get("tool_declarations")
             if not isinstance(tool_declarations, list):
@@ -260,6 +250,8 @@ def main(argv: list[str] | None = None) -> int:
                 model=str(request.get("model") or ""),
             ))
         elif args.command == "l1-decision-recent":
+            from l1_runtime.service import recent_decisions
+
             request = _read_arguments()
             payload = recent_decisions(
                 limit=int(request.get("limit", 20)),
@@ -269,6 +261,8 @@ def main(argv: list[str] | None = None) -> int:
                 ),
             )
         elif args.command == "l1-decision-observe":
+            from l1_runtime.service import observe_decision
+
             request = _read_arguments()
             observed_arguments = request.get("observed_arguments")
             if not isinstance(observed_arguments, dict):
@@ -281,6 +275,8 @@ def main(argv: list[str] | None = None) -> int:
                 observed_arguments=observed_arguments,
             )
         elif args.command == "l1-decision-close":
+            from l1_runtime.service import close_decision
+
             request = _read_arguments()
             payload = close_decision(
                 decision_id=str(request.get("decision_id") or ""),
@@ -288,6 +284,8 @@ def main(argv: list[str] | None = None) -> int:
                 reason=str(request.get("reason") or ""),
             )
         elif args.command == "l1-decision-metrics":
+            from l1_runtime.service import decision_metrics
+
             request = _read_arguments()
             payload = decision_metrics(limit=int(request.get("limit", 500)))
         elif args.command == "agent-authoring-template":

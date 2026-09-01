@@ -2104,11 +2104,11 @@ def _calibration_markdown(report: dict[str, Any]) -> str:
 - 报告禁止输出 Prompt 和 Label，只保留聚合指标与 case-id digest。
 - Catalog v3 为每个 Observation phase 声明受信最低 `phasePredicates`；候选可以附加更强约束，但不能删除或改写最低证明。
 - v7 逐案 Catalog guide/validator 收口 capability/phase/output/proof；v8 将等价 guide 封装为指纹绑定的紧凑稳定 JSON packet，并在连续 transport 故障时先 checkpoint 再暂停。
-- P2.5-E 提供仓库外角色隔离工作区和只读 Doctor；它只生成 Schema、占位模板、目录与阶段门禁，不生成独立用例、Reviewer 真值或资格结论。
+- 外部研究工作区提供仓库外角色隔离目录和只读 Doctor；它只生成 Schema、占位模板、目录与阶段门禁，不生成独立用例、Reviewer 真值或资格结论。
 
 {model_evidence}
 
-### P2.5-D 服务韧性与 Prompt 成本
+### 公开反向校准：服务韧性与 Prompt 成本
 
 最终 v8 已完整运行 210 条：210/210 全语义 exact/current-Runtime-ready，0 repair、0 模型协议/transport/Promotion/物化失败。相对最终 v7，输入 token 下降 18.89%，p50/p95 下降 13.79%/53.03%，全语义 exact 与 Runtime-ready 均提高 0.95 个百分点，transport 故障从 2 降为 0；相对更早的历史 210 基线，输入 token 仅增加 1.31%，输出 token 下降 3.96%，p50/p95 下降 2.70%/3.30%，全语义 exact 提高 3.33 个百分点。完整 210 条 Prompt 表示字节相对 v7 等价格式下降 18.98%。每次 start/resume 保存只证明注册表可达/模型已注册的 preflight；连续 transport 故障达到阈值后，触发故障先进入不可变 checkpoint，运行再暂停。恢复跳过旧失败而不静默重试。这些公开单次对照是重构回归证据，不是模型资格或生产成功概率。
 
@@ -2223,7 +2223,7 @@ scripts/netopyu-l0 forward-eval-score CASES.jsonl MANIFEST.json \\
 
 ## English
 
-The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. The final same-artifact v8 run completed all 210 wrappers with 210/210 full-semantic exact/current-Runtime-ready outcomes and zero repair or failure. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, exact/readiness rose 0.95 percentage points, and transport faults fell from two to zero. P2.5-E adds a repository-external, role-separated workspace and a read-only staged Doctor; it creates schemas and workflow controls but never manufactures independent cases, reviewer truth, identity proof, or qualification. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. ES-P1 now requires a clean-worktree Research Freeze that jointly binds Runtime, contracts, evaluator, authoring protocol, harness boundary, model artifact and environment before the v2 Study Plan and v3 private manifest can be created. Reports add family/profile/risk/disposition slices, Wilson intervals, zero-event upper bounds, and mutually exclusive outcomes. This public reverse-bootstrap, single-run result is regression evidence—not model qualification or a production success probability.
+The repository contains a pre-registered forward-qualification workflow and a {coverage['case_count']}-case public calibration matrix across {coverage['family_count']} reviewed contract families. Catalog v3 binds phase-scoped minimum proof predicates; protocol v8 transports the equivalent per-case guide in a compact, stable, fingerprint-bound JSON packet. The final same-artifact v8 run completed all 210 wrappers with 210/210 full-semantic exact/current-Runtime-ready outcomes and zero repair or failure. Versus final v7, input tokens fell 18.89%, p50/p95 fell 13.79%/53.03%, exact/readiness rose 0.95 percentage points, and transport faults fell from two to zero. The external research workspace adds role-separated directories and a read-only staged Doctor; it creates schemas and workflow controls but never manufactures independent cases, reviewer truth, identity proof, or qualification. Registry preflight has a narrow claim, and a consecutive transport-fault streak is checkpointed before the run pauses; resume never retries or rewrites old fault evidence. ES-P1 now requires a clean-worktree Research Freeze that jointly binds Runtime, contracts, evaluator, authoring protocol, harness boundary, model artifact and environment before the v2 Study Plan and v3 private manifest can be created. Reports add family/profile/risk/disposition slices, Wilson intervals, zero-event upper bounds, and mutually exclusive outcomes. This public reverse-bootstrap, single-run result is regression evidence—not model qualification or a production success probability.
 """
 
 

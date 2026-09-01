@@ -183,12 +183,13 @@ class NetworkRuntimeTests(unittest.TestCase):
             [item["step_id"] for item in plan["step_contract"]],
             [
                 "snapshot", "precheck", "approval", "revalidate", "execute",
-                "verify", "commit", "reconcile", "escalate",
+                "verify", "commit", "reconcile", "abort", "escalate",
             ],
         )
         outcome = self.execute(prepared)
         self.assertEqual(outcome.state, PlanState.VERIFIED_SUCCESS)
-        events = self.runtime().inspect(plan["plan_id"])["events"]
+        inspection = self.runtime().inspect(plan["plan_id"])
+        events = inspection["events"]
         l0_steps = [
             event["payload"]["step_id"]
             for event in events
@@ -198,6 +199,34 @@ class NetworkRuntimeTests(unittest.TestCase):
             "validate_parameters", "compile_intent", "preflight", "approval",
             "revalidate", "execute", "execute", "verify", "verify", "audit",
         ])
+        graph = inspection["graph_execution"]
+        self.assertTrue(graph["complete"])
+        self.assertEqual(graph["terminal_phase"], "commit")
+        self.assertEqual(
+            [item["node_id"] for item in graph["results"]],
+            [
+                "snapshot", "precheck", "approval", "revalidate", "execute",
+                "verify", "commit",
+            ],
+        )
+        latency = inspection["graph_latency"]
+        self.assertGreaterEqual(latency["runtime_active_ms"], 0.0)
+        self.assertGreaterEqual(latency["approval_wait_ms"], 0.0)
+        self.assertIn("excludes Reasoning/LLM", latency["claim_boundary"])
+        provenance = inspection["provenance"]
+        self.assertGreaterEqual(provenance["coverage"]["evidence_nodes"], 2)
+        self.assertEqual(provenance["coverage"]["traceability_rate"], 1.0)
+        self.assertEqual(
+            provenance["integrity"], {"acyclic": True, "dangling_edges": 0},
+        )
+        self.assertTrue(all(
+            "identity" not in node and "object" not in node
+            for node in provenance["nodes"]
+        ))
+        self.assertTrue(any(
+            edge["relation"] == "depends_on"
+            for edge in provenance["edges"]
+        ))
 
     def test_schema_v9_plan_hash_remains_read_compatible(self) -> None:
         prepared = self.prepare("lan", "restart_service", {
@@ -492,13 +521,45 @@ class NetworkRuntimeTests(unittest.TestCase):
         self.assertFalse(outcome.ok)
         self.assertTrue(any(item.evidence_type == "rollback" for item in outcome.evidence))
         self.assertIn("BLOCKED at network layer", run(lan_tools.get_user_access({"user_id": "erin"})))
+        inspection = runtime.inspect(plan["plan_id"])
         step_events = [
             (event["event_type"], event["payload"].get("step_id"))
-            for event in runtime.inspect(plan["plan_id"])["events"]
+            for event in inspection["events"]
             if event["event_type"].startswith("l0_step_")
         ]
         self.assertIn(("l0_step_completed", "compensate"), step_events)
         self.assertEqual(step_events[-1], ("l0_step_completed", "audit"))
+        self.assertEqual(
+            [item["node_id"] for item in inspection["graph_execution"]["results"]],
+            [
+                "snapshot", "precheck", "approval", "revalidate", "execute",
+                "verify", "compensate", "verify_recovery", "abort",
+            ],
+        )
+        self.assertEqual(
+            inspection["graph_execution"]["terminal_phase"], "abort",
+        )
+
+    def test_unexpected_pre_effect_runtime_failure_closes_graph_without_effect(self) -> None:
+        async def unavailable_backend(_profile):
+            raise RuntimeError("provider unavailable")
+
+        runtime = self.runtime(backend_factory=unavailable_backend)
+        prepared = self.prepare_with(self.runtime(), "lan", "restart_service", {
+            "service": "crm", "environment": "staging",
+        })
+        plan = prepared["plan"]
+        outcome = run(runtime.execute(
+            plan_id=plan["plan_id"], plan_hash=plan["plan_hash"],
+            execution_nonce=prepared["execution_nonce"],
+            approval_request_id="provider-down", approval_actor="operator",
+            allow_destructive=True,
+        ))
+        self.assertEqual(outcome.state, PlanState.MANUAL_INTERVENTION_REQUIRED)
+        graph = runtime.inspect(plan["plan_id"])["graph_execution"]
+        self.assertTrue(graph["complete"])
+        self.assertEqual(graph["terminal_phase"], "abort")
+        self.assertNotIn("execute", [item["node_id"] for item in graph["results"]])
 
     def test_rollback_never_claims_success_without_exact_typed_restoration(self) -> None:
         from profiles.lan import tools as lan_tools
@@ -647,8 +708,28 @@ class NetworkRuntimeTests(unittest.TestCase):
         outcomes = run(self.runtime().recover_inflight())
         self.assertEqual(len(outcomes), 1)
         self.assertEqual(outcomes[0]["state"], PlanState.VERIFIED_SUCCESS.value)
-        events = self.runtime().inspect(plan["plan_id"])["events"]
+        inspection = self.runtime().inspect(plan["plan_id"])
+        events = inspection["events"]
         self.assertEqual(sum(event["event_type"] == "execution_started" for event in events), 1)
+        graph = inspection["graph_execution"]
+        self.assertTrue(graph["complete"])
+        self.assertEqual(graph["terminal_phase"], "commit")
+        self.assertEqual(
+            [
+                (item["node_id"], item["outcome"])
+                for item in graph["results"]
+            ],
+            [
+                ("snapshot", "succeeded"),
+                ("precheck", "succeeded"),
+                ("approval", "succeeded"),
+                ("revalidate", "skipped"),
+                ("execute", "indeterminate"),
+                ("reconcile", "succeeded"),
+                ("verify", "succeeded"),
+                ("commit", "succeeded"),
+            ],
+        )
 
     def test_compiled_skill_workflow_blocks_skipped_or_cross_skill_write_steps(self) -> None:
         templates = compile_workflow_templates("lan", "mock")

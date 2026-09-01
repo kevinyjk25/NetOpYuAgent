@@ -157,6 +157,7 @@ class Evidence:
         collector_digest: str,
         associated_action: str,
         evidence_id: str,
+        parent_evidence_ids: tuple[str, ...] = (),
     ) -> "Evidence":
         return replace(
             self,
@@ -166,6 +167,7 @@ class Evidence:
             collector_identity=collector_identity,
             collector_digest=collector_digest,
             associated_action=associated_action,
+            parent_evidence_ids=parent_evidence_ids,
             evidence_id=evidence_id,
         )
 

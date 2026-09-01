@@ -141,6 +141,26 @@ description: Broken package used to test gates.
         self.assertIn("RESOURCE_REFERENCE_MISSING", codes)
         self.assertIn("RESOURCE_REFERENCE_UNSAFE", codes)
 
+    def test_markdown_link_does_not_create_a_duplicate_inline_reference(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            root.joinpath("references").mkdir()
+            root.joinpath("references", "guide.md").write_text("# Guide\n", encoding="utf-8")
+            root.joinpath("SKILL.md").write_text(
+                """---
+name: linked-package
+description: Read one bundled reference.
+---
+Read [references/guide.md](references/guide.md).
+""",
+                encoding="utf-8",
+            )
+            report = inspect_skill_package(root)
+        self.assertEqual(report["gate"], "passed")
+        self.assertEqual(report["referenceGraph"], [
+            {"from": "SKILL.md", "to": "references/guide.md"},
+        ])
+
 
 class ProgressiveDecisionTests(unittest.TestCase):
     def _decide(self, **overrides: object) -> dict[str, object]:

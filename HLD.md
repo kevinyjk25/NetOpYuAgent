@@ -47,7 +47,9 @@ flowchart LR
 | Promotion Compiler | L1 + 显式锚点 + Catalog | L0.5、L0 proposal、语义映射报告 | 只离线生成；不自动激活 |
 | L0 Registry | 人工审查并激活的 compiled contract | 精确合同版本与摘要 | 执行语义权威 |
 | Contract/Plan Compiler | Candidate + L0 + Provider contract | 不可变 PreparedPlan + Typed Graph | 不猜测缺失参数 |
+| Graph Scheduler | 已审 Typed Graph + 节点结果 | commit / abort / escalate 图轨迹 | 分支门禁、Effect/Compensate one-shot；崩溃不重放写 |
 | Evidence Manager | 独立 Observation | typed/fresh/scoped Evidence | 普通上下文和模型 confidence 不算 Evidence |
+| Provenance Projector | Evidence + graph events | Evidence→Observation→Capability/Collector→Object DAG | 只证明记录的来源关系；标识符最小化 |
 | Guard/Risk Engine | 合同、Evidence、影响范围、可逆性 | execute / ask_human / reject | 分数不能覆盖结构失败 |
 | Transaction Manager | approved plan | commit / abort / escalate | Effect 只发送一次；不确定时先对账 |
 | Verification Manager | post-effect Observation | postcondition verdict | 不信任写工具成功文本 |
@@ -143,7 +145,7 @@ Linux/Docker host or VM
 
 ### 9. 冻结扩展
 
-Hermes、A2A、企业 OIDC/PDP/Change Authority、Provider 签名供应链、Catalog 治理、Evidence dashboard、HA/DR/WORM/SLO 均从当前主图和完成判据移除。代码保留作未来实验；核心 Runtime 默认不加载企业身份、Provider release 或 L1 canary binding。
+Hermes、A2A、企业 OIDC/PDP/Change Authority、Provider 签名供应链、Catalog 治理、Evidence dashboard、HA/DR/WORM/SLO 均从当前主图和完成判据移除。代码保留作未来实验；核心 Runtime 默认不加载企业身份、Provider release 或 L1 canary binding，DSH Adapter 也只在显式历史命令下延迟加载 A2A、轨迹学习和 L1 shadow。
 
 ---
 
@@ -159,7 +161,7 @@ Enterprise IAM, provider supply chains, multi-team governance, Hermes/A2A produc
 
 ### 2. Components
 
-The Reasoning Plane contains DSH, L1 semantic guidance, and proposal-only model output. The offline Promotion Compiler creates readable L0.5 and L0 proposals but cannot activate them. The L0 Registry owns reviewed execution semantics. The Runtime compiles immutable plans and typed graphs, gathers independent evidence, evaluates guards and risk, manages approval and transaction state, verifies postconditions, compensates failures, and journals terminal evidence. Infrastructure adapters expose observation and effect capabilities without owning Runtime truth.
+The Reasoning Plane contains DSH, L1 semantic guidance, and proposal-only model output. The offline Promotion Compiler creates readable L0.5 and L0 proposals but cannot activate them. The L0 Registry owns reviewed execution semantics. The Runtime compiles immutable plans and typed graphs; a journal-backed graph scheduler gates each branch, while a cross-step provenance DAG links evidence to observations, capabilities/collectors, and network objects. The Runtime evaluates guards and risk, manages approval and transaction state, verifies postconditions, compensates failures, and journals terminal evidence. Infrastructure adapters expose observation and effect capabilities without owning Runtime truth.
 
 ### 3. End-to-end behavior
 
@@ -177,4 +179,4 @@ L1-to-L0.5-to-L0 is authoring compilation, not automatic Experience Compilation.
 
 The prototype must exercise six network transaction classes and report unsafe execution, false commit, invalid action, compensation success, autonomous coverage, escalation, task completion, and overhead. Control and treatment use the same DSH, model, L1 Skill, inputs, provider, approvals, and faults. An unqualified treatment conversion stops safely; it does not regain native write authority.
 
-Hermes/A2A, enterprise identity, signed provider supply chains, governance control planes, HA/DR/WORM/SLO work, and additional domains remain frozen optional experiments outside the core dependency graph.
+Hermes/A2A, enterprise identity, signed provider supply chains, governance control planes, HA/DR/WORM/SLO work, and additional domains remain frozen optional experiments outside the core dependency graph. The DSH adapter lazily imports A2A, trajectory learning, and historical L1 shadow only for their explicit commands.

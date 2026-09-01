@@ -154,9 +154,9 @@ Risk Policy 只能输出 `EXECUTE / ASK_HUMAN / REJECT`。结构门禁和 Eviden
 2. **资格门禁优先于模型分数。** L1→L0.5→L0 的核心安全指标是 false accept 和 safety-contract escape；置信度只用于解释和审查，不能授予权限。
 3. **安全与自治必须共同度量。** Safe-stop 是正确的安全结果，但会消耗 Autonomous Coverage；任何“更安全”结论必须同时报告 Task Completion、Coverage、Escalation 和 Process Failure。
 4. **模型能力影响 proposal yield，不改变执行权。** 弱模型可以更频繁 proposal-only 或 safe-stop；不能因模型置信或 Harness fallback 获得直接写权限。
-5. **Graph 必须成为执行事实。** Typed Graph 当前已绑定计划，但后续要成为唯一调度、门禁、状态和审计单元，而不是描述性制品。
-6. **Evidence 必须形成可追踪证明链。** 后续从单项 Action Binding 扩展为 Evidence→Observation→Capability/Collector→Network Object 的跨步骤 Provenance DAG。
-7. **性能必须分阶段解释。** Agent 端到端时延、转译、资格、Evidence、Effect、Verify、Reconcile 和 Compensation 分开报告；fail-fast 造成的低时延不能直接写成 Runtime 加速。
+5. **Graph 必须成为执行事实。** 当前 journal-backed Typed Graph scheduler 已门禁 Runtime 分支并记录崩溃不确定性；后续只允许把 legacy PlanState/L0 事件收敛为图的派生兼容视图，不能重新形成平行执行语义。
+6. **Evidence 必须形成可追踪证明链。** 当前 `inspect()` 已投影 Evidence→Observation→Capability/Collector→Network Object 的跨步骤 Provenance DAG；该 DAG 证明记录的来源关系，不证明外部载荷天然真实。
+7. **性能必须分阶段解释。** 当前已拆分 Runtime 图节点时延与 approval wait，并明确排除 Reasoning/LLM；真实 ES-P1 仍需预注册并报告 Agent 端到端、转译、资格、Evidence、Effect、Verify、Reconcile 和 Compensation，不能把 fail-fast 低时延写成 Runtime 加速。
 8. **任何零观测都不是零概率。** 报告样本数和单侧上界，不使用“100% 安全”或“生产零失败”。
 9. **评测制品与执行权隔离。** Runtime 不导入 evaluator/gold；任何 post-hoc rescore 都保留原始报告、规则、差异和 scorer fingerprint。
 10. **Experience Compilation 独立立项。** 当前只有 authoring compilation；可靠 Trace 完成独立资格前，不做自动 replay、promotion 或 activation。
@@ -210,6 +210,6 @@ Those conditions define ES-P0 only. As of 2026-09-01 they support `local_hypothe
 
 ### 7. Post-ES-P0 principles and production gate
 
-Independent generalization takes priority over feature growth. Qualification gates precede confidence scores; false acceptance and safety-contract escape are more important than raw translation yield. Safety must be reported together with task completion, autonomous coverage, escalation, and process failure. Model weakness may reduce proposal yield but never expands authority. Typed Graph must become the single execution scheduler, evidence must evolve into a cross-step provenance DAG, and latency must be decomposed by stage. Zero observed events are reported with sample size and bounds, never as zero probability. Evaluation remains dependency-isolated, and Experience Compilation remains a separate future hypothesis.
+Independent generalization takes priority over feature growth. Qualification gates precede confidence scores; false acceptance and safety-contract escape are more important than raw translation yield. Safety must be reported together with task completion, autonomous coverage, escalation, and process failure. Model weakness may reduce proposal yield but never expands authority. The current journal-backed Typed Graph scheduler gates Runtime branches and records crash uncertainty; legacy PlanState/L0 events may only converge into derived compatibility views. Runtime inspection now projects a cross-step Evidence provenance DAG and stage timing separated from approval wait, with explicit boundaries that lineage does not prove external truth and Runtime timing excludes Reasoning/LLM. Real ES-P1 still requires preregistered end-to-end latency decomposition. Zero observed events are reported with sample size and bounds, never as zero probability. Evaluation remains dependency-isolated, and Experience Compilation remains a separate future hypothesis.
 
 Production engineering is reconsidered only after two additional gates: ES-P1 repository-external private qualification with independent roles and preregistered evaluation, followed by ES-P2 qualification on at least one real router platform and one controller or management path without weakening runtime semantics. See the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md).

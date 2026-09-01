@@ -57,9 +57,10 @@ User Intent
 |---|---|---|
 | `dsh-plugin-netopyu/`, `dsh_adapter/` | Reasoning | DSH 投影、Candidate Plan 和窄 Worker bridge |
 | `skills/`, `profiles/*/skills/` | Reasoning | L1 Semantic Guidance；不得授予效果权限 |
-| `effect_runtime/reliability.py` | Runtime | 领域中性 Contract、Evidence、Risk、Typed Graph 和事务状态机 |
+| `effect_runtime/reliability.py`, `effect_runtime/graph_scheduler.py` | Runtime | 领域中性 Contract、Evidence、Risk、Typed Graph 与 fail-closed 图调度门禁 |
 | `network_runtime/l0/` | Runtime | L1→L0.5→L0 authoring、编译、静态安全门禁和激活合同 |
 | `network_runtime/engine.py` | Runtime | prepare、evidence gate、approve、execute、verify、compensate、audit |
+| `network_runtime/{graph_runtime,provenance}.py` | Runtime | 哈希链图执行、崩溃边界恢复、分阶段时延和跨步骤 Evidence DAG |
 | `network_runtime/{validation,evidence,verifiers,compensators}.py` | Runtime | 参数、证据、后置条件和恢复验证 |
 | `network_runtime/{contracts,journal}.py` | Runtime | 不可变计划、状态与哈希链事件 |
 | `network_lab/`, `network_provider/`, `service_layer/` | Infrastructure | 本地 Observation/Effect Provider 和 Containerlab/FRR 网络锚点 |
@@ -86,7 +87,7 @@ Evaluation → all public test surfaces
 - `evaluation/` 被产品 Runtime 导入；
 - 企业身份、供应链或治理模块成为核心 Runtime 的必需依赖。
 
-企业身份、Provider 发布和 L1 canary binding 已改为**显式使用时才延迟加载**；默认原型路径不导入这些冻结扩展。
+企业身份、Provider 发布、A2A、轨迹学习和历史 L1 shadow/canary 已改为**显式使用时才延迟加载**；默认原型路径不导入这些冻结扩展。DSH 能力检索 parity 位于 `evaluation/`，只能从离线命令运行并使用内存状态，产品 Adapter 不导入 Golden Set。
 
 ### 6. 核心不变量
 
@@ -150,9 +151,9 @@ An unqualified L1-to-L0 translation may only read, clarify, propose, ask a human
 
 ### 4. Dependencies and invariants
 
-The Runtime depends on L0 contracts and a domain-neutral Capability gateway, never on DSH UI, prompts, model SDKs, or evaluation code. L1 and providers cannot bypass the Runtime. Evidence must be typed, fresh, scoped, integrity-checked, and action-bound. Approval and execution share an immutable plan digest. Postconditions require independent observations. Outcome uncertainty enters reconciliation, not blind retry. Compensation and recovery verification are explicit.
+The Runtime depends on L0 contracts and a domain-neutral Capability gateway, never on DSH UI, prompts, model SDKs, or evaluation code. L1 and providers cannot bypass the Runtime. A journal-backed Typed Graph scheduler gates every current transaction branch and records crash-boundary uncertainty without replaying Effect. Evidence must be typed, fresh, scoped, integrity-checked, and action-bound; the inspection view projects Evidence → Observation → Capability/Collector → Object lineage with hashed collector/object identifiers. Approval and execution share an immutable plan digest. Postconditions require independent observations. Outcome uncertainty enters reconciliation, not blind retry. Compensation and recovery verification are explicit.
 
-Enterprise identity, provider supply-chain admission, and L1 canary binding are now lazy optional extensions rather than core imports.
+Enterprise identity, provider supply-chain admission, A2A, trajectory learning, and the historical L1 shadow/canary path are lazy optional extensions rather than core imports. DSH retrieval parity lives in `evaluation/`, uses memory-only state, and is never imported by the product adapter.
 
 ### 5. Frozen engineering
 

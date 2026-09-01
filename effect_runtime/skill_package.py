@@ -26,7 +26,7 @@ _SCRIPT_ROLES = frozenset(
 )
 _LINK_RE = re.compile(r"\[[^\]]*\]\(([^)]+)\)")
 _INLINE_RESOURCE_RE = re.compile(
-    r"(?<![A-Za-z0-9_])((?:scripts|references|assets)/[^\s`'\"<>)]+)"
+    r"(?<![A-Za-z0-9_])((?:scripts|references|assets)/[^\s`'\"<>()\[\]]+)"
 )
 _SIDE_EFFECT_RE = re.compile(
     r"(?:\bos\.system\b|\bsubprocess\b|\bparamiko\b|\bnetmiko\b|\bncclient\b|"

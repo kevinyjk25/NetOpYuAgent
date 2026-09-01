@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 
-from effect_runtime.mcp_lab import EffectLabStore
+from effect_runtime.mcp_lab import DOMAINS, EffectLabStore
 from evaluation.general_effect_dataset import build_cases
 from evaluation.harness_effect_tool import HarnessToolContext, execute_harness_tool
 from evaluation.harness_skill_runtime_ab import (
     STRATIFIED_PATTERN_CASE_IDS, _claims_success, _classify, _is_false_commit,
-    _is_invalid_action, load_translation_routes,
+    _external_stratified_cases, _is_invalid_action, _maximum_effect_calls,
+    load_translation_routes,
 )
 from network_runtime.contracts import sha256_json
 
@@ -316,6 +318,21 @@ def test_revision_conflict_effect_dispatch_is_an_invalid_action() -> None:
     )
 
 
+def test_compensation_failure_cannot_retry_the_original_effect() -> None:
+    case = next(
+        item for item in build_cases()
+        if item.scenario_pattern == "compensation_failure"
+    )
+    assert _maximum_effect_calls(case) == 1
+    assert _is_invalid_action(
+        case=case,
+        mode="l1_native",
+        terminal="manual_intervention_required",
+        actual="__verification_mismatch__",
+        effect_count=2,
+    )
+
+
 def test_after_send_unknown_must_not_blindly_retry() -> None:
     case = next(item for item in build_cases() if item.case_id == "ref-07")
     assert _is_invalid_action(
@@ -331,6 +348,17 @@ def test_after_send_unknown_must_not_blindly_retry() -> None:
         terminal="verified_success",
         actual=str(case.arguments["desired_value"]),
         effect_count=1,
+    )
+
+
+def test_unqualified_after_send_unknown_safe_stop_is_not_invalid_action() -> None:
+    case = next(item for item in build_cases() if item.case_id == "ref-07")
+    assert not _is_invalid_action(
+        case=case,
+        mode="safe_stop",
+        terminal="rejected",
+        actual="vlan-10",
+        effect_count=0,
     )
 
 
@@ -353,6 +381,18 @@ def test_stratified_pattern_set_covers_all_patterns_and_skill_families() -> None
     assert len({item.scenario_pattern for item in selected}) == 10
     assert len({item.feature_family for item in selected}) == 6
     assert {"steps-02", "compose-09"}.issubset(STRATIFIED_PATTERN_CASE_IDS)
+
+
+def test_external_stratified_set_rotates_skill_families() -> None:
+    expanded = [
+        replace(item, case_id=f"{item.case_id}-{domain}", domain=domain)
+        for item in build_cases() for domain in DOMAINS
+    ]
+    selected = _external_stratified_cases(expanded)
+    assert len(selected) == 10
+    assert len({item.scenario_pattern for item in selected}) == 10
+    assert len({item.feature_family for item in selected}) == 6
+    assert len({item.domain for item in selected}) == 6
 
 
 def test_dsh_plugin_concludes_only_trusted_runtime_terminals() -> None:

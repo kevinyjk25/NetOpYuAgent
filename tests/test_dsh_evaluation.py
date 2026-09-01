@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import tempfile
 import unittest
 from collections import Counter
 from pathlib import Path
 from unittest.mock import patch
 
-from dsh_adapter.evaluation import parity_report
 from evaluation import load_golden_set
+from evaluation.dsh_adapter_parity import parity_report
 from skills import SkillLoader
 
 
@@ -25,6 +26,22 @@ class TestDshEvaluation(unittest.TestCase):
         self.assertEqual(report["metrics"]["recall_at_3"], 1.0)
         self.assertGreaterEqual(report["metrics"]["mrr"], 0.90)
         self.assertEqual(report["failures"], [])
+
+    def test_retirement_gate_never_mutates_configured_product_store(self):
+        root = Path(__file__).parents[1]
+        with tempfile.TemporaryDirectory() as directory:
+            forbidden = Path(directory) / "must-not-create-product-store.sqlite"
+            with patch.dict(os.environ, {
+                "NETOPYU_DSH_BACKEND": "mock",
+                "NETOPYU_TOOL_RESULT_STORE": str(forbidden),
+                "NETOPYU_DSH_TOOL_RESULT_STORE": str(forbidden),
+            }):
+                report = asyncio.run(parity_report(
+                    profile_id="lan",
+                    golden_path=str(root / "data" / "golden_set.jsonl"),
+                ))
+            self.assertTrue(report["ok"])
+            self.assertFalse(forbidden.exists())
 
     def test_golden_set_is_balanced_valid_and_unique(self):
         root = Path(__file__).parents[1]

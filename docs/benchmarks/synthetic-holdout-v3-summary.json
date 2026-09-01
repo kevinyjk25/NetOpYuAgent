@@ -1,0 +1,82 @@
+{
+  "schema": "effect-runtime.io/synthetic-holdout-summary/v3",
+  "generatedAt": "2026-09-01",
+  "evidenceClass": "repository_external_context_isolated_model_authored_sealed_synthetic_holdout",
+  "officialEsP1QualificationEligible": false,
+  "dataset": {
+    "cases": 240,
+    "datasetDigest": "sha256:dd43f1aeffaa56ebf4c90b9d2db372ca3a90bbfd1440130e01ea1e0dfc60fb45",
+    "manifestDigest": "sha256:2b3934516160a8cd0e8cd16a819b85751b7b16e7d8514ab41909bfcbbe7ba9c3",
+    "rendererVersion": "synthetic-skill-package-renderer/v3",
+    "packageInspection": {
+      "passed": 240,
+      "failed": 0,
+      "findings": 0
+    },
+    "featureFamilies": 6,
+    "scenarioPatterns": 10,
+    "mcpDomains": 6,
+    "languages": 3
+  },
+  "translation": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "sourceDigest": "sha256:609b07f7f9319a8ce9b736fd3a7ae2d4677624a1c3e937bbb22ed4cb46d8797a",
+    "rawProtocolValid": 240,
+    "trustedOracleQualified": 235,
+    "fallbacks": 5,
+    "falseAccepts": 0,
+    "meanSemanticCoveragePercent": 99.55,
+    "p50Ms": 15228.878,
+    "p95Ms": 49069.844,
+    "byFeatureQualified": {
+      "approvals": "36/40",
+      "composition": "40/40",
+      "conditional_branching": "40/40",
+      "multi_step": "40/40",
+      "references": "40/40",
+      "scripts": "39/40"
+    }
+  },
+  "dshPairedExecution": {
+    "cases": 10,
+    "repetitions": 3,
+    "pairedObservations": 30,
+    "agentSessions": 60,
+    "sourceDigest": "sha256:cc98fcce895b8532d82b13949fd29509f669d7f37847979775f265b4bddc2deb",
+    "rawSourceReportDigest": "sha256:c936c5d87e363792b5f325607b0a1064fa7cf5b5c86a049fbabf84ea11f33613",
+    "rescore": {
+      "version": "es-p0-action-availability-and-effect-budget/v3",
+      "newModelCalls": 0,
+      "retryBudgetViolations": 1
+    },
+    "control": {
+      "taskCompletionPercent": 76.67,
+      "executionPrecisionPercent": 80.0,
+      "unsafeExecutions": 4,
+      "falseCommits": 0,
+      "invalidActions": 5,
+      "processFailures": 5,
+      "p50Ms": 103577.118,
+      "p95Ms": 300041.08
+    },
+    "treatment": {
+      "taskCompletionPercent": 93.33,
+      "executionPrecisionPercent": 100.0,
+      "unsafeExecutions": 0,
+      "falseCommits": 0,
+      "invalidActions": 1,
+      "processFailures": 1,
+      "runtimeAudits": "17/17",
+      "p50Ms": 64311.74,
+      "p95Ms": 142516.837
+    },
+    "taskCompletionDeltaPercentagePoints": 16.66
+  },
+  "knownLimits": [
+    "one Treatment safe-stop session preserved state but failed DSH session completion",
+    "one Treatment L1 Agent hallucinated a Provider-failure condition before invoking Runtime",
+    "the model-authored synthetic set is not an independently human-authored private holdout"
+  ],
+  "claimBoundary": "Model-authored sealed synthetic evidence; not independently human-authored ES-P1 evidence, a production success probability, statistically sufficient cross-distribution evidence, or real-network qualification."
+}

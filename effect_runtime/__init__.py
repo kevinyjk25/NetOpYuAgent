@@ -16,6 +16,13 @@ from .progressive import (
 from .saga import SagaCoordinator, SagaDefinition, SagaState, SagaStepSpec
 from .skill_graph import SkillEdge, SkillLevel, SkillNode, validate_skill_graph
 from .skill_package import build_skill_disclosure_packet, inspect_skill_package
+from .graph_scheduler import (
+    GraphScheduleError,
+    NodeOutcome,
+    NodeResult,
+    TypedGraphScheduler,
+    graph_from_step_contract,
+)
 from .reliability import (
     AutonomyDecision,
     EvidenceRecord,
@@ -52,7 +59,8 @@ __all__ = [
     "RiskTier", "Route", "SagaCoordinator", "SagaDefinition", "SagaState",
     "SagaStepSpec", "SkillEdge", "SkillLevel", "SkillNode",
     "build_skill_disclosure_packet", "decide_progressive_execution",
-    "inspect_skill_package",
+    "inspect_skill_package", "GraphScheduleError", "NodeOutcome", "NodeResult",
+    "TypedGraphScheduler", "graph_from_step_contract",
     "validate_skill_graph",
     "AutonomyDecision", "EvidenceRecord", "EvidenceRequirement",
     "ExecutionPhase", "GuardResult", "ReliabilityContract", "Reversibility", "RiskFactors",

@@ -1,4 +1,4 @@
-"""Resumable qwen3.5 translation evaluation for the P2.6-B Skill corpus."""
+"""Resumable model translation for built-in or sealed synthetic Skill corpora."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from effect_runtime.mcp_lab import (
 )
 from effect_runtime.skill_package import build_skill_disclosure_packet, inspect_skill_package
 from evaluation.general_effect_dataset import GeneralEffectCase, build_cases, materialize_dataset
+from evaluation.synthetic_skill_holdout import load_synthetic_dataset
 from network_runtime.contracts import sha256_json
 from network_runtime.l0_skills import REGISTRY as L0_SKILLS
 
@@ -326,11 +327,29 @@ def _run_model_translation_registered(
     *, output_root: str | Path, model: str = "qwen3.5:9b",
     l0_digests: dict[str, str], limit: int | None = None,
     resume: bool = True, stratified: bool = False,
+    dataset_root: str | Path | None = None,
 ) -> dict[str, Any]:
     root = Path(output_root).expanduser()
-    dataset_root = root / "dataset"
-    manifest = materialize_dataset(dataset_root)
-    cases = list(build_cases())
+    if dataset_root is None:
+        active_dataset_root = root / "dataset"
+        manifest = materialize_dataset(active_dataset_root)
+        cases = list(build_cases())
+        data_classification = {
+            "developmentSet": True,
+            "syntheticHoldout": False,
+            "officialEsP1QualificationEligible": False,
+        }
+    else:
+        active_dataset_root = Path(dataset_root).expanduser().resolve()
+        manifest, sealed_cases = load_synthetic_dataset(active_dataset_root)
+        cases = list(sealed_cases)
+        data_classification = {
+            "developmentSet": False,
+            "syntheticHoldout": True,
+            "evidenceClass": manifest["evidenceClass"],
+            "officialEsP1QualificationEligible": False,
+            "sourceManifestDigest": manifest["manifestDigest"],
+        }
     if stratified:
         cases = [
             next(item for item in cases if item.feature_family == family)
@@ -370,7 +389,7 @@ def _run_model_translation_registered(
             results.append(existing[case.case_id])
             resumed_cases += 1
             continue
-        package = dataset_root / "skills" / case.skill_id
+        package = active_dataset_root / "skills" / case.skill_id
         package_report = inspect_skill_package(package, bound_scripts=_bindings(case))
         decision, reply = adapter.translate(_prompt(case, package))
         field_results = _oracle(case, decision) if decision is not None else {}
@@ -457,7 +476,7 @@ def _run_model_translation_registered(
         },
         "dataset": {
             "digest": manifest["datasetDigest"], "declaredSkills": manifest["skillCount"],
-            "executedCases": len(results), "developmentSet": True,
+            "executedCases": len(results), **data_classification,
         },
         "metrics": {
             "oraclePassed": passed, "total": len(results),
@@ -484,8 +503,14 @@ def _run_model_translation_registered(
         "cases": results,
         "claimBoundary": (
             "A model proposal reaches L0 only when every trusted Catalog Oracle passes. "
-            "This transparent local development set is not hidden-set generalization evidence "
-            "or a production success probability."
+            + (
+                "This repository-external, context-isolated, model-authored sealed "
+                "synthetic holdout is not independently human-authored ES-P1 truth, "
+                "a production success probability, or real-network qualification."
+                if data_classification["syntheticHoldout"] else
+                "This transparent local development set is not hidden-set "
+                "generalization evidence or a production success probability."
+            )
         ),
     }
     root.mkdir(parents=True, exist_ok=True)
@@ -499,11 +524,13 @@ def _run_model_translation_registered(
 def run_model_translation(
     *, output_root: str | Path, model: str = "qwen3.5:9b",
     limit: int | None = None, resume: bool = True, stratified: bool = False,
+    dataset_root: str | Path | None = None,
 ) -> dict[str, Any]:
     with effect_lab_runtime_registration() as l0_digests:
         return _run_model_translation_registered(
             output_root=output_root, model=model, l0_digests=l0_digests,
             limit=limit, resume=resume, stratified=stratified,
+            dataset_root=dataset_root,
         )
 
 
@@ -513,6 +540,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default="qwen3.5:9b")
     parser.add_argument("--limit", type=int)
     parser.add_argument(
+        "--dataset-root",
+        help="sealed repository-external synthetic study root",
+    )
+    parser.add_argument(
         "--stratified", action="store_true",
         help="run one representative from each of the six Skill feature families",
     )
@@ -521,6 +552,7 @@ def main(argv: list[str] | None = None) -> int:
     report = run_model_translation(
         output_root=args.output_root, model=args.model, limit=args.limit,
         resume=not args.no_resume, stratified=args.stratified,
+        dataset_root=args.dataset_root,
     )
     print(json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if report["metrics"]["oraclePassed"] == report["metrics"]["total"] else 2

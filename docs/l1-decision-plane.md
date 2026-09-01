@@ -4,9 +4,9 @@
 
 > **当前定位：Reasoning Plane 的 proposal-only 历史参考。** shadow/canary/productization 路线冻结；任何 Decision 都不能绕过 active L0、Evidence/Guard 和 Runtime。
 
-### 1. 目标与边界
+### 1. 历史目标与保留边界
 
-P1.8 证明了“候选专属 Schema + 请求证据 grounding + 确定性编译 + 单调 Guard”可以显著收窄模型输出，但 C3 是隔离评测路径。P1.9 把同一原则迁入正式 Harness 入口，形成独立的 L1 Decision Plane：它在 DSH/Hermes 与 L0 Runtime 之间产生一个严格、可观测、无执行权的意图候选。
+这一历史实验把“候选专属 Schema + 请求证据 grounding + 确定性编译 + 单调 Guard”接入 Harness，形成无执行权的 L1 Decision proposal。当前研究不把它视为正式产品层、独立权威层或 ES-P1 完成条件；保留代码只用于验证 Reasoning proposal 不能绕过 active L0、Evidence/Guard 和 Runtime。
 
 ```text
 直接用户请求
@@ -24,7 +24,7 @@ Domain L1 Skill / L0 Runtime
 
 Decision Plane 不调用业务 Tool，不创建或批准 Runtime plan，不持有 Provider/设备凭据，不判定执行成功，也不执行回滚。写请求即使选择正确，仍必须经过 L0 的严格参数与来源校验、计划、风险、人工审批、执行前重读、单次效果、独立 Observer、补偿和审计。
 
-### 2. 当前阶段
+### 2. 冻结时的实现快照
 
 P1.9-B1 已实现 **DSH/Hermes 共用 shadow 与本地证据框架**：
 
@@ -39,7 +39,7 @@ P1.9-B1 已实现 **DSH/Hermes 共用 shadow 与本地证据框架**：
 - DSH 新一轮会关闭被覆盖的 pending Decision；Hermes 还通过 `post_llm_call/on_session_end` 记录 no-route/session-end，关闭后的 Decision 不可绑定后续 Tool；
 - SQLite 不保存用户原文、模型正文或实际参数值，只保存 prompt/argument digest、字段名、决定、token usage 完整性和一致性结果；旧 schema 打开时迁移并清除参数原值；
 - `data/l1_catalog_baseline.json` 固定 LAN/DC/WAN 当前候选与 Tool/Skill 摘要，Catalog/Schema/Skill 漂移进入退休门禁；
-- `l1_runtime.holdout` 已提供 50+、10+ 类、三 profile、中英覆盖的 prompt-free seal manifest 和双 reviewer 一致性合同。
+- `l1_runtime.holdout` 提供可承载 50+、10+ 类、三 profile 和中英覆盖的 prompt-free seal manifest 与双 reviewer 一致性**协议工具**；仓库未包含真实私有 Case、两名人工 reviewer 的真值或资格结果。
 
 P1.9-B2 的两级本地执行器已经完成：Worker 级在 Catalog baseline 无漂移且双 reviewer 完全一致后，使用同一模型/策略/Tool declarations 分别生成 DSH/Hermes 身份的独立 Decision，并计算协议、选择、参数、追问字段、workflow、安全拒绝、重复稳定性、语义 parity、token 与 p50/p95；Adapter 级实际执行 DSH JavaScript `agent/pre-step` 与 Hermes Python `pre_llm_call`，通过临时 owner-only Worker 比较 Prompt/Catalog/Candidate/Policy/Decision digest。报告只含聚合指标和 case-id 摘要。
 
@@ -60,7 +60,7 @@ P1.9-C1 的**未启用安全准备层**也已完成：`canary_policy` 是无副�
 | `l1_runtime/service.py` | Guard、模型尝试、grounding、确定性编译、证据绑定和指标 |
 | `l1_runtime/store.py` | immutable Decision、一次性终态生命周期与首次路由 Observation；不保存 Prompt/参数原值 |
 | `l1_runtime/catalog_gate.py` | 可移植的三 profile Catalog/Tool/Skill 摘要基线与漂移报告 |
-| `l1_runtime/holdout.py` | 私有 50+ 未见集 seal 和双 reviewer 一致性检查；manifest 不含 Prompt/标签 |
+| `l1_runtime/holdout.py` | 私有 50+ 未见集 seal 和双 reviewer 一致性协议工具；不随仓库提供真实 Case/标签 |
 | `l1_runtime/qualification.py` | B2 私有 Oracle、同模型双身份 parity、重复稳定性和隐私化聚合报告 |
 | `l1_runtime/adapter_qualification.py` | B2 DSH/Hermes 生产 Hook → 临时 Worker 的摘要 parity 执行器 |
 | `l1_runtime/canary_policy.py` | C1 只保持或收窄原 route 的纯策略；无 Runtime/Provider 副作用或授权 |
@@ -164,7 +164,7 @@ Worker runner 的 `scope.level=shared_worker_decision_contract`；Adapter runner
 
 这些指标的 scope 明确为 `local_shadow_observations`。DSH agreement 是一致性信号，不是真值；P1.9-B 必须增加独立人工/封存 Oracle，才能测 selection、参数、clarification 和 workflow 正确率。
 
-### 6. 升级门禁
+### 6. 历史升级门禁（非当前路线）
 
 Shadow 进入 canary 前至少需要：
 
@@ -187,9 +187,9 @@ C0 已实现第 5 项的计划合同；C1 已实现单调策略、第 8 项 runb
 
 > **Current role: proposal-only Reasoning Plane reference.** Shadow/canary productization is frozen, and no Decision can bypass an active L0, Evidence/Guard, or the Runtime.
 
-### 1. Purpose and boundary
+### 1. Historical purpose and retained boundary
 
-P1.9 moves the candidate-specific Schema, grounding, deterministic compiler, and monotonic Guard principles from the isolated P1.8 evaluation path into a production-facing L1 Decision Plane. The plane narrows direct user language to a strict proposal between the Harness and L0 Runtime.
+This historical experiment connected candidate-specific schemas, grounding, deterministic compilation, and a monotonic Guard to the Harness as a proposal-only L1 Decision path. It is not a current product layer, an independent authority, or an ES-P1 completion criterion. The retained code demonstrates that a Reasoning proposal cannot bypass an active L0, Evidence/Guard, or the Runtime.
 
 It cannot call a business Tool, create or approve a plan, hold Provider credentials, declare success, or roll back an effect. Every write still passes the complete L0 plan, approval, revalidation, one-shot effect, independent observation, compensation, and audit path.
 
@@ -197,7 +197,7 @@ It cannot call a business Tool, create or approve a plan, hold Provider credenti
 
 P1.9-B1 implements a shared DSH/Hermes shadow and local evidence framework. DSH reads direct-user source from an accepted step; Hermes uses its official `pre_llm_call`, `pre_tool_call`, `post_llm_call`, and `on_session_end` hooks. Both bind the current exposed Tool declarations and Skill manifest, retrieve at most twelve candidates, force one candidate-specific function call, ground values, deterministically derive action/missing fields/workflow, and persist privacy-minimized evidence.
 
-Pending Decisions are observed once or closed as superseded/no-route/session-end, and a closed Decision cannot bind a later route. The store removes raw prompts, model prose, and argument values while retaining digests, keys, reported token completeness, and lifecycle. A portable three-profile Catalog drift gate and private 50+/two-reviewer holdout contracts are present.
+Pending Decisions are observed once or closed as superseded/no-route/session-end, and a closed Decision cannot bind a later route. The store removes raw prompts, model prose, and argument values while retaining digests, keys, reported token completeness, and lifecycle. The repository contains a portable three-profile Catalog drift gate and tooling contracts capable of sealing a 50+/two-reviewer holdout; it does not contain those private cases, human labels, or an independent qualification result.
 
 The P1.9-B2 local tooling now has two levels. The shared-Worker runner aggregates protocol, selection, argument, clarification, workflow, refusal, repeatability, semantic-parity, token, and latency metrics. The adapter runner executes the production DSH JavaScript `agent/pre-step` and Hermes Python `pre_llm_call` hooks through a temporary owner-only Worker and compares prompt/catalog/candidate/policy/full-Decision digests. Neither emits prompts, per-case labels, or argument values.
 
@@ -230,6 +230,6 @@ Non-loopback model endpoints are rejected unless `NETOPYU_L1_DECISION_ALLOW_REMO
 
 Protocol success measures contract formation. Routing agreement measures parity with the Harness route, not correctness. Direct-tool argument exactness excludes later Skill-internal calls. Safety escape counts a first domain route after a non-executable Decision. Lifecycle counts distinguish observed, pending, and explicitly closed turns. Reported token completeness prevents partial endpoint accounting from being presented as full cost. Decision latency includes the selector model and is not Runtime latency or a production SLO.
 
-Promotion to canary requires a sealed unseen set, adjudicated labels, zero accepted Schema/grounding escape, zero final safety escape on the fixed safety suite, DSH/Hermes digest parity, complete Decision-to-plan binding, unchanged Core-72 controls, privacy gates, and an explicit fail-closed rollback runbook.
+Under the frozen historical canary proposal, promotion would have required a sealed unseen set, adjudicated labels, zero accepted Schema/grounding escape, zero final safety escape on the fixed safety suite, DSH/Hermes digest parity, complete Decision-to-plan binding, unchanged Core-72 controls, privacy gates, and an explicit fail-closed rollback runbook. This is not an active project roadmap.
 
 C0 implements the plan contract and one-shot binding. C1 implements monotonic handling, machine-checkable evidence consistency, and the stop/rollback runbook. Neither waives real human/product evidence, organization identity/signatures, or an independently approved release change. Adapter configuration remains restricted to `off/shadow`, and the readiness exit code must never directly trigger deployment.
