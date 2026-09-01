@@ -1,0 +1,99 @@
+{
+  "schema": "ensuredskill.io/es-p0-versioned-summary/v1",
+  "generatedAt": "2026-09-01",
+  "status": "local_hypothesis_supported",
+  "evidenceCompleteForLocalEsP0": true,
+  "mechanism": {
+    "runs": 60,
+    "taskCompletionRate": 100.0,
+    "unsafeExecutionRate": 0.0,
+    "falseCommitRate": 0.0,
+    "invalidActionRate": 0.0,
+    "compensationSuccessRate": 100.0,
+    "artifactDigest": "sha256:500f0282b3d2eb3148b97faea1e751504bf981629f9c2c03dfb10944f894cbf1"
+  },
+  "ablation": {
+    "variants": 6,
+    "probesPerVariant": 5,
+    "allExpectedContributionsVisible": true,
+    "artifactDigest": "sha256:73eeae3746fa08f2cf0616be96a7c020f11f535779dfe397ad8ba4d2f28eb8f8"
+  },
+  "models": {
+    "qwen3.5:9b": {
+      "translation": {
+        "passed": 58,
+        "total": 60,
+        "falseAccepts": 0,
+        "p50Ms": 9486.373,
+        "p95Ms": 10865.08,
+        "artifactDigest": "sha256:6d1ba4c72d685adb3be91c4acd1d65dd0ffc0a09871b169d2059a81f7b405e4e"
+      },
+      "control": {
+        "taskCompletionRate": 50.0,
+        "unsafeExecutionRate": 20.0,
+        "falseCommitRate": 13.33,
+        "invalidActionRate": 33.33,
+        "executionPrecision": 59.09,
+        "autonomousCoverage": 43.33,
+        "processFailures": 5,
+        "p50Ms": 90693.258,
+        "p95Ms": 158397.393
+      },
+      "treatment": {
+        "taskCompletionRate": 86.67,
+        "unsafeExecutionRate": 0.0,
+        "falseCommitRate": 0.0,
+        "invalidActionRate": 0.0,
+        "executionPrecision": 100.0,
+        "autonomousCoverage": 76.67,
+        "processFailures": 1,
+        "p50Ms": 44404.659,
+        "p95Ms": 72173.309
+      },
+      "harnessArtifactDigest": "sha256:e39b94d09e2ab90125401dc57455a55b97bdbd6a24ba898dbba6b7d23a4d6c68"
+    },
+    "qwen2.5:7b": {
+      "translation": {
+        "passed": 38,
+        "total": 60,
+        "falseAccepts": 0,
+        "p50Ms": 5925.631,
+        "p95Ms": 7589.99,
+        "artifactDigest": "sha256:41ab3d76347cb6ec4855e1add2db0be2946237d872be9e4b120b2526c0392b99"
+      },
+      "control": {
+        "taskCompletionRate": 20.0,
+        "unsafeExecutionRate": 10.0,
+        "falseCommitRate": 3.33,
+        "invalidActionRate": 20.0,
+        "executionPrecision": 50.0,
+        "autonomousCoverage": 20.0,
+        "processFailures": 18,
+        "p50Ms": 2891.471,
+        "p95Ms": 24596.467
+      },
+      "treatment": {
+        "taskCompletionRate": 36.67,
+        "unsafeExecutionRate": 0.0,
+        "falseCommitRate": 0.0,
+        "invalidActionRate": 0.0,
+        "executionPrecision": 100.0,
+        "autonomousCoverage": 36.67,
+        "processFailures": 18,
+        "p50Ms": 2435.751,
+        "p95Ms": 9502.964
+      },
+      "harnessArtifactDigest": "sha256:0386e17ae172963e946a8ee4c771f7424f41b073bf839bc187e9e750581f309c"
+    }
+  },
+  "regression": {
+    "passed": 506,
+    "subtestsPassed": 81
+  },
+  "aggregateArtifactDigest": "sha256:362c0e91ea7ae439ceaab05391633c2fb46897f56d4d072c5b51e274b3578fde",
+  "limits": {
+    "sealedOrPrivateGeneralizationSet": false,
+    "realVendorDeviceQualification": false,
+    "productionProbability": false
+  }
+}

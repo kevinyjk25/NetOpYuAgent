@@ -2,6 +2,8 @@
 
 ## 中文
 
+> **状态：`frozen_future_engineering`。** 历史 P1.9 canary 产品化路线已暂停；当前只保留 proposal-only 原则和离线回归，不进入 ES-P0 执行主线。
+
 ### 1. 当前状态和安全边界
 
 P1.9-C1 已提供 **canary 安全准备层**，但没有启用 canary。DSH 和 Hermes 的生产配置仍只接受 `off|shadow`；`canary` 会在 Adapter 启动边界被拒绝。仓库当前没有真实仓库外未见集、两名独立人员形成的最终真值、真实 DSH Web/Hermes CLI 产品执行证据和组织级部署身份，因此不能把本地 synthetic fixture 当成上线证据。
@@ -78,6 +80,8 @@ C1 本地验收证明策略结果是单调的、证据缺失会失败关闭、�
 ---
 
 ## English
+
+> **Status: `frozen_future_engineering`.** The historical P1.9 canary productization path is paused. Only proposal-only semantics and offline regressions remain as reference outside ES-P0 execution.
 
 ### 1. Current state and boundary
 

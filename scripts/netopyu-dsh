@@ -94,6 +94,7 @@ Commands:
   learning-review ID approve|reject REVIEWER  Review once; approval writes a proposal only
   reliability   Run local load/chaos/policy and harness-boundary retirement checks
   compare-runtime  Benchmark DSH-only versus DSH + Runtime; accepts benchmark CLI flags
+  compare-harness  Real DSH L1 Agent versus confidence-gated L0 Runtime A/B
   compare-l1     Evaluate non-executing L1 routing; accepts P1.8 benchmark flags
   compare-l1-dsh Evaluate the no-tool DSH headless shadow path for P1.8-B1
   compare-l1-dsh-tools  Evaluate P1.8-B2 controlled Skill + capture Tool path
@@ -1007,6 +1008,13 @@ run_runtime_comparison() {
   "$PYTHON_BIN" -m evaluation.runtime_comparison "$@"
 }
 
+run_real_harness_comparison() {
+  check_python || return 1
+  shift
+  cd "$PROJECT_ROOT" || return 1
+  "$PYTHON_BIN" -m evaluation.harness_skill_runtime_ab "$@"
+}
+
 run_l1_comparison() {
   check_python || return 1
   shift
@@ -1131,6 +1139,25 @@ run_e2e() {
   # runtime, settings file, Ollama model, or live network endpoint.
   check_node && check_python || return 1
   runtime_env
+  # A retirement run must never read, lock, prune, or otherwise mutate the
+  # operator's live DSH stores.  Isolate every durable test surface even when
+  # the caller already has a running local DSH instance.
+  NETOPYU_RETIREMENT_WORKSPACE="$(mktemp -d "${TMPDIR:-/tmp}/netopyu-retirement.XXXXXX")" || return 1
+  cleanup_retirement_workspace() {
+    [[ -n "${NETOPYU_RETIREMENT_WORKSPACE:-}" && -d "$NETOPYU_RETIREMENT_WORKSPACE" ]] || return 0
+    [[ "$(basename "$NETOPYU_RETIREMENT_WORKSPACE")" == netopyu-retirement.* ]] || return 1
+    rm -rf -- "$NETOPYU_RETIREMENT_WORKSPACE"
+  }
+  trap cleanup_retirement_workspace EXIT
+  HITL_STORE="$NETOPYU_RETIREMENT_WORKSPACE/hitl.sqlite"
+  TOOL_RESULT_STORE="$NETOPYU_RETIREMENT_WORKSPACE/tool-results.sqlite"
+  NETWORK_RUNTIME_STORE="$NETOPYU_RETIREMENT_WORKSPACE/runtime.sqlite"
+  L1_DECISION_STORE="$NETOPYU_RETIREMENT_WORKSPACE/l1-decisions.sqlite"
+  LEARNING_STORE="$NETOPYU_RETIREMENT_WORKSPACE/learning.sqlite"
+  LEARNING_PROPOSALS="$NETOPYU_RETIREMENT_WORKSPACE/skill-proposals"
+  LOCAL_DC_STATE="$NETOPYU_RETIREMENT_WORKSPACE/local-dc.sqlite"
+  WORKER_SOCKET="$NETOPYU_RETIREMENT_WORKSPACE/bridge.sock"
+  runtime_env
   cd "$PROJECT_ROOT" || return 1
   printf '1/7 Python full suite\n'
   "$PYTHON_BIN" -m pytest -q || return 1
@@ -1149,7 +1176,7 @@ render_convergence_html(value)
 ' || return 1
   printf '3/7 Node/plugin syntax\n'
   local plugin_source
-  for plugin_source in dsh-plugin-netopyu/src/*.js dsh-plugin-l1-shadow-capture/src/*.js dsh-plugin-l1-protocol-controller/src/*.js dsh-plugin-l1-schema-controller/src/*.js; do
+  for plugin_source in dsh-plugin-netopyu/src/*.js dsh-plugin-effect-harness/src/*.js dsh-plugin-l1-shadow-capture/src/*.js dsh-plugin-l1-protocol-controller/src/*.js dsh-plugin-l1-schema-controller/src/*.js; do
     node --check "$plugin_source" || return 1
   done
   node dsh-plugin-l1-shadow-capture/test/capture-smoke.mjs || return 1
@@ -1220,6 +1247,7 @@ case "$command" in
   learning-review) run_learning_review "$@" ;;
   reliability) run_reliability ;;
   compare-runtime) run_runtime_comparison "$@" ;;
+  compare-harness) run_real_harness_comparison "$@" ;;
   compare-l1) run_l1_comparison "$@" ;;
   compare-l1-dsh) run_l1_dsh_shadow "$@" ;;
   compare-l1-dsh-tools) run_l1_dsh_tool_shadow "$@" ;;

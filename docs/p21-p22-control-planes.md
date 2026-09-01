@@ -2,6 +2,8 @@
 
 ## 中文
 
+> **状态：`frozen_future_engineering`。** Catalog 治理、Evidence dashboard 和多团队控制面不是当前三平面的新增权威层，也不计入原型完成度。
+
 ### 1. 结论与边界
 
 P2.1 和 P2.2 已完成为可重复运行的本地参考实现：
@@ -145,6 +147,8 @@ scripts/netopyu-p2 evidence-trend \
 - 主门禁以仓库最新全量测试和 `scripts/netopyu-dsh retirement` 输出为准。
 
 ## English
+
+> **Status: `frozen_future_engineering`.** Catalog governance, evidence dashboards, and multi-team control planes are not additional authoritative planes and do not count toward prototype completion.
 
 ### 1. Result and boundary
 

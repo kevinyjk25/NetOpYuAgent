@@ -187,7 +187,6 @@ class IntentSpec:
         targets: tuple[str, ...],
     ) -> "IntentSpec":
         arguments_digest = sha256_json(arguments)
-        desired_state = _desired_state(contract.tool_name, arguments)
         if contract.compiled_contract is not None:
             from .l0.expressions import render_template
 
@@ -205,6 +204,8 @@ class IntentSpec:
                     },
                 },
             )
+        else:
+            desired_state = _desired_state(contract.tool_name, arguments)
         stable = {
             "schema_version": INTENT_SCHEMA_VERSION,
             "intent_kind": contract.intent_kind,
@@ -310,6 +311,23 @@ class L0SkillRegistry:
 
     def contracts(self) -> tuple[L0SkillContract, ...]:
         return tuple(self._by_key[key] for key in sorted(self._by_key))
+
+    def unregister(self, skill_id: str, version: str) -> None:
+        """Remove one exact adapter-owned contract from a temporary registration."""
+        contract = self._by_key.pop((skill_id, version), None)
+        if contract is None:
+            return
+        self._by_tool[contract.tool_name] = [
+            item for item in self._by_tool[contract.tool_name]
+            if (item.skill_id, item.version) != (skill_id, version)
+        ]
+        self._by_id[skill_id] = [
+            item for item in self._by_id[skill_id] if item.version != version
+        ]
+        if not self._by_tool[contract.tool_name]:
+            del self._by_tool[contract.tool_name]
+        if not self._by_id[skill_id]:
+            del self._by_id[skill_id]
 
 
 REGISTRY = L0SkillRegistry()

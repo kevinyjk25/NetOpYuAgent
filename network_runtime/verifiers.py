@@ -10,7 +10,7 @@ from dsh_adapter.backend import BackendSession
 
 from .contracts import Evidence, PreparedPlan, sha256_json, utc_now
 from .evidence import config_matches, failed_output, render, typed_evidence
-from .policies import ToolContract
+from .policies import ToolContract, project_arguments
 
 
 @dataclass(frozen=True)
@@ -88,6 +88,17 @@ def _result(evidence: Evidence, passed: bool, error: str | None = None) -> Verif
     return VerificationResult((evidence,), passed, error=error)
 
 
+def _contains_expected(observed: object, expected: object) -> bool:
+    if isinstance(expected, dict):
+        return isinstance(observed, dict) and all(
+            key in observed and _contains_expected(observed[key], value)
+            for key, value in expected.items()
+        )
+    if isinstance(expected, list):
+        return observed == expected
+    return observed == expected
+
+
 async def verify_operation(
     backend: BackendSession, plan: PreparedPlan, contract: ToolContract, result: str | None,
 ) -> VerificationResult:
@@ -103,6 +114,36 @@ async def verify_operation(
             False, internal_rollback=True, error="tool performed automatic rollback",
         )
     return await REGISTRY.verify(VerificationContext(backend, plan, contract, rendered))
+
+
+@REGISTRY.register("structured-state-v1")
+async def _structured_state(context: VerificationContext) -> VerificationResult:
+    """Verify a provider-neutral JSON desired state with an independent read."""
+    plan, contract = context.plan, context.contract
+    tool_name = contract.verification_tool or contract.preflight_tool
+    if not tool_name or tool_name not in context.backend.callables:
+        return _result(
+            _adapter_evidence(plan, context.result, False, "verification observation exists"),
+            False, "structured verification observation is unavailable",
+        )
+    fields = contract.verification_fields or contract.preflight_fields
+    arguments = project_arguments(plan.arguments, fields)
+    output = render(await context.backend.invoke_observation(tool_name, arguments))
+    value = typed_evidence(tool_name, output)
+    expected = dict((plan.intent_spec or {}).get("desired_state") or {})
+    observed = value.get("facts") or {}
+    passed = not failed_output(output) and _contains_expected(observed, expected)
+    evidence = Evidence(
+        evidence_type="postcondition", source=tool_name,
+        target=str(arguments), observed_at=utc_now(), value=value,
+        passed=passed,
+        predicate="fresh typed state contains the immutable L0 desired state",
+        expected=expected,
+    )
+    return _result(
+        evidence, passed,
+        None if passed else "fresh provider state differs from the approved L0 desired state",
+    )
 
 
 @REGISTRY.register("device-config")

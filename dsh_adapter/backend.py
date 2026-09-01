@@ -49,9 +49,9 @@ class BackendSession:
             source.startswith("mcp:") or source.startswith("openapi")
         ):
             if source.startswith("openapi") and contract.provider_identity == "openapi-unpinned":
-                from network_runtime.provider_release import ProviderReleaseError
+                from network_runtime.capabilities import CapabilityAdmissionError
 
-                raise ProviderReleaseError(
+                raise CapabilityAdmissionError(
                     "enforced OpenAPI Provider admission requires a deployment-owned provider_identity"
                 )
             evidence = self._provider_admission_gate.admit(
@@ -385,9 +385,18 @@ def _external_action_type(name: str) -> str:
 
 async def open_backend(profile_id: str = "lan") -> BackendSession:
     mode = resolve_backend_mode()
-    from network_runtime.provider_release import provider_admission_from_environment
+    # Provider release/supply-chain qualification is frozen future engineering.
+    # Keep it outside the prototype dependency graph unless a caller opts in
+    # explicitly. The default EnsuredSkill path has no import-time dependency
+    # on that productization surface.
+    admission_mode = os.environ.get(
+        "NETOPYU_PROVIDER_ADMISSION", "disabled",
+    ).strip().lower()
+    provider_admission = None
+    if admission_mode not in {"", "disabled", "off", "0"}:
+        from network_runtime.provider_release import provider_admission_from_environment
 
-    provider_admission = provider_admission_from_environment()
+        provider_admission = provider_admission_from_environment()
     if mode == "mock":
         from profiles import load_profile
 

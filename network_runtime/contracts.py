@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Any
@@ -123,9 +123,51 @@ class Evidence:
     passed: bool | None = None
     predicate: str | None = None
     expected: Any = None
+    semantic_type: str | None = None
+    source_capability: str | None = None
+    scope: tuple[str, ...] = ()
+    collector_identity: str | None = None
+    collector_digest: str | None = None
+    associated_action: str | None = None
+    associated_hypothesis: str | None = None
+    parent_evidence_ids: tuple[str, ...] = ()
+    evidence_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        value = asdict(self)
+        # Keep old persisted-plan hashes readable while allowing new plans to
+        # bind full EnsuredSkill provenance. Empty extension fields are not
+        # serialized into legacy evidence records.
+        for key in (
+            "semantic_type", "source_capability", "scope", "collector_identity", "collector_digest",
+            "associated_action", "associated_hypothesis", "parent_evidence_ids",
+            "evidence_id",
+        ):
+            if value[key] in (None, (), []):
+                value.pop(key)
+        return value
+
+    def bind_provenance(
+        self,
+        *,
+        semantic_type: str,
+        source_capability: str,
+        scope: tuple[str, ...],
+        collector_identity: str,
+        collector_digest: str,
+        associated_action: str,
+        evidence_id: str,
+    ) -> "Evidence":
+        return replace(
+            self,
+            semantic_type=semantic_type,
+            source_capability=source_capability,
+            scope=scope,
+            collector_identity=collector_identity,
+            collector_digest=collector_digest,
+            associated_action=associated_action,
+            evidence_id=evidence_id,
+        )
 
 
 @dataclass(frozen=True)

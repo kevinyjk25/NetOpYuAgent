@@ -44,6 +44,8 @@ class L0PromotionTests(unittest.TestCase):
             "netopyu.io/l0.5-structured-skill/v3",
         )
         self.assertIn("do not guess", " ".join(packet["trustBoundary"]).lower())
+        self.assertEqual(packet["skillPackage"]["gate"], "passed")
+        self.assertEqual(packet["skillPackage"]["executionBoundary"].split()[0], "Bundled")
 
     def test_l05_is_structured_human_readable_and_source_bound(self) -> None:
         spec = build_l05_spec(
@@ -67,6 +69,52 @@ class L0PromotionTests(unittest.TestCase):
         )
         self.assertIn("workflow:", l05_yaml(spec))
 
+    def test_prompt_discloses_referenced_scripts_without_executing_them(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "url1-network-access"
+            root.mkdir()
+            source = SKILL.read_text(encoding="utf-8").replace(
+                "  returns: Verified access state or verified restoration state",
+                "  returns: Verified access state or verified restoration state\n"
+                "  effect-runtime-script-roles: scripts/apply.py=provider_adapter",
+            )
+            source += "\n\nUse [the provider rule](references/provider.md) and `scripts/apply.py`.\n"
+            root.joinpath("SKILL.md").write_text(source, encoding="utf-8")
+            root.joinpath("references").mkdir()
+            root.joinpath("references", "provider.md").write_text(
+                "Write response is not success evidence.\n", encoding="utf-8",
+            )
+            root.joinpath("scripts").mkdir()
+            marker = root / "executed"
+            root.joinpath("scripts", "apply.py").write_text(
+                f"from pathlib import Path\nPath({str(marker)!r}).write_text('bad')\n",
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(PromotionError, "trust gate blocked"):
+                promotion_prompt(skill_path=root / "SKILL.md", capability_catalog_path=CAPABILITIES)
+            with self.assertRaisesRegex(PromotionError, "Capability binding is invalid"):
+                promotion_prompt(
+                    skill_path=root / "SKILL.md",
+                    capability_catalog_path=CAPABILITIES,
+                    bound_scripts=["scripts/apply.py=unknown.effect"],
+                )
+            packet = json.loads(promotion_prompt(
+                skill_path=root / "SKILL.md",
+                capability_catalog_path=CAPABILITIES,
+                bound_scripts=[
+                    "scripts/apply.py=rest.url1.network-access.grant",
+                ],
+            ))
+            self.assertFalse(marker.exists())
+            self.assertEqual(packet["schema"], "netopyu.io/l0-promotion-prompt/v3")
+            self.assertEqual(
+                {item["path"] for item in packet["skillPackage"]["resources"]},
+                {"references/provider.md", "scripts/apply.py"},
+            )
+            self.assertTrue(all(
+                item["executable"] is False
+                for item in packet["skillPackage"]["resources"]
+            ))
     def test_missing_or_drifted_exact_intent_fails_closed(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "url1-network-access"
@@ -409,6 +457,11 @@ class L0PromotionTests(unittest.TestCase):
                 ["L1", "L0.5", "L0-authoring", "L0-compiled"],
             )
             self.assertTrue((proposal / "02-L0.5.yaml").is_file())
+            self.assertEqual(
+                trajectory["sourcePackage"]["digest"],
+                json.loads((proposal / "report.json").read_text(encoding="utf-8"))
+                ["skillPackage"]["packageDigest"],
+            )
             reviewed = review_promotion(
                 proposal_directory=proposal, reviewer="network-reviewer",
                 decision="approve", reason="schema and rollback reviewed",
@@ -418,6 +471,33 @@ class L0PromotionTests(unittest.TestCase):
                 review_promotion(
                     proposal_directory=proposal, reviewer="second-reviewer",
                     decision="reject", reason="late decision",
+                )
+
+    def test_packaged_references_are_digest_bound_and_tamper_evident(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "url1-network-access"
+            root.mkdir()
+            root.joinpath("references").mkdir()
+            root.joinpath("SKILL.md").write_text(
+                SKILL.read_text(encoding="utf-8")
+                + "\n\nSee [the provider rule](references/provider.md).\n",
+                encoding="utf-8",
+            )
+            root.joinpath("references", "provider.md").write_text(
+                "Write response is not verification.\n", encoding="utf-8",
+            )
+            proposal = Path(directory) / "proposal"
+            package_promotion(
+                skill_path=root / "SKILL.md", candidate_path=CANDIDATE,
+                capability_catalog_path=CAPABILITIES, output_directory=proposal,
+            )
+            archived = proposal / "01-L1-package" / "references" / "provider.md"
+            self.assertTrue(archived.is_file())
+            archived.write_text("tampered\n", encoding="utf-8")
+            with self.assertRaisesRegex(PromotionError, "file integrity check failed"):
+                review_promotion(
+                    proposal_directory=proposal, reviewer="reviewer",
+                    decision="approve", reason="must not pass",
                 )
 
     def test_tampered_proposal_cannot_be_reviewed(self) -> None:

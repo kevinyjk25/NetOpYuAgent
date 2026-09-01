@@ -2,9 +2,11 @@
 
 ## 中文
 
+> **状态：`frozen_future_engineering`。** Provider release、签名、SBOM、部署 admission 和组织供应链全部后置；本文不属于当前核心 Runtime 或 ES-P0 完成条件。
+
 ### 1. 状态与边界
 
-P1.4-B-ready 已提供本地可运行的 Provider release reference：严格 Manifest、独立 Publisher/Qualifier/Deployer Ed25519 角色、仓库外 JSONL 进程资格协议、固定 9 项故障套件、真实进程重启恢复、OCI image/SBOM/provenance 必需 digest、部署控制器证明、SQLite 发布状态机、兼容性门禁、显式 promote/rollback/deprecate、hash-chain lifecycle audit，以及 Runtime admission。PreparedPlan schema v9 会同时绑定 Provider identity、release、manifest、qualification、deployment、schema、Capability 和 L0 contract。
+P1.4-B-ready 已提供本地可运行的 Provider release reference：严格 Manifest、独立 Publisher/Qualifier/Deployer Ed25519 角色、仓库外 JSONL 进程资格协议、固定 9 项故障套件、真实进程重启恢复、OCI image/SBOM/provenance 必需 digest、部署控制器证明、SQLite 发布状态机、兼容性门禁、显式 promote/rollback/deprecate、hash-chain lifecycle audit，以及 Runtime admission。schema v9 首次绑定 Provider identity、release、manifest、qualification、deployment、schema、Capability 和 L0 contract，当前 PreparedPlan schema v10 完整继承这些证据。
 
 它不等于生产供应链认证。测试会把 fixture 复制到仓库外临时目录并以独立进程运行，但 fixture 源码仍随本仓库维护；当前密钥临时生成，artifact 仅验证 exact digest 映射，尚未验证真实 OCI registry、SBOM 内容或 SLSA provenance，也没有组织独立仓库/CI/实验室、HSM/企业签名根和外部 WORM 审计。P1.4-B 必须在真实组织边界完成这些现场资格步骤。
 
@@ -193,7 +195,7 @@ export NETOPYU_PROVIDER_RELEASE_DB=/var/lib/netopyu/provider-releases.sqlite
 export NETOPYU_PROVIDER_ENVIRONMENT=production
 ```
 
-每个 MCP server 的部署配置增加 `release_provider_id`。OpenAPI 还必须配置部署拥有的 `provider_identity`，不能使用默认 unpinned identity。Admission 缺配置、无 active release、缺少/过期/不匹配 deployment、签名过期/撤销、资格过期、artifact/identity/schema/result/L0 不同，都会在 Provider 调用前失败关闭。schema-v9 plan 固定 deployment digest；审批后即使 release 不变但部署证明改变，也会在 Provider 调用前以 `precondition_changed` 零写入终止。
+每个 MCP server 的部署配置增加 `release_provider_id`。OpenAPI 还必须配置部署拥有的 `provider_identity`，不能使用默认 unpinned identity。Admission 缺配置、无 active release、缺少/过期/不匹配 deployment、签名过期/撤销、资格过期、artifact/identity/schema/result/L0 不同，都会在 Provider 调用前失败关闭。schema v9 引入且当前 schema v10 继承的 plan 固定 deployment digest；审批后即使 release 不变但部署证明改变，也会在 Provider 调用前以 `precondition_changed` 零写入终止。
 
 SQLite hash chain 只提供本地篡改检测；攻击者若能重写数据库和链头仍可伪造。P1.7 必须把 release event/head 复制到外部 append-only/WORM 审计系统。
 
@@ -201,9 +203,11 @@ SQLite hash chain 只提供本地篡改检测；攻击者若能重写数据库�
 
 ## English
 
+> **Status: `frozen_future_engineering`.** Provider release, signatures, SBOM, deployment admission, and organizational supply-chain work are deferred and are not part of the core Runtime or ES-P0 exit criteria.
+
 ### 1. Status and boundary
 
-P1.4-B-ready provides a runnable local release reference with strict Manifests, independent Publisher/Qualifier/Deployer Ed25519 roles, a repository-external JSONL process protocol, the fixed nine-case suite with real process restart, required OCI-image/SBOM/provenance digests, deployment-controller attestations, durable lifecycle state, compatibility gates, hash-chained events, and Runtime admission. PreparedPlan schema v9 additionally binds the exact deployment digest.
+P1.4-B-ready provides a runnable local release reference with strict Manifests, independent Publisher/Qualifier/Deployer Ed25519 roles, a repository-external JSONL process protocol, the fixed nine-case suite with real process restart, required OCI-image/SBOM/provenance digests, deployment-controller attestations, durable lifecycle state, compatibility gates, hash-chained events, and Runtime admission. Schema v9 introduced the exact deployment binding and current PreparedPlan schema v10 retains it.
 
 This is not production certification. Tests copy a fixture outside the repository and execute it as a separate process, but its source remains repository-owned. Keys are ephemeral and artifacts are digest fixtures rather than OCI registry, SBOM-content, or SLSA verification. P1.4-B still requires an independently owned Provider repository, organizational CI/lab and signing/HSM roots, real artifact services, and external WORM audit.
 
@@ -211,7 +215,7 @@ This is not production certification. Tests copy a fixture outside the repositor
 
 The Publisher signs exact artifacts and Capability contracts. An independent Qualifier signs a nine-of-nine report. A separate Deployer signs a short-lived observation of the exact release, artifact map, and environment. Trust keys are role-, provider-, time-, and revocation-scoped, and key material cannot cross the three roles. Deployment configuration—not MCP tool self-assertion—selects `release_provider_id`.
 
-Admission requires discovery and the active deployment proof to match the release exactly. Schema-v9 plans bind the deployment digest, so even same-release redeployment drift fails before Provider invocation.
+Admission requires discovery and the active deployment proof to match the release exactly. Current schema-v10 plans retain the deployment digest introduced in schema v9, so even same-release redeployment drift fails before Provider invocation.
 
 ### 3. Operation
 

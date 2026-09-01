@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT"
+
+PYTHON="${NETOPYU_PYTHON:-$ROOT/.venv/bin/python}"
+exec "$PYTHON" -m evaluation.ensured_skill_runner "$@"

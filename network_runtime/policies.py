@@ -19,6 +19,8 @@ class ToolContract:
     requires_trusted_mcp: bool = False
     capability_id: str | None = None
     allowed_provider_kinds: tuple[str, ...] = ()
+    verification_tool: str | None = None
+    verification_fields: tuple[str, ...] = ()
 
 
 _CONTRACTS: dict[str, ToolContract] = {
@@ -138,6 +140,30 @@ _CONTRACTS: dict[str, ToolContract] = {
 def reviewed_contracts() -> dict[str, ToolContract]:
     """Return a copy for startup checks, audits and contract-coverage tests."""
     return dict(_CONTRACTS)
+
+
+def register_reviewed_contract(tool_name: str, contract: ToolContract) -> None:
+    """Register one adapter-supplied execution contract, idempotently.
+
+    Providers may add domain contracts during their trusted startup path, but
+    they cannot replace an existing reviewed binding.  This keeps the Runtime
+    core transport/domain neutral without allowing MCP self-description to
+    grant execution authority.
+    """
+    existing = _CONTRACTS.get(tool_name)
+    if existing is not None and existing != contract:
+        raise RuntimeError(f"reviewed execution contract already exists for {tool_name}")
+    _CONTRACTS[tool_name] = contract
+
+
+def unregister_reviewed_contract(tool_name: str, contract: ToolContract) -> None:
+    """Remove an exact adapter-owned registration without replacing authority."""
+    existing = _CONTRACTS.get(tool_name)
+    if existing is None:
+        return
+    if existing != contract:
+        raise RuntimeError(f"cannot remove a different reviewed contract for {tool_name}")
+    del _CONTRACTS[tool_name]
 
 
 def resolve_contract(

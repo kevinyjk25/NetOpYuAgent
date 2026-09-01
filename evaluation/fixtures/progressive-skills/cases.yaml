@@ -1,0 +1,80 @@
+schema: effect-runtime.io/anthropic-skill-fixture-suite/v1
+modelBaseline: qwen3.5:9b
+claimBoundary: Structural fixture coverage is not an LLM accuracy or production-success claim.
+cases:
+  - id: referenced-inventory-read
+    domain: asset-inventory
+    skillPath: referenced-inventory-read
+    features: [read-only, reference, progressive-disclosure]
+    risk: low
+    effectSemantics: read_only
+    expectedPackageGate: passed
+  - id: approval-access-grant
+    domain: iam
+    skillPath: approval-access-grant
+    features: [approval, reversible-write, verification, compensation]
+    risk: medium
+    effectSemantics: reversible
+    expectedPackageGate: passed
+  - id: conditional-ticket-triage
+    domain: service-desk
+    skillPath: conditional-ticket-triage
+    features: [condition-branch, clarification, multi-step]
+    risk: low
+    effectSemantics: read_only
+    expectedPackageGate: passed
+  - id: multistep-cloud-maintenance
+    domain: cloud
+    skillPath: multistep-cloud-maintenance
+    features: [multi-step, approval, independent-verification, rollback, asset]
+    risk: high
+    effectSemantics: reversible
+    expectedPackageGate: passed
+  - id: scripted-data-export
+    domain: data
+    skillPath: scripted-data-export
+    features: [script, reference, deterministic-transformer, read-only]
+    risk: low
+    effectSemantics: read_only
+    expectedPackageGate: passed
+  - id: scripted-network-change
+    domain: network
+    skillPath: scripted-network-change
+    features: [script, reference, approval, multi-step, verification, compensation]
+    risk: high
+    effectSemantics: reversible
+    boundScripts:
+      - scripts/apply.py=network.interface.description.set
+      - scripts/rollback.py=network.interface.restore
+    expectedPackageGate: passed
+  - id: composite-employee-onboarding
+    domain: cross-system
+    skillPath: composite-employee-onboarding
+    features: [condition-branch, multi-step, l1-l0-composition, reference, approval]
+    risk: medium
+    effectSemantics: reversible
+    expectedPackageGate: passed
+  - id: unbound-critical-purge
+    domain: data
+    skillPath: unbound-critical-purge
+    features: [script, critical, irreversible, negative-gate]
+    risk: critical
+    effectSemantics: irreversible
+    expectedPackageGate: blocked
+    expectedFinding: SCRIPT_EFFECT_UNBOUND
+  - id: missing-reference
+    domain: generic
+    skillPath: missing-reference
+    features: [reference, negative-gate]
+    risk: low
+    effectSemantics: read_only
+    expectedPackageGate: blocked
+    expectedFinding: RESOURCE_REFERENCE_MISSING
+  - id: unsafe-reference
+    domain: generic
+    skillPath: unsafe-reference
+    features: [reference, path-traversal, negative-gate]
+    risk: low
+    effectSemantics: read_only
+    expectedPackageGate: blocked
+    expectedFinding: RESOURCE_REFERENCE_UNSAFE

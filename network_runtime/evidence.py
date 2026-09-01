@@ -173,6 +173,22 @@ def typed_evidence(tool_name: str, rendered: str) -> dict[str, Any]:
                 "application_endpoint": decoded.get("application_endpoint"),
                 "implementation": decoded.get("implementation"),
             }
+    else:
+        # Domain adapters may expose typed JSON state without adding parser
+        # code to the Runtime core.  Volatile transport fields are excluded so
+        # exact snapshot, verification and compensation comparisons remain
+        # stable and meaningful.
+        try:
+            decoded = json.loads(rendered)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, dict):
+            facts = {
+                key: value for key, value in decoded.items()
+                if key not in {
+                    "correlation_id", "observed_at", "simulation", "message",
+                }
+            }
     return {
         "digest": sha256_json(rendered), "bytes": len(rendered), "facts": facts, **extra,
     }

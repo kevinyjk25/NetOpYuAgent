@@ -2,6 +2,8 @@
 
 ## 中文
 
+> **状态：`frozen_future_engineering`。** 本文仅保留历史企业接入参考，不属于当前 EnsuredSkill 原型架构、完成条件或价值证据；默认 Runtime 不加载该扩展。
+
 ### 1. 状态与边界
 
 P1.3-B1 已提供可运行的 OIDC/JWKS、Gateway sender attestation、HTTP PDP 和 HTTP Change Authority 参考 Adapter。B2-ready 接入包进一步加入按 Harness session 动态签发 Gateway attestation、显式 CA/mTLS transport、无泄密配置 Doctor 和无网络效果的 live contract check。它们已用真实 RS256/JWKS/HTTP 和本地证书完成资格测试，但没有连接具体企业系统，因此仍不是 B2 生产认证。
@@ -115,6 +117,8 @@ scripts/netopyu-dsh retirement
 ---
 
 ## English
+
+> **Status: `frozen_future_engineering`.** This is retained as historical enterprise-integration reference only. It is not active prototype architecture, an exit criterion, or value evidence, and the default Runtime does not load it.
 
 ### 1. Status and boundary
 

@@ -81,6 +81,10 @@ def main(argv: list[str] | None = None) -> int:
     prompt_command.add_argument("--skill", required=True)
     prompt_command.add_argument("--capabilities", required=True)
     prompt_command.add_argument("--l05")
+    prompt_command.add_argument(
+        "--bound-script", action="append", default=[], metavar="PATH=CAPABILITY_ID",
+        help="package script path plus trusted Catalog Capability binding",
+    )
     prompt_command.add_argument("--output")
 
     for name, help_text in (
@@ -92,6 +96,10 @@ def main(argv: list[str] | None = None) -> int:
         command.add_argument("--candidate", required=True)
         command.add_argument("--capabilities", required=True)
         command.add_argument("--l05")
+        command.add_argument(
+            "--bound-script", action="append", default=[], metavar="PATH=CAPABILITY_ID",
+            help="package script path plus trusted Catalog Capability binding",
+        )
         command.add_argument(
             "--dependencies", action="append", default=[],
             help="L0 manifest file/directory required by a derived/composite candidate",
@@ -418,6 +426,7 @@ def main(argv: list[str] | None = None) -> int:
             value = promotion_prompt(
                 skill_path=args.skill, capability_catalog_path=args.capabilities,
                 l05_path=args.l05,
+                bound_scripts=args.bound_script,
             )
             if args.output:
                 destination = Path(args.output).expanduser().resolve()
@@ -433,6 +442,7 @@ def main(argv: list[str] | None = None) -> int:
                 capability_catalog_path=args.capabilities,
                 dependency_paths=args.dependencies,
                 l05_path=args.l05,
+                bound_scripts=args.bound_script,
             )
             print(json.dumps(assessment.report, ensure_ascii=False, indent=2, sort_keys=True))
             return 0 if assessment.report["status"] == "ready_for_review" else 1
@@ -442,6 +452,7 @@ def main(argv: list[str] | None = None) -> int:
                 capability_catalog_path=args.capabilities,
                 dependency_paths=args.dependencies, output_directory=args.output,
                 l05_path=args.l05,
+                bound_scripts=args.bound_script,
             ), ensure_ascii=False, indent=2, sort_keys=True))
             return 0
         if args.command == "promote-review":

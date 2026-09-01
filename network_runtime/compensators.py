@@ -70,6 +70,47 @@ async def compensate_operation(
     ))
 
 
+@REGISTRY.register("structured-snapshot-v1")
+async def _restore_structured_snapshot(context: CompensationContext) -> CompensationResult:
+    """Restore an adapter-owned snapshot and independently prove equality."""
+    plan, contract = context.plan, context.contract
+    if not contract.rollback_tool or not contract.preflight_tool or not plan.preflight:
+        raise RuntimeError("structured snapshot compensation contract is incomplete")
+    rollback_args = project_arguments(plan.arguments, contract.rollback_fields)
+    result = render(await asyncio.wait_for(
+        context.backend.invoke_effect(
+            contract.rollback_tool, rollback_args, plan=plan, phase="compensate",
+        ), timeout=context.timeout_seconds,
+    ))
+    if failed_output(result):
+        raise RuntimeError(result)
+    read_args = project_arguments(plan.arguments, contract.preflight_fields)
+    read_result = render(await context.backend.invoke_observation(
+        contract.preflight_tool, read_args,
+    ))
+    before = plan.preflight[0].value
+    after = typed_evidence(contract.preflight_tool, read_result)
+    restored = same_snapshot(before, after)
+    evidence = (
+        Evidence(
+            evidence_type="rollback", source=contract.rollback_tool,
+            target=canonical_json(rollback_args), observed_at=utc_now(),
+            value={"digest": sha256_json(result), "facts": {"restore_accepted": True}},
+            passed=True, predicate="trusted provider accepted exact snapshot restore",
+            expected=True,
+        ),
+        Evidence(
+            evidence_type="rollback_postcondition", source=contract.preflight_tool,
+            target=canonical_json(read_args), observed_at=utc_now(), value=after,
+            passed=restored, predicate="fresh typed state exactly equals approved preflight",
+            expected=before,
+        ),
+    )
+    if not restored:
+        raise RuntimeError("snapshot restore completed but exact preflight state was not restored")
+    return CompensationResult(result, evidence)
+
+
 @REGISTRY.register("device-config-snapshot-v1")
 async def _restore_device_snapshot(context: CompensationContext) -> CompensationResult:
     """Restore the provider-owned execution snapshot and prove exact state."""
