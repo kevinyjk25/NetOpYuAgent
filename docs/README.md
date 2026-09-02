@@ -10,6 +10,7 @@
 |---|---|
 | 当前项目以什么理念、边界和完成判据为准 | [EnsuredSkill 原型权威准则](ENSUREDSKILL-PROTOTYPE.md) |
 | 项目是什么、有什么能力、如何开始 | [README](../README.md) |
+| L1、L0.5、L0、Runtime 怎样交互，结果怎样解释和定位 | [Skill 与系统交互全景](SKILL-SYSTEM-INTERACTION.md) |
 | 当前做到哪一步、还缺什么 | [项目进展与路线图](PROJECT-STATUS.md) |
 | ES-P0 后遵循什么研究原则、按什么顺序推进 | [后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md) |
 | 当前论文如何陈述系统与证据 | [中文论文 v0.4](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md) / [English paper v0.4](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md) |
@@ -27,6 +28,7 @@
 
 #### Agent、L1 与模型
 
+- [Skill 与系统交互全景](SKILL-SYSTEM-INTERACTION.md)：离线 authoring、在线执行、路由分支、终态和证据定位的统一入口。
 - [真实 LLM Agent 用例](AGENTIZED-USE-CASES.md)：DSH 页面 Prompt、Tool 链和外部 MCP 交互。
 - [L1 模型资格](l1-model-qualification.md)：固定评测集、模型门槛和解释边界。
 - [LLM 收敛评测](convergence-evaluation.md)：已解决、部分解决和未解决的问题。
@@ -75,6 +77,7 @@
 ### 文档权威边界
 
 - `README.md` 只维护项目设计、能力、优势、性能、场景和入口，不记录完整阶段历史。
+- `SKILL-SYSTEM-INTERACTION.md` 是 Skill 层级、authoring/执行双生命周期、用户可见结果和解释路径的统一说明；其他设计文档引用而不另造口径。
 - `docs/PROJECT-STATUS.md` 是 Done、To-do 和阶段边界的唯一汇总来源。
 - `ARCHITECTURE.md`、`HLD.md`、`LLD.md`、`SSD.md` 分别拥有架构、组件、实现和安全设计事实；同一细节不在 README 重复展开。
 - 自动生成的评测报告只由对应命令刷新，不能手工把固定集结果改写成生产概率。
@@ -90,6 +93,7 @@
 | Question | Primary document |
 |---|---|
 | What is the project and how do I start? | [README](../README.md) |
+| How do L1, L0.5, L0, and the Runtime interact, and how are outcomes explained? | [Skill-to-system interaction](SKILL-SYSTEM-INTERACTION.md) |
 | What is complete and what remains? | [Project status and roadmap](PROJECT-STATUS.md) |
 | What governs post-ES-P0 research? | [Research instruction v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md) |
 | How does the current paper state the system and evidence? | [English paper v0.4](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md) / [Chinese paper v0.4](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md) |
@@ -105,7 +109,7 @@
 
 ### Topic index
 
-- Agent and L1: [Agent use cases](AGENTIZED-USE-CASES.md), [model qualification](l1-model-qualification.md), and [convergence evaluation](convergence-evaluation.md).
+- Agent and L1: [Skill-to-system interaction](SKILL-SYSTEM-INTERACTION.md), [Agent use cases](AGENTIZED-USE-CASES.md), [model qualification](l1-model-qualification.md), and [convergence evaluation](convergence-evaluation.md).
 - L0 and Promotion: [general progressive determinization](progressive-determinization.md), [general Effect Runtime A/B](general-effect-ab.md), [L0 v2 design](l0-v2-design.md), [Runtime migration](l0-v2-runtime-migration.md), [L1-to-L0 Promotion](l1-to-l0-promotion.md), [Workbench](p20-promotion-workbench.md), [Research Freeze and forward qualification](promotion-forward-qualification.md), and the [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
 - Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), [ES-P1-Wild role-separated simulation](ES-P1-WILD-SIMULATED-RESULTS.md), the [synthetic holdout workflow](SYNTHETIC-HOLDOUT.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md), the [English paper](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md), the [Chinese paper](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
 - Frozen future-engineering reference: [enterprise control plane](enterprise-control-plane.md), [provider supply chain](provider-supply-chain.md), [Capability Catalog/Evidence Plane](p21-p22-control-planes.md), the historical [L1 Decision Plane](l1-decision-plane.md), and the [P1.9 canary runbook](p19-canary-runbook.md).
@@ -113,4 +117,4 @@
 
 ### Source-of-truth rules
 
-`README.md` is the concise product entry. `docs/PROJECT-STATUS.md` is the only phase summary. The architecture, HLD, LLD, and SSD own their respective design facts. Generated evaluation reports must be refreshed by their commands and must not convert fixed-set evidence into a production probability. `artifacts/` contains run evidence, while versioned `data/` files are baselines or test inputs rather than disposable output. Project-level documents keep Chinese before English; the structurally matched Chinese and English submission drafts remain separate for independent editing and review.
+`README.md` is the concise product entry. `SKILL-SYSTEM-INTERACTION.md` is the single lifecycle and outcome-explanation guide. `docs/PROJECT-STATUS.md` is the only phase summary. The architecture, HLD, LLD, and SSD own their respective design facts. Generated evaluation reports must be refreshed by their commands and must not convert fixed-set evidence into a production probability. `artifacts/` contains run evidence, while versioned `data/` files are baselines or test inputs rather than disposable output. Project-level documents keep Chinese before English; the structurally matched Chinese and English submission drafts remain separate for independent editing and review.

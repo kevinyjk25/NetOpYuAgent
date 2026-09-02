@@ -1,5 +1,7 @@
 # NetOpYuAgent 架构 / Architecture
 
+> 架构基线 / Architecture baseline: 2026-09-02。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
+
 ## 中文
 
 ### 1. 权威架构
@@ -50,6 +52,54 @@ User Intent
 ```
 
 产品原型不允许 L1/LLM 直接写 Provider。L1→L0 转换失败、证据不足或置信度不足时，只能读、追问、生成 proposal、请求人工处理或拒绝。原生 Agent 写入仅存在于隔离的本地 A/B evaluator，作为实验 Control，不是产品 fallback。
+
+#### 3.1 Skill authoring 与请求执行是两条不同链
+
+```mermaid
+flowchart TB
+    subgraph OFF[离线 Authoring；不持有执行权限]
+      L1[L1 SKILL.md] --> L05[L0.5 structured proposal]
+      CAT[Trusted Capability Catalog] --> L05
+      L05 --> L0A[L0 authoring]
+      L0A --> G[Schema + semantic coverage + safety gate]
+      G --> HR[Human review / publish]
+      HR --> REG[Active L0 Registry]
+    end
+    subgraph ON[在线 Request；只有 Runtime 持有效果权限]
+      U[User] --> H[DSH/LLM/L1]
+      H --> CP[Candidate Plan]
+      CP --> REG
+      REG --> PP[Immutable PreparedPlan]
+      PP --> TX[Typed Graph transaction]
+      TX --> TE[Verified terminal envelope]
+    end
+```
+
+L0.5 和未激活 L0 都是 review artifact，不在在线请求中临场取得执行权。正常产品路径使用已激活 L0；评测中的 Gold-blind auto route 用来比较“是否引入 Runtime”，不得反向改变 Registry 或真值。
+
+#### 3.2 在线路由决策
+
+| 候选 | 权威处理 | 允许结果 |
+|---|---|---|
+| Observation/read | Observation Policy、Capability/Schema、参数与访问上下文校验 | typed read result；无写能力 |
+| 参数缺失/目标歧义 | 参数编译器失败关闭 | `clarification_required` |
+| write + 唯一 active L0 | 编译不可变计划并进入 Evidence/Guard/Risk/Approval/Transaction | verified commit、verified rollback 或 escalate |
+| write 无 active L0 或转换不合格 | 不创建可执行计划 | clarify/proposal/ask-human/reject |
+| 隔离实验 Control | evaluator 直接驱动仿真 Effect | 只用于 A/B 测量，不得导入产品 Adapter |
+
+因此“原生 L1 fallback”只适用于无 Effect 的读取/解释；它绝不意味着不合格写操作绕过 Runtime。
+
+#### 3.3 解释性是执行模型的一部分
+
+解释不是让 LLM 事后编一段理由，而是保存可追踪的结构事实：
+
+- Authoring：L1 原句 → L0.5 路径 → L0 路径的 requirement-level mapping、状态、置信/丢失告警、修正位置和逐阶段 digest；
+- Planning：规范化参数与 provenance、exact L0/Provider/Schema、Evidence、Risk、Approval、Graph 与 plan hash；
+- Execution：哈希链事件、每个 Typed Graph 节点的输入/输出 Evidence、分阶段时延和明确终态；
+- Provenance：Evidence → Observation → Capability/Collector → Network Object 的最小化 DAG；
+- Harness boundary：只接受 Runtime terminal envelope，Provider receipt 只保留摘要，不能冒充成功。
+
+完整对象关系、示例和状态解释见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)。
 
 ### 4. 核心源码边界
 
@@ -149,11 +199,17 @@ Every prototype mutation follows Candidate Plan → active L0 contract → immut
 
 An unqualified L1-to-L0 translation may only read, clarify, propose, ask a human, or reject. Native-Agent mutation exists only inside the isolated local A/B evaluator as the control arm; it is never a product fallback.
 
+Authoring and execution are separate lifecycles. Offline authoring binds untrusted L1 text to a trusted Capability Catalog, produces review-only L0.5 and L0 artifacts, runs deterministic semantic and safety gates, and requires explicit human publication into the active Registry. Online execution consumes only active L0 contracts: a Candidate Plan becomes an immutable PreparedPlan and a journal-gated Typed Graph. L0.5, confidence, and an unreviewed L0 cannot acquire effect authority at request time.
+
+Read observations pass access, capability, schema, and parameter checks without effect authority. A missing or ambiguous input clarifies. A qualified write follows the unique Runtime path. An unqualified write may clarify, propose, ask a human, or reject; native L1 fallback remains read-only. The [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md) provides the complete lifecycle and terminal-state interpretation.
+
 ### 4. Dependencies and invariants
 
 The Runtime depends on L0 contracts and a domain-neutral Capability gateway, never on DSH UI, prompts, model SDKs, or evaluation code. L1 and providers cannot bypass the Runtime. A journal-backed Typed Graph scheduler gates every current transaction branch and records crash-boundary uncertainty without replaying Effect. Evidence must be typed, fresh, scoped, integrity-checked, and action-bound; the inspection view projects Evidence → Observation → Capability/Collector → Object lineage with hashed collector/object identifiers. Approval and execution share an immutable plan digest. Postconditions require independent observations. Outcome uncertainty enters reconciliation, not blind retry. Compensation and recovery verification are explicit.
 
 Enterprise identity, provider supply-chain admission, A2A, trajectory learning, and the historical L1 shadow/canary path are lazy optional extensions rather than core imports. DSH retrieval parity lives in `evaluation/`, uses memory-only state, and is never imported by the product adapter.
+
+Explainability is structural rather than model-authored: authoring retains requirement-level L1→L0.5→L0 mappings and digests; plans bind normalized arguments, provenance, contracts, providers, evidence, risk, approval, and graph hashes; execution retains hash-chained events, node evidence, stage latency, and an Evidence-to-Object provenance DAG. Only the Runtime terminal envelope crosses back to the Harness as an execution result.
 
 ### 5. Frozen engineering
 

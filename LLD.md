@@ -1,5 +1,7 @@
 # EnsuredSkill 低层设计 / Low-Level Design
 
+> 实现基线 / Implementation baseline: 2026-09-02。字段和状态以当前源码为准；阶段结论以[项目进展](docs/PROJECT-STATUS.md)为准。
+
 ## 中文
 
 ### 1. 实现范围
@@ -81,6 +83,20 @@ EXECUTE | ASK_HUMAN | REJECT
 
 冻结扩展的 release/deployment 或 L1 Decision provenance 只在显式使用时加入；不是原型核心合同的必需字段。
 
+#### 2.6 从 Harness 到终态的模块追踪
+
+| 阶段 | 入口实现 | 关键输出 |
+|---|---|---|
+| DSH Tool 投影与一次性授权 | `dsh-plugin-netopyu/src/index.js` | read 调用或 plan-bound write grant |
+| Worker 协议桥 | `dsh-plugin-netopyu/src/bridge.js`, `dsh_adapter/worker.py` | 受限 JSON command；不暴露 Provider credential |
+| 参数/L0/计划编译 | `network_runtime/engine.py::prepare` | `read_ready`、`clarification_required`、`rejected` 或 `plan_ready` |
+| 合同与图内核 | `effect_runtime/reliability.py`, `effect_runtime/graph_scheduler.py` | `ReliabilityContract`、`TypedExecutionGraph` 和受控分支 |
+| 一次性事务 | `network_runtime/engine.py::execute` | `ExecutionOutcome` |
+| 状态、事件与恢复 | `network_runtime/contracts.py`, `journal.py`, `graph_runtime.py` | immutable plan、哈希链事件、crash reconciliation |
+| 解释与检查 | `engine.py::inspect`, `provenance.py` | graph summary、stage latency、provenance DAG |
+
+DSH 写 Tool 的 `execute()` 在拿到与 PreparedPlan 绑定的一次性 token 后，先请求 Runtime 签发/验证审批证明，再调用 `runtime-execute`。最终返回给模型的是 `terminal_envelope()`，不是 Actor 的原始结果。
+
 ### 3. Typed Execution Graph
 
 `build_transaction_graph()` 生成固定的 phase DAG：
@@ -124,6 +140,27 @@ execute/verify
 10. 绑定本地 requester/approval policy；
 11. 创建不可变 PreparedPlan 和一次性执行 nonce；
 12. 写入 Journal，返回 `plan_ready` 或明确的 clarification/reject。
+
+请求级分支的等价伪代码：
+
+```text
+if capability.kind == observation:
+    authorize_observation_context()
+    validate_exact_arguments()
+    return invoke_observation()          # never obtains an effect lease
+
+validate_exact_arguments_or_clarify()
+l0 = resolve_one_active_l0_or_reject()
+validate_runtime_projection(l0, provider, verifier, compensator)
+evidence = snapshot_and_precheck()
+require(evidence_contract && guards)
+decision = risk_policy()
+require(decision != REJECT)
+plan = persist_immutable_plan_and_graph()
+return plan_ready(plan, one_shot_nonce)
+```
+
+模型不可将 `clarification_required` 或 `rejected` 改写成可执行请求；修改参数后必须重新调用 prepare 并产生新的 plan hash。
 
 核心默认直接创建本地 `ApprovalControlPlane`。只有显式 `NETOPYU_IDENTITY_MODE=enforced` 时才延迟加载冻结的 enterprise adapter。
 
@@ -173,6 +210,21 @@ L1 SKILL.md
 
 Promotion 记录逐阶段 digest、字段映射、置信度和语义丢失告警。转换模型只建议结构化内容；不可猜测的 Capability、target、precondition、Evidence、Guard、postcondition 和 compensation 必须来自受信 Catalog/显式锚点。低置信、缺引用、扩大权限、弱化 Safety 或缺 verifier/compensator 时不得进入 active Registry。
 
+一个完整 proposal 保存以下可审制品：
+
+```text
+proposal/
+  00-capability-catalog.yaml
+  01-L1-SKILL.md
+  02-L0.5.yaml
+  03-L0-authoring.yaml
+  04-L0-compiled.json
+  trajectory.json
+  report.json
+```
+
+`report.json` 中的 requirement-level coverage 记录 L1 原句、L0.5/L0 JSON path、`preserved/weakened/missing/ambiguous`、解释与 `fix.file/path/hint`。`trajectory.json` 绑定阶段顺序、每个文件摘要和前驱摘要；Workbench 只是该数据的只读交互投影，没有 review、publish、activate 或 execute API。
+
 这条路径不自动从运行轨迹生成 L0。Experience Compilation 保留为未来研究：它必须基于多次真实成功与失败轨迹、聚类、参数抽象、反例验证和独立 Promotion。
 
 ### 7. Provider 接口
@@ -196,10 +248,32 @@ Journal 使用 SQLite 保存不可变 plan 和 append-only event hash chain。�
 |---|---|
 | `verified_success` / COMMIT | 独立 postcondition 成立 |
 | `rejected` / ABORT | 写前合同、Evidence、Guard、Risk 或审批失败 |
-| `rolled_back` / ABORT | Effect 后补偿并证明恢复 |
+| `rollback_verified` / ABORT | Effect 后补偿并证明恢复；任务本身不算成功 |
+| `precondition_changed` / ABORT | 审批后事实漂移，Effect 被阻断 |
+| `expired` / ABORT | 不可变计划在执行前过期 |
 | `manual_intervention_required` / ESCALATE | 结果或恢复无法可靠证明 |
 
 错误对象必须区分参数错误、证据不足、前置漂移、审批错误、执行错误、结果不确定、验证失败和补偿失败；不得将它们折叠为通用 `success=false`。
+
+Harness 获得的终态信封固定为：
+
+```json
+{
+  "contract": "netopyu.effect-runtime-terminal@1.0.0",
+  "terminal": true,
+  "ok": true,
+  "state": "verified_success",
+  "plan_id": "...",
+  "plan_hash": "sha256:...",
+  "summary": "...",
+  "evidence": [],
+  "error": null,
+  "compensation": {"performed": false, "verified": false},
+  "provider_result_digest": "sha256:..."
+}
+```
+
+只有 `state=verified_success` 时 `ok=true`。`provider_result_digest` 保留调用关联性而不把 Provider 文本当作终态事实。详细的人类阅读方法见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)。
 
 ### 9. 测试设计
 
@@ -225,6 +299,8 @@ Journal 使用 SQLite 保存不可变 plan 和 append-only event hash chain。�
 
 Evidence evaluation requires exact semantic type, source capability, scope, associated action, freshness, validity, and payload integrity. Risk consumes scope, blast radius, evidence confidence, reversibility, history, and criticality, and emits only execute, ask-human, or reject. Structural gates always precede scoring.
 
+The concrete request trace is DSH tool projection (`dsh-plugin-netopyu`) → narrow JSON Worker bridge (`dsh_adapter`) → parameter/L0/plan compilation (`NetworkRuntime.prepare`) → domain-neutral contract and graph gates (`effect_runtime`) → one-shot transaction (`NetworkRuntime.execute`) → journal/graph/provenance inspection. The Harness receives `terminal_envelope()`, never a provider result as authoritative success.
+
 ### 2. Plan and transaction
 
 A PreparedPlan binds normalized arguments and provenance, exact L0 and tool contracts, targets/resources/risk, preflight evidence, the typed transaction graph, approval, provider schema identity, TTL, and immutable digests.
@@ -245,6 +321,8 @@ Approval cannot mutate a plan. Execute reopens the provider and revalidates ever
 
 L1-to-L0.5-to-L0 is an offline, review-gated authoring compilation. It records stage digests, semantic mappings, confidence, and loss warnings but cannot activate contracts automatically. Trace-based Experience Compilation remains future research.
 
+Each proposal preserves the trusted Catalog, original L1, L0.5, L0 authoring, compiled candidate, trajectory, and report. Requirement-level coverage links L1 statements to L0.5/L0 paths, classifies preservation or loss, and identifies the exact file/path to revise. The Workbench is a read-only projection and has no publication or execution API.
+
 Providers expose protocol-neutral Observation and Effect capabilities. MCP, REST, NETCONF, CLI, and local callables are adapter choices, not trust decisions.
 
 ### 5. Persistence, testing, and isolation
@@ -252,3 +330,5 @@ Providers expose protocol-neutral Observation and Effect capabilities. MCP, REST
 SQLite stores immutable plans and an append-only event hash chain for local crash recovery. It is not a distributed or WORM guarantee. Tests cover contracts, evidence, guards, risk, state transitions, full transaction paths, fault injection, DSH/Provider integration, paired control/treatment runs, five ablations, and cross-model stability.
 
 Enterprise identity, provider supply-chain admission, and L1 canary binding are lazy optional extensions. The DSH CLI also imports A2A, trajectory learning, and historical L1 shadow only for explicit commands. Retrieval parity now lives in `evaluation/` and uses memory-only state instead of product SQLite. The default prototype path therefore cannot let frozen productization or evaluator code define the reliability kernel.
+
+The only positive terminal state is `verified_success`. `rollback_verified` proves restoration but is not task success; `precondition_changed`, `rejected`, and `expired` are safe stops; `manual_intervention_required` means the target or recovery state remains unproved. The terminal envelope carries plan identity, independent evidence, error, compensation flags, and only a digest of the provider result. See the [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md).

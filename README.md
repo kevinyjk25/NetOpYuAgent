@@ -2,6 +2,8 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
+> 文档状态：2026-09-02。当前已完成 ES-P0 本地证据闭环和 ES-P1-Wild 角色隔离模拟；正式 ES-P1 独立人工 Private Holdout 尚未完成。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
 > **当前权威范围已经重置为研究原型。** 企业身份、Provider 供应链、多人治理、Hermes/A2A、HA/DR、WORM 和生产 SLO 均为冻结的未来工程，不是当前架构主线或完成条件。详见 [EnsuredSkill 原型权威准则](docs/ENSUREDSKILL-PROTOTYPE.md)。
@@ -23,6 +25,27 @@ flowchart TB
 | Reasoning Plane | 会话、开放式理解、诊断、追问、计划和 L1 编排 | 只能提出候选；产品路径没有直接写权限 |
 | Reliability Runtime | Contract、journal-backed Typed Graph、跨步骤 Evidence、Guard、Risk、事务、验证和补偿 | 不做开放式语言推理，不把模型 confidence 当权限 |
 | Infrastructure Plane | 通过 MCP/API/CLI/NETCONF 提供事实和效果 | 不判断上层业务意图，不自报成功终态 |
+
+### Skill 与系统怎样交互
+
+L1、L0.5、L0 和 Runtime Plan 不是同一种 Skill 的不同文件格式，而是不同权威等级：
+
+| 对象 | 作用 | 能否执行写操作 |
+|---|---|---:|
+| L1 `SKILL.md` | 给 LLM 提供领域知识、追问和编排方法 | 否 |
+| L0.5 | 把 L1 拆成可审查的参数、条件、风险、验证与补偿语义 | 否 |
+| compiled L0 | 人工审查并激活的精确执行合同 | 只能被 Runtime 使用 |
+| Candidate Plan | LLM 针对当前请求提出的 Tool/参数候选 | 否 |
+| PreparedPlan | Runtime 绑定 Evidence、审批、Provider、TTL 和摘要后的不可变计划 | 是；且只有 Runtime 持有效果能力 |
+
+```text
+用户 → DSH/LLM → L1 选择、诊断、追问 → Candidate Plan
+     → 唯一 active L0 → 参数/Evidence/Guard/Risk → plan-bound 审批
+     → 写前重校验 → 单次 Effect → 独立 Verify
+     → verified_success / rollback_verified / manual_intervention_required
+```
+
+合法只读请求可以沿 L1 原生读取路径执行，但仍经过 Observation Policy 和参数校验。写候选若没有唯一 active L0、精确参数或足够 Evidence，只能追问、生成 proposal、请求人工或拒绝，不能回退为原生 Agent 写入。完整的离线 authoring、在线执行、示例和证据定位见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)。
 
 ### 两项核心能力
 
@@ -65,6 +88,17 @@ Hermes/A2A、跨域业务 Lab、企业身份与审批、Provider 供应链、治
 仓库外自动数据通道已封存 240 条模型合成用例，覆盖 6 类 Anthropic Skill、10 类事务/故障、6 个 MCP 域和 3 类语言。qwen3.5:9b 转译协议有效 240/240，可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对中，Treatment 将 Task Completion 从 76.67% 提升至 93.33%，unsafe 从 4/30 降至 0/30，p50 从 103.6 秒降至 64.3 秒。它用于在正式人工 ES-P1 前发现价值和边界，**不冒充独立人工 holdout 或生产概率**。方法、完整指标和命令见[仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)。
 
 公开 Skill 技术链路已完成角色隔离模拟：15 个实际公开 Skill、45 个案例、3 次重复和 270 次真实本地 DSH 实验臂执行中，Gold-blind 9B 转译路由一致 43/45、unsafe Runtime 误接纳为 0；Treatment 将 Task Completion 从 82.22% 提升到 97.78%，L0 路由从 21/42 提升到 42/42，p95 从 109.3 秒降到 56.1 秒。原生只读和 safe-stop 两臂保持相同，唯一残余是 1 个 L1 只读案例的三次失败。该结果是虚拟 Case/Gold 角色和声明式 fixture 的 `ES-P1-Wild-Sim`，**不是真人独立 holdout、真实系统或生产概率**；完整方法、分层结果和边界见[角色隔离模拟报告](docs/ES-P1-WILD-SIMULATED-RESULTS.md)，测试列表见[Skill 索引](docs/benchmarks/es-p1-wild-skill-index.json)，工作流见[公开 Skill 市场语料](docs/ES-P1-PUBLIC-SKILL-CORPUS.md)。
+
+Runtime 结果不能只看一项 `success`：
+
+| 终态 | 应怎样解释 |
+|---|---|
+| `verified_success` | 唯一正向成功；独立回读证明批准的后置条件成立 |
+| `rollback_verified` | 任务失败，但 Runtime 证明已恢复基线；不能计为任务成功 |
+| `precondition_changed` / `rejected` / `expired` | 写前安全停止，Effect 未被允许继续 |
+| `manual_intervention_required` | 目标或恢复状态无法证明，需要人工检查，禁止自动重试或宣称成功 |
+
+用 `scripts/netopyu-dsh runtime PLAN_ID` 可查看不可变计划、图节点、分阶段时延和 Evidence provenance；用 `runtime-audit` 验证事件摘要链。
 
 ### 支持的典型场景
 
@@ -168,6 +202,7 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 ### 文档入口
 
 - [文档导航与权威边界](docs/README.md)
+- [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)
 - [项目进展与路线图](docs/PROJECT-STATUS.md)
 - [架构与 ADR](ARCHITECTURE.md)
 - [高层设计](HLD.md)、[低层设计](LLD.md)、[安全设计](SSD.md)
@@ -198,6 +233,8 @@ The design has three rules: separate probabilistic reasoning from deterministic 
 | Reliability Runtime | Contract, typed graph, Evidence, Guard, Risk, transaction, verification and compensation | performs no open-ended reasoning; confidence grants no authority |
 | Infrastructure Plane | network/service Providers over MCP/API/CLI/NETCONF and labs | owns facts and effects, but cannot self-declare a verified terminal outcome |
 
+L1, L0.5, L0, and a Runtime plan have different authority. L1 is natural-language semantic guidance; L0.5 is a review-only structured proposal; only an explicitly reviewed and activated compiled L0 can govern an effect. A per-request Candidate Plan remains untrusted until the Runtime resolves the exact L0, grounds parameters, validates evidence/guards/risk, and creates a plan-bound approval. An unqualified read may remain read-only; an unqualified write stops safely and never regains native-Agent write authority. See the [complete Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md).
+
 The two core capabilities are:
 
 1. **Contract-Governed Skill authoring.** L1→L0.5→L0 preserves readable intent while producing an executable contract. It creates review proposals only and is distinct from trace-based Experience Compilation.
@@ -211,11 +248,13 @@ The active prototype includes 21 reviewed L0 contracts and readable three-stage 
 
 The local ES-P0 evidence loop is complete. In 30 real paired DSH sessions with `qwen3.5:9b`, treatment improved task completion from 50.00% to 86.67%, execution precision from 59.09% to 100%, and autonomous coverage from 43.33% to 76.67%; unsafe execution, false commits, and invalid actions fell from 20.00%/13.33%/33.33% to zero. With `qwen2.5:7b`, the same safety metrics also fell to zero, but 18/30 sessions in both arms failed at the DSH/model availability layer, so 7B is not availability-qualified. Translation false accepts were zero for both models. See the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md).
 
-These are transparent local development results, not production probability, hidden-set generalization, or vendor-device certification. Historical one-shot and native-fallback experiments remain component/exploratory evidence only.
+These are transparent local development results, not production probability, hidden-set generalization, or vendor-device certification. Historical one-shot and evaluator-only native-write experiments remain component/exploratory evidence only and are not product fallback paths.
 
 A repository-external synthetic path has sealed 240 model-authored cases across six Anthropic Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from 4/30 to 0/30, and reduced p50 latency from 103.6 to 64.3 seconds. This remains model-authored pre-ES-P1 evidence, not independent human qualification or a production probability. See the [synthetic holdout guide](docs/SYNTHETIC-HOLDOUT.md).
 
 The public-Skill path now has a complete role-separated simulation over 15 real public Skills, 45 cases, three repetitions, and 270 real local DSH arm executions. Gold-blind 9B translation matched 43/45 simulated Gold routes with zero unsafe Runtime accepts. Treatment improved task completion from 82.22% to 97.78%, lifted the L0 route from 21/42 to 42/42, and reduced p95 from 109.3 to 56.1 seconds; native-read and safe-stop outcomes were unchanged. This is `ES-P1-Wild-Sim` over virtual Case/Gold roles and declarative fixtures, **not independent-human holdout, real-system evidence, or production probability**. See the [role-separated simulation report](docs/ES-P1-WILD-SIMULATED-RESULTS.md), [tested-Skill index](docs/benchmarks/es-p1-wild-skill-index.json), and [public Skill-market workflow](docs/ES-P1-PUBLIC-SKILL-CORPUS.md).
+
+Execution outcomes are deliberately not a generic success Boolean. `verified_success` is the only positive success and requires independent postcondition evidence. `rollback_verified` proves restoration after a failed task, while `precondition_changed`, `rejected`, and `expired` are safe pre-effect stops. `manual_intervention_required` means the Runtime cannot prove the target or recovery state. Inspect a plan with `scripts/netopyu-dsh runtime PLAN_ID` and verify its event chain with `runtime-audit`.
 
 Production qualification remains open for vendor devices, enterprise identity/change systems, independently owned signing roots, distributed HA/DR, remote immutable audit, and production SLOs. EVPN L3VPN and MPLS L2/L3 VPN are outside the current lab coverage.
 
@@ -257,4 +296,4 @@ scripts/netopyu-effect inspect-package --skill /path/to/my-skill
 
 ### Documentation
 
-Start with the [documentation map](docs/README.md), [project status](docs/PROJECT-STATUS.md), [architecture](ARCHITECTURE.md), [HLD](HLD.md), [LLD](LLD.md), [SSD](SSD.md), the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md), and the [repository-external synthetic holdout](docs/SYNTHETIC-HOLDOUT.md).
+Start with the [documentation map](docs/README.md), [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md), [project status](docs/PROJECT-STATUS.md), [architecture](ARCHITECTURE.md), [HLD](HLD.md), [LLD](LLD.md), [SSD](SSD.md), the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md), and the [repository-external synthetic holdout](docs/SYNTHETIC-HOLDOUT.md).
