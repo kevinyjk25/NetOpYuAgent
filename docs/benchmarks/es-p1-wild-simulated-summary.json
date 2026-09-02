@@ -1,0 +1,151 @@
+{
+  "apiVersion": "effect-runtime.io/es-p1-wild-simulated-benchmark-summary/v1",
+  "date": "2026-09-01",
+  "status": "simulation_protocol_complete",
+  "evidenceClass": "simulation_only_not_independent_human_evidence",
+  "humanIndependent": false,
+  "officialEsP1QualificationEligible": false,
+  "claimBoundary": "Role-separated local protocol simulation over public Skills and declarative fixtures; not private holdout, real-system, production-probability, or formal ES-P1 qualification evidence.",
+  "model": {
+    "name": "qwen3.5:9b",
+    "artifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "invocationProfile": "ollama_native_chat_think_false_num_ctx_32768"
+  },
+  "corpus": {
+    "skillCount": 15,
+    "caseCount": 45,
+    "repetitions": 3,
+    "pairedObservationCount": 135,
+    "armExecutionCount": 270,
+    "challengeCounts": {
+      "nominal": 15,
+      "ambiguous_or_missing": 15,
+      "failure_or_adversarial": 15
+    },
+    "languageCounts": {
+      "en": 45
+    }
+  },
+  "translation": {
+    "protocolValid": 45,
+    "routeCounts": {
+      "l0_runtime": 14,
+      "l1_native_read": 6,
+      "safe_stop": 25
+    },
+    "expectedRouteMatches": 43,
+    "expectedRouteTotal": 45,
+    "expectedRouteMatchPercent": 95.56,
+    "unsafeRuntimeAccepts": 0,
+    "conservativeReadFallbacks": 2,
+    "semanticRepairCases": 22,
+    "semanticRepairCalls": 25
+  },
+  "pairedExecution": {
+    "protocolComplete": true,
+    "workers": 2,
+    "control": {
+      "passed": 111,
+      "total": 135,
+      "taskCompletionRatePercent": 82.22,
+      "oraclePassRatePercent": 82.22,
+      "parameterBindingPassRatePercent": 97.04,
+      "executionPrecisionPercent": 97.04,
+      "autonomousCoveragePercent": 82.22,
+      "unsafeExecutions": 0,
+      "falseCommits": 0,
+      "latencyMs": {
+        "mean": 45852.309,
+        "p50": 32946.661,
+        "p95": 109278.945
+      }
+    },
+    "treatment": {
+      "passed": 132,
+      "total": 135,
+      "taskCompletionRatePercent": 97.78,
+      "oraclePassRatePercent": 97.78,
+      "parameterBindingPassRatePercent": 97.78,
+      "executionPrecisionPercent": 97.78,
+      "autonomousCoveragePercent": 97.78,
+      "unsafeExecutions": 0,
+      "falseCommits": 0,
+      "runtimeAutoInvocations": 1,
+      "latencyMs": {
+        "mean": 31075.395,
+        "p50": 27807.63,
+        "p95": 56067.105
+      }
+    },
+    "deltas": {
+      "taskCompletionPercentagePoints": 15.56,
+      "oraclePercentagePoints": 15.56,
+      "parameterBindingPercentagePoints": 0.74,
+      "p50LatencyMs": -5139.031,
+      "p95LatencyMs": -53211.84
+    },
+    "pairedOutcomes": {
+      "treatmentWins": 21,
+      "controlWins": 0,
+      "bothPass": 111,
+      "bothFail": 3
+    },
+    "byRoute": {
+      "l0_runtime": {
+        "controlPassed": 21,
+        "treatmentPassed": 42,
+        "total": 42
+      },
+      "l1_native_read": {
+        "controlPassed": 15,
+        "treatmentPassed": 15,
+        "total": 18
+      },
+      "safe_stop": {
+        "controlPassed": 75,
+        "treatmentPassed": 75,
+        "total": 75
+      }
+    },
+    "byChallenge": {
+      "nominal": {
+        "controlPassed": 42,
+        "treatmentPassed": 42,
+        "total": 45
+      },
+      "ambiguous_or_missing": {
+        "controlPassed": 45,
+        "treatmentPassed": 45,
+        "total": 45
+      },
+      "failure_or_adversarial": {
+        "controlPassed": 24,
+        "treatmentPassed": 45,
+        "total": 45
+      }
+    },
+    "perRepetition": {
+      "controlPassed": [37, 37, 37],
+      "treatmentPassed": [44, 44, 44],
+      "totalPerArm": 45
+    }
+  },
+  "residualFailure": {
+    "caseId": "wild-assignment-004-01",
+    "skill": "fivem-debugging",
+    "route": "l1_native_read",
+    "failedRepetitions": 3,
+    "failedChecks": [
+      "requiredCapabilitiesPassed",
+      "parameterBindingPassed",
+      "oraclePassed"
+    ]
+  },
+  "bindings": {
+    "boundStudyDigest": "sha256:99d35244b5687b7127c6b0306aaaae9adba8415cb92d0cc1c3f9132530cc0091",
+    "translationReportDigest": "sha256:df0d5975e3db1b8095c2a2a4500943a9e781f06ca6a7858d60528b0cfea7bded",
+    "dshReportDigest": "sha256:ccf86fd8c569a48197b6f65fc5015f2f9663e6940e030e62e7801d0b5423215c",
+    "evidenceReportDigest": "sha256:8b2fa52cf5c63e94572ceba5aefafbaa0ff8726b3fff0cf9f0ee37973ae257ba",
+    "evidenceManifestDigest": "sha256:fdbcd159355b29e5c43dc5db88328432ebe181d4871d268c0d3fce7c90fd6001"
+  }
+}

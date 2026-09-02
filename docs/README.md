@@ -18,6 +18,7 @@
 | 接口、合同、状态机和异常处理 | [LLD](../LLD.md) |
 | 威胁模型、安全控制和验收门禁 | [SSD](../SSD.md) |
 | 两项核心能力到底达到什么效果 | [ES-P0 本地证据报告](ES-P0-EVIDENCE.md) |
+| 公开 Skill 的角色隔离模拟效果与边界 | [ES-P1-Wild 角色隔离模拟结果](ES-P1-WILD-SIMULATED-RESULTS.md) |
 | 没有独立团队时如何自动生成、封存并接入合成用例 | [仓库外合成 Holdout](SYNTHETIC-HOLDOUT.md) |
 | 如何把 SkillsMP/GitHub 公开 Skill 安全纳入外部评测 | [ES-P1 公开 Skill 市场语料](ES-P1-PUBLIC-SKILL-CORPUS.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
@@ -40,6 +41,7 @@
 - [ES-P0 本地证据报告](ES-P0-EVIDENCE.md)：六场景、消融、9B/7B 三次配对、性能和外推边界。
 - [仓库外合成 Holdout](SYNTHETIC-HOLDOUT.md)：240 条模型合成 Skill、双盲模型审阅、摘要封存、受控导入和正式 ES-P1 边界。
 - [ES-P1 公开 Skill 市场语料](ES-P1-PUBLIC-SKILL-CORPUS.md)：SkillsMP/GitHub 公开生态的采样、封存、零执行隔离和证据边界。
+- [ES-P1-Wild 角色隔离模拟结果](ES-P1-WILD-SIMULATED-RESULTS.md)：15 Skill、45 case、三重复真实 DSH 配对、分层指标、残余失败与非真人证据边界。
 - [ES-P1-Wild pilot 摘要](benchmarks/es-p1-wild-pilot-summary.json)：20 个静态接纳包、15 包 author kit，以及 9B 非权威草案辅助的通过、修复、失败和时延结果。
 - [ES-P1-Wild 测试 Skill 索引](benchmarks/es-p1-wild-skill-index.json)：15 个实际测试 Skill 的固定来源、commit、许可证、文件清单、任务槽位与草案状态。
 - [真实 Harness 冒烟摘要](benchmarks/real-harness-smoke-summary.json)：历史 fallback evaluator 的 DSH 配对轨迹，仅作前期探索证据。
@@ -96,6 +98,7 @@
 | What are the interfaces, contracts, states, and failure paths? | [LLD](../LLD.md) |
 | What is the threat model and acceptance gate? | [SSD](../SSD.md) |
 | What evidence supports the two core capabilities? | [ES-P0 local evidence](ES-P0-EVIDENCE.md) |
+| What did the role-separated public-Skill simulation show? | [ES-P1-Wild simulation results](ES-P1-WILD-SIMULATED-RESULTS.md) |
 | How can I generate and seal synthetic cases before an independent ES-P1 study? | [Repository-external synthetic holdout](SYNTHETIC-HOLDOUT.md) |
 | How can public SkillsMP/GitHub Skills be evaluated safely? | [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md) |
 | How do I run a demo or integrate my systems? | [Usage and integration](getting-started-integration.md) |
@@ -104,7 +107,7 @@
 
 - Agent and L1: [Agent use cases](AGENTIZED-USE-CASES.md), [model qualification](l1-model-qualification.md), and [convergence evaluation](convergence-evaluation.md).
 - L0 and Promotion: [general progressive determinization](progressive-determinization.md), [general Effect Runtime A/B](general-effect-ab.md), [L0 v2 design](l0-v2-design.md), [Runtime migration](l0-v2-runtime-migration.md), [L1-to-L0 Promotion](l1-to-l0-promotion.md), [Workbench](p20-promotion-workbench.md), [Research Freeze and forward qualification](promotion-forward-qualification.md), and the [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
-- Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), the [synthetic holdout workflow](SYNTHETIC-HOLDOUT.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md), the [English paper](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md), the [Chinese paper](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
+- Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), [ES-P1-Wild role-separated simulation](ES-P1-WILD-SIMULATED-RESULTS.md), the [synthetic holdout workflow](SYNTHETIC-HOLDOUT.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md), the [English paper](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md), the [Chinese paper](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
 - Frozen future-engineering reference: [enterprise control plane](enterprise-control-plane.md), [provider supply chain](provider-supply-chain.md), [Capability Catalog/Evidence Plane](p21-p22-control-planes.md), the historical [L1 Decision Plane](l1-decision-plane.md), and the [P1.9 canary runbook](p19-canary-runbook.md).
 - Local labs: [FRR/OSPF](../labs/p075-a-frr/README.md), [campus/IDC](../labs/p075-a-campus-idc/README.md), [small production network](../labs/p075-b-small-production/README.md), and [EVPN/VXLAN](../labs/p075-c-evpn-vxlan/README.md).
 
