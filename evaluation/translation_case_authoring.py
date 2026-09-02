@@ -276,6 +276,18 @@ def _file_digest(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def authoring_implementation_digest() -> str:
+    """Fingerprint the actual authoring implementation used by future runs."""
+
+    return sha256_json({
+        "sourceFile": _file_digest(Path(__file__).resolve()),
+        "promptVersion": PROMPT_VERSION,
+        "systemPrompt": SYSTEM_PROMPT,
+        "outputSchema": AnchoredBundle.model_json_schema(),
+        "toolCatalogSchema": TOOL_CATALOG_SCHEMA,
+    })
+
+
 def _write_json(path: Path, value: Any) -> None:
     path.write_text(
         json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
@@ -291,6 +303,13 @@ def _write_jsonl(path: Path, values: list[dict[str, Any]]) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _percentile(values: list[float], fraction: float) -> float:
+    if not values:
+        return 0.0
+    ordered = sorted(values)
+    return round(ordered[max(0, math.ceil(fraction * len(ordered)) - 1)], 3)
 
 
 def _load_corpus(corpus_root: Path) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -798,6 +817,7 @@ def run_anchored_case_authoring(
     adapter: AuthoringAdapter | None = None,
     resume: bool = True,
     limit: int | None = None,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Generate and deterministically filter one known-development batch."""
 
@@ -808,11 +828,15 @@ def run_anchored_case_authoring(
     batch = corpus_info["batches"].get(batch_id)
     if batch is None:
         raise ValueError(f"unknown translation development batch: {batch_id}")
-    package_ids = list(batch["packageIds"])
+    if offset < 0:
+        raise ValueError("authoring offset cannot be negative")
+    package_ids = list(batch["packageIds"])[offset:]
     if limit is not None:
         if limit < 1:
             raise ValueError("authoring limit must be positive")
         package_ids = package_ids[:limit]
+    if not package_ids:
+        raise ValueError("authoring selection is empty")
     runtime_adapter = adapter or OllamaAnchoredAuthorAdapter(model)
     model_info = runtime_adapter.preflight()
     root = Path(output_root).expanduser().resolve()
@@ -837,6 +861,7 @@ def run_anchored_case_authoring(
         "promptVersion": PROMPT_VERSION,
         "systemPromptDigest": sha256_json({"systemPrompt": SYSTEM_PROMPT}),
         "outputSchemaDigest": sha256_json(AnchoredBundle.model_json_schema()),
+        "authoringImplementationDigest": authoring_implementation_digest(),
         "goldVisibleToAuthor": False,
         "runtimeOrDshExecuted": False,
         "authority": AUTHORITY,
@@ -850,7 +875,7 @@ def run_anchored_case_authoring(
         _write_json(run_path, run)
 
     rows: list[dict[str, Any]] = []
-    for index, package_id in enumerate(package_ids, start=1):
+    for index, package_id in enumerate(package_ids, start=offset + 1):
         skill = skills[package_id]
         assignment_id = f"{batch_id}-{index:03d}"
         prompt, prompt_digest = _author_prompt(skill, assignment_id)
@@ -949,6 +974,22 @@ def run_anchored_case_authoring(
         for row in rows
         for failure in row["validation"].get("failures", [])
     )
+    latencies = [float(row["telemetry"]["latencyMs"]) for row in rows]
+    first_pass_accepted = sum(
+        bool(row["authoringAttempts"])
+        and not row["authoringAttempts"][0]["failures"]
+        for row in rows
+    )
+    repair_attempted = sum(
+        bool(row["telemetry"].get("deterministicRepairAttempted"))
+        for row in rows
+    )
+    repair_salvaged = sum(
+        len(row["authoringAttempts"]) > 1
+        and bool(row["authoringAttempts"][0]["failures"])
+        and not row["authoringAttempts"][-1]["failures"]
+        for row in rows
+    )
     report_body = {
         "apiVersion": AUTHORING_SCHEMA,
         "runBinding": run_binding,
@@ -960,6 +1001,16 @@ def run_anchored_case_authoring(
         "alignmentReviewPacketCount": len(packets),
         "statusCounts": dict(sorted(counts.items())),
         "failureCounts": dict(sorted(failure_counts.items())),
+        "protocolValidCandidateCount": sum(row["candidate"] is not None for row in rows),
+        "firstPassAcceptedCount": first_pass_accepted,
+        "repairAttemptedCount": repair_attempted,
+        "repairSalvagedCount": repair_salvaged,
+        "modelCallCount": sum(int(row["telemetry"]["modelCalls"]) for row in rows),
+        "latencyMs": {
+            "p50": _percentile(latencies, 0.50),
+            "p95": _percentile(latencies, 0.95),
+            "max": round(max(latencies), 3) if latencies else 0.0,
+        },
         "normalizationCounts": dict(sorted(Counter(
             event for row in rows for event in row.get("normalizations", [])
         ).items())),
@@ -1071,6 +1122,9 @@ def inspect_anchored_case_authoring(
         "semanticAlignmentProven": False,
         "runtimeAuthorityGranted": False,
         "runtimeOrDshExecuted": False,
+        "implementationDrift": (
+            run["authoringImplementationDigest"] != authoring_implementation_digest()
+        ),
         "claimBoundary": report["claimBoundary"],
     }
 
@@ -1194,6 +1248,7 @@ def main(argv: list[str] | None = None) -> int:
     author.add_argument("--batch-id", required=True)
     author.add_argument("--model", default=MODEL)
     author.add_argument("--limit", type=int)
+    author.add_argument("--offset", type=int, default=0)
     author.add_argument("--no-resume", action="store_true")
     inspect = commands.add_parser("inspect")
     inspect.add_argument("root")
@@ -1212,6 +1267,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             resume=not args.no_resume,
             limit=args.limit,
+            offset=args.offset,
         )
     elif args.command == "inspect":
         result = inspect_anchored_case_authoring(args.root, args.corpus_root)
@@ -1240,6 +1296,7 @@ __all__ = [
     "ParameterDefinition",
     "SourceAnchor",
     "TOOL_CATALOG_SCHEMA",
+    "authoring_implementation_digest",
     "inspect_anchored_case_authoring",
     "inspect_development_alignment_reviews",
     "materialize_tool_catalog",

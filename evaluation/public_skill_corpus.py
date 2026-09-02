@@ -1083,6 +1083,7 @@ def main(argv: list[str] | None = None) -> int:
     anchored_author.add_argument("--batch-id", required=True)
     anchored_author.add_argument("--model", default="qwen3.5:9b")
     anchored_author.add_argument("--limit", type=int)
+    anchored_author.add_argument("--offset", type=int, default=0)
     anchored_author.add_argument("--no-resume", action="store_true")
     inspect_anchored_author = commands.add_parser("anchored-author-inspect")
     inspect_anchored_author.add_argument("root")
@@ -1227,6 +1228,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             resume=not args.no_resume,
             limit=args.limit,
+            offset=args.offset,
         )
     elif args.command == "anchored-author-inspect":
         from evaluation.translation_case_authoring import inspect_anchored_case_authoring

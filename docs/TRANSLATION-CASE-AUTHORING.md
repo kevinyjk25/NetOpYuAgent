@@ -31,22 +31,26 @@
 
 通用转译 Tool Catalog 与 Fixture MCP/真实 MCP 有意分离。前者回答“这个 Skill 需要什么语义能力和事务角色”；后者回答“项目现在是否已有可执行适配器”。因此一个候选可以语义上可转译，但仍因没有 Provider/Runtime adapter 而不可执行。
 
-### 首个 9B 开发 pilot（2026-09-03）
+### 首个 9B 开发批次（2026-09-03）
 
-使用 `qwen3.5:9b` 对 `development-01` 的前三个 Skill 做了静态作者 pilot：
+使用 `qwen3.5:9b` 完成 `development-01` 的 12 个 Skill 静态作者预筛：
 
 | 项目 | 结果 |
 |---|---:|
-| Skill | 3 |
-| 候选任务 | 9 |
-| 通过确定性作者门禁的 Skill | 2/3 |
-| 输出的盲审包 | 6 |
+| Skill | 12 |
+| 候选任务 | 36 |
+| 协议结构有效 | 12/12 |
+| 通过确定性作者门禁的 Skill | 6/12 |
+| 输出的盲审包 | 18 |
+| 模型调用 | 18（6 个 Skill 触发修复） |
+| 修复挽回 | 0/6 |
+| 每 Skill 作者时延 p50 / p95 | 65.7 秒 / 205.7 秒 |
 | Runtime/DSH 执行 | 0 |
 | 第三方代码执行 | 0 |
 
-`agent-bridge` 和 `brand-voice` 进入盲审队列；`stacks-commerce` 因两个 source quote 不是固定原文的精确子串而拒绝。该 66.67% 是**作者候选可审率**，不是 Translator 准确率，更不是项目成功概率。它说明门禁可以保留精确失败并阻止不洁用例污染后续评测。
+失败并非 Translator 失败：5 个 Skill 至少有一个 source quote 不是固定原文的精确子串，3 个 read 候选仍声称 Effect budget=1；部分 Skill 同时命中两类。该 50% 是**作者候选可审率**，不是 Translator 准确率，更不是项目成功概率。0/6 修复挽回说明当前 9B 作者修复提示没有实际收益，下一轮应优先减少作者字段自由度、使用确定性原文 span 选择并补强 read/write 机械闭包，而不是把不洁案例交给 Translator。
 
-本地制品位于 `artifacts/translator-v2/anchored-development-01-pilot-3/`，其中 `alignment-review.html` 展示模型候选、规范化和失败；`alignment-review/review-packets.jsonl` 隐藏候选 expected behavior 与 Gold；`review-schema.json` 规定 AI 角色审查格式。AI 审查永远标记为 `humanIndependentEvidence=false`，只能辅助排队，不能替代独立人工证据。
+本地完整文本制品按前三个和后九个检查点保存；可提交的聚合指标见 [development-01 摘要](benchmarks/translation-authoring-development-01-summary.json)。`alignment-review.html` 展示模型候选、规范化和失败；`alignment-review/review-packets.jsonl` 隐藏候选 expected behavior 与 Gold；`review-schema.json` 规定 AI 角色审查格式。AI 审查永远标记为 `humanIndependentEvidence=false`，只能辅助排队，不能替代独立人工证据。本轮运行尚未写入作者实现摘要，因此明确 `researchEvidenceEligible=false`；后续冻结 cohort 必须补齐实现绑定。
 
 ### 使用
 
@@ -70,6 +74,6 @@ The former public-Skill study could validate wiring while pairing some real Skil
 
 Each candidate binds exact source quotes, scalar parameter definitions, three task challenges, and a generic non-executable Tool Catalog with explicit observe/effect/verify/compensate roles. Reversible writes require one compensation; irreversible writes cannot claim a false rollback. This generic semantic catalog is intentionally distinct from a Fixture MCP or real Provider adapter, so translation capability and current execution support can be measured separately.
 
-The first qwen3.5:9b development pilot covered three Skills and nine tasks. Two Skills passed the deterministic author gate and produced six blind-review packets; one failed because two source quotes were not exact substrings. No Runtime, DSH, Tool, or third-party code ran. The 66.67% result is candidate reviewability—not Translator accuracy, independent generalization, or production probability.
+The first qwen3.5:9b development batch covered 12 Skills and 36 tasks. All 12 produced protocol-valid structures; six passed the deterministic author gate and produced 18 blind-review packets. Six Skills entered repair and none was salvaged. Five rejected Skills contained at least one non-exact source quote, while three read candidates incorrectly retained a positive Effect budget. Per-Skill authoring latency was 65.7 seconds p50 and 205.7 seconds p95. No Runtime, DSH, Tool, or third-party code ran. The 50% result is candidate reviewability—not Translator accuracy, independent generalization, or production probability.
 
 AI-role reviews remain simulated evidence (`humanIndependentEvidence=false`). They may triage candidates for later Gold authoring but cannot unlock the translation or Runtime gate.

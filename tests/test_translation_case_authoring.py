@@ -164,6 +164,12 @@ def test_anchored_authoring_filters_then_exports_gold_blind_review(
     report = json.loads((output / "report.json").read_text(encoding="utf-8"))
     assert report["statusCounts"] == {"accepted_candidate": 1}
     assert report["alignmentReviewPacketCount"] == 3
+    assert report["protocolValidCandidateCount"] == 1
+    assert report["firstPassAcceptedCount"] == 1
+    assert report["repairAttemptedCount"] == 0
+    assert report["repairSalvagedCount"] == 0
+    assert report["modelCallCount"] == 1
+    assert report["latencyMs"] == {"p50": 1.0, "p95": 1.0, "max": 1.0}
     assert report["semanticAlignmentProven"] is False
     packets = [
         json.loads(line)
@@ -178,6 +184,7 @@ def test_anchored_authoring_filters_then_exports_gold_blind_review(
     assert inspection["acceptedCandidateCount"] == 1
     assert inspection["runtimeAuthorityGranted"] is False
     assert inspection["runtimeOrDshExecuted"] is False
+    assert inspection["implementationDrift"] is False
 
     reviews = tmp_path / "ai-reviews.jsonl"
     review_rows = []
