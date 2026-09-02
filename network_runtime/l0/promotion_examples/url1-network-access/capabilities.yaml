@@ -1,0 +1,52 @@
+apiVersion: netopyu.io/capability-catalog/v3
+provider: example.url1-access-api
+version: 1.0.0
+
+capabilities:
+  - id: rest.url1.network-access.grant
+    role: effect
+    tool: url1_grant_network_access
+    profiles: [lan]
+    inputs:
+      user_id: {type: string, required: true, minLength: 1, maxLength: 64}
+      vlan_id: {type: integer, required: true, minimum: 1, maximum: 4094}
+      duration_minutes: {type: integer, required: true, minimum: 30, maximum: 10080}
+      reason: {type: string, required: true, minLength: 5, maxLength: 512}
+    outputs:
+      operation_id: {type: string}
+      accepted: {type: boolean}
+
+  - id: rest.network-access.get
+    role: observation
+    observationPhases: [preflight, success_verification, compensation_verification]
+    phasePredicates:
+      preflight:
+        - {field: active, operator: equals, expected: true}
+        - {field: revision, operator: exists}
+      success_verification:
+        - {field: allowed, operator: equals, expected: true}
+        - {field: vlan_id, operator: equals, expected: "${arguments.vlan_id}"}
+        - {field: revision, operator: greater_than, expected: "${preflight.access-state.revision}"}
+      compensation_verification:
+        - {field: state, operator: exact_snapshot, expected: "${preflight.access-state.snapshot}"}
+    profiles: [lan]
+    inputs:
+      user_id: {type: string, required: true, minLength: 1, maxLength: 64}
+    outputs:
+      active: {type: boolean}
+      allowed: {type: boolean}
+      vlan_id: {type: integer, minimum: 1, maximum: 4094}
+      expires_at: {type: string}
+      revision: {type: integer, minimum: 0}
+      state: {type: object}
+
+  - id: rest.network-access.restore
+    role: compensation
+    tool: restore_network_access
+    profiles: [lan]
+    inputs:
+      user_id: {type: string, required: true, minLength: 1, maxLength: 64}
+      snapshot: {type: object, required: true}
+      expected_revision: {type: integer, required: true, minimum: 0}
+    outputs:
+      restored: {type: boolean}

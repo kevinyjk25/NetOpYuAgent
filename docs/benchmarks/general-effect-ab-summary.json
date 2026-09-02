@@ -1,0 +1,66 @@
+{
+  "schema": "effect-runtime.io/general-effect-ab-summary/v2",
+  "dataset": {
+    "digest": "sha256:ef15968c5478493d4c2202437719a73f34319b329b831897fe8eb8dc9abb21f0",
+    "domains": 6,
+    "mcpTools": 24,
+    "skills": 60,
+    "featureFamilies": 6,
+    "developmentSet": true
+  },
+  "controlledExecution": {
+    "eligibleForHarnessAgentClaim": false,
+    "classification": "component transaction-control regression",
+    "retirementReason": "The control arm is a one-shot Provider contract call, not native DSH/Hermes Skill execution.",
+    "modelSelectionExcluded": true,
+    "transport": "shared in-process contract adapter; official MCP stdio is tested separately across all six domains",
+    "singleToolContractCall": {
+      "passed": 36,
+      "total": 60,
+      "falseSuccesses": 12,
+      "p50Ms": 1.066,
+      "p95Ms": 1.419,
+      "terminalAudits": "0/42",
+      "unknownOutcomeResolution": "0/12",
+      "verificationMismatchContainment": "0/6"
+    },
+    "effectRuntime": {
+      "passed": 60,
+      "total": 60,
+      "falseSuccesses": 0,
+      "independentlyVerified": 36,
+      "compensationAttempts": 18,
+      "p50Ms": 16.234,
+      "p95Ms": 20.537,
+      "terminalAudits": "42/42",
+      "unknownOutcomeResolution": "12/12",
+      "verificationMismatchContainment": "6/6"
+    }
+  },
+  "qwen35_9bFullDevelopmentBaseline": {
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "passed": 58,
+    "total": 60,
+    "exactTranslationPercent": 96.67,
+    "rawProtocolValid": 60,
+    "falseAccepts": 0,
+    "safeFallbacks": 2,
+    "meanSemanticCoveragePercent": 99.72,
+    "meanModelEmittedPercent": 52.22,
+    "catalogEnrichedFieldCount": 167,
+    "inputTokens": 76066,
+    "outputTokens": 11200,
+    "evaluatorFingerprint": "sha256:4b62534bcd85912ea0073999487866f99812555923979a88d25f037c7c4e14af",
+    "runFingerprint": "sha256:295570c1b9b2c5082f48990a48210c9770929491db70261dece20d419948ed7e",
+    "newModelCases": 60,
+    "resumedCases": 0,
+    "p50Ms": 11006.096,
+    "p95Ms": 16812.591,
+    "failedCases": {
+      "steps-02": "approval_required omitted despite approval prose",
+      "compose-09": "verification capability mismatch"
+    },
+    "completeSixtyCaseModelBaseline": true
+  },
+  "claimBoundary": "The execution numbers are component-only and must not be presented as DSH/Hermes Agent performance. Translation evidence is transparent local development evidence, not hidden-set generalization, production qualification, an SLO, or production success probability."
+}

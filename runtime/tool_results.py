@@ -1,4 +1,4 @@
-"""Durable storage for large tool results returned through the DSH bridge."""
+"""Durable storage for large tool results returned through harness adapters."""
 
 from __future__ import annotations
 

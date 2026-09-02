@@ -1,0 +1,132 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:50aace0b4d246383b5fe2bbe00d0604916e48892cc8ec9eef45230212386b608",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for dc_config_push",
+    "id": "network.dc.fabric-config.push",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "node",
+      "runtime-tool-contract": "dc-config-v2",
+      "runtime-verifier": "dc-config"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": null,
+    "effect": {
+      "capability": "netopyu.tool.dc_config_push",
+      "internal": {},
+      "request": {
+        "config_lines": "${arguments.config_lines}",
+        "node": "${arguments.node}",
+        "reason": "${arguments.reason}"
+      },
+      "tool": "dc_config_push"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "manual_intervention"
+    },
+    "intent": {
+      "desiredState": {
+        "requested_configuration_digest": "${intent.configuration_digest}"
+      },
+      "kind": "configure_fabric",
+      "targetFields": [
+        "node"
+      ]
+    },
+    "parameters": {
+      "config_lines": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 500,
+        "maximum": null,
+        "minLength": 1,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "array"
+      },
+      "node": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "reason": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": 1,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "node": "${arguments.node}"
+        },
+        "capability": "netopyu.tool.dc_get_applied_config",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "dc"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "node": "${arguments.node}"
+      },
+      "capability": "netopyu.verifier.dc-config",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

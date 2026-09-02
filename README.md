@@ -1,277 +1,299 @@
 # NetOpYuAgent
 
+EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
+
+> 文档状态：2026-09-02。当前已完成 ES-P0 本地证据闭环和 ES-P1-Wild 角色隔离模拟；正式 ES-P1 独立人工 Private Holdout 尚未完成。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+
+> 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
+>
+> **当前权威范围已经重置为研究原型。** 企业身份、Provider 供应链、多人治理、Hermes/A2A、HA/DR、WORM 和生产 SLO 均为冻结的未来工程，不是当前架构主线或完成条件。详见 [EnsuredSkill 原型权威准则](docs/ENSUREDSKILL-PROTOTYPE.md)。
+
 ## 中文
 
-### 项目定位
+### 项目设计
 
-NetOpYuAgent 是运行在 [DeepSeek Harness（DSH）](https://github.com/deepseek-ai/deepseek-harness) 之上的网络领域插件与确定性执行运行时。
+项目遵循三个原则：**概率推理与确定执行分离；No evidence, no action；LLM 决定尝试什么，Runtime 决定允许发生什么。**
 
-DSH 负责通用智能体能力：会话、模型调用、工具调用、Web UI、Skill 生命周期、审批交互和子代理框架。NetOpYuAgent 不再实现第二套通用 Agent Harness，而是提供网络领域必须保留的可靠能力：
+```mermaid
+flowchart TB
+    RP[Reasoning Plane<br/>DSH・LLM・L1 Skill] -->|Candidate Plan| RR[Reliability Runtime<br/>Contract・Evidence・Guard・Risk・Transaction]
+    RR -->|Validated Operation| IP[Infrastructure Plane<br/>Network/Service Provider・Containerlab]
+```
 
-- Domain L1 Skills：诊断、追问、跨域协作和业务流程编排；
-- Network L0 Skills：参数校验、风险计算、预检、审批绑定、单次执行、结果验证、补偿/回滚和审计；
-- LAN、DC、WAN 与 pragmatic 网络工具；
-- DSH 插件、Python Worker、A2A provider、作用域记忆、能力检索和离线评测。
+| 层 | 权威职责 | 明确边界 |
+|---|---|---|
+| Reasoning Plane | 会话、开放式理解、诊断、追问、计划和 L1 编排 | 只能提出候选；产品路径没有直接写权限 |
+| Reliability Runtime | Contract、journal-backed Typed Graph、跨步骤 Evidence、Guard、Risk、事务、验证和补偿 | 不做开放式语言推理，不把模型 confidence 当权限 |
+| Infrastructure Plane | 通过 MCP/API/CLI/NETCONF 提供事实和效果 | 不判断上层业务意图，不自报成功终态 |
 
-> 当前状态：P0 迁移完成；P0.5 本地模拟原型闭环完成。它证明了架构与安全执行链路，但不等于真实生产网络中的“绝对 100% 正确”。真实设备、企业身份、变更窗口、HA、备份恢复与生产 SLO 属于 P1。
+### Skill 与系统怎样交互
 
-### 分层术语
+L1、L0.5、L0 和 Runtime Plan 不是同一种 Skill 的不同文件格式，而是不同权威等级：
 
-为避免 L0/L1 歧义，本项目统一使用以下名称：
+| 对象 | 作用 | 能否执行写操作 |
+|---|---|---:|
+| L1 `SKILL.md` | 给 LLM 提供领域知识、追问和编排方法 | 否 |
+| L0.5 | 把 L1 拆成可审查的参数、条件、风险、验证与补偿语义 | 否 |
+| compiled L0 | 人工审查并激活的精确执行合同 | 只能被 Runtime 使用 |
+| Candidate Plan | LLM 针对当前请求提出的 Tool/参数候选 | 否 |
+| PreparedPlan | Runtime 绑定 Evidence、审批、Provider、TTL 和摘要后的不可变计划 | 是；且只有 Runtime 持有效果能力 |
 
-| 名称 | 职责 |
+```text
+用户 → DSH/LLM → L1 选择、诊断、追问 → Candidate Plan
+     → 唯一 active L0 → 参数/Evidence/Guard/Risk → plan-bound 审批
+     → 写前重校验 → 单次 Effect → 独立 Verify
+     → verified_success / rollback_verified / manual_intervention_required
+```
+
+合法只读请求可以沿 L1 原生读取路径执行，但仍经过 Observation Policy 和参数校验。写候选若没有唯一 active L0、精确参数或足够 Evidence，只能追问、生成 proposal、请求人工或拒绝，不能回退为原生 Agent 写入。完整的离线 authoring、在线执行、示例和证据定位见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)。
+
+### 两项核心能力
+
+1. **Contract-Governed Skill**：L1→L0.5→L0 是 authoring compilation；最终 L0 固定输入、证据、Guard、资源、风险、后置条件和补偿。模型只能生成待审 proposal。
+2. **Evidence-Gated Transaction Runtime**：把 L0 编译为不可变计划和 Typed Execution Graph；写前 Snapshot/Precheck/Revalidate，写后独立 Verify；失败时 Reconcile/Compensate/Verify Recovery。
+
+当前结论是：**ES-P0 本地研究原型证据闭环完成**。这表示六场景、五项消融、9B/7B 三次真实 DSH 配对和全量回归已经产生一致证据；不表示生产成功概率、隐藏集泛化或真实厂商设备认证。
+
+### 已实现能力
+
+| 能力域 | 当前范围 |
 |---|---|
-| DSH Platform Layer | 通用 Agent Harness；管理模型、会话、UI、工具与审批交互 |
-| NetOpYu Domain Layer | DSH 之上的网络领域能力总层 |
-| Domain L1 Skill | 允许模型参与的泛化业务 Skill；负责理解、诊断、追问和编排 |
-| Network L0 Skill | 不依赖模型推理的版本化执行合同；负责确定性网络效果 |
-| Network Runtime | 编译并执行 Network L0 Skill 的安全运行时 |
+| Harness | DSH 主路径；模型/L1 只输出 Candidate Plan，经窄 Worker bridge 进入 Runtime |
+| L1 | LAN/DC/WAN Skill，缺参追问，多步 workflow，领域外和高风险拒绝 |
+| L0 | 21 个激活合同；原子、约束、扩展、组合 Saga；21/21 三阶段可解释轨迹 |
+| Promotion | L1/L0.5/L0 并排审查、语义映射、低置信告警、合同图、严格安全门禁 |
+| Runtime | ReliabilityContract、journal-backed Typed Graph gate、跨步骤 Evidence provenance、Guard、Risk、写前重校验、独立验证、补偿、恢复和分阶段时延 |
+| Provider | 协议无关 Observation/Effect Capability；Network Observer、Actor 和本地 Adapter |
+| 网络仿真 | Containerlab + FRR：OSPF、eBGP、VLAN、EVPN/VXLAN L2VPN、故障切换和真实容器转发 |
+| 评测 | 六类 ES-P0 事务场景、独立安全 scorer、五机制消融矩阵和真实 DSH 配对协议 |
 
-### P0.5 完成范围
+Hermes/A2A、跨域业务 Lab、企业身份与审批、Provider 供应链、治理工作台、HA/DR、远端不可变审计和生产 SLO 的已有代码统一冻结，不计入当前能力或完成度。真实厂商设备、EVPN L3VPN、MPLS L2VPN/L3VPN 也不在当前原型覆盖内。
 
-本地 mock 范围已经具备：
+### 可量化结果
 
-- DSH-only Web UI 和 Agent runtime；
-- 版本化 Network L0 Skill 注册表；
-- 严格参数类型、必填字段、目标存在性与参数来源校验；
-- 不可变 `IntentSpec`、`plan_hash`、`intent_hash` 与 L0 合同哈希；
-- DSH `allowed-once` 审批与一次性 Tool Guard grant；
-- 执行前状态重校验，阻止 TOCTOU 状态漂移；
-- 独立 typed postcondition 验证；
-- 合同化补偿/回滚与人工介入终态；
-- SQLite 状态机及防篡改事件哈希链；
-- 持久化 Python Worker 和故障恢复；
-- A2A 发现、委派、深度/循环保护和持久化 continuation；
-- 本地 loopback-only DC peer，用于真实 A2A/SSE 协议模拟；
-- 作用域记忆、大结果分页、能力检索和隐私最小化轨迹；
-- 完整 retirement 门禁：132 个测试、32 个子测试和 7/7 本地端到端检查。
+真实主实验只改变一个变量：Control 为 `DSH + 同一模型/L1 Skill + 原生工具编排`；Treatment 在相同输入、审批、工具、Provider 和故障上加入 L0 资格门禁与 Runtime，不合格转换安全停机。
+
+| 模型与指标 | DSH + L1 原生 | DSH + L0 auto Runtime |
+|---|---:|---:|
+| 9B Task Completion | 50.00% | **86.67%** |
+| 9B Unsafe / False Commit / Invalid Action | 20.00% / 13.33% / 33.33% | **0 / 0 / 0** |
+| 9B Execution Precision / Autonomous Coverage | 59.09% / 43.33% | **100% / 76.67%** |
+| 9B p50 / p95 | 90.693 / 158.397 秒 | **44.405 / 72.173 秒** |
+| 7B Task Completion | 20.00% | **36.67%** |
+| 7B Unsafe / False Commit / Invalid Action | 10.00% / 3.33% / 20.00% | **0 / 0 / 0** |
+| 7B Execution Precision / Autonomous Coverage | 50.00% / 20.00% | **100% / 36.67%** |
+
+9B 转译严格通过 58/60，7B 为 38/60，两者误接受均为 0。7B 两臂各有 18/30 次 DSH `EMPTY_RESPONSE`，因此只支持安全边界跨模型稳定，不代表 7B 可用性合格。完整实验矩阵、消融贡献、进程失败、复现命令和摘要见 [ES-P0 本地证据报告](docs/ES-P0-EVIDENCE.md)。固定集结果不是生产概率。
+
+仓库外自动数据通道已封存 240 条模型合成用例，覆盖 6 类 Anthropic Skill、10 类事务/故障、6 个 MCP 域和 3 类语言。qwen3.5:9b 转译协议有效 240/240，可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对中，Treatment 将 Task Completion 从 76.67% 提升至 93.33%，unsafe 从 4/30 降至 0/30，p50 从 103.6 秒降至 64.3 秒。它用于在正式人工 ES-P1 前发现价值和边界，**不冒充独立人工 holdout 或生产概率**。方法、完整指标和命令见[仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)。
+
+公开 Skill 技术链路已完成角色隔离模拟：15 个实际公开 Skill、45 个案例、3 次重复和 270 次真实本地 DSH 实验臂执行中，Gold-blind 9B 转译路由一致 43/45、unsafe Runtime 误接纳为 0；Treatment 将 Task Completion 从 82.22% 提升到 97.78%，L0 路由从 21/42 提升到 42/42，p95 从 109.3 秒降到 56.1 秒。原生只读和 safe-stop 两臂保持相同，唯一残余是 1 个 L1 只读案例的三次失败。该结果是虚拟 Case/Gold 角色和声明式 fixture 的 `ES-P1-Wild-Sim`，**不是真人独立 holdout、真实系统或生产概率**；完整方法、分层结果和边界见[角色隔离模拟报告](docs/ES-P1-WILD-SIMULATED-RESULTS.md)，测试列表见[Skill 索引](docs/benchmarks/es-p1-wild-skill-index.json)，工作流见[公开 Skill 市场语料](docs/ES-P1-PUBLIC-SKILL-CORPUS.md)。
+
+Runtime 结果不能只看一项 `success`：
+
+| 终态 | 应怎样解释 |
+|---|---|
+| `verified_success` | 唯一正向成功；独立回读证明批准的后置条件成立 |
+| `rollback_verified` | 任务失败，但 Runtime 证明已恢复基线；不能计为任务成功 |
+| `precondition_changed` / `rejected` / `expired` | 写前安全停止，Effect 未被允许继续 |
+| `manual_intervention_required` | 目标或恢复状态无法证明，需要人工检查，禁止自动重试或宣称成功 |
+
+用 `scripts/netopyu-dsh runtime PLAN_ID` 可查看不可变计划、图节点、分阶段时延和 Evidence provenance；用 `runtime-audit` 验证事件摘要链。
+
+### 支持的典型场景
+
+- 新员工应用访问开通：身份、应用、审批、权限 MCP 与网络 L0 Saga 联动；
+- LAN 用户接入诊断、授权、撤销和回滚；
+- DC 应用访问、Fabric 配置、EVPN/VXLAN L2 路径诊断；
+- OSPF/eBGP 路径查询、链路故障切换和恢复；
+- 设备配置 edit/push、部署 rollback、节点 drain、服务 restart/rollback；
+- L1 Skill 转 L0.5/L0 的 proposal、语义审查和离线资格工作流；
+- REST/MCP/SSH/NETCONF/Controller Provider 接入前的合同检查。
 
 ### 快速开始
 
-依赖：
-
-- macOS 或 Linux；
-- Python 3.11 或 3.12；
-- Node.js 22.19+ 或 24+；
-- pnpm；
-- Ollama 和本地模型。
+依赖：Python 3.11/3.12、Node.js 22.19+ 或 24+、pnpm、Ollama。Containerlab 场景另需 Linux/Docker/Containerlab。
 
 ```bash
-cd /Users/steven/NetOpYuAgent
-python -m venv .venv
+git clone https://github.com/kevinyjk25/NetOpYuAgent.git
+cd NetOpYuAgent
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
+pip install -r requirements.txt -r requirements-dev.txt
 
-ollama pull qwen3.5:27b
-ollama pull qwen2.5:7b
-
+ollama pull qwen3.5:9b
 scripts/netopyu-dsh install
+scripts/netopyu-dsh settings-sync
+scripts/netopyu-dsh model qwen3.5:9b
 scripts/netopyu-dsh doctor
 scripts/netopyu-dsh start
 ```
 
-打开 <http://127.0.0.1:3080/>。
+打开 <http://127.0.0.1:3080/>。若该端口已被占用，使用 `NETOPYU_DSH_PORT=3081 scripts/netopyu-dsh restart`，并始终以 `scripts/netopyu-dsh status` 输出为准。
 
-完整运行时依赖按用途拆分：
+### 如何使用
 
-| 文件 | 用途 |
-|---|---|
-| `requirements-core.txt` | DSH bridge 核心依赖 |
-| `requirements-pragmatic.txt` | Netmiko/NAPALM/Nornir 等真实网络适配器 |
-| `requirements-observability.txt` | OpenTelemetry 可观测性 |
-| `requirements-dev.txt` | 本地/CI 测试门禁 |
-| `requirements.txt` | 生产能力全集 |
-
-### 本地 L1 + L0 + A2A 演练
-
-以下流程只改变本地模拟状态，不连接真实设备：
+先看三条 Golden Path 和本机就绪状态：
 
 ```bash
-scripts/netopyu-dsh stop
-scripts/netopyu-dsh dc-peer-start
-
-NETOPYU_PROFILE=lan \
-NETOPYU_DSH_BACKEND=mock \
-NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 \
-NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8765 \
-scripts/netopyu-dsh start
+scripts/netopyu doctor
+scripts/netopyu journeys
+scripts/netopyu agent-usecases
+scripts/netopyu evaluate
 ```
 
-在 DSH 新会话中使用 `qwen3.5:27b`，输入：
+`agent-usecases` 会给出三个可直接粘贴到 DSH 页面、真正包含 LLM Tool loop 的用例：Runtime L1→L0、L1→L0.5→L0 authoring、四类 MCP 外部系统集成。详细 Prompt 与预期证据见[真实 LLM Agent 用例](docs/AGENTIZED-USE-CASES.md)。
 
-```text
-这是本地 mock 网络演练。请调用 lan-new-employee-onboarding-access Skill，
-为新员工 erin 开通 CRM 的端到端访问。严格实际调用工具；所有写入都让我在
-DSH 的 Network L0 Skill 计划审批卡中审批，不要使用通用提问代替审批。
-```
-
-审批卡必须显示精确参数、目标、风险、plan hash、intent hash、L0 Skill 版本与哈希、验证合同和回滚合同。执行后检查：
+验证自己的外部系统接入包，不连接或激活目标系统：
 
 ```bash
-scripts/netopyu-dsh runtime-list 5
-scripts/netopyu-dsh runtime PLAN_ID
-scripts/netopyu-dsh runtime-audit PLAN_ID
+scripts/netopyu integration-check \
+  --pack examples/integration-rest-mcp/pack.yaml
 ```
 
-### 模型使用策略
-
-- 默认使用 `qwen3.5:27b` 进行网络工具会话。
-- `qwen2.5:7b` 的本地资格测试未通过自主变更要求：它会跳过指定 Skill、错误选择子代理、在成功后重复发起相同破坏性调用，并错误解释审批拒绝。
-- 7B 可以用于只读查询、分类或候选意图生成，但不能独立驱动可变更网络流程。
-- 模型只提出候选意图；Network Runtime 决定该意图能否安全进入效果层。
-
-Network L0 Skill 能保证“已校验并经审批的具体计划”按合同执行和验证，不能保证模型提出的计划天然等于用户真实业务意图。
-
-### 安全默认值
-
-- 默认 backend 为 `mock`；pragmatic 模式缺少真实来源时 fail closed。
-- 默认只暴露只读工具。
-- 写工具必须显式设置 `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1`。
-- 环境变量不能绕过单次 DSH 审批。
-- 批准绑定到完整计划哈希；参数、目标或合同变化都会使批准失效。
-- 授权 grant 最多消费一次，重放和并发重复调用会失败。
-- 成功只能由新的独立 postcondition evidence 判定，不能由模型文本或写工具返回值直接判定。
-- 真实凭据只允许通过环境或部署密钥系统注入，不写入仓库、计划摘要或轨迹。
-
-### 常用命令
+开发和审查 L0：
 
 ```bash
-scripts/netopyu-dsh doctor
-scripts/netopyu-dsh start
-scripts/netopyu-dsh stop
-scripts/netopyu-dsh status
-scripts/netopyu-dsh logs
-scripts/netopyu-dsh models
-scripts/netopyu-dsh model qwen3.5:27b
-scripts/netopyu-dsh backend
-scripts/netopyu-dsh worker-status
-scripts/netopyu-dsh dc-peer-start
-scripts/netopyu-dsh dc-peer-status
-scripts/netopyu-dsh peers
-scripts/netopyu-dsh l0-skills
-scripts/netopyu-dsh demo-l1-l0
-scripts/netopyu-dsh parity
-scripts/netopyu-dsh reliability
-scripts/netopyu-dsh retirement
+scripts/netopyu-l0 validate
+scripts/netopyu-l0 list
+scripts/netopyu-l0 explain network.lan.user-access.grant
+scripts/netopyu-l0 runtime-trajectories-validate
+scripts/netopyu-l0 workbench-export \
+  --proposal /path/to/proposal --output /tmp/semantic-review.html
 ```
 
-可变运行时数据默认位于 `~/Library/Application Support/NetOpYuAgent/dsh-runtime`，可用 `NETOPYU_DSH_RUNTIME` 覆盖。运行时 SQLite、日志、虚拟环境和 IDE 文件不会提交到 Git。
-
-### 验证
+创建仓库外、角色隔离的正向资格工作区：
 
 ```bash
-scripts/netopyu-dsh retirement
+scripts/netopyu-l0 forward-eval-study-kit --output-root /private/forward-study
+scripts/netopyu-l0 forward-eval-study-doctor --root /private/forward-study
 ```
 
-该命令是本项目的权威本地门禁，覆盖 Python、Node 插件语法、DSH-only 架构、HITL、A2A、Network Runtime、Skill 投影、检索质量、Worker 并发/恢复和破坏性操作策略。
+没有独立业务团队时，可先自动生成明确标记为 synthetic、且不能通过正式 ES-P1 门禁的封存用例：
 
-### 文档
+```bash
+scripts/netopyu-synthetic-study export /private/synthetic-study --cases 240
+cd /private/synthetic-study
+env -u PYTHONPATH python3 generate.py --model qwen3.5:9b --resume
+```
 
-- [ARCHITECTURE.md](ARCHITECTURE.md)：权威架构边界、依赖规则与架构决策；
-- [HLD.md](HLD.md)：高层设计、组件、部署和端到端数据流；
-- [LLD.md](LLD.md)：模块、接口、状态机、合同与异常处理；
-- [SSD.md](SSD.md)：系统规格、安全设计、威胁模型和验收标准。
+检查通用 Anthropic Skill 包及其安全路由：
+
+```bash
+scripts/netopyu-effect inspect-package --skill /path/to/my-skill
+python -m evaluation.progressive_skill_suite
+python -m evaluation.general_effect_model \
+  --dataset-root /private/synthetic-study \
+  --model qwen3.5:9b --output-root artifacts/es-p0-9b-translation
+scripts/netopyu-harness-ab \
+  --dataset-root /private/synthetic-study \
+  --model qwen3.5:9b \
+  --translation-report artifacts/es-p0-9b-translation/model-translation.json \
+  --output-root artifacts/es-p0-dsh-9b \
+  --stratified-patterns --repetitions 3
+scripts/netopyu-synthetic-study report /private/synthetic-study \
+  --translation-report artifacts/es-p0-9b-translation/model-translation.json \
+  --dsh-report artifacts/es-p0-dsh-9b/real-harness-ab.json \
+  --output-root artifacts/es-p0-synthetic-evidence
+```
+
+Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作见[使用与系统接入](docs/getting-started-integration.md)。
+
+### 文档入口
+
+- [文档导航与权威边界](docs/README.md)
+- [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)
+- [项目进展与路线图](docs/PROJECT-STATUS.md)
+- [架构与 ADR](ARCHITECTURE.md)
+- [高层设计](HLD.md)、[低层设计](LLD.md)、[安全设计](SSD.md)
+- [ES-P0 本地证据报告](docs/ES-P0-EVIDENCE.md)
+- [ES-P1-Wild 角色隔离模拟结果](docs/ES-P1-WILD-SIMULATED-RESULTS.md)
+- [仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)
+- [通用渐进式确定化与跨域验证](docs/progressive-determinization.md)
+- [真实 Harness 自动 Runtime A/B](docs/general-effect-ab.md)
+- [L1 → L0 Promotion](docs/l1-to-l0-promotion.md)
+- [正向资格协议](docs/promotion-forward-qualification.md)
+- [Runtime A/B 基线](docs/benchmarks/runtime-ab-baseline.md)
 
 ---
 
 ## English
 
-### Project scope
+EnsuredSkill is a network-first Reliability Runtime research prototype. DSH, the LLM, and L1 Skills produce hypotheses and Candidate Plans; Contract, Evidence, Guard, Risk, and transactional state determine what is allowed to reach the network.
 
-NetOpYuAgent is a network-domain plugin and deterministic execution runtime built on [DeepSeek Harness (DSH)](https://github.com/deepseek-ai/deepseek-harness).
+The [authoritative prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes conflicting production-engineering plans. Enterprise identity, provider supply chain, multi-team governance, Hermes/A2A productization, HA/DR, WORM audit, and production SLOs are frozen future work rather than current architecture or exit criteria.
 
-DSH owns the general agent platform: sessions, model calls, tools, Web UI, Skills, approval interaction, and subagents. NetOpYuAgent no longer implements a second general-purpose harness. It contributes only the network-domain capabilities that must remain reliable:
+### Design
 
-- Domain L1 Skills for diagnosis, clarification, cross-domain collaboration, and workflow orchestration;
-- Network L0 Skills for validation, risk assessment, preflight, approval binding, one-shot execution, verification, compensation/rollback, and audit;
-- LAN, DC, WAN, and pragmatic network tools;
-- the DSH plugin, Python Worker, A2A provider, scoped memory, capability retrieval, and offline evaluation.
+The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
 
-> Status: the P0 migration is complete and the P0.5 local-simulation prototype is complete. This validates the architecture and safety pipeline; it does not claim absolute correctness in a real production network. Real devices, enterprise identity, change windows, HA, backup/restore, and production SLOs belong to P1.
+| Layer | Authority | Boundary |
+|---|---|---|
+| Reasoning Plane | DSH, LLM, L1 understanding, diagnosis, clarification and planning | proposes only; the product path has no direct write authority |
+| Reliability Runtime | Contract, typed graph, Evidence, Guard, Risk, transaction, verification and compensation | performs no open-ended reasoning; confidence grants no authority |
+| Infrastructure Plane | network/service Providers over MCP/API/CLI/NETCONF and labs | owns facts and effects, but cannot self-declare a verified terminal outcome |
 
-### Layer terminology
+L1, L0.5, L0, and a Runtime plan have different authority. L1 is natural-language semantic guidance; L0.5 is a review-only structured proposal; only an explicitly reviewed and activated compiled L0 can govern an effect. A per-request Candidate Plan remains untrusted until the Runtime resolves the exact L0, grounds parameters, validates evidence/guards/risk, and creates a plan-bound approval. An unqualified read may remain read-only; an unqualified write stops safely and never regains native-Agent write authority. See the [complete Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md).
 
-| Name | Responsibility |
-|---|---|
-| DSH Platform Layer | General agent harness for models, sessions, UI, tools, and approval interaction |
-| NetOpYu Domain Layer | All network-domain capabilities above DSH |
-| Domain L1 Skill | Generalized, model-assisted business Skill for reasoning and orchestration |
-| Network L0 Skill | Versioned, model-independent effect contract |
-| Network Runtime | Safety runtime that compiles and executes Network L0 Skills |
+The two core capabilities are:
 
-### P0.5 completion scope
+1. **Contract-Governed Skill authoring.** L1→L0.5→L0 preserves readable intent while producing an executable contract. It creates review proposals only and is distinct from trace-based Experience Compilation.
+2. **Evidence-Gated transactional execution.** An active L0 becomes an immutable plan and typed graph. Runtime snapshots, prechecks, revalidates, executes, verifies, commits, reconciles uncertainty, compensates, verifies recovery, and audits terminal evidence.
 
-The local mock scope includes a DSH-only runtime and UI, versioned Network L0 Skills, strict parameters and provenance, immutable intent/plan/contract hashes, allowed-once approval, one-shot Tool Guard grants, execution-time revalidation, typed independent postconditions, contractual compensation, a tamper-evident SQLite journal, persistent Worker recovery, A2A discovery and continuations, a loopback-only DC peer, scoped memory, large-result paging, capability retrieval, and a complete retirement gate with 132 tests, 32 subtests, and 7/7 end-to-end checks.
+The ES-P0 local research-prototype evidence loop is complete: provenance-aware execution, mechanism ablation, three repeated real-Harness pairs, and cross-model safety evidence are now available. This does not imply hidden-set generalization, real-device qualification, or production readiness.
+
+### Capabilities and evidence
+
+The active prototype includes 21 reviewed L0 contracts and readable three-stage trajectories, LAN/DC/WAN L1 guidance, the DSH path, a journal-backed Typed Graph gate, cross-step evidence provenance and stage latency, network Observation/Effect providers, Containerlab/FRR labs, and the ES-P0 evaluation protocol. Hermes/A2A, enterprise controls, supply-chain admission, governance, and extra domains are frozen experimental code rather than active capability claims.
+
+The local ES-P0 evidence loop is complete. In 30 real paired DSH sessions with `qwen3.5:9b`, treatment improved task completion from 50.00% to 86.67%, execution precision from 59.09% to 100%, and autonomous coverage from 43.33% to 76.67%; unsafe execution, false commits, and invalid actions fell from 20.00%/13.33%/33.33% to zero. With `qwen2.5:7b`, the same safety metrics also fell to zero, but 18/30 sessions in both arms failed at the DSH/model availability layer, so 7B is not availability-qualified. Translation false accepts were zero for both models. See the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md).
+
+These are transparent local development results, not production probability, hidden-set generalization, or vendor-device certification. Historical one-shot and evaluator-only native-write experiments remain component/exploratory evidence only and are not product fallback paths.
+
+A repository-external synthetic path has sealed 240 model-authored cases across six Anthropic Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from 4/30 to 0/30, and reduced p50 latency from 103.6 to 64.3 seconds. This remains model-authored pre-ES-P1 evidence, not independent human qualification or a production probability. See the [synthetic holdout guide](docs/SYNTHETIC-HOLDOUT.md).
+
+The public-Skill path now has a complete role-separated simulation over 15 real public Skills, 45 cases, three repetitions, and 270 real local DSH arm executions. Gold-blind 9B translation matched 43/45 simulated Gold routes with zero unsafe Runtime accepts. Treatment improved task completion from 82.22% to 97.78%, lifted the L0 route from 21/42 to 42/42, and reduced p95 from 109.3 to 56.1 seconds; native-read and safe-stop outcomes were unchanged. This is `ES-P1-Wild-Sim` over virtual Case/Gold roles and declarative fixtures, **not independent-human holdout, real-system evidence, or production probability**. See the [role-separated simulation report](docs/ES-P1-WILD-SIMULATED-RESULTS.md), [tested-Skill index](docs/benchmarks/es-p1-wild-skill-index.json), and [public Skill-market workflow](docs/ES-P1-PUBLIC-SKILL-CORPUS.md).
+
+Execution outcomes are deliberately not a generic success Boolean. `verified_success` is the only positive success and requires independent postcondition evidence. `rollback_verified` proves restoration after a failed task, while `precondition_changed`, `rejected`, and `expired` are safe pre-effect stops. `manual_intervention_required` means the Runtime cannot prove the target or recovery state. Inspect a plan with `scripts/netopyu-dsh runtime PLAN_ID` and verify its event chain with `runtime-audit`.
+
+Production qualification remains open for vendor devices, enterprise identity/change systems, independently owned signing roots, distributed HA/DR, remote immutable audit, and production SLOs. EVPN L3VPN and MPLS L2/L3 VPN are outside the current lab coverage.
 
 ### Quick start
 
-Requirements: Python 3.11/3.12, Node.js 22.19+ or 24+, pnpm, Ollama, and a local model.
-
 ```bash
-cd /Users/steven/NetOpYuAgent
-python -m venv .venv
+python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements-dev.txt
-
-ollama pull qwen3.5:27b
-ollama pull qwen2.5:7b
-
+pip install -r requirements.txt -r requirements-dev.txt
+ollama pull qwen3.5:9b
 scripts/netopyu-dsh install
+scripts/netopyu-dsh settings-sync
+scripts/netopyu-dsh model qwen3.5:9b
 scripts/netopyu-dsh doctor
 scripts/netopyu-dsh start
 ```
 
-Open <http://127.0.0.1:3080/>.
-
-### Local L1 + L0 + A2A exercise
-
-This changes local simulator state only:
+Open <http://127.0.0.1:3080/>. Use `scripts/netopyu-dsh status` as the authoritative URL/process check.
 
 ```bash
-scripts/netopyu-dsh stop
-scripts/netopyu-dsh dc-peer-start
-
-NETOPYU_PROFILE=lan \
-NETOPYU_DSH_BACKEND=mock \
-NETOPYU_DSH_ENABLE_DESTRUCTIVE=1 \
-NETOPYU_DSH_A2A_PEERS=http://127.0.0.1:8765 \
-scripts/netopyu-dsh start
+scripts/netopyu doctor
+scripts/netopyu journeys
+scripts/netopyu agent-usecases
+scripts/netopyu evaluate
+scripts/netopyu integration-check --pack examples/integration-rest-mcp/pack.yaml
 ```
 
-Use `qwen3.5:27b` in a new DSH session and ask it to run the `lan-new-employee-onboarding-access` Skill for user `erin` and application `crm`. Approve writes only through the Network L0 plan card, then inspect and audit the plan:
+The Agent use-case command prints three paste-ready real-LLM DSH journeys: L1-to-L0 Runtime execution, proposal-only L1-to-L0.5-to-L0 authoring, and four-system MCP integration. See the [Agent use cases](docs/AGENTIZED-USE-CASES.md) and [integration guide](docs/getting-started-integration.md).
+
+For L0 development and external qualification:
 
 ```bash
-scripts/netopyu-dsh runtime PLAN_ID
-scripts/netopyu-dsh runtime-audit PLAN_ID
+scripts/netopyu-l0 validate
+scripts/netopyu-l0 runtime-trajectories-validate
+scripts/netopyu-l0 forward-eval-study-kit --output-root /private/forward-study
+scripts/netopyu-l0 forward-eval-study-doctor --root /private/forward-study
+scripts/netopyu-effect inspect-package --skill /path/to/my-skill
 ```
-
-### Model policy
-
-`qwen3.5:27b` is the default for network tool sessions. Local qualification rejected `qwen2.5:7b` for autonomous mutations because it skipped the required Skill, selected an unrelated subagent path, retried a destructive action after success, and misinterpreted a rejected approval. It may be used for read-only classification or candidate intent generation behind the Runtime boundary.
-
-A Network L0 Skill guarantees the execution properties of a specific validated and approved plan. It does not guarantee that the model selected the correct business plan.
-
-### Safety defaults
-
-- `mock` is the default backend; an incomplete pragmatic backend fails closed.
-- Only read-only tools are exposed by default.
-- Mutations require `NETOPYU_DSH_ENABLE_DESTRUCTIVE=1` and a fresh DSH allowed-once decision.
-- Approval is bound to the full plan hash and cannot be reused after any parameter, target, or contract change.
-- Grants are consumable once and resist replay/concurrent duplication.
-- Success requires fresh independent postcondition evidence.
-- Credentials must come from environment or deployment secret systems and must not enter plans, trajectories, or Git.
-
-### Verification
-
-```bash
-scripts/netopyu-dsh retirement
-```
-
-This is the authoritative local gate for Python tests, Node/plugin syntax, DSH-only architecture, HITL, A2A, Network Runtime, Skill projection, retrieval quality, Worker concurrency/recovery, and mutation policy.
 
 ### Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md): authoritative boundaries, dependency rules, and decisions;
-- [HLD.md](HLD.md): high-level components, deployment, and end-to-end flows;
-- [LLD.md](LLD.md): modules, interfaces, state machines, contracts, and failure handling;
-- [SSD.md](SSD.md): system specification, security design, threat model, and acceptance criteria.
+Start with the [documentation map](docs/README.md), [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md), [project status](docs/PROJECT-STATUS.md), [architecture](ARCHITECTURE.md), [HLD](HLD.md), [LLD](LLD.md), [SSD](SSD.md), the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md), and the [repository-external synthetic holdout](docs/SYNTHETIC-HOLDOUT.md).

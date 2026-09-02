@@ -1,0 +1,113 @@
+schema_version: 1
+name: netopyu-evpn-vxlan
+topology: topology.clab.yml
+
+zones:
+  fabric-underlay: {trust: trusted, description: Spine/leaf routed underlay}
+  tenant-a: {trust: restricted, description: Tenant A isolated L2 bridge domain}
+  tenant-b: {trust: restricted, description: Tenant B isolated L2 bridge domain}
+
+devices:
+  spine-1:
+    node: spine-1
+    platform: frr
+    role: route-reflector
+    zone: fabric-underlay
+    tags: [spine, ospf, bgp, evpn]
+    expected_ospf_neighbors: 2
+    expected_bgp_neighbors: 2
+  spine-2:
+    node: spine-2
+    platform: frr
+    role: route-reflector
+    zone: fabric-underlay
+    tags: [spine, ospf, bgp, evpn]
+    expected_ospf_neighbors: 2
+    expected_bgp_neighbors: 2
+  leaf-1:
+    node: leaf-1
+    platform: frr
+    role: vtep-leaf
+    zone: fabric-underlay
+    tags: [leaf, ospf, bgp, evpn, vxlan]
+    expected_ospf_neighbors: 2
+    expected_bgp_neighbors: 2
+  leaf-2:
+    node: leaf-2
+    platform: frr
+    role: vtep-leaf
+    zone: fabric-underlay
+    tags: [leaf, ospf, bgp, evpn, vxlan]
+    expected_ospf_neighbors: 2
+    expected_bgp_neighbors: 2
+
+endpoints:
+  host-a1: {node: host-a1, role: access-host, zone: tenant-a}
+  host-a2: {node: host-a2, role: access-host, zone: tenant-a}
+  host-b1: {node: host-b1, role: access-host, zone: tenant-b}
+  host-b2: {node: host-b2, role: access-host, zone: tenant-b}
+  trunk-1: {node: trunk-1, role: tagged-host, zone: tenant-a}
+  trunk-2: {node: trunk-2, role: tagged-host, zone: tenant-a}
+
+probes:
+  tenant-a-l2vpn:
+    source: host-a1
+    destination: 10.10.10.12
+    count: 3
+  tenant-b-l2vpn:
+    source: host-b1
+    destination: 10.20.20.12
+    count: 3
+  tagged-vlan-20:
+    source: trunk-1
+    destination: 10.20.20.22
+    count: 3
+  tagged-vlan-10:
+    source: trunk-1
+    destination: 10.10.10.22
+    count: 3
+  tenant-isolation:
+    source: host-a1
+    destination: 10.20.20.12
+    count: 3
+    expected: false
+
+fault_targets:
+  leaf1-spine1:
+    node: leaf-1
+    interface: eth1
+  leaf1-spine2:
+    node: leaf-1
+    interface: eth2
+  leaf2-spine1:
+    node: leaf-2
+    interface: eth1
+  leaf2-spine2:
+    node: leaf-2
+    interface: eth2
+
+fabric:
+  mode: evpn-vxlan-l2
+  asn: 65000
+  route_reflectors: [spine-1, spine-2]
+  vteps: [leaf-1, leaf-2]
+  vlans:
+    vlan-10:
+      {vlan_id: 10, name: tenant-a-stretched, tenant: tenant-a, l2vni: 10010,
+       bridge: br10, vxlan_interface: vxlan10}
+    vlan-20:
+      {vlan_id: 20, name: tenant-b-stretched, tenant: tenant-b, l2vni: 10020,
+       bridge: br20, vxlan_interface: vxlan20}
+  attachments:
+    host-a1: {device: leaf-1, interface: eth3, mode: access, vlans: [10]}
+    host-b1: {device: leaf-1, interface: eth4, mode: access, vlans: [20]}
+    trunk-1: {device: leaf-1, interface: eth5, mode: trunk, vlans: [10, 20]}
+    host-a2: {device: leaf-2, interface: eth3, mode: access, vlans: [10]}
+    host-b2: {device: leaf-2, interface: eth4, mode: access, vlans: [20]}
+    trunk-2: {device: leaf-2, interface: eth5, mode: trunk, vlans: [10, 20]}
+
+simulation:
+  forwarding: linux-frr-evpn-vxlan
+  network_admission: 8021q-linux-bridge
+  application_policy: evpn-mac-route-distribution
+  security_edge: tenant-bridge-domain-isolation

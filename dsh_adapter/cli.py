@@ -9,8 +9,13 @@ import os
 import sys
 from typing import Any
 
+from .agentized_authoring import (
+    authoring_template, authoring_trace, capture_authoring, submit_authoring,
+)
+from .backend import resolve_backend_mode
 from .bridge import (
     audit_network_plan,
+    approve_network_plan,
     backend_report,
     build_l0_skill_catalog,
     build_manifest,
@@ -23,13 +28,9 @@ from .bridge import (
     recent_network_plans,
     start_network_workflow,
 )
-from .a2a_provider import delegate_a2a, discover_peers
-from .scoped_services import recall_memory, search_capabilities
-from .evaluation import parity_report
-from .learning import mine_candidates, review_candidate
 from .reliability import run_local_reliability
+from .scoped_services import recall_memory, search_capabilities
 from .skills import build_skill_manifest
-from .backend import resolve_backend_mode
 
 
 def _read_arguments() -> dict[str, Any]:
@@ -51,6 +52,7 @@ def main(argv: list[str] | None = None) -> int:
     invoke = subparsers.add_parser("invoke")
     invoke.add_argument("--profile", default="lan")
     invoke.add_argument("--tool", required=True)
+    invoke.add_argument("--session")
 
     runtime_prepare = subparsers.add_parser("runtime-prepare")
     runtime_prepare.add_argument("--profile", default="lan")
@@ -61,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
     runtime_execute = subparsers.add_parser("runtime-execute")
     runtime_execute.add_argument("--profile", default="lan")
     runtime_execute.add_argument("--tool")
+
+    runtime_approve = subparsers.add_parser("runtime-approve")
+    runtime_approve.add_argument("--profile", default="lan")
+    runtime_approve.add_argument("--tool")
 
     runtime_inspect = subparsers.add_parser("runtime-inspect")
     runtime_inspect.add_argument("--plan", required=True)
@@ -98,11 +104,6 @@ def main(argv: list[str] | None = None) -> int:
     a2a_delegate = subparsers.add_parser("a2a-delegate")
     a2a_delegate.add_argument("--profile", default="lan")
 
-    parity = subparsers.add_parser("parity")
-    parity.add_argument("--profile", default="lan")
-    parity.add_argument("--golden", required=True)
-    parity.add_argument("--include-destructive", action="store_true")
-
     trajectory_mine = subparsers.add_parser("trajectory-mine")
     trajectory_mine.add_argument("--source", required=True)
     trajectory_mine.add_argument("--database", required=True)
@@ -126,18 +127,59 @@ def main(argv: list[str] | None = None) -> int:
     skill_manifest = subparsers.add_parser("skill-manifest")
     skill_manifest.add_argument("--profile", default="lan")
 
+    agent_authoring_template = subparsers.add_parser("agent-authoring-template")
+    agent_authoring_template.add_argument("--profile", default="lan")
+    agent_authoring_capture = subparsers.add_parser("agent-authoring-capture")
+    agent_authoring_capture.add_argument("--profile", default="lan")
+    agent_authoring_submit = subparsers.add_parser("agent-authoring-submit")
+    agent_authoring_submit.add_argument("--profile", default="lan")
+    agent_authoring_trace = subparsers.add_parser("agent-authoring-trace")
+    agent_authoring_trace.add_argument("--profile", default="lan")
+    agent_authoring_trace.add_argument("--attempt")
+
+    l1_decision_shadow = subparsers.add_parser("l1-decision-shadow")
+    l1_decision_shadow.add_argument("--profile", default="lan")
+
+    l1_decision_recent = subparsers.add_parser("l1-decision-recent")
+    l1_decision_recent.add_argument("--profile", default="lan")
+
+    l1_decision_observe = subparsers.add_parser("l1-decision-observe")
+    l1_decision_observe.add_argument("--profile", default="lan")
+
+    l1_decision_close = subparsers.add_parser("l1-decision-close")
+    l1_decision_close.add_argument("--profile", default="lan")
+
+    l1_decision_metrics = subparsers.add_parser("l1-decision-metrics")
+    l1_decision_metrics.add_argument("--profile", default="lan")
+
     args = parser.parse_args(argv)
     try:
         if args.command == "manifest":
             payload = build_manifest(args.profile, include_destructive=args.include_destructive)
         elif args.command == "invoke":
-            result = asyncio.run(invoke_tool(args.profile, args.tool, _read_arguments()))
+            raw_access = os.environ.get("NETOPYU_DSH_ACCESS_CONTEXT", "")
+            access_context = json.loads(raw_access) if raw_access else None
+            if access_context is not None and not isinstance(access_context, dict):
+                raise TypeError("NETOPYU_DSH_ACCESS_CONTEXT must be a JSON object")
+            result = asyncio.run(invoke_tool(
+                args.profile, args.tool, _read_arguments(), access_context=access_context,
+                session_id=args.session,
+                harness=os.environ.get("NETOPYU_HARNESS", "local"),
+            ))
             payload = {"ok": True, "result": result}
         elif args.command == "runtime-prepare":
+            raw_subject = os.environ.get("NETOPYU_DSH_SUBJECT_CONTEXT", "")
+            subject_context = json.loads(raw_subject) if raw_subject else None
+            if subject_context is not None and not isinstance(subject_context, dict):
+                raise TypeError("NETOPYU_DSH_SUBJECT_CONTEXT must be a JSON object")
             payload = asyncio.run(prepare_network_plan(
                 args.profile, args.tool, _read_arguments(),
                 session_id=args.session, l0_skill_id=args.l0_skill,
+                subject_context=subject_context,
+                harness=os.environ.get("NETOPYU_HARNESS", "local"),
             ))
+        elif args.command == "runtime-approve":
+            payload = approve_network_plan(_read_arguments())
         elif args.command == "runtime-execute":
             payload = asyncio.run(execute_network_plan(
                 _read_arguments(),
@@ -165,20 +207,23 @@ def main(argv: list[str] | None = None) -> int:
             request = _read_arguments()
             payload = asyncio.run(search_capabilities(profile_id=args.profile, **request))
         elif args.command == "a2a-peers":
+            from .a2a_provider import discover_peers
+
             payload = asyncio.run(discover_peers(**_read_arguments()))
         elif args.command == "a2a-delegate":
+            from .a2a_provider import delegate_a2a
+
             payload = asyncio.run(delegate_a2a(**_read_arguments()))
-        elif args.command == "parity":
-            payload = asyncio.run(parity_report(
-                profile_id=args.profile, golden_path=args.golden,
-                include_destructive=args.include_destructive,
-            ))
         elif args.command == "trajectory-mine":
+            from .learning import mine_candidates
+
             payload = mine_candidates(
                 source_database=args.source, review_database=args.database,
                 min_occurrences=args.min_occurrences, apply_changes=args.apply,
             )
         elif args.command == "trajectory-review":
+            from .learning import review_candidate
+
             payload = review_candidate(
                 review_database=args.database, candidate_id=args.candidate,
                 decision=args.decision, reviewer=args.reviewer, reason=args.reason,
@@ -189,6 +234,69 @@ def main(argv: list[str] | None = None) -> int:
                 project_root=args.project_root, python_executable=args.python,
                 request_count=args.requests, concurrency=args.concurrency,
             )
+        elif args.command == "l1-decision-shadow":
+            from l1_runtime.service import decide_shadow
+
+            request = _read_arguments()
+            tool_declarations = request.get("tool_declarations")
+            if not isinstance(tool_declarations, list):
+                raise TypeError("L1 decision tool_declarations must be an array")
+            payload = asyncio.run(decide_shadow(
+                profile=args.profile,
+                session_id=str(request.get("session_id") or ""),
+                harness=str(request.get("harness") or "dsh"),
+                prompt=str(request.get("user_request") or ""),
+                tool_declarations=tool_declarations,
+                model=str(request.get("model") or ""),
+            ))
+        elif args.command == "l1-decision-recent":
+            from l1_runtime.service import recent_decisions
+
+            request = _read_arguments()
+            payload = recent_decisions(
+                limit=int(request.get("limit", 20)),
+                session_id=(
+                    str(request["session_id"])
+                    if request.get("session_id") is not None else None
+                ),
+            )
+        elif args.command == "l1-decision-observe":
+            from l1_runtime.service import observe_decision
+
+            request = _read_arguments()
+            observed_arguments = request.get("observed_arguments")
+            if not isinstance(observed_arguments, dict):
+                raise TypeError("L1 observed_arguments must be an object")
+            payload = observe_decision(
+                decision_id=str(request.get("decision_id") or ""),
+                session_id=str(request.get("session_id") or ""),
+                observed_kind=str(request.get("observed_kind") or ""),
+                observed_target=str(request.get("observed_target") or ""),
+                observed_arguments=observed_arguments,
+            )
+        elif args.command == "l1-decision-close":
+            from l1_runtime.service import close_decision
+
+            request = _read_arguments()
+            payload = close_decision(
+                decision_id=str(request.get("decision_id") or ""),
+                session_id=str(request.get("session_id") or ""),
+                reason=str(request.get("reason") or ""),
+            )
+        elif args.command == "l1-decision-metrics":
+            from l1_runtime.service import decision_metrics
+
+            request = _read_arguments()
+            payload = decision_metrics(limit=int(request.get("limit", 500)))
+        elif args.command == "agent-authoring-template":
+            payload = authoring_template()
+        elif args.command == "agent-authoring-capture":
+            payload = capture_authoring(_read_arguments())
+        elif args.command == "agent-authoring-submit":
+            payload = submit_authoring(_read_arguments())
+        elif args.command == "agent-authoring-trace":
+            request = {} if args.attempt else _read_arguments()
+            payload = authoring_trace(str(args.attempt or request.get("attempt_id") or ""))
         else:
             payload = build_skill_manifest(args.profile, resolve_backend_mode())
     except Exception as error:

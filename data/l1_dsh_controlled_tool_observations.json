@@ -1,0 +1,83 @@
+{
+  "apiVersion": "netopyu.io/l1-dsh-controlled-tool-observations/v1",
+  "observations": [
+    {
+      "adapter": "dsh-headless-controlled-skill-capture",
+      "candidate_top_k": 12,
+      "catalog_digest": "sha256:642839b44b639e8d7a6e78fb01d7caee09d1f2c5d25f462fe1b072751fe3ef0d",
+      "dataset_complete": true,
+      "dataset_digest": "sha256:c9cf65cfaa15d5d5096a5eefc026463888f3d7aa71aca4078bece8b171fb48c2",
+      "dsh_config_digest": "sha256:1c1bbbd08f0e79a006aee3d742ce23f3305fc3be3d8ff2f7e3b8c02981c0ada1",
+      "dsh_settings_digest": "sha256:d584ee3e679a64b81774747f2fbb96c87919bae5060a332136492073e9eb879d",
+      "dsh_version": "0.1.1-rc.2",
+      "evaluated_cases": 160,
+      "evaluator_fingerprint": "sha256:6a1714eda707a87344d623da74c7ff9abb71b84abd0e5c27d0fb0daa581ebf1a",
+      "fingerprint": "sha256:08cf26d6c2856d103d0d2dd3c29f37a17be03306e8dae98e274ea242dd792453",
+      "metrics": {
+        "action_accuracy": 0.475,
+        "candidate_recall": 1.0,
+        "clarification_precision": 0.7273,
+        "clarification_recall": 0.2667,
+        "end_to_end_accuracy": 0.3688,
+        "latency_ms": {
+          "p50": 4565.052,
+          "p95": 9672.185
+        },
+        "missing_fields_accuracy": 0.2333,
+        "out_of_scope_accuracy": 0.0,
+        "parameter_field_f1": 0.5302,
+        "safety_escape_rate": 0.05,
+        "selection_accuracy": 0.5208,
+        "strict_output_rate": 0.6813,
+        "tokens": {
+          "input": 396793,
+          "output": 8504
+        },
+        "workflow_accuracy": 0.5625
+      },
+      "model": "qwen2.5:7b",
+      "model_artifact_digest": "sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "preloaded_skill_digest": "sha256:c39b844683d982a4b93f338672d6d073db33903e93a68ac155389082b4650c6d",
+      "protocol_governor": {
+        "capture_retry_count": 17,
+        "capture_retry_exhausted": 2,
+        "forced_capture_rounds": 160,
+        "forced_final_rounds": 158,
+        "rejected_requests": 0,
+        "synthetic_final_count": 158,
+        "upstream_request_count": 177
+      },
+      "protocol_metrics": {
+        "capture_accept_rate": 0.8,
+        "capture_call_rate": 0.9875,
+        "capture_schema_valid_rate": 0.8,
+        "duplicate_capture_rate": 0.0,
+        "exposed_tools_exact_rate": 1.0,
+        "final_response_exact_rate": 0.8063,
+        "forbidden_tool_call_rate": 0.0,
+        "preloaded_skill_digest_match_rate": 0.8,
+        "premature_visible_text_rate": 0.0187,
+        "proposal_contract_valid_rate": 0.6813,
+        "session_completion_rate": 1.0,
+        "single_capture_accuracy": 0.9875
+      },
+      "protocol_preflight": "compatible",
+      "qualification_eligible": true,
+      "qualified": false,
+      "recorded_at": "2026-08-29T02:54:14.455782+00:00",
+      "scope": "full-160-controlled-qualification",
+      "token_accounting": "transcript-visible-only; 17 discarded hidden repair attempts are excluded"
+    }
+  ],
+  "comparison_to_b2_same_model_artifact": {
+    "capture_call_rate_delta": 0.8688,
+    "capture_schema_valid_rate_delta": 0.75,
+    "duplicate_capture_rate_delta": -0.0063,
+    "end_to_end_accuracy_delta": 0.3501,
+    "parameter_field_f1_delta": 0.509,
+    "premature_visible_text_rate_delta": -0.25,
+    "proposal_contract_valid_rate_delta": 0.6563,
+    "selection_accuracy_delta": 0.5,
+    "warning": "C1 materially improves protocol conformance but remains unqualified; safety escape increased from 0 to 5%. Fixed-set deltas are not production probabilities."
+  }
+}

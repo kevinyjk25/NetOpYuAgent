@@ -1,0 +1,114 @@
+apiVersion: netopyu.io/capability-catalog/v3
+provider: netopyu.production.restart_service
+version: 1.0.0
+capabilities:
+- id: netopyu.tool.restart_service
+  role: effect
+  profiles:
+  - lan
+  inputs:
+    service:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    environment:
+      type: string
+      required: false
+      description: ''
+      enum:
+      - prod
+      - staging
+      - dev
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: restart_service
+- id: netopyu.tool.service_health
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    service:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    environment:
+      type: string
+      required: false
+      description: ''
+      enum:
+      - prod
+      - staging
+      - dev
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+  observationPhases:
+  - preflight
+  phasePredicates:
+    preflight:
+    - field: facts
+      operator: exists
+      expected: null
+- id: netopyu.verifier.service-health
+  role: observation
+  profiles:
+  - lan
+  inputs:
+    service:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean
+  observationPhases:
+  - success_verification
+  phasePredicates:
+    success_verification:
+    - field: passed
+      operator: equals
+      expected: true

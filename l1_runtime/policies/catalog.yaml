@@ -1,0 +1,60 @@
+apiVersion: netopyu.io/l1-catalog-policy/v1
+policyId: netopyu-production-l1-v1
+aliases:
+  skill:lan-new-employee-onboarding-access:
+    - new hire employee onboarding provision application end to end access
+    - 新员工 入职 开通 应用访问 准入 权限 可达性 验证
+  skill:lan-user-access-diagnose:
+    - user cannot access diagnose admission identity application permission layered
+    - 用户 无法访问 诊断 准入 身份 应用权限 分层 排查
+  tool:device_info:
+    - device facts hardware model firmware serial uptime
+    - 设备信息 硬件 型号 固件 序列号 运行时间 无线 AP
+  tool:get_device_config:
+    - show read configuration config section vlan
+    - 读取 查看 设备配置 配置段 核心交换机 VLAN
+  tool:validate_device_config:
+    - validate check audit current device configuration compliance read only
+    - 验证 检查 审计 当前设备配置 合规 只检查 不修改
+  tool:dns_lookup:
+    - dns lookup resolve hostname address
+    - DNS 解析 域名 地址
+  tool:grant_user_access:
+    - grant restore network admission nac user reason
+    - 开通 恢复 网络准入 用户 原因
+  tool:dc_config_push:
+    - push apply data center node configuration reason
+    - 下发 应用 数据中心 节点 配置 变更原因
+requiredParameters:
+  tool:device_info: [device_id]
+  tool:dns_lookup: [hostname]
+  tool:get_device_config: [device_id]
+  tool:validate_device_config: [device_id]
+  tool:grant_user_access: [user_id, reason]
+  tool:dc_config_push: [node, config_lines, reason]
+  tool:wan_failover_path: [tunnel, to_transport]
+  tool:wan_path_sla: [src, dst]
+  tool:wan_route_lookup: [prefix]
+dominance:
+  skill:alert-summary: [tool:alert_summary]
+  skill:prometheus-query: [tool:prometheus_query]
+  skill:restart-service: [tool:restart_service]
+  skill:rollback-service: [tool:rollback_service]
+  skill:service-health: [tool:service_health]
+  skill:syslog-search: [tool:syslog_search]
+  skill:netflow-analysis: [tool:netflow_dump]
+  skill:dc-evpn-troubleshoot:
+    - tool:dc_bgp_evpn_status
+    - tool:dc_evpn_route_lookup
+  skill:dc-path-troubleshoot: [tool:dc_fabric_path_trace]
+skillOverrides:
+  skill:app-access-troubleshoot:
+    parameters:
+      user_id: 用户唯一标识
+      app: 目标应用标识
+    requiredParameters: [user_id, app]
+  skill:branch-app-reachability:
+    parameters:
+      user_id: 分支用户唯一标识
+      app: 目标应用标识
+    requiredParameters: [user_id, app]

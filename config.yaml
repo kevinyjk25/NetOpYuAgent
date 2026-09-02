@@ -30,6 +30,14 @@ pragmatic:
   device_inventory: []
   mcp_servers: []
   napalm_getters: [get_facts, get_interfaces, get_interfaces_counters]
+  # P0.75-A local FRR lab. Enable only after `scripts/netopyu-lab preflight`
+  # passes and the topology has been deployed. Lab mode never falls back to
+  # mock data or a real device inventory.
+  lab:
+    enabled: false
+    provider: containerlab
+    manifest: labs/p075-a-frr/lab.yaml
+    command_timeout: 30
 
 retrieval:
   backend: bm25

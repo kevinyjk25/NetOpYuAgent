@@ -85,6 +85,7 @@ assert.ok(services.get('netopyuToolGuard'))
 assert.ok(services.get('netopyuMemory'))
 assert.ok(services.get('netopyuCapabilities'))
 assert.ok(services.get('netopyuA2A'))
+assert.equal(services.get('netopyuDecisionPlane').mode, 'off')
 assert.ok(providers.get('netopyu-a2a'))
 assert.ok(registeredSkills.has('read-stored-result'))
 assert.ok(registeredSkills.has('app-access-troubleshoot'))
@@ -162,7 +163,11 @@ const execution = {
 const decision = await listeners.get('tools/pre-execute')(execution, async () => ({ kind: 'allow' }))
 assert.equal(decision.kind, 'allow')
 const result = await restart.execute(execution.arguments, execution)
-assert.match(result, /restart/i)
+const terminal = JSON.parse(result)
+assert.equal(terminal.contract, 'netopyu.effect-runtime-terminal@1.0.0')
+assert.equal(terminal.terminal, true)
+assert.equal(terminal.state, 'verified_success')
+assert.doesNotMatch(result, /\"state\"\s*:\s*\"applied\"/i)
 await assert.rejects(restart.execute(execution.arguments, execution), /durable-HITL grant/)
 listeners.get('tools/result')(execution, { isError: false })
 assert.ok(JSON.parse(await trajectoryRecent.execute({ limit: 10 })).some(item => item.event_type === 'tool:result'))
@@ -178,7 +183,11 @@ const reusedTokenDecision = await listeners.get('tools/pre-execute')(
   reusedTokenExecution, async () => ({ kind: 'allow' }),
 )
 assert.equal(reusedTokenDecision.kind, 'allow')
-assert.match(await restart.execute(reusedTokenExecution.arguments, reusedTokenExecution), /restart/i)
+const reusedTerminal = JSON.parse(
+  await restart.execute(reusedTokenExecution.arguments, reusedTokenExecution),
+)
+assert.equal(reusedTerminal.contract, 'netopyu.effect-runtime-terminal@1.0.0')
+assert.equal(reusedTerminal.state, 'verified_success')
 listeners.get('tools/result')(reusedTokenExecution, { isError: false })
 
 approvalOutcome = 'rejected'

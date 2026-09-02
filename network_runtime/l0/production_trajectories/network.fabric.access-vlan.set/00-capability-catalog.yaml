@@ -1,0 +1,236 @@
+apiVersion: netopyu.io/capability-catalog/v3
+provider: netopyu.production.fabric_set_access_vlan
+version: 1.0.0
+capabilities:
+- id: network.fabric.access-vlan.set
+  role: effect
+  profiles:
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    interface:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    vlan_id:
+      type: integer
+      required: false
+      description: ''
+      enum: []
+      minimum: 1.0
+      maximum: 4094.0
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    verification_probe_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: fabric_set_access_vlan
+- id: network.fabric.access-vlan.get
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    interface:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+  observationPhases:
+  - preflight
+  phasePredicates:
+    preflight:
+    - field: facts
+      operator: exists
+      expected: null
+- id: netopyu.verifier.fabric-access-vlan
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    interface:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean
+  observationPhases:
+  - success_verification
+  phasePredicates:
+    success_verification:
+    - field: passed
+      operator: equals
+      expected: true
+- id: network.fabric.access-vlan.restore
+  role: compensation
+  profiles:
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    interface:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean
+  tool: fabric_restore_access_vlan
+- id: netopyu.rollback-verifier.fabric-access-vlan-snapshot-v1
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    interface:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean
+  observationPhases:
+  - compensation_verification
+  phasePredicates:
+    compensation_verification:
+    - field: restored
+      operator: equals
+      expected: true

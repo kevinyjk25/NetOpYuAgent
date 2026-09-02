@@ -1,0 +1,120 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:561aa3fa37ce3fdefc9aa43d256c0435719262ab09d8388aed85d9f7f451e2b4",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for wan_failover_path",
+    "id": "network.wan.path.failover",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "",
+      "runtime-tool-contract": "wan-failover-v1",
+      "runtime-verifier": "wan-failover"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": null,
+    "effect": {
+      "capability": "netopyu.tool.wan_failover_path",
+      "internal": {},
+      "request": {
+        "to_transport": "${arguments.to_transport}",
+        "tunnel": "${arguments.tunnel}"
+      },
+      "tool": "wan_failover_path"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "manual_intervention"
+    },
+    "intent": {
+      "desiredState": {
+        "state": "up",
+        "transport": "${arguments.to_transport}"
+      },
+      "kind": "failover_wan_path",
+      "targetFields": [
+        "tunnel"
+      ]
+    },
+    "parameters": {
+      "to_transport": {
+        "description": "",
+        "enum": [
+          "mpls",
+          "broadband",
+          "lte"
+        ],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "tunnel": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {},
+        "capability": "netopyu.tool.wan_tunnel_status",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "wan"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "tunnel": "${arguments.tunnel}"
+      },
+      "capability": "netopyu.verifier.wan-failover",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

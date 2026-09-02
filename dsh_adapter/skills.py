@@ -1,4 +1,4 @@
-"""Expose the active NetOpYu profile's canonical SKILL.md files to DSH."""
+"""Expose canonical profile SKILL.md files to DSH and Hermes adapters."""
 
 from __future__ import annotations
 

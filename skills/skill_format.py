@@ -395,6 +395,8 @@ def to_flat_dict(
         "parameters":     sections["parameters"],
         "returns":        meta.get("returns", "string"),
         "tool_deps":      tool_deps,
+        "profiles":       _meta_list("profiles"),
+        "lab_capability": meta.get("lab_capability", ""),
         "examples":       sections["examples"],
         "constraints":    sections["constraints"],
         "estimated_size": meta.get("estimated_size", "small"),

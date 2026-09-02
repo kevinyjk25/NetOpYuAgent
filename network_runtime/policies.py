@@ -15,11 +15,20 @@ class ToolContract:
     rollback_tool: str | None = None
     rollback_fields: tuple[str, ...] = ()
     compensator: str | None = None
+    allowed_sources: tuple[str, ...] = ()
+    requires_trusted_mcp: bool = False
+    capability_id: str | None = None
+    allowed_provider_kinds: tuple[str, ...] = ()
+    verification_tool: str | None = None
+    verification_fields: tuple[str, ...] = ()
 
 
 _CONTRACTS: dict[str, ToolContract] = {
     "edit_device_config": ToolContract(
         "device-config-v1", "get_device_config", ("device_id", "section"), "device-config",
+        "restore_device_config", ("device_id",), "device-config-snapshot-v1",
+        capability_id="network.device.config.edit",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "push_config": ToolContract(
         "mock-config-push-v1", "get_device_config", ("device_id",), "device-config",
@@ -39,10 +48,14 @@ _CONTRACTS: dict[str, ToolContract] = {
     "grant_user_access": ToolContract(
         "lan-access-grant-v1", "get_user_access", ("user_id",), "lan-access-granted",
         "revoke_user_access", ("user_id",), "inverse-tool-v1",
+        capability_id="network.lan.user-access.grant",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "revoke_user_access": ToolContract(
         "lan-access-revoke-v1", "get_user_access", ("user_id",), "lan-access-revoked",
         "grant_user_access", ("user_id",), "inverse-tool-v1",
+        capability_id="network.lan.user-access.revoke",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "dc_config_push": ToolContract(
         "dc-config-v2", "dc_get_applied_config", ("node",), "dc-config",
@@ -50,13 +63,76 @@ _CONTRACTS: dict[str, ToolContract] = {
     "dc_grant_app_access": ToolContract(
         "dc-access-grant-v1", "dc_check_user_app_access", ("user_id", "app_id"), "dc-access-granted",
         "dc_revoke_app_access", ("user_id", "app_id"), "inverse-tool-v1",
+        capability_id="network.dc.app-access.grant",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "dc_revoke_app_access": ToolContract(
         "dc-access-revoke-v1", "dc_check_user_app_access", ("user_id", "app_id"), "dc-access-revoked",
         "dc_grant_app_access", ("user_id", "app_id"), "inverse-tool-v1",
+        capability_id="network.dc.app-access.revoke",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
     "wan_failover_path": ToolContract(
         "wan-failover-v1", "wan_tunnel_status", (), "wan-failover",
+    ),
+    "fabric_set_access_vlan": ToolContract(
+        "fabric-access-vlan-v1",
+        "lab_get_access_vlan", ("device_id", "interface"),
+        "fabric-access-vlan",
+        "fabric_restore_access_vlan", ("device_id", "interface"),
+        "fabric-access-vlan-snapshot-v1",
+        capability_id="network.fabric.access-vlan.set",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
+    ),
+    "access_policy_grant_entitlement": ToolContract(
+        "service-entitlement-grant-v1",
+        "access_policy_get_entitlement", ("user_id", "app_id"),
+        "service-entitlement-granted",
+        "access_policy_restore_entitlement", ("user_id", "app_id"),
+        "service-entitlement-snapshot-v1",
+        ("mcp:access-policy-service",), True,
+    ),
+    "access_policy_revoke_entitlement": ToolContract(
+        "service-entitlement-revoke-v1",
+        "access_policy_get_entitlement", ("user_id", "app_id"),
+        "service-entitlement-revoked",
+        "access_policy_restore_entitlement", ("user_id", "app_id"),
+        "service-entitlement-snapshot-v1",
+        ("mcp:access-policy-service",), True,
+    ),
+    "platform_restart_service": ToolContract(
+        "service-platform-restart-v1",
+        "platform_get_service_health", ("service", "environment"),
+        "service-platform-healthy",
+        "platform_restore_service", ("service", "environment"),
+        "service-platform-snapshot-v1",
+        ("mcp:platform-service",), True,
+    ),
+    "platform_rollback_service": ToolContract(
+        "service-platform-rollback-v1",
+        "platform_get_service_health", ("service", "environment"),
+        "service-platform-healthy",
+        "platform_restore_service", ("service", "environment"),
+        "service-platform-snapshot-v1",
+        ("mcp:platform-service",), True,
+    ),
+    "network_apply_app_enforcement": ToolContract(
+        "network-app-enforcement-grant-v1",
+        "network_get_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-granted",
+        "network_restore_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-snapshot-v1",
+        capability_id="network.application.enforcement.apply",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
+    ),
+    "network_revoke_app_enforcement": ToolContract(
+        "network-app-enforcement-revoke-v1",
+        "network_get_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-revoked",
+        "network_restore_app_enforcement", ("user_id", "app_id"),
+        "network-app-enforcement-snapshot-v1",
+        capability_id="network.application.enforcement.revoke",
+        allowed_provider_kinds=("network-lab", "network-actor-mcp"),
     ),
 }
 
@@ -66,6 +142,30 @@ def reviewed_contracts() -> dict[str, ToolContract]:
     return dict(_CONTRACTS)
 
 
+def register_reviewed_contract(tool_name: str, contract: ToolContract) -> None:
+    """Register one adapter-supplied execution contract, idempotently.
+
+    Providers may add domain contracts during their trusted startup path, but
+    they cannot replace an existing reviewed binding.  This keeps the Runtime
+    core transport/domain neutral without allowing MCP self-description to
+    grant execution authority.
+    """
+    existing = _CONTRACTS.get(tool_name)
+    if existing is not None and existing != contract:
+        raise RuntimeError(f"reviewed execution contract already exists for {tool_name}")
+    _CONTRACTS[tool_name] = contract
+
+
+def unregister_reviewed_contract(tool_name: str, contract: ToolContract) -> None:
+    """Remove an exact adapter-owned registration without replacing authority."""
+    existing = _CONTRACTS.get(tool_name)
+    if existing is None:
+        return
+    if existing != contract:
+        raise RuntimeError(f"cannot remove a different reviewed contract for {tool_name}")
+    del _CONTRACTS[tool_name]
+
+
 def resolve_contract(
     tool_name: str,
     *,
@@ -73,19 +173,74 @@ def resolve_contract(
     requires_approval: bool,
     mode: str,
     source: str,
+    metadata: dict[str, Any] | None = None,
 ) -> ToolContract | None:
     if not requires_approval and action_type == "read_only":
         return ToolContract("read-only-v1", None, (), "read-result")
     contract = _CONTRACTS.get(tool_name)
     if contract is None:
         return None
+    if contract.allowed_sources and source not in contract.allowed_sources:
+        return None
+    capability_bound = False
+    if contract.capability_id:
+        metadata = metadata or {}
+        capability_id = metadata.get("capability_id")
+        # Temporary P0.9 compatibility permits the two reviewed in-process
+        # providers used by tests/backfills to omit capability metadata. Every
+        # real pragmatic Lab backend created by open_backend is enriched and
+        # follows the capability branch below. External providers never enter
+        # this compatibility path.
+        if capability_id is None and source in {"network-lab", "profile-mock"}:
+            capability_bound = False
+        elif (
+            capability_id != contract.capability_id
+            or metadata.get("provider_role") != "actor"
+            or metadata.get("provider_kind") not in contract.allowed_provider_kinds
+            or not str(metadata.get("capability_version") or "")
+        ):
+            return None
+        else:
+            capability_bound = True
+            if source.startswith("mcp:") and (
+                not metadata.get("trusted_for_writes")
+                or not str(metadata.get("provider_identity") or "").startswith(f"{source}:")
+                or not str(metadata.get("input_schema_digest") or "").startswith("sha256:")
+                or not str(metadata.get("output_schema_digest") or "").startswith("sha256:")
+                or metadata.get("declared_contract_id") != contract.contract_id
+                or metadata.get("result_contract") != "structured-content-required-v1"
+            ):
+                return None
+    if capability_bound:
+        return contract
+    if contract.requires_trusted_mcp:
+        metadata = metadata or {}
+        if (
+            not metadata.get("trusted_for_writes")
+            or metadata.get("declared_contract_id") != contract.contract_id
+            or metadata.get("result_contract") != "structured-content-required-v1"
+            or not str(metadata.get("provider_identity") or "").startswith(f"{source}:")
+            or not str(metadata.get("input_schema_digest") or "").startswith("sha256:")
+            or not str(metadata.get("output_schema_digest") or "").startswith("sha256:")
+        ):
+            return None
+        return contract
     # External MCP/OpenAPI writes cannot inherit a same-name local contract.
-    if source not in {"profile-mock", "pragmatic-device"}:
+    if source not in {"profile-mock", "pragmatic-device", "network-lab"}:
         return None
-    # Only the pragmatic edit tool currently owns verified snapshot/rollback
-    # semantics. Other pragmatic writes must add an explicit contract first.
+    # Pragmatic writes are fail-closed. The local lab may additionally expose
+    # manifest-bound access controls whose verifiers and inverse operations are
+    # implemented by the same provider. Real-device adapters cannot inherit
+    # those simulator contracts merely by reusing a tool name.
+    pragmatic_lab_writes = {
+        "grant_user_access", "revoke_user_access",
+        "dc_grant_app_access", "dc_revoke_app_access",
+        "fabric_set_access_vlan",
+        "network_apply_app_enforcement", "network_revoke_app_enforcement",
+    }
     if mode == "pragmatic" and tool_name != "edit_device_config":
-        return None
+        if source != "network-lab" or tool_name not in pragmatic_lab_writes:
+            return None
     return contract
 
 

@@ -1,0 +1,42 @@
+{
+  "schema": "netopyu.runtime-ab-baseline@1.0.0",
+  "baseline_id": "p1.1-core72-local-2026-08-28",
+  "description": "Core-72 local fixed-L1 DSH-only versus DSH + Runtime baseline; rates are fixed-oracle coverage, not production probabilities.",
+  "campaign": {
+    "campaign_id": "core72-v1",
+    "scenario_count": 72,
+    "valid_scenarios": 8,
+    "control_scenarios": 64,
+    "matrix": {
+      "parameter_intent": 12,
+      "read_policy": 8,
+      "approval_binding": 12,
+      "result_recovery": 12,
+      "compensation": 8,
+      "saga": 6,
+      "evidence_integrity": 6
+    },
+    "dsh_only_control_effectiveness_rate": 7.8
+  },
+  "runtime": {
+    "control_effectiveness_rate": 100.0,
+    "valid_completion_rate": 100.0,
+    "control_scenarios": 64,
+    "p50_ms": 7.893,
+    "p95_ms": 8.871
+  },
+  "thresholds": {
+    "minimum_unique_iterations": 3,
+    "latency_regression_relative": 1.25,
+    "latency_regression_absolute_ms": 3.0,
+    "latency_improvement_relative": 0.15,
+    "latency_improvement_absolute_ms": 1.0
+  },
+  "unmeasured": [
+    "LLM intent extraction",
+    "L1 Skill selection",
+    "vendor-device qualification",
+    "human approval duration",
+    "distributed HA and production SLO"
+  ]
+}

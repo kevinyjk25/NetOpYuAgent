@@ -84,7 +84,11 @@ const approvedDecision = await listeners.get('tools/pre-execute')(approved, asyn
 assert.equal(approvedDecision.kind, 'allow')
 assert.equal(approvalCalls, 1)
 const result = await grantAccess.execute(approved.arguments, approved)
-assert.match(result, /Granted network access/)
+const terminal = JSON.parse(result)
+assert.equal(terminal.contract, 'netopyu.effect-runtime-terminal@1.0.0')
+assert.equal(terminal.state, 'verified_success')
+assert.equal(terminal.evidence[0].value.facts.admitted, true)
+assert.doesNotMatch(result, /\"state\"\s*:\s*\"applied\"/i)
 await listeners.get('tools/post-execute')(
   approved, { isError: false, value: result, content: [] }, async () => ({ kind: 'accept' }),
 )

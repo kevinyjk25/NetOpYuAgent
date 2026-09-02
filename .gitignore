@@ -1,6 +1,8 @@
 .DS_Store
 .idea/
 .pytest_cache/
+labs/**/.state/
+labs/**/clab-*/
 .mypy_cache/
 .ruff_cache/
 __pycache__/
@@ -15,7 +17,11 @@ data/network_runtime.sqlite
 data/tool_results.db
 data/tool_results.sqlite
 data/local_dc_peer.sqlite
+data/service_layer.sqlite
+data/agentized_service_layer.sqlite
+data/l0-proposals/
 
 # Generated local test/runtime artifacts
+artifacts/
 *.sqlite-shm
 *.sqlite-wal

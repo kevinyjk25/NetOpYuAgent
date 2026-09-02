@@ -3,22 +3,32 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import re
 from dataclasses import dataclass
 from typing import Any
+
+from effect_runtime.reliability import (
+    AutonomyDecision,
+    Reversibility,
+    RiskAssessment,
+    RiskFactors,
+    RiskPolicy,
+)
 
 from .contracts import RiskLevel
 
 
 _INTEGER_KEYS = {
-    "flows", "grace_period_s", "length", "lines", "minutes", "offset", "range_minutes", "top_n", "vni",
+    "flows", "grace_period_s", "length", "lines", "minutes", "offset", "range_minutes",
+    "route_type", "top_n", "vlan_id", "vni", "expected_revision",
 }
 _BOOLEAN_KEYS = {"dry_run", "force", "graceful", "rolling"}
 _ARRAY_KEYS = {"config_lines", "device_ids"}
 _JSON_KEYS = {"changes"}
 _TARGET_KEYS = (
     "device_id", "device_ids", "node", "node_id", "tunnel", "resource_id",
-    "deploy_id", "service", "user_id", "app_id",
+    "deploy_id", "service", "user_id", "app_id", "entity_id",
 )
 _ENUMS: dict[str, set[str]] = {
     "environment": {"prod", "staging", "dev"},
@@ -41,6 +51,21 @@ _SAFETY_REQUIRED: dict[str, set[str]] = {
     "dc_grant_app_access": {"user_id", "app_id", "reason"},
     "dc_revoke_app_access": {"user_id", "app_id", "reason"},
     "wan_failover_path": {"tunnel", "to_transport"},
+    "fabric_set_access_vlan": {"device_id", "interface", "vlan_id", "reason"},
+    "access_policy_grant_entitlement": {
+        "user_id", "app_id", "role", "change_id", "expected_revision", "reason",
+    },
+    "access_policy_revoke_entitlement": {
+        "user_id", "app_id", "change_id", "expected_revision", "reason",
+    },
+    "platform_restart_service": {
+        "service", "environment", "change_id", "expected_revision", "reason",
+    },
+    "platform_rollback_service": {
+        "service", "environment", "version", "change_id", "expected_revision", "reason",
+    },
+    "network_apply_app_enforcement": {"user_id", "app_id", "change_id", "reason"},
+    "network_revoke_app_enforcement": {"user_id", "app_id", "change_id", "reason"},
 }
 _FORBIDDEN_CONFIG = re.compile(
     r"(^|\s)(write\s+erase|erase\s+startup|format\b|reload\b|factory-reset|"
@@ -103,7 +128,15 @@ def _known_entities(profile: str, mode: str) -> dict[str, set[str]]:
     if mode == "pragmatic":
         from config import load
 
-        devices = {device.id for device in load().pragmatic.device_inventory if device.id}
+        pragmatic = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml")).pragmatic
+        devices = {device.id for device in pragmatic.device_inventory if device.id}
+        if pragmatic.lab.enabled:
+            from network_lab import load_manifest
+
+            manifest = load_manifest(pragmatic.lab.manifest)
+            devices.update(manifest.devices)
+            entities["user_id"] = set(manifest.users)
+            entities["app_id"] = set(manifest.applications)
         entities["device_id"] = devices
         return entities
     if profile == "lan":
@@ -177,6 +210,10 @@ def compile_parameters(
             value = value.lower()
         if name == "vni" and isinstance(value, int) and not 1 <= value <= 16_777_215:
             errors.append("vni must be between 1 and 16777215")
+        if name == "vlan_id" and isinstance(value, int) and not 1 <= value <= 4_094:
+            errors.append("vlan_id must be between 1 and 4094")
+        if name == "route_type" and isinstance(value, int) and value not in {2, 3, 5}:
+            errors.append("route_type must be one of 2, 3, or 5")
         if name == "grace_period_s" and isinstance(value, int) and not 0 <= value <= 3_600:
             errors.append("grace_period_s must be between 0 and 3600")
         if name == "prefix" and isinstance(value, str):
@@ -200,7 +237,11 @@ def compile_parameters(
     if tool_name == "edit_device_config" and not compiled.get("config_lines") and not compiled.get("changes"):
         missing.append("config_lines or changes")
 
-    known = _known_entities(profile, mode)
+    tags = {str(item) for item in (metadata.get("tags") or [])}
+    # The Service MCP owns business identifiers. A user can legitimately have
+    # no Containerlab endpoint; cross-layer reconciliation reports that drift
+    # instead of parameter compilation rejecting the business identity.
+    known = {} if {"mcp", "service"}.issubset(tags) else _known_entities(profile, mode)
     for field_name, values in known.items():
         if field_name not in compiled or not values:
             continue
@@ -237,20 +278,78 @@ def compile_parameters(
     )
 
 
-def assess_risk(tool_name: str, metadata: dict[str, Any], arguments: dict[str, Any]) -> tuple[RiskLevel, tuple[str, ...]]:
+def assess_risk_decision(
+    tool_name: str,
+    metadata: dict[str, Any],
+    arguments: dict[str, Any],
+    *,
+    evidence_confidence: float = 1.0,
+) -> RiskAssessment:
+    """Return a versioned, explainable EXECUTE/ASK_HUMAN/REJECT decision.
+
+    This replaces the former tool-name-only heuristic.  A reviewed L0 contract
+    may still require human approval even when the generic risk policy says an
+    operation is eligible for automatic execution; policy can only narrow.
+    """
     action = str(metadata.get("action_type", "read_only"))
-    if not bool(metadata.get("hitl")) and action == "read_only":
-        return RiskLevel.LOW, ("read-only operation",)
-    reasons = [f"action_type={action}"]
-    level = RiskLevel.HIGH
-    if action == "reversible":
-        reasons.append("explicit reversible operation")
-    if tool_name in {"delete_resource"} or bool(arguments.get("force")):
-        level = RiskLevel.CRITICAL
-        reasons.append("irreversible deletion or dependency bypass")
-    if isinstance(arguments.get("device_ids"), list) and len(arguments["device_ids"]) > 1:
-        level = RiskLevel.CRITICAL
-        reasons.append(f"multi-target blast radius={len(arguments['device_ids'])}")
+    has_compensation = bool(metadata.get("compensator") or metadata.get("rollback_tool"))
+    reversibility = (
+        Reversibility.STRONG
+        if action == "reversible" and has_compensation
+        else Reversibility.CONDITIONAL
+        if action == "reversible"
+        else Reversibility.IRREVERSIBLE
+        if action in {"destructive", "irreversible"}
+        else Reversibility.STRONG
+    )
+    targets = arguments.get("device_ids")
+    blast_radius = len(targets) if isinstance(targets, list) else 1
+    if bool(arguments.get("force")) or tool_name == "delete_resource":
+        reversibility = Reversibility.IRREVERSIBLE
+    service_criticality = int(metadata.get("service_criticality", 0) or 0)
     if arguments.get("environment") == "prod":
-        reasons.append("production environment")
-    return level, tuple(reasons)
+        service_criticality = max(service_criticality, 3)
+    historical_success = float(metadata.get("historical_success_rate", 1.0) or 0.0)
+    return RiskPolicy().evaluate(RiskFactors(
+        change_scope=max(1, len(arguments)),
+        blast_radius=max(1, blast_radius),
+        evidence_confidence=evidence_confidence,
+        reversibility=reversibility,
+        historical_success=historical_success,
+        service_criticality=service_criticality,
+    ))
+
+
+def assess_risk(
+    tool_name: str,
+    metadata: dict[str, Any],
+    arguments: dict[str, Any],
+) -> tuple[RiskLevel, tuple[str, ...]]:
+    """Compatibility projection used by PreparedPlan schema v10."""
+    if not bool(metadata.get("hitl")) and str(metadata.get("action_type", "read_only")) == "read_only":
+        return RiskLevel.LOW, ("autonomy_decision=execute", "read-only operation")
+    assessment = assess_risk_decision(tool_name, metadata, arguments)
+    # Preserve the externally visible critical classification for destructive
+    # or force-bypass operations.  The new autonomy decision is intentionally
+    # orthogonal: a critical operation may be routed to a human instead of
+    # being rejected at plan-compilation time.
+    if tool_name == "delete_resource" or bool(arguments.get("force")):
+        level = RiskLevel.CRITICAL
+    elif assessment.decision == AutonomyDecision.REJECT:
+        level = RiskLevel.CRITICAL
+    elif assessment.decision == AutonomyDecision.ASK_HUMAN:
+        level = RiskLevel.HIGH
+    else:
+        level = RiskLevel.MEDIUM
+    compatibility_reasons = (
+        ("irreversible deletion or force bypass",)
+        if level == RiskLevel.CRITICAL
+        and (tool_name == "delete_resource" or bool(arguments.get("force")))
+        else ()
+    )
+    return level, (
+        f"autonomy_decision={assessment.decision.value}",
+        f"risk_score={assessment.score}",
+        *compatibility_reasons,
+        *assessment.reasons,
+    )

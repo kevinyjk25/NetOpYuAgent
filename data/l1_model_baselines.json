@@ -1,0 +1,33 @@
+{
+  "apiVersion": "netopyu.io/l1-model-baselines/v1",
+  "baselines": [
+    {
+      "adapter": "openai-compatible",
+      "candidate_top_k": 12,
+      "catalog_digest": "sha256:642839b44b639e8d7a6e78fb01d7caee09d1f2c5d25f462fe1b072751fe3ef0d",
+      "dataset_digest": "sha256:c9cf65cfaa15d5d5096a5eefc026463888f3d7aa71aca4078bece8b171fb48c2",
+      "evaluated_cases": 160,
+      "evaluator_fingerprint": "sha256:f8d736614b7be4ac2ad49df1e74b73d625ef5be5425ea3c31448b0c69599eb46",
+      "fingerprint": "sha256:c30938d7b474ab674ea669b98633716f0f99d4f2f04d713a6627806e68fb0585",
+      "metrics": {
+        "action_accuracy": 0.6,
+        "candidate_recall": 1.0,
+        "clarification_precision": 0.0,
+        "clarification_recall": 0.0,
+        "end_to_end_accuracy": 0.5563,
+        "missing_fields_accuracy": 0.0,
+        "out_of_scope_accuracy": 0.7857,
+        "parameter_field_f1": 0.6211,
+        "safety_escape_rate": 0.0,
+        "selection_accuracy": 0.6979,
+        "strict_output_rate": 0.7562,
+        "workflow_accuracy": 0.625
+      },
+      "model": "qwen2.5:7b",
+      "model_artifact_digest": "sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "prompt_fingerprint": "sha256:0c1296a2b96af329ba276949c847710450c6bdd0e0088449c069a353766853df",
+      "qualified": false,
+      "recorded_at": "2026-08-28T18:33:00.125195+00:00"
+    }
+  ]
+}

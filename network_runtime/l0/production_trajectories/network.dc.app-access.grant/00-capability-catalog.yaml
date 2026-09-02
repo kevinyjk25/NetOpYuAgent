@@ -1,0 +1,223 @@
+apiVersion: netopyu.io/capability-catalog/v3
+provider: netopyu.production.dc_grant_app_access
+version: 1.0.0
+capabilities:
+- id: network.dc.app-access.grant
+  role: effect
+  profiles:
+  - dc
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    role:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: dc_grant_app_access
+- id: network.dc.application-access.check
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+  observationPhases:
+  - preflight
+  phasePredicates:
+    preflight:
+    - field: facts
+      operator: exists
+      expected: null
+- id: netopyu.verifier.dc-access-granted
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean
+  observationPhases:
+  - success_verification
+  phasePredicates:
+    success_verification:
+    - field: passed
+      operator: equals
+      expected: true
+- id: network.dc.app-access.revoke
+  role: compensation
+  profiles:
+  - dc
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean
+  tool: dc_revoke_app_access
+- id: netopyu.rollback-verifier.inverse-tool-v1
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    user_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    app_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean
+  observationPhases:
+  - compensation_verification
+  phasePredicates:
+    compensation_verification:
+    - field: restored
+      operator: equals
+      expected: true

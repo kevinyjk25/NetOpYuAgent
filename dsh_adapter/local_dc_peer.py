@@ -2,7 +2,8 @@
 
 It runs the reviewed DC workflow, prepares an immutable Network L0 plan,
 pauses for a DSH approval, and executes only the exact resumed plan.  It is a
-mock test adapter, never a production or pragmatic-mode peer.
+local peer. In pragmatic lab mode it is bound to the reviewed Containerlab
+manifest; it is never a production peer.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from typing import Any
 from network_runtime.engine import NetworkRuntime, default_journal_path
 from network_runtime.l0_skills import REGISTRY as L0_SKILLS
 from network_runtime.workflows import WorkflowRuntime
+from dsh_adapter.backend import resolve_backend_mode
 
 
 _USER_RE = re.compile(r"\buser_id\s*=\s*([A-Za-z0-9_.-]+)", re.I)
@@ -58,8 +60,15 @@ def _targets(prompt: str) -> tuple[str, str]:
 
 class LocalDcPeer:
     def __init__(self, *, runtime_path: str | Path, state_path: str | Path) -> None:
-        if os.environ.get("NETOPYU_DSH_BACKEND", "mock").strip().lower() != "mock":
-            raise RuntimeError("local DC A2A peer is mock-only and refuses pragmatic mode")
+        self.mode = resolve_backend_mode()
+        if self.mode == "pragmatic":
+            from config import load
+
+            cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
+            if not cfg.pragmatic.lab.enabled:
+                raise RuntimeError(
+                    "local DC A2A peer permits pragmatic mode only with the reviewed local lab"
+                )
         self.runtime_path = Path(runtime_path).expanduser().resolve()
         self.state_path = Path(state_path).expanduser().resolve()
         self.state_path.parent.mkdir(parents=True, exist_ok=True)
@@ -124,7 +133,7 @@ class LocalDcPeer:
         runtime = NetworkRuntime(self.runtime_path)
         workflow_session = f"dc-a2a:{source}:{user_id}:{app_id}"
         with WorkflowRuntime(self.runtime_path) as workflows:
-            workflows.start(session_id=workflow_session, profile="dc", mode="mock",
+            workflows.start(session_id=workflow_session, profile="dc", mode=self.mode,
                             skill_name="dc-app-access-diagnose")
         access = await runtime.invoke_read(
             "dc", "dc_check_user_app_access", {"user_id": user_id, "app_id": app_id},
@@ -244,6 +253,30 @@ class LocalDcPeer:
                                            {"user_id": user_id, "app_id": app_id})
         if "✅ ALLOWED" not in access:
             return _failed("DC path verification refused because application access is not granted")
+        if self.mode == "pragmatic":
+            raw_probe = await runtime.invoke_read(
+                "dc", "lab_app_probe", {"user_id": user_id, "app_id": app_id},
+            )
+            try:
+                probe = json.loads(raw_probe)
+            except json.JSONDecodeError:
+                return _failed("lab application probe returned invalid evidence")
+            if not (
+                probe.get("ok") is True
+                and probe.get("user_id") == user_id
+                and probe.get("app_id") == app_id
+                and probe.get("policy_allowed") is True
+                and int(probe.get("exit_code", -1)) == 0
+            ):
+                return _failed("manifest-bound HTTP path verification failed")
+            return _message(json.dumps({
+                "status": "completed", "skill": "dc-path-troubleshoot",
+                "user_id": user_id, "app_id": app_id,
+                "vip": probe.get("destination"),
+                "application_access_verified": True,
+                "path_verified": True,
+                "traffic_evidence": probe,
+            }, ensure_ascii=False))
         apps = await runtime.invoke_read("dc", "dc_list_apps", {})
         vip_match = re.search(rf"^\s*{re.escape(app_id)}\s+.*?(\d+(?:\.\d+){{3}})",
                               apps, re.MULTILINE | re.I)
@@ -275,7 +308,8 @@ class _Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.rstrip("/").endswith("agent-card.json"):
-            self._json(200, {"agent_id": "dc-agent", "name": "Local Mock DC Agent",
+            mode = self.server.peer.mode
+            self._json(200, {"agent_id": "dc-agent", "name": f"Local {mode.title()} DC Agent",
                 "description": "Loopback-only reviewed DC application-access and path-verification peer.",
                 "url": self.server.base_url, "skills": [
                     {"id": "dc-app-access-diagnose", "name": "DC Application Access",
@@ -286,7 +320,8 @@ class _Handler(BaseHTTPRequestHandler):
                      "tags": ["dc", "path", "verification"]}]})
             return
         if self.path == "/health":
-            self._json(200, {"ok": True, "agent_id": "dc-agent", "mode": "mock", "pid": os.getpid()})
+            self._json(200, {"ok": True, "agent_id": "dc-agent",
+                             "mode": self.server.peer.mode, "pid": os.getpid()})
             return
         self._json(404, {"error": "not found"})
 
@@ -317,7 +352,7 @@ class _Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the loopback-only local mock DC A2A peer")
+    parser = argparse.ArgumentParser(description="Run the loopback-only local DC A2A peer")
     parser.add_argument("--host", default=os.environ.get("NETOPYU_DSH_LOCAL_DC_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("NETOPYU_DSH_LOCAL_DC_PORT", "8765")))
     parser.add_argument("--runtime-store", default=str(default_journal_path()))
@@ -328,7 +363,7 @@ def main() -> None:
     server = ThreadingHTTPServer((args.host, args.port), _Handler)
     server.peer = LocalDcPeer(runtime_path=args.runtime_store, state_path=args.state_store)
     server.base_url = f"http://{args.host}:{server.server_port}"
-    print(f"local mock dc-agent: {server.base_url}", flush=True)
+    print(f"local {server.peer.mode} dc-agent: {server.base_url}", flush=True)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

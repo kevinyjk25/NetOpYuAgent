@@ -1,0 +1,45 @@
+name: netopyu-p075a
+
+topology:
+  nodes:
+    branch-r1:
+      kind: linux
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - branch-r1/daemons:/etc/frr/daemons
+        - branch-r1/frr.conf:/etc/frr/frr.conf
+        - branch-r1/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls:
+        net.ipv4.ip_forward: 1
+
+    dc-r1:
+      kind: linux
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - dc-r1/daemons:/etc/frr/daemons
+        - dc-r1/frr.conf:/etc/frr/frr.conf
+        - dc-r1/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls:
+        net.ipv4.ip_forward: 1
+
+    branch-client:
+      kind: linux
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.10.10/24 dev eth1
+        - ip route add 10.20.20.0/24 via 10.10.10.1
+
+    dc-server:
+      kind: linux
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.20.20.20/24 dev eth1
+        - ip route add 10.10.10.0/24 via 10.20.20.1
+
+  links:
+    - endpoints: [branch-client:eth1, branch-r1:eth1]
+    - endpoints: [branch-r1:eth2, dc-r1:eth2]
+    - endpoints: [branch-r1:eth3, dc-r1:eth3]
+    - endpoints: [dc-r1:eth1, dc-server:eth1]

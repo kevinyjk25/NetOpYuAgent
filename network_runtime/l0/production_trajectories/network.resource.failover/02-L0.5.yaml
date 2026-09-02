@@ -1,0 +1,101 @@
+apiVersion: netopyu.io/l0.5-structured-skill/v3
+kind: StructuredNaturalLanguageSkill
+skillId: network_resource_failover
+title: network.resource.failover
+purpose: 以精确参数安全执行 network.resource.failover，并通过独立证据验证结果。 / Safely execute network.resource.failover
+  with exact inputs and independent evidence.
+profiles:
+- lan
+parameters:
+  resource_id: 'resource_id；必填 / Required string；最长长度 / maximum length: 4096。'
+  target: 'target；必填 / Required string；最长长度 / maximum length: 4096。'
+semanticIntents:
+- effectCapability: netopyu.tool.failover
+  kind: failover_resource
+  targetFields:
+  - resource_id
+  desiredState:
+    primary: ${arguments.target}
+    healthy: true
+constraints:
+- 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
+  inputs, target, and preflight.
+- '只允许 profile：lan。 / Allowed profiles only: lan.'
+- Provider 返回不能替代独立验证。 / A Provider response cannot replace independent verification.
+- 写结果不确定时先只读对账，禁止盲目重试。 / Reconcile read-only after an indeterminate result; never
+  retry blindly.
+- 'Non-compensable justification: 该受审合同没有安全自动逆操作；验证失败必须进入人工介入，禁止盲目重试。 / The reviewed
+  contract has no safe automatic inverse; verification failure requires manual intervention
+  and never a blind retry.'
+workflow:
+- phase: validate
+  instruction: 校验每个已记录参数并解析关键身份，不得推断。 / Validate every documented parameter and resolve
+    critical identities without inference.
+  capabilityOptions: []
+- phase: preflight
+  instruction: 通过独立 Observation 读取当前状态并保留 revision 与回滚证据。 / Read current state through
+    an independent observation and preserve revision plus rollback evidence.
+  capabilityOptions:
+  - netopyu.tool.mock_operation_status
+- phase: approval
+  instruction: 在任何 Effect 前展示并绑定精确不可变变更。 / Present and bind the exact immutable change
+    before any effect.
+  capabilityOptions: []
+- phase: effect
+  instruction: 只用已批准且通过 Schema 的输入调用一次受审 Effect。 / Invoke one reviewed effect with
+    only approved and schema-valid inputs.
+  capabilityOptions:
+  - netopyu.tool.failover
+- phase: verification
+  instruction: 通过独立 Observation 判定成功，禁止只依赖写响应。 / Determine success from an independent
+    observation, never from the write response alone.
+  capabilityOptions:
+  - netopyu.verifier.mock-state
+- phase: compensation
+  instruction: 该合同没有安全自动补偿；验证失败后进入人工介入并禁止盲目重试。 / This contract has no safe automatic
+    compensation; verification failure enters manual intervention and forbids blind
+    retry.
+  capabilityOptions: []
+- phase: compensation_verification
+  instruction: 通过独立 Observation 验证精确前态已经恢复；否则进入人工介入。 / Verify exact prior-state restoration
+    through an independent observation; otherwise enter manual intervention.
+  capabilityOptions: []
+capabilities:
+  effects:
+  - netopyu.tool.failover
+  observations:
+  - netopyu.tool.mock_operation_status
+  - netopyu.verifier.mock-state
+  compensations: []
+  preflightObservations:
+  - netopyu.tool.mock_operation_status
+  successVerificationObservations:
+  - netopyu.verifier.mock-state
+  compensationVerificationObservations: []
+safety:
+  risk: high
+  approvalRequired: true
+  unknownOutcomePolicy: 任何重试前先只读对账，禁止盲目重复 Effect。 / Read-only reconciliation before
+    any retry; never blindly repeat an effect.
+  stopConditions:
+  - 人工审批强制且只绑定当前合同、参数、目标和前态。 / Human approval is mandatory and binds only this contract,
+    inputs, target, and preflight.
+  - 写结果不确定时先只读对账，禁止盲目重试。 / Reconcile read-only after an indeterminate result; never
+    retry blindly.
+  - 'Non-compensable justification: 该受审合同没有安全自动逆操作；验证失败必须进入人工介入，禁止盲目重试。 / The reviewed
+    contract has no safe automatic inverse; verification failure requires manual intervention
+    and never a blind retry.'
+  nonCompensableJustification: 该受审合同没有安全自动逆操作；验证失败必须进入人工介入，禁止盲目重试。 / The reviewed
+    contract has no safe automatic inverse; verification failure requires manual intervention
+    and never a blind retry.
+outcomes:
+  success: 独立验证的目标状态，或明确的人工介入终态。 / Independently verified desired state or an explicit
+    manual-intervention terminal state.
+  failure: 未验证不得成功；失败关闭或进入明确恢复态。 / No unverified success; fail closed or enter an
+    explicit recovery state.
+  rollback: 无自动回滚声明；必须由人工介入恢复并另行验证。 / No automatic rollback is declared; manual recovery
+    and separate verification are required.
+sourceSkillSha256: sha256:445b8bc0c641f74d384941dd7c23516e6bfbaadbb6ea120b3cc5d67840fa71bc
+capabilityCatalogSha256: sha256:162cd12a55722fb96399c305bc20290e559238713100611b4a4a46bc1fa120be
+previousStageSha256: sha256:445b8bc0c641f74d384941dd7c23516e6bfbaadbb6ea120b3cc5d67840fa71bc
+unresolvedQuestions: []

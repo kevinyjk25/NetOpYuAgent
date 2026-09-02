@@ -1,0 +1,58 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: DerivedEffect
+
+metadata:
+  id: network.privileged-access.grant
+  version: 1.0.0
+  owner: network-security-team
+  description: S11 extension - S1 plus ticket, sponsor, stronger reads and dual approval
+
+extends:
+  id: network.access.grant
+  version: 1.0.0
+
+mode: extension
+
+spec:
+  intentKind: grant_privileged_network_access
+  constrainParameters:
+    duration_minutes:
+      maximum: 60
+  addParameters:
+    change_id:
+      type: string
+      required: true
+      pattern: "^CHG-[0-9]+$"
+    sponsor_id:
+      type: string
+      required: true
+      resolver: iam.employee
+  addPreflight:
+    - id: approved-change
+      capability: service.change-ticket.get
+      arguments:
+        change_id: "${arguments.change_id}"
+      snapshotFields: [status, owner, revision]
+      predicates:
+        - field: status
+          operator: in
+          expected: [approved, implementing]
+    - id: active-sponsor
+      capability: service.iam.user.get
+      arguments:
+        user_id: "${arguments.sponsor_id}"
+      snapshotFields: [active, department]
+      predicates:
+        - field: active
+          operator: equals
+          expected: true
+  addVerification:
+    - field: expires_at
+      operator: less_than_or_equal
+      expected: "${plan.approved_at + 60 minutes}"
+  desiredStateAdditions:
+    privileged: true
+  approval:
+    required: true
+    risk: critical
+    mode: dual

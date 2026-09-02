@@ -1,267 +1,203 @@
-# NetOpYuAgent 系统规格与安全设计 / System Specification and Security Design
+# EnsuredSkill 规格与安全设计 / Specification and Safety Design
+
+> 规格基线 / Specification baseline: 2026-09-02。本文规定当前研究原型的可验证行为，不构成生产安全认证。
 
 ## 中文
 
-### 1. 规格状态
+### 1. 规格地位
 
-本文件是 P0.5 的系统规格与安全基线。适用范围为本地 mock 和 DSH 插件集成。P1 将在真实网络、企业身份和生产审批环境中重新认证这些控制。
+本文定义 EnsuredSkill 网络可靠执行原型的功能、安全和验收要求。它不构成生产安全认证；绝对安全、100% 准确率和 100% 可用率都不是当前可证明结论。权威研究边界见[原型准则](docs/ENSUREDSKILL-PROTOTYPE.md)。
 
-### 2. 功能规格
+### 2. 信任边界
 
-| ID | 必须满足的规格 |
-|---|---|
-| F-01 | 系统必须只使用 DSH 作为通用 Agent runtime 和 Web UI。 |
-| F-02 | 系统必须按 `default/lan/dc/wan` profile 隔离工具与 Skill。 |
-| F-03 | 默认只能注册只读工具；写工具必须显式启用。 |
-| F-04 | 每个写工具必须绑定唯一、版本化的 Network L0 Skill。 |
-| F-05 | 写计划必须包含规范化参数、参数来源、目标、风险、preflight、verifier 和合同 hash。 |
-| F-06 | 系统必须在执行前向操作员展示精确计划并获得 allowed-once 决策。 |
-| F-07 | 系统必须在写前重校验目标状态。 |
-| F-08 | 系统必须使用独立读路径验证 postcondition。 |
-| F-09 | 验证失败时必须按合同补偿，或进入人工介入状态。 |
-| F-10 | 所有计划状态迁移必须持久化并可审计。 |
-| F-11 | 大结果必须外置并通过有界分页读取。 |
-| F-12 | A2A 必须支持 peer 发现、能力选择、超时、循环保护和 durable continuation。 |
-| F-13 | 记忆召回必须绑定 operator 与 session，且只能显式调用。 |
-| F-14 | 离线学习只能生成 proposal，不能自动启用 Skill。 |
+```text
+不受信 / 概率性
+  用户自然语言
+  LLM output / confidence
+  L1 natural-language Skill
+  Candidate Plan
+  Provider success text
 
-### 3. 可靠性规格
-
-| ID | 必须满足的规格 |
-|---|---|
-| R-01 | 单个 malformed Worker 请求不得终止 Worker。 |
-| R-02 | 未完成授权在重启后不得继续有效。 |
-| R-03 | grant 与 execution nonce 必须最多消费一次。 |
-| R-04 | 写是否到达不确定时不得重试同一效果，必须先验证。 |
-| R-05 | 非法状态迁移必须被拒绝。 |
-| R-06 | precondition 变化必须在写前终止计划。 |
-| R-07 | A2A timeout、unreachable、loop 和 remote failure 不得报告为完成。 |
-| R-08 | 本地可靠性门禁必须覆盖 24 请求、8 并发，p95 小于 1 秒。 |
-| R-09 | Runtime event audit 必须检测断链、篡改和终态不一致。 |
-
-### 4. 安全目标
-
-1. **正确授权**：只有操作员批准的精确计划能执行一次。
-2. **效果完整性**：模型不能修改、绕过或伪造 L0 合同。
-3. **结果可信**：成功来自 fresh independent evidence。
-4. **最小暴露**：profile 和部署配置只暴露必需工具。
-5. **故障安全**：未知状态不自动重试或乐观成功。
-6. **审计完整性**：计划和事件可检测篡改。
-7. **数据最小化**：不在不必要的位置保存 prompt、敏感参数或凭据。
-
-### 5. 信任边界
-
-| 边界 | 不可信输入 | 强制控制 |
-|---|---|---|
-| 用户/模型 → DSH | 自然语言、tool selection、arguments | Tool schema、L0 prepare、clarification |
-| DSH → Plugin | 工具生命周期、approval outcome | 精确 request/plan binding |
-| Plugin → Worker | JSON 请求、环境配置 | command allowlist、大小/类型校验 |
-| Runtime → Backend | 规范化参数 | versioned ToolContract、profile、request authorization |
-| Backend → Runtime | 文本/JSON/transport error | typed evidence parser、freshness、predicate |
-| 本 Agent → A2A peer | 委派 prompt、metadata | self-contained payload、hop/loop limits |
-| A2A peer → 本 Agent | SSE event、interrupt、结果文本 | parser、timeout、continuation approval |
-| Runtime → SQLite | 计划、token digest、事件 | transaction、conditional update、hash chain |
-
-### 6. 威胁模型
-
-#### T-01 模型幻觉工具或参数
-
-- 风险：错误工具、缺失字段、猜测目标、虚构成功。
-- 控制：strict compiler、实体校验、provenance、L0 binding、独立 verifier。
-- 剩余风险：schema 合法但业务意图错误；必须由 L1 追问、reviewed workflow 和操作员审批共同降低。
-
-#### T-02 审批后篡改参数
-
-- 风险：批准 A，执行 B。
-- 控制：canonical arguments、plan hash、intent hash、contract hash 和 grant binding。
-
-#### T-03 重放或并发重复执行
-
-- 风险：同一批准触发多次写。
-- 控制：token digest、conditional `issued -> consumed`、Runtime nonce、plan state CAS。
-
-#### T-04 TOCTOU 状态漂移
-
-- 风险：preflight 后网络状态变化。
-- 控制：执行前重新读取并比较 snapshot；变化后 `precondition_changed`。
-
-#### T-05 写已到达但响应丢失
-
-- 风险：盲目重试造成二次效果。
-- 控制：`outcome_indeterminate`、强制 postcondition read、补偿/人工介入，禁止直接重试。
-
-#### T-06 工具或 peer 伪造成功
-
-- 风险：返回文本声称成功但状态未改变。
-- 控制：独立 verifier；A2A 中间结果不能替代本域最终验证。
-
-#### T-07 mock 污染真实环境
-
-- 风险：生产误用模拟数据。
-- 控制：默认 mock 明确 warning；pragmatic 禁止 mock MCP transport；本地 DC peer 拒绝非 loopback 和 pragmatic。
-
-#### T-08 凭据泄漏
-
-- 风险：凭据进入 Git、prompt、计划或日志。
-- 控制：environment/secret manager 注入、auth 配置校验、trajectory 最小化、日志脱敏。
-
-#### T-09 A2A 循环、放大或会话泄漏
-
-- 风险：无限委派、跨域泄漏父会话。
-- 控制：最大 hop、chain loop detection、自包含 prompt、不继承父历史、大小/timeout 限制。
-
-#### T-10 审计篡改
-
-- 风险：删除或修改失败事件。
-- 控制：每计划事件哈希链、plan hash、终态一致性 audit。P1 需要外部 append-only/WORM 副本以覆盖数据库管理员威胁。
-
-### 7. 审批规格
-
-审批摘要至少包含：
-
-- plan id/hash、intent hash；
-- L0 Skill id/version/contract hash；
-- tool 与 action type；
-- 完整规范化 arguments 和 targets；
-- 参数来源；
-- risk level/reasons；
-- preflight 摘要；
-- verification/rollback contract；
-- workflow binding；
-- expiry。
-
-批准只对该摘要对应 hash 有效。批量、异步恢复和 A2A continuation 也必须通过新的 DSH 审批，不能复用环境变量、自然语言“已批准”或历史会话状态。
-
-### 8. 模型安全策略
-
-模型不是信任根。每个模型必须按用途单独认证：
-
-| 等级 | 允许用途 | 资格要求 |
-|---|---|---|
-| M0 | 文本总结、只读分类 | 不得触发写工具 |
-| M1 | 只读诊断、候选 Skill/intent | tool-call 协议和参数提取评测通过 |
-| M2 | 审批前写计划候选 | reviewed workflow、重复调用、停止条件和结果解释评测通过 |
-| M3 | 生产变更候选 | M2 + 真实环境 shadow/canary + 人工审批 + SLO |
-
-当前 `qwen3.5:27b` 仅作为本地 P0.5 默认；`qwen2.5:7b` 未通过 M2，不允许自主写流程。
-
-### 9. 数据安全
-
-- 密钥、密码、bearer token 和 API key 不得进入仓库。
-- Tool Guard 只持久化执行 token digest。
-- trajectory 不保存 prompt、参数值或工具结果正文。
-- A2A 只发送任务必需的自包含 prompt 和有限 provenance。
-- 大结果 TTL 默认 24 小时；P1 应按数据分类配置 TTL、加密和删除策略。
-- SQLite 文件权限、volume 加密、备份和 WORM audit 是部署责任；P0.5 尚未实现集中密钥管理。
-
-### 10. 安全失败策略
-
-| 场景 | 必须的结果 |
-|---|---|
-| 无法识别意图/目标 | 追问；不 prepare |
-| 缺少 backend/credential | 拒绝；不回退 mock |
-| approval timeout/reject | 终止计划 |
-| hash/grant/nonce mismatch | 安全拒绝并记录 |
-| verifier 读失败 | 不得成功；补偿或人工介入 |
-| compensator 失败 | 人工介入并保留全部 evidence |
-| audit 失败 | 标记完整性故障；禁止把计划当作可信成功证据 |
-
-### 11. 验收标准
-
-P0.5 必须同时通过：
-
-1. Python 全套测试和子测试；
-2. DSH-only architecture audit；
-3. Node/plugin syntax 与 HITL/A2A smoke；
-4. profile Skill projection；
-5. retrieval Recall@3 ≥ 0.95、MRR ≥ 0.90；
-6. Worker load、malformed isolation 和 restart recovery；
-7. ambient destructive env 不能绕过请求级 gate；
-8. plan hash、nonce、state drift、verifier、compensator 和 event audit 单测；
-9. 本地 UI 中至少一次 L1 + L0 + approval + verification 实测；
-10. 小模型资格失败时 Runtime 必须拦截未批准的重复效果。
-
-权威命令：
-
-```bash
-scripts/netopyu-dsh retirement
+受约束
+  reviewed L0 Contract
+  Runtime parameter compiler
+  typed Evidence + Guard
+  immutable plan + approval binding
+  transaction state machine
+  independent verifier / compensator
 ```
 
-### 12. P1 安全缺口
+LLM、Prompt、L1 Skill、普通 Tool Schema 和 Provider 自报结果都不是安全根。Runtime 代码和人工审查的 L0 也可能有缺陷，因此需要合同测试、故障注入、消融和未来的数字孪生/形式化验证。
 
-- 企业 SSO/RBAC 与审批人身份不可抵赖；
-- mTLS、证书轮换、egress allowlist；
-- 集中密钥、静态加密和数据库访问控制；
-- WORM/远端审计副本；
-- 真实设备 adapter 的命令 allowlist 和厂商差异认证；
-- 变更窗口、工单、双人复核和紧急变更策略；
-- HA/DR、备份恢复演练与长期 chaos；
-- 生产模型/Skill 的版本发布、canary 和回退机制。
+### 3. 功能要求
+
+| ID | 要求 |
+|---|---|
+| FR-01 | Reasoning Plane 只能提交 Candidate Plan，不能直接获得 Effect 句柄或凭据 |
+| FR-02 | 每个可写操作必须解析到唯一、已激活、版本化的 L0 Contract |
+| FR-03 | 未知、缺失、歧义、越界或来源不明的参数必须追问或拒绝 |
+| FR-04 | 每个 Effect 前必须满足 Preconditions、Evidence、Guards 和 Risk Policy |
+| FR-05 | Evidence 必须绑定类型、来源、采集者、时间、范围、Action 和 payload digest |
+| FR-06 | 高风险操作必须输出 ask-human 或 reject；审批与 exact plan hash 绑定 |
+| FR-07 | 审批后、Effect 前必须重新验证易变前置条件和合同摘要 |
+| FR-08 | Effect 最多发送一次；结果不确定时先进行只读 Reconcile |
+| FR-09 | Commit 必须由独立 postcondition Observation 证明 |
+| FR-10 | 验证失败时按合同补偿并独立验证恢复；无法证明时升级人工 |
+| FR-11 | 每条终态路径必须记录 plan、Evidence、状态和摘要链 |
+| FR-12 | L1→L0.5→L0 只能生成 proposal，不能自动激活 |
+| FR-13 | Authoring 必须保存 requirement-level L1→L0.5→L0 映射、语义丢失分类和可定位的修正路径 |
+| FR-14 | Harness 只能把 Runtime terminal envelope 作为执行结果；Provider receipt 或模型叙述不得变成成功终态 |
+| FR-15 | 操作者必须能从 plan id 追踪 immutable plan、图节点、Evidence provenance、分阶段时延和事件摘要链 |
+
+### 4. 安全不变量
+
+#### S-01：无绕过写路径
+
+产品原型的所有 Effect 必须经过 Runtime。隔离 A/B evaluator 可以让原生 DSH Agent 写本地仿真 Provider，但该代码不得被产品 Adapter 导入，也不得被描述为 fallback。
+
+#### S-02：Evidence 不等于上下文
+
+以下内容不得单独授权执行：模型 confidence、自然语言诊断、缓存 Prompt、Tool 返回的任意文本、用户声称已审批。缺 Evidence 时结果只能是 read/clarify/propose/ask/reject。
+
+#### S-03：失败关闭
+
+未知合同、未知 Capability、不可解析状态、摘要不一致、过期、超时、范围漂移、无法验证结果或恢复都不得转成成功。
+
+#### S-04：独立验证
+
+写工具的返回值最多证明“请求被接收/调用返回”，不能证明 desired state。Verifier 应使用独立 Observation；在仿真环境中也应与 Actor 效果接口分离。
+
+#### S-05：不确定性不触发盲重试
+
+调用超时必须区分 before-send 与 may-have-sent。后者进入 Reconcile；除非合同证明幂等并确认当前状态，否则不得重放。
+
+#### S-06：补偿不是魔法回滚
+
+合同必须声明 strongly reversible、conditionally reversible 或 irreversible。补偿是新的受控操作，需要 snapshot、precondition、verification 和失败终态；不能承诺恢复所有现实影响。
+
+#### S-07：解释不能创造权威
+
+模型可以解释为什么选择某个 Skill，但授权和终态只能来自结构化合同、计划、Evidence、Guard、审批、图状态与摘要链。Workbench、报告、自然语言 summary 和模型 confidence 都是投影；它们不能修改 active L0、PreparedPlan 或 ExecutionOutcome。
+
+### 5. 威胁与控制
+
+| 威胁 | 主要控制 | 剩余风险 |
+|---|---|---|
+| 模型选择错误 Skill/Tool | 有界候选、exact L0 binding、参数/证据/Guard | 合法但业务意图错误，需要更强 Evidence/人审 |
+| 参数幻觉或猜目标 | provenance、inventory resolution、缺参追问 | CMDB/Observation 本身可能错误 |
+| Prompt 注入要求绕审批 | Candidate 无权限、plan-bound approval、Runtime 独占 Effect | 本地模拟身份不代表企业不可抵赖身份 |
+| 旧 Evidence 重放 | timestamp、freshness、scope、Action、digest | 时钟和采集器本身可能失真 |
+| Provider 谎报成功 | 独立 verifier、result schema、fail closed | Observer 与 Actor 共故障风险 |
+| 写后断连 | reconcile、idempotency policy、no blind retry | 无法观测时需人工 |
+| 部分多步骤成功 | typed dependencies、snapshot、reverse compensation | 跨设备无法实现真正 ACID |
+| 合同/补偿编写错误 | static validation、round-trip、negative tests、ablation | 仍需数字孪生和独立 review |
+| 自动 Promotion 扩权 | proposal-only、semantic loss alert、explicit activation | Reviewer 可能误判 |
+| 模型生成事后解释掩盖失败 | 固定 terminal envelope、Provider 原文摘要化、plan/evidence/graph 可追踪 | 操作者仍需理解 `rollback_verified` 不等于任务成功 |
+| 评测过拟合 | 扰动集、封存集、重复、跨模型、场景级报告 | 本地实验不能外推生产概率 |
+
+### 6. 数据最小化
+
+计划和 Journal 只存运行所需的规范化参数、Evidence 摘要、状态、合同摘要和终态证据。模型密钥、设备密码、Bearer token、私钥和完整企业凭据不得进入 Prompt、L0、plan 或日志。当前 SQLite 只提供本机完整性和恢复；不宣称远端不可变或组织级审计。
+
+### 7. 原型验收场景
+
+| 场景 | 必须结果 |
+|---|---|
+| 正常可逆网络变更 | 满足证据与 Guard 后执行，独立 Verify 后 Commit |
+| 缺失/过期 Evidence | Effect 未发送，明确 rejected/clarification |
+| 高风险或不可逆变更 | ask-human 或 reject，不由模型 confidence 放行 |
+| Effect 结果不确定 | Reconcile，不盲重试；无法证明则 Escalate |
+| Verification mismatch | 不得 False Commit；补偿并验证恢复 |
+| 多步骤部分失败 | 已执行步骤按依赖逆序补偿，保留完整轨迹 |
+
+### 8. 评测规范
+
+主实验的唯一变量是是否引入 EnsuredSkill：
+
+```text
+Control: DSH + same L1 Skill + LLM native tool orchestration
+Treatment: same DSH/model/L1/tools/input/provider/faults + L0 auto Runtime
+```
+
+Control 只在隔离本地仿真中运行。Treatment 的转换未达阈值时不能回退为原生写入；应报告安全停机带来的 Autonomous Coverage 变化。
+
+必须报告场景级与聚合指标：
+
+- Unsafe Execution Rate；
+- False Commit Rate；
+- Invalid Action Rate；
+- Compensation Success Rate；
+- Autonomous Coverage；
+- Human Escalation / Rejection Rate；
+- Task Completion Rate；
+- p50/p95 Runtime overhead、tokens 和 tool calls。
+
+还必须运行五项消融（去掉 Contract/Evidence/Guard/Transaction/Compensation）、至少三次主实验配对重复、扰动/封存场景，以及 9B 与更弱模型的稳定性比较。固定 Oracle 的 100% 只能表述为“该回归集通过”。
+
+证据必须按来源分层，不允许合并成一个“准确率”：
+
+| 层级 | 当前状态 | 允许的 claim |
+|---|---|---|
+| ES-P0 透明本地开发集 | 完成 | 机制和本地假设得到支持 |
+| 仓库外模型合成集 | 完成 | 生成、封存、fallback 和跨类型链路可运行 |
+| ES-P1-Wild-Sim 虚拟角色公开集 | 完成 | 公开 Skill + DSH + Runtime 的角色隔离原型有效 |
+| ES-P1 独立人工 Private Holdout | 未完成 | 当前不得声称独立隐藏集泛化 |
+| ES-P2 真实网络 | 未完成 | 当前不得声称厂商设备或生产资格 |
+
+每份报告还必须说明失败属于 Reasoning、转换/路由、Runtime 门禁、Provider、Oracle 还是 Harness transport，避免把安全停机、模型空响应和事务失败混为一类。
+
+### 9. 原型出场门禁
+
+截至 2026-09-02，以下条目已经形成 **ES-P0 本地研究原型闭环**，但这只允许进入独立泛化研究，不允许直接进入生产：
+
+1. 代码、文档和测试只有一条产品原型 Effect 路径；
+2. 六类事务场景均有可复算证据；
+3. 五项消融完成并可解释各机制贡献；
+4. 三次以上真实 DSH 配对结果稳定；
+5. 更换模型后 Runtime 安全收益稳定；
+6. 明确给出 Execution Precision 与 Autonomous Coverage 的 Pareto 权衡；
+7. 结论明确区分透明开发集、模型合成集、角色模拟公开集和独立人工证据，不用单次演示外推。
+
+下一道强制门是仓库外、预注册、独立人员持有 Gold 的 ES-P1 Private Holdout。只有 ES-P1 通过后才进入 ES-P2 小范围真实网络；只有 ES-P1 和 ES-P2 同时支持核心 claim，才重新评估生产身份、供应链、治理、HA/DR、WORM 与 SLO。
+
+交互对象、终态和定位路径见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)，阶段状态见[项目进展](docs/PROJECT-STATUS.md)。
+
+### 10. 冻结生产安全设计
+
+企业 OIDC/JWKS/PDP/Change Authority、Provider 签名/SBOM/供应链、多人审批治理、远端 WORM、HA/DR、mTLS/secret manager 和生产 SLO 都是未来部署安全能力。它们可以继续保留回归，但不得掩盖当前研究问题，也不得增加核心原型完成条件。
 
 ---
 
 ## English
 
-### 1. Status
+### 1. Scope and trust
 
-This document is the P0.5 system and security baseline for local mock and DSH-plugin integration. P1 must recertify these controls against real networks, enterprise identity, and production approval systems.
+This document specifies the EnsuredSkill network reliability prototype. It is not a production security certification and does not claim absolute safety, 100% accuracy, or 100% availability.
 
-### 2. Functional requirements
+User language, model output and confidence, L1 text, Candidate Plans, ordinary tool schemas, and provider success text are untrusted. Reviewed L0 contracts, deterministic compilers, typed evidence and guards, immutable plan/approval bindings, transaction state, independent verification, and explicit compensation form the constrained execution boundary. The Runtime and reviewed contracts can still contain bugs and require testing and independent validation.
 
-| ID | Requirement |
-|---|---|
-| F-01 | DSH must be the only general agent runtime and Web UI. |
-| F-02 | Tools and Skills must be isolated by profile. |
-| F-03 | Only read-only tools are registered by default. |
-| F-04 | Every mutation must bind to one versioned Network L0 Skill. |
-| F-05 | A mutation plan must bind normalized arguments, provenance, targets, risk, preflight, verifier, and contract hashes. |
-| F-06 | The exact plan must receive an allowed-once operator decision. |
-| F-07 | Target state must be revalidated immediately before the write. |
-| F-08 | Success must be established through an independent read path. |
-| F-09 | Failed verification must compensate contractually or require manual intervention. |
-| F-10 | Every state transition must be durable and auditable. |
-| F-11 | Oversized results must use durable bounded paging. |
-| F-12 | A2A must provide discovery, selection, timeout/loop protection, and durable continuations. |
-| F-13 | Memory recall must be operator/session scoped and explicit. |
-| F-14 | Offline learning may create proposals but may not activate Skills. |
+### 2. Required behavior
 
-### 3. Security objectives
+The Reasoning Plane has no effect credential. Every mutation resolves to one active versioned L0 contract. Missing, ambiguous, ungrounded, or out-of-range inputs clarify or reject. Preconditions, evidence, guards, and risk must all pass before an effect. Approval binds the exact plan. Mutable facts are revalidated after approval. Effects are not blindly retried. Independent observations prove commits. Verification failure compensates and verifies recovery, otherwise escalating. Every terminal path is auditable. Promotion remains proposal-only.
 
-The system must provide exact authorization, effect integrity, evidence-based outcomes, least capability exposure, fail-closed uncertainty, tamper detection, and data minimization.
+Authoring also retains requirement-level L1-to-L0.5-to-L0 mappings, loss classifications, and exact revision locations. The Harness accepts only the Runtime terminal envelope as an execution outcome. Given a plan id, an operator can inspect the immutable plan, graph nodes, evidence provenance, stage latency, and event-chain integrity.
 
-### 4. Threat controls
+### 3. Safety properties
 
-- **Hallucinated tools/arguments:** strict compilation, entity/provenance checks, L0 binding, independent verification.
-- **Post-approval tampering:** canonical arguments and plan/intent/contract hashes.
-- **Replay/concurrent duplication:** token digests, atomic state changes, one-shot Runtime nonces.
-- **TOCTOU drift:** execution-time precondition comparison.
-- **Lost write response:** indeterminate state followed by verification, never blind retry.
-- **Forged success:** independent typed postconditions.
-- **Mock contamination:** explicit modes, no pragmatic-to-mock fallback, loopback-only demo peer.
-- **Credential leakage:** external secrets, minimized trajectories, redacted logs.
-- **A2A loops/history leakage:** hop/chain controls and self-contained delegation.
-- **Audit tampering:** per-plan event hash chains; P1 still requires an external append-only copy.
+There is no prototype write bypass. No evidence means no action. Unknown contracts, capabilities, states, digests, expiry, drift, or recovery fail closed. A write receipt is not postcondition evidence. Post-send uncertainty enters reconciliation. Compensation is a new controlled operation rather than magical rollback and carries an explicit reversibility class.
 
-### 5. Approval and model policy
+Explanation cannot create authority. Workbench views, reports, natural-language summaries, and model confidence are projections of contracts, plans, evidence, and graph state; they cannot mutate an active L0, PreparedPlan, or ExecutionOutcome.
 
-Approval must display and bind the exact plan, intent, L0 contract, arguments, targets, provenance, risk, evidence, verifier/rollback, workflow, and expiry. Batch, recovery, and A2A continuation paths need fresh approval.
+### 4. Evaluation
 
-Models are not a trust root. They are qualified by use level: summary/classification, read-only candidate generation, mutation-plan candidate generation, and production mutation candidate generation. `qwen2.5:7b` failed the mutation-plan level and is not authorized for autonomous writes. `qwen3.5:27b` remains a local P0.5 default, not a production certification.
+The primary experiment compares native DSH L1 orchestration with the same DSH/model/L1/tools/inputs/provider/faults plus EnsuredSkill. Native mutation is an isolated local control only. An unqualified treatment conversion stops safely instead of falling back to native mutation.
 
-### 6. Data security
+Reports must include unsafe execution, false commit, invalid action, compensation success, autonomous coverage, escalation/rejection, task completion, overhead, token, and tool-call metrics. Five mechanism ablations, at least three paired repetitions, perturbation/sealed cases, and a weaker-model comparison are required. A fixed-set 100% result means only that the fixed regression passed.
 
-Secrets must not enter Git, plans, prompts, or trajectories. Only execution-token digests are persisted. A2A sends bounded task data. Large results expire by default. Encryption, file permissions, backups, retention, and WORM audit are deployment controls that must be completed in P1.
+Evidence is reported separately as transparent ES-P0 development evidence, repository-external model-synthetic evidence, virtual-role public-Skill simulation, independent-human private holdout, and real-network qualification. The first three are complete at their declared scope; formal ES-P1 private holdout and ES-P2 real-network evidence remain open. Failures must be attributed to reasoning, translation/routing, Runtime gates, Provider, Oracle, or Harness transport.
 
-### 7. Acceptance
+### 5. Exit and frozen production security
 
-P0.5 acceptance requires the complete Python and subtest suite, DSH-only audit, Node/HITL/A2A smoke, Skill projection, retrieval thresholds, Worker load and recovery, destructive-gate tests, Runtime integrity/verification/compensation tests, a local UI L1+L0 exercise, and proof that an unapproved duplicate effect is blocked.
+The local ES-P0 prototype gate is complete only at its transparent local scope. The next mandatory gate is a preregistered, repository-external ES-P1 private holdout with independently owned Gold. ES-P2 then qualifies the same abstractions on a small real-network path. Production engineering is reconsidered only after independent and real evidence support the core claims.
 
-The authoritative command is:
-
-```bash
-scripts/netopyu-dsh retirement
-```
-
-### 8. P1 gaps
-
-P1 must add enterprise identity and non-repudiation, mTLS and egress controls, centralized secrets and encryption, external immutable audit, real-adapter command certification, change-window/ticket/two-person policy, HA/DR and long-duration chaos, and controlled model/Skill release with canary and rollback.
+Enterprise IAM/PDP/change systems, signed provider/SBOM supply chains, multi-party governance, remote WORM, HA/DR, mTLS/secret management, and production SLOs remain frozen future deployment security.

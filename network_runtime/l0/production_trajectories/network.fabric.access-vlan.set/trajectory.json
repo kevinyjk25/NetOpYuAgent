@@ -1,0 +1,42 @@
+{
+  "autoActivated": false,
+  "bootstrapDirection": "reviewed-L0-to-readable-L1/L0.5-baseline",
+  "capabilityCatalog": {
+    "file": "00-capability-catalog.yaml",
+    "sha256": "sha256:66ed0dd09dc773308a091739f09d58642df6f74f11495e0c80c7494c34067d2e"
+  },
+  "executionEligible": false,
+  "schema": "netopyu.io/l0-production-stage-chain/v1",
+  "stages": [
+    {
+      "file": "01-L1-SKILL.md",
+      "format": "anthropic-skill-markdown",
+      "previousSha256": null,
+      "sha256": "sha256:b85ab68f09df043b0c87e9925a22857e15bf144f7693aed75472612ace08fb47",
+      "stage": "L1"
+    },
+    {
+      "file": "02-L0.5.yaml",
+      "format": "netopyu.io/l0.5-structured-skill/v3",
+      "previousSha256": "sha256:b85ab68f09df043b0c87e9925a22857e15bf144f7693aed75472612ace08fb47",
+      "sha256": "sha256:dabbea09904c6eeddba401d0ea9da19a09204250a55c592476248dcaa131d7bc",
+      "stage": "L0.5"
+    },
+    {
+      "file": "03-L0-authoring.yaml",
+      "format": "netopyu.io/l0-effect/v2",
+      "previousSha256": "sha256:dabbea09904c6eeddba401d0ea9da19a09204250a55c592476248dcaa131d7bc",
+      "sha256": "sha256:1379686544b99c318f1f0ae501db54d3f7e8a80e48f20d18ce209229f2e31cd3",
+      "stage": "L0-authoring"
+    },
+    {
+      "contractHash": "sha256:b6240eca17d6d8cb2b894a2be46b0440f20a521e301b502bd5bb951da04ec434",
+      "file": "04-L0-compiled.json",
+      "format": "netopyu.io/l0-effect-compiled/v2",
+      "previousSha256": "sha256:1379686544b99c318f1f0ae501db54d3f7e8a80e48f20d18ce209229f2e31cd3",
+      "sha256": "sha256:9ac0c0871007f23bf4e1b0c236e255234299c0d707a4e8e3b16e2192007f56e8",
+      "stage": "L0-compiled"
+    }
+  ],
+  "trajectoryHash": "sha256:3dbe3c114a283bf74e5aa1eeb73086d8a057f38e34002b7aaabbc883d5391dde"
+}

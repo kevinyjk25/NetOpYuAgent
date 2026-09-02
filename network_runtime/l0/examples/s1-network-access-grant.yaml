@@ -1,0 +1,111 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+
+metadata:
+  id: network.access.grant
+  version: 1.0.0
+  owner: network-access-team
+  description: S1 - grant one user access to one VLAN through a REST capability
+
+spec:
+  template: access-grant
+  profiles: [lan]
+
+  effect:
+    capability: rest.url1.network-access.grant
+    tool: url1_grant_network_access
+    request:
+      user_id: "${arguments.user_id}"
+      vlan_id: "${arguments.vlan_id}"
+      duration_minutes: "${arguments.duration_minutes}"
+      reason: "${arguments.reason}"
+    internal:
+      operation_id: "${plan.id}"
+      plan_hash: "${plan.hash}"
+      intent_hash: "${intent.hash}"
+      expected_revision: "${preflight.access-state.revision}"
+
+  intent:
+    kind: grant_network_access
+    targetFields: [user_id]
+    desiredState:
+      allowed: true
+      vlan_id: "${arguments.vlan_id}"
+
+  parameters:
+    user_id:
+      type: string
+      required: true
+      resolver: iam.user
+      minLength: 1
+      maxLength: 64
+    vlan_id:
+      type: integer
+      required: true
+      minimum: 1
+      maximum: 4094
+    duration_minutes:
+      type: integer
+      required: true
+      minimum: 30
+      maximum: 10080
+    reason:
+      type: string
+      required: true
+      minLength: 5
+      maxLength: 512
+
+  preflight:
+    - id: access-state
+      capability: rest.network-access.get
+      arguments:
+        user_id: "${arguments.user_id}"
+      snapshotFields: [active, allowed, vlan_id, expires_at, revision]
+      predicates:
+        - field: active
+          operator: equals
+          expected: true
+        - field: revision
+          operator: exists
+
+  verification:
+    capability: rest.network-access.get
+    arguments:
+      user_id: "${arguments.user_id}"
+    predicates:
+      - field: allowed
+        operator: equals
+        expected: true
+      - field: vlan_id
+        operator: equals
+        expected: "${arguments.vlan_id}"
+      - field: revision
+        operator: greater_than
+        expected: "${preflight.access-state.revision}"
+
+  compensation:
+    capability: rest.network-access.restore
+    tool: restore_network_access
+    arguments:
+      user_id: "${arguments.user_id}"
+      snapshot: "${preflight.access-state.snapshot}"
+      expected_revision: "${verification.revision}"
+    verification:
+      capability: rest.network-access.get
+      arguments:
+        user_id: "${arguments.user_id}"
+      predicates:
+        - field: state
+          operator: exact_snapshot
+          expected: "${preflight.access-state.snapshot}"
+
+  approval:
+    required: true
+    risk: medium
+    mode: single
+
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: compensate
+    compensationFailed: manual_intervention

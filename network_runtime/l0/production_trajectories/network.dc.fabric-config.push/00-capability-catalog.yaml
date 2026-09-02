@@ -1,0 +1,108 @@
+apiVersion: netopyu.io/capability-catalog/v3
+provider: netopyu.production.dc_config_push
+version: 1.0.0
+capabilities:
+- id: netopyu.tool.dc_config_push
+  role: effect
+  profiles:
+  - dc
+  inputs:
+    node:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    config_lines:
+      type: array
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 500
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: dc_config_push
+- id: netopyu.tool.dc_get_applied_config
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    node:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+  observationPhases:
+  - preflight
+  phasePredicates:
+    preflight:
+    - field: facts
+      operator: exists
+      expected: null
+- id: netopyu.verifier.dc-config
+  role: observation
+  profiles:
+  - dc
+  inputs:
+    node:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean
+  observationPhases:
+  - success_verification
+  phasePredicates:
+    success_verification:
+    - field: passed
+      operator: equals
+      expected: true

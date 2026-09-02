@@ -1,0 +1,228 @@
+apiVersion: netopyu.io/capability-catalog/v3
+provider: netopyu.production.edit_device_config
+version: 1.0.0
+capabilities:
+- id: network.device.config.edit
+  role: effect
+  profiles:
+  - lan
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    section:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    changes:
+      type: object
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: null
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    config_lines:
+      type: array
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 500
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    verification_probe_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    accepted:
+      type: boolean
+  tool: edit_device_config
+- id: network.device.config.get
+  role: observation
+  profiles:
+  - lan
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    section:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    facts:
+      type: object
+  observationPhases:
+  - preflight
+  phasePredicates:
+    preflight:
+    - field: facts
+      operator: exists
+      expected: null
+- id: netopyu.verifier.device-config
+  role: observation
+  profiles:
+  - lan
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    passed:
+      type: boolean
+  observationPhases:
+  - success_verification
+  phasePredicates:
+    success_verification:
+    - field: passed
+      operator: equals
+      expected: true
+- id: network.device.config.restore
+  role: compensation
+  profiles:
+  - lan
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean
+  tool: restore_device_config
+- id: netopyu.rollback-verifier.device-config-snapshot-v1
+  role: observation
+  profiles:
+  - lan
+  - dc
+  inputs:
+    device_id:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    section:
+      type: string
+      required: false
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  outputs:
+    restored:
+      type: boolean
+  observationPhases:
+  - compensation_verification
+  phasePredicates:
+    compensation_verification:
+    - field: restored
+      operator: equals
+      expected: true

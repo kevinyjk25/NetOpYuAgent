@@ -1,345 +1,334 @@
-# NetOpYuAgent 低层设计 / Low-Level Design
+# EnsuredSkill 低层设计 / Low-Level Design
+
+> 实现基线 / Implementation baseline: 2026-09-02。字段和状态以当前源码为准；阶段结论以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 ## 中文
 
-### 1. 文档范围
+### 1. 实现范围
 
-本文定义 DSH 插件、Python bridge/Worker、Network Runtime、L0 Skill、backend、A2A 和持久化组件的实现合同。这里的“必须”表示代码应 fail closed 的约束。
+本文只描述当前 EnsuredSkill 原型执行闭环。历史企业身份、Provider 供应链、治理、Hermes/A2A 和 canary 产品化实现属于冻结扩展，不是核心 Runtime 依赖。
 
-### 2. 仓库模块
+### 2. 核心数据结构
 
-| 路径 | 实现职责 |
+#### 2.1 ReliabilityContract
+
+`effect_runtime/reliability.py` 定义领域中性合同：
+
+```text
+ReliabilityContract
+  operation + version
+  inputs_schema_digest
+  preconditions[]
+  evidence[]
+  guards[]
+  postconditions[]
+  resources{reads,writes}
+  reversibility
+  idempotent
+  timeout_seconds
+  approval_required
+  compensation_operation?
+```
+
+合同创建时验证基本闭包：操作和版本存在、Evidence id 唯一、Guard 引用有效、资源写集合无重复、可补偿性与可逆性一致。`contract_from_compiled_l0()` 将已审 L0 v2 投影到该内核，不允许模型在执行时改变合同。
+
+#### 2.2 EvidenceRequirement / EvidenceRecord
+
+Requirement 固定：`id`、`semantic_type`、`source_capability`、`phase`、`max_age_seconds`、`scope`、关联 Action 和谓词。
+
+Record 固定：Evidence id/type/source、collector identity、采集时间、scope、associated action、payload、payload digest、valid 和父 Evidence id。`evaluate_evidence()` 检查：
+
+1. 必需 Evidence 是否存在；
+2. 类型和来源 Capability 是否精确匹配；
+3. scope 和关联 Action 是否匹配；
+4. 时间是否合法且未过期；
+5. payload digest 是否仍然一致；
+6. valid 是否为真。
+
+任一失败都在 Effect 前关闭执行。
+
+#### 2.3 Guard
+
+Guard 是确定性谓词，不是自然语言建议：
+
+```text
+Guard{id, field, operator, expected, evidence_requirement_id?}
+```
+
+当前 L0 编译器负责静态结构和引用门禁；Runtime 负责用已验证 Evidence 求值。未知字段、未知 operator 或无法求值均失败关闭。
+
+#### 2.4 RiskFactors / RiskAssessment
+
+风险输入：ChangeScope、BlastRadius、EvidenceConfidence、Reversibility、HistoricalSuccess、ServiceCriticality。输出固定为：
+
+```text
+EXECUTE | ASK_HUMAN | REJECT
+```
+
+结构门禁、Evidence 和 Guard 永远先执行。受审 L0 可以比通用风险策略更保守。`delete_resource` 和 `force` 对外保持 `critical` 分类，但风险决策仍独立，避免把“Critical”错误等同于“编译阶段必须拒绝”。
+
+#### 2.5 PreparedPlan
+
+`network_runtime/contracts.py` 中的 PreparedPlan 绑定：
+
+- normalized arguments 与 provenance；
+- exact L0 id/version/contract hash；
+- Tool/Capability contract；
+- target/resource/risk；
+- preflight Evidence；
+- typed transaction graph；
+- requester/approval binding；
+- provider identity/schema binding；
+- TTL、plan id 和 plan hash。
+
+冻结扩展的 release/deployment 或 L1 Decision provenance 只在显式使用时加入；不是原型核心合同的必需字段。
+
+#### 2.6 从 Harness 到终态的模块追踪
+
+| 阶段 | 入口实现 | 关键输出 |
+|---|---|---|
+| DSH Tool 投影与一次性授权 | `dsh-plugin-netopyu/src/index.js` | read 调用或 plan-bound write grant |
+| Worker 协议桥 | `dsh-plugin-netopyu/src/bridge.js`, `dsh_adapter/worker.py` | 受限 JSON command；不暴露 Provider credential |
+| 参数/L0/计划编译 | `network_runtime/engine.py::prepare` | `read_ready`、`clarification_required`、`rejected` 或 `plan_ready` |
+| 合同与图内核 | `effect_runtime/reliability.py`, `effect_runtime/graph_scheduler.py` | `ReliabilityContract`、`TypedExecutionGraph` 和受控分支 |
+| 一次性事务 | `network_runtime/engine.py::execute` | `ExecutionOutcome` |
+| 状态、事件与恢复 | `network_runtime/contracts.py`, `journal.py`, `graph_runtime.py` | immutable plan、哈希链事件、crash reconciliation |
+| 解释与检查 | `engine.py::inspect`, `provenance.py` | graph summary、stage latency、provenance DAG |
+
+DSH 写 Tool 的 `execute()` 在拿到与 PreparedPlan 绑定的一次性 token 后，先请求 Runtime 签发/验证审批证明，再调用 `runtime-execute`。最终返回给模型的是 `terminal_envelope()`，不是 Actor 的原始结果。
+
+### 3. Typed Execution Graph
+
+`build_transaction_graph()` 生成固定的 phase DAG：
+
+```text
+begin
+  → snapshot
+  → precheck
+  → awaiting_approval?
+  → revalidate
+  → execute
+  → verify
+  → commit
+
+execute/verify
+  → reconcile
+  → compensate?
+  → verify_recovery
+  → abort | escalate
+```
+
+每个 `OperationNode` 包含 id、phase、依赖和 `side_effect`。图校验拒绝重复节点、缺失依赖、环和多个不受控 Effect 节点。图摘要写入计划，审批后重编译不一致会被识别为漂移。
+
+`effect_runtime/graph_scheduler.py` 是 fail-closed 调度门禁：节点必须按已审图和分支结果推进，Effect/Compensate 都是 one-shot，Commit 只能跟随独立 Verify 成功。`network_runtime/graph_runtime.py` 从哈希链事件重建调度状态；正常、审批拒绝、写前漂移、未知 Effect、补偿、恢复验证和启动恢复都写入 `graph_node_started/finished`。崩溃时未知的写边界只记录为 `skipped/indeterminate` 并进入只读 Reconcile，不伪造重校验成功，也不重放 Effect。
+
+`inspect()` 同时返回图执行摘要、按 snapshot/precheck/approval/revalidate/effect/verify/reconcile/compensate 拆分的 Runtime 时延，以及隐私最小化的 Evidence→Observation→Capability/Collector→Network Object DAG。Runtime 时延明确排除 Reasoning/LLM，DAG 只证明已记录的来源关系，不证明外部载荷天然真实。
+
+### 4. prepare 算法
+
+`NetworkRuntime.prepare()`：
+
+1. 从 Backend/Provider 获取 Tool metadata 和 CapabilityContract；
+2. 严格校验参数类型、枚举、范围、未知字段、目标解析和来源；
+3. 对缺参或歧义返回 `clarification_required`，不得猜测；
+4. 解析 reviewed ToolContract 和 exact active L0；
+5. 校验 L0→Tool/Verifier/Compensator Runtime projection；
+6. 投影 ReliabilityContract 并生成 Typed Execution Graph；
+7. 执行 snapshot/preflight Observation；
+8. 将 Observation 绑定为有 provenance 的 EvidenceRecord；
+9. 运行 Evidence、Guard 和 Risk gate；
+10. 绑定本地 requester/approval policy；
+11. 创建不可变 PreparedPlan 和一次性执行 nonce；
+12. 写入 Journal，返回 `plan_ready` 或明确的 clarification/reject。
+
+请求级分支的等价伪代码：
+
+```text
+if capability.kind == observation:
+    authorize_observation_context()
+    validate_exact_arguments()
+    return invoke_observation()          # never obtains an effect lease
+
+validate_exact_arguments_or_clarify()
+l0 = resolve_one_active_l0_or_reject()
+validate_runtime_projection(l0, provider, verifier, compensator)
+evidence = snapshot_and_precheck()
+require(evidence_contract && guards)
+decision = risk_policy()
+require(decision != REJECT)
+plan = persist_immutable_plan_and_graph()
+return plan_ready(plan, one_shot_nonce)
+```
+
+模型不可将 `clarification_required` 或 `rejected` 改写成可执行请求；修改参数后必须重新调用 prepare 并产生新的 plan hash。
+
+核心默认直接创建本地 `ApprovalControlPlane`。只有显式 `NETOPYU_IDENTITY_MODE=enforced` 时才延迟加载冻结的 enterprise adapter。
+
+### 5. approve / execute 算法
+
+#### 5.1 Approval
+
+审批证明必须绑定 plan id/hash、requester、approver、policy、risk、过期时间和一次性 token。审批不能修改参数、L0、目标、Evidence 或图；需要修改时必须重新 prepare。
+
+#### 5.2 Revalidation
+
+执行前重新打开 Backend，并验证：
+
+- Tool/Capability/L0/contract 仍存在且摘要一致；
+- 参数和目标仍满足合同；
+- typed graph 未漂移；
+- plan、nonce、审批证明和 TTL 有效；
+- 关键 preflight Evidence 仍新鲜且 snapshot 未变化。
+
+失败返回 `precondition_changed`/`expired`/`rejected`，Effect 不发送。
+
+#### 5.3 Effect and verification
+
+Runtime 通过 `BackendSession.invoke_effect()` 发送一次效果。模型和 L1 不获得 nonce、Provider credential 或可重放句柄。写返回值只形成 receipt；Verifier 再调用独立 Observation，并将结果与 L0 postconditions 比较。仅全部通过才进入 `verified_success/COMMIT`。
+
+#### 5.4 Uncertainty and compensation
+
+- timeout-before-send：安全终止；
+- sent/unknown：进入 reconcile Observation；
+- 已达到 desired state：继续独立 verify；
+- 部分或错误状态：调用精确 compensator；
+- compensation 后独立 verify recovery；
+- 无法证明恢复：`manual_intervention_required/ESCALATE`。
+
+Runtime 不对非幂等写进行盲重试。
+
+### 6. Promotion 实现
+
+```text
+L1 SKILL.md
+  → L0.5 Structured Natural Language
+  → L0 authoring contract
+  → compiled L0
+  → semantic review / human decision
+  → explicit activation outside proposal directory
+```
+
+Promotion 记录逐阶段 digest、字段映射、置信度和语义丢失告警。转换模型只建议结构化内容；不可猜测的 Capability、target、precondition、Evidence、Guard、postcondition 和 compensation 必须来自受信 Catalog/显式锚点。低置信、缺引用、扩大权限、弱化 Safety 或缺 verifier/compensator 时不得进入 active Registry。
+
+一个完整 proposal 保存以下可审制品：
+
+```text
+proposal/
+  00-capability-catalog.yaml
+  01-L1-SKILL.md
+  02-L0.5.yaml
+  03-L0-authoring.yaml
+  04-L0-compiled.json
+  trajectory.json
+  report.json
+```
+
+`report.json` 中的 requirement-level coverage 记录 L1 原句、L0.5/L0 JSON path、`preserved/weakened/missing/ambiguous`、解释与 `fix.file/path/hint`。`trajectory.json` 绑定阶段顺序、每个文件摘要和前驱摘要；Workbench 只是该数据的只读交互投影，没有 review、publish、activate 或 execute API。
+
+这条路径不自动从运行轨迹生成 L0。Experience Compilation 保留为未来研究：它必须基于多次真实成功与失败轨迹、聚类、参数抽象、反例验证和独立 Promotion。
+
+### 7. Provider 接口
+
+Runtime 只依赖协议中性的两类 Capability：
+
+```text
+Observation(arguments) -> typed evidence envelope
+Effect(arguments, immutable runtime context) -> effect receipt
+```
+
+Adapter 可以使用 MCP、REST、NETCONF、SSH/CLI 或本地 callable。Protocol 不授予信任；Runtime 仍验证 capability id/version、schema、scope、freshness 和结果结构。Provider release/supply-chain admission 是延迟加载的冻结扩展。
+
+### 8. Journal 与错误语义
+
+Journal 使用 SQLite 保存不可变 plan 和 append-only event hash chain。当前原型要求单机 crash recovery 和可复算完整性，不宣称分布式一致性或 WORM。
+
+主要终态：
+
+| 终态 | 含义 |
 |---|---|
-| `dsh-plugin-netopyu/src/index.js` | DSH 组合入口、工具定义、审批卡、Memory/Capability service |
-| `dsh-plugin-netopyu/src/bridge.js` | Unix Socket Worker 与短进程 fallback transport |
-| `dsh-plugin-netopyu/src/hitl-store.js` | HITL、batch、grant、trajectory、continuation SQLite |
-| `dsh-plugin-netopyu/src/a2a.js` | DSH remote subagent provider 与 continuation 工具 |
-| `dsh_adapter/bridge.py` | manifest、只读调用、prepare/execute/inspect/audit/workflow API |
-| `dsh_adapter/worker.py` | 持久化 JSON-lines Unix Socket 服务、请求隔离和 tracing |
-| `dsh_adapter/backend.py` | mock/pragmatic backend 生命周期和公共分页工具 |
-| `dsh_adapter/local_dc_peer.py` | loopback-only mock A2A peer |
-| `dsh_adapter/scoped_services.py` | session/operator memory 和 profile capability retrieval |
-| `network_runtime/engine.py` | Network Runtime 主状态机 |
-| `network_runtime/contracts.py` | schema v4、Plan/Evidence/Outcome 与状态迁移 |
-| `network_runtime/l0_skills.py` | L0 Skill/step/IntentSpec 注册表和 hash |
-| `network_runtime/validation.py` | 参数规范化、类型、来源、实体与风险校验 |
-| `network_runtime/policies.py` | 工具版本、preflight、verifier、compensator 合同 |
-| `network_runtime/verifiers.py` | typed postcondition registry |
-| `network_runtime/compensators.py` | 逆操作和补偿结果 registry |
-| `network_runtime/workflows.py` | reviewed L1 workflow template 与阶段约束 |
-| `network_runtime/journal.py` | SQLite 状态、nonce、事件哈希链和审计 |
-| `runtime/tool_results.py` | durable 大结果外置与引用解析 |
-| `profiles/` | LAN/DC/WAN/mock callables、metadata 和 L1 Skills |
-| `tools/` | 公共分页和 pragmatic network tools |
-| `integrations/` | MCP、OpenAPI 和统一路由 |
-| `agent_memory/` | operator/session scoped memory |
-| `retrieval/` | CJK-aware BM25 与可选 hybrid retrieval |
+| `verified_success` / COMMIT | 独立 postcondition 成立 |
+| `rejected` / ABORT | 写前合同、Evidence、Guard、Risk 或审批失败 |
+| `rollback_verified` / ABORT | Effect 后补偿并证明恢复；任务本身不算成功 |
+| `precondition_changed` / ABORT | 审批后事实漂移，Effect 被阻断 |
+| `expired` / ABORT | 不可变计划在执行前过期 |
+| `manual_intervention_required` / ESCALATE | 结果或恢复无法可靠证明 |
 
-### 3. DSH 插件启动
+错误对象必须区分参数错误、证据不足、前置漂移、审批错误、执行错误、结果不确定、验证失败和补偿失败；不得将它们折叠为通用 `success=false`。
 
-`apply(ctx, config)` 执行顺序：
-
-1. 解析项目根、Python、profile、backend 和持久化路径；
-2. 从 Python bridge 获取 profile manifest 与 Skill manifest；
-3. 根据 `NETOPYU_DSH_ENABLE_DESTRUCTIVE` 决定是否投影写工具；
-4. 初始化 HITL store，恢复中断状态；
-5. 初始化 Tool Guard、Memory、Capability 和 A2A provider；
-6. 通过 `ctx.provide` 注册 DSH service；
-7. 注册普通工具、HITL 工具、A2A 工具和 trajectory 工具；
-8. 在 Cordis effect cleanup 中关闭 SQLite。
-
-启动失败不得留下“部分写工具已注册”的状态。manifest、Python、backend 或存储初始化失败应使插件启动失败。
-
-### 4. Bridge/Worker 协议
-
-Worker 使用 Unix Domain Socket，消息为一行一个 JSON object。每个请求包含：
+Harness 获得的终态信封固定为：
 
 ```json
 {
-  "id": "correlation-id",
-  "command": "manifest|invoke|prepare|execute|inspect|audit|workflow-*",
-  "profile": "lan",
-  "tool": "restart_service",
-  "arguments": {},
-  "include_destructive": false,
-  "allow_destructive": false,
-  "l0_skill_id": "network.service.restart"
+  "contract": "netopyu.effect-runtime-terminal@1.0.0",
+  "terminal": true,
+  "ok": true,
+  "state": "verified_success",
+  "plan_id": "...",
+  "plan_hash": "sha256:...",
+  "summary": "...",
+  "evidence": [],
+  "error": null,
+  "compensation": {"performed": false, "verified": false},
+  "provider_result_digest": "sha256:..."
 }
 ```
 
-约束：
+只有 `state=verified_success` 时 `ok=true`。`provider_result_digest` 保留调用关联性而不把 Provider 文本当作终态事实。详细的人类阅读方法见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)。
 
-- 非 object、超长、缺字段和未知 command 返回结构化错误，不终止 Worker；
-- `invoke` 只允许只读工具；任何直接写调用均拒绝；
-- `execute` 必须携带 plan id/hash、execution nonce、approval request、actor 和请求级 `allow_destructive=true`；
-- Worker 每个请求建立独立 backend 生命周期并在结束时关闭客户端与结果 store；
-- Socket 残留只能在确认无监听者后删除。
+### 9. 测试设计
 
-### 5. Network L0 Skill 合同
+- 单元：Contract、Evidence integrity/freshness/scope、Guard、Risk、状态迁移；
+- 组件：prepare/approve/execute/verify/compensate 和 hash-chain；
+- 故障注入：超时前/后、断连、部分成功、验证不一致、补偿失败；
+- 集成：DSH Worker、MCP/Containerlab Provider；
+- 主实验：相同条件下的 DSH L1 Control 与 DSH + EnsuredSkill Treatment；
+- 消融：分别移除 Contract、Evidence、Guard、Transaction、Compensation；
+- 稳定性：9B 主模型与至少一个更弱模型，Runtime 合同保持不变。
 
-`L0SkillContract` 是 frozen、版本化的效果定义，包含：
+### 10. 冻结代码隔离
 
-- `skill_id`、`version`、`tool_name`、`tool_contract_id`；
-- `intent_kind`、`target_fields`、`allowed_profiles`；
-- 固定 `steps`；
-- 由规范 JSON 计算的 `contract_hash`。
-
-默认步骤：
-
-| 顺序 | step | 阶段 | 失败策略 |
-|---:|---|---|---|
-| 1 | `validate_parameters` | prepare | clarify or reject |
-| 2 | `compile_intent` | prepare | clarify or reject |
-| 3 | `preflight` | prepare | reject |
-| 4 | `approval` | approve | reject |
-| 5 | `revalidate` | execute | abort without write |
-| 6 | `execute` | execute | reconcile |
-| 7 | `verify` | verify | compensate or escalate |
-| 8 | `compensate` | compensate | manual intervention；仅有合同的 Skill |
-| 9 | `audit` | terminal | fail closed |
-
-Raw write tool 必须解析到唯一 L0 Skill，且请求提供的 L0 id 必须完全匹配。未知、未绑定、profile 不允许或 contract hash 不一致都在 prepare 阶段拒绝。
-
-### 6. IntentSpec 与参数编译
-
-编译器输入为 profile、tool metadata、原始 arguments、argument provenance 和 L0 Skill。输出只能是成功的 `CompilationResult` 或明确错误列表。
-
-校验顺序：
-
-1. arguments 必须是 object；
-2. 拒绝未知字段；
-3. 检查 required；
-4. 校验并规范化 string/integer/number/boolean/array/object；
-5. 校验 enum、空值和范围；
-6. 在 mock 模式校验用户、设备、服务、应用等目标实体存在；
-7. 校验 provenance 值；高风险关键字段不得来自未确认猜测；
-8. 根据 action type、tool 和参数计算 risk；
-9. 生成 normalized arguments、targets、constraints、desired state；
-10. 生成 `arguments_digest` 和 `intent_hash`。
-
-`IntentSpec` 不包含自由文本执行指令。模型解释只能保留在 DSH 会话，不能成为 backend 命令。
-
-### 7. PreparedPlan schema v4
-
-核心字段：
-
-```text
-plan_id, profile, tool_name, tool_version, action_type
-arguments, argument_provenance, targets
-risk_level, risk_reasons
-preflight[]
-verification_contract, rollback_contract
-l0_skill_id, l0_skill_version, l0_contract_hash
-intent_spec, intent_hash, step_contract
-workflow_run_id, workflow_template_hash
-created_at, expires_at, plan_hash, state, schema_version
-```
-
-`plan_hash` 对除自身和可变 state 外的规范计划内容计算 SHA-256。审批、grant、execute 和 audit 必须再次验证 hash。任何计划字段变化都产生不同 hash，旧批准不再有效。
-
-### 8. 状态机
-
-```mermaid
-stateDiagram-v2
-    [*] --> plan_ready
-    plan_ready --> approved
-    plan_ready --> rejected
-    plan_ready --> expired
-    approved --> executing
-    approved --> expired
-    executing --> verifying
-    executing --> execution_failed
-    executing --> outcome_indeterminate
-    executing --> precondition_changed
-    execution_failed --> rolling_back
-    execution_failed --> manual_intervention_required
-    outcome_indeterminate --> verifying
-    outcome_indeterminate --> rolling_back
-    outcome_indeterminate --> manual_intervention_required
-    verifying --> verified_success
-    verifying --> rolling_back
-    verifying --> manual_intervention_required
-    rolling_back --> rollback_verified
-    rolling_back --> manual_intervention_required
-```
-
-只有 `verified_success` 或 `rollback_verified` 能表示已经验证的确定状态。`precondition_changed`、`manual_intervention_required`、`rejected` 和 `expired` 是安全终态。非法迁移抛出 `StateTransitionError`。
-
-### 9. Prepare 算法
-
-1. `resolve_contract` 和 `L0SkillRegistry.resolve`；
-2. `compile_parameters`；
-3. `compile_intent`；
-4. `assess_risk`；
-5. 调用合同指定 preflight read；
-6. 将输出转换为 typed `Evidence`；
-7. reviewed workflow 存在时验证阶段和 observation 前置条件；
-8. 创建具有 TTL 的 `PreparedPlan`；
-9. 原子写入 plan 与 `plan_created`；
-10. 返回 `plan` 或 `clarification_required/errors`，不得同时返回两者。
-
-### 10. Approval 与 Tool Guard
-
-DSH 插件从计划生成审批摘要。`allowed-once` 后：
-
-- 生成随机 execution token；
-- SQLite 只保存 token SHA-256 digest；
-- grant 绑定 operator、request id、tool、canonical arguments、plan id/hash 和过期时间；
-- conditional update 只允许 `issued -> consumed` 一次；
-- 重启将未完成 grant 标记 orphaned；
-- reject/timeout 会撤销或终止计划。
-
-Runtime journal 另保存 execution nonce 的 digest。Tool Guard 和 Runtime nonce 构成两层一次性保护。
-
-### 11. Execute/Verify 算法
-
-1. 读取计划并校验 schema/hash/状态/TTL；
-2. 校验请求级破坏性授权和 approval identity；
-3. 原子消费 nonce；
-4. 转为 `executing`；
-5. 重新执行 preflight，并与原 snapshot 比较；
-6. 状态漂移则 `precondition_changed`，不写；
-7. 调用写 callable 一次；
-8. 无论写返回是否“成功”，进入 verifier；
-9. verifier 用独立 read callable 生成 typed evidence；
-10. 通过则 `verified_success`；
-11. 失败且有 compensator 时执行补偿并再次验证；
-12. 无安全补偿或结果不确定则 `manual_intervention_required`；
-13. 写入 terminal audit step。
-
-### 12. Evidence 与 verifier
-
-Evidence 字段为：`evidence_type`、`source`、`target`、`observed_at`、`value`、`fresh`、`passed`、`predicate`、`expected`。
-
-Verifier 必须：
-
-- 使用与写工具独立的读路径；
-- 解析 typed facts，而不是匹配模型总结；
-- 明确 expected predicate；
-- 拒绝 stale 或 error marker；
-- 在无法确定时返回失败/不确定，而不是乐观成功。
-
-### 13. Workflow Runtime
-
-Reviewed workflow template 从 canonical L1 `SKILL.md` 编译，hash 绑定模板版本。Workflow session 持久化已观察事实与完成阶段。mutating plan 必须满足：
-
-- 当前阶段允许该 L0 Skill；
-- 必需 read observation 已成功；
-- plan 的 `workflow_run_id` 和 `workflow_template_hash` 匹配；
-- 工具结果只能推进已定义阶段；
-- final verification 不得被中间写结果替代。
-
-### 14. A2A continuation
-
-Remote `input-required` 结果不被当作成功。插件保存 peer、interrupt id、原始委派绑定和状态，展示新的 DSH 审批。恢复时发送 `resume_interrupt_id + operator_decision`；两者必须成对出现。continuation 领取使用原子状态更新，重复恢复失败或幂等返回终态。
-
-### 15. Journal 与审计
-
-每个 plan 的事件链：
-
-```text
-event_hash = SHA256(canonical(event_without_hash) + prev_event_hash)
-```
-
-首事件使用 `GENESIS`。`runtime-audit` 重算：
-
-- plan hash；
-- 事件顺序；
-- `prev_event_hash` 连续性；
-- 每个 event hash；
-- 终态与 record 一致性。
-
-审计失败只报告，不修复被篡改事件。旧无 hash 记录只允许一次性迁移，不能用迁移逻辑“治愈”后续篡改。
-
-### 16. 异常策略
-
-| 异常 | 行为 |
-|---|---|
-| 参数不完整/歧义 | 返回 clarification；不建可执行计划 |
-| 未知 L0 Skill/工具绑定 | 拒绝 |
-| backend 未配置 | fail closed |
-| 审批拒绝/过期 | `rejected`/`expired` |
-| grant/hash/nonce 不匹配 | 拒绝且不写 |
-| precondition 漂移 | `precondition_changed` |
-| 写前 transport 失败 | `execution_failed` |
-| 写是否到达不确定 | `outcome_indeterminate` 后强制验证 |
-| postcondition 失败 | 补偿或人工介入 |
-| rollback 验证失败 | `manual_intervention_required` |
-| Worker 单请求异常 | 返回错误；Worker 保持健康 |
-| A2A timeout/loop/unreachable | 当前委派失败，不伪造结果 |
-
-### 17. 扩展规则
-
-增加写能力必须同时提交：工具 metadata、L0 Skill、ToolContract、目标/参数规则、preflight、verifier、必要的 compensator、profile 映射、测试和双语文档更新。只增加 callable 或 Skill prompt 不构成可执行写能力。
+`enterprise.py`、`provider_release.py` 和 `proposal_binding.py` 不再由默认核心路径顶层加载：本地 Runtime 直接构造本地审批；Provider admission 仅在显式环境开关下导入；L1 binding 仅在调用者确实提供 envelope 时导入。DSH CLI 同样只在显式命令下导入 A2A、轨迹学习和历史 L1 shadow；能力检索 parity 已迁入 `evaluation/`，并使用内存状态而不是产品 SQLite。该隔离确保未来产品扩展或 Evaluator 不会反向定义 EnsuredSkill 内核。
 
 ---
 
 ## English
 
-### 1. Scope
+### 1. Core model
 
-This document defines implementation contracts for the DSH plugin, Python bridge/Worker, Network Runtime, L0 Skills, backends, A2A, and persistence. “Must” denotes a fail-closed requirement.
+`effect_runtime/reliability.py` defines the domain-neutral kernel: ReliabilityContract, EvidenceRequirement/Record, Guard, ResourceSet, RiskPolicy, OperationNode, TypedExecutionGraph, and TransactionStateMachine. `contract_from_compiled_l0()` projects a reviewed L0 v2 artifact into the kernel; the model cannot alter it at execution time.
 
-### 2. Module map
+Evidence evaluation requires exact semantic type, source capability, scope, associated action, freshness, validity, and payload integrity. Risk consumes scope, blast radius, evidence confidence, reversibility, history, and criticality, and emits only execute, ask-human, or reject. Structural gates always precede scoring.
 
-| Path | Responsibility |
-|---|---|
-| `dsh-plugin-netopyu/src/index.js` | DSH composition, tool definitions, approval cards, scoped services |
-| `dsh-plugin-netopyu/src/bridge.js` | Unix-socket Worker and process fallback transport |
-| `dsh-plugin-netopyu/src/hitl-store.js` | HITL, batches, grants, trajectories, continuations |
-| `dsh-plugin-netopyu/src/a2a.js` | Remote subagent provider and continuation tools |
-| `dsh_adapter/bridge.py` | Manifest, read, prepare, execute, inspect, audit, workflow API |
-| `dsh_adapter/worker.py` | Persistent JSON-lines Unix-socket server and request isolation |
-| `dsh_adapter/backend.py` | Backend lifecycle and common paging tools |
-| `network_runtime/engine.py` | Main deterministic state machine |
-| `network_runtime/contracts.py` | Schema v4 plans, evidence, outcomes, transitions |
-| `network_runtime/l0_skills.py` | Versioned L0 and IntentSpec registry |
-| `network_runtime/validation.py` | Normalization, schema, provenance, entity, and risk validation |
-| `network_runtime/policies.py` | Tool, preflight, verifier, and compensator contracts |
-| `network_runtime/journal.py` | State, nonces, hash-chain events, audit |
-| `runtime/tool_results.py` | Durable oversized-result storage |
-| `profiles/`, `tools/`, `integrations/` | Domain tools and mock/pragmatic adapters |
+The concrete request trace is DSH tool projection (`dsh-plugin-netopyu`) → narrow JSON Worker bridge (`dsh_adapter`) → parameter/L0/plan compilation (`NetworkRuntime.prepare`) → domain-neutral contract and graph gates (`effect_runtime`) → one-shot transaction (`NetworkRuntime.execute`) → journal/graph/provenance inspection. The Harness receives `terminal_envelope()`, never a provider result as authoritative success.
 
-### 3. Startup and transport
+### 2. Plan and transaction
 
-Plugin startup resolves configuration, loads Python manifests, projects only the active profile and allowed mutation surface, initializes persistent stores and services, registers tools, and attaches cleanup. A partial mutation surface must never survive startup failure.
+A PreparedPlan binds normalized arguments and provenance, exact L0 and tool contracts, targets/resources/risk, preflight evidence, the typed transaction graph, approval, provider schema identity, TTL, and immutable digests.
 
-The Worker accepts one JSON object per Unix-socket line. Malformed or unknown requests return structured errors without terminating the Worker. `invoke` is read-only. Mutation requires the plan-bound `execute` command with request-level authorization, nonce, approval identity, and L0 binding.
+The normal graph is begin → snapshot → precheck → optional approval → revalidate → execute → verify → commit. A pre-Effect rejection or drift reaches abort. An indeterminate Effect enters read-only reconciliation; failed verification enters optional compensation and recovery verification; unresolved state escalates. Post-send uncertainty is observed before any retry.
 
-### 4. L0 and intent contracts
+`effect_runtime/graph_scheduler.py` is the fail-closed schedule gate: nodes advance only under the reviewed graph and prior outcome, Effect and Compensate are one-shot, and Commit requires successful independent Verify. `network_runtime/graph_runtime.py` reconstructs this cursor from hash-chained events. Crash recovery records unknown work as skipped/indeterminate and may reconcile by reads, but cannot replay Effect or invent successful revalidation.
 
-A frozen `L0SkillContract` binds identity/version, one tool contract, intent kind, target fields, allowed profiles, fixed steps, and a canonical contract hash. A raw mutation must resolve to exactly one matching L0 contract.
+Runtime inspection returns graph conformance, per-stage Runtime latency, and a privacy-minimized Evidence → Observation → Capability/Collector → Network Object DAG. Runtime latency excludes Reasoning/LLM latency; recorded lineage is not itself proof that an external payload is true.
 
-Compilation rejects unknown/missing/type-invalid arguments, invalid entities, untrusted provenance on critical fields, and unsupported profiles. It emits normalized arguments, targets, constraints, desired state, an argument digest, and an immutable `intent_hash`. Free-form model instructions never become backend commands.
+### 3. Runtime algorithms
 
-### 5. Plan and state machine
+Prepare resolves the provider capability, validates and grounds parameters, refuses missing or ambiguous values, resolves the exact active L0, validates its runtime projection, builds the reliability contract and graph, gathers and validates preflight evidence, applies guards and risk, and persists an immutable plan.
 
-Schema-v4 `PreparedPlan` binds the complete effect description, evidence, L0 contract, intent, workflow, TTL, and `plan_hash`. Approval and execution revalidate the hash; any change invalidates prior authorization.
+Approval cannot mutate a plan. Execute reopens the provider and revalidates every mutable binding before consuming a one-shot authorization. The effect receipt is not success evidence. An independent observation proves postconditions. Failure reconciles actual state, compensates when specified, independently verifies recovery, and otherwise escalates.
 
-Only `verified_success` and `rollback_verified` represent verified outcomes. Rejection, expiry, changed preconditions, and manual intervention are safe terminal states. Illegal transitions raise `StateTransitionError`.
+### 4. Promotion and providers
 
-### 6. Prepare, approval, and execution
+L1-to-L0.5-to-L0 is an offline, review-gated authoring compilation. It records stage digests, semantic mappings, confidence, and loss warnings but cannot activate contracts automatically. Trace-based Experience Compilation remains future research.
 
-Prepare resolves contracts, compiles parameters and intent, assesses risk, obtains fresh preflight evidence, verifies reviewed-workflow constraints, persists the plan, and returns either a plan or clarification/errors.
+Each proposal preserves the trusted Catalog, original L1, L0.5, L0 authoring, compiled candidate, trajectory, and report. Requirement-level coverage links L1 statements to L0.5/L0 paths, classifies preservation or loss, and identifies the exact file/path to revise. The Workbench is a read-only projection and has no publication or execution API.
 
-An allowed-once decision creates a random token whose digest is stored and atomically consumed. The grant binds the operator, request, tool, canonical arguments, plan id/hash, and expiry. The Runtime independently consumes an execution nonce.
+Providers expose protocol-neutral Observation and Effect capabilities. MCP, REST, NETCONF, CLI, and local callables are adapter choices, not trust decisions.
 
-Execution checks integrity and authorization, revalidates the precondition, sends the write once, and always uses a separate verifier. Verification failure invokes a registered compensator when safe; otherwise the plan escalates to manual intervention.
+### 5. Persistence, testing, and isolation
 
-### 7. Evidence, workflows, and A2A
+SQLite stores immutable plans and an append-only event hash chain for local crash recovery. It is not a distributed or WORM guarantee. Tests cover contracts, evidence, guards, risk, state transitions, full transaction paths, fault injection, DSH/Provider integration, paired control/treatment runs, five ablations, and cross-model stability.
 
-Evidence is typed, fresh, source-identified, target-bound, predicate-driven, and independently read. Model summaries are never evidence.
+Enterprise identity, provider supply-chain admission, and L1 canary binding are lazy optional extensions. The DSH CLI also imports A2A, trajectory learning, and historical L1 shadow only for explicit commands. Retrieval parity now lives in `evaluation/` and uses memory-only state instead of product SQLite. The default prototype path therefore cannot let frozen productization or evaluator code define the reliability kernel.
 
-Reviewed workflow templates are compiled from canonical L1 Skills and bound by hash. A mutation is allowed only in the correct phase after required observations. Intermediate write output cannot replace final verification.
-
-Remote `input-required` is persisted as a continuation and requires a fresh DSH approval to resume or reject. Hop limits, loop detection, atomic claims, and timeout/error states fail closed.
-
-### 8. Journal and failures
-
-Each plan has an independent SHA-256 event chain starting at `GENESIS`. Audit recomputes plan integrity, event ordering, previous-hash links, event hashes, and terminal consistency. Audit reports tampering and never repairs it.
-
-Incomplete intent, unknown contracts, missing backends, rejected approval, token mismatch, state drift, uncertain effects, failed postconditions, failed rollback, Worker exceptions, and A2A failures all have explicit non-success states. No error path may be converted to success by model prose.
-
-### 9. Extension rule
-
-A new mutating capability must include metadata, an L0 Skill, a ToolContract, parameter/target policy, preflight, verifier, optional compensator, profile projection, tests, and bilingual documentation. A callable or prompt alone is never an executable mutation capability.
+The only positive terminal state is `verified_success`. `rollback_verified` proves restoration but is not task success; `precondition_changed`, `rejected`, and `expired` are safe stops; `manual_intervention_required` means the target or recovery state remains unproved. The terminal envelope carries plan identity, independent evidence, error, compensation flags, and only a digest of the provider result. See the [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md).

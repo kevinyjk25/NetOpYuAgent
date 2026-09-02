@@ -1,0 +1,195 @@
+{
+  "apiVersion": "effect-runtime.io/public-skill-static-pilot-summary/v1",
+  "date": "2026-09-01",
+  "status": "static_import_model_assist_and_role_simulation_complete_human_independent_eval_not_started",
+  "evidenceClass": "public_market_repository_external_static_only_ecological_validity",
+  "officialEsP1QualificationEligible": false,
+  "source": {
+    "discoveryCandidateCount": 100,
+    "processedCandidateCount": 60,
+    "acceptedCount": 20,
+    "sourceRepositoryCount": 13,
+    "discoveryDigest": "sha256:434fcccdc35c404111e8cfaa9dacb1004a54f118f85e2a3e5ceba049462dfcbb",
+    "manifestDigest": "sha256:11988a1c83c3ebe2e3d730a0507d414c8d7f902a4ae80d4f69a1d16b3cffdbec",
+    "reportDigest": "sha256:70325e61e55e22dceaaec16575df20acddeb57712e3c7350337f7c99e0a8787e"
+  },
+  "quarantine": {
+    "executionPolicy": "static_only",
+    "scriptPolicy": "exclude",
+    "licensePolicy": "known",
+    "sourceBackend": "git_no_checkout",
+    "thirdPartyExecutionAttempted": false,
+    "materializedExecutableFiles": 0
+  },
+  "exclusions": {
+    "license_not_declared": 35,
+    "executable_surface_excluded": 1,
+    "snapshot_error": 4
+  },
+  "runtimePackageInspection": {
+    "passed": 15,
+    "blocked": 5,
+    "findingCounts": {
+      "RESOURCE_REFERENCE_MISSING": 16,
+      "RESOURCE_REFERENCE_UNSAFE": 11,
+      "SKILL_FORMAT_INVALID": 3
+    }
+  },
+  "independentAuthorKit": {
+    "selectedPackageCount": 15,
+    "tasksPerSkill": 3,
+    "taskSlotCount": 45,
+    "containsRuntimeOrEvaluator": false,
+    "containsGeneratedGold": false,
+    "thirdPartyExecutionAttempted": false,
+    "workspaceDigest": "sha256:d476e417f9218b138433c7cf9f4ddec3674c090d41c6f3ef9389820945ea3012"
+  },
+  "modelDraftAssist": {
+    "authority": "draft_only_human_review_required",
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "assignmentCount": 15,
+    "draftedAssignments": 14,
+    "draftedTaskCount": 42,
+    "taskSlotCount": 45,
+    "assignmentStructuralPassRate": 0.933333,
+    "taskSlotCoverageRate": 0.933333,
+    "assignmentsRequiringRepair": 12,
+    "modelRepairCallCount": 12,
+    "latencyMs": {
+      "p50": 59214.133,
+      "p95": 97202.947,
+      "max": 97202.947
+    },
+    "failedAssignmentIds": [
+      "wild-assignment-008"
+    ],
+    "containsTrustedGold": false,
+    "humanReviewRequired": true,
+    "officialEsP1QualificationEligible": false,
+    "thirdPartyExecutionAttempted": false,
+    "draftsDigest": "sha256:d6e85334e5c3477361fd046757821826d854545ec42df30db16ae6b96eb56a98",
+    "reportDigest": "sha256:da09d171a1c9f303dc179a029bad3dcffe95a1708b6fcefa9f0536674d2059ca"
+  },
+  "testedSkillLibrary": {
+    "authority": "read_only_transparency_artifact_no_execution_authority",
+    "skillCount": 15,
+    "fileCount": 22,
+    "displayableFileCount": 22,
+    "referenceFileCount": 4,
+    "taskSlotCount": 45,
+    "draftedTaskCount": 42,
+    "executionSurfaceFileCount": 0,
+    "thirdPartyExecutionAttempted": false,
+    "indexDigest": "sha256:d794fc65e37257eed010ac431e9e4876e4e9b45deb1f98130116c75054c99c10",
+    "manifestDigest": "sha256:c6ad1ee3c9b6dc60a19c47d9e8fbdc9aaf055a4748bb277efbcc62552033c137",
+    "versionedMetadataIndex": "docs/benchmarks/es-p1-wild-skill-index.json"
+  },
+  "assistedCaseAuthorReviewKit": {
+    "schemaVersion": "effect-runtime.io/public-skill-assisted-review-kit/v3",
+    "authority": "case_authoring_only_no_gold_or_execution_authority",
+    "assignmentCount": 15,
+    "taskSlotCount": 45,
+    "promptCandidateCount": 42,
+    "missingPromptCount": 3,
+    "pendingDecisionCount": 45,
+    "materialFileCount": 0,
+    "materialsDigest": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "containsModelSemanticCandidates": false,
+    "containsGoldOrOracle": false,
+    "goldAuthorKitExportEligible": false,
+    "thirdPartyExecutionAttempted": false,
+    "workspaceDigest": "sha256:072a5bb83eb95f1c049c6c5c99ae518ff7e21b3d889a20ef1f6f0dec3fdc48ec"
+  },
+  "blindGoldAuthorKit": {
+    "schemaVersion": "effect-runtime.io/public-skill-blind-gold-kit/v1",
+    "authority": "blind_gold_authoring_only_no_execution_or_qualification_authority",
+    "exportEligible": false,
+    "exportAttemptResult": "fail_closed_no_output_created",
+    "containsModelSemanticCandidates": false,
+    "officialEsP1QualificationEligible": false
+  },
+  "pairedStudyKit": {
+    "schemaVersion": "effect-runtime.io/public-skill-paired-study-kit/v1",
+    "authority": "paired_study_input_only_no_execution_or_qualification_authority",
+    "model": "qwen3.5:9b",
+    "repetitions": 3,
+    "agentGoldIsolationRequired": true,
+    "inputExportEligible": false,
+    "fixtureMcpInputEligible": false,
+    "translationReportAttached": false,
+    "pairedExecutionInputEligible": false,
+    "pairedExecutionCompleted": false,
+    "thirdPartyExecutionAttempted": false,
+    "officialEsP1QualificationEligible": false
+  },
+  "declarativeFixtureMcp": {
+    "toolCatalogSchema": "effect-runtime.io/public-skill-tool-catalog/v2",
+    "fixtureSchema": "effect-runtime.io/public-skill-fixture-state/v1",
+    "operationKinds": [
+      "static",
+      "read_record",
+      "validate_record",
+      "upsert_record",
+      "restore_record",
+      "delete_record"
+    ],
+    "modes": ["l1_native", "l0_runtime", "safe_stop"],
+    "officialMcpStdioTested": true,
+    "thirdPartyCodeExecutionAllowed": false,
+    "productionProviderQualification": false
+  },
+  "publicTranslationAndDshRunner": {
+    "translationSchema": "effect-runtime.io/public-skill-model-translation/v1",
+    "boundStudySchema": "effect-runtime.io/public-skill-bound-paired-study/v1",
+    "runnerSchema": "effect-runtime.io/public-skill-real-dsh-ab/v1",
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "goldParsedBeforeAgentRuns": false,
+    "confidenceGrantsAuthority": false,
+    "catalogParameterMaterialization": true,
+    "unqualifiedNativeWriteFallback": false,
+    "controlledTechnicalSmoke": {
+      "evidenceClass": "controlled_local_wiring_only",
+      "readFallback": {
+        "cases": 1,
+        "repetitions": 1,
+        "controlPassed": 1,
+        "treatmentPassed": 1,
+        "effectsPerArm": 0
+      },
+      "nominalWrite": {
+        "cases": 1,
+        "repetitions": 1,
+        "translationRoute": "l0_runtime",
+        "controlPassed": 1,
+        "treatmentPassed": 1,
+        "treatmentEffectCalls": 1,
+        "treatmentTerminal": "verified_success"
+      },
+      "compensationPathDeterministicTested": true,
+      "protocolComplete": false,
+      "officialEsP1QualificationEligible": false
+    }
+  },
+  "roleSeparatedSimulationSummary": {
+    "reference": "docs/benchmarks/es-p1-wild-simulated-summary.json",
+    "status": "simulation_protocol_complete",
+    "humanIndependent": false,
+    "officialEsP1QualificationEligible": false,
+    "skillCount": 15,
+    "caseCount": 45,
+    "pairedObservationCount": 135,
+    "armExecutionCount": 270,
+    "controlTaskCompletionPercent": 82.22,
+    "treatmentTaskCompletionPercent": 97.78,
+    "unsafeRuntimeAccepts": 0,
+    "evidenceReportDigest": "sha256:8b2fa52cf5c63e94572ceba5aefafbaa0ff8726b3fff0cf9f0ee37973ae257ba"
+  },
+  "limitations": [
+    "The pilot contains public, model-visible packages rather than a private holdout.",
+    "Model-authored task drafts exist, but no independently accepted tasks, fixtures, Gold semantics, or Oracles have been authored.",
+    "A role-separated virtual study has paired DSH results, but the human-authored 15-Skill workspace has no paired qualification result.",
+    "All 20 accepted packages in this pilot are English; language coverage must be expanded."
+  ]
+}

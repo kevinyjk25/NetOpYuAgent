@@ -1,0 +1,30 @@
+{
+  "schema": "effect-runtime.io/argument-binding-follow-up/v1",
+  "model": "qwen3.5:9b",
+  "dshVersion": "0.1.1-rc.2",
+  "caseId": "branch-03",
+  "pattern": "unknown_parameter",
+  "evaluationFingerprint": "sha256:32a71319ecd21660d63aad35ed7aad83c1c41a23ad13d2cdab183d10875ddbb3",
+  "nativeDSH": {
+    "passed": false,
+    "terminal": "verified_success",
+    "finalState": "restricted",
+    "providerEffectCalls": 1,
+    "latencyMs": 61947.322
+  },
+  "autoRuntime": {
+    "passed": true,
+    "terminal": "rejected",
+    "finalState": "internal",
+    "providerEffectCalls": 0,
+    "latencyMs": 30687.99,
+    "bindingCode": "argument_binding_rejected",
+    "unknownSourceFields": ["invented_scope"],
+    "sourceValuesPersistedInBindingEvidence": false,
+    "sessionCompleted": true,
+    "terminalPropagatedBy": "DSH ToolRunContext.concludeTurn",
+    "toolCalls": ["skill", "data_get_state", "data_validate_change", "data_apply_change"]
+  },
+  "conclusion": "The 9B model silently dropped an unsupported source field in both arms. Native DSH wrote the legal subset; Runtime compared the confirmed request digest and field set with the actual invocation, blocked the write before the Provider, and structurally concluded the DSH turn without a model-controlled retry.",
+  "claimBoundary": "This is one targeted local development-set regression, not a model-wide or production success rate."
+}

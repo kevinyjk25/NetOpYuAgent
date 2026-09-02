@@ -1,0 +1,3 @@
+- insert:
+    - id: l1-protocol-controller
+      name: dsh-l1-protocol-controller

@@ -1,0 +1,95 @@
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicEffect
+metadata:
+  id: network.lan.user-access.revoke
+  version: 1.0.0
+  owner: netopyu-runtime
+  description: Production L0 v2 contract for revoke_user_access
+  labels:
+    runtime-tool-contract: lan-access-revoke-v1
+    runtime-verifier: lan-access-revoked
+    runtime-preflight-fields: user_id
+    migration-source: l0-v1-reviewed
+spec:
+  template: netopyu-runtime-v2
+  profiles:
+  - lan
+  effect:
+    capability: network.lan.user-access.revoke
+    tool: revoke_user_access
+    request:
+      user_id: ${arguments.user_id}
+      reason: ${arguments.reason}
+  intent:
+    kind: revoke_network_access
+    targetFields:
+    - user_id
+    desiredState:
+      admitted: false
+  parameters:
+    user_id:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: null
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+    reason:
+      type: string
+      required: true
+      description: ''
+      enum: []
+      minimum: null
+      maximum: null
+      minLength: 1
+      maxLength: 4096
+      pattern: null
+      resolver: null
+      fixed: null
+      sensitive: false
+  preflight:
+  - id: approved-state
+    capability: network.access.user.get
+    arguments:
+      user_id: ${arguments.user_id}
+    snapshotFields:
+    - facts
+    predicates:
+    - field: facts
+      operator: exists
+  verification:
+    capability: netopyu.verifier.lan-access-revoked
+    arguments:
+      user_id: ${arguments.user_id}
+    predicates:
+    - field: passed
+      operator: equals
+      expected: true
+  compensation:
+    capability: network.lan.user-access.grant
+    tool: grant_user_access
+    arguments:
+      user_id: ${arguments.user_id}
+    verification:
+      capability: netopyu.rollback-verifier.inverse-tool-v1
+      arguments:
+        user_id: ${arguments.user_id}
+      predicates:
+      - field: restored
+        operator: equals
+        expected: true
+  approval:
+    required: true
+    risk: high
+    mode: single
+  failurePolicy:
+    beforeSend: abort
+    afterSendUnknown: reconcile_read_only
+    verificationFailed: compensate
+    compensationFailed: manual_intervention

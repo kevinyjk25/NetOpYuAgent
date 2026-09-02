@@ -6,6 +6,9 @@ import { a2aToolDefinitions, NetOpYuA2AProvider } from './a2a.js'
 import { callBridge, resolvePython } from './bridge.js'
 import { createHitlStore, NetOpYuToolGuard } from './hitl-store.js'
 
+// HMR contract marker: reload the plugin when the Python topology/path surface changes.
+export const networkLabContractVersion = 'p075-b1-topology-path-v1'
+
 export { NetOpYuA2AProvider } from './a2a.js'
 export { NetOpYuToolGuard } from './hitl-store.js'
 
@@ -22,6 +25,53 @@ function bindingHash(value) {
 function preparationFailure(prepared) {
   const details = [...(prepared.missing ?? []), ...(prepared.errors ?? [])]
   return `${prepared.status ?? 'rejected'}${details.length > 0 ? `: ${details.join('; ')}` : ''}`
+}
+
+function observationAccessContext(execution, operatorId, profile) {
+  if (process.env.NETOPYU_IDENTITY_MODE === 'enforced') {
+    return {
+      subject_token: process.env.NETOPYU_OIDC_TOKEN,
+      gateway_token: process.env.NETOPYU_GATEWAY_TOKEN,
+    }
+  }
+  const sessionId = execution.agent?.session?.id
+  return {
+    subject_id: operatorId,
+    session_id: sessionId === undefined ? undefined : String(sessionId),
+    roles: ['operations-reader', 'network-operator'],
+    scopes: ['*', `profile:${profile}`],
+    purpose: 'interactive-network-operations',
+    clearance: 'restricted',
+    authenticated: true,
+  }
+}
+
+function effectSubjectContext(execution, operatorId, profile, role = 'requester') {
+  if (process.env.NETOPYU_IDENTITY_MODE === 'enforced') {
+    const prefix = role === 'approver' ? 'NETOPYU_APPROVER_' : 'NETOPYU_'
+    return {
+      subject_token: process.env[`${prefix}OIDC_TOKEN`],
+      gateway_token: process.env[`${prefix}GATEWAY_TOKEN`] ?? process.env.NETOPYU_GATEWAY_TOKEN,
+    }
+  }
+  const sessionId = execution.agent?.session?.id
+  const normalizedSession = sessionId === undefined ? 'dsh-sessionless' : String(sessionId)
+  const roles = role === 'approver'
+    ? ['network-approver', 'change-approver']
+    : ['network-operator', 'change-requester']
+  return {
+    subject_id: operatorId,
+    issuer: 'netopyu.local/dsh',
+    harness: 'dsh',
+    session_id: normalizedSession,
+    roles,
+    scopes: ['*', `profile:${profile}`],
+    purpose: role === 'approver' ? 'interactive-effect-approval' : 'interactive-effect-operation',
+    assurance_level: 1,
+    auth_method: 'dsh-local-adapter',
+    authenticated: true,
+    credential_id: `dsh:${normalizedSession}:${operatorId}:${role}`,
+  }
 }
 
 async function rejectPreparedPlans(bridge, preparedValues, reason, signal) {
@@ -50,6 +100,25 @@ async function executePreparedPlan(bridge, prepared, requestId, operatorId, exec
     throw new Error('approved Network Runtime plan is missing')
   }
   try {
+    const approval = await callBridge({
+      ...bridge,
+      command: 'runtime-approve',
+      tool: plan.tool_name,
+      args: {
+        plan_id: plan.plan_id,
+        plan_hash: plan.plan_hash,
+        approval_request_id: requestId,
+        approver_contexts: [effectSubjectContext(
+          execution, operatorId, bridge.profile, 'approver',
+        )],
+        ...(bridge.changeContext ? { change_context: bridge.changeContext } : {}),
+      },
+      signal: execution.signal,
+      correlationId: `${String(execution.callId ?? requestId)}${suffix}:approve`,
+    })
+    if (typeof approval?.approval_proof !== 'string') {
+      throw new Error('Network Runtime did not issue a signed approval proof')
+    }
     const outcome = await callBridge({
       ...bridge,
       command: 'runtime-execute',
@@ -58,19 +127,25 @@ async function executePreparedPlan(bridge, prepared, requestId, operatorId, exec
         plan_id: plan.plan_id,
         plan_hash: plan.plan_hash,
         execution_nonce: prepared.execution_nonce,
-        approval_request_id: requestId,
-        approval_actor: operatorId,
+        approval_proof: approval.approval_proof,
       },
       signal: execution.signal,
       allowDestructive: true,
       correlationId: `${String(execution.callId ?? requestId)}${suffix}`,
     })
-    if (outcome.ok !== true || outcome.state !== 'verified_success' || typeof outcome.result !== 'string') {
+    const terminal = outcome.terminal_envelope
+    if (
+      outcome.ok !== true
+      || outcome.state !== 'verified_success'
+      || terminal?.contract !== 'netopyu.effect-runtime-terminal@1.0.0'
+      || terminal?.terminal !== true
+      || terminal?.state !== 'verified_success'
+    ) {
       throw new Error(
         `Network Runtime did not verify success (state=${outcome.state ?? 'unknown'}): ${outcome.error ?? 'missing evidence'}`,
       )
     }
-    return outcome.result
+    return JSON.stringify(terminal, null, 2)
   } catch (error) {
     await rejectPreparedPlans(
       bridge, [prepared],
@@ -139,6 +214,13 @@ function toolDefinition(tool, bridge, toolGuard, approvalByToken, bindingByToken
         signal: execution.signal,
         allowDestructive: false,
         correlationId: execution.callId,
+        accessContext: observationAccessContext(
+          execution, operatorId, bridge.profile,
+        ),
+        sessionId: execution.agent?.session?.id === undefined
+          ? 'dsh-sessionless'
+          : String(execution.agent.session.id),
+        harness: 'dsh',
       })
       if (payload.ok !== true || typeof payload.result !== 'string') {
         throw new Error(payload.error ?? `invalid result from ${tool.name}`)
@@ -204,6 +286,107 @@ export class NetOpYuCapabilityService {
       signal,
     })
   }
+}
+
+export class NetOpYuDecisionService {
+  #bridge
+  #mode
+  #model
+  #toolDeclarations
+
+  constructor(bridge, { mode, model, toolDeclarations }) {
+    this.#bridge = bridge
+    this.#mode = mode
+    this.#model = model
+    this.#toolDeclarations = toolDeclarations.map(tool => structuredClone(tool))
+  }
+
+  get mode() { return this.#mode }
+
+  async decide({ sessionId, userRequest, signal }) {
+    if (this.#mode !== 'shadow') {
+      throw new Error('NetOpYu L1 Decision Plane is not in shadow mode')
+    }
+    return callBridge({
+      ...this.#bridge,
+      command: 'l1-decision-shadow',
+      args: {
+        session_id: String(sessionId),
+        harness: 'dsh',
+        user_request: userRequest,
+        tool_declarations: this.#toolDeclarations,
+        model: this.#model,
+      },
+      signal,
+    })
+  }
+
+  async recent(options = {}, signal) {
+    return callBridge({
+      ...this.#bridge,
+      command: 'l1-decision-recent',
+      args: {
+        limit: options.limit,
+        session_id: options.sessionId,
+      },
+      signal,
+    })
+  }
+
+  async observe({ decisionId, sessionId, kind, target, arguments: observedArguments, signal }) {
+    return callBridge({
+      ...this.#bridge,
+      command: 'l1-decision-observe',
+      args: {
+        decision_id: decisionId,
+        session_id: String(sessionId),
+        observed_kind: kind,
+        observed_target: target,
+        observed_arguments: observedArguments ?? {},
+      },
+      signal,
+    })
+  }
+
+  async close({ decisionId, sessionId, reason, signal }) {
+    return callBridge({
+      ...this.#bridge,
+      command: 'l1-decision-close',
+      args: {
+        decision_id: decisionId,
+        session_id: String(sessionId),
+        reason,
+      },
+      signal,
+    })
+  }
+
+  async metrics(options = {}, signal) {
+    return callBridge({
+      ...this.#bridge,
+      command: 'l1-decision-metrics',
+      args: { limit: options.limit },
+      signal,
+    })
+  }
+}
+
+function directUserText(messages) {
+  const direct = [...messages].reverse().find(message => message?.source?.kind === 'user')
+  if (direct === undefined || !Array.isArray(direct.content)) return undefined
+  const text = direct.content
+    .filter(block => block?.type === 'text' && typeof block.text === 'string')
+    .map(block => block.text)
+    .join('\n')
+    .trim()
+  if (!text) return undefined
+  return { id: String(direct.id ?? ''), text }
+}
+
+function rememberBounded(values, value, maximum = 10_000) {
+  values.add(value)
+  if (values.size <= maximum) return
+  values.delete(values.values().next().value)
 }
 
 function scopedServiceDefinitions(memoryService, capabilityService) {
@@ -466,11 +649,137 @@ function trajectoryDefinition(hitlStore) {
   }
 }
 
+function agentizedAuthoringDefinitions(bridge) {
+  const output = {
+    schema: { type: 'string' },
+    render: (_args, value) => [{ type: 'text', text: value }],
+  }
+  const template = {
+    name: 'netopyu_l0_authoring_template',
+    description: 'Read the proposal-only L1 Skill template, trusted capability catalog, and model/runtime responsibility boundary before translating a user-authored Skill.',
+    parameters: { type: 'object', properties: {}, additionalProperties: false },
+    output,
+    presentCall: () => ({ card: 'generic', title: 'L1 to L0 authoring template', kind: 'read', rawInput: '{}' }),
+    async execute(_args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-template', signal: execution.signal })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  const capture = {
+    name: 'netopyu_l0_authoring_capture',
+    description: 'Capture the exact user-authored L1 SKILL.md as immutable proposal input and return a draft_id. This performs no translation, registration, activation, or execution.',
+    parameters: {
+      type: 'object',
+      properties: {
+        skill_markdown: { type: 'string', description: 'Exact complete user-authored L1 SKILL.md, including YAML frontmatter and Markdown body.' },
+      },
+      required: ['skill_markdown'],
+      additionalProperties: false,
+    },
+    output,
+    presentCall: args => ({ card: 'generic', title: 'Capture L1 Skill source', kind: 'read', rawInput: JSON.stringify({ skill_bytes: Buffer.byteLength(args.skill_markdown ?? '') }) }),
+    async execute(args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-capture', args, signal: execution.signal, correlationId: execution.callId })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  const submit = {
+    name: 'netopyu_l0_authoring_submit',
+    description: 'Submit an LLM-translated L1 Skill as an untrusted L0.5/L0 proposal. Runtime validates requirement-level semantic coverage against a trusted catalog, blocks missing or weakened safety semantics, compiles it, returns authoritative artifact_paths, records the full trajectory, and never activates it.',
+    parameters: {
+      type: 'object',
+      properties: {
+        catalog_id: { type: 'string', enum: ['lan-user-access'] },
+        draft_id: { type: 'string', description: 'ID returned by netopyu_l0_authoring_capture for this exact L1 source.' },
+        l0_id: { type: 'string' },
+        profiles: { type: 'array', items: { type: 'string', enum: ['lan'] }, minItems: 1, uniqueItems: true },
+        parameters: { type: 'object' },
+        effect_capability: { type: 'string' },
+        observation_capability: { type: 'string' },
+        verification_capability: { type: 'string' },
+        compensation_capability: { type: 'string' },
+        compensation_verification_capability: { type: 'string' },
+        effect_request: { type: 'object' },
+        intent: {
+          type: 'object',
+          properties: {
+            kind: { type: 'string' },
+            target_fields: { type: 'array', items: { type: 'string' }, minItems: 1, uniqueItems: true },
+            desired_state: { type: 'object' },
+          },
+          required: ['kind', 'target_fields', 'desired_state'],
+          additionalProperties: false,
+        },
+        preflight: {
+          type: 'object',
+          properties: {
+            arguments: { type: 'object' },
+            snapshot_fields: { type: 'array', items: { type: 'string' }, minItems: 1 },
+            predicates: { type: 'array', items: { type: 'object' }, minItems: 1, description: 'Machine-checkable predicates for every L1 precondition; facts existence alone does not prove facts.status is active.' },
+          },
+          required: ['arguments', 'snapshot_fields', 'predicates'],
+          additionalProperties: false,
+        },
+        verification_arguments: { type: 'object' },
+        verification_predicates: { type: 'array', items: { type: 'object' }, minItems: 1 },
+        compensation_arguments: { type: 'object' },
+        compensation_verification_arguments: { type: 'object' },
+        compensation_verification_predicates: { type: 'array', items: { type: 'object' }, minItems: 1 },
+        risk: { type: 'string', enum: ['low', 'medium', 'high', 'critical'] },
+        approval_mode: { type: 'string', enum: ['single', 'dual'] },
+        translation_logic: { type: 'array', items: { type: 'string' }, minItems: 1, description: 'Requirement-level explanations linking L1 clauses to L0.5 structure and concrete L0 paths.' },
+      },
+      required: [
+        'draft_id', 'profiles', 'parameters', 'effect_capability',
+        'observation_capability', 'verification_capability',
+        'compensation_capability', 'compensation_verification_capability',
+        'effect_request', 'intent', 'preflight', 'verification_arguments',
+        'verification_predicates', 'compensation_arguments',
+        'compensation_verification_arguments',
+        'compensation_verification_predicates', 'risk', 'approval_mode',
+        'translation_logic',
+      ],
+      additionalProperties: false,
+    },
+    output,
+    presentCall: args => ({ card: 'generic', title: 'Validate L1 to L0 proposal', kind: 'read', rawInput: JSON.stringify({ catalog_id: args.catalog_id, draft_id: args.draft_id, translation_keys: Object.keys(args).filter(key => !['catalog_id', 'draft_id'].includes(key)).sort() }) }),
+    async execute(args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-submit', args, signal: execution.signal, correlationId: execution.callId })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  const trace = {
+    name: 'netopyu_l0_authoring_trace',
+    description: 'Read the model-versus-Runtime responsibility trace and authoritative artifact_paths for one L1 to L0 proposal attempt. Never infer artifact filenames.',
+    parameters: {
+      type: 'object',
+      properties: { attempt_id: { type: 'string' } },
+      required: ['attempt_id'],
+      additionalProperties: false,
+    },
+    output,
+    presentCall: args => ({ card: 'generic', title: 'L1 to L0 trajectory', kind: 'read', rawInput: JSON.stringify(args) }),
+    async execute(args, execution) {
+      const value = await callBridge({ ...bridge, command: 'agent-authoring-trace', args, signal: execution.signal })
+      return JSON.stringify(value, null, 2)
+    },
+  }
+  return [template, capture, submit, trace]
+}
+
 export async function apply(ctx, config = {}) {
   const projectRoot = resolve(config.projectRoot ?? process.env.NETOPYU_ROOT ?? inferredProjectRoot)
   const profile = config.profile ?? process.env.NETOPYU_PROFILE ?? 'lan'
   const python = config.pythonExecutable ?? await resolvePython(projectRoot)
-  const bridge = { projectRoot, python, profile }
+  const changeTicketId = String(
+    config.changeTicketId ?? process.env.NETOPYU_CHANGE_TICKET ?? '',
+  ).trim()
+  const bridge = {
+    projectRoot,
+    python,
+    profile,
+    changeContext: changeTicketId ? { ticket_id: changeTicketId } : undefined,
+  }
   const enableDestructive = config.enableDestructive ?? process.env.NETOPYU_DSH_ENABLE_DESTRUCTIVE === '1'
   const bridgeManifest = await callBridge({ ...bridge, command: 'manifest', includeDestructive: enableDestructive })
   if (!Array.isArray(bridgeManifest.tools)) throw new Error('NetOpYu manifest has no tools array')
@@ -487,6 +796,7 @@ export async function apply(ctx, config = {}) {
   const manifest = toolAllowlist.length === 0
     ? bridgeManifest
     : { ...bridgeManifest, tools: bridgeManifest.tools.filter(tool => allowedToolNames.has(tool.name)) }
+  const exposedToolNames = new Set(manifest.tools.map(tool => tool.name))
   const skillManifest = await callBridge({ ...bridge, command: 'skill-manifest' })
   if (!Array.isArray(skillManifest.skills)) throw new Error('NetOpYu skill manifest has no skills array')
   const workflowSkills = new Map(
@@ -507,6 +817,18 @@ export async function apply(ctx, config = {}) {
       ?? `data/agents/${profile}-agent/memory`,
   )
   const operatorId = String(config.operatorId ?? process.env.NETOPYU_DSH_OPERATOR_ID ?? 'dev-user')
+  const decisionMode = String(
+    config.decisionMode ?? process.env.NETOPYU_L1_DECISION_MODE ?? 'off',
+  ).trim().toLowerCase()
+  if (!['off', 'shadow'].includes(decisionMode)) {
+    throw new Error('NETOPYU_L1_DECISION_MODE must be off or shadow in P1.9-A')
+  }
+  const decisionModel = String(
+    config.decisionModel ?? process.env.NETOPYU_L1_DECISION_MODEL ?? '',
+  ).trim()
+  if (decisionMode === 'shadow' && !decisionModel) {
+    throw new Error('NETOPYU_L1_DECISION_MODEL is required when shadow mode is enabled')
+  }
   const memoryService = new NetOpYuMemoryService(bridge, memoryDirectory, operatorId)
   const capabilityService = new NetOpYuCapabilityService(
     bridge, manifest.tools.map(tool => tool.name),
@@ -522,10 +844,16 @@ export async function apply(ctx, config = {}) {
     maxHops: Number(config.a2aMaxHops ?? process.env.NETOPYU_DSH_A2A_MAX_HOPS ?? 3),
     continuationStore: hitlStore,
   })
+  const decisionService = new NetOpYuDecisionService(bridge, {
+    mode: decisionMode,
+    model: decisionModel,
+    toolDeclarations: manifest.tools,
+  })
   ctx.provide('netopyuToolGuard', toolGuard)
   ctx.provide('netopyuMemory', memoryService)
   ctx.provide('netopyuCapabilities', capabilityService)
   ctx.provide('netopyuA2A', a2aProvider)
+  ctx.provide('netopyuDecisionPlane', decisionService)
   ctx.effect(() => () => hitlStore.close())
   ctx.subagents.registerProvider(a2aProvider)
   for (const skill of skillManifest.skills) {
@@ -553,6 +881,7 @@ export async function apply(ctx, config = {}) {
   )
   for (const tool of hitlTools) ctx.tools.register(tool)
   ctx.tools.register(trajectoryDefinition(hitlStore))
+  for (const tool of agentizedAuthoringDefinitions(bridge)) ctx.tools.register(tool)
 
   ctx.on('session/event', (session, event) => {
     hitlStore.recordTrajectory(session.id, `session:${String(event.type)}`, {
@@ -561,7 +890,10 @@ export async function apply(ctx, config = {}) {
     })
   })
 
-  ctx.on('agent/pre-step', async ({ agent, signal }, next) => {
+  const shadowedMessages = new Set()
+  const shadowingMessages = new Set()
+  const pendingShadowBySession = new Map()
+  ctx.on('agent/pre-step', async ({ agent, signal, turn }, next) => {
     const decision = await next()
     if (decision.kind !== 'enter' || !Array.isArray(decision.messages)) return decision
     const invoked = decision.messages.filter(message => (
@@ -585,11 +917,119 @@ export async function apply(ctx, config = {}) {
       })
       startedSkillInvocations.add(key)
     }
+    if (decisionMode === 'shadow') {
+      const direct = directUserText(decision.messages)
+      if (direct !== undefined) {
+        const fallbackMessageKey = turn === undefined
+          ? bindingHash(direct.text)
+          : `${String(turn)}:${bindingHash(direct.text)}`
+        const messageKey = `${String(agent.session.id)}:${direct.id || fallbackMessageKey}`
+        if (!shadowedMessages.has(messageKey) && !shadowingMessages.has(messageKey)) {
+          shadowingMessages.add(messageKey)
+          try {
+            const envelope = await decisionService.decide({
+              sessionId: agent.session.id,
+              userRequest: direct.text,
+              signal,
+            })
+            hitlStore.recordTrajectory(agent.session.id, 'l1:shadow:decision', {
+              decision_id: envelope.decision_id,
+              status: envelope.status,
+              action: envelope.decision?.action ?? null,
+              target: envelope.decision?.target ?? null,
+              prompt_digest: envelope.evidence?.prompt_digest ?? null,
+              decision_digest: envelope.decision_digest ?? null,
+              evidence_digest: envelope.evidence_digest ?? null,
+              duration_ms: envelope.evidence?.duration_ms ?? null,
+              authority: envelope.authority,
+            })
+            const sessionKey = String(agent.session.id)
+            const previous = pendingShadowBySession.get(sessionKey)
+            if (previous !== undefined) {
+              try {
+                await decisionService.close({
+                  decisionId: previous.decisionId,
+                  sessionId: sessionKey,
+                  reason: 'superseded',
+                  signal,
+                })
+              } catch (error) {
+                hitlStore.recordTrajectory(agent.session.id, 'l1:shadow:close-error', {
+                  decision_id: previous.decisionId,
+                  error_type: error?.constructor?.name ?? 'Error',
+                })
+              }
+            }
+            pendingShadowBySession.set(sessionKey, {
+              decisionId: envelope.decision_id,
+            })
+          } catch (error) {
+            hitlStore.recordTrajectory(agent.session.id, 'l1:shadow:error', {
+              error_type: error?.constructor?.name ?? 'Error',
+            })
+          } finally {
+            shadowingMessages.delete(messageKey)
+            rememberBounded(shadowedMessages, messageKey)
+          }
+        }
+      }
+    }
     return decision
   })
 
   ctx.on('tools/pre-execute', async (execution, next) => {
     const sessionId = execution.agent?.session?.id
+    if (decisionMode === 'shadow' && sessionId !== undefined) {
+      const sessionKey = String(sessionId)
+      const pendingShadow = pendingShadowBySession.get(sessionKey)
+      const observedKind = execution.name === 'skill'
+        ? 'skill'
+        : exposedToolNames.has(execution.name) ? 'tool' : undefined
+      const observedTarget = observedKind === 'skill'
+        ? execution.arguments?.name
+        : observedKind === 'tool' ? execution.name : undefined
+      if (
+        pendingShadow !== undefined
+        && typeof observedTarget === 'string'
+        && observedTarget.trim() !== ''
+      ) {
+        pendingShadowBySession.delete(sessionKey)
+        try {
+          const observation = await decisionService.observe({
+            decisionId: pendingShadow.decisionId,
+            sessionId: sessionKey,
+            kind: observedKind,
+            target: observedTarget,
+            arguments: execution.arguments ?? {},
+            signal: execution.signal,
+          })
+          hitlStore.recordTrajectory(sessionId, 'l1:shadow:observation', {
+            decision_id: pendingShadow.decisionId,
+            observed_kind: observation.observed_kind,
+            observed_target: observation.observed_target,
+            target_match: observation.target_match,
+            arguments_exact: observation.arguments_exact,
+            safety_escape: observation.safety_escape,
+            outcome: observation.outcome,
+          })
+        } catch (error) {
+          hitlStore.recordTrajectory(sessionId, 'l1:shadow:observation-error', {
+            decision_id: pendingShadow.decisionId,
+            error_type: error?.constructor?.name ?? 'Error',
+          })
+          try {
+            await decisionService.close({
+              decisionId: pendingShadow.decisionId,
+              sessionId: sessionKey,
+              reason: 'observation_error',
+              signal: execution.signal,
+            })
+          } catch {
+            // The shadow path cannot affect the original DSH tool decision.
+          }
+        }
+      }
+    }
     if (sessionId !== undefined) {
       hitlStore.recordTrajectory(sessionId, 'tool:start', {
         tool_name: execution.name,
@@ -630,8 +1070,10 @@ export async function apply(ctx, config = {}) {
           args: execution.arguments,
           signal: execution.signal,
           correlationId: execution.callId,
-          sessionId: sessionId === undefined ? undefined : String(sessionId),
+          sessionId: sessionId === undefined ? 'dsh-sessionless' : String(sessionId),
           l0SkillId: tool.l0_skill_id,
+          subjectContext: effectSubjectContext(execution, operatorId, bridge.profile),
+          harness: 'dsh',
         })
         if (prepared.status !== 'plan_ready') {
           return { kind: 'deny', reason: `Network Runtime ${preparationFailure(prepared)}` }
@@ -659,8 +1101,10 @@ export async function apply(ctx, config = {}) {
           args: replayArguments,
           signal: execution.signal,
           correlationId: execution.callId,
-          sessionId: sessionId === undefined ? undefined : String(sessionId),
+          sessionId: sessionId === undefined ? 'dsh-sessionless' : String(sessionId),
           l0SkillId: originalTool.l0_skill_id,
+          subjectContext: effectSubjectContext(execution, operatorId, bridge.profile),
+          harness: 'dsh',
         })
         if (prepared.status !== 'plan_ready') {
           return { kind: 'deny', reason: `Network Runtime recovery ${preparationFailure(prepared)}` }
@@ -687,8 +1131,10 @@ export async function apply(ctx, config = {}) {
             args: operation.arguments,
             signal: execution.signal,
             correlationId: `${String(execution.callId ?? 'batch')}:prepare:${index}`,
-            sessionId: sessionId === undefined ? undefined : String(sessionId),
+            sessionId: sessionId === undefined ? 'dsh-sessionless' : String(sessionId),
             l0SkillId: operationTool.l0_skill_id,
+            subjectContext: effectSubjectContext(execution, operatorId, bridge.profile),
+            harness: 'dsh',
           })
           if (value.status !== 'plan_ready') {
             throw new Error(`operations[${index}] ${preparationFailure(value)}`)

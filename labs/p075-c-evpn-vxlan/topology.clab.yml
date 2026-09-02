@@ -1,0 +1,97 @@
+name: netopyu-evpn-vxlan
+
+topology:
+  defaults:
+    kind: linux
+  nodes:
+    spine-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/daemons:/etc/frr/daemons
+        - spine-1/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    spine-2:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/daemons:/etc/frr/daemons
+        - spine-2/frr.conf:/etc/frr/frr.conf
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      sysctls: {net.ipv4.ip_forward: 1}
+    leaf-1:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/daemons:/etc/frr/daemons
+        - leaf-1/frr.conf:/etc/frr/frr.conf
+        - leaf-1/setup.sh:/setup.sh
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      exec: [sh /setup.sh]
+      sysctls:
+        net.ipv4.ip_forward: 1
+        net.ipv4.conf.all.rp_filter: 0
+        net.ipv4.conf.default.rp_filter: 0
+    leaf-2:
+      image: quay.io/frrouting/frr:10.3.1
+      binds:
+        - common/daemons:/etc/frr/daemons
+        - leaf-2/frr.conf:/etc/frr/frr.conf
+        - leaf-2/setup.sh:/setup.sh
+        - common/vtysh.conf:/etc/frr/vtysh.conf
+      exec: [sh /setup.sh]
+      sysctls:
+        net.ipv4.ip_forward: 1
+        net.ipv4.conf.all.rp_filter: 0
+        net.ipv4.conf.default.rp_filter: 0
+
+    host-a1:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.10.11/24 dev eth1
+    host-a2:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.10.10.12/24 dev eth1
+    host-b1:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.20.20.11/24 dev eth1
+    host-b2:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip address add 10.20.20.12/24 dev eth1
+    trunk-1:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip link add link eth1 name eth1.10 type vlan id 10
+        - ip link add link eth1 name eth1.20 type vlan id 20
+        - ip address add 10.10.10.21/24 dev eth1.10
+        - ip address add 10.20.20.21/24 dev eth1.20
+        - ip link set eth1.10 up
+        - ip link set eth1.20 up
+    trunk-2:
+      image: alpine:3.21
+      cmd: sleep infinity
+      exec:
+        - ip link add link eth1 name eth1.10 type vlan id 10
+        - ip link add link eth1 name eth1.20 type vlan id 20
+        - ip address add 10.10.10.22/24 dev eth1.10
+        - ip address add 10.20.20.22/24 dev eth1.20
+        - ip link set eth1.10 up
+        - ip link set eth1.20 up
+
+  links:
+    - endpoints: [spine-1:eth1, leaf-1:eth1]
+    - endpoints: [spine-2:eth1, leaf-1:eth2]
+    - endpoints: [spine-1:eth2, leaf-2:eth1]
+    - endpoints: [spine-2:eth2, leaf-2:eth2]
+    - endpoints: [host-a1:eth1, leaf-1:eth3]
+    - endpoints: [host-b1:eth1, leaf-1:eth4]
+    - endpoints: [trunk-1:eth1, leaf-1:eth5]
+    - endpoints: [host-a2:eth1, leaf-2:eth3]
+    - endpoints: [host-b2:eth1, leaf-2:eth4]
+    - endpoints: [trunk-2:eth1, leaf-2:eth5]

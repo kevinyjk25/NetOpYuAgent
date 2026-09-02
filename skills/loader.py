@@ -31,6 +31,7 @@ Fail-soft policy:
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -86,7 +87,62 @@ class SkillLoader:
         else:
             prag = self._load_folder(self._root / "skills" / "pragmatic", fatal=False)
             defs.update(prag)
-            logger.info("SkillLoader[pragmatic]: %d skill(s) loaded", len(defs))
+            service: dict[str, dict[str, Any]] = {}
+            try:
+                from config import load
+
+                cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
+                if any(server.domain == "service" for server in cfg.pragmatic.mcp_servers):
+                    service = self._load_folder(self._root / "skills" / "service", fatal=False)
+                    if not cfg.pragmatic.lab.enabled:
+                        # Service-only deployments must not advertise workflows
+                        # whose reviewed contract also depends on a Network Lab.
+                        # The pure MCP Agent Skill remains available.
+                        service = {
+                            skill_id: definition
+                            for skill_id, definition in service.items()
+                            if not any(
+                                str(tool).startswith(("network_", "lab_", "reconcile_"))
+                                for tool in definition.get("tool_deps", ())
+                            )
+                        }
+                    defs.update(service)
+            except (OSError, ValueError):
+                logger.warning("SkillLoader: service skill discovery skipped due to invalid config")
+            lab: dict[str, dict[str, Any]] = {}
+            try:
+                from config import load
+
+                if load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml")).pragmatic.lab.enabled:
+                    from network_lab import load_manifest
+
+                    cfg = load(os.environ.get("NETOPYU_CONFIG_PATH", "config.yaml"))
+                    manifest = load_manifest(cfg.pragmatic.lab.manifest)
+                    capabilities: set[str] = set()
+                    if manifest.users and manifest.applications:
+                        capabilities.add("access")
+                    if manifest.links:
+                        capabilities.add("topology")
+                    if manifest.fabric:
+                        capabilities.add("fabric")
+                    discovered = self._load_folder(self._root / "skills" / "lab", fatal=False)
+                    lab = {
+                        skill_id: definition
+                        for skill_id, definition in discovered.items()
+                        if not definition.get("profiles")
+                        or self._profile_id in definition["profiles"]
+                        if not definition.get("lab_capability")
+                        or definition["lab_capability"] in capabilities
+                    }
+                    defs.update(lab)
+            except (OSError, ValueError):
+                # Backend construction performs strict config validation. Skill
+                # discovery remains fail-soft as documented for business skills.
+                logger.warning("SkillLoader: lab skill discovery skipped due to invalid config")
+            logger.info(
+                "SkillLoader[pragmatic]: %d skill(s) loaded (%d service, %d lab)",
+                len(defs), len(service), len(lab),
+            )
 
         return defs
 

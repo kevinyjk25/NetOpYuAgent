@@ -21,6 +21,8 @@ class OpenAPIConfig:
     base_url: str = ""
     auth_type: str = "bearer"
     token_env: str = "NETOPS_API_TOKEN"
+    release_provider_id: str = ""
+    provider_identity: str = ""
 
 
 @dataclass
@@ -52,12 +54,29 @@ class PragmaticMCPServer:
     url: str = ""
     command: list[str] = field(default_factory=list)
     auth: dict[str, Any] = field(default_factory=dict)
+    env: dict[str, str] = field(default_factory=dict)
+    cwd: str = ""
+    domain: str = "external"
+    trusted_for_writes: bool = False
+    expected_server_name: str = ""
+    expected_server_version: str = ""
+    release_provider_id: str = ""
+    timeout: float = 30.0
+
+
+@dataclass
+class PragmaticLabConfig:
+    enabled: bool = False
+    provider: str = "containerlab"
+    manifest: str = "labs/p075-a-frr/lab.yaml"
+    command_timeout: float = 30.0
 
 
 @dataclass
 class PragmaticConfig:
     device_inventory: list[PragmaticDevice] = field(default_factory=list)
     mcp_servers: list[PragmaticMCPServer] = field(default_factory=list)
+    lab: PragmaticLabConfig = field(default_factory=PragmaticLabConfig)
     napalm_getters: list[str] = field(default_factory=lambda: [
         "get_facts", "get_interfaces", "get_interfaces_counters",
     ])
@@ -147,6 +166,7 @@ def _csv(value: str) -> list[str]:
 
 def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
     source = Path(path).expanduser()
+    config_directory = source.resolve().parent
     raw = yaml.safe_load(source.read_text(encoding="utf-8")) if source.is_file() else {}
     raw = _mapping(raw)
 
@@ -154,6 +174,7 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
     mcp_raw = _mapping(tools_raw.get("mcp"))
     openapi_raw = _mapping(tools_raw.get("openapi"))
     pragmatic_raw = _mapping(raw.get("pragmatic"))
+    lab_raw = _mapping(pragmatic_raw.get("lab"))
     agent_raw = _mapping(raw.get("agent"))
     retrieval_raw = _mapping(raw.get("retrieval"))
     cache_raw = _mapping(retrieval_raw.get("cache"))
@@ -190,6 +211,16 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
         url=str(item.get("url", "")),
         command=[str(part) for part in _list(item.get("command"))],
         auth=_mapping(item.get("auth")),
+        env={str(k): str(v) for k, v in _mapping(item.get("env")).items()},
+        cwd=str(
+            (config_directory / str(item.get("cwd") or ".")).resolve()
+        ),
+        domain=str(item.get("domain", "external")),
+        trusted_for_writes=bool(item.get("trusted_for_writes", False)),
+        expected_server_name=str(item.get("expected_server_name", "")),
+        expected_server_version=str(item.get("expected_server_version", "")),
+        release_provider_id=str(item.get("release_provider_id", "")),
+        timeout=float(item.get("timeout", 30.0)),
     ) for item in map(_mapping, _list(pragmatic_raw.get("mcp_servers")))]
 
     editable = {
@@ -205,6 +236,14 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
                 base_url=os.getenv("OPENAPI_BASE_URL", str(openapi_raw.get("base_url", ""))),
                 auth_type=os.getenv("OPENAPI_AUTH_TYPE", str(openapi_raw.get("auth_type", "bearer"))),
                 token_env=os.getenv("OPENAPI_TOKEN_ENV", str(openapi_raw.get("token_env", "NETOPS_API_TOKEN"))),
+                release_provider_id=os.getenv(
+                    "NETOPYU_OPENAPI_RELEASE_PROVIDER_ID",
+                    str(openapi_raw.get("release_provider_id", "")),
+                ),
+                provider_identity=os.getenv(
+                    "NETOPYU_OPENAPI_PROVIDER_IDENTITY",
+                    str(openapi_raw.get("provider_identity", "")),
+                ),
             ),
             editable_hitl_tools=editable,
             schema_validation_enabled=bool(tools_raw.get("schema_validation_enabled", True)),
@@ -212,6 +251,12 @@ def load(path: str | os.PathLike[str] = "config.yaml") -> AppConfig:
         pragmatic=PragmaticConfig(
             device_inventory=devices,
             mcp_servers=servers,
+            lab=PragmaticLabConfig(
+                enabled=bool(lab_raw.get("enabled", False)),
+                provider=str(lab_raw.get("provider", "containerlab")).strip().lower(),
+                manifest=str(lab_raw.get("manifest", "labs/p075-a-frr/lab.yaml")).strip(),
+                command_timeout=float(lab_raw.get("command_timeout", 30)),
+            ),
             napalm_getters=[str(item) for item in _list(pragmatic_raw.get("napalm_getters"))]
                 or PragmaticConfig().napalm_getters,
         ),

@@ -1,0 +1,207 @@
+{
+  "apiVersion": "netopyu.io/l0-effect-compiled/v2",
+  "contractHash": "sha256:307126faced2875a89ede969db79f20fb57a2b280a54e27d13b521ddf4e074dc",
+  "derivation": "base",
+  "kind": "CompiledAtomicEffect",
+  "lineage": [],
+  "metadata": {
+    "description": "Production L0 v2 contract for platform_restart_service",
+    "id": "service.platform.restart",
+    "labels": {
+      "migration-source": "l0-v1-reviewed",
+      "runtime-preflight-fields": "service,environment",
+      "runtime-tool-contract": "service-platform-restart-v1",
+      "runtime-verifier": "service-platform-healthy"
+    },
+    "owner": "netopyu-runtime",
+    "version": "1.0.0"
+  },
+  "spec": {
+    "approval": {
+      "mode": "single",
+      "required": true,
+      "risk": "high"
+    },
+    "compensation": {
+      "arguments": {
+        "environment": "${arguments.environment}",
+        "service": "${arguments.service}"
+      },
+      "capability": "netopyu.compensator.service-platform-snapshot-v1",
+      "tool": "platform_restore_service",
+      "verification": {
+        "arguments": {
+          "environment": "${arguments.environment}",
+          "service": "${arguments.service}"
+        },
+        "capability": "netopyu.rollback-verifier.service-platform-snapshot-v1",
+        "predicates": [
+          {
+            "expected": true,
+            "field": "restored",
+            "operator": "equals"
+          }
+        ]
+      }
+    },
+    "effect": {
+      "capability": "netopyu.tool.platform_restart_service",
+      "internal": {},
+      "request": {
+        "change_id": "${arguments.change_id}",
+        "correlation_id": "${arguments.correlation_id}",
+        "environment": "${arguments.environment}",
+        "expected_revision": "${arguments.expected_revision}",
+        "reason": "${arguments.reason}",
+        "service": "${arguments.service}"
+      },
+      "tool": "platform_restart_service"
+    },
+    "failurePolicy": {
+      "afterSendUnknown": "reconcile_read_only",
+      "beforeSend": "abort",
+      "compensationFailed": "manual_intervention",
+      "verificationFailed": "compensate"
+    },
+    "intent": {
+      "desiredState": {
+        "rollout": "complete",
+        "status": "healthy"
+      },
+      "kind": "restart_platform_service",
+      "targetFields": [
+        "service",
+        "environment"
+      ]
+    },
+    "parameters": {
+      "change_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "correlation_id": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": false,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "environment": {
+        "description": "",
+        "enum": [
+          "prod",
+          "staging",
+          "dev"
+        ],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "expected_revision": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": null,
+        "maximum": null,
+        "minLength": null,
+        "minimum": 0.0,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "integer"
+      },
+      "reason": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": 1,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      },
+      "service": {
+        "description": "",
+        "enum": [],
+        "fixed": null,
+        "maxLength": 4096,
+        "maximum": null,
+        "minLength": null,
+        "minimum": null,
+        "pattern": null,
+        "required": true,
+        "resolver": null,
+        "sensitive": false,
+        "type": "string"
+      }
+    },
+    "preflight": [
+      {
+        "arguments": {
+          "environment": "${arguments.environment}",
+          "service": "${arguments.service}"
+        },
+        "capability": "netopyu.tool.platform_get_service_health",
+        "id": "approved-state",
+        "predicates": [
+          {
+            "expected": null,
+            "field": "facts",
+            "operator": "exists"
+          }
+        ],
+        "snapshotFields": [
+          "facts"
+        ]
+      }
+    ],
+    "profiles": [
+      "lan",
+      "dc"
+    ],
+    "template": "netopyu-runtime-v2",
+    "verification": {
+      "arguments": {
+        "environment": "${arguments.environment}",
+        "service": "${arguments.service}"
+      },
+      "capability": "netopyu.verifier.service-platform-healthy",
+      "predicates": [
+        {
+          "expected": true,
+          "field": "passed",
+          "operator": "equals"
+        }
+      ]
+    }
+  }
+}

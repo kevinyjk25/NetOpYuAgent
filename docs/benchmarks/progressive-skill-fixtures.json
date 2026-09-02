@@ -1,0 +1,233 @@
+{
+  "cases": [
+    {
+      "caseId": "referenced-inventory-read",
+      "domain": "asset-inventory",
+      "effectSemantics": "read_only",
+      "expectedFinding": null,
+      "expectedPackageGate": "passed",
+      "features": [
+        "read-only",
+        "reference",
+        "progressive-disclosure"
+      ],
+      "observedFindings": [],
+      "observedPackageGate": "passed",
+      "oraclePass": true,
+      "packageDigest": "sha256:824565f621b157b687c908807186f7900a4452e0124dc49299c158f85fadeb2f",
+      "risk": "low"
+    },
+    {
+      "caseId": "approval-access-grant",
+      "domain": "iam",
+      "effectSemantics": "reversible",
+      "expectedFinding": null,
+      "expectedPackageGate": "passed",
+      "features": [
+        "approval",
+        "reversible-write",
+        "verification",
+        "compensation"
+      ],
+      "observedFindings": [],
+      "observedPackageGate": "passed",
+      "oraclePass": true,
+      "packageDigest": "sha256:15ba42eed8ea36d982875b343a2f4371a4c9a0a33e356c4d0cff2f57ff54db1f",
+      "risk": "medium"
+    },
+    {
+      "caseId": "conditional-ticket-triage",
+      "domain": "service-desk",
+      "effectSemantics": "read_only",
+      "expectedFinding": null,
+      "expectedPackageGate": "passed",
+      "features": [
+        "condition-branch",
+        "clarification",
+        "multi-step"
+      ],
+      "observedFindings": [],
+      "observedPackageGate": "passed",
+      "oraclePass": true,
+      "packageDigest": "sha256:585994fae1b187848edd8d5b5edf44ba44a427e1958468937413042832d8fdb5",
+      "risk": "low"
+    },
+    {
+      "caseId": "multistep-cloud-maintenance",
+      "domain": "cloud",
+      "effectSemantics": "reversible",
+      "expectedFinding": null,
+      "expectedPackageGate": "passed",
+      "features": [
+        "multi-step",
+        "approval",
+        "independent-verification",
+        "rollback",
+        "asset"
+      ],
+      "observedFindings": [],
+      "observedPackageGate": "passed",
+      "oraclePass": true,
+      "packageDigest": "sha256:644d4829b7970e9e41f15cdbb9c3f558f6521dc30d3e1a8d06fcbc018ef294a3",
+      "risk": "high"
+    },
+    {
+      "caseId": "scripted-data-export",
+      "domain": "data",
+      "effectSemantics": "read_only",
+      "expectedFinding": null,
+      "expectedPackageGate": "passed",
+      "features": [
+        "script",
+        "reference",
+        "deterministic-transformer",
+        "read-only"
+      ],
+      "observedFindings": [],
+      "observedPackageGate": "passed",
+      "oraclePass": true,
+      "packageDigest": "sha256:dd4ef395521f948410a1cfabc00ab343141fa5f7a1681cfcf8e3e308b2e7eb35",
+      "risk": "low"
+    },
+    {
+      "caseId": "scripted-network-change",
+      "domain": "network",
+      "effectSemantics": "reversible",
+      "expectedFinding": null,
+      "expectedPackageGate": "passed",
+      "features": [
+        "script",
+        "reference",
+        "approval",
+        "multi-step",
+        "verification",
+        "compensation"
+      ],
+      "observedFindings": [],
+      "observedPackageGate": "passed",
+      "oraclePass": true,
+      "packageDigest": "sha256:1d17f5984fde597373c2f012df992ae11d338716fa7a99a485739dcd1511d073",
+      "risk": "high"
+    },
+    {
+      "caseId": "composite-employee-onboarding",
+      "domain": "cross-system",
+      "effectSemantics": "reversible",
+      "expectedFinding": null,
+      "expectedPackageGate": "passed",
+      "features": [
+        "condition-branch",
+        "multi-step",
+        "l1-l0-composition",
+        "reference",
+        "approval"
+      ],
+      "observedFindings": [],
+      "observedPackageGate": "passed",
+      "oraclePass": true,
+      "packageDigest": "sha256:2e3c4660f809f7d53ddbdda8013f35342c6f1c0583c7bda20ee10116dd53abbf",
+      "risk": "medium"
+    },
+    {
+      "caseId": "unbound-critical-purge",
+      "domain": "data",
+      "effectSemantics": "irreversible",
+      "expectedFinding": "SCRIPT_EFFECT_UNBOUND",
+      "expectedPackageGate": "blocked",
+      "features": [
+        "script",
+        "critical",
+        "irreversible",
+        "negative-gate"
+      ],
+      "observedFindings": [
+        "SCRIPT_EFFECT_UNBOUND"
+      ],
+      "observedPackageGate": "blocked",
+      "oraclePass": true,
+      "packageDigest": "sha256:d01ede3bd6186e7c8108f51eafa469e0272f0a2b5311a622e877a476658a3c02",
+      "risk": "critical"
+    },
+    {
+      "caseId": "missing-reference",
+      "domain": "generic",
+      "effectSemantics": "read_only",
+      "expectedFinding": "RESOURCE_REFERENCE_MISSING",
+      "expectedPackageGate": "blocked",
+      "features": [
+        "reference",
+        "negative-gate"
+      ],
+      "observedFindings": [
+        "RESOURCE_REFERENCE_MISSING"
+      ],
+      "observedPackageGate": "blocked",
+      "oraclePass": true,
+      "packageDigest": "sha256:95a69966a78c8087204a057ba605188db90774a515669ae2acafcb26cb1e5826",
+      "risk": "low"
+    },
+    {
+      "caseId": "unsafe-reference",
+      "domain": "generic",
+      "effectSemantics": "read_only",
+      "expectedFinding": "RESOURCE_REFERENCE_UNSAFE",
+      "expectedPackageGate": "blocked",
+      "features": [
+        "reference",
+        "path-traversal",
+        "negative-gate"
+      ],
+      "observedFindings": [
+        "RESOURCE_REFERENCE_UNSAFE"
+      ],
+      "observedPackageGate": "blocked",
+      "oraclePass": true,
+      "packageDigest": "sha256:f8f090202275c51288d9708b625cf72aad699bb6e8b2d4a6bd4f8e2e59fac140",
+      "risk": "low"
+    }
+  ],
+  "claimBoundary": "Structural fixture coverage is not an LLM accuracy or production-success claim.",
+  "domains": [
+    "asset-inventory",
+    "cloud",
+    "cross-system",
+    "data",
+    "generic",
+    "iam",
+    "network",
+    "service-desk"
+  ],
+  "features": [
+    "approval",
+    "asset",
+    "clarification",
+    "compensation",
+    "condition-branch",
+    "critical",
+    "deterministic-transformer",
+    "independent-verification",
+    "irreversible",
+    "l1-l0-composition",
+    "multi-step",
+    "negative-gate",
+    "path-traversal",
+    "progressive-disclosure",
+    "read-only",
+    "reference",
+    "reversible-write",
+    "rollback",
+    "script",
+    "verification"
+  ],
+  "modelBaseline": "qwen3.5:9b",
+  "schema": "effect-runtime.io/anthropic-skill-fixture-report/v1",
+  "suiteSchema": "effect-runtime.io/anthropic-skill-fixture-suite/v1",
+  "summary": {
+    "cases": 10,
+    "domains": 8,
+    "failed": 0,
+    "featureTypes": 20,
+    "oracleCoveragePercent": 100.0,
+    "passed": 10
+  }
+}

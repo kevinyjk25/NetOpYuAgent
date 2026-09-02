@@ -1,0 +1,11 @@
+{
+  "name": "dsh-effect-harness-evaluation",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.js",
+  "files": ["src/*.js"],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  }
+}

@@ -1,0 +1,69 @@
+{
+  "schema": "effect-runtime.io/synthetic-holdout-pilot-summary/v1",
+  "generatedAt": "2026-09-01",
+  "evidenceClass": "repository_external_context_isolated_model_authored_sealed_synthetic_holdout",
+  "officialEsP1QualificationEligible": false,
+  "dataset": {
+    "candidates": 240,
+    "sealedCases": 240,
+    "datasetDigest": "sha256:dd43f1aeffaa56ebf4c90b9d2db372ca3a90bbfd1440130e01ea1e0dfc60fb45",
+    "manifestDigest": "sha256:2b3934516160a8cd0e8cd16a819b85751b7b16e7d8514ab41909bfcbbe7ba9c3",
+    "rendererVersion": "synthetic-skill-package-renderer/v3",
+    "packageInspection": {
+      "passed": 240,
+      "failed": 0,
+      "findings": 0
+    },
+    "reviewAgreementRate": 1.0,
+    "featureFamilies": 6,
+    "scenarioPatterns": 10,
+    "mcpDomains": 6,
+    "mcpTools": 24,
+    "languages": 3
+  },
+  "translationPilot": {
+    "status": "superseded_pipeline_smoke",
+    "sourceDatasetDigest": "sha256:c358cf0fcd21f896b1e85c55e6ed8f1d5d7f8aa88c9187cd2b5fdd0b3105fca7",
+    "sourceManifestDigest": "sha256:36ec3f144a7f1798e12e667f0aa5dc00bc949bad9243d4f9092354d345ebe0a6",
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "rawProtocolValid": "6/6",
+    "strictQualified": "5/6",
+    "safeStops": 1,
+    "falseAccepts": 0,
+    "p50Ms": 8725.598,
+    "p95Ms": 12198.482
+  },
+  "dshPilot": {
+    "status": "superseded_pipeline_smoke",
+    "sourceDatasetDigest": "sha256:c358cf0fcd21f896b1e85c55e6ed8f1d5d7f8aa88c9187cd2b5fdd0b3105fca7",
+    "cases": 6,
+    "repetitions": 1,
+    "scenarioCoverage": ["after_send_unknown"],
+    "control": {
+      "taskCompletionPercent": 66.67,
+      "executionPrecisionPercent": 100.0,
+      "unsafeExecutions": 0,
+      "falseCommits": 0,
+      "invalidActions": 1,
+      "p50Ms": 130170.595,
+      "p95Ms": 168101.943
+    },
+    "treatment": {
+      "taskCompletionPercent": 83.33,
+      "executionPrecisionPercent": 100.0,
+      "unsafeExecutions": 0,
+      "falseCommits": 0,
+      "invalidActions": 0,
+      "p50Ms": 69196.087,
+      "p95Ms": 81875.108
+    },
+    "rescore": {
+      "version": "es-p0-action-availability-separation/v2",
+      "newModelCalls": 0,
+      "normalizedObservations": 1,
+      "rule": "zero-effect intact-state unqualified safe stop is an autonomy/task-completion loss, not an invalid action"
+    }
+  },
+  "claimBoundary": "The current v3 corpus has passed structural/package validation but its full translation and DSH results are pending. Pilot metrics are retained only as a superseded single-pattern pipeline smoke; they are not evidence for v3, independently human-authored ES-P1 evidence, a production success probability, or real-network qualification."
+}

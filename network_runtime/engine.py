@@ -11,12 +11,21 @@ import asyncio
 import inspect
 import os
 import secrets
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Awaitable, Callable
 
 from dsh_adapter.backend import BackendSession, open_backend
+from effect_runtime.reliability import (
+    AutonomyDecision,
+    EvidenceRecord,
+    build_transaction_graph,
+    contract_from_compiled_l0,
+    evaluate_evidence,
+    evaluate_guards,
+)
 
 from .contracts import (
     ApprovalError,
@@ -27,10 +36,14 @@ from .contracts import (
     PlanIntegrityError,
     PlanState,
     PreparedPlan,
+    TERMINAL_STATES,
     canonical_json,
+    sha256_json,
     utc_now,
 )
 from .compensators import REGISTRY as COMPENSATORS, compensate_operation
+from .access import ObservationAccessContext, ObservationPolicy
+from .capabilities import CapabilityAdmissionError, CapabilityKind
 from .evidence import (
     bounded as _bounded,
     failed_output as _failed_output,
@@ -39,9 +52,14 @@ from .evidence import (
     typed_evidence as _evidence_value,
 )
 from .journal import NetworkJournal
+from .graph_runtime import JournalGraphScheduler, stage_latency_summary
+from .identity import ApprovalControlPlane
 from .l0_skills import REGISTRY as L0_SKILLS, L0SkillContract, compile_intent
+from .l0.models import CompiledAtomicEffect
+from .l0.runtime_loader import require_effect_arguments, validate_runtime_projection
 from .policies import ToolContract, project_arguments, resolve_contract
-from .validation import assess_risk, compile_parameters
+from .provenance import build_provenance_dag
+from .validation import assess_risk, assess_risk_decision, compile_parameters
 from .verifiers import REGISTRY as VERIFIERS, verify_operation
 from .workflows import WorkflowRuntime
 
@@ -49,8 +67,95 @@ from .workflows import WorkflowRuntime
 FaultHook = Callable[[str, PreparedPlan], Any]
 BackendFactory = Callable[[str], Awaitable[BackendSession]]
 
+
+def _evidence_ids(evidence: tuple[Evidence, ...]) -> tuple[str, ...]:
+    return tuple(sorted(
+        str(item.evidence_id or sha256_json({
+            "type": item.evidence_type,
+            "source": item.source,
+            "target": item.target,
+            "observed_at": item.observed_at,
+            "value_digest": sha256_json(item.value),
+        }))
+        for item in evidence
+    ))
+
+
+def _ensured_step_contract(graph: Any) -> tuple[dict[str, Any], ...]:
+    """Bind the material-defined transaction graph into the approved plan."""
+    return tuple(
+        {
+            "step_id": node.id,
+            "phase": node.phase.value,
+            "condition": "dependencies_satisfied",
+            "failure_action": (
+                "reconcile_or_compensate" if node.side_effect else "fail_closed"
+            ),
+            "depends_on": list(node.depends_on),
+            "side_effect": node.side_effect,
+        }
+        for node in graph.nodes
+    )
+
+
+def _bind_contract_evidence(
+    evidence: tuple[Evidence, ...],
+    requirements: list[Any],
+    *,
+    backend: BackendSession,
+    associated_action: str,
+    scope: tuple[str, ...],
+    parent_evidence_ids: tuple[str, ...] = (),
+) -> tuple[tuple[Evidence, ...], tuple[EvidenceRecord, ...]]:
+    """Bind observations to reviewed requirements without trusting prose."""
+    bound: list[Evidence] = []
+    records: list[EvidenceRecord] = []
+    for index, item in enumerate(evidence):
+        requirement = requirements[index] if index < len(requirements) else None
+        source_metadata = backend.metadata.get(item.source, {})
+        attached = item.bind_provenance(
+            semantic_type=(
+                requirement.semantic_type if requirement else item.evidence_type
+            ),
+            source_capability=(
+                requirement.source_capability if requirement else item.source
+            ),
+            scope=scope,
+            collector_identity=str(
+                source_metadata.get("provider_identity")
+                or backend.sources.get(item.source)
+                or "local-runtime-observer"
+            ),
+            collector_digest=sha256_json({
+                "source": item.source,
+                "metadata": source_metadata,
+            }),
+            associated_action=associated_action,
+            parent_evidence_ids=parent_evidence_ids,
+            evidence_id=f"{item.evidence_type}:{index}:{sha256_json(item.value)}",
+        )
+        payload = item.value if isinstance(item.value, dict) else {"value": item.value}
+        payload = {**payload, "passed": item.passed}
+        bound.append(attached)
+        records.append(EvidenceRecord.create(
+            id=str(attached.evidence_id),
+            semantic_type=str(attached.semantic_type),
+            source_capability=str(attached.source_capability),
+            collector_identity=str(attached.collector_identity),
+            collected_at=attached.observed_at,
+            scope=attached.scope,
+            associated_action=str(attached.associated_action),
+            payload=payload,
+            valid=attached.passed is not False,
+            parent_evidence_ids=attached.parent_evidence_ids,
+        ))
+    return tuple(bound), tuple(records)
+
 def default_journal_path() -> Path:
-    configured = os.environ.get("NETOPYU_DSH_NETWORK_RUNTIME_STORE")
+    configured = (
+        os.environ.get("NETOPYU_NETWORK_RUNTIME_STORE")
+        or os.environ.get("NETOPYU_DSH_NETWORK_RUNTIME_STORE")
+    )
     return Path(configured).expanduser() if configured else Path("data/network_runtime.sqlite")
 
 class NetworkRuntime:
@@ -64,6 +169,8 @@ class NetworkRuntime:
         plan_ttl_seconds: int = 300,
         execution_timeout_seconds: float | None = None,
         fault_hook: FaultHook | None = None,
+        observation_policy: ObservationPolicy | None = None,
+        approval_control_plane: ApprovalControlPlane | None = None,
     ) -> None:
         if not 30 <= plan_ttl_seconds <= 3600:
             raise ValueError("plan_ttl_seconds must be between 30 and 3600")
@@ -71,9 +178,28 @@ class NetworkRuntime:
         self.backend_factory = backend_factory
         self.plan_ttl_seconds = plan_ttl_seconds
         self.execution_timeout_seconds = execution_timeout_seconds or float(
-            os.environ.get("NETOPYU_DSH_EXECUTION_TIMEOUT", "90")
+            os.environ.get("NETOPYU_EXECUTION_TIMEOUT")
+            or os.environ.get("NETOPYU_DSH_EXECUTION_TIMEOUT", "90")
         )
         self.fault_hook = fault_hook
+        self.observation_policy = observation_policy or ObservationPolicy()
+        if approval_control_plane is None:
+            key_path = self.journal_path.with_name(
+                self.journal_path.name + ".approval.key"
+            )
+            # Enterprise identity/PDP/change-system wiring is a frozen optional
+            # adapter.  The prototype core constructs its local approval
+            # boundary directly and imports the enterprise module only for an
+            # explicit enforced-mode experiment.
+            if os.environ.get("NETOPYU_IDENTITY_MODE", "local-simulation") == "enforced":
+                from .enterprise import control_plane_from_environment
+
+                approval_control_plane = control_plane_from_environment(
+                    key_path=key_path,
+                )
+            else:
+                approval_control_plane = ApprovalControlPlane(key_path=key_path)
+        self.approval_control_plane = approval_control_plane
 
     async def _fault(self, stage: str, plan: PreparedPlan) -> None:
         if self.fault_hook is None:
@@ -90,8 +216,20 @@ class NetworkRuntime:
         *,
         session_id: str | None = None,
         l0_skill_id: str | None = None,
+        subject_context: dict[str, Any] | None = None,
+        harness: str = "local",
+        l1_decision_envelope: dict[str, Any] | None = None,
+        l1_route_context: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Compile a request into an immutable plan before approval is shown."""
+        if (l1_decision_envelope is None) != (l1_route_context is None):
+            return {
+                "ok": False,
+                "status": "rejected",
+                "errors": [
+                    "L1 Decision envelope and observed route must be supplied together"
+                ],
+            }
         backend = await self.backend_factory(profile_id)
         try:
             metadata = backend.metadata.get(tool_name)
@@ -100,10 +238,20 @@ class NetworkRuntime:
                 return {"ok": False, "status": "rejected", "errors": [
                     f"unknown tool {tool_name!r} in {backend.mode} backend"
                 ]}
+            try:
+                provider_capability = backend.describe_capability(tool_name)
+            except CapabilityAdmissionError as error:
+                return {
+                    "ok": False,
+                    "status": "rejected",
+                    "errors": [f"Provider release admission failed: {error}"],
+                }
             action_type = str(metadata.get("action_type", "read_only"))
             requires_approval = bool(metadata.get("hitl")) or action_type != "read_only"
             expected_l0 = (
-                L0_SKILLS.for_tool(backend.profile_id, tool_name)
+                L0_SKILLS.for_tool(
+                    backend.profile_id, tool_name, skill_id=l0_skill_id,
+                )
                 if requires_approval else None
             )
             compiled = compile_parameters(
@@ -173,6 +321,7 @@ class NetworkRuntime:
                 requires_approval=requires_approval,
                 mode=backend.mode,
                 source=source,
+                metadata=metadata,
             )
             if contract is None:
                 return {
@@ -184,9 +333,26 @@ class NetworkRuntime:
                 }
             l0_contract: L0SkillContract | None = None
             intent = None
+            ensured_contract = None
+            execution_graph = None
             if requires_approval:
-                l0_contract = L0_SKILLS.for_tool(backend.profile_id, tool_name)
+                candidates = L0_SKILLS.candidates_for_tool(backend.profile_id, tool_name)
+                l0_contract = L0_SKILLS.for_tool(
+                    backend.profile_id, tool_name, skill_id=l0_skill_id,
+                )
                 if l0_contract is None:
+                    if l0_skill_id is None and len({item.skill_id for item in candidates}) > 1:
+                        return {
+                            "ok": False,
+                            "status": "rejected",
+                            "errors": [
+                                "write tool has multiple L0 semantic contracts; "
+                                "an exact L0 Skill id is required"
+                            ],
+                            "candidate_l0_skill_ids": sorted({
+                                item.skill_id for item in candidates
+                            }),
+                        }
                     return {
                         "ok": False,
                         "status": "rejected",
@@ -207,6 +373,20 @@ class NetworkRuntime:
                         "status": "rejected",
                         "errors": ["Network L0 Skill references a stale tool contract; fail closed"],
                     }
+                released_l0_hashes = tuple(
+                    str(item) for item in metadata.get("provider_l0_contract_hashes") or ()
+                )
+                if (
+                    metadata.get("provider_release_digest")
+                    and l0_contract.contract_hash not in released_l0_hashes
+                ):
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [
+                            "active signed Provider release does not authorize this L0 contract"
+                        ],
+                    }
                 intent = compile_intent(
                     l0_contract,
                     profile=backend.profile_id,
@@ -215,6 +395,50 @@ class NetworkRuntime:
                     provenance=compiled.provenance,
                     targets=compiled.targets,
                 )
+                if not isinstance(l0_contract.compiled_contract, CompiledAtomicEffect):
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["write L0 is not an activated compiled AtomicEffect v2"],
+                    }
+                parity = validate_runtime_projection(
+                    compiled=l0_contract.compiled_contract,
+                    tool_name=tool_name,
+                    tool_contract_id=contract.contract_id,
+                    verifier_id=contract.verifier,
+                    compensator_id=contract.compensator,
+                    profile=backend.profile_id,
+                    arguments=compiled.arguments,
+                    intent=intent.to_dict(),
+                    resolver_context={
+                        "profile": backend.profile_id,
+                        "mode": backend.mode,
+                        "provider": source,
+                    },
+                )
+                if not parity.ok:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [
+                            "L0 v2 Runtime parity failed: " + error
+                            for error in parity.errors
+                        ],
+                    }
+                try:
+                    ensured_contract = contract_from_compiled_l0(
+                        l0_contract.compiled_contract,
+                        compiled.arguments,
+                    )
+                    execution_graph = build_transaction_graph(
+                        compensatable=ensured_contract.compensation_operation is not None,
+                    )
+                except ValueError as error:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [f"EnsuredSkill reliability contract rejected: {error}"],
+                    }
             if requires_approval and contract.verifier not in VERIFIERS.contract_ids():
                 return {
                     "ok": False,
@@ -231,6 +455,12 @@ class NetworkRuntime:
                     "errors": ["rollback tool has no registered compensation contract; fail closed"],
                 }
             if not requires_approval:
+                if l1_decision_envelope is not None:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["L1 Decision-to-plan binding applies only to mutating plans"],
+                    }
                 return {
                     "ok": True,
                     "status": "read_ready",
@@ -239,7 +469,9 @@ class NetworkRuntime:
                     "contract_id": contract.contract_id,
                 }
 
+            snapshot_started = time.perf_counter()
             preflight = await self._preflight(backend, contract, compiled.arguments)
+            snapshot_duration_ms = (time.perf_counter() - snapshot_started) * 1000.0
             if any(item.passed is False for item in preflight):
                 return {
                     "ok": False,
@@ -247,15 +479,143 @@ class NetworkRuntime:
                     "errors": ["preflight did not prove the target is safe and reachable"],
                     "preflight": [item.to_dict() for item in preflight],
                 }
+            precheck_started = time.perf_counter()
+            if ensured_contract is not None:
+                preflight_requirements = [
+                    item for item in ensured_contract.evidence
+                    if item.phase.value == "precheck"
+                ]
+                preflight, preflight_records = _bind_contract_evidence(
+                    preflight,
+                    preflight_requirements,
+                    backend=backend,
+                    associated_action=ensured_contract.operation,
+                    scope=compiled.targets,
+                )
+                evidence_gate = evaluate_evidence(
+                    preflight_requirements,
+                    preflight_records,
+                )
+                if not evidence_gate.allowed:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["Evidence Contract is not satisfied; no action"],
+                        "evidence_gate": {
+                            "missing": list(evidence_gate.missing),
+                            "invalid": list(evidence_gate.invalid),
+                            "stale": list(evidence_gate.stale),
+                            "mismatched": list(evidence_gate.mismatched),
+                        },
+                    }
+                guard_gate = evaluate_guards(
+                    ensured_contract.guards,
+                    preflight_requirements,
+                    preflight_records,
+                )
+                if not guard_gate.allowed:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": ["EnsuredSkill Guard is not satisfied; no action"],
+                        "guard_gate": {
+                            "failed": list(guard_gate.failed),
+                            "unresolved": list(guard_gate.unresolved),
+                        },
+                    }
+            risk_decision = assess_risk_decision(
+                tool_name, metadata, compiled.arguments,
+                evidence_confidence=1.0,
+            )
+            if risk_decision.decision == AutonomyDecision.REJECT:
+                return {
+                    "ok": False,
+                    "status": "rejected",
+                    "errors": ["Risk Policy rejected this operation"],
+                    "risk_policy": {
+                        "decision": risk_decision.decision.value,
+                        "score": risk_decision.score,
+                        "reasons": list(risk_decision.reasons),
+                    },
+                }
             risk, reasons = assess_risk(tool_name, metadata, compiled.arguments)
+            if l0_contract.compiled_contract.spec.approval.required:
+                reasons = tuple(
+                    "autonomy_decision=ask_human"
+                    if item.startswith("autonomy_decision=") else item
+                    for item in reasons
+                ) + ("reviewed_contract_requires_approval",)
+            precheck_duration_ms = (time.perf_counter() - precheck_started) * 1000.0
+            capability_id = provider_capability.capability_id
+            requester = self.approval_control_plane.bind_requester(
+                subject_context,
+                harness=harness,
+                session_id=str(session_id or "local-session"),
+                profile=backend.profile_id,
+                capability_id=capability_id,
+            )
+            approval_mode = str(l0_contract.compiled_contract.spec.approval.mode)
             created = datetime.now(timezone.utc)
             expires = created + timedelta(seconds=self.plan_ttl_seconds)
+            l1_binding: dict[str, Any] | None = None
+            if l1_decision_envelope is not None:
+                # Proposal binding belongs to the optional Reasoning adapter,
+                # not the Reliability kernel. Load it only when provenance is
+                # actually supplied.
+                from .proposal_binding import (
+                    ProposalBindingError,
+                    compile_plan_decision_binding,
+                )
+
+                try:
+                    l1_binding = compile_plan_decision_binding(
+                        l1_decision_envelope,
+                        route_context=l1_route_context or {},
+                        profile=backend.profile_id,
+                        session_id=str(session_id or "local-session"),
+                        harness=harness,
+                        tool_name=tool_name,
+                        l0_skill_id=l0_contract.skill_id,
+                        l0_contract_hash=l0_contract.contract_hash,
+                        request_arguments=arguments,
+                        plan_arguments=compiled.arguments,
+                        created_at=created.isoformat(),
+                        expires_at=expires.isoformat(),
+                    )
+                except ProposalBindingError as error:
+                    return {
+                        "ok": False,
+                        "status": "rejected",
+                        "errors": [f"L1 Decision-to-plan binding rejected: {error}"],
+                    }
             plan = PreparedPlan.create(
                 plan_id=str(uuid.uuid4()),
                 profile=backend.profile_id,
                 tool_name=tool_name,
                 tool_version=contract.contract_id,
                 action_type=action_type,
+                provider_identity=provider_capability.provider_identity,
+                provider_release_digest=str(
+                    metadata.get("provider_release_digest")
+                    or "unmanaged-local:" + sha256_json({
+                        "provider_identity": provider_capability.provider_identity,
+                        "provider_kind": provider_capability.provider_kind,
+                    }).removeprefix("sha256:")
+                ),
+                provider_manifest_digest=str(
+                    metadata.get("provider_manifest_digest") or "unmanaged-local"
+                ),
+                provider_qualification_digest=str(
+                    metadata.get("provider_qualification_digest") or "unmanaged-local"
+                ),
+                provider_deployment_digest=str(
+                    metadata.get("provider_deployment_digest") or "unmanaged-local"
+                ),
+                input_schema_digest=provider_capability.input_schema_digest,
+                output_schema_digest=provider_capability.output_schema_digest,
+                capability_id=provider_capability.capability_id,
+                capability_version=provider_capability.capability_version,
+                provider_role=provider_capability.provider_role,
                 arguments=compiled.arguments,
                 argument_provenance=compiled.provenance,
                 targets=compiled.targets,
@@ -269,27 +629,92 @@ class NetworkRuntime:
                 l0_contract_hash=l0_contract.contract_hash,
                 intent_spec=intent.to_dict(),
                 intent_hash=intent.intent_hash,
-                step_contract=tuple(step.to_dict() for step in l0_contract.steps),
+                step_contract=_ensured_step_contract(
+                    execution_graph,
+                ) if execution_graph is not None else tuple(
+                    step.to_dict() for step in l0_contract.steps
+                ),
                 workflow_run_id=(workflow_context or {}).get("run_id"),
                 workflow_template_hash=(workflow_context or {}).get("template_hash"),
+                requester_identity=requester.to_dict(),
+                requester_digest=requester.digest,
+                approval_mode=approval_mode,
+                approval_policy_id=self.approval_control_plane.policy_id,
+                approval_policy_version=self.approval_control_plane.policy_version,
+                approval_policy_hash=self.approval_control_plane.policy_hash,
+                l1_decision_binding=l1_binding,
                 created_at=created.isoformat(),
                 expires_at=expires.isoformat(),
             )
             nonce = secrets.token_urlsafe(32)
-            with NetworkJournal(self.journal_path) as journal:
-                journal.create(plan, nonce)
-                for step_id in ("validate_parameters", "compile_intent", "preflight"):
-                    journal.append_event(plan.plan_id, "l0_step_completed", {
-                        "step_id": step_id,
-                        "l0_contract_hash": l0_contract.contract_hash,
-                        "intent_hash": intent.intent_hash,
-                    })
+            try:
+                with NetworkJournal(self.journal_path) as journal:
+                    journal.create(plan, nonce)
+                    graph_run = JournalGraphScheduler(plan, journal)
+                    preflight_ids = tuple(
+                        str(item.evidence_id) for item in plan.preflight
+                        if item.evidence_id
+                    )
+                    graph_run.start("snapshot")
+                    graph_run.finish(
+                        "snapshot",
+                        "succeeded",
+                        output_evidence_ids=preflight_ids,
+                        duration_ms=snapshot_duration_ms,
+                    )
+                    graph_run.start(
+                        "precheck",
+                        input_evidence_ids=preflight_ids,
+                    )
+                    graph_run.finish(
+                        "precheck",
+                        "succeeded",
+                        output_evidence_ids=preflight_ids,
+                        duration_ms=precheck_duration_ms,
+                        details={"risk_decision": risk_decision.decision.value},
+                    )
+                    graph_run.start(
+                        "approval",
+                        input_evidence_ids=preflight_ids,
+                    )
+                    journal.append_events(plan.plan_id, [
+                        ("ensured_contract_compiled", {
+                            "contract_digest": ensured_contract.contract_digest,
+                            "execution_graph_digest": execution_graph.graph_digest,
+                            "evidence_requirements": len(ensured_contract.evidence),
+                            "reversibility": ensured_contract.reversibility.value,
+                        }),
+                    ] + [
+                        ("l0_step_completed", {
+                            "step_id": step_id,
+                            "l0_contract_hash": l0_contract.contract_hash,
+                            "intent_hash": intent.intent_hash,
+                        })
+                        for step_id in ("validate_parameters", "compile_intent", "preflight")
+                    ])
+            except PlanIntegrityError as error:
+                return {
+                    "ok": False,
+                    "status": "rejected",
+                    "errors": [str(error)],
+                }
             return {
                 "ok": True,
                 "status": "plan_ready",
                 "plan": plan.to_dict(),
                 "execution_nonce": nonce,
                 "approval_summary": self._approval_summary(plan, source, backend.mode),
+                "identity_binding": {
+                    "subject_id": requester.subject_id,
+                    "issuer": requester.issuer,
+                    "harness": requester.harness,
+                    "session_id": requester.session_id,
+                    "assurance_level": requester.assurance_level,
+                    "local_simulation": requester.local_simulation,
+                    "requester_digest": requester.digest,
+                    "approval_policy_hash": plan.approval_policy_hash,
+                    "approval_mode": plan.approval_mode,
+                },
             }
         finally:
             await backend.close()
@@ -299,6 +724,10 @@ class NetworkRuntime:
         profile_id: str,
         tool_name: str,
         arguments: dict[str, Any],
+        *,
+        access_context: ObservationAccessContext | dict[str, Any] | None = None,
+        session_id: str | None = None,
+        harness: str = "local",
     ) -> str:
         """Strictly validate and invoke a read-only tool without a write lease."""
         backend = await self.backend_factory(profile_id)
@@ -307,10 +736,43 @@ class NetworkRuntime:
             tool = backend.callables.get(tool_name)
             if metadata is None or tool is None:
                 raise KeyError(f"unknown tool {tool_name!r} in {backend.mode} backend")
-            action = str(metadata.get("action_type", "read_only"))
-            if bool(metadata.get("hitl")) or action != "read_only":
+            capability = backend.describe_capability(tool_name)
+            if capability.kind != CapabilityKind.OBSERVATION:
                 raise ApprovalError(
                     f"direct write invocation of {tool_name} is retired; use runtime prepare/execute"
+                )
+            if self.approval_control_plane.enforced:
+                if not isinstance(access_context, dict):
+                    raise ApprovalError(
+                        "enforced observation requires an OIDC/Gateway credential context"
+                    )
+                identity = self.approval_control_plane.bind_observer(
+                    access_context,
+                    harness=harness,
+                    session_id=str(session_id or ""),
+                    profile=backend.profile_id,
+                    capability_id=capability.capability_id,
+                    arguments=arguments,
+                )
+                subject = ObservationAccessContext.from_value({
+                    "subject_id": identity.subject_id,
+                    "roles": list(identity.roles),
+                    "scopes": list(identity.scopes),
+                    "purpose": identity.purpose,
+                    "clearance": identity.subject_attributes.get("clearance"),
+                    "authenticated": True,
+                    "session_id": identity.session_id,
+                }, profile=backend.profile_id)
+            else:
+                subject = ObservationAccessContext.from_value(
+                    access_context, profile=backend.profile_id,
+                )
+            decision = self.observation_policy.authorize(
+                capability, arguments, subject,
+            )
+            if not decision.allowed:
+                raise ApprovalError(
+                    f"observation authorization denied ({decision.code}): {decision.reason}"
                 )
             compiled = compile_parameters(
                 profile=backend.profile_id,
@@ -323,12 +785,42 @@ class NetworkRuntime:
                 raise ValueError("missing required parameters: " + ", ".join(compiled.missing))
             if compiled.errors:
                 raise ValueError("; ".join(compiled.errors))
-            result = _render(await tool(compiled.arguments))
+            result = _render(await backend.invoke_observation(tool_name, compiled.arguments))
             if _failed_output(result):
                 raise NetworkRuntimeError(f"read tool returned a failure: {_bounded(result, 500)}")
             return self._store_large_result(backend, tool_name, result)
         finally:
             await backend.close()
+
+    def approve(
+        self,
+        *,
+        plan_id: str,
+        plan_hash: str,
+        approval_request_id: str,
+        approver_contexts: list[dict[str, Any]],
+        change_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Issue a short-lived signed proof for one exact immutable plan."""
+        with NetworkJournal(self.journal_path) as journal:
+            plan = journal.get(plan_id)
+            if plan.plan_hash != plan_hash:
+                raise PlanIntegrityError("approval target hash does not match stored plan")
+            if plan.state != PlanState.PLAN_READY:
+                raise ApprovalError(f"plan {plan_id} is not awaiting approval")
+            if datetime.fromisoformat(plan.expires_at) <= datetime.now(timezone.utc):
+                raise ApprovalError("effect plan expired before approval")
+            issued = self.approval_control_plane.issue_proof(
+                plan,
+                approval_request_id=approval_request_id,
+                approver_contexts=approver_contexts,
+                change_context=change_context,
+            )
+            journal.append_event(plan.plan_id, "approval_proof_issued", {
+                "evidence": issued["evidence"],
+                "decision": "approved",
+            })
+            return issued
 
     async def execute(
         self,
@@ -336,9 +828,10 @@ class NetworkRuntime:
         plan_id: str,
         plan_hash: str,
         execution_nonce: str,
-        approval_request_id: str,
-        approval_actor: str,
         allow_destructive: bool,
+        approval_proof: str | None = None,
+        approval_request_id: str | None = None,
+        approval_actor: str | None = None,
     ) -> ExecutionOutcome:
         """Consume a plan once, execute once, and never infer success sans evidence."""
         if not allow_destructive:
@@ -347,6 +840,30 @@ class NetworkRuntime:
             candidate = journal.get(plan_id)
             if candidate.plan_hash != plan_hash:
                 raise PlanIntegrityError("approved plan hash does not match stored plan")
+            if approval_proof is None:
+                if not str(approval_request_id or "").strip() or not str(approval_actor or "").strip():
+                    raise ApprovalError("a signed approval proof is required")
+                issued = self.approval_control_plane.issue_local_compatibility_proof(
+                    candidate,
+                    approval_request_id=str(approval_request_id),
+                    approval_actor=str(approval_actor),
+                )
+                approval_proof = str(issued["approval_proof"])
+            approval_evidence = self.approval_control_plane.verify_proof(
+                approval_proof, candidate,
+            )
+            proof_request_id = str(approval_evidence.get("approval_request_id") or "")
+            proof_actors = [
+                str(item.get("subject_id") or "")
+                for item in approval_evidence.get("approvers", [])
+                if isinstance(item, dict) and str(item.get("subject_id") or "")
+            ]
+            if not proof_request_id or not proof_actors:
+                raise ApprovalError("signed approval proof has no request or approver identity")
+            if approval_request_id and approval_request_id != proof_request_id:
+                raise ApprovalError("approval request id does not match the signed proof")
+            if approval_actor and approval_actor not in proof_actors:
+                raise ApprovalError("approval actor does not match the signed proof")
             if candidate.workflow_run_id and candidate.workflow_template_hash:
                 with WorkflowRuntime(self.journal_path) as workflow_runtime:
                     workflow_runtime.validate_plan_binding(
@@ -356,19 +873,90 @@ class NetworkRuntime:
                 plan_id=plan_id,
                 plan_hash=plan_hash,
                 execution_nonce=execution_nonce,
-                approval_request_id=approval_request_id,
-                approval_actor=approval_actor,
+                approval_request_id=proof_request_id,
+                approval_actor=",".join(proof_actors),
+                approval_evidence=approval_evidence,
+            )
+            graph_run = JournalGraphScheduler(plan, journal)
+            graph_run.finish(
+                "approval",
+                "succeeded",
+                output_evidence_ids=(str(approval_evidence["proof_id"]),),
+                details={"policy_hash": approval_evidence["policy_hash"]},
             )
             journal.append_event(plan.plan_id, "l0_step_completed", {
                 "step_id": "approval",
                 "l0_skill_id": plan.l0_skill_id,
                 "intent_hash": plan.intent_hash,
+                "approval_proof_id": approval_evidence["proof_id"],
+                "approval_policy_hash": approval_evidence["policy_hash"],
             })
             backend: BackendSession | None = None
             result: str | None = None
+            effect_dispatched = False
             try:
                 backend = await self.backend_factory(plan.profile)
-                contract = self._revalidate_contract(plan, backend)
+                graph_run.start(
+                    "revalidate",
+                    input_evidence_ids=_evidence_ids(plan.preflight),
+                )
+                try:
+                    contract = self._revalidate_contract(plan, backend)
+                    effect_arguments = require_effect_arguments(
+                        L0_SKILLS.get(plan.l0_skill_id, plan.l0_skill_version),
+                        plan.arguments,
+                    )
+                except PlanIntegrityError as error:
+                    graph_run.finish(
+                        "revalidate",
+                        "failed",
+                        details={"reason": "execution_contract_changed"},
+                    )
+                    graph_run.start("abort")
+                    graph_run.finish(
+                        "abort",
+                        "succeeded",
+                        details={"reason": "write_not_sent"},
+                    )
+                    journal.transition(
+                        plan.plan_id,
+                        PlanState.PRECONDITION_CHANGED,
+                        "execution_contract_changed",
+                        {"error": str(error), "write_sent": False},
+                    )
+                    evidence = (Evidence(
+                        evidence_type="execution_contract",
+                        source="domain-effect-runtime",
+                        target=plan.tool_name,
+                        observed_at=utc_now(),
+                        value={"error": str(error)},
+                        passed=False,
+                        predicate="execution contract equals the approved contract",
+                        expected={
+                            "provider_release_digest": plan.provider_release_digest,
+                            "provider_manifest_digest": plan.provider_manifest_digest,
+                            "provider_qualification_digest": plan.provider_qualification_digest,
+                            "provider_deployment_digest": plan.provider_deployment_digest,
+                            "l0_contract_hash": plan.l0_contract_hash,
+                        },
+                    ),)
+                    outcome = ExecutionOutcome(
+                        plan.plan_id,
+                        plan.plan_hash,
+                        PlanState.PRECONDITION_CHANGED,
+                        None,
+                        evidence,
+                        "approved execution contract changed; write was not sent",
+                    )
+                    journal.store_outcome(plan.plan_id, outcome.to_dict(), outcome.error)
+                    journal.release_locks(plan.plan_id)
+                    journal.append_event(plan.plan_id, "l0_step_failed", {
+                        "step_id": "revalidate",
+                        "reason": "execution_contract_changed",
+                    })
+                    self._skip_compensation(journal, plan, "write_not_sent")
+                    self._complete_audit(journal, plan, outcome.state)
+                    return outcome
                 if plan.workflow_run_id and plan.workflow_template_hash:
                     with WorkflowRuntime(self.journal_path) as workflow_runtime:
                         workflow_runtime.validate_plan_binding(
@@ -389,6 +977,21 @@ class NetworkRuntime:
                             if index < len(plan.preflight) else {"missing": True}
                         ),
                     ) for index, item in enumerate(current_preflight))
+                    graph_run.finish(
+                        "revalidate",
+                        "failed",
+                        output_evidence_ids=_evidence_ids(drift_evidence),
+                        details={"reason": "precondition_changed"},
+                    )
+                    graph_run.start(
+                        "abort",
+                        input_evidence_ids=_evidence_ids(drift_evidence),
+                    )
+                    graph_run.finish(
+                        "abort",
+                        "succeeded",
+                        details={"reason": "write_not_sent"},
+                    )
                     journal.transition(
                         plan.plan_id, PlanState.PRECONDITION_CHANGED,
                         "execution_precondition_changed",
@@ -407,25 +1010,52 @@ class NetworkRuntime:
                     self._skip_compensation(journal, plan, "write_not_sent")
                     self._complete_audit(journal, plan, outcome.state)
                     return outcome
+                graph_run.finish(
+                    "revalidate",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(plan.preflight),
+                )
                 journal.append_event(plan.plan_id, "l0_step_completed", {
                     "step_id": "revalidate",
                     "l0_skill_id": plan.l0_skill_id,
                     "intent_hash": plan.intent_hash,
                 })
                 await self._fault("before_send", plan)
+                graph_run.start(
+                    "execute",
+                    input_evidence_ids=_evidence_ids(plan.preflight),
+                )
                 journal.append_event(plan.plan_id, "l0_step_started", {
                     "step_id": "execute", "tool_name": plan.tool_name,
                 })
-                tool = backend.callables[plan.tool_name]
                 try:
+                    effect_dispatched = True
                     result = _render(await asyncio.wait_for(
-                        tool(plan.arguments), timeout=self.execution_timeout_seconds,
+                        backend.invoke_effect(
+                            plan.tool_name, effect_arguments, plan=plan, phase="execute",
+                        ),
+                        timeout=self.execution_timeout_seconds,
                     ))
+                    effect_receipt_id = sha256_json({
+                        "plan_id": plan.plan_id,
+                        "tool_name": plan.tool_name,
+                        "result_digest": sha256_json(result),
+                    })
+                    await self._fault("after_send_before_verify", plan)
+                    graph_run.finish(
+                        "execute",
+                        "succeeded",
+                        output_evidence_ids=(effect_receipt_id,),
+                    )
                     journal.append_event(plan.plan_id, "l0_step_completed", {
                         "step_id": "execute", "result_received": True,
                     })
-                    await self._fault("after_send_before_verify", plan)
                 except (asyncio.TimeoutError, OutcomeIndeterminateError) as error:
+                    graph_run.finish(
+                        "execute",
+                        "indeterminate",
+                        details={"reason": type(error).__name__},
+                    )
                     journal.append_event(plan.plan_id, "l0_step_indeterminate", {
                         "step_id": "execute", "reason": type(error).__name__,
                     })
@@ -433,10 +1063,17 @@ class NetworkRuntime:
                         plan.plan_id, PlanState.OUTCOME_INDETERMINATE,
                         "write_outcome_indeterminate", {"error": str(error)},
                     )
-                    return await self._reconcile_indeterminate(journal, backend, plan, contract, result, error)
+                    return await self._reconcile_indeterminate(
+                        journal, backend, plan, contract, result, error, graph_run,
+                    )
                 except Exception as error:
                     # Once the callable started, a generic transport exception
                     # cannot prove that the remote system made no change.
+                    graph_run.finish(
+                        "execute",
+                        "indeterminate",
+                        details={"reason": type(error).__name__},
+                    )
                     journal.append_event(plan.plan_id, "l0_step_indeterminate", {
                         "step_id": "execute", "reason": type(error).__name__,
                     })
@@ -444,9 +1081,15 @@ class NetworkRuntime:
                         plan.plan_id, PlanState.OUTCOME_INDETERMINATE,
                         "write_raised_after_send", {"error": f"{type(error).__name__}: {error}"},
                     )
-                    return await self._reconcile_indeterminate(journal, backend, plan, contract, result, error)
+                    return await self._reconcile_indeterminate(
+                        journal, backend, plan, contract, result, error, graph_run,
+                    )
 
                 journal.transition(plan.plan_id, PlanState.VERIFYING, "verification_started", {})
+                graph_run.start(
+                    "verify",
+                    input_evidence_ids=(effect_receipt_id,),
+                )
                 journal.append_event(plan.plan_id, "l0_step_started", {
                     "step_id": "verify", "contract": plan.verification_contract,
                 })
@@ -454,11 +1097,26 @@ class NetworkRuntime:
                 evidence, passed, internal_rollback, verify_error = await self._verify(
                     backend, plan, contract, result,
                 )
+                graph_run.finish(
+                    "verify",
+                    "succeeded" if passed else "failed",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"internal_rollback": internal_rollback},
+                )
                 journal.append_event(plan.plan_id, "l0_step_completed", {
                     "step_id": "verify", "passed": passed,
                     "internal_rollback": internal_rollback,
                 })
                 if passed:
+                    graph_run.start(
+                        "commit",
+                        input_evidence_ids=_evidence_ids(evidence),
+                    )
+                    graph_run.finish(
+                        "commit",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                    )
                     journal.transition(
                         plan.plan_id, PlanState.VERIFIED_SUCCESS,
                         "verification_passed", {"evidence": [item.to_dict() for item in evidence]},
@@ -475,12 +1133,37 @@ class NetworkRuntime:
                     return outcome
                 if internal_rollback:
                     journal.transition(plan.plan_id, PlanState.ROLLING_BACK, "tool_reported_rollback", {})
+                    graph_run.start(
+                        "compensate",
+                        input_evidence_ids=_evidence_ids(evidence),
+                    )
                     journal.append_event(plan.plan_id, "l0_step_started", {
                         "step_id": "compensate", "mode": "tool_internal_rollback_verification",
                     })
                     restored = await self._verify_restored_preflight(backend, plan, contract)
                     evidence = (*evidence, restored)
+                    graph_run.finish(
+                        "compensate",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                        details={"mode": "tool_internal_rollback"},
+                    )
+                    graph_run.start(
+                        "verify_recovery",
+                        input_evidence_ids=_evidence_ids(evidence),
+                    )
                     if restored.passed is not True:
+                        graph_run.finish(
+                            "verify_recovery",
+                            "failed",
+                            output_evidence_ids=_evidence_ids(evidence),
+                        )
+                        graph_run.start("escalate")
+                        graph_run.finish(
+                            "escalate",
+                            "succeeded",
+                            details={"reason": "restoration_not_verified"},
+                        )
                         journal.transition(
                             plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                             "internal_rollback_not_independently_verified",
@@ -496,6 +1179,18 @@ class NetworkRuntime:
                         })
                         self._complete_audit(journal, plan, outcome.state)
                         return outcome
+                    graph_run.finish(
+                        "verify_recovery",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                    )
+                    graph_run.start("abort")
+                    graph_run.finish(
+                        "abort",
+                        "succeeded",
+                        output_evidence_ids=_evidence_ids(evidence),
+                        details={"reason": "verified_recovery"},
+                    )
                     journal.append_event(plan.plan_id, "l0_step_completed", {
                         "step_id": "compensate", "mode": "tool_internal_rollback",
                         "passed": True,
@@ -514,10 +1209,20 @@ class NetworkRuntime:
                     return outcome
                 return await self._rollback_or_escalate(
                     journal, backend, plan, contract, result, evidence, verify_error,
+                    graph_run,
                 )
             except (ApprovalError, PlanIntegrityError):
                 raise
             except Exception as error:
+                try:
+                    graph_run.fail_closed(error, effect_dispatched=effect_dispatched)
+                except Exception as graph_error:
+                    # Preserve the original failure while making graph-control
+                    # failure independently visible in the hash-chained audit.
+                    journal.append_event(plan.plan_id, "graph_fail_closed_error", {
+                        "original_error_type": type(error).__name__,
+                        "graph_error": f"{type(graph_error).__name__}: {graph_error}",
+                    })
                 current = journal.get(plan.plan_id)
                 if current.state == PlanState.EXECUTING:
                     journal.transition(
@@ -546,15 +1251,37 @@ class NetworkRuntime:
                 return outcome
             finally:
                 if backend is not None:
+                    if effect_dispatched:
+                        current = journal.get(plan.plan_id)
+                        if current.state in TERMINAL_STATES:
+                            try:
+                                finalized = await backend.finalize_effect(
+                                    plan, current.state.value,
+                                )
+                                if finalized is not None:
+                                    journal.append_event(plan.plan_id, "actor_finalized", {
+                                        "state": current.state.value,
+                                    })
+                            except Exception as finalize_error:
+                                journal.append_event(plan.plan_id, "actor_finalize_failed", {
+                                    "error": f"{type(finalize_error).__name__}: {finalize_error}",
+                                })
                     await backend.close()
 
     def inspect(self, plan_id: str) -> dict[str, Any]:
         with NetworkJournal(self.journal_path) as journal:
+            plan = journal.get(plan_id)
+            events = journal.events(plan_id)
+            record = journal.record(plan_id)
+            graph_run = JournalGraphScheduler(plan, journal)
             return {
-                "plan": journal.get(plan_id).to_dict(),
-                "events": journal.events(plan_id),
+                "plan": plan.to_dict(),
+                "events": events,
                 "audit": journal.verify_event_chain(plan_id),
-                "record": journal.record(plan_id),
+                "record": record,
+                "graph_execution": graph_run.summary(),
+                "graph_latency": stage_latency_summary(events),
+                "provenance": build_provenance_dag(plan, events, record),
             }
 
     def audit(self, plan_id: str) -> dict[str, Any]:
@@ -576,10 +1303,35 @@ class NetworkRuntime:
                 try:
                     backend = await self.backend_factory(plan.profile)
                     contract = self._revalidate_contract(plan, backend)
+                    events = journal.events(plan_id)
+                    execution_claim = next(
+                        (
+                            str(item.get("event_hash") or "")
+                            for item in reversed(events)
+                            if item.get("event_type") == "execution_started"
+                        ),
+                        "",
+                    )
+                    record = journal.record(plan_id)
+                    graph_run = JournalGraphScheduler(plan, journal)
+                    graph_run.recover_indeterminate_effect_boundary(
+                        execution_claim_evidence=execution_claim,
+                        approval_proof_id=str(record.get("approval_proof_id") or ""),
+                    )
                     outcome = await self._reconcile_indeterminate(
                         journal, backend, plan, contract, None,
                         OutcomeIndeterminateError("runtime restarted during side-effect processing"),
+                        graph_run,
                     )
+                    if outcome.state in TERMINAL_STATES:
+                        finalized = await backend.finalize_effect(
+                            plan, outcome.state.value,
+                        )
+                        if finalized is not None:
+                            journal.append_event(plan.plan_id, "actor_finalized", {
+                                "state": outcome.state.value,
+                                "source": "startup_reconciliation",
+                            })
                     outcomes.append(outcome.to_dict())
                 except Exception as error:
                     current = journal.get(plan_id)
@@ -599,7 +1351,48 @@ class NetworkRuntime:
                 finally:
                     if backend is not None:
                         await backend.close()
+            await self._recover_actor_finalizers(journal)
         return outcomes
+
+    async def _recover_actor_finalizers(self, journal: NetworkJournal) -> None:
+        """Retry a terminal Runtime-to-Actor commit lost during process shutdown."""
+        plan_ids = {
+            plan_id
+            for state in TERMINAL_STATES
+            for plan_id in journal.plan_ids_in_state(state)
+        }
+        for plan_id in sorted(plan_ids):
+            plan = journal.get(plan_id)
+            if ":netopyu.network-actor@" not in plan.provider_identity:
+                continue
+            events = journal.events(plan_id)
+            if any(item["event_type"] == "actor_finalized" for item in events):
+                continue
+            if not any(
+                item["event_type"] == "l0_step_started"
+                and item["payload"].get("step_id") == "execute"
+                for item in events
+            ):
+                continue
+            backend: BackendSession | None = None
+            try:
+                backend = await self.backend_factory(plan.profile)
+                self._revalidate_contract(plan, backend)
+                finalized = await backend.finalize_effect(plan, plan.state.value)
+                if finalized is None:
+                    raise RuntimeError("approved Network Actor finalizer is unavailable")
+                journal.append_event(plan_id, "actor_finalized", {
+                    "state": plan.state.value,
+                    "source": "startup_finalizer_recovery",
+                })
+            except Exception as error:
+                journal.append_event(plan_id, "actor_finalize_failed", {
+                    "source": "startup_finalizer_recovery",
+                    "error": f"{type(error).__name__}: {error}",
+                })
+            finally:
+                if backend is not None:
+                    await backend.close()
 
     def reject(self, *, plan_id: str, plan_hash: str, reason: str) -> dict[str, Any]:
         with NetworkJournal(self.journal_path) as journal:
@@ -612,6 +1405,18 @@ class NetworkRuntime:
                 raise NetworkRuntimeError(
                     f"cannot reject plan {plan_id} from state {plan.state.value}"
                 )
+            graph_run = JournalGraphScheduler(plan, journal)
+            graph_run.finish(
+                "approval",
+                "failed",
+                details={"reason": "operator_rejected"},
+            )
+            graph_run.start("abort")
+            graph_run.finish(
+                "abort",
+                "succeeded",
+                details={"reason": "operator_rejected"},
+            )
             updated = journal.transition(
                 plan_id, PlanState.REJECTED, "approval_rejected",
                 {"reason": _bounded(reason, 1000)},
@@ -662,13 +1467,17 @@ class NetworkRuntime:
             ),)
         projected = project_arguments(arguments, contract.preflight_fields)
         rendered = _render(await tool(projected))
-        passed = not _failed_output(rendered)
+        value = _evidence_value(contract.preflight_tool, rendered)
+        passed = (
+            not _failed_output(rendered)
+            and value.get("facts", {}).get("ok") is not False
+        )
         return (Evidence(
             evidence_type="preflight",
             source=contract.preflight_tool,
             target=canonical_json(projected),
             observed_at=utc_now(),
-            value=_evidence_value(contract.preflight_tool, rendered),
+            value=value,
             passed=passed,
             predicate="preflight read succeeds without an error marker",
             expected=True,
@@ -678,6 +1487,10 @@ class NetworkRuntime:
         metadata = backend.metadata.get(plan.tool_name)
         if metadata is None or plan.tool_name not in backend.callables:
             raise PlanIntegrityError("approved tool is no longer registered")
+        try:
+            provider_capability = backend.describe_capability(plan.tool_name)
+        except CapabilityAdmissionError as error:
+            raise PlanIntegrityError(f"Provider release admission failed: {error}") from error
         action = str(metadata.get("action_type", "read_only"))
         requires_approval = bool(metadata.get("hitl")) or action != "read_only"
         contract = resolve_contract(
@@ -686,7 +1499,37 @@ class NetworkRuntime:
             requires_approval=requires_approval,
             mode=backend.mode,
             source=backend.sources.get(plan.tool_name, "unknown"),
+            metadata=metadata,
         )
+        current_source = backend.sources.get(plan.tool_name, "unknown")
+        current_provider = provider_capability.provider_identity
+        current_input_digest = provider_capability.input_schema_digest
+        current_output_digest = provider_capability.output_schema_digest
+        current_release_digest = str(
+            metadata.get("provider_release_digest")
+            or "unmanaged-local:" + sha256_json({
+                "provider_identity": provider_capability.provider_identity,
+                "provider_kind": provider_capability.provider_kind,
+            }).removeprefix("sha256:")
+        )
+        current_manifest_digest = str(
+            metadata.get("provider_manifest_digest") or "unmanaged-local"
+        )
+        current_qualification_digest = str(
+            metadata.get("provider_qualification_digest") or "unmanaged-local"
+        )
+        current_deployment_digest = str(
+            metadata.get("provider_deployment_digest") or "unmanaged-local"
+        )
+        current_l0 = L0_SKILLS.for_tool(
+            plan.profile,
+            plan.tool_name,
+            skill_id=plan.l0_skill_id,
+            version=plan.l0_skill_version,
+        )
+        current_capability_id = provider_capability.capability_id
+        current_capability_version = provider_capability.capability_version
+        current_provider_role = provider_capability.provider_role
         if (
             contract is None
             or contract.contract_id != plan.tool_version
@@ -694,22 +1537,52 @@ class NetworkRuntime:
             or contract.compensator != plan.rollback_contract
             or action != plan.action_type
             or not requires_approval
+            or current_provider != plan.provider_identity
+            or current_release_digest != plan.provider_release_digest
+            or current_manifest_digest != plan.provider_manifest_digest
+            or current_qualification_digest != plan.provider_qualification_digest
+            or current_deployment_digest != plan.provider_deployment_digest
+            or current_input_digest != plan.input_schema_digest
+            or current_output_digest != plan.output_schema_digest
+            or current_capability_id != plan.capability_id
+            or current_capability_version != plan.capability_version
+            or current_provider_role != plan.provider_role
         ):
             raise PlanIntegrityError("runtime tool contract changed after approval")
         if contract.verifier not in VERIFIERS.contract_ids():
             raise PlanIntegrityError("approved verifier contract is no longer registered")
         if contract.compensator and contract.compensator not in COMPENSATORS.contract_ids():
             raise PlanIntegrityError("approved compensation contract is no longer registered")
-        l0_contract = L0_SKILLS.for_tool(plan.profile, plan.tool_name)
+        l0_contract = current_l0
+        current_step_contract: tuple[dict[str, Any], ...] = ()
+        if l0_contract is not None and isinstance(
+            l0_contract.compiled_contract, CompiledAtomicEffect,
+        ):
+            ensured = contract_from_compiled_l0(
+                l0_contract.compiled_contract, plan.arguments,
+            )
+            current_step_contract = _ensured_step_contract(build_transaction_graph(
+                compensatable=ensured.compensation_operation is not None,
+            ))
         if (
             l0_contract is None
             or plan.l0_skill_id != l0_contract.skill_id
             or plan.l0_skill_version != l0_contract.version
             or plan.l0_contract_hash != l0_contract.contract_hash
-            or plan.step_contract != tuple(step.to_dict() for step in l0_contract.steps)
+            or plan.step_contract != current_step_contract
             or l0_contract.tool_contract_id != contract.contract_id
         ):
             raise PlanIntegrityError("Network L0 Skill contract changed after approval")
+        released_l0_hashes = tuple(
+            str(item) for item in metadata.get("provider_l0_contract_hashes") or ()
+        )
+        if (
+            metadata.get("provider_release_digest")
+            and l0_contract.contract_hash not in released_l0_hashes
+        ):
+            raise PlanIntegrityError(
+                "active signed Provider release no longer authorizes the approved L0 contract"
+            )
         intent = compile_intent(
             l0_contract,
             profile=plan.profile,
@@ -720,6 +1593,25 @@ class NetworkRuntime:
         )
         if intent.intent_hash != plan.intent_hash or intent.to_dict() != plan.intent_spec:
             raise PlanIntegrityError("approved intent is not bound to the L0 Skill plan")
+        if not isinstance(l0_contract.compiled_contract, CompiledAtomicEffect):
+            raise PlanIntegrityError("approved L0 is not a compiled AtomicEffect v2")
+        parity = validate_runtime_projection(
+            compiled=l0_contract.compiled_contract,
+            tool_name=plan.tool_name,
+            tool_contract_id=contract.contract_id,
+            verifier_id=contract.verifier,
+            compensator_id=contract.compensator,
+            profile=plan.profile,
+            arguments=plan.arguments,
+            intent=intent.to_dict(),
+            resolver_context={
+                "profile": plan.profile,
+                "mode": backend.mode,
+                "provider": current_source,
+            },
+        )
+        if not parity.ok:
+            raise PlanIntegrityError("L0 v2 Runtime parity changed: " + "; ".join(parity.errors))
         return contract
 
     @staticmethod
@@ -748,9 +1640,54 @@ class NetworkRuntime:
         result: str | None,
     ) -> tuple[tuple[Evidence, ...], bool, bool, str | None]:
         verification = await verify_operation(backend, plan, contract, result)
+        try:
+            compiled = L0_SKILLS.get(
+                plan.l0_skill_id, plan.l0_skill_version,
+            ).compiled_contract
+            ensured_contract = contract_from_compiled_l0(compiled, plan.arguments)
+            requirements = [
+                item for item in ensured_contract.evidence
+                if item.phase.value == "verify"
+            ]
+            evidence, records = _bind_contract_evidence(
+                verification.evidence,
+                requirements,
+                backend=backend,
+                associated_action=ensured_contract.operation,
+                scope=plan.targets,
+                parent_evidence_ids=tuple(
+                    str(item.evidence_id) for item in plan.preflight
+                    if item.evidence_id
+                ),
+            )
+            evidence_gate = evaluate_evidence(requirements, records)
+            guard_gate = evaluate_guards(
+                ensured_contract.postconditions, requirements, records,
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            return (
+                verification.evidence,
+                False,
+                verification.internal_rollback,
+                f"EnsuredSkill postcondition contract could not be evaluated: {error}",
+            )
+        if not verification.passed:
+            return (
+                evidence,
+                False,
+                verification.internal_rollback,
+                verification.error,
+            )
+        if not evidence_gate.allowed or not guard_gate.allowed:
+            return (
+                evidence,
+                False,
+                verification.internal_rollback,
+                "EnsuredSkill postcondition Evidence/Guard is not satisfied",
+            )
         return (
-            verification.evidence,
-            verification.passed,
+            evidence,
+            True,
             verification.internal_rollback,
             verification.error,
         )
@@ -763,8 +1700,11 @@ class NetworkRuntime:
         contract: ToolContract,
         result: str | None,
         error: BaseException,
+        graph_run: JournalGraphScheduler | None = None,
     ) -> ExecutionOutcome:
         journal.transition(plan.plan_id, PlanState.VERIFYING, "reconciliation_started", {})
+        if graph_run is not None:
+            graph_run.start("reconcile")
         journal.append_event(plan.plan_id, "l0_step_started", {
             "step_id": "verify", "mode": "indeterminate_reconciliation",
         })
@@ -776,12 +1716,39 @@ class NetworkRuntime:
             evidence = ()
             passed = internal_rollback = False
             verify_error = f"reconciliation failed: {type(verify_exception).__name__}: {verify_exception}"
+        if graph_run is not None:
+            graph_run.finish(
+                "reconcile",
+                "succeeded" if passed else "failed",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"internal_rollback": internal_rollback},
+            )
         journal.append_event(plan.plan_id, "l0_step_completed", {
             "step_id": "verify", "passed": passed,
             "internal_rollback": internal_rollback,
             "mode": "indeterminate_reconciliation",
         })
         if passed:
+            if graph_run is not None:
+                graph_run.start(
+                    "verify",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
+                graph_run.finish(
+                    "verify",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"mode": "reconciliation_observation"},
+                )
+                graph_run.start(
+                    "commit",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
+                graph_run.finish(
+                    "commit",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                )
             journal.transition(
                 plan.plan_id, PlanState.VERIFIED_SUCCESS,
                 "indeterminate_reconciled_success", {"evidence": [item.to_dict() for item in evidence]},
@@ -797,12 +1764,40 @@ class NetworkRuntime:
             return outcome
         if internal_rollback:
             journal.transition(plan.plan_id, PlanState.ROLLING_BACK, "indeterminate_internal_rollback", {})
+            if graph_run is not None:
+                graph_run.start(
+                    "compensate",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
             journal.append_event(plan.plan_id, "l0_step_started", {
                 "step_id": "compensate", "mode": "indeterminate_internal_rollback_verification",
             })
             restored = await self._verify_restored_preflight(backend, plan, contract)
             evidence = (*evidence, restored)
+            if graph_run is not None:
+                graph_run.finish(
+                    "compensate",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"mode": "tool_internal_rollback"},
+                )
+                graph_run.start(
+                    "verify_recovery",
+                    input_evidence_ids=_evidence_ids(evidence),
+                )
             if restored.passed is not True:
+                if graph_run is not None:
+                    graph_run.finish(
+                        "verify_recovery",
+                        "failed",
+                        output_evidence_ids=_evidence_ids(evidence),
+                    )
+                    graph_run.start("escalate")
+                    graph_run.finish(
+                        "escalate",
+                        "succeeded",
+                        details={"reason": "restoration_not_verified"},
+                    )
                 journal.transition(
                     plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                     "indeterminate_rollback_not_verified",
@@ -819,6 +1814,19 @@ class NetworkRuntime:
                 })
                 self._complete_audit(journal, plan, outcome.state)
                 return outcome
+            if graph_run is not None:
+                graph_run.finish(
+                    "verify_recovery",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                )
+                graph_run.start("abort")
+                graph_run.finish(
+                    "abort",
+                    "succeeded",
+                    output_evidence_ids=_evidence_ids(evidence),
+                    details={"reason": "verified_recovery"},
+                )
             journal.append_event(plan.plan_id, "l0_step_completed", {
                 "step_id": "compensate", "mode": "indeterminate_internal_rollback",
                 "passed": True,
@@ -835,6 +1843,17 @@ class NetworkRuntime:
             journal.release_locks(plan.plan_id)
             self._complete_audit(journal, plan, outcome.state)
             return outcome
+        if graph_run is not None:
+            graph_run.start(
+                "escalate",
+                input_evidence_ids=_evidence_ids(evidence),
+            )
+            graph_run.finish(
+                "escalate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"reason": "indeterminate_not_reconciled"},
+            )
         journal.transition(
             plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
             "indeterminate_not_reconciled", {"error": str(error), "verification": verify_error},
@@ -858,8 +1877,19 @@ class NetworkRuntime:
         result: str | None,
         evidence: tuple[Evidence, ...],
         verify_error: str | None,
+        graph_run: JournalGraphScheduler,
     ) -> ExecutionOutcome:
         if not contract.compensator:
+            graph_run.start(
+                "escalate",
+                input_evidence_ids=_evidence_ids(evidence),
+            )
+            graph_run.finish(
+                "escalate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"reason": "no_safe_compensation"},
+            )
             journal.transition(
                 plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                 "verification_failed_no_safe_rollback", {"error": verify_error},
@@ -872,6 +1902,10 @@ class NetworkRuntime:
             self._complete_audit(journal, plan, outcome.state)
             return outcome
         journal.transition(plan.plan_id, PlanState.ROLLING_BACK, "rollback_started", {})
+        graph_run.start(
+            "compensate",
+            input_evidence_ids=_evidence_ids(evidence),
+        )
         journal.append_event(plan.plan_id, "l0_step_started", {
             "step_id": "compensate", "contract": plan.rollback_contract,
         })
@@ -881,6 +1915,27 @@ class NetworkRuntime:
                 backend, plan, contract, self.execution_timeout_seconds,
             )
             all_evidence = (*evidence, *compensation.evidence)
+            graph_run.finish(
+                "compensate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(compensation.evidence),
+            )
+            graph_run.start(
+                "verify_recovery",
+                input_evidence_ids=_evidence_ids(all_evidence),
+            )
+            graph_run.finish(
+                "verify_recovery",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(all_evidence),
+            )
+            graph_run.start("abort")
+            graph_run.finish(
+                "abort",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(all_evidence),
+                details={"reason": "verified_recovery"},
+            )
             journal.transition(
                 plan.plan_id, PlanState.ROLLBACK_VERIFIED,
                 "rollback_verified", {"evidence": [item.to_dict() for item in all_evidence]},
@@ -898,6 +1953,19 @@ class NetworkRuntime:
             self._complete_audit(journal, plan, outcome.state)
             return outcome
         except Exception as rollback_error:
+            if graph_run.scheduler.active_node_id == "compensate":
+                graph_run.finish(
+                    "compensate",
+                    "failed",
+                    details={"reason": type(rollback_error).__name__},
+                )
+            graph_run.start("escalate")
+            graph_run.finish(
+                "escalate",
+                "succeeded",
+                output_evidence_ids=_evidence_ids(evidence),
+                details={"reason": "compensation_failed"},
+            )
             journal.transition(
                 plan.plan_id, PlanState.MANUAL_INTERVENTION_REQUIRED,
                 "rollback_failed", {"error": f"{type(rollback_error).__name__}: {rollback_error}"},
@@ -935,6 +2003,9 @@ class NetworkRuntime:
         before = plan.preflight[0].value
         after = _evidence_value(contract.preflight_tool, output)
         passed = isinstance(before, dict) and same_snapshot(before, after)
+        parent_evidence_ids = tuple(
+            str(item.evidence_id) for item in plan.preflight if item.evidence_id
+        )
         return Evidence(
             evidence_type="rollback_postcondition",
             source=contract.preflight_tool,
@@ -942,6 +2013,19 @@ class NetworkRuntime:
             observed_at=utc_now(), value=after, passed=passed,
             predicate="fresh independent read exactly matches typed preflight state",
             expected=before,
+            semantic_type="network.rollback.restoration",
+            source_capability=contract.preflight_tool,
+            scope=plan.targets,
+            collector_identity=backend.sources.get(
+                contract.preflight_tool, "local-runtime-observer",
+            ),
+            collector_digest=sha256_json({
+                "source": contract.preflight_tool,
+                "metadata": backend.metadata.get(contract.preflight_tool, {}),
+            }),
+            associated_action=plan.capability_id,
+            parent_evidence_ids=parent_evidence_ids,
+            evidence_id="rollback_postcondition:" + sha256_json(after),
         )
 
     @staticmethod
@@ -971,17 +2055,31 @@ class NetworkRuntime:
     def _approval_summary(plan: PreparedPlan, source: str, mode: str) -> str:
         args = canonical_json(plan.arguments)
         return (
-            f"Network plan {plan.plan_id}\n"
+            f"Effect plan {plan.plan_id}\n"
             f"Tool: {plan.tool_name} ({plan.action_type}, risk={plan.risk_level.value})\n"
             f"Target(s): {', '.join(plan.targets)}\n"
             f"Arguments: {args}\n"
             f"Source: {source}; backend={mode}; contract={plan.tool_version}\n"
+            f"Provider: {plan.provider_identity}\n"
+            f"Provider release: {plan.provider_release_digest}; manifest="
+            f"{plan.provider_manifest_digest}; qualification="
+            f"{plan.provider_qualification_digest}; deployment="
+            f"{plan.provider_deployment_digest}\n"
+            f"Capability: {plan.capability_id}@{plan.capability_version} "
+            f"({plan.provider_role})\n"
+            f"Schemas: input={plan.input_schema_digest}; output={plan.output_schema_digest}\n"
             f"L0 Skill: {plan.l0_skill_id}@{plan.l0_skill_version} "
             f"({plan.l0_contract_hash})\n"
             f"Intent: {plan.intent_spec.get('intent_kind')} "
             f"desired={canonical_json(plan.intent_spec.get('desired_state', {}))}\n"
             f"Intent hash: {plan.intent_hash}\n"
             f"Verification: {plan.verification_contract}; rollback: {plan.rollback_contract or 'none'}\n"
+            f"Requester: {plan.requester_identity.get('subject_id')} via "
+            f"{plan.requester_identity.get('issuer')} "
+            f"(assurance={plan.requester_identity.get('assurance_level')})\n"
+            f"Approval: mode={plan.approval_mode}; policy="
+            f"{plan.approval_policy_id}@{plan.approval_policy_version} "
+            f"({plan.approval_policy_hash})\n"
             f"Workflow: {plan.workflow_run_id or 'standalone'}"
             f"{f' ({plan.workflow_template_hash})' if plan.workflow_template_hash else ''}\n"
             f"Expires: {plan.expires_at}\n"

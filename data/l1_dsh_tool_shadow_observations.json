@@ -1,0 +1,111 @@
+{
+  "apiVersion": "netopyu.io/l1-dsh-tool-shadow-observations/v1",
+  "observations": [
+    {
+      "adapter": "dsh-headless-skill-tool-shadow",
+      "candidate_top_k": 12,
+      "catalog_digest": "sha256:642839b44b639e8d7a6e78fb01d7caee09d1f2c5d25f462fe1b072751fe3ef0d",
+      "dataset_complete": true,
+      "dataset_digest": "sha256:c9cf65cfaa15d5d5096a5eefc026463888f3d7aa71aca4078bece8b171fb48c2",
+      "dsh_config_digest": "sha256:8ba8c9a2dee290ff3dc52d827c42907b2ceb92d5ca559d42daa187b4ca9d5409",
+      "dsh_settings_digest": "sha256:ba38ca7f355348ec5890c46db710b12ee352c43e015fb17c7b1bd89fbf733d6c",
+      "dsh_version": "0.1.1-rc.2",
+      "evaluated_cases": 160,
+      "evaluator_fingerprint": "sha256:613e486e2db065e366e1a9fba63ef5ff6810aa468a03cce9ea8683b641984e63",
+      "fingerprint": "sha256:41ccb124b83109081c4cfb8cc90d28baf42e6b20c099df04b902524d72701922",
+      "metrics": {
+        "action_accuracy": 0.0187,
+        "candidate_recall": 1.0,
+        "end_to_end_accuracy": 0.0187,
+        "latency_ms": {
+          "p50": 3767.573,
+          "p95": 7348.999
+        },
+        "parameter_field_f1": 0.0212,
+        "safety_escape_rate": 0.0,
+        "selection_accuracy": 0.0208,
+        "strict_output_rate": 0.025,
+        "tokens": {
+          "input": 444485,
+          "output": 6661
+        },
+        "workflow_accuracy": 0.0312
+      },
+      "model": "qwen2.5:7b",
+      "model_artifact_digest": "sha256:845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e",
+      "protocol_metrics": {
+        "capture_accept_rate": 0.05,
+        "capture_call_rate": 0.1187,
+        "capture_schema_valid_rate": 0.05,
+        "duplicate_capture_rate": 0.0063,
+        "exposed_tools_exact_rate": 1.0,
+        "final_response_exact_rate": 0.3438,
+        "forbidden_tool_call_rate": 0.0,
+        "premature_visible_text_rate": 0.2687,
+        "proposal_contract_valid_rate": 0.025,
+        "session_completion_rate": 0.3875,
+        "skill_catalog_exact_rate": 1.0,
+        "skill_load_success_rate": 0.3125,
+        "tool_sequence_accuracy": 0.0938
+      },
+      "protocol_preflight": "compatible",
+      "qualification_eligible": true,
+      "qualified": false,
+      "recorded_at": "2026-08-28T20:39:24.718686+00:00",
+      "scope": "full-160-qualification"
+    },
+    {
+      "adapter": "dsh-headless-skill-tool-shadow",
+      "candidate_top_k": 12,
+      "dsh_config_digest": "sha256:8ba8c9a2dee290ff3dc52d827c42907b2ceb92d5ca559d42daa187b4ca9d5409",
+      "dsh_settings_digest": "sha256:c26a1024eae9dc3afee9eed40f5062e8d13d7074570280662cf1e19251ba4db8",
+      "dsh_version": "0.1.1-rc.2",
+      "evaluated_cases": 1,
+      "evaluator_fingerprint": "sha256:613e486e2db065e366e1a9fba63ef5ff6810aa468a03cce9ea8683b641984e63",
+      "fingerprint": "sha256:5215b8cc7b2c4632b941b015491f481fa00da40e970ac15257914d88d403bf63",
+      "metrics": {
+        "action_accuracy": 1.0,
+        "candidate_recall": 1.0,
+        "end_to_end_accuracy": 1.0,
+        "latency_ms": {
+          "p50": 122422.987,
+          "p95": 122422.987
+        },
+        "parameter_field_f1": 1.0,
+        "safety_escape_rate": 0.0,
+        "selection_accuracy": 1.0,
+        "strict_output_rate": 1.0,
+        "tokens": {
+          "input": 7541,
+          "output": 597
+        },
+        "workflow_accuracy": 0.0
+      },
+      "model": "qwen3.6:27b",
+      "model_artifact_digest": "sha256:a50eda8ed977ab48a12431878896b27ffd5cef552c17af3317d9623b939a7f1e",
+      "protocol_metrics": {
+        "capture_accept_rate": 1.0,
+        "capture_call_rate": 1.0,
+        "capture_schema_valid_rate": 1.0,
+        "duplicate_capture_rate": 0.0,
+        "exposed_tools_exact_rate": 1.0,
+        "final_response_exact_rate": 1.0,
+        "forbidden_tool_call_rate": 0.0,
+        "premature_visible_text_rate": 0.0,
+        "proposal_contract_valid_rate": 1.0,
+        "session_completion_rate": 1.0,
+        "skill_catalog_exact_rate": 1.0,
+        "skill_load_success_rate": 1.0,
+        "tool_sequence_accuracy": 1.0
+      },
+      "protocol_preflight": "compatible",
+      "qualification_eligible": false,
+      "qualified": false,
+      "recorded_at": "2026-08-28T20:21:18.932564+00:00",
+      "scenario_ids": [
+        "route-alerts-1"
+      ],
+      "scope": "single-case-functional-smoke"
+    }
+  ]
+}

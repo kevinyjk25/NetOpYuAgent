@@ -1,274 +1,216 @@
-# NetOpYuAgent 架构说明 / Architecture
+# NetOpYuAgent 架构 / Architecture
+
+> 架构基线 / Architecture baseline: 2026-09-02。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 ## 中文
 
-### 1. 权威架构声明
+### 1. 权威架构
 
-NetOpYuAgent 是 **DSH-only 网络领域插件**。DSH 是唯一通用 Agent Harness；本仓库只实现 DSH 之上的网络领域能力和确定性效果运行时。
+NetOpYuAgent 当前只以 **EnsuredSkill 网络可靠执行研究原型**为目标。本文依据[原型权威准则](docs/ENSUREDSKILL-PROTOTYPE.md)描述当前架构；历史 P1/P2 产品化设计不再是当前架构的一部分。
 
-禁止重新引入以下表面：
-
-- 自建 Agent loop、通用 planner 或模型 client；
-- 独立 FastAPI/WebUI；
-- 与 DSH 并行的会话、审批或子代理框架；
-- 绕过 Network Runtime 的直接写工具入口；
-- 自动把轨迹/学习结果安装为可执行 Skill。
-
-### 2. 架构分层
+核心命题：
 
 ```text
-┌──────────────────────────────────────────────────────────────┐
-│ DSH Platform Layer                                           │
-│ Session · Model · UI · Tool lifecycle · Skill · Approval UI │
-└────────────────────────────┬─────────────────────────────────┘
-                             │ plugin contract
-┌────────────────────────────▼─────────────────────────────────┐
-│ NetOpYu Domain Control Plane                                 │
-│ Tool projection · HITL · Tool Guard · A2A · Scoped services │
-└────────────────────────────┬─────────────────────────────────┘
-                             │ typed bridge commands
-┌────────────────────────────▼─────────────────────────────────┐
-│ Network Domain Runtime                                      │
-│ L1 workflow constraints · L0 contracts · plan state machine │
-│ validation · preflight · execute · verify · compensate      │
-└────────────────────────────┬─────────────────────────────────┘
-                             │ adapter contracts
-┌────────────────────────────▼─────────────────────────────────┐
-│ Backends                                                     │
-│ Profile mock · pragmatic local · MCP · OpenAPI · A2A peers  │
-└──────────────────────────────────────────────────────────────┘
+Reasoning correctness does not imply execution safety.
+LLM 决定尝试什么；Runtime 决定允许发生什么。
+No evidence, no action.
 ```
 
-Domain L1 Skill 是“可以推理的业务编排”；Network L0 Skill 是“不能自由发挥的效果合同”。二者都属于 NetOpYu Domain Layer，不应与 DSH 平台层的 L0/L1 命名混用。
+### 2. 三平面
 
-### 3. 源代码边界
+```mermaid
+flowchart TB
+    U[用户] --> RP[Reasoning Plane<br/>DSH · LLM · L1 Skill]
+    RP -->|Candidate Plan；无写权限| RR[Reliability Runtime<br/>Contract · Evidence · Guard · Risk · Transaction]
+    RR -->|Validated Operation| IP[Infrastructure Plane<br/>Network Provider · MCP/API/CLI/NETCONF · Containerlab]
+    IP -->|Observation / Effect Receipt| RR
+    RR -->|Verified terminal outcome| RP
+```
 
-#### 3.1 平台集成
+| 平面 | 负责 | 不负责 |
+|---|---|---|
+| Reasoning Plane | 自然语言理解、诊断假设、追问、任务分解、L1 编排和 Candidate Plan | 不持有基础设施写权限；不自行宣布执行成功 |
+| Reliability Runtime | L0 合同解析、Typed Graph、Evidence、Guard、Risk、事务、验证、补偿和审计 | 不做开放式语言推理；不把模型置信度当权限 |
+| Infrastructure Plane | 提供事实 Observation 和 Effect Capability | 不判断上层意图；Provider 返回的 `success` 不是 Runtime 的 Commit 证据 |
 
-- `dsh-plugin-netopyu/`：唯一 JavaScript 插件入口；只依赖 DSH/Cordis contract 和 Python bridge。
-- `.netopyu-dsh/`：隔离的 DSH workspace 描述，不包含生成 runtime。
-- `scripts/netopyu-dsh`：安装、启动、模型、诊断、审计和 retirement 的唯一运维入口。
+Decision、Promotion、Catalog、Approval 和 Provider Adapter 都必须归入上述平面，不能再形成平级“控制面”。
 
-#### 3.2 领域控制面
-
-- `dsh_adapter/`：把 Python 领域能力投影为 DSH 可消费的 manifest/commands。
-- `network_runtime/`：所有可变更效果的唯一执行入口。
-- `profiles/`：域隔离的 mock capability 与 canonical L1 Skill。
-- `skills/`：common/pragmatic canonical Skill。
-
-#### 3.3 适配与辅助
-
-- `tools/`：公共工具与 pragmatic local adapters；
-- `integrations/`：MCP/OpenAPI client 和 router；
-- `registry/`：只保留 outbound A2A AgentCard discovery schema；
-- `runtime/`：只保留通用但实际被 DSH 使用的 tool-result store/tracing；
-- `agent_memory/`：仅通过 scoped service 暴露；
-- `retrieval/`：能力检索；
-- `evaluation/`：离线、非生产执行路径的质量门禁；
-- `tests/`：迁移与 P0.5 规格的可执行证据。
-
-### 4. 依赖规则
-
-允许的主要依赖方向：
+### 3. 唯一写路径
 
 ```text
-dsh-plugin-netopyu -> dsh_adapter bridge protocol
-dsh_adapter -> network_runtime / profiles / scoped services
-network_runtime -> profiles metadata/callables / tools loader
-profiles -> tools common helpers
-pragmatic backend -> tools / integrations / schema
-scoped services -> agent_memory / retrieval
-evaluation -> public manifests / retrieval / test data
+User Intent
+→ L1 semantic guidance
+→ Candidate Plan
+→ active Contract-Governed L0
+→ immutable Runtime Plan
+→ Evidence + Guard + Risk
+→ approval when required
+→ revalidation
+→ exactly one controlled Effect
+→ independent verification
+→ COMMIT / COMPENSATE / ESCALATE
 ```
 
-禁止的依赖方向：
+产品原型不允许 L1/LLM 直接写 Provider。L1→L0 转换失败、证据不足或置信度不足时，只能读、追问、生成 proposal、请求人工处理或拒绝。原生 Agent 写入仅存在于隔离的本地 A/B evaluator，作为实验 Control，不是产品 fallback。
 
-- `network_runtime` 不得依赖 DSH Web/UI 或模型；
-- `profiles`/`tools` 不得调用审批 API；
-- L1 `SKILL.md` 不得直接持有 backend credentials；
-- verifier 不得复用写工具返回文本作为唯一证据；
-- mock profile 不得加载 pragmatic real sources；
-- `evaluation` 不得进入生产工具执行调用链；
-- `agent_memory` 不得自动注入 DSH prompt；
-- JavaScript grant 不得用环境变量替代 request-level approval。
+#### 3.1 Skill authoring 与请求执行是两条不同链
 
-`scripts/audit_dsh_only.py` 和 retirement gate 负责防止历史架构表面返回。
+```mermaid
+flowchart TB
+    subgraph OFF[离线 Authoring；不持有执行权限]
+      L1[L1 SKILL.md] --> L05[L0.5 structured proposal]
+      CAT[Trusted Capability Catalog] --> L05
+      L05 --> L0A[L0 authoring]
+      L0A --> G[Schema + semantic coverage + safety gate]
+      G --> HR[Human review / publish]
+      HR --> REG[Active L0 Registry]
+    end
+    subgraph ON[在线 Request；只有 Runtime 持有效果权限]
+      U[User] --> H[DSH/LLM/L1]
+      H --> CP[Candidate Plan]
+      CP --> REG
+      REG --> PP[Immutable PreparedPlan]
+      PP --> TX[Typed Graph transaction]
+      TX --> TE[Verified terminal envelope]
+    end
+```
 
-### 5. 核心不变量
+L0.5 和未激活 L0 都是 review artifact，不在在线请求中临场取得执行权。正常产品路径使用已激活 L0；评测中的 Gold-blind auto route 用来比较“是否引入 Runtime”，不得反向改变 Registry 或真值。
 
-1. **One effect path**：所有写效果都经过 Network Runtime。
-2. **One immutable plan**：批准、grant 和执行看到同一个 plan hash。
-3. **One-shot authorization**：每个 execution token/nonce 最多消费一次。
-4. **Verify, do not infer**：成功只能由独立 postcondition 产生。
-5. **Fail closed**：未知 backend、状态、合同、结果或 peer 都不转成成功。
-6. **Profile isolation**：未投影能力对模型不可见，也不能通过 capability search 泄漏。
-7. **No automatic promotion**：学习 proposal 不进入 active Skill registry。
-8. **Audit every terminal path**：成功、拒绝、过期、漂移、回滚和人工介入都有终态事件。
+#### 3.2 在线路由决策
 
-### 6. 架构决策记录
+| 候选 | 权威处理 | 允许结果 |
+|---|---|---|
+| Observation/read | Observation Policy、Capability/Schema、参数与访问上下文校验 | typed read result；无写能力 |
+| 参数缺失/目标歧义 | 参数编译器失败关闭 | `clarification_required` |
+| write + 唯一 active L0 | 编译不可变计划并进入 Evidence/Guard/Risk/Approval/Transaction | verified commit、verified rollback 或 escalate |
+| write 无 active L0 或转换不合格 | 不创建可执行计划 | clarify/proposal/ask-human/reject |
+| 隔离实验 Control | evaluator 直接驱动仿真 Effect | 只用于 A/B 测量，不得导入产品 Adapter |
 
-#### ADR-001：采用 DSH 作为唯一平台层
+因此“原生 L1 fallback”只适用于无 Effect 的读取/解释；它绝不意味着不合格写操作绕过 Runtime。
 
-决定：删除自建 UI、Agent loop、通用 HITL 和 inbound agent server。
+#### 3.3 解释性是执行模型的一部分
 
-原因：这些能力与 DSH 重复，不能形成网络领域差异化；双 runtime 会造成会话、授权与工具生命周期不一致。
+解释不是让 LLM 事后编一段理由，而是保存可追踪的结构事实：
 
-#### ADR-002：保留 Python 领域 bridge
+- Authoring：L1 原句 → L0.5 路径 → L0 路径的 requirement-level mapping、状态、置信/丢失告警、修正位置和逐阶段 digest；
+- Planning：规范化参数与 provenance、exact L0/Provider/Schema、Evidence、Risk、Approval、Graph 与 plan hash；
+- Execution：哈希链事件、每个 Typed Graph 节点的输入/输出 Evidence、分阶段时延和明确终态；
+- Provenance：Evidence → Observation → Capability/Collector → Network Object 的最小化 DAG；
+- Harness boundary：只接受 Runtime terminal envelope，Provider receipt 只保留摘要，不能冒充成功。
 
-决定：DSH 插件通过持久化 Worker 调用 Python 领域代码。
+完整对象关系、示例和状态解释见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)。
 
-原因：现有网络工具、校验器和领域测试以 Python 为主；bridge 将迁移风险限制在窄协议中，同时允许后续逐步重构。
+### 4. 核心源码边界
 
-#### ADR-003：写工具必须绑定 Network L0 Skill
+| 目录 | 所属平面 | 当前职责 |
+|---|---|---|
+| `dsh-plugin-netopyu/`, `dsh_adapter/` | Reasoning | DSH 投影、Candidate Plan 和窄 Worker bridge |
+| `skills/`, `profiles/*/skills/` | Reasoning | L1 Semantic Guidance；不得授予效果权限 |
+| `effect_runtime/reliability.py`, `effect_runtime/graph_scheduler.py` | Runtime | 领域中性 Contract、Evidence、Risk、Typed Graph 与 fail-closed 图调度门禁 |
+| `network_runtime/l0/` | Runtime | L1→L0.5→L0 authoring、编译、静态安全门禁和激活合同 |
+| `network_runtime/engine.py` | Runtime | prepare、evidence gate、approve、execute、verify、compensate、audit |
+| `network_runtime/{graph_runtime,provenance}.py` | Runtime | 哈希链图执行、崩溃边界恢复、分阶段时延和跨步骤 Evidence DAG |
+| `network_runtime/{validation,evidence,verifiers,compensators}.py` | Runtime | 参数、证据、后置条件和恢复验证 |
+| `network_runtime/{contracts,journal}.py` | Runtime | 不可变计划、状态与哈希链事件 |
+| `network_lab/`, `network_provider/`, `service_layer/` | Infrastructure | 本地 Observation/Effect Provider 和 Containerlab/FRR 网络锚点 |
+| `evaluation/`, `data/ensured_skill_scenarios.yaml` | Evaluation | 配对实验、故障注入、消融和指标；不得进入执行链 |
 
-决定：禁止仅凭 tool schema + DSH approval 直接执行写 callable。
+### 5. 依赖规则
 
-原因：网络操作需要固定步骤、目标/意图 hash、preflight、revalidation、verifier 和补偿策略。
+允许：
 
-#### ADR-004：SQLite 作为 P0.5 durable store
+```text
+DSH/L1 → public Runtime API
+Runtime → L0 contract + domain-neutral Capability gateway
+Provider Adapter → Infrastructure
+Evaluation → all public test surfaces
+```
 
-决定：本地使用 SQLite、transaction、conditional update 和 hash chain。
+禁止：
 
-原因：零外部依赖、易测试、重启可恢复。生产多实例一致性、远端不可变审计和 HA 在 P1 重新评估。
+- Runtime 依赖 DSH UI、模型 SDK、Prompt 或会话实现；
+- L1、模型或评测器直接调用产品原型写 Capability；
+- Provider 自报成功被直接映射为 `COMMIT`；
+- verifier 只复用写返回值，不进行独立 Observation；
+- 模型生成的 L0 自动注册或激活；
+- `evaluation/` 被产品 Runtime 导入；
+- 企业身份、供应链或治理模块成为核心 Runtime 的必需依赖。
 
-#### ADR-005：模型不是安全边界
+企业身份、Provider 发布、A2A、轨迹学习和历史 L1 shadow/canary 已改为**显式使用时才延迟加载**；默认原型路径不导入这些冻结扩展。DSH 能力检索 parity 位于 `evaluation/`，只能从离线命令运行并使用内存状态，产品 Adapter 不导入 Golden Set。
 
-决定：任何模型都只能提出候选计划。
+### 6. 核心不变量
 
-原因：7B 与 27B 都可能发生阶段、工具、重复执行或总结错误；模型升级/降级不能改变 L0 安全合同。
+1. **Candidate is not authority**：任何模型输出都只是候选。
+2. **No evidence, no action**：缺失、过期、来源/范围不匹配或摘要损坏的 Evidence 阻断写入。
+3. **Contract before score**：结构、Evidence 和 Guard 门禁先于风险分数。
+4. **One immutable plan**：审批和执行绑定同一个 plan/contract digest。
+5. **Revalidate before effect**：审批后、写入前重新读取易变前置条件。
+6. **Verify, do not infer**：只有独立后置条件允许 `COMMIT`。
+7. **Uncertainty is a state**：写后断连进入 `RECONCILE`，不能盲重试。
+8. **Compensation is explicit**：合同声明可逆性、快照、补偿和恢复验证；不可逆操作降低自治等级。
+9. **Terminal paths are auditable**：Commit、Abort、Escalate 和恢复失败均有证据链。
+10. **No automatic promotion**：L1→L0.5→L0 只生成待审制品。
 
-#### ADR-006：A2A 只传自包含任务
+### 7. 架构决策
 
-决定：不继承父会话历史，显式记录 delegation chain。
+- **ADR-001：DSH 只承担 Reasoning Harness。** 不再自建 Agent loop、会话、模型 client 或 Web UI。
+- **ADR-002：L0 是可执行合同，不是更长的 Prompt。** L1 保留语义弹性，L0 固定执行语义。
+- **ADR-003：Evidence 是一等对象。** 它绑定类型、Capability、采集者、时间、范围、Action 和 payload digest。
+- **ADR-004：网络事务采用近似事务语义。** 通过 Snapshot、Precheck、Verify、Reconcile 和 Compensation 控制非 ACID 设备。
+- **ADR-005：Risk 输出只有 `EXECUTE / ASK_HUMAN / REJECT`。** 模型 confidence 不参与授权。
+- **ADR-006：网络是唯一优先锚点。** 通用接口保留，但暂停扩展更多非网络领域。
+- **ADR-007：先完成原型证据，再恢复产品化。** 企业 IAM、供应链、治理、Hermes/A2A、HA/DR、WORM 和 SLO 均冻结。
 
-原因：降低跨域数据泄漏、上下文污染和循环委派风险。
+### 8. 冻结工程
 
-#### ADR-007：大结果外置
+以下代码保留作未来实验和回归，但不是当前核心能力、完成条件或效果证据：
 
-决定：超过阈值的工具输出写 SQLite，模型通过 bounded paging 读取。
+- `hermes_adapter/`、`a2a_provider/`；
+- `network_runtime/enterprise.py`；
+- `network_runtime/provider_release.py` 与资格/部署供应链；
+- `network_runtime/catalog_control.py`、`evidence_plane.py`；
+- `l1_runtime/` 的 canary/productization 路径；
+- 多团队治理、远端 WORM、HA/DR 和生产 SLO。
 
-原因：控制 context、避免重复传输，并在 bridge 生命周期之间保留结果。
-
-### 7. Clean Code 规则
-
-- 一个模块只保留当前 DSH 路径实际使用的职责；
-- 删除断裂 CLI、旧框架 adapter、重复文档和运行时产物，不保留“以后也许有用”的死代码；
-- 公共 API 由包 `__init__` 明确导出，内部 helper 不跨层引用；
-- mutation contract 必须 frozen/versioned/hashable；
-- 不在 import 时启动网络、进程或写入持久化状态；
-- backend 必须有显式 `close()` 生命周期；
-- error message 不包含 secret value；
-- 模块级文档描述当前架构，不描述已经删除的 `main.py`/legacy loop；
-- 文档变更与代码合同变更同一个提交；
-- `scripts/netopyu-dsh retirement` 是合并前必过门禁。
-
-### 8. 新能力接入
-
-#### 8.1 新只读工具
-
-1. 在 profile 或 pragmatic adapter 实现 callable；
-2. 添加 metadata/schema/action type=`read_only`；
-3. 添加 profile projection 和测试；
-4. 需要大结果时复用 `ToolResultStore`；
-5. 更新 LLD/SSD 中的数据或安全说明。
-
-#### 8.2 新写能力
-
-除只读步骤外，还必须增加：
-
-1. versioned ToolContract；
-2. Network L0 Skill contract；
-3. target/provenance/desired-state compiler；
-4. independent preflight 与 verifier；
-5. 安全可行时的 compensator；
-6. approval card assertions；
-7. hash、nonce、drift、failure、rollback 和 audit 测试；
-8. model-independent deterministic demo。
-
-#### 8.3 新 Domain L1 Skill
-
-- 只描述诊断/业务阶段和允许调用的能力；
-- 写阶段必须引用已存在的 L0 Skill；
-- 必需 observation 和停止条件必须可编译为 reviewed workflow；
-- L1 失败不得降低 L0 控制；
-- L1 → L0 自动下沉仍不是 P0.5 范围。
-
-### 9. 文档治理
-
-| 文档 | 权威内容 |
-|---|---|
-| `README.md` | 安装、运行、状态和使用入口 |
-| `ARCHITECTURE.md` | 边界、依赖、不变量和 ADR |
-| `HLD.md` | 组件、部署、端到端流程和 NFR |
-| `LLD.md` | 模块、数据合同、状态机和算法 |
-| `SSD.md` | 规范、安全控制、威胁和验收 |
-
-所有主文档采用同文件双语结构，中文在前、英文在后。历史迁移过程不再作为当前架构文档保留；Git 历史承担追溯职责。
+恢复任一冻结工程前，必须先满足[原型完成判据](docs/ENSUREDSKILL-PROTOTYPE.md#11-原型完成判据)。
 
 ---
 
 ## English
 
-### 1. Authoritative statement
+### 1. Authority and thesis
 
-NetOpYuAgent is a **DSH-only network-domain plugin**. DSH is the only general agent harness. This repository implements only the network-domain layer and deterministic effect runtime above DSH.
+NetOpYuAgent is currently a network-first EnsuredSkill research prototype. The [prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes historical P1/P2 productization architecture.
 
-The architecture forbids a custom agent loop or model client, a standalone Web UI, parallel session/approval/subagent frameworks, direct mutations outside Network Runtime, and automatic activation of learned Skills.
+Reasoning correctness does not imply execution safety. The LLM decides what to attempt; the Runtime decides what is allowed to happen. No evidence means no action.
 
-### 2. Layers
+### 2. Three planes
 
-1. **DSH Platform Layer:** sessions, models, UI, tool lifecycle, Skills, approval interaction.
-2. **NetOpYu Domain Control Plane:** tool projection, HITL, Tool Guard, A2A, scoped services.
-3. **Network Domain Runtime:** reviewed L1 workflow constraints, versioned L0 contracts, deterministic plan execution.
-4. **Backends:** profile mocks, pragmatic local tools, MCP, OpenAPI, and A2A peers.
+The **Reasoning Plane** contains DSH, the LLM, and L1 semantic guidance. It understands, diagnoses, clarifies, plans, and emits Candidate Plans without write authority.
 
-Domain L1 Skills are model-assisted business orchestration. Network L0 Skills are fixed effect contracts. Both belong to the NetOpYu domain and must not be confused with names used for the platform layer.
+The **Reliability Runtime** resolves Contract-Governed L0 operations, compiles typed graphs, gates evidence and guards, applies risk policy, executes transactions, verifies outcomes, compensates failures, and records audit evidence. It performs no open-ended language reasoning.
 
-### 3. Source boundaries
+The **Infrastructure Plane** exposes observations and effects through protocol-neutral capabilities backed by MCP, API, CLI, NETCONF, or Containerlab. Provider success text cannot declare a Runtime commit.
 
-- `dsh-plugin-netopyu/` is the only JavaScript plugin boundary.
-- `dsh_adapter/` projects Python domain capabilities into typed bridge commands.
-- `network_runtime/` is the only mutation execution path.
-- `profiles/` and `skills/` contain isolated capabilities and canonical L1 Skills.
-- `tools/` and `integrations/` provide local, MCP, and OpenAPI adapters.
-- `registry/` is outbound A2A discovery only.
-- `runtime/` contains only DSH-used result storage and tracing.
-- `agent_memory/` is reachable only through scoped services.
-- `evaluation/` is offline and never part of production execution.
+### 3. Unique effect path
 
-### 4. Dependency rules
+Every prototype mutation follows Candidate Plan → active L0 contract → immutable plan → evidence/guard/risk → optional approval → revalidation → controlled effect → independent verification → commit, compensation, or escalation.
 
-The plugin may call the bridge; the bridge may call Network Runtime, profiles, and scoped services; Network Runtime may call profile metadata/callables and tool loaders; pragmatic backends may call integrations and schema; scoped services may call memory and retrieval.
+An unqualified L1-to-L0 translation may only read, clarify, propose, ask a human, or reject. Native-Agent mutation exists only inside the isolated local A/B evaluator as the control arm; it is never a product fallback.
 
-Network Runtime must not depend on DSH UI or models. Tools must not call approval APIs. Skills must not carry credentials. Verifiers must not trust mutation response prose. Mock must not backfill pragmatic mode. Evaluation must not enter production execution. Memory must not inject itself automatically. Environment variables must not replace request-level authorization.
+Authoring and execution are separate lifecycles. Offline authoring binds untrusted L1 text to a trusted Capability Catalog, produces review-only L0.5 and L0 artifacts, runs deterministic semantic and safety gates, and requires explicit human publication into the active Registry. Online execution consumes only active L0 contracts: a Candidate Plan becomes an immutable PreparedPlan and a journal-gated Typed Graph. L0.5, confidence, and an unreviewed L0 cannot acquire effect authority at request time.
 
-### 5. Invariants
+Read observations pass access, capability, schema, and parameter checks without effect authority. A missing or ambiguous input clarifies. A qualified write follows the unique Runtime path. An unqualified write may clarify, propose, ask a human, or reject; native L1 fallback remains read-only. The [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md) provides the complete lifecycle and terminal-state interpretation.
 
-- One mutation path through Network Runtime.
-- One immutable plan shared by approval, grant, and execution.
-- One-shot authorization and nonce consumption.
-- Independent verification rather than inference.
-- Fail closed for unknown state, backend, contract, result, or peer.
-- Profile isolation for both tool projection and capability search.
-- No automatic Skill promotion.
-- A terminal audit event for every outcome.
+### 4. Dependencies and invariants
 
-### 6. Decisions
+The Runtime depends on L0 contracts and a domain-neutral Capability gateway, never on DSH UI, prompts, model SDKs, or evaluation code. L1 and providers cannot bypass the Runtime. A journal-backed Typed Graph scheduler gates every current transaction branch and records crash-boundary uncertainty without replaying Effect. Evidence must be typed, fresh, scoped, integrity-checked, and action-bound; the inspection view projects Evidence → Observation → Capability/Collector → Object lineage with hashed collector/object identifiers. Approval and execution share an immutable plan digest. Postconditions require independent observations. Outcome uncertainty enters reconciliation, not blind retry. Compensation and recovery verification are explicit.
 
-- **ADR-001:** DSH is the only platform layer; duplicate harness surfaces were removed.
-- **ADR-002:** a narrow persistent Python bridge preserves domain investment while containing migration risk.
-- **ADR-003:** every mutation binds to a versioned Network L0 Skill.
-- **ADR-004:** SQLite is the durable P0.5 store; production HA and immutable remote audit are P1 decisions.
-- **ADR-005:** models are candidate generators, never a security boundary.
-- **ADR-006:** A2A sends self-contained tasks and explicit delegation chains.
-- **ADR-007:** oversized tool output is stored durably and paged.
+Enterprise identity, provider supply-chain admission, A2A, trajectory learning, and the historical L1 shadow/canary path are lazy optional extensions rather than core imports. DSH retrieval parity lives in `evaluation/`, uses memory-only state, and is never imported by the product adapter.
 
-### 7. Clean-code and extension policy
+Explainability is structural rather than model-authored: authoring retains requirement-level L1→L0.5→L0 mappings and digests; plans bind normalized arguments, provenance, contracts, providers, evidence, risk, approval, and graph hashes; execution retains hash-chained events, node evidence, stage latency, and an Evidence-to-Object provenance DAG. Only the Runtime terminal envelope crosses back to the Harness as an execution result.
 
-Keep only responsibilities used by the DSH path. Remove broken CLIs, retired adapters, duplicate documents, and runtime artifacts. Use explicit public APIs, frozen/versioned/hashable mutation contracts, side-effect-free imports, explicit backend cleanup, secret-safe errors, current module documentation, and the retirement gate before merge.
+### 5. Frozen engineering
 
-A new read tool needs a callable, metadata/schema, profile projection, tests, and result paging when needed. A new mutation additionally needs a ToolContract, L0 contract, intent/target/provenance compiler, independent preflight/verifier, optional compensator, approval assertions, integrity/failure/rollback tests, and a deterministic demo. A new L1 Skill must reference existing L0 effects and encode observations and stop conditions in a reviewed workflow.
-
-### 8. Documentation ownership
-
-`README.md` owns usage; `ARCHITECTURE.md` owns boundaries and decisions; `HLD.md` owns components and deployment; `LLD.md` owns contracts and algorithms; `SSD.md` owns requirements, threats, and acceptance. Each primary document contains Chinese first and English second. Git history, not duplicate migration documents, preserves historical evolution.
+Hermes/A2A productization, enterprise IAM/PDP/change integration, signed provider supply chains, governance control planes, WORM/HA/DR/SLO work, and additional non-network domains are frozen future engineering. Their code may remain regression-tested, but it is not current architecture, prototype completion evidence, or an active roadmap.

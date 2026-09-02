@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PYTHON="$ROOT/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  PYTHON=python3
+fi
+cd "$ROOT"
+exec "$PYTHON" -m network_runtime.provider_release_cli "$@"

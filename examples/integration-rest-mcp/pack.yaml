@@ -1,0 +1,75 @@
+apiVersion: netopyu.io/integration-pack/v1
+purpose: proposal_only
+activationAvailable: false
+metadata:
+  id: example.access-system
+  version: 1.0.0
+  owner: access-platform-team
+  description: Proposal-only mapping of an external REST access service into reviewed read/write capabilities.
+providers:
+  - id: identity-mcp
+    protocol: mcp
+    endpointEnvironment: IDENTITY_MCP_ENDPOINT
+    authentication:
+      mode: workload_identity
+      modelVisible: false
+    providerIdentity: example.identity.provider
+    providerVersion: 1.0.0
+  - id: access-rest
+    protocol: rest
+    endpointEnvironment: ACCESS_API_BASE_URL
+    authentication:
+      mode: environment
+      credentialEnvironment: ACCESS_API_TOKEN
+      modelVisible: false
+    providerIdentity: example.access.provider
+    providerVersion: 1.0.0
+capabilities:
+  - id: identity.user.get
+    version: 1.0.0
+    access: read
+    providerRef: identity-mcp
+    operation: tool:get_user
+    inputSchemaDigest: sha256:f775535bd350ed3c49e10c55e2fbd784e36cc7468477088b617fe0a31e2432e6
+    outputSchemaDigest: sha256:fdff9ecbe6085a9e4af8c5cb38a5d520c52f338ace3240ce7d1d7b2d55ba90bd
+    sensitiveFields: [user_id]
+  - id: access.user.status.get
+    version: 1.0.0
+    access: read
+    providerRef: access-rest
+    operation: GET /v1/users/{user_id}/access/{application_id}
+    inputSchemaDigest: sha256:1b3d9ad21363ee44b98b3856e622f73d6f8344969536789344f44eadfa54f503
+    outputSchemaDigest: sha256:d88470b7ed8495c08163004a008e82ca78ba0d687ab8884dc6b105111ccf753d
+    sensitiveFields: [user_id]
+  - id: access.user.grant
+    version: 1.0.0
+    access: write
+    providerRef: access-rest
+    operation: POST /v1/users/{user_id}/access/{application_id}
+    inputSchemaDigest: sha256:d0fe7cbe5117fa15f4ea8e8006b88e2771ebdeb01ad12e9bbfc450acd8e48586
+    outputSchemaDigest: sha256:8a13be7ae4f2e262b510d7298be67a9a8764625d71a3c20f40e435731835fb02
+    sensitiveFields: [user_id]
+    controls:
+      role: primary
+      risk: high
+      approvalRequired: true
+      idempotencyKeyField: request_id
+      verifierRef: access.user.status.get
+      reversible: true
+      compensationRef: access.user.revoke
+  - id: access.user.revoke
+    version: 1.0.0
+    access: write
+    providerRef: access-rest
+    operation: DELETE /v1/users/{user_id}/access/{application_id}
+    inputSchemaDigest: sha256:2d4cfa774b49cac650444999524c2e0f4d3628aa6e998a6586a82cd0f663d061
+    outputSchemaDigest: sha256:3727013129d7a5e65d4425716764ec711ddf0a829901281440d91464f98ef16d
+    sensitiveFields: [user_id]
+    controls:
+      role: compensation
+      risk: high
+      approvalRequired: true
+      idempotencyKeyField: request_id
+      verifierRef: access.user.status.get
+      reversible: false
+      irreversibleJustification: Terminal compensation operation for the grant workflow; restoring access requires a new approved plan.

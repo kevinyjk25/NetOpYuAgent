@@ -1,4 +1,4 @@
-"""Deterministic local-only reliability and DSH retirement checks."""
+"""Deterministic local-only reliability and harness-boundary retirement checks."""
 
 from __future__ import annotations
 
@@ -31,9 +31,9 @@ def _start_worker(
 ) -> subprocess.Popen[str]:
     environment = {
         **os.environ,
-        "NETOPYU_DSH_BACKEND": "mock",
-        "NETOPYU_DSH_TOOL_RESULT_STORE": str(result_store),
-        "NETOPYU_DSH_NETWORK_RUNTIME_STORE": str(runtime_store),
+        "NETOPYU_BACKEND": "mock",
+        "NETOPYU_TOOL_RESULT_STORE": str(result_store),
+        "NETOPYU_NETWORK_RUNTIME_STORE": str(runtime_store),
         # Prove that the explicit per-request False gate overrides ambient env.
         "NETOPYU_DSH_ALLOW_DESTRUCTIVE": "1",
         "NETOPYU_DSH_OTEL_ENABLED": "false",
@@ -158,6 +158,11 @@ def run_local_reliability(
         "restart_recovery": healthy_after_restart.get("ok") is True,
         "legacy_surfaces_removed": all(not path.exists() for path in retired_paths),
         "dsh_launcher_present": (root / "scripts" / "netopyu-dsh").is_file(),
+        "hermes_adapter_present": all(path.is_file() for path in (
+            root / "scripts" / "netopyu-hermes",
+            root / "hermes-plugin-netopyu" / "plugin.yaml",
+            root / "hermes_adapter" / "plugin.py",
+        )),
     }
     return {
         "ok": all(checks.values()), "scope": "local-mock-only", "checks": checks,

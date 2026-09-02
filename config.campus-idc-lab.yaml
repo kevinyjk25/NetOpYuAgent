@@ -1,0 +1,35 @@
+mode: pragmatic
+agent:
+  agent_id: lan-agent
+  profile: lan
+  peer_urls: [http://127.0.0.1:8766]
+tools:
+  schema_validation_enabled: true
+  mcp: {config_json: ''}
+  openapi: {spec_url: '', base_url: ''}
+  editable_hitl_tools:
+    grant_user_access: [reason]
+    revoke_user_access: [reason]
+    dc_grant_app_access: [role, reason]
+    dc_revoke_app_access: [reason]
+pragmatic:
+  device_inventory: []
+  mcp_servers:
+    - name: network-observer
+      domain: network
+      transport: stdio
+      command: [.venv/bin/python, -m, network_provider.mcp_observer, --profile, lan, --manifest, labs/p075-a-campus-idc/lab.yaml, --command-timeout, '30']
+      expected_server_name: netopyu.network-observer
+      expected_server_version: 1.0.0
+    - name: network-actor
+      domain: network
+      transport: stdio
+      command: [.venv/bin/python, -m, network_provider.mcp_actor, --profile, all, --manifest, labs/p075-a-campus-idc/lab.yaml, --store, labs/p075-a-campus-idc/.state/network_actor.sqlite, --command-timeout, '30', --lease-seconds, '120']
+      trusted_for_writes: true
+      expected_server_name: netopyu.network-actor
+      expected_server_version: 1.0.0
+  lab:
+    enabled: true
+    provider: containerlab
+    manifest: labs/p075-a-campus-idc/lab.yaml
+    command_timeout: 30
