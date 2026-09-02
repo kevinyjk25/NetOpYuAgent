@@ -2,7 +2,7 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-02。当前已完成 ES-P0 本地证据闭环和 ES-P1-Wild 角色隔离模拟；正式 ES-P1 独立人工 Private Holdout 尚未完成。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-02。当前已完成 ES-P0 本地证据闭环、ES-P1-Wild 小样本模拟和 ES-P1-AI-External 角色隔离评测；最新 200-case 外部模拟暴露了严重 over-safe-stop，正式 ES-P1 独立人工 Private Holdout 尚未完成。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -88,6 +88,8 @@ Hermes/A2A、跨域业务 Lab、企业身份与审批、Provider 供应链、治
 仓库外自动数据通道已封存 240 条模型合成用例，覆盖 6 类 Anthropic Skill、10 类事务/故障、6 个 MCP 域和 3 类语言。qwen3.5:9b 转译协议有效 240/240，可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对中，Treatment 将 Task Completion 从 76.67% 提升至 93.33%，unsafe 从 4/30 降至 0/30，p50 从 103.6 秒降至 64.3 秒。它用于在正式人工 ES-P1 前发现价值和边界，**不冒充独立人工 holdout 或生产概率**。方法、完整指标和命令见[仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)。
 
 公开 Skill 技术链路已完成角色隔离模拟：15 个实际公开 Skill、45 个案例、3 次重复和 270 次真实本地 DSH 实验臂执行中，Gold-blind 9B 转译路由一致 43/45、unsafe Runtime 误接纳为 0；Treatment 将 Task Completion 从 82.22% 提升到 97.78%，L0 路由从 21/42 提升到 42/42，p95 从 109.3 秒降到 56.1 秒。原生只读和 safe-stop 两臂保持相同，唯一残余是 1 个 L1 只读案例的三次失败。该结果是虚拟 Case/Gold 角色和声明式 fixture 的 `ES-P1-Wild-Sim`，**不是真人独立 holdout、真实系统或生产概率**；完整方法、分层结果和边界见[角色隔离模拟报告](docs/ES-P1-WILD-SIMULATED-RESULTS.md)，测试列表见[Skill 索引](docs/benchmarks/es-p1-wild-skill-index.json)，工作流见[公开 Skill 市场语料](docs/ES-P1-PUBLIC-SKILL-CORPUS.md)。
+
+扩大到 15 Skill、8 仓库、200 case、3 次重复和 1200 次真实本地 DSH 实验臂的 `ES-P1-AI-External` 得到了相反结果：Treatment 虽保持 unsafe/false commit 为 0，但转译仅正确路由 70/200，130 个请求被过度 safe-stop，Runtime-eligible recall 仅 1.11%；Task Completion 从 65.67% 降至 46.83%，Skill 聚类 95% bootstrap CI 为 `[-20.11, -17.48]` pp。它说明当前转译门在更丰富表达上存在 capability grounding 和 `apply` 词面过拟合，不能把小样本正向结果外推。完整负向结果、审阅修订和修复方向见 [ES-P1-AI-External 报告](docs/ES-P1-AI-EXTERNAL.md)。该评测仍是 GPT 角色模拟，不是正式 ES-P1 或生产概率。
 
 Runtime 结果不能只看一项 `success`：
 
@@ -208,6 +210,7 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 - [高层设计](HLD.md)、[低层设计](LLD.md)、[安全设计](SSD.md)
 - [ES-P0 本地证据报告](docs/ES-P0-EVIDENCE.md)
 - [ES-P1-Wild 角色隔离模拟结果](docs/ES-P1-WILD-SIMULATED-RESULTS.md)
+- [ES-P1-AI-External 角色隔离评测](docs/ES-P1-AI-EXTERNAL.md)
 - [仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)
 - [通用渐进式确定化与跨域验证](docs/progressive-determinization.md)
 - [真实 Harness 自动 Runtime A/B](docs/general-effect-ab.md)
@@ -253,6 +256,8 @@ These are transparent local development results, not production probability, hid
 A repository-external synthetic path has sealed 240 model-authored cases across six Anthropic Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from 4/30 to 0/30, and reduced p50 latency from 103.6 to 64.3 seconds. This remains model-authored pre-ES-P1 evidence, not independent human qualification or a production probability. See the [synthetic holdout guide](docs/SYNTHETIC-HOLDOUT.md).
 
 The public-Skill path now has a complete role-separated simulation over 15 real public Skills, 45 cases, three repetitions, and 270 real local DSH arm executions. Gold-blind 9B translation matched 43/45 simulated Gold routes with zero unsafe Runtime accepts. Treatment improved task completion from 82.22% to 97.78%, lifted the L0 route from 21/42 to 42/42, and reduced p95 from 109.3 to 56.1 seconds; native-read and safe-stop outcomes were unchanged. This is `ES-P1-Wild-Sim` over virtual Case/Gold roles and declarative fixtures, **not independent-human holdout, real-system evidence, or production probability**. See the [role-separated simulation report](docs/ES-P1-WILD-SIMULATED-RESULTS.md), [tested-Skill index](docs/benchmarks/es-p1-wild-skill-index.json), and [public Skill-market workflow](docs/ES-P1-PUBLIC-SKILL-CORPUS.md).
+
+The larger `ES-P1-AI-External` run produced the opposite result across 15 Skills, eight repositories, 200 cases, three repetitions, and 1,200 real local DSH arm executions. Treatment kept unsafe executions and false commits at zero, but matched only 70/200 expected routes, over-stopped 130 cases, and reached only 1.11% Runtime-eligible recall. Task completion fell from 65.67% to 46.83%; the Skill-clustered 95% bootstrap CI was `[-20.11, -17.48]` percentage points. This exposes capability-grounding and `apply` lexical overfitting and prevents extrapolation from the smaller positive simulation. See the [ES-P1-AI-External report](docs/ES-P1-AI-EXTERNAL.md). It remains a GPT role simulation, not formal ES-P1 qualification or a production probability.
 
 Execution outcomes are deliberately not a generic success Boolean. `verified_success` is the only positive success and requires independent postcondition evidence. `rollback_verified` proves restoration after a failed task, while `precondition_changed`, `rejected`, and `expired` are safe pre-effect stops. `manual_intervention_required` means the Runtime cannot prove the target or recovery state. Inspect a plan with `scripts/netopyu-dsh runtime PLAN_ID` and verify its event chain with `runtime-audit`.
 
