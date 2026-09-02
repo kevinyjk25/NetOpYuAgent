@@ -32,6 +32,8 @@ flowchart TB
 
 当前静态开发库包含 100 个公开 Skill、72 个仓库、9 个领域：53 个 Runtime 包门禁通过，18 个是标准格式但引用上下文不完整的“仅转译”样本，29 个非标准格式只用于鲁棒性测试。主要转译语料为 71 个 Skill/7 个开发批次；它们已经可见，所以不冒充 unseen 证明。只有冻结 Translator 后，在至少 3 个互不重叠的未知 cohort 上累计达到 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case，并同时通过安全、召回、macro-F1、参数和证据门槛，才允许大规模 Runtime A/B。完整口径、命令和指标见 [L1→L0 泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)。
 
+新的[转译用例构造链](docs/TRANSLATION-CASE-AUTHORING.md)不再把任意公开 Skill 硬配给通用 `resource.apply`：9B 只提出非 Gold 候选，确定性代码校验精确原文锚点、参数证据、风险和事务角色，再输出隐藏作者答案的 Skill–Task–Tool 审查包。首个 3-Skill/9-task pilot 有 2 个 Skill 通过结构门禁并生成 6 个盲审包；这只是候选可审率，不是 Translator 准确率。通用转译 Tool Catalog 固定不可执行，只有另行存在 Fixture MCP/真实 Provider adapter 时才可能进入 Runtime。
+
 ### Skill 与系统怎样交互
 
 L1、L0.5、L0 和 Runtime Plan 不是同一种 Skill 的不同文件格式，而是不同权威等级：

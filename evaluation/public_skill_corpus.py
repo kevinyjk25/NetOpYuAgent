@@ -1074,6 +1074,24 @@ def main(argv: list[str] | None = None) -> int:
     translation_corpus.add_argument("--batch-size", type=int, default=12)
     inspect_translation_corpus = commands.add_parser("translation-corpus-inspect")
     inspect_translation_corpus.add_argument("root")
+    anchored_author = commands.add_parser(
+        "anchored-author",
+        help="author Skill-grounded translation candidates without running Runtime/DSH",
+    )
+    anchored_author.add_argument("corpus_root")
+    anchored_author.add_argument("--output-root", required=True)
+    anchored_author.add_argument("--batch-id", required=True)
+    anchored_author.add_argument("--model", default="qwen3.5:9b")
+    anchored_author.add_argument("--limit", type=int)
+    anchored_author.add_argument("--no-resume", action="store_true")
+    inspect_anchored_author = commands.add_parser("anchored-author-inspect")
+    inspect_anchored_author.add_argument("root")
+    inspect_anchored_author.add_argument("corpus_root")
+    inspect_anchored_review = commands.add_parser("anchored-review-inspect")
+    inspect_anchored_review.add_argument("authoring_root")
+    inspect_anchored_review.add_argument("corpus_root")
+    inspect_anchored_review.add_argument("reviews_path")
+    inspect_anchored_review.add_argument("--output")
     library_summary = commands.add_parser("library-summary")
     library_summary.add_argument("root")
     library_summary.add_argument("--output", required=True)
@@ -1200,6 +1218,27 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "translation-corpus-inspect":
         from evaluation.translation_corpus import inspect_translation_corpus
         result = inspect_translation_corpus(args.root)
+    elif args.command == "anchored-author":
+        from evaluation.translation_case_authoring import run_anchored_case_authoring
+        result = run_anchored_case_authoring(
+            args.corpus_root,
+            args.output_root,
+            batch_id=args.batch_id,
+            model=args.model,
+            resume=not args.no_resume,
+            limit=args.limit,
+        )
+    elif args.command == "anchored-author-inspect":
+        from evaluation.translation_case_authoring import inspect_anchored_case_authoring
+        result = inspect_anchored_case_authoring(args.root, args.corpus_root)
+    elif args.command == "anchored-review-inspect":
+        from evaluation.translation_case_authoring import inspect_development_alignment_reviews
+        result = inspect_development_alignment_reviews(
+            args.authoring_root,
+            args.corpus_root,
+            args.reviews_path,
+            output_path=args.output,
+        )
     elif args.command == "library-summary":
         from evaluation.public_skill_library import export_public_skill_library_summary
         result = export_public_skill_library_summary(args.root, args.output)

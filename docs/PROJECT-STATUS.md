@@ -18,7 +18,9 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 - [x] 主要转译开发语料为 71 Skill，按仓库聚合为 7 个批次；整个已知库固定 `proofCohortEligible=false`；
 - [x] Runtime 大规模评测加入硬门禁：没有有效 admission 时只允许 1 case × 1 repetition 接线 smoke，且 `researchEvidenceEligible=false`；
 - [x] 准入器要求同一冻结 Translator、至少 3 个互不重叠的未知 cohort，以及合计 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case；
-- [ ] 为 71 个主要开发 Skill 构建语义对齐且不复用错误通用映射的 Task/Tool/Gold 候选，并完成 AI 角色独立审查；
+- [x] 建成语义锚定作者链：精确原文锚点、参数字面证据、通用不可执行 Tool Catalog、确定性结构门禁、透明保守规范化与答案隐藏的 AI 审查格式；
+- [x] 完成首个 3-Skill/9-task 9B 作者 pilot：2/3 Skill 通过结构门禁并输出 6 个盲审包，1 个因 source quote 不精确被拒绝；Runtime/DSH/第三方执行均为 0；该结果只是候选可审率；
+- [ ] 扩展到 71 个主要开发 Skill，完成 AI 角色审查与独立 Gold；当前不得把作者候选门禁通过率称为 Translator 准确率；
 - [ ] 使用 qwen3.5:9b 分批只跑离线转译，基于失败类别改良通用算法，禁止按单 Skill 打补丁；
 - [ ] 冻结稳定 Translator 后再收集全新 proof cohorts；门禁未通过前不恢复规模化 Runtime A/B。
 
@@ -147,6 +149,8 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 **Active phase: L1-to-L0 translation generalization gate.** ES-P0 Runtime mechanics and small-sample wiring remain `local_hypothesis_supported`, but they are not broad translation evidence. No scaled Runtime study is meaningful until the Translator passes post-freeze, cross-Skill, cross-repository, and cross-domain unseen cohorts.
 
 The 2026-09-03 reset adds a Gold-blind Translator v2, mandatory pre-run Skill–Task–Tool construct review, and a digest-bound admission gate. The current known development inventory contains 100 static public Skills from 72 repositories and nine domains, with zero third-party execution. Fifty-three are Runtime-package ready, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only; the 71 primary inputs form seven repository-preserving development batches. This entire visible inventory has `proofCohortEligible=false`.
+
+The semantic case-authoring lane is now implemented. It binds exact Skill quotes, explicit parameter evidence, a generic non-executable Tool Catalog, conservative recorded normalization, deterministic structural rejection, and an answer-hidden AI-review schema. Its first qwen3.5:9b pilot covered three Skills and nine tasks: two Skills passed the author gate and produced six blind-review packets; one was rejected for two non-exact source quotes. This is candidate reviewability only—not Translator accuracy, independent evidence, or Runtime qualification. Expansion to all 71 development Skills, AI-role review, and independent Gold remain open.
 
 Runtime evaluation now requires the same frozen Translator to pass at least three disjoint post-freeze unseen cohorts totaling at least 50 unique Skills, 15 repositories, eight domains, and 600 cases. Every cohort must pass the safety, recall, macro-F1, exact-parameter, source-evidence, artifact-loadability, and alignment gates. Without a valid admission artifact, the DSH runner permits only a 1-case × 1-repetition wiring smoke and marks it ineligible as research evidence. See the [L1-to-L0 generalization gate](TRANSLATION-GENERALIZATION-GATE.md).
 
