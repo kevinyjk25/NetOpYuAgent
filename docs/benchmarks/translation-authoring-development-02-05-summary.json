@@ -1,0 +1,103 @@
+{
+  "apiVersion": "effect-runtime.io/translation-authoring-development-summary/v1",
+  "authority": "known_development_diagnostic_only",
+  "claimBoundary": "Known development batches, different Skills, and evolving implementations. These measurements expose failure families; they are not a controlled accuracy comparison, unseen generalization evidence, Gold, or Runtime qualification.",
+  "model": "qwen3.5:9b",
+  "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+  "runtimeOrDshExecuted": false,
+  "thirdPartyExecutionAttempted": false,
+  "batches": [
+    {
+      "batchId": "development-02",
+      "packageCount": 10,
+      "acceptedCandidateCount": 2,
+      "rejectedCandidateCount": 8,
+      "deterministicCandidateAcceptanceRate": 0.2,
+      "protocolValidCandidateCount": 10,
+      "firstPassAcceptedCount": 2,
+      "repairAttemptedCount": 8,
+      "repairSalvagedCount": 0,
+      "modelCallCount": 18,
+      "latencyMs": {"p50": 112429.579, "p95": 160014.31, "max": 160014.31},
+      "dominantFailureFamilies": ["generic_operation_slug", "source_anchor_not_exact", "read_effect_semantics_mismatch", "runtime_control_parameter_leak"],
+      "authoringImplementationDigest": "sha256:20bf248688c32254b29cdf6a24d05904c6eb7315fa7939c171f4299d9923a972",
+      "reportDigest": "sha256:161fdc502fd4451e262886225c2a2c519e6e27511dfaaf5eb42059fe2f8b0670"
+    },
+    {
+      "batchId": "development-03",
+      "packageCount": 11,
+      "acceptedCandidateCount": 2,
+      "rejectedCandidateCount": 9,
+      "deterministicCandidateAcceptanceRate": 0.181818,
+      "protocolValidCandidateCount": 11,
+      "firstPassAcceptedCount": 2,
+      "repairAttemptedCount": 9,
+      "repairSalvagedCount": 0,
+      "modelCallCount": 20,
+      "latencyMs": {"p50": 103406.88, "p95": 149751.454, "max": 149751.454},
+      "dominantFailureFamilies": ["generic_operation_slug", "source_anchor_not_exact", "runtime_control_parameter_leak"],
+      "authoringImplementationDigest": "sha256:53517d92fd0724dd1df16bb7b8aa54c9d9853e07515d6a90ec4a1ccbe81cf3b7",
+      "reportDigest": "sha256:938496f71ea130df728a989d215c123a37b817bc5e646ba0356f799a24688146"
+    },
+    {
+      "batchId": "development-04",
+      "packageCount": 11,
+      "acceptedCandidateCount": 8,
+      "rejectedCandidateCount": 3,
+      "deterministicCandidateAcceptanceRate": 0.727273,
+      "protocolValidCandidateCount": 11,
+      "firstPassAcceptedCount": 6,
+      "repairAttemptedCount": 5,
+      "repairSalvagedCount": 2,
+      "modelCallCount": 17,
+      "latencyMs": {"p50": 93334.361, "p95": 191831.681, "max": 191831.681},
+      "dominantFailureFamilies": ["source_anchor_span_id_missing", "slot_coverage_mismatch", "adversarial_effect_shape_failed"],
+      "authoringImplementationDigest": "sha256:add6ffa31ec42d3a078d9dec901a89913805e9ec32edb45c223703220c303f86",
+      "reportDigest": "sha256:583343c2a32a5b6bc7c39b136c732e6c49758c81b5982900ab4a4a27ca8fe698"
+    },
+    {
+      "batchId": "development-05",
+      "packageCount": 11,
+      "acceptedCandidateCount": 9,
+      "rejectedCandidateCount": 2,
+      "deterministicCandidateAcceptanceRate": 0.818182,
+      "protocolValidCandidateCount": 11,
+      "firstPassAcceptedCount": 9,
+      "repairAttemptedCount": 2,
+      "repairSalvagedCount": 0,
+      "modelCallCount": 15,
+      "latencyMs": {"p50": 77718.208, "p95": 259334.981, "max": 259334.981},
+      "dominantFailureFamilies": ["assignment_binding_mismatch", "slot_coverage_mismatch", "parameter_literal_type_mismatch"],
+      "authoringImplementationDigest": "sha256:d3b57480673946baa22b33a5770d518097e5ad7faa59243994078217b02b6e31",
+      "reportDigest": "sha256:5b4688a460fa43b631940967cf3f9eb7bf207b6f480587741f1bd4b7c1c48dd8"
+    }
+  ],
+  "development05AnswerHiddenReview": {
+    "packageCount": 9,
+    "reviewCount": 27,
+    "protocolComplete": true,
+    "behaviorAgreementCount": 26,
+    "behaviorAgreementRate": 0.962963,
+    "alignedCount": 25,
+    "alignmentRate": 0.925926,
+    "lowConfidenceCaseCount": 0,
+    "modelCallCount": 9,
+    "latencyMs": {"p50": 31878.374, "p95": 61935.302, "max": 61935.302},
+    "diagnosticFindings": [
+      "One accepted Skill used identical normalized text for ambiguous and adversarial tasks while assigning different dispositions.",
+      "One clarification judgement contradicted the reviewer rubric by marking parameter-shape support false."
+    ],
+    "humanIndependentEvidence": false,
+    "semanticAlignmentProven": false,
+    "reportDigest": "sha256:127389d4f429977e864f7febb797840e2f3623993bca30087461cd1d53915645"
+  },
+  "postRunGateChanges": [
+    "Compiler-owned operation IDs replace generic route-label slugs.",
+    "Required source span IDs bind anchors to disclosed exact bytes.",
+    "Runtime control fields cannot leak into business parameters.",
+    "Read and non-write task envelopes are mechanically closed.",
+    "Normalized duplicate challenge prompts are rejected.",
+    "Clarification review judgements must be internally consistent with the reviewer rubric."
+  ],
+  "nextEvidence": "Validate the post-run gates on later known development batches, then freeze before collecting disjoint proof cohorts and independent Gold."
+}

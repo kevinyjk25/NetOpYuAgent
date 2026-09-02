@@ -69,6 +69,7 @@ class FakeAuthor:
     def author(self, prompt: str):  # type: ignore[no-untyped-def]
         payload = json.loads(prompt)
         assignment = payload["assignmentId"]
+        disclosed_span = payload["untrustedSourceSpans"][0]
         slots = {item["challenge"]: item["slotId"] for item in payload["slots"]}
         bundle = AnchoredBundle(
             assignment_id=assignment,
@@ -78,8 +79,9 @@ class FakeAuthor:
                 mode="read",
                 effect_semantics="none",
                 source_anchors=(SourceAnchor(
-                    path="SKILL.md",
-                    exact_quote="Inspect one service health record.",
+                    source_span_id=disclosed_span["source_span_id"],
+                    path=disclosed_span["path"],
+                    exact_quote=disclosed_span["exactQuote"],
                     rationale="The operation is explicit.",
                 ),),
                 parameters=(ParameterDefinition(
@@ -143,6 +145,17 @@ class FakeReviewer:
         }
 
 
+class InternallyInconsistentReviewer(FakeReviewer):
+    def review(self, packets):  # type: ignore[no-untyped-def]
+        reviews, telemetry = super().review(packets)
+        assert reviews is not None
+        changed = list(reviews)
+        changed[1] = changed[1].model_copy(update={
+            "parameter_shape_supports_expected_disposition": False,
+        })
+        return tuple(changed), telemetry
+
+
 def test_answer_hidden_role_review_is_sealed_and_non_authoritative(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -176,6 +189,37 @@ def test_answer_hidden_role_review_is_sealed_and_non_authoritative(
     run = json.loads((review / "run.json").read_text(encoding="utf-8"))
     assert run["candidateExpectedBehaviorVisible"] is False
     assert run["goldVisible"] is False
+
+
+def test_clarification_review_requires_parameter_shape_support(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    corpus = _corpus(tmp_path, monkeypatch)
+    authoring = tmp_path / "authoring"
+    run_anchored_case_authoring(
+        corpus,
+        authoring,
+        batch_id="development-01",
+        model="fake-author",
+        adapter=FakeAuthor(),
+    )
+
+    review = tmp_path / "review"
+    run_alignment_review(
+        authoring,
+        corpus,
+        review,
+        model="fake-reviewer",
+        adapter=InternallyInconsistentReviewer(),
+    )
+    report = json.loads((review / "report.json").read_text(encoding="utf-8"))
+    assert report["protocolComplete"] is False
+    assert report["statusCounts"] == {"protocol_failed": 1}
+    checkpoint = json.loads(
+        (review / "checkpoints/review-001.json").read_text(encoding="utf-8"),
+    )
+    assert "clarification requires" in checkpoint["telemetry"]["error"]
 
 
 def test_review_output_cannot_mutate_sealed_authoring_workspace(

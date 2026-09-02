@@ -169,6 +169,15 @@ def _validate_judgements(
 ) -> None:
     if [item.case_id for item in judgements] != [item["caseId"] for item in packets]:
         raise ValueError("review case coverage or order mismatch")
+    for item in judgements:
+        if (
+            item.expected_behavior == "clarification"
+            and not item.parameter_shape_supports_expected_disposition
+        ):
+            raise ValueError(
+                f"{item.case_id}: clarification requires a missing or ambiguous parameter "
+                "shape, so parameter_shape_supports_expected_disposition must be true"
+            )
 
 
 class OllamaAlignmentReviewAdapter:
@@ -394,6 +403,15 @@ def run_alignment_review(
             flush=True,
         )
         judgements, telemetry = runtime_adapter.review(group)
+        if judgements is not None:
+            try:
+                _validate_judgements(judgements, group)
+            except ValueError as exc:
+                telemetry = {
+                    **telemetry,
+                    "error": f"{type(exc).__name__}: {exc}"[:4000],
+                }
+                judgements = None
         review_rows = [] if judgements is None else _materialize_reviews(judgements, reviewer_id)
         row = {
             "apiVersion": REVIEW_RUN_SCHEMA,

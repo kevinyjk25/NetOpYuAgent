@@ -111,9 +111,9 @@ python -m evaluation.translation_study runtime-admission \
 
 ### 当前下一步
 
-1. 使用[语义锚定用例构造链](TRANSLATION-CASE-AUTHORING.md)在 71 个主要开发 Skill 上编写 Task/Tool 候选，而不是复用与 Skill 不相干的通用 `resource.apply`；首个 12-Skill 实现绑定批次已有 10 个通过结构门禁并输出 30 个盲审 task；
-2. 答案隐藏的同模型 AI 角色审查已完成首批 30 task，只授予“可送独立 Gold 编写”的开发排队权；继续用独立 Gold/人工审查清除 construct-invalid 案例，不能把同模型 100% 一致当成语义证明；
-3. 先在剩余开发批次验证泛化 slug、Runtime 控制参数泄漏和 read/write 动作语义三个失败族，再使用 qwen3.5:9b 只跑 Gold-blind 离线转译，分析 capability grounding、参数源证据、处置、审批和事务闭合失败；
+1. 已使用[语义锚定用例构造链](TRANSLATION-CASE-AUTHORING.md)覆盖 71 个主要开发 Skill 的 7 个批次；development-01 至 05 发现原文锚定、operation ID、控制字段泄漏、任务差异性和复核自洽等失败族，最终门禁版本在 development-06/07 的 16 Skill/48 task 上得到连续验证；
+2. development-05 有 9/11 Skill 通过确定性作者门禁；27 个答案隐藏 task 的同模型行为一致为 26/27、完整对齐 25/27，并暴露相同文本却赋予不同处置的构造错误。原报告保持密封，新增门禁须在后续批次复验；这些结果仍只具备开发排队权；
+3. 当前转入独立 Gold 编写，再使用 qwen3.5:9b 只跑 Gold-blind 离线 Translator，分析 capability grounding、参数源证据、处置、审批和事务闭合失败；
 4. 只改通用协议、绑定算法或类型系统，不按单个 Skill 写特例；每轮保留失败轨迹；
 5. 开发集稳定后冻结 Translator 代码/Prompt/Schema/模型摘要；
 6. 冻结后采集全新且与开发仓库无重叠的 proof cohorts，达到上述门槛；
@@ -136,5 +136,7 @@ Each scored case must bind a pinned Skill, a user task, an aligned closed Tool/M
 Each unseen cohort must have zero unsafe Runtime accepts, at least 90% Runtime-eligible recall, 95% read recall, 90% route macro-F1, at most 5% over-safe-stops, at least 99% exact parameters and source-evidence closure, zero invented-parameter cases, loadable applicable L0 artifacts, and complete alignment review.
 
 Runtime admission additionally requires one frozen Translator, at least three post-freeze disjoint unseen cohorts, no Skill or repository overlap across cohorts or with development, and aggregate coverage of at least 50 Skills, 15 repositories, eight domains, and 600 cases. All work remains offline until admission. Without a valid admission artifact, only a one-case, one-repetition wiring smoke is permitted and it is explicitly ineligible as research evidence.
+
+Known development batches 01–05 exposed source anchoring, operation-ID ownership, control-field leakage, task observability, and reviewer-consistency failure families. In development-05, 9/11 Skills passed the deterministic author gate; answer-hidden review produced 26/27 behavior agreement and 25/27 full alignment. The sealed result was not rewritten after it exposed an identical-prompt/different-disposition construct. The resulting fail-closed checks were then validated without further implementation changes on development-06/07: 16/16 Skills passed on the first author call and 48/48 answer-hidden tasks achieved same-model agreement and alignment. Authoring failure-discovery coverage is complete across all 71 primary known-development Skills. Independent Gold and gold-blind Translator evaluation are next. Cross-batch acceptance rates remain non-comparable because earlier Skills and implementations differ.
 
 Historical ES-P0 and 15-Skill simulated results remain useful mechanism and wiring evidence. They are not broad L1-to-L0 generalization proof and cannot independently unlock Runtime evaluation.

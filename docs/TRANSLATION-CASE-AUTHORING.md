@@ -68,6 +68,25 @@ v2 剩余两个拒绝只命中 `source_anchor_not_exact`；非唯一 span、标�
 
 本地完整文本制品保留逐 Skill checkpoint；可提交的聚合指标见 [development-01 v1 摘要](benchmarks/translation-authoring-development-01-summary.json)和[实现绑定的 v2 摘要](benchmarks/translation-authoring-development-01-v2-summary.json)。`alignment-review.html` 展示模型候选、规范化和失败；`review-packets.jsonl` 隐藏候选 expected behavior 与 Gold。AI 审查永远标记为 `humanIndependentEvidence=false`，只能辅助排队，不能替代独立 Gold/人工证据。
 
+### 跨批次失败驱动改良（development-02 至 05）
+
+后续四个已知开发批次用于寻找**通用失败族**，不同批次包含不同 Skill，且实现持续变化，所以通过率不能被解释为受控 A/B 或准确率提升：
+
+| 批次 | Skill | 确定性门禁通过 | 首轮通过 | 修复/挽回 | 调用 | p50 / p95 秒 |
+|---|---:|---:|---:|---:|---:|---:|
+| development-02 | 10 | 2（20.0%） | 2 | 8 / 0 | 18 | 112.4 / 160.0 |
+| development-03 | 11 | 2（18.2%） | 2 | 9 / 0 | 20 | 103.4 / 149.8 |
+| development-04 | 11 | 8（72.7%） | 6 | 5 / 2 | 17 | 93.3 / 191.8 |
+| development-05 | 11 | 9（81.8%） | 9 | 2 / 0 | 15 | 77.7 / 259.3 |
+
+development-02/03 证明仅靠 Prompt 软约束无法稳定消除泛化 slug、控制字段泄漏和复制 anchor 错误。随后将 operation ID 与原文 span 绑定收归编译器：模型选择语义，编译器生成稳定 ID，并通过必填 `source_span_id` 绑定披露的精确字节；read/non-write 安全 envelope 也由确定性代码闭合。development-05 不再出现泛化 slug、缺失 span ID、read Effect 或控制参数泄漏，两个拒绝均来自同内容长 Skill 的 assignment/slot/参数类型错误。
+
+对 development-05 的 9 个通过 Skill/27 task 做答案隐藏角色复核后，行为处置一致 26/27、完整对齐 25/27，无低置信度，p50/p95 为 31.9/61.9 秒。复核发现一个重要漏检：某候选让 ambiguous 与 adversarial 使用完全相同文本，却赋予不同处置；另有一个复核布尔值与 clarification 定义自相矛盾。原密封结果保留不改，后续代码新增“规范化后挑战文本不得重复”和“clarification 参数形态判断必须自洽”门禁。它们尚需在后续开发批次复验。
+
+逐批实现摘要、报告 digest 和完整限制见 [development-02–05 聚合摘要](benchmarks/translation-authoring-development-02-05-summary.json)。截至这里仍未编写独立 Gold、未运行 Translator，也未运行 Runtime/DSH。
+
+新增门禁随后以同一作者/复核实现运行 development-06/07：16/16 Skill 均首轮通过，48/48 task 的答案隐藏同模型复核行为一致且完整对齐，无低置信度；作者不需要修复调用。它证明新协议可以在两个后续已知批次上稳定工作，并完成 71 个主要开发 Skill 的失败发现覆盖，但仍不能证明独立语义准确率。实现绑定明细见 [development-06–07 摘要](benchmarks/translation-authoring-development-06-07-summary.json)。下一步是独立 Gold 和 Gold-blind Translator 诊断，而不是 Runtime。
+
 ### 使用
 
 ```bash
@@ -106,3 +125,9 @@ The first qwen3.5:9b development batch covered 12 Skills and 36 tasks. All 12 pr
 An answer-hidden same-model role review completed all 30 tasks with 30/30 behavior agreement and no low-confidence case at 26.0/43.4 seconds p50/p95. This only queues candidates for independent Gold authoring: the author and reviewer used the same 9B artifact, so the result is neither independent evidence nor Translator accuracy. Manual-style inspection also identified generic operation slugs, Runtime-control parameters leaking into Tool schemas, and subtle read/write semantics as the next general gate families. No Runtime, DSH, Tool, MCP provider, or third-party Skill code ran.
 
 AI-role reviews remain simulated evidence (`humanIndependentEvidence=false`). They may triage candidates for later Gold authoring but cannot unlock the translation or Runtime gate.
+
+Development batches 02–05 were then used to expose reusable failure families. Their Skills and implementation digests differ, so the observed author-gate rates—20.0%, 18.2%, 72.7%, and 81.8%—are diagnostics rather than a controlled accuracy trend. Soft prompt constraints did not reliably prevent generic route slugs, control-field leakage, or copied-anchor errors. Operation IDs and disclosed source-span binding were therefore moved into the deterministic compiler boundary, while read and non-write safety envelopes were mechanically closed.
+
+In development-05, 9/11 Skills passed the structural gate. The answer-hidden review agreed on behavior for 26/27 tasks and marked 25/27 fully aligned. It exposed one accepted candidate whose ambiguous and adversarial prompts were textually identical despite different labels, plus one clarification judgement that contradicted the rubric's parameter-shape semantics. The sealed report remains unchanged; subsequent code rejects normalized duplicate challenge prompts and internally inconsistent clarification reviews. These post-run gates still require validation on later development batches. No independent Gold, Translator, Runtime, or DSH execution occurred. See the [implementation-bound batch summary](benchmarks/translation-authoring-development-02-05-summary.json).
+
+The revised author and reviewer implementations then evaluated development-06/07 without further changes. All 16 Skills passed on the first author call, and all 48 answer-hidden tasks achieved behavior agreement and full same-model alignment with no low-confidence case. This validates mechanism stability across two later known batches and completes failure-discovery authoring coverage for all 71 primary development Skills; it does not establish independent semantic accuracy. See the [development-06–07 implementation-bound summary](benchmarks/translation-authoring-development-06-07-summary.json). Independent Gold and gold-blind Translator diagnostics come next; Runtime remains locked.
