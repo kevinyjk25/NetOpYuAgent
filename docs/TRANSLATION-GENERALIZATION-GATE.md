@@ -111,9 +111,9 @@ python -m evaluation.translation_study runtime-admission \
 
 ### 当前下一步
 
-1. 使用[语义锚定用例构造链](TRANSLATION-CASE-AUTHORING.md)在 71 个主要开发 Skill 上编写 Task/Tool 候选，而不是复用与 Skill 不相干的通用 `resource.apply`；首个 12-Skill 开发批次有 6 个通过结构门禁并输出 18 个盲审包；
-2. 先做独立 AI 角色审查，人工证据仍保留为未完成，清除 construct-invalid 案例；
-3. 使用 qwen3.5:9b 按 7 个开发批次只跑离线转译，分析 capability grounding、参数源证据、处置、审批和事务闭合失败；
+1. 使用[语义锚定用例构造链](TRANSLATION-CASE-AUTHORING.md)在 71 个主要开发 Skill 上编写 Task/Tool 候选，而不是复用与 Skill 不相干的通用 `resource.apply`；首个 12-Skill 实现绑定批次已有 10 个通过结构门禁并输出 30 个盲审 task；
+2. 答案隐藏的同模型 AI 角色审查已完成首批 30 task，只授予“可送独立 Gold 编写”的开发排队权；继续用独立 Gold/人工审查清除 construct-invalid 案例，不能把同模型 100% 一致当成语义证明；
+3. 先在剩余开发批次验证泛化 slug、Runtime 控制参数泄漏和 read/write 动作语义三个失败族，再使用 qwen3.5:9b 只跑 Gold-blind 离线转译，分析 capability grounding、参数源证据、处置、审批和事务闭合失败；
 4. 只改通用协议、绑定算法或类型系统，不按单个 Skill 写特例；每轮保留失败轨迹；
 5. 开发集稳定后冻结 Translator 代码/Prompt/Schema/模型摘要；
 6. 冻结后采集全新且与开发仓库无重叠的 proof cohorts，达到上述门槛；

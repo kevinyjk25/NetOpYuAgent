@@ -1088,6 +1088,19 @@ def main(argv: list[str] | None = None) -> int:
     inspect_anchored_author = commands.add_parser("anchored-author-inspect")
     inspect_anchored_author.add_argument("root")
     inspect_anchored_author.add_argument("corpus_root")
+    anchored_review_run = commands.add_parser(
+        "anchored-review-run",
+        help="run answer-hidden AI-role triage outside the sealed authoring workspace",
+    )
+    anchored_review_run.add_argument("authoring_root")
+    anchored_review_run.add_argument("corpus_root")
+    anchored_review_run.add_argument("--output-root", required=True)
+    anchored_review_run.add_argument("--model", default="qwen3.5:9b")
+    anchored_review_run.add_argument("--no-resume", action="store_true")
+    inspect_anchored_review_run = commands.add_parser("anchored-review-run-inspect")
+    inspect_anchored_review_run.add_argument("review_root")
+    inspect_anchored_review_run.add_argument("authoring_root")
+    inspect_anchored_review_run.add_argument("corpus_root")
     inspect_anchored_review = commands.add_parser("anchored-review-inspect")
     inspect_anchored_review.add_argument("authoring_root")
     inspect_anchored_review.add_argument("corpus_root")
@@ -1233,6 +1246,22 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "anchored-author-inspect":
         from evaluation.translation_case_authoring import inspect_anchored_case_authoring
         result = inspect_anchored_case_authoring(args.root, args.corpus_root)
+    elif args.command == "anchored-review-run":
+        from evaluation.translation_alignment_review import run_alignment_review
+        result = run_alignment_review(
+            args.authoring_root,
+            args.corpus_root,
+            args.output_root,
+            model=args.model,
+            resume=not args.no_resume,
+        )
+    elif args.command == "anchored-review-run-inspect":
+        from evaluation.translation_alignment_review import inspect_alignment_review
+        result = inspect_alignment_review(
+            args.review_root,
+            args.authoring_root,
+            args.corpus_root,
+        )
     elif args.command == "anchored-review-inspect":
         from evaluation.translation_case_authoring import inspect_development_alignment_reviews
         result = inspect_development_alignment_reviews(

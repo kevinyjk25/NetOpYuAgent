@@ -397,17 +397,60 @@ def _assignment_literal(name: str, value: str) -> str:
     return f"{name}={rendered}"
 
 
+def _unique_source_span(quote: str, source: str) -> tuple[str, str] | None:
+    """Return one whitespace/case-only source span, never a fuzzy repair."""
+
+    stripped = quote.strip()
+    if not stripped:
+        return None
+    tokens = re.split(r"\s+", stripped)
+    pattern = r"\s+".join(re.escape(token) for token in tokens)
+    for flags, reason in (
+        (0, "whitespace"),
+        (re.IGNORECASE, "whitespace_case"),
+    ):
+        matches = list(re.finditer(pattern, source, flags=flags))
+        if len(matches) == 1:
+            matched = matches[0].group(0)
+            if matched != quote:
+                return matched, reason
+            return None
+        if len(matches) > 1:
+            return None
+    return None
+
+
 def normalize_author_candidate(
     bundle: AnchoredBundle,
+    skill_files: dict[str, str] | None = None,
 ) -> tuple[AnchoredBundle, tuple[str, ...]]:
     """Normalize mechanical fixture syntax without changing semantic labels.
 
-    The normalization cannot repair a source anchor, change read/write intent,
-    invent a parameter, or turn clarify/reject into an actionable candidate.
+    Source anchors may only be rebound to a unique span with identical
+    non-whitespace text (optionally case-insensitive).  The normalization cannot
+    perform fuzzy semantic repair, change read/write intent, invent a parameter,
+    or turn clarify/reject into an actionable candidate.
     """
 
     events: list[str] = []
     operation = bundle.operation
+    if skill_files is not None:
+        anchors: list[SourceAnchor] = []
+        for index, anchor in enumerate(operation.source_anchors):
+            source = skill_files.get(anchor.path)
+            aligned = (
+                None
+                if source is None or anchor.exact_quote in source
+                else _unique_source_span(anchor.exact_quote, source)
+            )
+            if aligned is not None:
+                exact_quote, reason = aligned
+                anchor = anchor.model_copy(update={"exact_quote": exact_quote})
+                events.append(
+                    f"source_anchor_{reason}_realigned:{anchor.path}:{index}",
+                )
+            anchors.append(anchor)
+        operation = operation.model_copy(update={"source_anchors": tuple(anchors)})
     if operation.mode == "write" and operation.effect_semantics == "none":
         operation = operation.model_copy(update={"effect_semantics": "irreversible"})
         events.append("write_none_conservatively_normalized_to_irreversible")
@@ -433,6 +476,20 @@ def normalize_author_candidate(
             if operation.effect_semantics == "irreversible" and task.risk not in {"high", "critical"}:
                 updates["risk"] = "high"
                 events.append(f"{task.slot_id}:irreversible_risk_promoted_to_high")
+            if operation.mode == "read":
+                if task.approval_required:
+                    updates["approval_required"] = False
+                    events.append(f"{task.slot_id}:read_approval_normalized_to_false")
+                if task.max_effect_calls != 0:
+                    updates["max_effect_calls"] = 0
+                    events.append(f"{task.slot_id}:read_effect_budget_normalized_to_zero")
+            elif task.expected_behavior == "l0_write_candidate":
+                if not task.approval_required:
+                    updates["approval_required"] = True
+                    events.append(f"{task.slot_id}:write_approval_normalized_to_true")
+                if task.max_effect_calls != 1:
+                    updates["max_effect_calls"] = 1
+                    events.append(f"{task.slot_id}:write_effect_budget_normalized_to_one")
         tasks.append(task.model_copy(update=updates))
     return bundle.model_copy(update={"operation": operation, "tasks": tuple(tasks)}), tuple(events)
 
@@ -733,8 +790,11 @@ def validate_anchored_bundle(
                 local.append("write_safety_shape_failed")
             if operation.effect_semantics == "irreversible" and task.risk not in {"high", "critical"}:
                 local.append("irreversible_risk_underclassified")
-        elif task.max_effect_calls != 0:
-            local.append("non_write_effect_budget_nonzero")
+        else:
+            if task.max_effect_calls != 0:
+                local.append("non_write_effect_budget_nonzero")
+            if task.approval_required:
+                local.append("non_write_approval_required")
         task_checks.append({
             "slotId": task.slot_id,
             "passed": not local,
@@ -891,11 +951,16 @@ def run_anchored_case_authoring(
         bundle, telemetry = runtime_adapter.author(prompt)
         attempts: list[dict[str, Any]] = []
         normalizations: tuple[str, ...] = ()
+        skill_files = {
+            item["path"]: item["content"]
+            for item in skill["files"]
+            if isinstance(item.get("content"), str)
+        }
         if bundle is None:
             validation = {"passed": False, "failures": ["model_protocol_failed"], "catalog": None}
         else:
             model_candidate_digest = sha256_json(bundle.model_dump(mode="json"))
-            bundle, normalizations = normalize_author_candidate(bundle)
+            bundle, normalizations = normalize_author_candidate(bundle, skill_files)
             validation = validate_anchored_bundle(skill, assignment_id, bundle)
             attempts.append({
                 "attempt": 1,
@@ -926,7 +991,7 @@ def run_anchored_case_authoring(
                 }
                 if repaired is not None:
                     model_candidate_digest = sha256_json(repaired.model_dump(mode="json"))
-                    bundle, normalizations = normalize_author_candidate(repaired)
+                    bundle, normalizations = normalize_author_candidate(repaired, skill_files)
                     validation = validate_anchored_bundle(skill, assignment_id, bundle)
                     attempts.append({
                         "attempt": 2,

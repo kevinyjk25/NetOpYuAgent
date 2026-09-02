@@ -32,7 +32,7 @@ flowchart TB
 
 当前静态开发库包含 100 个公开 Skill、72 个仓库、9 个领域：53 个 Runtime 包门禁通过，18 个是标准格式但引用上下文不完整的“仅转译”样本，29 个非标准格式只用于鲁棒性测试。主要转译语料为 71 个 Skill/7 个开发批次；它们已经可见，所以不冒充 unseen 证明。只有冻结 Translator 后，在至少 3 个互不重叠的未知 cohort 上累计达到 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case，并同时通过安全、召回、macro-F1、参数和证据门槛，才允许大规模 Runtime A/B。完整口径、命令和指标见 [L1→L0 泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)。
 
-新的[转译用例构造链](docs/TRANSLATION-CASE-AUTHORING.md)不再把任意公开 Skill 硬配给通用 `resource.apply`：9B 只提出非 Gold 候选，确定性代码校验精确原文锚点、参数证据、风险和事务角色，再输出隐藏作者答案的 Skill–Task–Tool 审查包。首个 12-Skill/36-task 开发批次为 12/12 协议有效、6/12 通过结构门禁并生成 18 个盲审包；6 次修复没有挽回案例。该 50% 只是候选可审率，不是 Translator 准确率。通用转译 Tool Catalog 固定不可执行，只有另行存在 Fixture MCP/真实 Provider adapter 时才可能进入 Runtime。
+新的[转译用例构造链](docs/TRANSLATION-CASE-AUTHORING.md)不再把任意公开 Skill 硬配给通用 `resource.apply`：9B 只提出非 Gold 候选，确定性代码校验原文锚点、参数证据、风险和事务角色，再输出隐藏作者答案的 Skill–Task–Tool 审查包。首个 12-Skill/36-task 开发批次经唯一 span 对齐与 read/write 机械闭包后，候选可审率从 6/12 提升到 10/12，模型调用从 18 降到 14；30 个 task 的同模型答案隐藏角色审查协议完整且行为一致。后者仅表示可送独立 Gold 编写，不是 Translator 准确率或独立证据；剩余泛化 slug、控制参数泄漏和 read/write 语义仍需更多开发批次验证。通用转译 Tool Catalog 固定不可执行，只有另行存在 Provider adapter 且通过转译泛化门禁后才可能进入 Runtime。
 
 ### Skill 与系统怎样交互
 
@@ -234,6 +234,8 @@ The [authoritative prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes
 ### Design
 
 The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
+
+The semantic authoring lane now has an implementation-bound 12-Skill development rerun. Unique non-fuzzy source-span alignment and mechanical read/write closure improved candidate reviewability from 6/12 to 10/12 while reducing model calls from 18 to 14. Thirty accepted tasks completed same-model answer-hidden role triage with full protocol coverage and behavior agreement. That triage only queues independent Gold work; it is not Translator accuracy, independent generalization, or Runtime qualification. See [translation case authoring and alignment](docs/TRANSLATION-CASE-AUTHORING.md).
 
 | Layer | Authority | Boundary |
 |---|---|---|
