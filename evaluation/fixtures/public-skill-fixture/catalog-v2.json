@@ -1,0 +1,90 @@
+{
+  "apiVersion": "effect-runtime.io/public-skill-tool-catalog/v2",
+  "assignmentId": "wild-assignment-example",
+  "capabilities": [
+    {
+      "capabilityId": "directory.user.read",
+      "toolName": "get_user",
+      "description": "Read one deterministic user record.",
+      "actionType": "read_only",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["user_id"],
+        "properties": {
+          "user_id": {"type": "string", "minLength": 1}
+        }
+      },
+      "operation": {
+        "kind": "read_record",
+        "collection": "users",
+        "keyArgument": "user_id"
+      }
+    },
+    {
+      "capabilityId": "directory.user.role.validate",
+      "toolName": "validate_user_role",
+      "description": "Validate a proposed user role without writing.",
+      "actionType": "read_only",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["user_id", "role"],
+        "properties": {
+          "user_id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "enum": ["viewer", "editor"]}
+        }
+      },
+      "operation": {
+        "kind": "validate_record",
+        "collection": "users",
+        "keyArgument": "user_id",
+        "valueArguments": {"role": "role"}
+      }
+    },
+    {
+      "capabilityId": "directory.user.role.set",
+      "toolName": "set_user_role",
+      "description": "Apply one approved user-role transition.",
+      "actionType": "reversible",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["user_id", "role", "expected_revision"],
+        "properties": {
+          "user_id": {"type": "string", "minLength": 1},
+          "role": {"type": "string", "enum": ["viewer", "editor"]},
+          "expected_revision": {"type": "integer", "minimum": 1}
+        }
+      },
+      "operation": {
+        "kind": "upsert_record",
+        "collection": "users",
+        "keyArgument": "user_id",
+        "valueArguments": {"role": "role"},
+        "revisionArgument": "expected_revision"
+      }
+    },
+    {
+      "capabilityId": "directory.user.restore",
+      "toolName": "restore_user",
+      "description": "Restore the Runtime-approved pre-change user snapshot.",
+      "actionType": "reversible",
+      "inputSchema": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["user_id", "approved_preflight"],
+        "properties": {
+          "user_id": {"type": "string", "minLength": 1},
+          "approved_preflight": {"type": "object"}
+        }
+      },
+      "operation": {
+        "kind": "restore_record",
+        "collection": "users",
+        "keyArgument": "user_id",
+        "snapshotArgument": "approved_preflight"
+      }
+    }
+  ]
+}

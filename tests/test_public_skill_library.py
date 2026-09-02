@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from effect_runtime import inspect_skill_package
 from evaluation.public_skill_draft_author import DraftBundle, DraftTask, run_public_market_drafts
 from evaluation.public_skill_library import (
     build_public_skill_library,
@@ -28,7 +29,8 @@ class _DraftAdapter:
                 "safe_stop_clarify" if challenge == "ambiguous_or_missing" else "safe_stop_reject"
             )
             tasks.append(DraftTask(
-                slot_id=slot["slotId"], challenge=challenge, user_prompt=f"Review {challenge}",
+                slot_id=slot["slotId"], challenge=challenge,
+                user_prompt=f"Review {challenge} for user_id alice",
                 intended_outcome="A bounded candidate", expected_disposition=disposition,
                 risk="medium", approval_required=False, max_effect_calls=0,
             ))
@@ -52,7 +54,8 @@ def _author_kit(root: Path) -> Path:
     )
     (package / "references" / "details.md").write_text("Reference details.\n", encoding="utf-8")
     (package / "agents" / "openai.yaml").write_text("interface: inert\n", encoding="utf-8")
-    package_digest = "sha256:" + "a" * 64
+    package_digest = inspect_skill_package(package)["packageDigest"]
+    assert package_digest is not None
     assignment = {
         "apiVersion": "effect-runtime.io/public-skill-author-assignment/v1",
         "assignmentId": "wild-assignment-001", "packageId": package_id,

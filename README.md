@@ -64,6 +64,8 @@ Hermes/A2A、跨域业务 Lab、企业身份与审批、Provider 供应链、治
 
 仓库外自动数据通道已封存 240 条模型合成用例，覆盖 6 类 Anthropic Skill、10 类事务/故障、6 个 MCP 域和 3 类语言。qwen3.5:9b 转译协议有效 240/240，可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对中，Treatment 将 Task Completion 从 76.67% 提升至 93.33%，unsafe 从 4/30 降至 0/30，p50 从 103.6 秒降至 64.3 秒。它用于在正式人工 ES-P1 前发现价值和边界，**不冒充独立人工 holdout 或生产概率**。方法、完整指标和命令见[仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)。
 
+公开 Skill 技术链路已完成角色隔离模拟：15 个实际公开 Skill、45 个案例、3 次重复和 270 次真实本地 DSH 实验臂执行中，Gold-blind 9B 转译路由一致 43/45、unsafe Runtime 误接纳为 0；Treatment 将 Task Completion 从 82.22% 提升到 97.78%，L0 路由从 21/42 提升到 42/42，p95 从 109.3 秒降到 56.1 秒。原生只读和 safe-stop 两臂保持相同，唯一残余是 1 个 L1 只读案例的三次失败。该结果是虚拟 Case/Gold 角色和声明式 fixture 的 `ES-P1-Wild-Sim`，**不是真人独立 holdout、真实系统或生产概率**；完整方法、分层结果和边界见[角色隔离模拟报告](docs/ES-P1-WILD-SIMULATED-RESULTS.md)，测试列表见[Skill 索引](docs/benchmarks/es-p1-wild-skill-index.json)，工作流见[公开 Skill 市场语料](docs/ES-P1-PUBLIC-SKILL-CORPUS.md)。
+
 ### 支持的典型场景
 
 - 新员工应用访问开通：身份、应用、审批、权限 MCP 与网络 L0 Saga 联动；
@@ -170,6 +172,7 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 - [架构与 ADR](ARCHITECTURE.md)
 - [高层设计](HLD.md)、[低层设计](LLD.md)、[安全设计](SSD.md)
 - [ES-P0 本地证据报告](docs/ES-P0-EVIDENCE.md)
+- [ES-P1-Wild 角色隔离模拟结果](docs/ES-P1-WILD-SIMULATED-RESULTS.md)
 - [仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)
 - [通用渐进式确定化与跨域验证](docs/progressive-determinization.md)
 - [真实 Harness 自动 Runtime A/B](docs/general-effect-ab.md)
@@ -212,7 +215,7 @@ These are transparent local development results, not production probability, hid
 
 A repository-external synthetic path has sealed 240 model-authored cases across six Anthropic Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from 4/30 to 0/30, and reduced p50 latency from 103.6 to 64.3 seconds. This remains model-authored pre-ES-P1 evidence, not independent human qualification or a production probability. See the [synthetic holdout guide](docs/SYNTHETIC-HOLDOUT.md).
 
-For public-market coverage, a static-only SkillsMP/GitHub pilot accepted 20 pinned packages and exported 45 independent-author slots from the 15 packages that passed the strict Runtime package gate. A qwen3.5:9b helper produced 42 non-authoritative task drafts; one inconsistent package draft remained fail-closed. Human-authored Gold and Oracles are still required. Browse the versioned [tested-Skill index](docs/benchmarks/es-p1-wild-skill-index.json), or generate the full offline content browser as documented in the [ES-P1 public Skill-market corpus](docs/ES-P1-PUBLIC-SKILL-CORPUS.md).
+The public-Skill path now has a complete role-separated simulation over 15 real public Skills, 45 cases, three repetitions, and 270 real local DSH arm executions. Gold-blind 9B translation matched 43/45 simulated Gold routes with zero unsafe Runtime accepts. Treatment improved task completion from 82.22% to 97.78%, lifted the L0 route from 21/42 to 42/42, and reduced p95 from 109.3 to 56.1 seconds; native-read and safe-stop outcomes were unchanged. This is `ES-P1-Wild-Sim` over virtual Case/Gold roles and declarative fixtures, **not independent-human holdout, real-system evidence, or production probability**. See the [role-separated simulation report](docs/ES-P1-WILD-SIMULATED-RESULTS.md), [tested-Skill index](docs/benchmarks/es-p1-wild-skill-index.json), and [public Skill-market workflow](docs/ES-P1-PUBLIC-SKILL-CORPUS.md).
 
 Production qualification remains open for vendor devices, enterprise identity/change systems, independently owned signing roots, distributed HA/DR, remote immutable audit, and production SLOs. EVPN L3VPN and MPLS L2/L3 VPN are outside the current lab coverage.
 

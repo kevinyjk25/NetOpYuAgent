@@ -813,7 +813,10 @@ def _annotation_schemas() -> dict[str, Any]:
             "type": "object", "additionalProperties": False,
             "required": ["apiVersion", "assignmentId", "capabilities"],
             "properties": {
-                "apiVersion": {"const": "effect-runtime.io/public-skill-tool-catalog/v1"},
+                "apiVersion": {"enum": [
+                    "effect-runtime.io/public-skill-tool-catalog/v1",
+                    "effect-runtime.io/public-skill-tool-catalog/v2",
+                ]},
                 "assignmentId": common_id,
                 "capabilities": {"type": "array", "items": {"type": "object"}},
             },
@@ -1028,6 +1031,72 @@ def main(argv: list[str] | None = None) -> int:
     library_summary = commands.add_parser("library-summary")
     library_summary.add_argument("root")
     library_summary.add_argument("--output", required=True)
+    review_kit = commands.add_parser("review-kit")
+    review_kit.add_argument("author_kit_root")
+    review_kit.add_argument("draft_root")
+    review_kit.add_argument("--output-root", required=True)
+    inspect_review_kit = commands.add_parser("review-kit-inspect")
+    inspect_review_kit.add_argument("root")
+    simulated_authoring = commands.add_parser(
+        "simulate-independent-authoring",
+        help="build role-separated simulation inputs; never independent-human evidence",
+    )
+    simulated_authoring.add_argument("review_root")
+    simulated_authoring.add_argument("author_kit_root")
+    simulated_authoring.add_argument("--output-root", required=True)
+    gold_kit = commands.add_parser("gold-kit")
+    gold_kit.add_argument("review_root")
+    gold_kit.add_argument("--output-root", required=True)
+    inspect_gold_kit = commands.add_parser("gold-kit-inspect")
+    inspect_gold_kit.add_argument("root")
+    paired_kit = commands.add_parser("paired-kit")
+    paired_kit.add_argument("gold_root")
+    paired_kit.add_argument("author_kit_root")
+    paired_kit.add_argument("--output-root", required=True)
+    inspect_paired_kit = commands.add_parser("paired-kit-inspect")
+    inspect_paired_kit.add_argument("root")
+    translate = commands.add_parser("translate")
+    translate.add_argument("paired_root")
+    translate.add_argument("--output-root", required=True)
+    translate.add_argument("--model", default="qwen3.5:9b")
+    translate.add_argument("--no-resume", action="store_true")
+    inspect_translation = commands.add_parser("translation-inspect")
+    inspect_translation.add_argument("root")
+    bind_translation = commands.add_parser("paired-bind")
+    bind_translation.add_argument("paired_root")
+    bind_translation.add_argument("translation_root")
+    bind_translation.add_argument("--output-root", required=True)
+    inspect_bound = commands.add_parser("paired-bind-inspect")
+    inspect_bound.add_argument("root")
+    paired_run = commands.add_parser(
+        "paired-run", help="run sealed Control/Treatment inputs through real local DSH",
+    )
+    paired_run.add_argument("bound_root")
+    paired_run.add_argument("--output-root", required=True)
+    paired_run.add_argument("--model", default="qwen3.5:9b")
+    paired_run.add_argument("--base-url", default="http://127.0.0.1:11434")
+    paired_run.add_argument("--repetitions", type=int)
+    paired_run.add_argument("--limit", type=int)
+    paired_run.add_argument(
+        "--workers", type=int, default=1,
+        help="isolated DSH workers (1-4); concurrency affects latency comparability",
+    )
+    paired_run.add_argument(
+        "--native-no-think", action="store_true",
+        help="use Ollama native chat with think=false, temperature=0, and num_ctx=32768",
+    )
+    evidence_report = commands.add_parser(
+        "simulation-evidence-report",
+        help="build digest-bound bilingual simulation evidence (not ES-P1 qualification)",
+    )
+    evidence_report.add_argument("simulation_root")
+    evidence_report.add_argument("result_root")
+    evidence_report.add_argument("--output-root", required=True)
+    evidence_report.add_argument("--allow-smoke", action="store_true")
+    inspect_evidence = commands.add_parser(
+        "simulation-evidence-inspect", help="verify every simulation-report file and digest",
+    )
+    inspect_evidence.add_argument("root")
     args = parser.parse_args(argv)
     if args.command == "discover":
         result = write_discovery(
@@ -1069,9 +1138,78 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "library-inspect":
         from evaluation.public_skill_library import inspect_public_skill_library
         result = inspect_public_skill_library(args.root)
-    else:
+    elif args.command == "library-summary":
         from evaluation.public_skill_library import export_public_skill_library_summary
         result = export_public_skill_library_summary(args.root, args.output)
+    elif args.command == "review-kit":
+        from evaluation.public_skill_review import export_assisted_review_kit
+        result = export_assisted_review_kit(
+            args.author_kit_root, args.draft_root, args.output_root,
+        )
+    elif args.command == "review-kit-inspect":
+        from evaluation.public_skill_review import inspect_assisted_review_kit
+        result = inspect_assisted_review_kit(args.root)
+    elif args.command == "simulate-independent-authoring":
+        from evaluation.public_skill_simulation import build_simulated_authoring_study
+        result = build_simulated_authoring_study(
+            args.review_root, args.author_kit_root, args.output_root,
+        )
+    elif args.command == "gold-kit":
+        from evaluation.public_skill_review import export_blind_gold_kit
+        result = export_blind_gold_kit(args.review_root, args.output_root)
+    elif args.command == "gold-kit-inspect":
+        from evaluation.public_skill_review import inspect_blind_gold_kit
+        result = inspect_blind_gold_kit(args.root)
+    elif args.command == "paired-kit":
+        from evaluation.public_skill_paired import export_public_paired_study_kit
+        result = export_public_paired_study_kit(
+            args.gold_root, args.author_kit_root, args.output_root,
+        )
+    elif args.command == "paired-kit-inspect":
+        from evaluation.public_skill_paired import inspect_public_paired_study_kit
+        result = inspect_public_paired_study_kit(args.root)
+    elif args.command == "translate":
+        from evaluation.public_skill_translation import run_public_skill_translation
+        result = run_public_skill_translation(
+            args.paired_root, args.output_root, model=args.model,
+            resume=not args.no_resume,
+        )
+    elif args.command == "translation-inspect":
+        from evaluation.public_skill_translation import inspect_public_skill_translation
+        result = inspect_public_skill_translation(args.root)
+    elif args.command == "paired-bind":
+        from evaluation.public_skill_translation import bind_public_paired_translation
+        result = bind_public_paired_translation(
+            args.paired_root, args.translation_root, args.output_root,
+        )
+    elif args.command == "paired-bind-inspect":
+        from evaluation.public_skill_translation import inspect_bound_public_paired_translation
+        result = inspect_bound_public_paired_translation(args.root)
+    elif args.command == "paired-run":
+        from evaluation.public_skill_dsh_ab import run_public_dsh_ab
+        if args.native_no_think:
+            from evaluation.ollama_no_think_proxy import INVOCATION_PROFILE, OllamaNoThinkProxy
+            with OllamaNoThinkProxy(args.base_url) as proxy:
+                result = run_public_dsh_ab(
+                    args.bound_root, args.output_root, model=args.model,
+                    base_url=proxy.base_url, repetitions=args.repetitions, limit=args.limit,
+                    workers=args.workers, invocation_profile=INVOCATION_PROFILE,
+                )
+        else:
+            result = run_public_dsh_ab(
+                args.bound_root, args.output_root, model=args.model,
+                base_url=args.base_url, repetitions=args.repetitions, limit=args.limit,
+                workers=args.workers,
+            )
+    elif args.command == "simulation-evidence-report":
+        from evaluation.public_skill_simulation_report import build_simulation_evidence_report
+        result = build_simulation_evidence_report(
+            args.simulation_root, args.result_root, args.output_root,
+            require_complete=not args.allow_smoke,
+        )
+    else:
+        from evaluation.public_skill_simulation_report import inspect_simulation_evidence_report
+        result = inspect_simulation_evidence_report(args.root)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
     return 0
 

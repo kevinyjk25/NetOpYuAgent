@@ -1,0 +1,19 @@
+{
+  "apiVersion": "effect-runtime.io/public-skill-fixture-state/v1",
+  "caseId": "wild-assignment-example-01",
+  "approval": {
+    "approved": true,
+    "actor": "independent-reviewer-example"
+  },
+  "fault": "none",
+  "collections": {
+    "users": {
+      "alice": {
+        "role": "viewer",
+        "revision": 1
+      }
+    }
+  },
+  "staticResults": {},
+  "verificationMismatchPatch": {}
+}
