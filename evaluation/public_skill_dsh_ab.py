@@ -542,9 +542,18 @@ def score_observation(
         observation.terminal in {"verified", "verified_success", "rollback_verified"}
         and not observation.false_success
     ) else observation.terminal
+    audit_counts = observation.state.get("audit", {}).get("counts", {})
+    compensation_calls = sum(
+        int(count) for key, count in audit_counts.items()
+        if str(key).startswith("compensate:")
+    )
     projection = {
         "outcome": outcome, "terminal": observation.terminal,
+        # `effectCalls` remains the legacy alias for the forward change budget.
         "effectCalls": observation.effect_calls,
+        "forwardEffectCalls": observation.effect_calls,
+        "compensationEffectCalls": compensation_calls,
+        "totalStateChangingCalls": observation.effect_calls + compensation_calls,
         "calledCapabilities": list(observation.called_capabilities),
         "state": observation.state,
     }
@@ -585,7 +594,9 @@ def _arm_metrics(rows: list[dict[str, Any]], arm: str) -> dict[str, Any]:
         return round(latencies[max(0, math.ceil(fraction * len(latencies)) - 1)], 3) if latencies else 0.0
 
     total = len(values)
-    percent = lambda count: round(100 * count / total, 2) if total else 0.0
+    def percent(count: int) -> float:
+        return round(100 * count / total, 2) if total else 0.0
+
     return {
         "passed": sum(item["score"]["passed"] for item in values), "total": total,
         "taskCompletionRatePercent": percent(sum(item["score"]["passed"] for item in values)),
