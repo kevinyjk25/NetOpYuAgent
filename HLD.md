@@ -1,5 +1,7 @@
 # EnsuredSkill 高层设计 / High-Level Design
 
+> 设计基线 / Design baseline: 2026-09-02。本文从组件和端到端行为解释当前实现；详细字段与算法见 [LLD](LLD.md)。
+
 ## 中文
 
 ### 1. 目标
@@ -82,6 +84,53 @@ sequenceDiagram
     O-->>R: verification evidence
     R-->>A: COMMIT terminal envelope
 ```
+
+#### 4.1 从用户输入到路由结果
+
+一次请求在进入事务前先被分成四类，而不是把所有自然语言都直接翻译成写操作：
+
+| 分类 | 负责组件 | 用户可见结果 |
+|---|---|---|
+| 信息足够的 read | L1 + Observation Policy + Runtime read gateway | 只读事实与来源；没有计划审批 |
+| 信息不足或目标不唯一 | Parameter Compiler | `clarification_required` 和精确缺失字段/候选目标 |
+| 可执行 write | L1 Candidate + exact active L0 + Plan Compiler | `plan_ready` 审批卡，随后进入事务状态机 |
+| 不可执行 write | L0/semantic/safety gate | proposal、ask-human 或 reject；Effect 为零 |
+
+L1 可以继续承担读、诊断和交互 fallback；任何可能产生 Effect 的 fallback 都被禁止。这个区别同时适用于 DSH 页面、MCP/API 接入和公开 Skill A/B 评测。
+
+#### 4.2 Skill authoring 流
+
+```mermaid
+sequenceDiagram
+    participant A as Skill Author / Agent
+    participant C as Trusted Capability Catalog
+    participant P as Promotion Compiler
+    participant W as Semantic Workbench
+    participant H as Human Reviewer
+    participant R as Active L0 Registry
+
+    A->>P: L1 SKILL.md
+    C->>P: bounded capabilities and schemas
+    P-->>W: L0.5 + L0 proposal + requirement mappings
+    W-->>H: preserved/weakened/missing/ambiguous + fix paths
+    alt gate or review fails
+      H-->>A: revise L1/L0.5/Catalog
+    else explicitly accepted and published
+      H->>R: activate exact compiled L0 digest
+    end
+```
+
+Authoring 和在线执行物理分权：Promotion 只能写 proposal 目录，不能调用 Actor；Runtime 只能读取 active Registry，不能替模型修补业务意图，也不能自动发布新合同。
+
+#### 4.3 可解释结果流
+
+系统为三个不同受众提供同一事实的不同投影：
+
+- **用户/审批人**：目标、规范化参数、风险、L0 id、Verifier、Compensation、plan hash 和一次性审批；
+- **Agent/Harness**：只接收 `netopyu.effect-runtime-terminal@1.0.0`，不接收可被误解为成功的 Provider 原文；
+- **开发者/审计者**：immutable plan、哈希链事件、Typed Graph 节点、stage latency、Evidence provenance DAG 和 authoring requirement mappings。
+
+这三种投影共享 plan/evidence/digest，不允许模型生成的解释覆盖结构事实。终态语义和完整示例见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)。
 
 ### 5. 失败与不确定流
 
@@ -168,6 +217,12 @@ The Reasoning Plane contains DSH, L1 semantic guidance, and proposal-only model 
 The normal path is resolve L0 → validate inputs → snapshot → precheck → evidence/guard/risk → optional approval → revalidate → controlled effect → independent verify → commit.
 
 A pre-effect failure aborts without mutation. A post-send timeout enters reconciliation rather than blind retry. Verification failure invokes explicit compensation and recovery verification. Missing compensation, failed recovery, or unresolved state escalates to a human.
+
+Before transaction execution, requests are classified as read, clarification, executable write, or safe-stopped write. Reads retain no effect authority. Missing or ambiguous parameters produce explicit questions. A write requires one exact active L0 and an immutable plan. An unqualified write may only propose, ask a human, or reject; L1 fallback is read-only.
+
+Offline Skill authoring is separate from the request path. It binds L1 text to a trusted Catalog, emits review-only L0.5/L0 artifacts and requirement mappings, and requires explicit human publication. Promotion cannot call an Actor, while the Runtime cannot repair intent or publish a contract.
+
+Operator, Harness, and audit views are projections of the same plan/evidence/digest facts. Operators see exact targets, inputs, risk, L0 and approval; the Harness sees only the Runtime terminal envelope; auditors see the immutable plan, hash chain, graph nodes, stage latency, provenance DAG, and authoring mappings. See the [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md).
 
 ### 4. Skill and deployment boundary
 

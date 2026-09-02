@@ -71,7 +71,7 @@ open artifacts/convergence/cockpit.html       # macOS
 
 ### 5. 当前边界
 
-本仓库已经证明固定本地 Oracle 上的接口/事务控制和模型资格过程，不证明真实厂商设备行为、企业权限、未见分布生产成功率、HA/DR 或生产 SLO。生产前仍需 P1.3–P1.7 的现场接入和资格化。
+本仓库已经证明固定本地 Oracle 上的接口/事务控制和模型资格过程，不证明真实厂商设备行为、企业权限、未见分布生产成功率、HA/DR 或生产 SLO。下一道门是仓库外独立人工 ES-P1 Private Holdout；通过后再进入 ES-P2 小范围真实网络资格。完整交互和终态解释见 [Skill 与系统交互全景](SKILL-SYSTEM-INTERACTION.md)。
 
 ---
 
@@ -104,4 +104,4 @@ See [L0 v2 design](l0-v2-design.md), [L1 → L0 promotion](l1-to-l0-promotion.md
 
 ### 4. Boundaries
 
-The repository proves local fixed-oracle controls and model-qualification mechanics. It does not qualify real vendor devices, enterprise authority, unseen production success probability, HA/DR, or production SLOs. P1.3–P1.7 site qualification remains mandatory before production.
+The repository proves local fixed-oracle controls and model-qualification mechanics. It does not qualify real vendor devices, enterprise authority, unseen production success probability, HA/DR, or production SLOs. The next gate is a repository-external independent-human ES-P1 private holdout, followed by narrow ES-P2 real-network qualification. See the [Skill-to-system interaction guide](SKILL-SYSTEM-INTERACTION.md) for lifecycle and terminal-state semantics.

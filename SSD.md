@@ -1,5 +1,7 @@
 # EnsuredSkill 规格与安全设计 / Specification and Safety Design
 
+> 规格基线 / Specification baseline: 2026-09-02。本文规定当前研究原型的可验证行为，不构成生产安全认证。
+
 ## 中文
 
 ### 1. 规格地位
@@ -43,6 +45,9 @@ LLM、Prompt、L1 Skill、普通 Tool Schema 和 Provider 自报结果都不是�
 | FR-10 | 验证失败时按合同补偿并独立验证恢复；无法证明时升级人工 |
 | FR-11 | 每条终态路径必须记录 plan、Evidence、状态和摘要链 |
 | FR-12 | L1→L0.5→L0 只能生成 proposal，不能自动激活 |
+| FR-13 | Authoring 必须保存 requirement-level L1→L0.5→L0 映射、语义丢失分类和可定位的修正路径 |
+| FR-14 | Harness 只能把 Runtime terminal envelope 作为执行结果；Provider receipt 或模型叙述不得变成成功终态 |
+| FR-15 | 操作者必须能从 plan id 追踪 immutable plan、图节点、Evidence provenance、分阶段时延和事件摘要链 |
 
 ### 4. 安全不变量
 
@@ -70,6 +75,10 @@ LLM、Prompt、L1 Skill、普通 Tool Schema 和 Provider 自报结果都不是�
 
 合同必须声明 strongly reversible、conditionally reversible 或 irreversible。补偿是新的受控操作，需要 snapshot、precondition、verification 和失败终态；不能承诺恢复所有现实影响。
 
+#### S-07：解释不能创造权威
+
+模型可以解释为什么选择某个 Skill，但授权和终态只能来自结构化合同、计划、Evidence、Guard、审批、图状态与摘要链。Workbench、报告、自然语言 summary 和模型 confidence 都是投影；它们不能修改 active L0、PreparedPlan 或 ExecutionOutcome。
+
 ### 5. 威胁与控制
 
 | 威胁 | 主要控制 | 剩余风险 |
@@ -83,6 +92,7 @@ LLM、Prompt、L1 Skill、普通 Tool Schema 和 Provider 自报结果都不是�
 | 部分多步骤成功 | typed dependencies、snapshot、reverse compensation | 跨设备无法实现真正 ACID |
 | 合同/补偿编写错误 | static validation、round-trip、negative tests、ablation | 仍需数字孪生和独立 review |
 | 自动 Promotion 扩权 | proposal-only、semantic loss alert、explicit activation | Reviewer 可能误判 |
+| 模型生成事后解释掩盖失败 | 固定 terminal envelope、Provider 原文摘要化、plan/evidence/graph 可追踪 | 操作者仍需理解 `rollback_verified` 不等于任务成功 |
 | 评测过拟合 | 扰动集、封存集、重复、跨模型、场景级报告 | 本地实验不能外推生产概率 |
 
 ### 6. 数据最小化
@@ -124,9 +134,21 @@ Control 只在隔离本地仿真中运行。Treatment 的转换未达阈值时�
 
 还必须运行五项消融（去掉 Contract/Evidence/Guard/Transaction/Compensation）、至少三次主实验配对重复、扰动/封存场景，以及 9B 与更弱模型的稳定性比较。固定 Oracle 的 100% 只能表述为“该回归集通过”。
 
+证据必须按来源分层，不允许合并成一个“准确率”：
+
+| 层级 | 当前状态 | 允许的 claim |
+|---|---|---|
+| ES-P0 透明本地开发集 | 完成 | 机制和本地假设得到支持 |
+| 仓库外模型合成集 | 完成 | 生成、封存、fallback 和跨类型链路可运行 |
+| ES-P1-Wild-Sim 虚拟角色公开集 | 完成 | 公开 Skill + DSH + Runtime 的角色隔离原型有效 |
+| ES-P1 独立人工 Private Holdout | 未完成 | 当前不得声称独立隐藏集泛化 |
+| ES-P2 真实网络 | 未完成 | 当前不得声称厂商设备或生产资格 |
+
+每份报告还必须说明失败属于 Reasoning、转换/路由、Runtime 门禁、Provider、Oracle 还是 Harness transport，避免把安全停机、模型空响应和事务失败混为一类。
+
 ### 9. 原型出场门禁
 
-进入生产工程前必须同时满足：
+截至 2026-09-02，以下条目已经形成 **ES-P0 本地研究原型闭环**，但这只允许进入独立泛化研究，不允许直接进入生产：
 
 1. 代码、文档和测试只有一条产品原型 Effect 路径；
 2. 六类事务场景均有可复算证据；
@@ -134,7 +156,11 @@ Control 只在隔离本地仿真中运行。Treatment 的转换未达阈值时�
 4. 三次以上真实 DSH 配对结果稳定；
 5. 更换模型后 Runtime 安全收益稳定；
 6. 明确给出 Execution Precision 与 Autonomous Coverage 的 Pareto 权衡；
-7. 结论不依赖反向构造数据或单次演示。
+7. 结论明确区分透明开发集、模型合成集、角色模拟公开集和独立人工证据，不用单次演示外推。
+
+下一道强制门是仓库外、预注册、独立人员持有 Gold 的 ES-P1 Private Holdout。只有 ES-P1 通过后才进入 ES-P2 小范围真实网络；只有 ES-P1 和 ES-P2 同时支持核心 claim，才重新评估生产身份、供应链、治理、HA/DR、WORM 与 SLO。
+
+交互对象、终态和定位路径见 [Skill 与系统交互全景](docs/SKILL-SYSTEM-INTERACTION.md)，阶段状态见[项目进展](docs/PROJECT-STATUS.md)。
 
 ### 10. 冻结生产安全设计
 
@@ -154,9 +180,13 @@ User language, model output and confidence, L1 text, Candidate Plans, ordinary t
 
 The Reasoning Plane has no effect credential. Every mutation resolves to one active versioned L0 contract. Missing, ambiguous, ungrounded, or out-of-range inputs clarify or reject. Preconditions, evidence, guards, and risk must all pass before an effect. Approval binds the exact plan. Mutable facts are revalidated after approval. Effects are not blindly retried. Independent observations prove commits. Verification failure compensates and verifies recovery, otherwise escalating. Every terminal path is auditable. Promotion remains proposal-only.
 
+Authoring also retains requirement-level L1-to-L0.5-to-L0 mappings, loss classifications, and exact revision locations. The Harness accepts only the Runtime terminal envelope as an execution outcome. Given a plan id, an operator can inspect the immutable plan, graph nodes, evidence provenance, stage latency, and event-chain integrity.
+
 ### 3. Safety properties
 
 There is no prototype write bypass. No evidence means no action. Unknown contracts, capabilities, states, digests, expiry, drift, or recovery fail closed. A write receipt is not postcondition evidence. Post-send uncertainty enters reconciliation. Compensation is a new controlled operation rather than magical rollback and carries an explicit reversibility class.
+
+Explanation cannot create authority. Workbench views, reports, natural-language summaries, and model confidence are projections of contracts, plans, evidence, and graph state; they cannot mutate an active L0, PreparedPlan, or ExecutionOutcome.
 
 ### 4. Evaluation
 
@@ -164,8 +194,10 @@ The primary experiment compares native DSH L1 orchestration with the same DSH/mo
 
 Reports must include unsafe execution, false commit, invalid action, compensation success, autonomous coverage, escalation/rejection, task completion, overhead, token, and tool-call metrics. Five mechanism ablations, at least three paired repetitions, perturbation/sealed cases, and a weaker-model comparison are required. A fixed-set 100% result means only that the fixed regression passed.
 
+Evidence is reported separately as transparent ES-P0 development evidence, repository-external model-synthetic evidence, virtual-role public-Skill simulation, independent-human private holdout, and real-network qualification. The first three are complete at their declared scope; formal ES-P1 private holdout and ES-P2 real-network evidence remain open. Failures must be attributed to reasoning, translation/routing, Runtime gates, Provider, Oracle, or Harness transport.
+
 ### 5. Exit and frozen production security
 
-Production engineering may resume only after the unique effect path, six transaction scenarios, five ablations, repeated real-Harness evidence, cross-model stability, and the execution-precision/autonomous-coverage trade-off are demonstrated without relying on reverse-generated data or a single demo.
+The local ES-P0 prototype gate is complete only at its transparent local scope. The next mandatory gate is a preregistered, repository-external ES-P1 private holdout with independently owned Gold. ES-P2 then qualifies the same abstractions on a small real-network path. Production engineering is reconsidered only after independent and real evidence support the core claims.
 
 Enterprise IAM/PDP/change systems, signed provider/SBOM supply chains, multi-party governance, remote WORM, HA/DR, mTLS/secret management, and production SLOs remain frozen future deployment security.
