@@ -1,6 +1,6 @@
 # NetOpYuAgent 架构 / Architecture
 
-> 架构基线 / Architecture baseline: 2026-09-02。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 架构基线 / Architecture baseline: 2026-09-03。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 ## 中文
 
@@ -15,6 +15,14 @@ Reasoning correctness does not imply execution safety.
 LLM 决定尝试什么；Runtime 决定允许发生什么。
 No evidence, no action.
 ```
+
+研究证据还有一个不可逆依赖顺序：
+
+```text
+L1→L0 跨 Skill 泛化 → L0 结构确定性 → Runtime 行为评测
+```
+
+Runtime 不得用小范围人工适配合同上的高分反向证明转译正确。已知开发库只用于修复通用转译算法；只有冻结后、仓库隔离的未知 cohort 通过[泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)，规模化 Runtime 评测才获得研究资格。
 
 ### 2. 三平面
 
@@ -151,6 +159,7 @@ Evaluation → all public test surfaces
 8. **Compensation is explicit**：合同声明可逆性、快照、补偿和恢复验证；不可逆操作降低自治等级。
 9. **Terminal paths are auditable**：Commit、Abort、Escalate 和恢复失败均有证据链。
 10. **No automatic promotion**：L1→L0.5→L0 只生成待审制品。
+11. **Translation proof before Runtime proof**：未知集转译泛化未通过时，除 1×1 接线 smoke 外禁止 Runtime 规模评测。
 
 ### 7. 架构决策
 
@@ -161,6 +170,7 @@ Evaluation → all public test surfaces
 - **ADR-005：Risk 输出只有 `EXECUTE / ASK_HUMAN / REJECT`。** 模型 confidence 不参与授权。
 - **ADR-006：网络是唯一优先锚点。** 通用接口保留，但暂停扩展更多非网络领域。
 - **ADR-007：先完成原型证据，再恢复产品化。** 企业 IAM、供应链、治理、Hermes/A2A、HA/DR、WORM 和 SLO 均冻结。
+- **ADR-008：转译泛化先于 Runtime 证明。** 已知 Skill 不能因逻辑 split 改名为未知证据；准入制品绑定冻结 Translator、独立 cohort、覆盖和零重叠条件。
 
 ### 8. 冻结工程
 
@@ -184,6 +194,8 @@ Evaluation → all public test surfaces
 NetOpYuAgent is currently a network-first EnsuredSkill research prototype. The [prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes historical P1/P2 productization architecture.
 
 Reasoning correctness does not imply execution safety. The LLM decides what to attempt; the Runtime decides what is allowed to happen. No evidence means no action.
+
+Research evidence also has a strict dependency order: cross-Skill L1-to-L0 generalization, then deterministic L0 validity, then Runtime behavior evaluation. Strong Runtime results over hand-fitted contracts cannot back-prove translation validity. Known corpora are development inputs only; scaled Runtime studies require the post-freeze unseen-cohort [generalization gate](docs/TRANSLATION-GENERALIZATION-GATE.md).
 
 ### 2. Three planes
 

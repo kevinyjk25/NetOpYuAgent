@@ -411,7 +411,7 @@ def _package_entries(tree: list[dict[str, Any]], package_path: str) -> list[dict
 def snapshot_public_skills(
     discovery_path: str | Path, output_root: str | Path, *, limit: int = 20,
     script_policy: str = "exclude", license_policy: str = "known",
-    source_backend: str = "api",
+    source_backend: str = "api", seed_snapshot_root: str | Path | None = None,
 ) -> dict[str, Any]:
     if (
         script_policy not in {"exclude", "metadata-only"}
@@ -427,17 +427,48 @@ def snapshot_public_skills(
     root.mkdir(parents=True, exist_ok=True)
     package_root = root / "packages"
     package_root.mkdir()
+    records: list[dict[str, Any]] = []
+    accepted = 0
+    processed_candidate_ids: set[str] = set()
+    seed_manifest_digest: str | None = None
+    if seed_snapshot_root is not None:
+        seed_root = Path(seed_snapshot_root).expanduser().resolve()
+        inspect_public_snapshot(seed_root)
+        seed_manifest = json.loads((seed_root / "manifest.json").read_text(encoding="utf-8"))
+        if any((
+            seed_manifest.get("discoveryDigest") != discovery["discoveryDigest"],
+            seed_manifest.get("scriptPolicy") != script_policy,
+            seed_manifest.get("licensePolicy") != license_policy,
+            seed_manifest.get("sourceBackend") != source_backend,
+        )):
+            raise ValueError("public Skill seed snapshot policy or discovery mismatch")
+        records = [
+            json.loads(line)
+            for line in (seed_root / "records.jsonl").read_text(encoding="utf-8").splitlines()
+            if line
+        ]
+        processed_candidate_ids = {str(item["candidateId"]) for item in records}
+        accepted_records = [item for item in records if item["status"] == "accepted"]
+        accepted = len(accepted_records)
+        if accepted > limit:
+            raise ValueError("public Skill seed snapshot exceeds requested accepted limit")
+        for item in accepted_records:
+            shutil.copytree(
+                seed_root / "packages" / item["packageId"],
+                package_root / item["packageId"],
+            )
+        seed_manifest_digest = str(seed_manifest["manifestDigest"])
     github_token = _github_token()
     repo_meta_cache: dict[str, dict[str, Any]] = {}
     tree_cache: dict[tuple[str, str, str], tuple[str, list[dict[str, Any]]]] = {}
     git_cache: dict[tuple[str, str, str], tuple[str, list[dict[str, Any]], Path, str]] = {}
     scratch_handle = tempfile.TemporaryDirectory(prefix="netopyu-market-static-")
     scratch = Path(scratch_handle.name)
-    records: list[dict[str, Any]] = []
-    accepted = 0
     for candidate in discovery["candidates"]:
         if accepted >= limit:
             break
+        if candidate["id"] in processed_candidate_ids:
+            continue
         record: dict[str, Any] = {
             "candidateId": candidate["id"], "name": candidate["name"],
             "language": candidate["language"], "githubUrl": candidate["githubUrl"],
@@ -570,6 +601,7 @@ def snapshot_public_skills(
         "scriptPolicy": script_policy,
         "licensePolicy": license_policy,
         "sourceBackend": source_backend,
+        "seedSnapshotDigest": seed_manifest_digest,
         "officialEsP1QualificationEligible": False,
         "privateHoldout": False,
         "discoveryDigest": discovery["discoveryDigest"],
@@ -1001,6 +1033,10 @@ def main(argv: list[str] | None = None) -> int:
     snapshot.add_argument("--script-policy", choices=("exclude", "metadata-only"), default="exclude")
     snapshot.add_argument("--license-policy", choices=("known", "record-only"), default="known")
     snapshot.add_argument("--source-backend", choices=("api", "git"), default="api")
+    snapshot.add_argument(
+        "--seed-snapshot",
+        help="validated smaller snapshot from the same discovery/policies to extend",
+    )
     inspect = commands.add_parser("inspect")
     inspect.add_argument("root")
     report = commands.add_parser("report")
@@ -1028,6 +1064,16 @@ def main(argv: list[str] | None = None) -> int:
     library.add_argument("--snapshot-root")
     inspect_library = commands.add_parser("library-inspect")
     inspect_library.add_argument("root")
+    translation_corpus = commands.add_parser(
+        "translation-corpus",
+        help="classify a static snapshot for L1-to-L0 translation development",
+    )
+    translation_corpus.add_argument("snapshot_root")
+    translation_corpus.add_argument("--output-root", required=True)
+    translation_corpus.add_argument("--discovery")
+    translation_corpus.add_argument("--batch-size", type=int, default=12)
+    inspect_translation_corpus = commands.add_parser("translation-corpus-inspect")
+    inspect_translation_corpus.add_argument("root")
     library_summary = commands.add_parser("library-summary")
     library_summary.add_argument("root")
     library_summary.add_argument("--output", required=True)
@@ -1085,6 +1131,10 @@ def main(argv: list[str] | None = None) -> int:
         "--native-no-think", action="store_true",
         help="use Ollama native chat with think=false, temperature=0, and num_ctx=32768",
     )
+    paired_run.add_argument(
+        "--translation-admission",
+        help="digest-bound L1-to-L0 generalization admission; required beyond a 1x1 wiring smoke",
+    )
     evidence_report = commands.add_parser(
         "simulation-evidence-report",
         help="build digest-bound bilingual simulation evidence (not ES-P1 qualification)",
@@ -1107,6 +1157,7 @@ def main(argv: list[str] | None = None) -> int:
         result = snapshot_public_skills(
             args.discovery, args.output_root, limit=args.limit, script_policy=args.script_policy,
             license_policy=args.license_policy, source_backend=args.source_backend,
+            seed_snapshot_root=args.seed_snapshot,
         )
     elif args.command == "inspect":
         result = inspect_public_snapshot(args.root)
@@ -1138,6 +1189,17 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "library-inspect":
         from evaluation.public_skill_library import inspect_public_skill_library
         result = inspect_public_skill_library(args.root)
+    elif args.command == "translation-corpus":
+        from evaluation.translation_corpus import build_translation_corpus
+        result = build_translation_corpus(
+            args.snapshot_root,
+            args.output_root,
+            discovery_path=args.discovery,
+            batch_size=args.batch_size,
+        )
+    elif args.command == "translation-corpus-inspect":
+        from evaluation.translation_corpus import inspect_translation_corpus
+        result = inspect_translation_corpus(args.root)
     elif args.command == "library-summary":
         from evaluation.public_skill_library import export_public_skill_library_summary
         result = export_public_skill_library_summary(args.root, args.output)
@@ -1194,12 +1256,14 @@ def main(argv: list[str] | None = None) -> int:
                     args.bound_root, args.output_root, model=args.model,
                     base_url=proxy.base_url, repetitions=args.repetitions, limit=args.limit,
                     workers=args.workers, invocation_profile=INVOCATION_PROFILE,
+                    translation_admission=args.translation_admission,
                 )
         else:
             result = run_public_dsh_ab(
                 args.bound_root, args.output_root, model=args.model,
                 base_url=args.base_url, repetitions=args.repetitions, limit=args.limit,
                 workers=args.workers,
+                translation_admission=args.translation_admission,
             )
     elif args.command == "simulation-evidence-report":
         from evaluation.public_skill_simulation_report import build_simulation_evidence_report

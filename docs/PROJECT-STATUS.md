@@ -4,11 +4,25 @@
 
 ### 当前阶段
 
-**ES-P0：本地研究原型证据闭环已完成。**
+**当前主阶段：L1→L0 转译泛化门禁。**
 
 权威命题是：概率性 Reasoning 只提出 Candidate Plan；Contract、Evidence、Guard、Risk 和 Transaction 决定是否允许 Effect；不合格转换安全停机，不能回退原生写。
 
-聚合结论为 `local_hypothesis_supported`。它只适用于透明开发集和本地仿真 Provider，不是生产成功概率、隐藏集泛化或真实厂商设备资格。
+ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesis_supported`，但不再被解释为 L1→L0 高泛化证明。只有转译器先在冻结后采集的跨 Skill/仓库/领域未知集合上通过门禁，L0→Runtime 的规模化安全、稳定和准确性评测才具有研究意义。
+
+#### 2026-09-03 转译优先重置
+
+- [x] 新建 Gold-blind Translator v2：模型只输出语义意图和参数源证据，Capability 选择、参数绑定、事务闭合与 L0 制品加载由确定性代码完成；
+- [x] 独立 Skill–Task–Tool 对齐审查区分 read/write/clarification/reject 与 construct-invalid，评分器要求审查全覆盖并与 Gold 处置一致；
+- [x] 100 个静态公开 Skill 已建立可搜索索引：72 仓库、9 领域、第三方执行 0；53 `runtime_ready`、18 `translation_only_partial_context`、29 `format_variant_robustness_only`；
+- [x] 主要转译开发语料为 71 Skill，按仓库聚合为 7 个批次；整个已知库固定 `proofCohortEligible=false`；
+- [x] Runtime 大规模评测加入硬门禁：没有有效 admission 时只允许 1 case × 1 repetition 接线 smoke，且 `researchEvidenceEligible=false`；
+- [x] 准入器要求同一冻结 Translator、至少 3 个互不重叠的未知 cohort，以及合计 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case；
+- [ ] 为 71 个主要开发 Skill 构建语义对齐且不复用错误通用映射的 Task/Tool/Gold 候选，并完成 AI 角色独立审查；
+- [ ] 使用 qwen3.5:9b 分批只跑离线转译，基于失败类别改良通用算法，禁止按单 Skill 打补丁；
+- [ ] 冻结稳定 Translator 后再收集全新 proof cohorts；门禁未通过前不恢复规模化 Runtime A/B。
+
+详细规则见 [L1→L0 泛化门禁](TRANSLATION-GENERALIZATION-GATE.md)。
 
 ### Done
 
@@ -67,7 +81,7 @@
 
 ### 当前活动阶段与后续计划
 
-**当前活动阶段：ES-P1 Independent Generalization 基础设施已就绪，等待仓库外独立数据。**
+**当前活动阶段：先完成 L1→L0 跨 Skill 泛化；Runtime 规模化评测已被硬门禁暂停。**
 
 #### ES-P1 已完成的研究基础设施
 
@@ -130,7 +144,11 @@
 
 ### Current phase
 
-**ES-P0 local research-prototype evidence is complete.** The aggregate result is `local_hypothesis_supported`: reasoning proposes candidates, while Contract, Evidence, Guard, Risk, and Transaction control effects; an unqualified translation stops safely and never regains native write authority.
+**Active phase: L1-to-L0 translation generalization gate.** ES-P0 Runtime mechanics and small-sample wiring remain `local_hypothesis_supported`, but they are not broad translation evidence. No scaled Runtime study is meaningful until the Translator passes post-freeze, cross-Skill, cross-repository, and cross-domain unseen cohorts.
+
+The 2026-09-03 reset adds a Gold-blind Translator v2, mandatory pre-run Skill–Task–Tool construct review, and a digest-bound admission gate. The current known development inventory contains 100 static public Skills from 72 repositories and nine domains, with zero third-party execution. Fifty-three are Runtime-package ready, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only; the 71 primary inputs form seven repository-preserving development batches. This entire visible inventory has `proofCohortEligible=false`.
+
+Runtime evaluation now requires the same frozen Translator to pass at least three disjoint post-freeze unseen cohorts totaling at least 50 unique Skills, 15 repositories, eight domains, and 600 cases. Every cohort must pass the safety, recall, macro-F1, exact-parameter, source-evidence, artifact-loadability, and alignment gates. Without a valid admission artifact, the DSH runner permits only a 1-case × 1-repetition wiring smoke and marks it ineligible as research evidence. See the [L1-to-L0 generalization gate](TRANSLATION-GENERALIZATION-GATE.md).
 
 Completed evidence includes 60 deterministic Runtime scenario runs, 30 mechanism-ablation probes, two 60-Skill translation studies, 120 real paired DSH sessions across 9B and 7B models, precision/coverage curves, scenario-level Wilson intervals, and a final regression of 506 tests plus 81 subtests.
 
@@ -148,7 +166,7 @@ The local Runtime-convergence prototype now uses a journal-backed Typed Graph sc
 
 A separate repository-external synthetic evidence path is now operational. It sealed 240 model-authored cases after two blind model-review prompts and digest-bound packaging, covering six Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. The loader structurally fixes `officialEsP1QualificationEligible` to false. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from four to zero, and reduced p50 latency from 103.6 to 64.3 seconds. All 17 applicable Runtime audits were valid. Residual Treatment failures expose pre-Runtime L1 factual-decision and safe-stop availability limits. This is synthetic evidence, not independent generalization or a production probability.
 
-The `ES-P1-Wild` static-import pilot is now complete. SkillsMP discovery returned 100 candidates; the importer processed 60 and accepted 20 license-identified, script-free packages from 13 repositories at pinned commits. No third-party code was executed and no executable file was materialized. The strict Runtime package gate passed 15 and blocked five, exposing non-standard frontmatter and unresolved/out-of-bound references. Those 15 packages now have a sealed external author kit with 45 blank task slots and Task/Gold/Tool-Catalog schemas; it contains no Runtime/evaluator, model output, or generated Gold. The next step is to preregister a broader multilingual sample and have independent people fill and review 200–500 paired cases. Marketplace packages remain untrusted and `static_only`; a separate disposable `ES-P1-Sec` sandbox will cover malicious-package behavior. Public-market evidence cannot replace the formal private holdout gate. See [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md).
+The earlier `ES-P1-Wild` 15-Skill authoring path remains a historical pilot. The expanded static development inventory now has 100 accepted Skills from 72 repositories. It is used to discover translation failure modes, not to claim unseen generalization. Marketplace packages remain untrusted and `static_only`; a separate disposable `ES-P1-Sec` sandbox will cover malicious-package behavior. Public-market evidence cannot replace the formal private holdout gate. See [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md).
 
 An explicitly non-authoritative qwen3.5:9b draft-assistance lane has also been exercised on the 15-package author kit. Fourteen assignments and 42/45 slots passed protocol and safety-shape validation; 12 assignments needed repair calls, p50/p95 latency was 59.2/97.2 seconds, and one persistent proposal/effect-budget contradiction remained rejected. The artifact passed binding and digest inspection. It contains no trusted Gold or execution authority and only reduces blank-page work for independent authors.
 

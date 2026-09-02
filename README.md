@@ -2,7 +2,7 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-02。当前已完成 ES-P0 本地证据闭环和 ES-P1-Wild 角色隔离模拟；正式 ES-P1 独立人工 Private Holdout 尚未完成。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-03。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -25,6 +25,12 @@ flowchart TB
 | Reasoning Plane | 会话、开放式理解、诊断、追问、计划和 L1 编排 | 只能提出候选；产品路径没有直接写权限 |
 | Reliability Runtime | Contract、journal-backed Typed Graph、跨步骤 Evidence、Guard、Risk、事务、验证和补偿 | 不做开放式语言推理，不把模型 confidence 当权限 |
 | Infrastructure Plane | 通过 MCP/API/CLI/NETCONF 提供事实和效果 | 不判断上层业务意图，不自报成功终态 |
+
+### 当前研究门禁
+
+项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
+
+当前静态开发库包含 100 个公开 Skill、72 个仓库、9 个领域：53 个 Runtime 包门禁通过，18 个是标准格式但引用上下文不完整的“仅转译”样本，29 个非标准格式只用于鲁棒性测试。主要转译语料为 71 个 Skill/7 个开发批次；它们已经可见，所以不冒充 unseen 证明。只有冻结 Translator 后，在至少 3 个互不重叠的未知 cohort 上累计达到 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case，并同时通过安全、召回、macro-F1、参数和证据门槛，才允许大规模 Runtime A/B。完整口径、命令和指标见 [L1→L0 泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)。
 
 ### Skill 与系统怎样交互
 
@@ -52,7 +58,7 @@ L1、L0.5、L0 和 Runtime Plan 不是同一种 Skill 的不同文件格式，�
 1. **Contract-Governed Skill**：L1→L0.5→L0 是 authoring compilation；最终 L0 固定输入、证据、Guard、资源、风险、后置条件和补偿。模型只能生成待审 proposal。
 2. **Evidence-Gated Transaction Runtime**：把 L0 编译为不可变计划和 Typed Execution Graph；写前 Snapshot/Precheck/Revalidate，写后独立 Verify；失败时 Reconcile/Compensate/Verify Recovery。
 
-当前结论是：**ES-P0 本地研究原型证据闭环完成**。这表示六场景、五项消融、9B/7B 三次真实 DSH 配对和全量回归已经产生一致证据；不表示生产成功概率、隐藏集泛化或真实厂商设备认证。
+当前结论是：**Runtime 机制原型与接线闭环完成，但项目核心假设尚未通过跨 Skill 泛化门禁。** 历史六场景、消融和 DSH 配对只作为假设形成与机械证据；不表示 L1→L0 已高泛化，更不表示生产成功概率或真实厂商设备认证。
 
 ### 已实现能力
 
@@ -69,9 +75,9 @@ L1、L0.5、L0 和 Runtime Plan 不是同一种 Skill 的不同文件格式，�
 
 Hermes/A2A、跨域业务 Lab、企业身份与审批、Provider 供应链、治理工作台、HA/DR、远端不可变审计和生产 SLO 的已有代码统一冻结，不计入当前能力或完成度。真实厂商设备、EVPN L3VPN、MPLS L2VPN/L3VPN 也不在当前原型覆盖内。
 
-### 可量化结果
+### 历史小样本结果与当前证据边界
 
-真实主实验只改变一个变量：Control 为 `DSH + 同一模型/L1 Skill + 原生工具编排`；Treatment 在相同输入、审批、工具、Provider 和故障上加入 L0 资格门禁与 Runtime，不合格转换安全停机。
+以下实验只改变一个变量：Control 为 `DSH + 同一模型/L1 Skill + 原生工具编排`；Treatment 加入 L0 资格门禁与 Runtime。它们证明机制值得继续研究，但样本参与了早期设计，不能证明转译泛化，也不能解锁新的大规模 Runtime 结论。
 
 | 模型与指标 | DSH + L1 原生 | DSH + L0 auto Runtime |
 |---|---:|---:|
@@ -240,7 +246,11 @@ The two core capabilities are:
 1. **Contract-Governed Skill authoring.** L1→L0.5→L0 preserves readable intent while producing an executable contract. It creates review proposals only and is distinct from trace-based Experience Compilation.
 2. **Evidence-Gated transactional execution.** An active L0 becomes an immutable plan and typed graph. Runtime snapshots, prechecks, revalidates, executes, verifies, commits, reconciles uncertainty, compensates, verifies recovery, and audits terminal evidence.
 
-The ES-P0 local research-prototype evidence loop is complete: provenance-aware execution, mechanism ablation, three repeated real-Harness pairs, and cross-model safety evidence are now available. This does not imply hidden-set generalization, real-device qualification, or production readiness.
+The Runtime mechanism and wiring prototype is complete, but the core project hypothesis has not yet passed cross-Skill translation generalization. Historical provenance, ablation, and paired-Harness results are retained as hypothesis-forming evidence; they do not establish broad L1-to-L0 validity, real-device qualification, or production readiness.
+
+### Active research gate
+
+The enforced evidence order is now `L1-to-L0 generalization → deterministic L0 validation → Runtime evaluation`. The known development inventory contains 100 public Skills from 72 repositories and nine domains: 53 pass the strict Runtime package gate, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only. The 71 primary Skills form seven development batches and are not unseen evidence. Large Runtime A/B work remains locked until one frozen Translator passes at least three disjoint post-freeze cohorts totaling at least 50 Skills, 15 repositories, eight domains, and 600 cases, including strict safety, recall, macro-F1, exact-parameter, evidence, and construct-alignment gates. See the [L1-to-L0 generalization gate](docs/TRANSLATION-GENERALIZATION-GATE.md).
 
 ### Capabilities and evidence
 

@@ -233,11 +233,30 @@ def test_public_dsh_runner_marks_smoke_vs_complete(tmp_path: Path) -> None:
     assert report["protocolComplete"] is False
     assert report["goldLoadedAfterAgentRuns"] is True
     assert report["pairedExecutionCompleted"] is True
+    assert report["evaluationPurpose"] == "wiring_smoke"
+    assert report["translationGeneralizationAdmitted"] is False
+    assert report["researchEvidenceEligible"] is False
     assert report["metrics"]["control"]["taskCompletionRatePercent"] == 100.0
     assert report["metrics"]["treatment"]["taskCompletionRatePercent"] == 100.0
     assert report["officialEsP1QualificationEligible"] is False
     assert report["executedArmCount"] == 2
     assert adapter.calls == 2
+
+
+def test_public_dsh_runner_blocks_runtime_evaluation_before_translation_gate(
+    tmp_path: Path,
+) -> None:
+    author, gold = _gold(tmp_path)
+    paired = tmp_path / "paired"
+    export_public_paired_study_kit(gold, author, paired)
+    translation = tmp_path / "translation"
+    run_public_skill_translation(paired, translation, adapter=_ReadTranslationAdapter())
+    bound = tmp_path / "bound"
+    bind_public_paired_translation(paired, translation, bound)
+    with pytest.raises(ValueError, match="generalization admission is required"):
+        run_public_dsh_ab(
+            bound, tmp_path / "run", repetitions=1, adapter=_FakeDSHAdapter(),
+        )
 
 
 def test_public_dsh_runner_resumes_atomic_arm_checkpoints(tmp_path: Path) -> None:

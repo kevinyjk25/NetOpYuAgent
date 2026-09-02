@@ -15,6 +15,8 @@ SkillsMP、GitHub 和厂商公开仓库中的 Skill 可以降低用例构造成�
 
 公开 Skill 可能已进入模型训练数据，来源之间也可能复制、批量生成或质量不一；Skill 本身通常没有任务输入、Gold 结果和事务 Oracle。因此，公开市场结果不能单独证明隐藏集泛化，也不能直接算生产成功概率。
 
+> 2026-09-03 更新：本页后续 20/15-Skill 内容是首轮历史 pilot。当前库已扩展为 100 个静态接纳 Skill、72 个仓库、9 个领域；其中 71 个进入主要转译开发语料、53 个同时 Runtime-package ready、18 个仅转译/引用上下文不完整、29 个只作格式鲁棒性测试。新的证据顺序、硬门禁和命令以 [L1→L0 泛化门禁](TRANSLATION-GENERALIZATION-GATE.md) 为准。大规模 Runtime paired run 在门禁通过前已被代码锁定。
+
 ### 采样和冻结
 
 建议选择 50–100 个 Skill，每个构造 3–5 个任务，形成 200–500 个 paired cases。采样计划在下载前预注册，并按来源仓库、作者、领域、语言和结构特征分层；同一仓库或近重复 Skill 只能进入同一数据 split，防止泄漏。
@@ -231,6 +233,8 @@ scripts/netopyu-market-corpus paired-run /ABS/PATH/bound-study \
 ## English
 
 Public Skills from SkillsMP, GitHub, and vendor repositories should form an `ES-P1-Wild` ecological-validity track. They reduce authoring cost and expose the system to real package structures and cross-author variation, but they do not replace `ES-P1-Private`: public content may be present in model training data, duplicated or generated, and normally lacks task inputs and trusted outcome Oracles.
+
+As of 2026-09-03, the 20/15-Skill material below is retained as the historical first pilot. The current static inventory contains 100 accepted Skills from 72 repositories and nine domains: 71 are primary translation-development inputs, including 53 Runtime-package-ready and 18 conformant partial-context packages; another 29 format variants are robustness-only. The authoritative sequencing and admission rules are in the [L1-to-L0 generalization gate](TRANSLATION-GENERALIZATION-GATE.md). Scaled Runtime paired evaluation is now code-blocked until that gate passes.
 
 The evidence program therefore has four distinct strata: sealed synthetic evidence, public in-the-wild compatibility, independently authored private qualification, and an adversarial package-security track. A recommended public corpus samples 50–100 Skills and derives three to five tasks per Skill, with source-repository grouping, near-duplicate control, commit pinning, license/provenance records, and a preregistered sampling rule.
 

@@ -156,3 +156,48 @@ def test_snapshot_rejects_unsealed_extra_file(
     (package / "extra.md").write_text("not sealed", encoding="utf-8")
     with pytest.raises(ValueError, match="unsealed files"):
         corpus.inspect_public_snapshot(output)
+
+
+def test_snapshot_can_extend_a_validated_seed_without_redownloading_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    discovery = tmp_path / "discovery.json"
+    _discovery(discovery, [
+        _candidate("first", "skills/first"),
+        _candidate("second", "skills/second"),
+    ])
+    sha = "d" * 40
+    first = b"---\nname: first\ndescription: First static Skill.\n---\nRead only.\n"
+    second = b"---\nname: second\ndescription: Second static Skill.\n---\nPlan only.\n"
+    tree = [
+        {"path": "skills/first/SKILL.md", "type": "blob", "mode": "100644", "size": len(first)},
+        {"path": "skills/second/SKILL.md", "type": "blob", "mode": "100644", "size": len(second)},
+    ]
+
+    def fake_json(url: str, *, token=None):  # type: ignore[no-untyped-def]
+        if url == "https://api.github.com/repos/owner/repo":
+            return {"default_branch": "main", "license": {"spdx_id": "MIT"}}
+        if "/commits/" in url:
+            return {"sha": sha}
+        return {"truncated": False, "tree": tree}
+
+    calls: list[str] = []
+
+    def fake_bytes(url: str, *, token=None, max_bytes=0):  # type: ignore[no-untyped-def]
+        source = url.split(f"/{sha}/", 1)[1]
+        calls.append(source)
+        return {"skills/first/SKILL.md": first, "skills/second/SKILL.md": second}[source]
+
+    monkeypatch.setattr(corpus, "_json_get", fake_json)
+    monkeypatch.setattr(corpus, "_bounded_get", fake_bytes)
+    seed = tmp_path / "seed"
+    seed_manifest = corpus.snapshot_public_skills(discovery, seed, limit=1)
+    assert calls == ["skills/first/SKILL.md"]
+    expanded = tmp_path / "expanded"
+    manifest = corpus.snapshot_public_skills(
+        discovery, expanded, limit=2, seed_snapshot_root=seed,
+    )
+    assert calls == ["skills/first/SKILL.md", "skills/second/SKILL.md"]
+    assert manifest["acceptedCount"] == 2
+    assert manifest["seedSnapshotDigest"] == seed_manifest["manifestDigest"]
+    assert corpus.inspect_public_snapshot(expanded)["complete"] is True

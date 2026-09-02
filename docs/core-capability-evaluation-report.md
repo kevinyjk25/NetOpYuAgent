@@ -178,7 +178,7 @@ scripts/netopyu-l0 core-eval-report
 .venv/bin/python -m pytest -q
 ```
 
-机器快照：[`artifacts/core-capability-evaluation/current.json`](../artifacts/core-capability-evaluation/current.json)。详细设计见 [正向资格协议](promotion-forward-qualification.md)、[L1 → L0 Promotion](l1-to-l0-promotion.md)、[Promotion Workbench](p20-promotion-workbench.md)、[Runtime A/B 基线](benchmarks/runtime-ab-baseline.md) 和 [架构](../ARCHITECTURE.md)。
+机器快照由 `scripts/netopyu-l0 core-eval-report` 在本地 `artifacts/core-capability-evaluation/current.json` 生成，不作为 Git 文档链接。详细设计见 [正向资格协议](promotion-forward-qualification.md)、[L1 → L0 Promotion](l1-to-l0-promotion.md)、[Promotion Workbench](p20-promotion-workbench.md)、[Runtime A/B 基线](benchmarks/runtime-ab-baseline.md) 和 [架构](../ARCHITECTURE.md)。
 
 ---
 

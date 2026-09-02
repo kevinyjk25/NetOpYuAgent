@@ -9,6 +9,7 @@
 | 你想回答的问题 | 首选文档 |
 |---|---|
 | 当前项目以什么理念、边界和完成判据为准 | [EnsuredSkill 原型权威准则](ENSUREDSKILL-PROTOTYPE.md) |
+| 为什么必须先证明 L1→L0，门禁和指标是什么 | [L1→L0 泛化门禁](TRANSLATION-GENERALIZATION-GATE.md) |
 | 项目是什么、有什么能力、如何开始 | [README](../README.md) |
 | L1、L0.5、L0、Runtime 怎样交互，结果怎样解释和定位 | [Skill 与系统交互全景](SKILL-SYSTEM-INTERACTION.md) |
 | 当前做到哪一步、还缺什么 | [项目进展与路线图](PROJECT-STATUS.md) |
@@ -38,6 +39,7 @@
 - [L0 v2 设计](l0-v2-design.md)：原子、约束、扩展、组合合同。
 - [L0 v2 Runtime 迁移](l0-v2-runtime-migration.md)：21 个激活合同和兼容边界。
 - [L1 → L0 Promotion](l1-to-l0-promotion.md)：L1、L0.5、L0 三阶段编译与留痕。
+- [L1→L0 泛化门禁](TRANSLATION-GENERALIZATION-GATE.md)：当前优先级、100-Skill 开发库、独立对齐审查、未知 cohort 指标和 Runtime 硬准入。
 - [通用渐进式确定化](progressive-determinization.md)：跨域边界、Anthropic Skill 包和风险路由。
 - [真实 Harness 自动 Runtime A/B](general-effect-ab.md)：原生 Agent 仅作为隔离 Control；Treatment 的不合格转换安全停机；旧单次工具基线已降级。
 - [ES-P0 本地证据报告](ES-P0-EVIDENCE.md)：六场景、消融、9B/7B 三次配对、性能和外推边界。
@@ -93,6 +95,7 @@
 | Question | Primary document |
 |---|---|
 | What is the project and how do I start? | [README](../README.md) |
+| Why must L1-to-L0 be proven first, and what unlocks Runtime evaluation? | [L1-to-L0 generalization gate](TRANSLATION-GENERALIZATION-GATE.md) |
 | How do L1, L0.5, L0, and the Runtime interact, and how are outcomes explained? | [Skill-to-system interaction](SKILL-SYSTEM-INTERACTION.md) |
 | What is complete and what remains? | [Project status and roadmap](PROJECT-STATUS.md) |
 | What governs post-ES-P0 research? | [Research instruction v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md) |
@@ -110,7 +113,7 @@
 ### Topic index
 
 - Agent and L1: [Skill-to-system interaction](SKILL-SYSTEM-INTERACTION.md), [Agent use cases](AGENTIZED-USE-CASES.md), [model qualification](l1-model-qualification.md), and [convergence evaluation](convergence-evaluation.md).
-- L0 and Promotion: [general progressive determinization](progressive-determinization.md), [general Effect Runtime A/B](general-effect-ab.md), [L0 v2 design](l0-v2-design.md), [Runtime migration](l0-v2-runtime-migration.md), [L1-to-L0 Promotion](l1-to-l0-promotion.md), [Workbench](p20-promotion-workbench.md), [Research Freeze and forward qualification](promotion-forward-qualification.md), and the [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
+- L0 and Promotion: [L1-to-L0 generalization gate](TRANSLATION-GENERALIZATION-GATE.md), [general progressive determinization](progressive-determinization.md), [general Effect Runtime A/B](general-effect-ab.md), [L0 v2 design](l0-v2-design.md), [Runtime migration](l0-v2-runtime-migration.md), [L1-to-L0 Promotion](l1-to-l0-promotion.md), [Workbench](p20-promotion-workbench.md), [Research Freeze and forward qualification](promotion-forward-qualification.md), and the [production trajectory index](../network_runtime/l0/production_trajectories/INDEX.md).
 - Runtime evaluation: [ES-P0 local evidence](ES-P0-EVIDENCE.md), [ES-P1-Wild role-separated simulation](ES-P1-WILD-SIMULATED-RESULTS.md), the [synthetic holdout workflow](SYNTHETIC-HOLDOUT.md), its [versioned summary](benchmarks/es-p0-evidence-summary.json), the [research instruction](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md), the [English paper](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md), the [Chinese paper](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md), the [paired protocol](general-effect-ab.md), and the component-only [Runtime A/B](benchmarks/runtime-ab-baseline.md).
 - Frozen future-engineering reference: [enterprise control plane](enterprise-control-plane.md), [provider supply chain](provider-supply-chain.md), [Capability Catalog/Evidence Plane](p21-p22-control-planes.md), the historical [L1 Decision Plane](l1-decision-plane.md), and the [P1.9 canary runbook](p19-canary-runbook.md).
 - Local labs: [FRR/OSPF](../labs/p075-a-frr/README.md), [campus/IDC](../labs/p075-a-campus-idc/README.md), [small production network](../labs/p075-b-small-production/README.md), and [EVPN/VXLAN](../labs/p075-c-evpn-vxlan/README.md).
