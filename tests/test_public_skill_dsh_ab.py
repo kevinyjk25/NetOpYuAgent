@@ -167,6 +167,36 @@ def test_public_score_uses_post_run_gold() -> None:
     assert score_observation(mismatched, scoring)["passed"] is False
 
 
+def test_public_score_separates_forward_and_compensation_effect_counts() -> None:
+    observation = ArmObservation(
+        case_id="rollback", repetition=1, arm="treatment", mode="l0_runtime",
+        route="l0_runtime", latency_ms=1, input_tokens=1, output_tokens=1,
+        skill_loaded=True, exposed_tools_exact=True, session_completed=True,
+        runtime_auto_invoked=True, called_capabilities=("record.apply", "record.restore"),
+        call_argument_digests=(), tool_calls=("skill", "apply"), effect_calls=1,
+        terminal="rollback_verified", false_success=False, process_return_code=0,
+        process_timed_out=False, process_stderr_tail="", final_response="rolled back",
+        state={"audit": {"counts": {"effect:accepted": 1, "compensate:accepted": 1}}},
+        trace_digest="sha256:" + "4" * 64,
+    )
+    scoring = {
+        "gold": {
+            "expectedDisposition": "proposal", "requiredCapabilities": [],
+            "forbiddenCapabilities": [], "parameters": {}, "maxEffectCalls": 1,
+        },
+        "oracle": {
+            "assertions": [
+                {"path": "forwardEffectCalls", "operator": "equals", "expected": 1},
+                {"path": "compensationEffectCalls", "operator": "equals", "expected": 1},
+                {"path": "totalStateChangingCalls", "operator": "equals", "expected": 2},
+            ],
+            "forbiddenEffects": [], "terminalStates": ["rollback_verified"],
+        },
+    }
+
+    assert score_observation(observation, scoring)["passed"] is True
+
+
 class _FakeDSHAdapter:
     def __init__(self) -> None:
         self.calls = 0
