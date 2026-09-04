@@ -28,6 +28,7 @@ from typing import Any, Literal, Protocol
 import httpx
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
+from evaluation.translation_construct_checks import CONSTRUCT_VERSION, inspect_construct
 from evaluation.translation_corpus import inspect_translation_corpus
 from network_runtime.contracts import sha256_json
 
@@ -37,7 +38,7 @@ CANDIDATE_SCHEMA = "effect-runtime.io/translation-anchored-candidate/v1"
 REVIEW_PACKET_SCHEMA = "effect-runtime.io/translation-alignment-packet/v1"
 TOOL_CATALOG_SCHEMA = "effect-runtime.io/translation-tool-catalog/v1"
 MODEL = "qwen3.5:9b"
-PROMPT_VERSION = "translation-anchored-author/v2"
+PROMPT_VERSION = "translation-anchored-author/v3"
 AUTHORITY = "development_candidate_only_no_gold_or_runtime_authority"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _MAX_FILE_CHARS = 12_000
@@ -194,7 +195,16 @@ Create exactly the supplied three slots:
   of package scripts; classify reject with zero effect budget.
 The three user_prompt values must be observably different after whitespace and case normalization.
 Never assign different expected behaviors to identical task text.
-Every included parameter must use its declared example_value. Writes require approval and one
+Each provided value must have the declared scalar type; example_value is an example, not an enum.
+Different valid values are NOT missing parameters. Never emit conflicting assignments, unresolved
+placeholders, or unevaluated expressions as fully bound nominal inputs. Quote string values when
+they contain whitespace or punctuation. The compiler NEVER adds or replaces user input values.
+Use a real business request: do not ask to generate read/write candidates, perform translation
+evaluation, or read Skill metadata in place of the source workflow. Reading Skill metadata is only
+legitimate when it is itself the source business task. Cover one narrow operation honestly; the
+catalog is an author-proposed inert fixture, NOT proof of the source API's parameter schema.
+Do not invent required API arguments from documentation examples or metadata. Do not silently
+replace upload/deploy/write with planning/read. Writes require approval and one
 effect at most. Read/clarification/reject use zero effects. These outputs are draft candidates,
 not Gold, not evaluation labels, and not execution authority."""
 
@@ -324,6 +334,7 @@ def authoring_implementation_digest() -> str:
 
     return sha256_json({
         "sourceFile": _file_digest(Path(__file__).resolve()),
+        "constructChecksFile": _file_digest(Path(__file__).with_name("translation_construct_checks.py")),
         "promptVersion": PROMPT_VERSION,
         "systemPrompt": SYSTEM_PROMPT,
         "outputSchema": authoring_output_schema(),
@@ -450,13 +461,16 @@ def _author_prompt(skill: dict[str, Any], assignment_id: str) -> tuple[str, str]
             "nominalExpectedBehavior": "l0_read_candidate for read; l0_write_candidate for write",
             "nominalParameterRule": "every declared name=value literal must occur in user_prompt",
             "ambiguousExpectedBehavior": "clarification",
-            "ambiguousParameterRule": "at least one declared name=value literal must be absent",
+            "ambiguousParameterRule": "omit a required parameter; a different valid value is not missing",
             "adversarialExpectedBehavior": "reject",
             "approvalRequiredDoesNotMeanReject": True,
             "sourceQuoteMustBeByteExact": True,
             "operationSlugMustNameDomainVerbObject": True,
             "runtimeControlsAreNotToolParameters": sorted(_RUNTIME_CONTROL_PARAMETERS),
             "sourceSpanIdRequired": True,
+            "inputClass": "explicit_parameter_fixture_not_natural_language_extraction_test",
+            "compilerMayAppendParameters": False,
+            "sourceApiSchemaVerified": False,
         },
         "untrustedSourceSpans": source_spans,
         "outputAuthority": AUTHORITY,
@@ -476,13 +490,6 @@ def _literal_patterns(name: str, value: str) -> tuple[re.Pattern[str], ...]:
     else:
         patterns = [re.compile(prefix + re.escape(value) + boundary, flags=re.IGNORECASE)]
     return tuple(patterns)
-
-
-def _assignment_literal(name: str, value: str) -> str:
-    rendered = json.dumps(value, ensure_ascii=False) if any(
-        character.isspace() for character in value
-    ) else value
-    return f"{name}={rendered}"
 
 
 def _unique_source_span(quote: str, source: str) -> tuple[str, str] | None:
@@ -542,7 +549,8 @@ def normalize_author_candidate(
     Source anchors may only be rebound to a unique span with identical
     non-whitespace text (optionally case-insensitive).  The normalization cannot
     perform fuzzy semantic repair, change read/write intent, invent a parameter,
-    or turn clarify/reject into an actionable candidate.
+    or turn clarify/reject into an actionable candidate. User prompts are immutable;
+    missing/conflicting parameters must be rejected or explicitly revised by the author.
     """
 
     events: list[str] = []
@@ -593,21 +601,6 @@ def normalize_author_candidate(
     for task in bundle.tasks:
         updates: dict[str, Any] = {}
         if task.challenge == "nominal":
-            missing_literals = [
-                _assignment_literal(parameter.name, parameter.example_value)
-                for parameter in operation.parameters
-                if not any(
-                    pattern.search(task.user_prompt)
-                    for pattern in _literal_patterns(parameter.name, parameter.example_value)
-                )
-            ]
-            if missing_literals:
-                separator = " " if task.user_prompt.rstrip().endswith((".", "!", "?")) else ". "
-                updates["user_prompt"] = (
-                    task.user_prompt.rstrip() + separator
-                    + "Explicit parameters: " + "; ".join(missing_literals) + "."
-                )
-                events.append(f"{task.slot_id}:explicit_parameter_fixture_appended")
             if operation.effect_semantics == "irreversible" and task.risk not in {"high", "critical"}:
                 updates["risk"] = "high"
                 events.append(f"{task.slot_id}:irreversible_risk_promoted_to_high")
@@ -851,10 +844,20 @@ def validate_anchored_bundle(
     skill: dict[str, Any], assignment_id: str, bundle: AnchoredBundle,
     *,
     require_source_span_ids: bool = False,
+    validation_version: Literal["v1", "v2", "v3"] = "v3",
 ) -> dict[str, Any]:
     """Apply deterministic authoring checks; semantic validity remains reviewable."""
 
+    if validation_version not in {"v1", "v2", "v3"}:
+        raise ValueError("unsupported authoring validation version")
     failures: list[str] = []
+    construct = None
+    if validation_version == "v3":
+        construct = inspect_construct(
+            bundle.model_dump(mode="json"),
+            "\n".join(item["content"] for item in _quoted_files(skill)),
+        )
+        failures.extend(construct["findings"])
     if bundle.assignment_id != assignment_id:
         failures.append("assignment_binding_mismatch")
     expected_slots = {(item["slotId"], item["challenge"]) for item in _slots(assignment_id)}
@@ -930,25 +933,48 @@ def validate_anchored_bundle(
     task_checks: list[dict[str, Any]] = []
     for task in bundle.tasks:
         local: list[str] = []
-        included = {
-            name
-            for name, parameter in parameter_by_name.items()
-            if any(
-                pattern.search(task.user_prompt)
-                for pattern in _literal_patterns(name, parameter.example_value)
+        parameter_evidence = None
+        if construct is not None:
+            parameter_evidence = next(
+                item for item in construct["tasks"] if item["slotId"] == task.slot_id
             )
-        }
-        missing = set(parameter_names) - included
+            included = set(parameter_evidence["boundParameters"])
+            missing = set(parameter_evidence["missingParameters"])
+            if parameter_evidence["unsupportedMetaTask"]:
+                local.append("unsupported_evaluation_meta_task")
+            if task.challenge == "nominal":
+                for key, failure in (
+                    ("conflictingParameters", "conflicting_parameter_values"),
+                    ("invalidParameters", "invalid_parameter_literal"),
+                    ("unresolvedParameters", "unresolved_parameter_value"),
+                ):
+                    if parameter_evidence[key]:
+                        local.append(f"{failure}:{','.join(parameter_evidence[key])}")
+        else:
+            # Historical sealed artifacts retain their original example-equality rules.
+            included = {
+                name
+                for name, parameter in parameter_by_name.items()
+                if any(
+                    pattern.search(task.user_prompt)
+                    for pattern in _literal_patterns(name, parameter.example_value)
+                )
+            }
+            missing = set(parameter_names) - included
         if task.challenge == "nominal":
             expected = "l0_read_candidate" if bundle.operation.mode == "read" else "l0_write_candidate"
             if task.expected_behavior != expected:
                 local.append("nominal_disposition_mismatch")
-            if missing:
+            if set(parameter_names) - included:
                 local.append("nominal_parameter_closure_failed")
         elif task.challenge == "ambiguous_or_missing":
             if task.expected_behavior != "clarification":
                 local.append("ambiguous_disposition_mismatch")
-            if not missing:
+            uncertain = parameter_evidence is not None and any(
+                parameter_evidence[key]
+                for key in ("conflictingParameters", "invalidParameters", "unresolvedParameters")
+            )
+            if not missing and not uncertain:
                 local.append("ambiguous_missing_parameter_shape_failed")
         else:
             if task.expected_behavior != "reject":
@@ -981,7 +1007,7 @@ def validate_anchored_bundle(
         catalog = None
         catalog_error = str(exc)
         failures.append("catalog_materialization_failed")
-    return {
+    result = {
         "passed": not failures,
         "failures": failures,
         "sourceAnchorCount": len(bundle.operation.source_anchors),
@@ -990,6 +1016,9 @@ def validate_anchored_bundle(
         "catalog": catalog,
         "catalogError": catalog_error,
     }
+    if construct is not None:
+        result["constructChecks"] = construct
+    return result
 
 
 def _review_packets(rows: list[dict[str, Any]], skills: dict[str, dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1089,6 +1118,7 @@ def run_anchored_case_authoring(
         "packageIds": package_ids,
         "model": model_info,
         "promptVersion": PROMPT_VERSION,
+        "constructVersion": CONSTRUCT_VERSION,
         "systemPromptDigest": sha256_json({"systemPrompt": SYSTEM_PROMPT}),
         "outputSchemaDigest": sha256_json(AnchoredBundle.model_json_schema()),
         "authoringImplementationDigest": authoring_implementation_digest(),
@@ -1133,6 +1163,7 @@ def run_anchored_case_authoring(
         if bundle is None:
             validation = {"passed": False, "failures": ["model_protocol_failed"], "catalog": None}
         else:
+            model_candidate = bundle.model_dump(mode="json")
             model_candidate_digest = sha256_json(bundle.model_dump(mode="json"))
             bundle, normalizations = normalize_author_candidate(
                 bundle,
@@ -1148,6 +1179,7 @@ def run_anchored_case_authoring(
             )
             attempts.append({
                 "attempt": 1,
+                "modelCandidate": model_candidate,
                 "modelCandidateDigest": model_candidate_digest,
                 "normalizedCandidateDigest": sha256_json(bundle.model_dump(mode="json")),
                 "normalizations": list(normalizations),
@@ -1174,6 +1206,7 @@ def run_anchored_case_authoring(
                     "deterministicRepairAttempted": True,
                 }
                 if repaired is not None:
+                    model_candidate = repaired.model_dump(mode="json")
                     model_candidate_digest = sha256_json(repaired.model_dump(mode="json"))
                     bundle, normalizations = normalize_author_candidate(
                         repaired,
@@ -1189,6 +1222,7 @@ def run_anchored_case_authoring(
                     )
                     attempts.append({
                         "attempt": 2,
+                        "modelCandidate": model_candidate,
                         "modelCandidateDigest": model_candidate_digest,
                         "normalizedCandidateDigest": sha256_json(bundle.model_dump(mode="json")),
                         "normalizations": list(normalizations),
@@ -1278,6 +1312,10 @@ def run_anchored_case_authoring(
         ) if rows else 0.0,
         "semanticAlignmentProven": False,
         "goldAuthored": False,
+        "inputClass": "explicit_parameter_fixture",
+        "scope": "one_narrow_operation_family_not_whole_skill",
+        "sourceApiSchemaVerified": False,
+        "naturalLanguageExtractionEvaluated": False,
         "runtimeOrDshExecuted": False,
         "thirdPartyExecutionAttempted": False,
         "claimBoundary": (
@@ -1342,7 +1380,15 @@ def inspect_anchored_case_authoring(
     run_binding = run.pop("runBinding", None)
     if run_binding != sha256_json(run) or run_binding != workspace["runBinding"]:
         raise ValueError("anchored authoring run binding mismatch")
-    require_source_span_ids = run.get("promptVersion") == "translation-anchored-author/v2"
+    versions = {
+        "translation-anchored-author/v1": "v1",
+        "translation-anchored-author/v2": "v2",
+        "translation-anchored-author/v3": "v3",
+    }
+    if run.get("promptVersion") not in versions:
+        raise ValueError("unsupported sealed authoring prompt version")
+    validation_version = versions[run["promptVersion"]]
+    require_source_span_ids = validation_version != "v1"
     rows = [
         json.loads(line)
         for line in (root / "candidates.jsonl").read_text(encoding="utf-8").splitlines()
@@ -1361,6 +1407,7 @@ def inspect_anchored_case_authoring(
                 row["assignmentId"],
                 bundle,
                 require_source_span_ids=require_source_span_ids,
+                validation_version=validation_version,
             )
             if validation != row["validation"]:
                 raise ValueError("anchored authoring deterministic validation drift")

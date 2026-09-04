@@ -1,0 +1,61 @@
+{
+  "schema": "effect-runtime.io/translation-construct-development-summary/v1",
+  "date": "2026-09-04",
+  "evidenceClass": "known_development_construct_diagnostics_not_translation_accuracy",
+  "implementationDigest": "sha256:2f8123d4e9f302c8eea30ebc015202e6f1ff7595b87a1ae7551ae3fdfce74b2f",
+  "staticAudit": {
+    "reportPath": "artifacts/translator-v2/construct-audit-v3/report.json",
+    "reportDigest": "sha256:5d9153f5a696521338764dc454c28f2cfdeb41b74a15f08f8ea4b411c3f4a100",
+    "sourceWorkspaceDigests": [
+      "sha256:a9daf2fe2e7a2a939536e72dd02d12c714c2f803c60588ac8f011a5be6c6a3a4",
+      "sha256:a309e2264e9f1c2326584827203990486b1594680a6fef145504e8dd5f688224"
+    ],
+    "uniqueSkillCount": 16,
+    "sourceAcceptedCount": 16,
+    "currentMechanicalPassCount": 9,
+    "newlyBlockedPreviouslyAcceptedCount": 7,
+    "blockedAssignments": [
+      "development-06-001", "development-06-002", "development-06-004",
+      "development-06-006", "development-06-011", "development-06-012",
+      "development-07-003"
+    ],
+    "sourceArtifactsModified": false
+  },
+  "freshAuthorProbe": {
+    "root": "artifacts/translator-v2/construct-v3-object-storage",
+    "reportDigest": "sha256:e207f33f21df2ace80cd34d9ba9c5787e117f5dd6434546e77593050397287c2",
+    "workspaceDigest": "sha256:ec036fd4a5ebb4f5f042b1b102a14aff71b18578434e818971f5b4c73d50512f",
+    "promptVersion": "translation-anchored-author/v3",
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "skillCount": 1,
+    "taskCount": 3,
+    "acceptedCandidates": 0,
+    "modelCalls": 2,
+    "repairAttempted": 1,
+    "repairSalvaged": 0,
+    "latencyMs": 242478.294,
+    "performanceClaimEligible": false,
+    "latencyLimit": "Single Skill including repair, concurrent local tests; not a performance comparison.",
+    "finding": "Upload was still replaced by a read-candidate meta-task after repair; the new gate rejected it and did not append parameters.",
+    "rawModelCandidatesRetained": true
+  },
+  "verification": {
+    "targetedTestsPassed": 71,
+    "fullTestsPassed": 658,
+    "subtestsPassed": 81,
+    "legacyArtifactsReadable": true,
+    "touchedRuffPassed": true
+  },
+  "limits": [
+    "Known development corpus; no unseen generalization claim.",
+    "Mechanical syntax checks are not source-grounded semantic correctness.",
+    "Arbitrary prose conflicts, negation and implicit values remain unverified.",
+    "Source API requiredness, schema and verification/compensation capabilities remain unverified.",
+    "Source task labels are not Gold; no relabeling or translation accuracy computed.",
+    "No Translator, Runtime, DSH or third-party script execution."
+  ],
+  "semanticAlignmentProven": false,
+  "naturalLanguageExtractionEvaluated": false,
+  "runtimeAdmissionGranted": false
+}

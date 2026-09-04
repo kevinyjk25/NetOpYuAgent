@@ -19,6 +19,18 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 - [ ] 清理用例中“生成某类候选”等元任务措辞，审查窄操作族是否忠实代表源 Skill；
 - [ ] 构造与模型输出隔离的参考答案，再进行真正的 Gold-blind Translator 评测；没有人工时 AI 角色结果始终标记模拟证据。
 
+#### 2026-09-04 构造检查 v3
+
+- [x] 删除自动追加正常任务参数的规范化；保存原始模型候选及显式修复版本，不再掩盖缺参；
+- [x] 显式参数使用类型化证据而非预设样例值匹配，保留冲突值原文/位置，拦截正常任务的无效字面量、未求值占位符和无源支持的评测元任务；
+- [x] 新增只读历史审计：development-06/07 原先 16 个已接受 Skill 中，9 个通过新机械规则、7 个被拦截；旧密封制品和标签未修改；这不是 Translator 准确率；
+- [x] 新报告明确区分显式参数夹具、窄操作族、未验证的源 API Schema 与完整自然语言/Skill 语义，历史 v1/v2 保持原规则检查；
+- [x] 真实 9B 新协议复验 object-storage：1 Skill/3 task，2 次调用后仍生成错误元任务，门禁拒绝，0 个通过；验证了拦截，未证明生成质量提升；定向 71、全量 658 tests + 81 subtests 通过；
+- [ ] 逐参数/逐步骤源证据审查，解决任意正文冲突、API 必填项虚构、完整写流程被降为读，以及验证/补偿能力是否真实存在；
+- [ ] 隔离参考答案与 Gold-blind Translator。Runtime 规模化评测仍锁定。
+
+实现与限制见[构造质量说明](TRANSLATION-CONSTRUCT-QUALITY.md)。
+
 #### 2026-09-03 转译优先重置
 
 - [x] 新建 Gold-blind Translator v2：模型只输出语义意图和参数源证据，Capability 选择、参数绑定、事务闭合与 L0 制品加载由确定性代码完成；
@@ -162,6 +174,8 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 **Active phase: L1-to-L0 translation generalization gate.** ES-P0 Runtime mechanics and small-sample wiring remain `local_hypothesis_supported`, but they are not broad translation evidence. No scaled Runtime study is meaningful until the Translator passes post-freeze, cross-Skill, cross-repository, and cross-domain unseen cohorts.
 
 On 2026-09-04, an audit found that legacy answer-hidden reviews still exposed category-bearing IDs and fixed task order. Those results remain sealed but are downgraded to metadata-cued development diagnostics. A new opaque-ID, independently called single-task protocol records model-visible inputs, keeps mappings scorer-side, and validates resume/output bindings. Revalidation on the same 9B and development-07 packets completed 12/12 calls, but reached only 7/12 behavior agreement and 10/12 construct alignment, with Gold-queue eligibility false. Natural-task construct quality and evidence-grounded isolated reference answers now precede Translator evaluation; AI role simulation never becomes human-independent evidence.
+
+Construct checks v3 stop parameter insertion, distinguish actual typed values from author examples, retain conflicting literal offsets, and block nominal placeholders and unsupported evaluation meta-tasks. A read-only re-audit blocked seven of 16 previously accepted development constructs; all legacy artifacts and labels remain unchanged. A fresh 9B object-storage probe still produced the wrong meta-task after repair and was rejected (one Skill, three tasks, two calls). This demonstrates interception, not improved generation accuracy. Targeted regression passed 71 tests; full regression passed 658 tests plus 81 subtests. Arbitrary prose conflicts and source API/step fidelity still require evidence-grounded review. See [construct quality](TRANSLATION-CONSTRUCT-QUALITY.md).
 
 The 2026-09-03 reset adds a Gold-blind Translator v2, mandatory pre-run Skill–Task–Tool construct review, and a digest-bound admission gate. The current known development inventory contains 100 static public Skills from 72 repositories and nine domains, with zero third-party execution. Fifty-three are Runtime-package ready, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only; the 71 primary inputs form seven repository-preserving development batches. This entire visible inventory has `proofCohortEligible=false`.
 

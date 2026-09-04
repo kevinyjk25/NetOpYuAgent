@@ -37,6 +37,8 @@
 
 ### 当前实现
 
+当前作者协议为 `translation-anchored-author/v3`。它**不再自动追加参数**；候选按实际参数类型与值检查，不同于 `example_value` 的合法值不能被判成缺参。正常任务中的显式冲突、未求值占位符及无源支持的评测元任务会被拦截。结果只标记为显式参数夹具；任意自然语言冲突、真实 API Schema 与完整步骤覆盖仍未证明。详见[构造质量 v3](TRANSLATION-CONSTRUCT-QUALITY.md)。历史 v1/v2 报告按原规则只读校验，不被新规则覆盖。
+
 `evaluation/translation_case_authoring.py` 对 71 个已知开发 Skill 按 7 个仓库聚合批次工作。每个 Skill 生成一个窄操作族和三类任务：正常、缺参追问、越界/恶意拒绝。每个候选必须满足：
 
 - 1–4 个 `SourceAnchor` 必须逐字存在于固定 Skill/reference；
@@ -46,7 +48,7 @@
 - 可逆写必须有唯一补偿；不可逆写不得伪造补偿；
 - 失败候选不能进入对齐审查队列；第三方脚本始终不执行。
 
-作者规范化只处理可证明等价的机械表示，并完整记录：给正常任务追加显式参数夹具；将 `write + none` 保守解释为 `irreversible`；把不可逆写风险抬到 high；按 read/write 类型闭合审批和 Effect budget；把仅有空白、换行或大小写差异且在原文中**唯一匹配**的 quote 重绑为真实原文 span。它不做编辑距离或语义模糊匹配，不能修改 read/write 意图、标点/词义、参数集合或处置标签，也不能把 clarify/reject 改成可执行候选；非唯一或词义变化的 anchor 继续 fail-closed。
+作者规范化只进行受限的机械处理并完整记录：将 `write + none` 保守解释为 `irreversible`；把不可逆写风险抬到 high；按声明的 read/write 类型闭合审批和 Effect budget；把仅有空白、换行或大小写差异且在原文中**唯一匹配**的 quote 重绑为真实原文 span。它不再追加参数，不做编辑距离或语义模糊匹配，不能修改用户问题、read/write 意图、参数集合或处置标签，也不能把 clarify/reject 改成可执行候选；非唯一或词义变化的 anchor 继续 fail-closed。原始模型候选和显式修复版本保存在 `authoringAttempts[].modelCandidate`；引用和参数字符串匹配都不是语义证明。
 
 通用转译 Tool Catalog 与 Fixture MCP/真实 MCP 有意分离。前者回答“这个 Skill 需要什么语义能力和事务角色”；后者回答“项目现在是否已有可执行适配器”。因此一个候选可以语义上可转译，但仍因没有 Provider/Runtime adapter 而不可执行。
 
@@ -134,6 +136,10 @@ scripts/netopyu-market-corpus anchored-review-run-inspect \
 先扩展和审查已知开发批次，只按失败类别修改通用协议/类型/链接算法。稳定后冻结 Translator，再采集仓库隔离的新 cohort。未达到[转译泛化门禁](TRANSLATION-GENERALIZATION-GATE.md)前，不恢复大规模 Runtime A/B。
 
 ## English
+
+### Current author protocol: v3
+
+The normalizer never appends or replaces user parameters. Typed explicit values are independent of `example_value`; alternate valid values cannot fake missing inputs. Conflicting assignments, deferred placeholders, and unsupported evaluation meta-tasks are blocked for nominal fixtures. Original model candidates and explicit repairs are retained. Reports identify explicit-parameter fixtures and narrow operation scope, not natural-language extraction accuracy or verified source API schemas. Legacy artifacts retain versioned read-only validation. See [construct quality and remaining semantic gaps](TRANSLATION-CONSTRUCT-QUALITY.md).
 
 ### 2026-09-04 blinding correction
 

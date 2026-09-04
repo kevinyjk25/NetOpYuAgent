@@ -399,9 +399,8 @@ def test_author_normalization_is_conservative_and_mechanical() -> None:
     normalized, events = normalize_author_candidate(bundle)
     assert normalized.operation.effect_semantics == "irreversible"
     assert normalized.tasks[0].risk == "high"
-    assert "parent=mac-main" in normalized.tasks[0].user_prompt
-    assert 'task="inspect service health"' in normalized.tasks[0].user_prompt
-    assert len(events) == 3
+    assert normalized.tasks[0].user_prompt == "Spawn an agent."
+    assert len(events) == 2
     assert normalized.tasks[1] == bundle.tasks[1]
     assert normalized.tasks[2] == bundle.tasks[2]
 
