@@ -670,10 +670,14 @@ def inspect_alignment_review(
         "behaviorAgreementRate": (
             None if alignment is None else alignment["behaviorAgreementRate"]
         ),
-        "candidateSetReadyForHumanGoldAuthoring": (
+        "candidateSetReadyForSourceEvidenceReview": (
             False if alignment is None or not blinding_verified
             else alignment["candidateSetReadyForHumanGoldAuthoring"]
         ),
+        # Boolean agreement is only a pre-screen. Source-cited field/step review
+        # is a separate prerequisite; sealed historical scores stay unchanged.
+        "candidateSetReadyForHumanGoldAuthoring": False,
+        "sourceEvidenceGateRequired": True,
         "metadataBlindingVerified": blinding_verified,
         "originalCaseIdsVisible": not blinding_verified,
         "challengeCompositionVisible": not blinding_verified,

@@ -34,6 +34,8 @@ flowchart TB
 
 新的[转译用例构造链](docs/TRANSLATION-CASE-AUTHORING.md)已覆盖 71 个主要已知开发 Skill，但这只是测试候选构造，不是完整 Skill 转译。2026-09-04 审计发现旧复核暴露类别 ID 与固定组序，历史 48/48 因而降级为有提示风险的开发诊断。新版使用匿名单任务审阅，并停止自动补齐参数；构造检查 v3 在 16 个旧已接受 Skill 中拦下 7 个问题夹具。**机械通过不代表语义正确**：自然语言冲突和源 API/步骤保真仍需独立审查，Runtime 继续锁定。细节见[构造质量及限制](docs/TRANSLATION-CONSTRUCT-QUALITY.md)；历史数字保留在[实现摘要](docs/benchmarks/translation-authoring-development-06-07-summary.json)。
 
+参数、类型、必填性及验证/回滚步骤现在可以逐项追溯源文；方法、真实失败案例及剩余设计限制见[源证据对齐审查](docs/TRANSLATION-SOURCE-ALIGNMENT.md)。
+
 匿名化后，同一 4-Skill/12-task 开发批次的行为一致为 7/12、构造对齐为 10/12，暂不具备 Gold 排队资格；自报高置信度也未揭示全部矛盾。这是评测方法诊断，不是 Translator 准确率。见[纠偏结果](docs/benchmarks/translation-review-blinding-v2-summary.json)。
 
 ### Skill 与系统怎样交互
@@ -238,6 +240,8 @@ The [authoritative prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes
 The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
 
 The case-authoring lane covers 71 known-development Skills, not whole-Skill translation. Legacy 48/48 review results are downgraded due to category-bearing IDs and fixed group order. Revised reviews use opaque single-task inputs; author normalization no longer fills missing parameters. Construct checks v3 blocked seven of 16 previously accepted fixtures. Mechanical passes do not prove semantic correctness: prose conflicts and source API/step fidelity still need review before isolated references and gold-blind Translator evaluation. Runtime remains locked. See [construct quality and limits](docs/TRANSLATION-CONSTRUCT-QUALITY.md).
+
+Parameters, types, requiredness and verification/compensation steps now have per-claim source-citation review. See [source evidence alignment](docs/TRANSLATION-SOURCE-ALIGNMENT.md) for the method, real failed probe and remaining author-format limitations.
 
 On the same four-Skill/twelve-task development inputs, the revised review reached 7/12 behavior agreement and 10/12 construct alignment; Gold-queue eligibility is false despite high self-reported confidence. This is a methodology diagnostic, not Translator accuracy. See the [correction results](docs/benchmarks/translation-review-blinding-v2-summary.json).
 

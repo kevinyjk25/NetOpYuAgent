@@ -37,6 +37,8 @@
 
 ### 当前实现
 
+新增[源证据逐项审查](TRANSLATION-SOURCE-ALIGNMENT.md)，区分每个参数的名称、类型、必填性及工具阶段的真实来源。当前 `inspect_alignment_review` 将旧布尔满分降为 `candidateSetReadyForSourceEvidenceReview`，不再直接提供 Gold 排队资格。密封的旧评分报告及历史 `review-inspect` 字段保留供重放，不具备新的准入权。
+
 当前作者协议为 `translation-anchored-author/v3`。它**不再自动追加参数**；候选按实际参数类型与值检查，不同于 `example_value` 的合法值不能被判成缺参。正常任务中的显式冲突、未求值占位符及无源支持的评测元任务会被拦截。结果只标记为显式参数夹具；任意自然语言冲突、真实 API Schema 与完整步骤覆盖仍未证明。详见[构造质量 v3](TRANSLATION-CONSTRUCT-QUALITY.md)。历史 v1/v2 报告按原规则只读校验，不被新规则覆盖。
 
 `evaluation/translation_case_authoring.py` 对 71 个已知开发 Skill 按 7 个仓库聚合批次工作。每个 Skill 生成一个窄操作族和三类任务：正常、缺参追问、越界/恶意拒绝。每个候选必须满足：
@@ -138,6 +140,8 @@ scripts/netopyu-market-corpus anchored-review-run-inspect \
 ## English
 
 ### Current author protocol: v3
+
+The [source-evidence review](TRANSLATION-SOURCE-ALIGNMENT.md) adds exhaustive field/step obligations and resolved citations. Current alignment inspection only queues source review, not Gold authoring. Sealed legacy scores and historical `review-inspect` fields remain reproducible but do not satisfy the new prerequisite.
 
 The normalizer never appends or replaces user parameters. Typed explicit values are independent of `example_value`; alternate valid values cannot fake missing inputs. Conflicting assignments, deferred placeholders, and unsupported evaluation meta-tasks are blocked for nominal fixtures. Original model candidates and explicit repairs are retained. Reports identify explicit-parameter fixtures and narrow operation scope, not natural-language extraction accuracy or verified source API schemas. Legacy artifacts retain versioned read-only validation. See [construct quality and remaining semantic gaps](TRANSLATION-CONSTRUCT-QUALITY.md).
 

@@ -31,6 +31,18 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 
 实现与限制见[构造质量说明](TRANSLATION-CONSTRUCT-QUALITY.md)。
 
+#### 2026-09-04 源证据对齐审查 v1
+
+- [x] 按任务、工具操作/读写/阶段/入参形状，以及每个参数的存在性/类型/必填性自动生成完整检查项；禁止模型自选审查子集；
+- [x] 源引用绑定到原文件和字符位置，缺项、错引用、任务文本冒充 API 证据均 fail-closed；报告支持比例与语义正确性分开，不能自动产生 Gold 或 Runtime 权限；
+- [x] 单任务匿名 9B 审查器、原始响应留存、结果摘要绑定、完成后只读重入；旧整体布尔审查仅能排队源证据审查；
+- [x] doc-ingest-analyze 真实 9B 单次审查返回 12 个声明结果，指出无参 API 与必填参数冲突；但漏引任务原文，整体 `protocol_failed`，且只读性质推断缺少充分依据；未修补模型答案；
+- [x] 定向 89 项测试、全量 676 tests + 81 subtests 通过，定向 Ruff 和制品完整性检查通过；
+- [ ] 修正源证据引用协议与读写语义推断，获得有效的逐项审查；重新设计无参/可选参数及不适用缺参测试，不能强制每个操作编造必填项；
+- [ ] 完成隔离参考答案、Gold-blind Translator 与未知 Skill 泛化验证；Runtime 规模化评测继续锁定。
+
+接口、用法和证据边界见[转译源证据对齐](TRANSLATION-SOURCE-ALIGNMENT.md)。
+
 #### 2026-09-03 转译优先重置
 
 - [x] 新建 Gold-blind Translator v2：模型只输出语义意图和参数源证据，Capability 选择、参数绑定、事务闭合与 L0 制品加载由确定性代码完成；
@@ -176,6 +188,8 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 On 2026-09-04, an audit found that legacy answer-hidden reviews still exposed category-bearing IDs and fixed task order. Those results remain sealed but are downgraded to metadata-cued development diagnostics. A new opaque-ID, independently called single-task protocol records model-visible inputs, keeps mappings scorer-side, and validates resume/output bindings. Revalidation on the same 9B and development-07 packets completed 12/12 calls, but reached only 7/12 behavior agreement and 10/12 construct alignment, with Gold-queue eligibility false. Natural-task construct quality and evidence-grounded isolated reference answers now precede Translator evaluation; AI role simulation never becomes human-independent evidence.
 
 Construct checks v3 stop parameter insertion, distinguish actual typed values from author examples, retain conflicting literal offsets, and block nominal placeholders and unsupported evaluation meta-tasks. A read-only re-audit blocked seven of 16 previously accepted development constructs; all legacy artifacts and labels remain unchanged. A fresh 9B object-storage probe still produced the wrong meta-task after repair and was rejected (one Skill, three tasks, two calls). This demonstrates interception, not improved generation accuracy. Targeted regression passed 71 tests; full regression passed 658 tests plus 81 subtests. Arbitrary prose conflicts and source API/step fidelity still require evidence-grounded review. See [construct quality](TRANSLATION-CONSTRUCT-QUALITY.md).
+
+Source-evidence review v1 now derives exhaustive field/step claims and resolves exact citations. Its real 9B doc-ingest probe returned 12 claims and located the no-argument/schema contradiction, but omitted task citations and therefore failed the protocol. Read-only classification was also inferred too strongly. Raw responses remain unchanged; valid source review, zero/optional-argument construct support, isolated references and Translator generalization are still open. See [source evidence alignment](TRANSLATION-SOURCE-ALIGNMENT.md).
 
 The 2026-09-03 reset adds a Gold-blind Translator v2, mandatory pre-run Skill–Task–Tool construct review, and a digest-bound admission gate. The current known development inventory contains 100 static public Skills from 72 repositories and nine domains, with zero third-party execution. Fifty-three are Runtime-package ready, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only; the 71 primary inputs form seven repository-preserving development batches. This entire visible inventory has `proofCohortEligible=false`.
 

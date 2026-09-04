@@ -53,7 +53,9 @@ python -m evaluation.translation_construct_audit \
 
 ### 后续交付
 
-建立带源证据的逐参数/步骤对齐审查与隔离参考答案，再形成 Gold-blind Translator 基线。评估至少分开显示：构造有效率、语义保真、适用覆盖、路由/参数准确率、引用/条件/审批/验证/恢复语义保留和时延。冻结后未知 cohort 才能提供泛化证据。
+[逐参数/步骤源证据审查](TRANSLATION-SOURCE-ALIGNMENT.md)已接通：检查项由代码生成，引用按原文定位，冲突/不足/协议错误均不进入后续参考答案步骤。首个真实 9B 案例识别了无参调用与两个必填参数的冲突，但因任务引用不完整而被整体拒绝；另有只读性质推断过强的问题，不能当作有效审查或转译成绩。
+
+接下来修正构造与审阅中的通用语义缺陷，形成有效、带源证据的审查及隔离参考答案，再做 Gold-blind Translator 基线。评估至少分开显示：构造有效率、语义保真、适用覆盖、路由/参数准确率、引用/条件/审批/验证/恢复语义保留和时延。冻结后未知 cohort 才能提供泛化证据。
 
 ## English
 
@@ -77,3 +79,5 @@ Normalization no longer appends or replaces user parameters; original model cand
 A static re-audit of 16 previously accepted development-06/07 constructs passed nine and blocked seven under the new mechanical checks. These are defect-discovery counts, not translation accuracy or generalization. Arbitrary prose conflicts (including “named 'my-runner-job'” versus `image_name=my-runner`), negation, source API requiredness, and genuine verification/compensation availability still require source-grounded semantic review. Mechanical passes do not establish correctness. The next gate remains per-parameter/per-step evidence review and isolated references before Translator evaluation; Runtime remains locked.
 
 A fresh 9B object-storage probe (one Skill, three tasks, two calls including repair) still substituted upload with a read-candidate meta-task. It was rejected without parameter insertion. This demonstrates defect interception, not improved author/Translator accuracy. Its 242.5-second latency includes repair and concurrent local testing, so it is not a performance comparison. Targeted tests: 71; full regression: 658 tests plus 81 subtests. See the [implementation-bound summary](benchmarks/translation-construct-v3-summary.json).
+
+The [source-evidence reviewer](TRANSLATION-SOURCE-ALIGNMENT.md) now derives per-parameter/per-step obligations and resolves citations to source locations. Its first real 9B probe located the no-argument/schema contradiction but failed the citation-type gate; an overconfident read-only inference also remains. This is diagnostic evidence, not a valid review or Translator score. Valid source-cited reviews and isolated reference answers remain prerequisites.

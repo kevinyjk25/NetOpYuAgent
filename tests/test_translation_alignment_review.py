@@ -203,7 +203,9 @@ def test_answer_hidden_role_review_is_sealed_and_non_authoritative(
     assert result["reviewCount"] == 3
     assert result["alignmentRate"] == 1.0
     assert result["behaviorAgreementRate"] == 1.0
-    assert result["candidateSetReadyForHumanGoldAuthoring"] is True
+    assert result["candidateSetReadyForSourceEvidenceReview"] is True
+    assert result["candidateSetReadyForHumanGoldAuthoring"] is False
+    assert result["sourceEvidenceGateRequired"] is True
     assert result["humanIndependentEvidence"] is False
     assert result["semanticAlignmentProven"] is False
     run = json.loads((review / "run.json").read_text(encoding="utf-8"))
