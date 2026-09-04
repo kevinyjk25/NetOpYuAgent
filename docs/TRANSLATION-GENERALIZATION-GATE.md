@@ -111,9 +111,11 @@ python -m evaluation.translation_study runtime-admission \
 
 ### 当前下一步
 
+2026-09-04 方法修正：旧版“答案隐藏”仍暴露类别 ID 与固定组序，不能据其一致率直接进入 Gold/转译评分。当前先验证匿名单任务协议，并清除元任务措辞、追加参数与正文冲突、窄操作族不能代表源 Skill 等构造问题。71 个 Skill 已完成的是失败发现作者覆盖，不是 71 个完整 Skill 转译成功。
+
 1. 已使用[语义锚定用例构造链](TRANSLATION-CASE-AUTHORING.md)覆盖 71 个主要开发 Skill 的 7 个批次；development-01 至 05 发现原文锚定、operation ID、控制字段泄漏、任务差异性和复核自洽等失败族，最终门禁版本在 development-06/07 的 16 Skill/48 task 上得到连续验证；
 2. development-05 有 9/11 Skill 通过确定性作者门禁；27 个答案隐藏 task 的同模型行为一致为 26/27、完整对齐 25/27，并暴露相同文本却赋予不同处置的构造错误。原报告保持密封，新增门禁须在后续批次复验；这些结果仍只具备开发排队权；
-3. 当前转入独立 Gold 编写，再使用 qwen3.5:9b 只跑 Gold-blind 离线 Translator，分析 capability grounding、参数源证据、处置、审批和事务闭合失败；
+3. 匿名化和构造质量审查通过后，再转入独立参考答案编写；没有人工时明确标记 AI 模拟。随后使用 qwen3.5:9b 只跑 Gold-blind 离线 Translator，分析 capability grounding、参数源证据、处置、审批和事务闭合失败；
 4. 只改通用协议、绑定算法或类型系统，不按单个 Skill 写特例；每轮保留失败轨迹；
 5. 开发集稳定后冻结 Translator 代码/Prompt/Schema/模型摘要；
 6. 冻结后采集全新且与开发仓库无重叠的 proof cohorts，达到上述门槛；
@@ -124,6 +126,8 @@ python -m evaluation.translation_study runtime-admission \
 ## English
 
 ### Why translation must be proven first
+
+Methodology correction (2026-09-04): legacy answer-hidden review still exposed category IDs and fixed slot order. Opaque single-task review and construct-quality checks must precede reference-answer authoring. Meta-task wording, appended parameters conflicting with prose, and narrow operations that do not represent the source Skill are separate validity risks. The 71-Skill coverage measures authoring failure discovery, not complete Skill translation success.
 
 EnsuredSkill now enforces the dependency order `aligned L1 Skill + Task + Tool Catalog → generalizable L1-to-L0 translation → deterministic L0 validation → Runtime evaluation`. A Runtime score over hand-fitted contracts does not establish that the project closes the general Skill-to-execution gap. Large DSH/Runtime studies are therefore blocked in code until the translation-generalization admission passes.
 

@@ -2,6 +2,25 @@
 
 ## 中文
 
+### 2026-09-04：盲审协议纠偏
+
+旧版虽隐藏 `expectedBehavior`，却把含 `nominal/ambiguous/adversarial` 的 caseId 和固定三任务顺序交给模型。因此下文历史 48/48 等结果只能作为**有类别提示风险的开发诊断**，不是严格盲审证据；旧密封报告不改写，检查器会返回 `metadataBlindingVerified=false` 并取消其自动送 Gold 排队资格。
+
+新版采用随机盐派生匿名 ID、按匿名 ID 排序，以及**每个独立请求只审查一个任务**。适配器只能收到白名单输入，不再收到原始任务/批次 ID、仓库元数据、三类任务组序或私有映射。模型返回匿名 ID 后，运行器严格校验覆盖，再映射回原始 ID 和原始评分顺序；未知/重复 ID 不猜测修复。私有绑定、实际模型输入、检查点与结果均摘要绑定，完整运行重入只读，中断恢复不重复已完成调用。
+
+- `model-inputs.jsonl`：实际传入模型的匿名化单任务 payload；
+- `case-bindings.json`：仅运行器/评分侧使用的原始 ID 映射和随机盐，不得发送给审阅模型；
+- `checkpoints/*.json`：匿名输出、恢复后的结果及二者的绑定证据；
+- `reviewUnit=single_task`、`latencyUnit=task`：时延不再是旧版每三任务 Skill 组时延，不能直接按百分比比较。
+
+原始 Skill 文本、引用、工具语义和用户问题不做语义改写，因此它们自身的示例或“生成 read candidate”等任务措辞仍可能提示答案。匿名化仅消除**评测元数据提示**，不证明测试用例自然度、完整 Skill 覆盖或模型独立性；这些必须由后续构造质量审查和独立参考答案处理。
+
+已定位的元任务替代、参数冲突和未求值字面量见[构造质量审查](TRANSLATION-CONSTRUCT-QUALITY.md)。该审查明确区分“出现了参数字符串”和“忠实理解业务请求”。
+
+新版已用相同 9B 制品和相同 development-07 源包完成 4 Skill/12 task 复验：协议完整、元数据盲态校验通过，但行为一致仅 **7/12（58.33%）**，构造布尔对齐 **10/12（83.33%）**，因此不能进入 Gold 队列。每 task p50/p95 为 24.1/63.9 秒。自报置信度没有触发低置信度告警，却出现“解释要求追问、结构标签写 read”的矛盾；还有上传会话 Skill 无参调用与目录必填参数不一致的问题。
+
+这不是转译准确率退步：作者不是 Gold，ID、顺序、单任务上下文及 Prompt 同时变化，不能将差异单独归因于 ID 泄漏。结果说明旧满分不足以支持语义可靠性，当前应先修订构造与建立带源证据的隔离参考答案，不继续扩大同模型自审或 Runtime。见[方法纠偏数据](benchmarks/translation-review-blinding-v2-summary.json)。
+
 ### 为什么增加这一层
 
 旧的 15-Skill/200-case 路径把部分真实公开 Skill 配给了通用 `resource.read/apply/restore` 工具。它可以验证接线，却不能公平回答“L1→L0 是否理解了 Skill 的真实业务语义”。新链路把用例构造放在转译器之前，并严格分离四件事：
@@ -115,6 +134,16 @@ scripts/netopyu-market-corpus anchored-review-run-inspect \
 先扩展和审查已知开发批次，只按失败类别修改通用协议/类型/链接算法。稳定后冻结 Translator，再采集仓库隔离的新 cohort。未达到[转译泛化门禁](TRANSLATION-GENERALIZATION-GATE.md)前，不恢复大规模 Runtime A/B。
 
 ## English
+
+### 2026-09-04 blinding correction
+
+The legacy reviewer hid `expectedBehavior` but exposed category-bearing case IDs and a fixed nominal/ambiguous/adversarial order. Historical 48/48-style results are therefore development diagnostics with known metadata cues, not strict blind-review evidence. Sealed artifacts remain unchanged; inspection flags legacy metadata blinding as unverified and disables automatic Gold-authoring queue eligibility.
+
+The revised protocol derives opaque IDs from a stored random salt, orders calls by those IDs, and sends exactly one task per independent request. Adapters receive only allowlisted public inputs, never the private source-ID map. Output IDs, remapping, checkpoints, and actual model inputs are digest-bound and revalidated on inspection/resume. Complete runs are read-only on reentry. `model-inputs.jsonl` records model-visible payloads; `case-bindings.json` is runner/scorer-only. Latency is now per task, not per three-task Skill group. Original Skill examples and semantic cues in user prompts remain visible by design, so metadata blinding does not establish natural-task quality, whole-Skill coverage, model independence, or translation accuracy.
+
+See the [construct-quality audit](TRANSLATION-CONSTRUCT-QUALITY.md) for concrete meta-task, conflicting-parameter, and unresolved-literal findings.
+
+The same 9B artifact and development-07 source packets were re-reviewed under v2: all 12 single-task calls completed and metadata blinding verified, but behavior agreement was 7/12 and construct-boolean alignment 10/12. Gold-authoring queue eligibility is false. Per-task p50/p95 was 24.1/63.9 seconds. High self-reported confidence failed to reveal explanations asking for clarification while structured labels said read; another finding concerns invented required parameters for a documented no-argument upload-session call. These are unresolved development disagreements, not measured Translator errors. IDs, ordering, singleton context, and prompt changed together, so the delta is not a single-variable leakage effect. See the [methodology diagnostic summary](benchmarks/translation-review-blinding-v2-summary.json).
 
 The former public-Skill study could validate wiring while pairing some real Skills with generic record tools that did not represent their documented operation. The new authoring layer precedes the Translator: pinned inert Skill → non-Gold 9B candidate → deterministic structural gate and recorded mechanical normalization → answer-hidden Skill–Task–Tool review → independent Gold → gold-blind Translator evaluation → Runtime only after generalization admission.
 

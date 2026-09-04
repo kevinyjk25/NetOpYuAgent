@@ -10,6 +10,15 @@
 
 ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesis_supported`，但不再被解释为 L1→L0 高泛化证明。只有转译器先在冻结后采集的跨 Skill/仓库/领域未知集合上通过门禁，L0→Runtime 的规模化安全、稳定和准确性评测才具有研究意义。
 
+#### 2026-09-04 评测可信性修正
+
+- [x] 发现并修复旧盲审中类别后缀 ID 与固定三任务组序的提示泄漏；旧 48/48 结果保留但降级为有元数据提示风险的开发诊断；
+- [x] 新增随机盐匿名 ID、单任务独立请求、模型输入白名单、私有映射与结果重绑定、可核查的实际输入及检查点完整性校验；
+- [x] 用相同真实 9B 与 development-07 源包完成匿名化复验：4 Skill/12 task 协议完整、元数据盲态校验通过，行为一致 7/12、构造对齐 10/12；Gold 排队资格为 false，原满分不再被用来支持语义可靠性；
+- [x] 全量回归 621 tests + 81 subtests 通过；定向 Ruff、JSON 和 diff 校验通过；未执行 Translator、Runtime 或第三方脚本；
+- [ ] 清理用例中“生成某类候选”等元任务措辞，审查窄操作族是否忠实代表源 Skill；
+- [ ] 构造与模型输出隔离的参考答案，再进行真正的 Gold-blind Translator 评测；没有人工时 AI 角色结果始终标记模拟证据。
+
 #### 2026-09-03 转译优先重置
 
 - [x] 新建 Gold-blind Translator v2：模型只输出语义意图和参数源证据，Capability 选择、参数绑定、事务闭合与 L0 制品加载由确定性代码完成；
@@ -151,6 +160,8 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 ### Current phase
 
 **Active phase: L1-to-L0 translation generalization gate.** ES-P0 Runtime mechanics and small-sample wiring remain `local_hypothesis_supported`, but they are not broad translation evidence. No scaled Runtime study is meaningful until the Translator passes post-freeze, cross-Skill, cross-repository, and cross-domain unseen cohorts.
+
+On 2026-09-04, an audit found that legacy answer-hidden reviews still exposed category-bearing IDs and fixed task order. Those results remain sealed but are downgraded to metadata-cued development diagnostics. A new opaque-ID, independently called single-task protocol records model-visible inputs, keeps mappings scorer-side, and validates resume/output bindings. Revalidation on the same 9B and development-07 packets completed 12/12 calls, but reached only 7/12 behavior agreement and 10/12 construct alignment, with Gold-queue eligibility false. Natural-task construct quality and evidence-grounded isolated reference answers now precede Translator evaluation; AI role simulation never becomes human-independent evidence.
 
 The 2026-09-03 reset adds a Gold-blind Translator v2, mandatory pre-run Skill–Task–Tool construct review, and a digest-bound admission gate. The current known development inventory contains 100 static public Skills from 72 repositories and nine domains, with zero third-party execution. Fifty-three are Runtime-package ready, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only; the 71 primary inputs form seven repository-preserving development batches. This entire visible inventory has `proofCohortEligible=false`.
 

@@ -24,6 +24,7 @@
 | 没有独立团队时如何自动生成、封存并接入合成用例 | [仓库外合成 Holdout](SYNTHETIC-HOLDOUT.md) |
 | 如何把 SkillsMP/GitHub 公开 Skill 安全纳入外部评测 | [ES-P1 公开 Skill 市场语料](ES-P1-PUBLIC-SKILL-CORPUS.md) |
 | 如何构造与审查语义对齐的 Skill–Task–Tool 用例 | [转译用例构造与语义对齐](TRANSLATION-CASE-AUTHORING.md) |
+| 为什么结构通过仍不代表转译准确，当前用例有哪些问题 | [转译测试构造质量](TRANSLATION-CONSTRUCT-QUALITY.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -111,6 +112,7 @@
 | How can I generate and seal synthetic cases before an independent ES-P1 study? | [Repository-external synthetic holdout](SYNTHETIC-HOLDOUT.md) |
 | How can public SkillsMP/GitHub Skills be evaluated safely? | [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md) |
 | How are semantically aligned Skill–Task–Tool cases authored and reviewed? | [Translation case authoring and alignment](TRANSLATION-CASE-AUTHORING.md) |
+| Why can a valid structure still misrepresent a Skill? | [Translation construct quality](TRANSLATION-CONSTRUCT-QUALITY.md) |
 | How do I run a demo or integrate my systems? | [Usage and integration](getting-started-integration.md) |
 
 ### Topic index
