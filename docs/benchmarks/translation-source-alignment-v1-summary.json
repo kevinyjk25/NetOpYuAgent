@@ -1,0 +1,58 @@
+{
+  "schema": "effect-runtime.io/translation-source-alignment-development-summary/v1",
+  "date": "2026-09-04",
+  "evidenceClass": "known_development_diagnostic_not_valid_review_or_translation_score",
+  "implementationDigest": "sha256:4ba87fcc3ba4002dc4742583bae90d8c07c4bd31283169f8666afaa340537b1a",
+  "inputRoot": "artifacts/translator-v2/source-alignment-doc-ingest-v1/input",
+  "outputRoot": "artifacts/translator-v2/source-alignment-doc-ingest-v1/review",
+  "sourcePacketDigest": "sha256:f3757a5326bb039651f5119342cfbe61dfcc1d6edff2c21914da722b552fdafc",
+  "inputDigest": "sha256:c970e0fd01a227b5543f785355b0037ef605ab879b4f6a76af943282bff8e575",
+  "sourceManifestDigest": "sha256:cd2a6ff01f534dfc936a3cedfb7aa8d72041881fe03c1eb8139ae1aced95f1cb",
+  "reportDigest": "sha256:1abfcc75bbd4d9e3760907021c729016fe2a2308c4f1d9faedebdfd25f3164c2",
+  "responseDigest": "sha256:0bd9030512bd6fa7d69727083a1a219057dfbc48c63a24473123dfffdfc9db50",
+  "sealDigest": "sha256:5bb71f4e7be4baebe37c83f9be4f26fd00d3441e9bc2a4e465c7d122f257af5d",
+  "model": "qwen3.5:9b",
+  "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+  "skillCount": 1,
+  "taskCount": 1,
+  "requestedClaimCount": 12,
+  "rawClaimCount": 12,
+  "rawUnvalidatedVerdictCounts": {
+    "contradicted": 7,
+    "supported": 3,
+    "insufficient_evidence": 2
+  },
+  "status": "protocol_failed",
+  "validReviewCount": 0,
+  "protocolFailure": {
+    "code": "required_evidence_kind_missing",
+    "claimIds": ["claim-0001", "claim-0002"],
+    "detail": "Task claims cited only the Skill, omitting task-0001. The original output was not repaired."
+  },
+  "projectTeamFindings": [
+    "The raw review located the explicit no-arguments call and the two invented required hints.",
+    "The raw reviewer inferred read-only state behavior from session preparation without sufficient source support.",
+    "The current author format requires at least one parameter, marks all properties required and fixes a missing-input challenge; zero/optional-argument APIs need a construct redesign."
+  ],
+  "telemetry": {
+    "modelCalls": 1,
+    "latencyMs": 106163.9343330171,
+    "inputTokens": 3584,
+    "outputTokens": 1631,
+    "performanceComparisonEligible": false
+  },
+  "verification": {
+    "targetedTestsPassed": 89,
+    "fullTestsPassed": 676,
+    "subtestsPassed": 81,
+    "touchedRuffPassed": true,
+    "artifactIntegrityVerified": true
+  },
+  "semanticEntailmentProven": false,
+  "humanIndependentEvidence": false,
+  "goldAuthored": false,
+  "runtimeAuthorityGranted": false,
+  "runtimeOrDshExecuted": false,
+  "thirdPartyExecutionAttempted": false,
+  "claimBoundary": "Mechanism and failure diagnosis only. Raw verdict counts and exact citations are not validated semantic accuracy or generalization evidence."
+}

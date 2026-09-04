@@ -98,6 +98,12 @@ def _digest_file(path: Path) -> str:
     return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def _inspect_translation_admission(path_value: str | Path) -> dict[str, Any]:
+    from evaluation.translation_study import inspect_runtime_evaluation_admission
+
+    return inspect_runtime_evaluation_admission(path_value)
+
+
 def _write_json_atomic(path: Path, value: dict[str, Any]) -> None:
     """Persist resumable evidence without ever exposing a partial JSON file."""
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -629,6 +635,7 @@ def run_public_dsh_ab(
     limit: int | None = None, workers: int = 1,
     invocation_profile: str = "ollama_openai_provider_default",
     adapter: PublicDSHAdapter | None = None,
+    translation_admission: str | Path | None = None,
 ) -> dict[str, Any]:
     if model != MODEL:
         raise ValueError(f"public DSH paired model is fixed to {MODEL}")
@@ -642,6 +649,16 @@ def run_public_dsh_ab(
     active_repetitions = planned_repetitions if repetitions is None else repetitions
     if active_repetitions < 1 or active_repetitions > planned_repetitions:
         raise ValueError("public DSH repetitions must be within the sealed study plan")
+    wiring_smoke = limit == 1 and active_repetitions == 1
+    admission = None
+    if translation_admission is None:
+        if not wiring_smoke:
+            raise ValueError(
+                "L1-to-L0 generalization admission is required before Runtime evaluation; "
+                "without it only a one-case, one-repetition wiring smoke is allowed"
+            )
+    else:
+        admission = _inspect_translation_admission(translation_admission)
     if workers < 1 or workers > 4:
         raise ValueError("public DSH workers must be between 1 and 4")
     if adapter is not None and workers != 1:
@@ -664,6 +681,8 @@ def run_public_dsh_ab(
         "plannedCaseCount": bound_inspection["caseCount"],
         "plannedRepetitions": planned_repetitions,
         "goldAvailableToAgent": False,
+        "evaluationPurpose": "wiring_smoke" if wiring_smoke and admission is None else "runtime_evaluation",
+        "translationAdmissionDigest": None if admission is None else admission["admissionDigest"],
     }
     run_manifest = {**run_body, "runDigest": sha256_json(run_body)}
     run_path = root / "run.json"
@@ -805,6 +824,9 @@ def run_public_dsh_ab(
         ),
         "runtimeArtifactLoadable": True, "pairedExecutionInputEligible": True,
         "pairedExecutionCompleted": True,
+        "evaluationPurpose": run_manifest["evaluationPurpose"],
+        "translationGeneralizationAdmitted": admission is not None,
+        "researchEvidenceEligible": admission is not None,
         "resumedArmCount": resumed_arm_count,
         "executedArmCount": executed_arm_count,
         "metrics": {
@@ -814,8 +836,9 @@ def run_public_dsh_ab(
         "rows": rows,
         "officialEsP1QualificationEligible": False,
         "claimBoundary": (
-            "Local public-Skill DSH paired evidence over sealed declarative fixtures; "
-            "not private ES-P1 qualification, production success probability, or real-system evidence."
+            "A one-case run without translation admission is wiring evidence only. An admitted "
+            "local public-Skill study is still not private ES-P1 qualification, production success "
+            "probability, or real-system evidence."
         ),
     }
     report = {**report_body, "reportDigest": sha256_json(report_body)}
@@ -833,6 +856,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--native-no-think", action="store_true")
+    parser.add_argument("--translation-admission")
     args = parser.parse_args(argv)
     if args.native_no_think:
         from evaluation.ollama_no_think_proxy import INVOCATION_PROFILE, OllamaNoThinkProxy
@@ -841,12 +865,14 @@ def main(argv: list[str] | None = None) -> int:
                 args.bound_root, args.output_root, model=args.model,
                 base_url=proxy.base_url, repetitions=args.repetitions, limit=args.limit,
                 workers=args.workers, invocation_profile=INVOCATION_PROFILE,
+                translation_admission=args.translation_admission,
             )
     else:
         result = run_public_dsh_ab(
             args.bound_root, args.output_root, model=args.model,
             base_url=args.base_url, repetitions=args.repetitions, limit=args.limit,
             workers=args.workers,
+            translation_admission=args.translation_admission,
         )
     print(json.dumps({
         key: result[key] for key in (

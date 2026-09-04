@@ -4,11 +4,64 @@
 
 ### 当前阶段
 
-**ES-P0：本地研究原型证据闭环已完成。**
+**当前主阶段：L1→L0 转译泛化门禁。**
 
 权威命题是：概率性 Reasoning 只提出 Candidate Plan；Contract、Evidence、Guard、Risk 和 Transaction 决定是否允许 Effect；不合格转换安全停机，不能回退原生写。
 
-聚合结论为 `local_hypothesis_supported`。它只适用于透明开发集和本地仿真 Provider，不是生产成功概率、隐藏集泛化或真实厂商设备资格。
+ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesis_supported`，但不再被解释为 L1→L0 高泛化证明。只有转译器先在冻结后采集的跨 Skill/仓库/领域未知集合上通过门禁，L0→Runtime 的规模化安全、稳定和准确性评测才具有研究意义。
+
+#### 2026-09-04 评测可信性修正
+
+- [x] 发现并修复旧盲审中类别后缀 ID 与固定三任务组序的提示泄漏；旧 48/48 结果保留但降级为有元数据提示风险的开发诊断；
+- [x] 新增随机盐匿名 ID、单任务独立请求、模型输入白名单、私有映射与结果重绑定、可核查的实际输入及检查点完整性校验；
+- [x] 用相同真实 9B 与 development-07 源包完成匿名化复验：4 Skill/12 task 协议完整、元数据盲态校验通过，行为一致 7/12、构造对齐 10/12；Gold 排队资格为 false，原满分不再被用来支持语义可靠性；
+- [x] 全量回归 621 tests + 81 subtests 通过；定向 Ruff、JSON 和 diff 校验通过；未执行 Translator、Runtime 或第三方脚本；
+- [ ] 清理用例中“生成某类候选”等元任务措辞，审查窄操作族是否忠实代表源 Skill；
+- [ ] 构造与模型输出隔离的参考答案，再进行真正的 Gold-blind Translator 评测；没有人工时 AI 角色结果始终标记模拟证据。
+
+#### 2026-09-04 构造检查 v3
+
+- [x] 删除自动追加正常任务参数的规范化；保存原始模型候选及显式修复版本，不再掩盖缺参；
+- [x] 显式参数使用类型化证据而非预设样例值匹配，保留冲突值原文/位置，拦截正常任务的无效字面量、未求值占位符和无源支持的评测元任务；
+- [x] 新增只读历史审计：development-06/07 原先 16 个已接受 Skill 中，9 个通过新机械规则、7 个被拦截；旧密封制品和标签未修改；这不是 Translator 准确率；
+- [x] 新报告明确区分显式参数夹具、窄操作族、未验证的源 API Schema 与完整自然语言/Skill 语义，历史 v1/v2 保持原规则检查；
+- [x] 真实 9B 新协议复验 object-storage：1 Skill/3 task，2 次调用后仍生成错误元任务，门禁拒绝，0 个通过；验证了拦截，未证明生成质量提升；定向 71、全量 658 tests + 81 subtests 通过；
+- [ ] 逐参数/逐步骤源证据审查，解决任意正文冲突、API 必填项虚构、完整写流程被降为读，以及验证/补偿能力是否真实存在；
+- [ ] 隔离参考答案与 Gold-blind Translator。Runtime 规模化评测仍锁定。
+
+实现与限制见[构造质量说明](TRANSLATION-CONSTRUCT-QUALITY.md)。
+
+#### 2026-09-04 源证据对齐审查 v1
+
+- [x] 按任务、工具操作/读写/阶段/入参形状，以及每个参数的存在性/类型/必填性自动生成完整检查项；禁止模型自选审查子集；
+- [x] 源引用绑定到原文件和字符位置，缺项、错引用、任务文本冒充 API 证据均 fail-closed；报告支持比例与语义正确性分开，不能自动产生 Gold 或 Runtime 权限；
+- [x] 单任务匿名 9B 审查器、原始响应留存、结果摘要绑定、完成后只读重入；旧整体布尔审查仅能排队源证据审查；
+- [x] doc-ingest-analyze 真实 9B 单次审查返回 12 个声明结果，指出无参 API 与必填参数冲突；但漏引任务原文，整体 `protocol_failed`，且只读性质推断缺少充分依据；未修补模型答案；
+- [x] 定向 89 项测试、全量 676 tests + 81 subtests 通过，定向 Ruff 和制品完整性检查通过；
+- [ ] 修正源证据引用协议与读写语义推断，获得有效的逐项审查；重新设计无参/可选参数及不适用缺参测试，不能强制每个操作编造必填项；
+- [ ] 完成隔离参考答案、Gold-blind Translator 与未知 Skill 泛化验证；Runtime 规模化评测继续锁定。
+
+接口、用法和证据边界见[转译源证据对齐](TRANSLATION-SOURCE-ALIGNMENT.md)。
+
+#### 2026-09-03 转译优先重置
+
+- [x] 新建 Gold-blind Translator v2：模型只输出语义意图和参数源证据，Capability 选择、参数绑定、事务闭合与 L0 制品加载由确定性代码完成；
+- [x] 独立 Skill–Task–Tool 对齐审查区分 read/write/clarification/reject 与 construct-invalid，评分器要求审查全覆盖并与 Gold 处置一致；
+- [x] 100 个静态公开 Skill 已建立可搜索索引：72 仓库、9 领域、第三方执行 0；53 `runtime_ready`、18 `translation_only_partial_context`、29 `format_variant_robustness_only`；
+- [x] 主要转译开发语料为 71 Skill，按仓库聚合为 7 个批次；整个已知库固定 `proofCohortEligible=false`；
+- [x] Runtime 大规模评测加入硬门禁：没有有效 admission 时只允许 1 case × 1 repetition 接线 smoke，且 `researchEvidenceEligible=false`；
+- [x] 准入器要求同一冻结 Translator、至少 3 个互不重叠的未知 cohort，以及合计 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case；
+- [x] 建成语义锚定作者链：精确原文锚点、参数字面证据、通用不可执行 Tool Catalog、确定性结构门禁、透明保守规范化与答案隐藏的 AI 审查格式；
+- [x] 完成 `development-01` 的实现绑定 12-Skill/36-task 9B 作者迭代：唯一非模糊 span 对齐与 read/write 机械闭包把门禁通过从 6/12 提升到 10/12，盲审 task 从 18 增至 30，模型调用从 18 降到 14；2 个剩余失败均为非精确 anchor；
+- [x] 建成独立密封输出的答案隐藏 AI 角色审查器：10 个通过 Skill/30 task 全部协议完整、行为一致且无低置信度，p50/p95 为 26.0/43.4 秒；作者与审查者同为 `qwen3.5:9b`，因此只具备开发排队权，`humanIndependentEvidence=false`、`semanticAlignmentProven=false`；
+- [x] development-02 至 05 已完成 43 个已知 Skill 的失败驱动作者实验；编译器接管 operation ID 和精确 source-span 绑定，禁止 Runtime 控制字段进入业务参数，并机械闭合 read/non-write envelope；development-05 为 9/11 通过，两个失败来自长上下文 Skill 的 assignment/slot/参数类型错误；
+- [x] development-05 的 9 个通过 Skill/27 task 完成答案隐藏复核：行为一致 26/27、完整对齐 25/27，无低置信度；复核暴露相同任务文本被赋予不同处置及 clarification 布尔自相矛盾，原密封报告未改写，代码已新增对应 fail-closed 门禁；
+- [x] 最终门禁版本在 development-06/07 连续运行：16/16 Skill 首轮通过、0 修复，48/48 task 的同模型答案隐藏复核行为一致且完整对齐；71 个主要已知开发 Skill 的失败发现作者覆盖完成；
+- [ ] 为合格候选完成独立 Gold 并运行 Gold-blind Translator；当前不得把作者门禁率、同模型自审率或跨不同批次的表面变化称为 Translator 准确率；
+- [ ] 使用 qwen3.5:9b 分批只跑离线转译，基于失败类别改良通用算法，禁止按单 Skill 打补丁；
+- [ ] 冻结稳定 Translator 后再收集全新 proof cohorts；门禁未通过前不恢复规模化 Runtime A/B。
+
+详细规则见 [L1→L0 泛化门禁](TRANSLATION-GENERALIZATION-GATE.md)。
 
 ### Done
 
@@ -67,7 +120,7 @@
 
 ### 当前活动阶段与后续计划
 
-**当前活动阶段：ES-P1 Independent Generalization 基础设施已就绪，等待仓库外独立数据。**
+**当前活动阶段：先完成 L1→L0 跨 Skill 泛化；Runtime 规模化评测已被硬门禁暂停。**
 
 #### ES-P1 已完成的研究基础设施
 
@@ -80,7 +133,7 @@
 - [x] 完成 I11 权威边界清理：DSH 产品 Adapter 不再导入 Evaluator/Golden Set，能力检索 parity 移入 `evaluation/` 且只使用内存状态；A2A、轨迹学习与历史 L1 shadow 改为命令触发时延迟加载；
 - [x] 活跃文档导航移除 P1.9 Decision Plane/Canary 产品化路线，真实 private holdout 与“只有协议工具”的边界已更正；冻结实现继续作为 fail-closed 回归，不计入当前能力；
 - [x] Runtime 语义收敛原型：Typed Graph 已成为 journal-backed 分支门禁；执行前安全中止不再依赖可补偿性；崩溃边界显式记录 `skipped/indeterminate` 并只读对账；`inspect()` 输出图一致性、跨步骤 Provenance DAG 与 stage latency；
-- [x] 当前仓库全量回归为 `567 passed, 81 subtests passed`。ES-P0 证据报告中的 506 是当时冻结制品的历史计数，不回写成新的实验结果。
+- [x] 当前仓库全量回归为 `599 passed, 81 subtests passed`。ES-P0 证据报告中的 506 是当时冻结制品的历史计数，不回写成新的实验结果。
 - [x] 建立仓库外 synthetic evidence 通道：240 条模型生成候选经 Reviewer A/B 独立 Prompt 盲审、按需裁决和 Skill/Case/Role 摘要封存；覆盖 6 个 Skill 特征族、10 个事务/故障模式、6 个 MCP 域和 3 种语言组；受控 Loader 强制其 `officialEsP1QualificationEligible=false`；
 - [x] 完成 v3 synthetic evidence：240/240 Skill 包零 finding，9B 转译协议有效 240/240、可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对经 effect-budget v3 无模型重评分后，Treatment Task Completion 93.33% 对 Control 76.67%，unsafe 0 对 4，invalid 1 对 5，p50 64.3 秒对 103.6 秒；17/17 Runtime 审计有效。该结果是模型合成证据，不是独立泛化或生产概率。
 - [x] 完成 `ES-P1-Wild` 静态导入 pilot：SkillsMP 发现 100 个候选，处理 60 个后以许可证、无脚本、固定 commit 和摘要门禁接纳 20 个/13 仓库；第三方执行与可执行文件物化均为 0；严格 Runtime 包门禁 15 passed、5 blocked。该静态导入阶段当时尚无任务、Gold/Oracle 或 DSH paired run；后续另行完成的角色模拟结果仍不是 ES-P1 资格结果。
@@ -130,7 +183,19 @@
 
 ### Current phase
 
-**ES-P0 local research-prototype evidence is complete.** The aggregate result is `local_hypothesis_supported`: reasoning proposes candidates, while Contract, Evidence, Guard, Risk, and Transaction control effects; an unqualified translation stops safely and never regains native write authority.
+**Active phase: L1-to-L0 translation generalization gate.** ES-P0 Runtime mechanics and small-sample wiring remain `local_hypothesis_supported`, but they are not broad translation evidence. No scaled Runtime study is meaningful until the Translator passes post-freeze, cross-Skill, cross-repository, and cross-domain unseen cohorts.
+
+On 2026-09-04, an audit found that legacy answer-hidden reviews still exposed category-bearing IDs and fixed task order. Those results remain sealed but are downgraded to metadata-cued development diagnostics. A new opaque-ID, independently called single-task protocol records model-visible inputs, keeps mappings scorer-side, and validates resume/output bindings. Revalidation on the same 9B and development-07 packets completed 12/12 calls, but reached only 7/12 behavior agreement and 10/12 construct alignment, with Gold-queue eligibility false. Natural-task construct quality and evidence-grounded isolated reference answers now precede Translator evaluation; AI role simulation never becomes human-independent evidence.
+
+Construct checks v3 stop parameter insertion, distinguish actual typed values from author examples, retain conflicting literal offsets, and block nominal placeholders and unsupported evaluation meta-tasks. A read-only re-audit blocked seven of 16 previously accepted development constructs; all legacy artifacts and labels remain unchanged. A fresh 9B object-storage probe still produced the wrong meta-task after repair and was rejected (one Skill, three tasks, two calls). This demonstrates interception, not improved generation accuracy. Targeted regression passed 71 tests; full regression passed 658 tests plus 81 subtests. Arbitrary prose conflicts and source API/step fidelity still require evidence-grounded review. See [construct quality](TRANSLATION-CONSTRUCT-QUALITY.md).
+
+Source-evidence review v1 now derives exhaustive field/step claims and resolves exact citations. Its real 9B doc-ingest probe returned 12 claims and located the no-argument/schema contradiction, but omitted task citations and therefore failed the protocol. Read-only classification was also inferred too strongly. Raw responses remain unchanged; valid source review, zero/optional-argument construct support, isolated references and Translator generalization are still open. See [source evidence alignment](TRANSLATION-SOURCE-ALIGNMENT.md).
+
+The 2026-09-03 reset adds a Gold-blind Translator v2, mandatory pre-run Skill–Task–Tool construct review, and a digest-bound admission gate. The current known development inventory contains 100 static public Skills from 72 repositories and nine domains, with zero third-party execution. Fifty-three are Runtime-package ready, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only; the 71 primary inputs form seven repository-preserving development batches. This entire visible inventory has `proofCohortEligible=false`.
+
+The semantic case-authoring lane is now implemented. It binds Skill quotes, explicit parameter evidence, a generic non-executable Tool Catalog, conservative recorded normalization, deterministic structural rejection, and answer-hidden review. Development batches 02–05 exposed reusable failure families while the implementation evolved. Compiler-owned operation IDs, required exact source-span IDs, control-field exclusion, mechanical read/non-write closure, distinct challenge text, and reviewer consistency became fail-closed gates. Without further changes, the final implementation accepted 16/16 Skills on the first call in development-06/07, while all 48 answer-hidden tasks achieved same-model behavior agreement and alignment. Failure-discovery authoring coverage now spans all 71 primary known-development Skills. These are development diagnostics, not independent Gold, Translator accuracy, unseen generalization, or Runtime qualification.
+
+Runtime evaluation now requires the same frozen Translator to pass at least three disjoint post-freeze unseen cohorts totaling at least 50 unique Skills, 15 repositories, eight domains, and 600 cases. Every cohort must pass the safety, recall, macro-F1, exact-parameter, source-evidence, artifact-loadability, and alignment gates. Without a valid admission artifact, the DSH runner permits only a 1-case × 1-repetition wiring smoke and marks it ineligible as research evidence. See the [L1-to-L0 generalization gate](TRANSLATION-GENERALIZATION-GATE.md).
 
 Completed evidence includes 60 deterministic Runtime scenario runs, 30 mechanism-ablation probes, two 60-Skill translation studies, 120 real paired DSH sessions across 9B and 7B models, precision/coverage curves, scenario-level Wilson intervals, and a final regression of 506 tests plus 81 subtests.
 
@@ -144,11 +209,11 @@ These controls prove that an external study can be preregistered and drift-check
 
 The I11 authority cleanup is also complete. Product DSH adapter code no longer imports evaluator or golden-set modules; retrieval parity now lives in `evaluation/` and uses memory-only state. Frozen A2A, trajectory-learning, and historical L1-shadow extensions are loaded only when their explicit commands are invoked. Active documentation no longer presents P1.9 Decision Plane/Canary productization or holdout tooling as current evidence. README, ARCHITECTURE, HLD, LLD, SSD, and the unified Skill-to-system interaction guide now use one lifecycle vocabulary: offline authoring versus online execution, read-only fallback versus write safe-stop, and evidence-backed terminal outcomes.
 
-The local Runtime-convergence prototype now uses a journal-backed Typed Graph scheduler to gate normal execution, rejection, precondition drift, indeterminate outcomes, compensation, and crash-boundary recovery. Unknown crash work is recorded as skipped/indeterminate and only reconciled by reads; Effect is never replayed. Runtime inspection exposes graph conformance, a privacy-minimized cross-step Evidence provenance DAG, and stage latency separated into Runtime-active and approval-wait time with an explicit Reasoning/LLM exclusion. The current repository regression is `567 passed, 81 subtests passed`. The 506-test number in frozen ES-P0 evidence remains historical and is not rewritten.
+The local Runtime-convergence prototype now uses a journal-backed Typed Graph scheduler to gate normal execution, rejection, precondition drift, indeterminate outcomes, compensation, and crash-boundary recovery. Unknown crash work is recorded as skipped/indeterminate and only reconciled by reads; Effect is never replayed. Runtime inspection exposes graph conformance, a privacy-minimized cross-step Evidence provenance DAG, and stage latency separated into Runtime-active and approval-wait time with an explicit Reasoning/LLM exclusion. The current repository regression is `599 passed, 81 subtests passed`. The 506-test number in frozen ES-P0 evidence remains historical and is not rewritten.
 
 A separate repository-external synthetic evidence path is now operational. It sealed 240 model-authored cases after two blind model-review prompts and digest-bound packaging, covering six Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. The loader structurally fixes `officialEsP1QualificationEligible` to false. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from four to zero, and reduced p50 latency from 103.6 to 64.3 seconds. All 17 applicable Runtime audits were valid. Residual Treatment failures expose pre-Runtime L1 factual-decision and safe-stop availability limits. This is synthetic evidence, not independent generalization or a production probability.
 
-The `ES-P1-Wild` static-import pilot is now complete. SkillsMP discovery returned 100 candidates; the importer processed 60 and accepted 20 license-identified, script-free packages from 13 repositories at pinned commits. No third-party code was executed and no executable file was materialized. The strict Runtime package gate passed 15 and blocked five, exposing non-standard frontmatter and unresolved/out-of-bound references. Those 15 packages now have a sealed external author kit with 45 blank task slots and Task/Gold/Tool-Catalog schemas; it contains no Runtime/evaluator, model output, or generated Gold. The next step is to preregister a broader multilingual sample and have independent people fill and review 200–500 paired cases. Marketplace packages remain untrusted and `static_only`; a separate disposable `ES-P1-Sec` sandbox will cover malicious-package behavior. Public-market evidence cannot replace the formal private holdout gate. See [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md).
+The earlier `ES-P1-Wild` 15-Skill authoring path remains a historical pilot. The expanded static development inventory now has 100 accepted Skills from 72 repositories. It is used to discover translation failure modes, not to claim unseen generalization. Marketplace packages remain untrusted and `static_only`; a separate disposable `ES-P1-Sec` sandbox will cover malicious-package behavior. Public-market evidence cannot replace the formal private holdout gate. See [ES-P1 public Skill-market corpus](ES-P1-PUBLIC-SKILL-CORPUS.md).
 
 An explicitly non-authoritative qwen3.5:9b draft-assistance lane has also been exercised on the 15-package author kit. Fourteen assignments and 42/45 slots passed protocol and safety-shape validation; 12 assignments needed repair calls, p50/p95 latency was 59.2/97.2 seconds, and one persistent proposal/effect-budget contradiction remained rejected. The artifact passed binding and digest inspection. It contains no trusted Gold or execution authority and only reduces blank-page work for independent authors.
 

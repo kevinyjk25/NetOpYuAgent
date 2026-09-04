@@ -189,7 +189,7 @@ P1.8-C3 把通用决策 Envelope 拆成候选专属 Tool：检索器先返回最
 
 C3.2 完成 184/184 并通过当前绝对门槛；新增 24 条对抗/反误杀集 E2E 100%，所有协议门禁均为 100%，禁止/重复 Tool 和提前文本为 0。usage 记录完整率 100%；grounding 删除 40 个无来源字段，Schema 边界删除 24 个越界字段，16 次调用以相同候选和已知值安全收窄。模型首轮 safety escape 仍为 3.12%，最终 0 不能表述成模型原生安全。版本化证据见 [`data/l1_dsh_schema_compiler_observations.json`](../data/l1_dsh_schema_compiler_observations.json)。
 
-同一 184 条和同一 C3.2 合同下，immutable `qwen3.6:27b` 的 E2E/selection/parameter F1 达到 95.11%/96.08%/95.83%，高于 7B，最终 safety escape 仍为 0。但两例超过 300 秒外层进程时限，导致 capture/compiler/session 等精确协议门禁只有 98.91%；p50/p95 为 68.193/176.923 秒，分别约为 7B 的 15.2/25.8 倍。因此本次 27B 全量运行不合格，不能替代 7B 默认基线；失败报告保留在 [`artifacts/l1-dsh-schema-compiler/qwen3.6-27b/`](../artifacts/l1-dsh-schema-compiler/qwen3.6-27b/)。
+同一 184 条和同一 C3.2 合同下，immutable `qwen3.6:27b` 的 E2E/selection/parameter F1 达到 95.11%/96.08%/95.83%，高于 7B，最终 safety escape 仍为 0。但两例超过 300 秒外层进程时限，导致 capture/compiler/session 等精确协议门禁只有 98.91%；p50/p95 为 68.193/176.923 秒，分别约为 7B 的 15.2/25.8 倍。因此本次 27B 全量运行不合格，不能替代 7B 默认基线；失败报告在运行机的 `artifacts/l1-dsh-schema-compiler/qwen3.6-27b/` 生成，不作为 Git 文档链接。
 
 ### 8. 当前完成边界
 
@@ -249,7 +249,7 @@ P1.8-C3 replaces the generic decision envelope with one proposal-only Tool per r
 
 The same immutable 7B completed 184/184 C3.2 cases and passed the current absolute gates. Protocol and strict output were 100%, selection 94.12%, argument F1 93.06%, clarification precision/recall 93.55%/96.67%, missing-field accuracy 93.33%, workflow 90.62%, final safety escape zero, and E2E 91.30%; the adversarial extension reached 100% E2E. Versus C2, model calls fell from 267 to 193, repairs from 34 to 9, and local p50/p95 from 4.510/12.909 to 4.488/6.850 seconds. Grounding removed 40 unsupported fields and Schema constraining removed 24 unknown fields while preserving candidate identity. First-attempt safety escape remains 3.12%; final zero therefore does not imply native model safety. See [`data/l1_dsh_schema_compiler_observations.json`](../data/l1_dsh_schema_compiler_observations.json).
 
-On the same 184 cases and C3.2 contract, immutable `qwen3.6:27b` improved E2E/selection/argument F1 to 95.11%/96.08%/95.83% and retained zero final safety escape. Two cases exceeded the 300-second outer process deadline, however, so the exact capture/compiler/session protocol gates reached only 98.91%. Its local p50/p95 was 68.193/176.923 seconds, about 15.2/25.8 times the 7B result. The full 27B run therefore failed qualification and does not replace the 7B default baseline; failure evidence is retained under [`artifacts/l1-dsh-schema-compiler/qwen3.6-27b/`](../artifacts/l1-dsh-schema-compiler/qwen3.6-27b/).
+On the same 184 cases and C3.2 contract, immutable `qwen3.6:27b` improved E2E/selection/argument F1 to 95.11%/96.08%/95.83% and retained zero final safety escape. Two cases exceeded the 300-second outer process deadline, however, so the exact capture/compiler/session protocol gates reached only 98.91%. Its local p50/p95 was 68.193/176.923 seconds, about 15.2/25.8 times the 7B result. The full 27B run therefore failed qualification and does not replace the 7B default baseline; failure evidence is generated locally under `artifacts/l1-dsh-schema-compiler/qwen3.6-27b/` and is not a Git documentation link.
 
 ### 6. Current completion boundary
 
