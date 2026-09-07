@@ -6,6 +6,112 @@
 
 **当前主阶段：L1→L0 转译泛化门禁。**
 
+#### 2026-09-07 Git 阶段检查点
+
+C3c–C3h 代码、测试及开发依赖已提交到本地 `dev`：`1c5fc7e`。本节及配套文档/评测摘要随独立文档提交保存；未推送、未合入 master。以下历史条目的“未提交”描述保留其当时状态，以本节为当前准。已有验证为 **1288 tests + 81 subtests 通过**，不代表语义质量验收完成；新版职责协议仍待真实 9B 验证。
+
+冻结的 `evaluation/flow_lean_pilot.py` 末尾一行空行保留，以避免改变已记录实验指纹；暂存检查除此格式例外通过。原始实验制品仍在 Git 忽略的本地 `artifacts/`，本次仅提交可追溯摘要，不包含完整原始证据包。
+
+#### 2026-09-07 C3h 职责映射：离线修复完成，新模型批次待验证
+
+- [x] 新独立协议把源句拆成精确引文子要求，明确操作/分支、输入/返回结构、读权限、错误传播、业务前置、解释/权限限制及缺能力停止。按真实规则/节点职责机械拒绝错配；条件节点遗漏提供精确指针，不猜补。
+- [x] 保留旧完整源审查，追加逐句分解完整性与逐子要求类型/目标审查。错分类、漏拆分、否定词截断仍可能发生，不能把兼容表当作语义证明。代码块不执行、未解决和父问题保留、审查不授权。
+- [x] 新增 **75 项开发回归**；含原精简映射/批次共 **98 项定向回归通过**，不是新增 Skill 或模型成功率。提供离线 request/compile/assess CLI，拒绝覆盖已有输出；不修改冻结协议/模型回答/旧报告，不切换产品或执行器。
+- [x] 全量 **1288 tests + 81 subtests 通过（131.58 秒）**；Ruff/diff、旧精简批次与旧完整双阶段含审查报告重放一致。全量回归包含原有隔离执行测试，其耗时不是模型或 Runtime 性能指标。
+- [ ] 冻结独立新版真实 9B 完整双阶段小批，分别测职责错配/漏分类/完整原意/正确停止/误接受及两步全部成本。当前 **0 次新模型调用**，没有新版准确率或时延结论，不能用这些回归更新前轮 3/4、语义全阻断结果。
+
+见[设计、离线使用与边界](FLOW-RESPONSIBILITY-MAPPING.md)。仍在 C3h；C4–C6 保持门禁，未提交/推送。历史“下一步”不覆盖本节。
+
+#### 2026-09-07 C3h 精简版：生成负担下降，语义质量门禁仍未通过
+
+- [x] 编译器拥有已知锚点、节点来源汇总及候选解释，模型仅选择真实目录目标与必要额外来源。禁止自由说明/改业务，保持完整源、节点/条件/参数、片段/规则审查；缺覆盖、错误引用、未解决事项和旧审查失效仍阻断。
+- [x] 新冻结完整两步批次：**4 已知流程 / 1 工具 / 0 公开 Skill / 8 次真实 9B 调用**，无历史树替换、修图或重试。第一步 4/4 结构合格，第二步 3/4；反向分支遗漏 `/steps/1` 条件节点来源，未自动猜补。
+- [x] 3 项完整同一助手审查 **128 声明：103 supported / 25 insufficient**，0 审查支持的未激活流程，全部 blocked。仍有数据背景误选操作、脚本前置误选读权限、形状检查冒充数据性质、复合句覆盖不全及检查/错误传播混用；这些是候选映射缺口，不是实际网络故障或 Runtime 执行器不安全的证明。
+- [x] 对照上轮的观察成本：第二步输出 **9,919→2,619 token（−73.6%）**，输入 **19,520→25,172（+29.0%）**；两步总 token **41,436→39,788（仅 −4.0%）**。第二步 POST 811.20→413.99 秒，两步 932.05→577.64 秒。负载/载荷/预算不同且部分并行回归，不作因果性能或准确率推断。
+- [x] **23 项新增回归**；全量 **1213 tests + 81 subtests** 通过（165.05 秒）；Ruff/diff、新报告重放、完整检查点重入及旧 C3h 完整报告一致性通过。模型批次 Runtime/业务工具/脚本/写执行为 0，原始回答/失败/基线保留。
+- [ ] **继续 C3h 语义职责匹配，不进入 C4**：优先区分业务前置、读取授权、结构检查、错误传播、数据解释及缺能力停止，补条件节点/复合句完整覆盖的独立反例；分开业务图错误与细粒度来源标注缺口，不能自动放行。目录/Schema 重复输入为次级优化，不得为省 token 删源义务或审查。
+
+生成成本改善不等于完整转译成功。C4–C6 及大规模 Runtime 仍受门禁约束；同一助手不是独立 Gold，声明数不是准确率。C3c–C3h 改动尚未提交或推送。见[设计、正反结果与复现](FLOW-LEAN-MAPPING.md)、[可追溯摘要](benchmarks/flow-lean-c3h-summary.json)。历史“下一步”不覆盖本节。
+
+#### 2026-09-07 C3h：完整双阶段实现及首轮评测完成，质量验收未通过
+
+- [x] 新增精确偏移的标点分段、逐片段必填账本与多来源节点映射；完整段落投影仅作原文保留，不替代模型片段判断。代码保持惰性，旧的完整源/操作/条件/参数审查继续保留。
+- [x] 冻结源→新 9B 流程→编译器节点目录→新 9B 映射的完整链路。两阶段分别保存请求/回答/状态/成本；失败不自动修图或重试，完整检查点重入不重复调用。父流程、问题和执行语义不允许第二步修改。
+- [x] **4 已知流程 / 1 工具 / 0 公开 Skill，8 次真实调用**：第一步 4/4 结构合格；第二步 2/4 合格。反向分支 44 记录中 31 条缺自身锚点，审批 30 记录中 15 条缺自身锚点，均结构阻断。
+- [x] 两个合格映射同一助手完整审查 **68 声明：53 supported / 15 insufficient**。直接读混淆检查/错误传播、缩窄无授权范围；脚本案把缺能力停止映射为输入/权限/返回校验，并有跨来源缺引用和未知脚本只读断言。**0 个审查支持的未激活流程，全部 blocked**；结构失败项不伪造语义评分。
+- [x] 全部 POST **932.05 秒、30,536 / 10,900 token**，第二步占 811.20 秒。失败/等待计入，预检/审查/测试不计；部分回归并行，不作因果性能比较。不是未知集泛化、C3g 控制变量准确率对比或可用性提升证明。
+- [x] **29 项新增回归**、全量 **1190 tests + 81 subtests** 通过（170.75 秒）；Ruff/diff、新报告及旧 C3f/C3g 重放通过。模型批次 Runtime/业务工具/脚本/写执行为 0；没有改动旧回答或基线。
+- [ ] **继续 C3h 精简，不进入 C4**：让编译器绑定条目已有锚点，减少模型重复引用及自由扩写；仅生成必要的额外来源/处理类型/目标，保留所有源蕴含审查。先离线验证反例，再另冻完整新批同时检查质量和成本，不能补改当前输出刷通过率。
+
+链路实现完成不等于 C3h 质量完成；C4 异质公开 Skill、C5 未知集与 C6 Runtime 价值评测仍按顺序受门禁约束。原始模型制品在本地，Git 摘要不是完整原始证据包。C3c–C3h 未提交或推送。见[设计、结果与复现](FLOW-TWO-PASS-TRANSLATION.md)、[摘要与精确失败位置](benchmarks/flow-two-pass-c3h-summary.json)。历史“下一步”不覆盖本节。
+
+#### 2026-09-07 C3g：源约束账本与受限映射修复完成，完整转译质量门禁未通过
+
+- [x] 分离完整源存档、业务目的、约束记录与执行保障；每个非标题源段必须有账本项，操作/文档/宿主规则/流程引用/未解决采用互斥结构。源和映射均进入逐项审查，不以文字保留冒充规则已执行。
+- [x] 可选约束首次 9B 批 **1/4 结构合格**：直接读取仍遗漏约束，其余混用文档与执行引用。强制账本新批 **1/4 合格**：3 项使用工具名代替节点路径；缺脚本例 18 声明支持但仍因真实缺能力 blocked。原始回答均保留，不修复重计首次成功。
+- [x] 新增受限第二步：复用 C3f 已封存的真实 9B 树，编译器枚举真实节点，模型只选来源与约束映射，禁止改工具/参数/条件/顺序/终态/原问题。父提案、执行投影和元数据摘要绑定审查，修改说明或别名也不能复用旧审查。
+- [x] 第二步 **4/4 结构合格**；同一助手审查 **98 声明：87 supported / 11 insufficient**。直接读存在保障过度陈述，分支例存在引用错配和新增报告语义；审批/脚本两案的停止及限制映射获支持，但缺能力事项原样保留。**0 个审查支持的未激活流程，全部 blocked**。此为辅助元数据结果，不是新的完整首次转译。
+- [x] 三批共 **12 次 9B 调用、651.79 秒、46,625 / 5,572 token**；仅 4 个已知流程、1 工具、0 公开 Skill。第二步自身 228.08 秒，父 C3f 生成成本另计 156.61 秒；不以不同协议/声明比例宣称准确率或因果性能改善。
+- [x] **68 项新增定向回归通过**；最终全量 **1161 tests + 81 subtests** 通过（108.08 秒，模型批次完成后）；Ruff、diff、新三批与 C3f 证据重放一致。本轮模型批次 Runtime/业务工具/脚本/写执行为 0。
+- [ ] 下一步 C3h：补逐子句/多来源绑定及工具说明扩写用户步骤的开发反例；再冻结从源文到流程到映射的完整新批，报告两步成本、完整保真、正确停止与误接受。不得修改本次冻结回答刷通过率。
+
+这是**映射协议的可校验性与定位能力修复**，不是泛化证明。逐行源段、长度/节点上限和同一助手审查的局限仍在；12 个公开 Skill 整流程及大规模 Runtime A/B 不解禁，不进入生产工程扩展。C3c–C3g 改动尚未提交或推送 Git。见[设计、真实失败、成本与复现](FLOW-SOURCE-CONSTRAINTS.md)、[第二步摘要](benchmarks/flow-mapping-c3g-summary.json)。以下历史“下一步”不覆盖本节。
+
+#### 2026-09-07 C3f：新版无答案正向小批完成，结构改善但完整源审查未通过
+
+- [x] 源/合同沿用 C3d 的 4 个已知流程；按 C3e 宿主能力约束，冻结新版请求、代码、依赖版本和模型后，各首次调用一次 9B。未提供目标 JSON、参考树或修图重试。
+- [x] **4/4 完整结构/合同合格**（C3d 同源批 0/4）；直接读取、反向条件的极性/引用/终态正确；缺审批和脚本例保留正确停止位置及真实事项。这个变化不等于公开 Skill 泛化或成功概率，也不能唯一归因于正文 Schema 或词表约束。
+- [x] 同一助手逐项审查 **62 声明：49 supported、0 contradicted、13 insufficient**，4 项仍 blocked。每例共享数据/权限限制缺少显式映射，审批首读还引用标题；源双语覆盖与 purpose 声明重叠，不能据声明比例计算准确率。
+- [x] **156.61 秒、11,016 / 981 token**；模型阶段同时有回归负载，不作因果时延比较。0 批次 Runtime/业务工具/脚本/写执行，0 辅助修订，旧 C3d/C3e 证据不变。
+- [x] **14 项新增回归**及最终全量 **1093 tests + 81 subtests** 通过（93.06 秒，模型完成后运行）；Ruff/diff/报告重放通过。逐项原始提案、完整审查和摘要均保留。
+- [ ] 下一步 C3g：将业务目的、约束保留和操作映射分开，显式区分“已保存原文”“有映射”“可确定性校验”“仍不支持”；不得用文本携带冒充已执行约束。先补跨段/标题/共享限制回归，再冻无答案批；不删源要求、放宽审查或重跑当前批。
+
+见[结果、定位与复现](FLOW-BOUNDED-FORWARD.md)、[可重算摘要](benchmarks/flow-bounded-forward-summary.json)。这是 4 个已知流程、1 工具、0 公开 Skill；12 个公开 Skill 整流程与规模化 Runtime A/B 仍受门禁限制。当前 C3c–C3f 改动尚未提交 Git。历史条目的旧“下一步”不覆盖本节。
+
+#### 2026-09-07 C3e：协议探针完成，宿主能力收口实现；新版正向转译待验证
+
+- [x] 独立冻结 4 个明确给答案的构造探针 × 3 组接口/消息条件，12 次首次 9B 调用，不计入 Skill/转译成功数。Schema-only 与 Schema-visible 各 4/4 精确复制，普通 JSON-visible 2/4；两个失败抄入输入封套，其中一个截断，均未修复重试。
+- [x] 确认该环境能表达本次基本终态/条件/空分支，不支持“解码器完全不支持 end”的解释；不能据此认定正文未附 Schema 是 C3d 唯一根因，或证明所有递归组合兼容。
+- [x] 生成 Schema 按实际宿主删除不可用读/Effect 构造器，有能力时枚举真实工具/目标 ID；新请求正文与接口共用 Schema，输出仍须通过独立 Schema 检查和旧编译/合同门禁。不依据用例名修图，不授予写权限。
+- [x] 成本 **268.97 秒、14,438 / 2,735 token**（包括失败回答，测试并行，非因果性能比较）。业务工具/Runtime/脚本/写执行均为 0。旧 C3c/C3d 证据保持一致。
+- [x] **23 项新增回归**；全量 **1079 tests + 81 subtests** 通过（147.50 秒），新增合法 Effect 断言后 23 项再次通过；Ruff/diff/报告重放通过。`jsonschema` 只加入开发依赖。
+- [ ] 下一步 C3f：另冻不给答案的宿主收口正向小批，完整保留首次输出，分别评估合法结构、语义、真实缺能力停止和误接受。当前新请求尚无真实转译结果；12 个公开 Skill 整流程及大规模 Runtime A/B 不解禁。
+
+见[诊断、能力边界与用法](FLOW-TREE-PROTOCOL-CANARY.md)、[探针摘要](benchmarks/flow-tree-canary-summary.json)。当前 C3c–C3e 改动尚未提交 Git；以下历史阶段不覆盖本节。
+
+#### 2026-09-07 C3d 正向小批：已完成，生成质量门禁未通过
+
+- [x] 新增层级树 authoring 请求与 freeze/run/report 命令；原文/宿主合同/Schema 输入，不提供手工树答案。保持旧 C3b/C3c 协议和原始证据不变。
+- [x] 同一 4 个已知开发流程各首次调用 9B 一次，3 个树可解析、**0/4 完整结构/合同合格**。终态被写成 Effect 目标；审批案重复至 2,200 token 截断；脚本案先读后停并有不可达代码。反向条件的极性/引用局部正确不等于整个提案可用。
+- [x] 冻结摘要、原始响应、失败状态与文件 receipt；不修复/重试失败输出。无合格树，因此逐项合格提案语义审查数量为 0，不伪造支持率；当前助手对失败的诊断不是独立评测。
+- [x] 请求共 **261.69 秒、4,652 / 3,584 输入/输出 token**。0 Runtime/业务工具/脚本/写执行；测试与模型并行，不用耗时作因果性能比较。
+- [x] **13 项新增协议回归、73 项定向回归**通过；全量 **1056 tests + 81 subtests** 通过（230.10 秒），Ruff/diff、新报告与旧 C3c/离线树示例重放通过。
+- [ ] 下一步 C3e：先独立冻结最小 Schema/结构化解码兼容性 canary，再按宿主合同收窄可生成构造器/目标 ID；明确区分协议接线测试与源文转译，禁止答案规则修图。通过后另冻开发批，不能重跑本批刷通过率。
+
+见[结果、失败定位与复现](FLOW-TREE-FORWARD-PILOT.md)、[摘要](benchmarks/flow-tree-9b-summary.json)。这是 4 个已知流程、0 公开 Skill，不是新增泛化证据；尚不能将失败唯一归因于模型或解码器。12 个公开 Skill 整流程和规模化 Runtime A/B 继续暂停。C3c/C3d 阶段改动尚未提交 Git；以下旧“下一步”保留作历史，不覆盖本节。
+
+#### 2026-09-07 C3d：层级流程编译及离线验证完成，9B 正向验证待开展
+
+- [x] 新增有界顺序/if_equal/显式终态 authoring 树；作者提供操作、条件和读结果别名，编译器生成节点 ID、顺序/真假/汇合边与必经前序步骤。不新增执行器，不替模型修正业务极性。
+- [x] 复用既有源引用、宿主合同、类型、DAG 与 read Runtime。禁止自引用、未完成读取、越作用域结果、死代码及隐式成功；分支结果不向外自动合并，单 Effect 只作终态候选。
+- [x] 树→图位置 origins 及整树进入审查摘要；仅修改别名但图不变也会令旧审查失效。新增手工 JSON 示例和 schema/example/compile/assess 命令，输出均未授权。
+- [x] **60 项新增回归**通过；7 类手工流程与 20 个固定种子树在两种库存数据上，对照独立测试解释器和实际本地文件读取的旧 Runtime，检查结果/读取顺序/文件不变；权限失败在 Provider 调用前阻断。它们不是新增 Skill 或语义 Gold。
+- [x] 全量 **1043 tests + 81 subtests** 通过（86.60 秒），Ruff/diff 校验通过；C3b/C3c 和新编译示例重放一致。本阶段新 LLM 调用为 0，写操作为 0；已有 C3c 未提交改动完整保留。
+- [ ] 下一步 C3d 正向小批：只给原文、宿主合同和层级 Schema，让 9B 生成树，不提供本轮手工树答案；另行冻结协议，分别计结构接线、业务保真、字段事实和辅助成本。不能把离线编译正确性当作模型准确率提升。
+
+见[设计、限制与用法](FLOW-TREE-COMPILER.md)、[手工示例](../examples/read-flow/flow-tree.json)、[可重算编译摘要](benchmarks/flow-tree-example-summary.json)。网络业务事实含义混用仍待解决；12 个公开 Skill 整流程和大规模 Runtime A/B 继续受门禁约束。当前 C3c/C3d 改动尚未提交 Git。
+
+#### 2026-09-07 C3c：源文约束实现与两协议诊断完成，质量门禁未通过
+
+- [x] 只改实验 authoring/review 层：传入既有宿主合同业务说明，用途/终态采用源文投影，分支分别绑定真假来源；声明前置依赖须在所有路径成立，映射变更使旧审查失效。未新增执行器、未改 Runtime 写门禁。
+- [x] 摘录协议 4 次首次 9B 调用：1/4 引用及结构合格；缺脚本案 10 项声明获同一助手支持，因真实缺能力事项仍 blocked。工具文档与目标源文混淆、漏分支引用及旧提示字段继承问题保留为诊断；不再作为默认入口。
+- [x] 另冻原文编号协议，同一 4 流程各 1 次：2/4 合格；单读案 11 supported / 2 insufficient，审批案 4 supported / 13 contradicted / 4 insufficient，均 blocked。编号减少引用抄写，但不能证明源段蕴含操作。
+- [x] 两批总计 306.33 秒请求时间（不含预检/审查/测试）、9,972 / 2,986 输入/输出 token；0 个获审查支持的未激活流程、0 写/脚本/Runtime 执行。反向条件、非读节点引用、库存状态冒充审批、缺失前置依赖等错误仍存在，不能宣称准确率提升。
+- [x] 新增 **22 项回归**；全量 **983 tests + 81 subtests** 通过（125.48 秒），Ruff/diff、原 C3b 及新两批证据重放通过。所有既有密封源、输出和报告保持不变。
+- [ ] 下一步 C3d：先离线验证层级顺序/if/otherwise 到既有图的机械编译，减少模型直接手写 ID/边/汇合的错误；字段业务事实含义仍需真实合同和源审查。通过后才另冻小批，不继续在当前反例上堆提示词。
+
+这仍是 **4 个已知开发流程、两种不同协议、同一助手参与作者/审查**，不是 8 个 Skill、独立评测或泛化提升。正确安全停止、证据不足与业务逻辑错误分别报告。完整用法、失败定位和后续方向见 [C3c 报告](FLOW-SOURCE-GROUNDING.md)、[可重算摘要](benchmarks/flow-source-grounding-c3c-summary.json)。12 个公开 Skill 整流程与大规模 Runtime A/B 继续保持门禁，不进入生产工程扩展。
+
 #### 2026-09-07 C3b：冻结协议、8 个异质开发流程与源审查完成
 
 - [x] 用户授权后，C2/C3a 全部项目改动已提交本地 `dev`：`2e4f762`，未推送远端。
@@ -313,6 +419,28 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 详细原则、指标 Gate、角色边界和任务模板见[后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md)。
 
 ## English
+
+**2026-09-07 Git checkpoint:** C3c–C3h code/tests/development dependency were committed locally on `dev` as `1c5fc7e`; documentation and evidence summaries are saved in a separate documentation commit. No push or master merge. Historical “uncommitted” entries describe their earlier state and are superseded here. Prior validation: **1288 tests + 81 subtests passed**, not semantic acceptance; fresh 9B responsibility-protocol evaluation remains pending. One trailing blank line in frozen `flow_lean_pilot.py` is intentionally retained to preserve recorded implementation fingerprints; other staged whitespace checks passed. Ignored local `artifacts/` retain raw evidence, not included in the committed summaries.
+
+Latest verification: **1288 tests + 81 subtests passed in 131.58 seconds**, including existing isolated execution fixtures; Ruff/diff and both previous lean/full two-pass report replays passed unchanged. Test duration is not model or Runtime performance.
+
+**2026-09-07 C3h offline responsibility mapping:** a separate exact-quote requirement protocol rejects incompatible declared target duties and reports omitted condition-node pointers. Full-source review remains, with complete-clause decomposition and atomic type/target review added. Seventy-five new development tests and ninety-eight targeted tests passed; these are not Skills or model accuracy. Offline request/compile/assess refuses existing outputs; no frozen answer/protocol/report, product default or executor changed. Zero new model calls: previous 3/4 mapping qualification and blocked semantic results remain the latest evidence. New 9B fresh paired quality/cost validation is pending, especially misclassification that evades compatibility. See [design and boundaries](FLOW-RESPONSIBILITY-MAPPING.md). C3h continues, C4–C6 remain gated; uncommitted/unpushed.
+
+**2026-09-07 C3h lean generation improvement, semantic gate still unmet:** compiler-owned anchors/node citations/candidate explanations replace repeated model copies and prose, while exhaustive source/operation/constraint review remains. Eight fresh 9B calls on four known flows/one tool/zero public Skills: flow qualification **4/4**, mapping **3/4**; inverted branch omitted condition-node `/steps/1` evidence. Three complete same-assistant reviews: **103 supported / 25 insufficient across 128 overlapping claims**, zero review-supported inactive flows, all blocked. Wrong guarantee roles, compound-clause gaps and interpretation-as-operation remain candidate defects, not executed network errors or proof of unsafe Runtime execution. Mapping output **9,919→2,619 (−73.6%)**, input **19,520→25,172 (+29.0%)**; whole-chain total tokens **41,436→39,788 (only −4.0%)**. Mapping POST 811.20→413.99 s; whole POST 932.05→577.64 s. Different payloads/budgets/load and partial concurrent tests prevent causal timing or accuracy claims. Twenty-three new regressions; **1213 tests + 81 subtests passed in 165.05 s**, plus Ruff/diff, new-report replay/checkpoint re-entry and unchanged previous C3h report. Zero batch Runtime/tools/scripts/writes, retries or answer repair. Continue C3h requirement/guarantee-role alignment and complete condition/compound-clause coverage; distinguish semantic-flow errors from annotation gaps without removing review. Schema/catalog input duplication is secondary. C4–C6 remain gated; C3c–C3h changes are uncommitted/unpushed. See [report](FLOW-LEAN-MAPPING.md) and [summary](benchmarks/flow-lean-c3h-summary.json).
+
+**2026-09-07 C3h implementation and first complete evaluation finished; quality gate unmet.** Exact-offset fragments and multi-source mappings now connect fresh source→9B flow→compiler nodes→9B metadata, with no historical-tree substitution or retries. Eight real calls on four known flows/one tool/zero public Skills: **4/4 flow qualification, 2/4 mapping qualification**. Inverted branch had 31 missing own anchors among 44 records; approval had 15 among 30. Complete same-assistant reviews of the two qualified mappings: **53 supported / 15 insufficient across 68 overlapping claims**, zero review-supported inactive flows, all blocked. Errors include validation/error-propagation conflation, narrowed authority, unsupported stops treated as checks, incomplete cross-source evidence and an unproven whole-operation read-only assertion. No fabricated semantic scores for structural failures. Costs **932.05 s POST, 30,536/10,900 tokens**, with 811.20 s in mapping; failures/waiting included, preflight/review/tests excluded, partial test concurrency prevents causal timing comparisons. This is not unseen evidence, a controlled C3g accuracy comparison or demonstrated usability gain. Twenty-nine new regressions and **1190 tests + 81 subtests** passed (170.75 s); Ruff/diff and new/old evidence replay passed. Zero batch Runtime/business/script/write executions. **Continue simplifying C3h before C4**: compiler-owned known anchors, fewer redundant model references/free explanations, with all semantic review obligations preserved, then a new complete frozen batch. C3c–C3h changes remain uncommitted/unpushed. See [report](FLOW-TWO-PASS-TRANSLATION.md) and [summary](benchmarks/flow-two-pass-c3h-summary.json).
+
+**2026-09-07 C3g mapping repair complete, full translation gate unmet:** source archives, objectives, mandatory paragraph ledgers and enforcement references are separate. Optional-constraint and mandatory-ledger first-attempt 9B batches each qualified 1/4; omissions, contradictory reference roles and tool-name-as-node failures remain preserved. A restricted metadata pass over immutable **C3f real-9B parent trees** qualified 4/4 using compiler-enumerated nodes, with no business edits. Full same-assistant review of 98 claims found **87 supported / 11 insufficient**: direct-read guarantees were overstated; branch metadata miscited restrictions and added reporting semantics. Approval/script mappings faithfully retained missing-capability stops, but their issues remain. **Zero review-supported inactive flows; all blocked.** This is auxiliary mapping evidence, not fresh end-to-end translation or independent Gold. Three new batches: **12 calls, four known flows, one tool, zero public Skills; 651.79 s, 46,625/5,572 tokens**. Mapping-only cost is 228.08 s; C3f parent generation additionally cost 156.61 s. No causal timing or claim-ratio accuracy conclusion. Sixty-eight new focused tests and final **1161 tests + 81 subtests** passed (108.08 s after model completion), with Ruff/diff and three new/C3f replay checks. Zero batch Runtime/business-tool/script/write executions. Next C3h adds clause/source and tool-description-leakage regressions before a fresh full source→flow→mapping batch. Whole-public-Skill, large Runtime and production work remain gated. C3c–C3g changes remain uncommitted/unpushed. See [design and evidence](FLOW-SOURCE-CONSTRAINTS.md).
+
+**2026-09-07 C3f answer-free pilot complete:** four first-attempt 9B proposals on the same known C3d sources now qualify structurally and against host contracts (**4/4 versus 0/4**). Direct/inverted paths and missing-approval/script stops are supported, with no invented Effect or reference answers. Complete same-assistant review of 62 claims yields **49 supported, zero contradicted, 13 insufficient**, and all four remain blocked: shared restrictions lack explicit mapping; the approval read cites a title. Counts overlap and are not accuracy or independent evidence. Costs: **156.61 s, 11,016/981 tokens**, concurrent regression, no causal latency comparison. Zero batch Runtime/tools/scripts/writes or assisted repairs. Fourteen new tests and final **1093 tests + 81 subtests** passed (93.06 s after model calls), plus Ruff/diff and old/new replay. Next C3g separates objective, retained constraints and enforceable mappings before another frozen forward batch; text retention is not enforcement. Public whole-Skill and large Runtime work remain gated. C3c–C3f changes are uncommitted. See [results](FLOW-BOUNDED-FORWARD.md) and [summary](benchmarks/flow-bounded-forward-summary.json).
+
+**2026-09-07 C3e protocol milestone:** 12 first-attempt explicit-answer 9B probes: format-only and format-visible each copied 4/4 targets exactly; JSON-visible copied 2/4, with envelope copying/truncation preserved. Basic constructor expressibility is demonstrated in this environment, not every recursive combination or source fidelity; absent visible Schema is not an established sole root cause. Host-derived generation now removes unavailable constructors, enumerates actual tool/Effect IDs and validates output again before existing compilation; no answer-based repair or authority. Costs including failures: **268.97 s, 14,438/2,735 tokens**, concurrent tests, no causal timing claim. Twenty-three new tests; **1079 tests + 81 subtests** passed (147.50 s), then 23 focused tests after an extra valid-Effect assertion; Ruff/diff and old/new replay passed. The next C3f batch must evaluate the new request without answers before claiming translation improvement. Zero business/Runtime/script/write executions; public whole-Skill and large Runtime studies remain gated. C3c–C3e changes are uncommitted. See [diagnostics](FLOW-TREE-PROTOCOL-CANARY.md) and [summary](benchmarks/flow-tree-canary-summary.json).
+
+**2026-09-07 C3d forward pilot complete, quality gate unmet:** a frozen hierarchical authoring protocol processed the same four known flows once with 9B, without reference trees. Three trees parsed; **0/4 fully qualified**. End outcomes became Effect IDs, approval output repeated to the 2,200-token limit, and the missing-script flow read before its prerequisite and appended terminals. Correct local polarity/reference wiring does not establish whole-flow fidelity. Raw responses and receipts are preserved without repairs/retries; zero qualified-flow source reviews, Runtime, tools, scripts or writes. Total POST time **261.69 s**, **4,652/3,584 tokens**; regression ran concurrently, so timing is not causal performance evidence. Thirteen new and 73 focused tests passed; **1056 tests + 81 subtests** passed (230.10 s), plus Ruff/diff and old/new replay. Next C3e separates minimal Schema/decoder canaries from translation evidence, then narrows constructors/target IDs using actual host capabilities before a new frozen batch. Failure attribution remains open. Public whole-Skill work and large Runtime A/B remain gated; C3c/C3d changes are uncommitted. See [pilot](FLOW-TREE-FORWARD-PILOT.md) and [summary](benchmarks/flow-tree-9b-summary.json).
+
+**2026-09-07 C3d offline compiler milestone:** a bounded sequence/if/otherwise authoring tree compiles mechanically to the existing graph. The compiler owns IDs, edges, joins, lexical read bindings and dominating predecessors, not business polarity or authorization. Existing source/contract/type/DAG/Runtime gates remain. Tree origins and review digests preserve provenance; no branch-value merging, implicit success, dead-code dropping or post-Effect continuation. Sixty new regressions passed; seven hand-authored patterns and twenty seeded trees were compared on two sites with a test-only interpreter and real temporary-file reads through the existing Runtime. **1043 tests + 81 subtests** passed (86.60 s), plus Ruff/diff and old/new evidence replay. Zero new LLM calls or operational writes. Next is a separately frozen 9B forward-tree pilot without reference answers; business-fact semantics and public-Skill/Runtime generalization gates remain unresolved. See [compiler](FLOW-TREE-COMPILER.md) and [example summary](benchmarks/flow-tree-example-summary.json). C3c/C3d changes remain uncommitted.
+
+**2026-09-07 C3c diagnostic milestone, quality gate still unmet:** added host semantic context, cited/ID-selected source projection, mandatory polarity citations, prerequisite dominance and mapping-bound review, without changing Runtime execution. Two protocols each processed four known flows once with 9B: excerpt qualification 1/4, source-ID qualification 2/4. Three complete same-assistant source reviews all ended blocked; a faithful missing-script stop retained a real capability issue, direct read lacked two mappings, and approval still confused inventory state with authorization. Total 306.33 seconds and 9,972/2,986 tokens; zero review-supported inactive flows or tool/Runtime/write/script execution. Twenty-two new regressions; **983 tests + 81 subtests** passed (125.48 s), plus Ruff/diff and old/new evidence replay. No claim of accuracy/generalization improvement. Next C3d first validates a hierarchical sequence/if/otherwise-to-existing-graph compiler offline, while business facts remain bound to real host semantics and review. See [report](FLOW-SOURCE-GROUNDING.md) and [evidence](benchmarks/flow-source-grounding-c3c-summary.json).
 
 **2026-09-07 C3b complete:** C2/C3a committed locally as `2e4f762`, no remote push. A frozen indexed protocol processed eight known hand-authored flows, one domain/tool and zero public Skills, with one 9B call each. Five structurally qualified; three were rejected. Complete same-assistant claim review blocked all five qualified drafts (89 overlapping claims: 63 supported, 15 contradicted, 11 insufficient evidence). No review-supported inactive flow, edits, retries, Runtime, script or write execution. Findings include reversed polarity, inventory-as-approval fabrication, missing prerequisites and unreachable unsupported nodes, beyond explanatory text defects. Seventeen new regressions; 51 focused tests and **961 tests + 81 subtests** passed (87.38 s), plus Ruff/diff and frozen replay. Client timing totalled 360.18 seconds, including per-case preflight and waiting, not pure inference; 6,268/3,596 tokens. Next C3c improves general source-to-purpose/conditions/dependencies/fact semantics and question representation in a new frozen batch. Public whole-Skill work and large Runtime A/B remain gated. See [scope/results](FLOW-FROZEN-DEVELOPMENT.md) and [evidence](benchmarks/flow-development-8-evidence-summary.json).
 

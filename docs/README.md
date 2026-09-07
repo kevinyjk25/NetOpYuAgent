@@ -33,6 +33,15 @@
 | 条件分支与步骤输出引用如何实际执行，写路径还缺什么 | [最小业务流程](L0-BUSINESS-FLOW.md) |
 | 9B 能否正向生成整个流程，原始失败与辅助修订如何区分 | [整流程正向转译实验](FLOW-FORWARD-TRANSLATION.md) |
 | 固定协议后，顺序/分支/依赖缺失有哪些真实失败 | [C3b 冻结开发小批](FLOW-FROZEN-DEVELOPMENT.md) |
+| 原文引用和编号能否解决语义错误，下一步如何改 | [C3c 源文约束与保真诊断](FLOW-SOURCE-GROUNDING.md) |
+| 如何用层级流程表达代替模型手写节点和连线 | [C3d 层级流程编译](FLOW-TREE-COMPILER.md) |
+| 9B 不看答案能否生成层级流程，失败在哪里 | [C3d 正向小批与原始失败](FLOW-TREE-FORWARD-PILOT.md) |
+| 如何区分格式协议错误与业务转译错误 | [C3e 解码探针与宿主能力收口](FLOW-TREE-PROTOCOL-CANARY.md) |
+| 新版不看答案的转译是否改善，为什么仍被阻断 | [C3f 正向结果与语义缺口](FLOW-BOUNDED-FORWARD.md) |
+| 如何避免遗漏限制和猜节点，映射正确是否代表已经执行 | [C3g 源账本与受限第二步映射](FLOW-SOURCE-CONSTRAINTS.md) |
+| 两次生成如何完整接起来，如何追溯到具体片段及统计全部成本 | [C3h 完整双阶段转译](FLOW-TWO-PASS-TRANSLATION.md) |
+| 精简模型输出后节省多少，哪些语义错误仍存在 | [C3h 精简映射实测](FLOW-LEAN-MAPPING.md) |
+| 如何区分业务前置、权限与校验，定位复合要求遗漏 | [C3h 源要求与保障职责](FLOW-RESPONSIBILITY-MAPPING.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -100,6 +109,24 @@
 ---
 
 ## English
+
+[Source requirements and guarantee responsibilities](FLOW-RESPONSIBILITY-MAPPING.md) explains atomic source quotes, necessary type/target compatibility, complete semantic review, offline usage and the still-unmeasured model benefit.
+
+[C3h lean mapping results](FLOW-LEAN-MAPPING.md) separate output savings from increased input burden, preserve complete semantic failures, and explain compiler-owned anchors without removing review obligations.
+
+[C3h fresh two-pass translation](FLOW-TWO-PASS-TRANSLATION.md) connects source-to-flow and exact-offset clause mapping, with per-phase checkpoints, multi-source review and costs that include failures. This is not a product activation or generalization claim.
+
+[C3g source ledgers and restricted mapping](FLOW-SOURCE-CONSTRAINTS.md) separate retention, mapping and enforcement; preserve three frozen 9B batches, semantic failures and auxiliary costs; and explain why qualified metadata or faithful missing-capability stops remain blocked.
+
+[C3f answer-free forward results](FLOW-BOUNDED-FORWARD.md) distinguish observed structural gains on four known flows from still-incomplete restriction/citation fidelity; no Runtime execution or generalization claim.
+
+[C3e protocol canaries](FLOW-TREE-PROTOCOL-CANARY.md) distinguish explicit-answer constructor checks from source translation and explain host-derived generation constraints. New answer-free validation remains pending.
+
+[C3d forward 9B pilot](FLOW-TREE-FORWARD-PILOT.md) preserves all four first attempts, qualification failures, costs and the next protocol-compatibility checks. Zero qualified flows is not a Runtime performance result.
+
+[C3d hierarchical flow compilation](FLOW-TREE-COMPILER.md) covers tree syntax, compiler-owned wiring, lexical reference limits and offline read-Runtime verification.
+
+[C3c source-grounding diagnostics](FLOW-SOURCE-GROUNDING.md) explain source IDs, dependency/polarity review, actual 9B failures and the remaining quality gap.
 
 For the eight known development flows, frozen input/protocol boundaries and preserved 9B failures, see [C3b frozen flow development](FLOW-FROZEN-DEVELOPMENT.md). These are not public-Skill generalization results.
 

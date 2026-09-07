@@ -1,0 +1,260 @@
+{
+  "protocol": "immutable-flow-mapping-pass/v1",
+  "manifestDigest": "sha256:3ba31426c3a0aee4bb1f481cacd7938b71cd6f764cbcf995ead2a5b8d712740d",
+  "parentManifestDigest": "sha256:5ce0633ee1aa9449cf875c11fcfd7fad26454385a14a11772cf6a59fa53d2308",
+  "evidenceRole": "auxiliary_mapping_over_preserved_9b_proposal_not_fresh_translation",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "rows": [
+    {
+      "case": "direct-read",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:173d7bea3392e85df6e85873348b68269ae3aa3c9825189474d338185a45b249",
+      "latencyMs": 51157.374499947764,
+      "inputTokens": 3282,
+      "outputTokens": 472,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:e056d515f619ff2a9b99df100ef4edf917f346507f5afd1bbcdb9ae124ffb8c0",
+        "mapping.json": "sha256:c89f11dd1be82ec7078e08381264d6a9d0bf01c892a95e6885062253ba9c6c79",
+        "request.json": "sha256:5de5c23bc1da5c2fe29ae250d0336a9f6d41dd251ceaaedbfc4ad13853ba5411",
+        "response.json": "sha256:453c63ddcafd4d19c36d7256b1b223c70c259568029d1d264a191bc671dcf696",
+        "review-input.json": "sha256:23f5b874a65048b7468b2e21b237332c7fa50fc289df82d6342fb5fd3316c9e6",
+        "sources.json": "sha256:fc173036148a6141b9ed757b56553a782613b6b24925fd84bdbdd5b5bc5019d5",
+        "status.json": "sha256:0b9dedf8b7b91d40778f7d4d4d0c1a48ede29beac4d63a4c4687390b54926b09"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:173d7bea3392e85df6e85873348b68269ae3aa3c9825189474d338185a45b249",
+        "reviewDigest": "sha256:d4837a9a867ebc9f670f54ba6532ff63fde6d614313bb27754b4dd3b47c381e2",
+        "reportDigest": "sha256:a9cb954ff67ec2950915a98dff16c17c323e894a233cfb82655d0f2c92503a11",
+        "reviewerId": "current-assistant-c3g-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 17,
+          "contradicted": 0,
+          "insufficient_evidence": 6
+        },
+        "scopeNote": "同一开发助手逐项核对已知流程、宿主合同和真实 9B 第二步元数据；非独立人员/Gold/泛化评测。父业务流程不变，未执行 Runtime 或业务工具。支持只表明具体声明有来源，不等于已实施全部限制；缺失能力仍阻断。",
+        "issues": [],
+        "findings": [
+          {
+            "claimId": "claim-0014",
+            "l05Pointer": "/constraints/0",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "documentation 类型不执行检查，但解释使用 Enforce 声称强制执行；文本保留不足以支持该强制语义。",
+            "suggested_revision": "将该说明限定为数据解释边界的保留；若要求可执行保障，另绑定真实数据来源检查。"
+          },
+          {
+            "claimId": "claim-0015",
+            "l05Pointer": "/constraints/1",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "所选规则涵盖输入、访问与错误阻断，但缺少明确的返回形状检查引用；不能从错误传播推出返回合法性检查已覆盖。",
+            "suggested_revision": "将返回形状校验单独映射到 read_result_shape，仍不得宣称业务真实性或校验已执行。"
+          },
+          {
+            "claimId": "claim-0017",
+            "l05Pointer": "/constraints/3",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "所选读规则不足以承担完整的返回合法性以及禁止写入或上层调用的保障；源不授权和所有外部动作被禁止不是同一检查。",
+            "suggested_revision": "拆开返回形状、读权限、错误阻断和无写/脚本/上层调用限制；不可实施者显式保留或未解决。"
+          },
+          {
+            "claimId": "claim-0020",
+            "l05Pointer": "/source_dispositions/s0005/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "documentation 不能提供解释中 Enforce 所称的强制执行，类型与解释不一致。",
+            "suggested_revision": "去除强制执行含义，或另提供可核验的真实来源约束，而非仅改为肯定结论。"
+          },
+          {
+            "claimId": "claim-0021",
+            "l05Pointer": "/source_dispositions/s0005/1",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "返回是否合法的检查不由这三个引用完整说明；错误阻断不等于返回形状验证。",
+            "suggested_revision": "明确绑定 read_result_shape 并限定其能力为结构检查。"
+          },
+          {
+            "claimId": "claim-0023",
+            "l05Pointer": "/source_dispositions/s0006/1",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "读输入/访问/错误规则不足以支持完整结果校验及禁止写和上层调用的合并保证。",
+            "suggested_revision": "把多个不同保障拆成有独立证据的映射，缺能力项不得包装为已覆盖。"
+          }
+        ]
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:a9feb6552366959c0632189ab596cb16a71f789d18236060c5d2f65cb7c973e4",
+      "latencyMs": 79220.97424999811,
+      "inputTokens": 4039,
+      "outputTokens": 732,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:f99a0537664e37c0c9d14218c39f68c8970e21e6d87612a322eaf860865f7784",
+        "mapping.json": "sha256:8da0deead735df5de86eebb65596976ae4ce9a1eaf74bbe605fdc670c67175a5",
+        "request.json": "sha256:04c1ae519e85d915e4627639981be2dd16499a2154082335726f807b13e075eb",
+        "response.json": "sha256:b7bbb5ca44707cd83d5ad21942d3609d764416cc1033ce7f0392cd0d53f3da9c",
+        "review-input.json": "sha256:f0b5c6b2f9f05b9ef716321f365bccd45d0aee813e7c25841d39b9683b0d6668",
+        "sources.json": "sha256:af4c9bd758b3fa38e84fede89f5505f57bcccf0f6f3e39ae9ccbdf7662ef3bfe",
+        "status.json": "sha256:5114ee4d970502162003e747879f68fc314ca60bc3cd215067840f4a2f5f7abb"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:a9feb6552366959c0632189ab596cb16a71f789d18236060c5d2f65cb7c973e4",
+        "reviewDigest": "sha256:142ac6b648f78f705a2045f852b8349fe69803b80dc3df6303e364d5df54f4d2",
+        "reportDigest": "sha256:02ed9e2ed3cafcc113a2f76d4cfde037bdbb1cf5844e312fdd66b5791bf218a5",
+        "reviewerId": "current-assistant-c3g-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 34,
+          "contradicted": 0,
+          "insufficient_evidence": 5
+        },
+        "scopeNote": "同一开发助手逐项核对已知流程、宿主合同和真实 9B 第二步元数据；非独立人员/Gold/泛化评测。父业务流程不变，未执行 Runtime 或业务工具。支持只表明具体声明有来源，不等于已实施全部限制；缺失能力仍阻断。",
+        "issues": [],
+        "findings": [
+          {
+            "claimId": "claim-0027",
+            "l05Pointer": "/constraints/1",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "所引操作段未包含开发库存、实时健康或错误阻断限制；这些实际位于 s0005/s0006，当前来源定位不支持说明。",
+            "suggested_revision": "把该限制绑定到真实限制段，而非操作段；不能仅用全局含有同义文字弥补错误引用。"
+          },
+          {
+            "claimId": "claim-0029",
+            "l05Pointer": "/constraints/3",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "英文操作段不包含此处解释的共享限制，引用段与解释内容错配。",
+            "suggested_revision": "把数据/权限限制移到其实际来源段映射，保留操作段的业务控制流关系。"
+          },
+          {
+            "claimId": "claim-0032",
+            "l05Pointer": "/source_dispositions/s0002/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "首读节点不包含说明新增的 Report 返回字段步骤；目标操作段也未要求报告全部字段，宿主能力说明不能冒充源操作。",
+            "suggested_revision": "删除没有源依据的报告操作含义，或将真实用户报告需求另立来源与可执行/上层节点。"
+          },
+          {
+            "claimId": "claim-0034",
+            "l05Pointer": "/source_dispositions/s0002/2",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "此 documentation 引用了操作段，无法为数据性质和错误行为说明提供精确来源。",
+            "suggested_revision": "引用真实共享限制段，不以邻近或同文件来源代替准确引用。"
+          },
+          {
+            "claimId": "claim-0037",
+            "l05Pointer": "/source_dispositions/s0003/2",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "documentation 的共享限制不在所引用英文操作段中，来源映射不准确。",
+            "suggested_revision": "将该条归属到 s0005/s0006 的实际限制段。"
+          }
+        ]
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:9ce30302f8d64270e040e1ac04b973a189a43a7c3ba2e724564b53a20f9524fe",
+      "latencyMs": 48086.56358404551,
+      "inputTokens": 3378,
+      "outputTokens": 449,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:8112ed3253da23a9edf17c96a053dc5d1dfe25e85ecfe9c6a1cb48347591387b",
+        "mapping.json": "sha256:a5628ecae995842e8dd2a77a7f972e08f9ea3b89e27ddd81174083570a790002",
+        "request.json": "sha256:68188e4ffb4f9231ace7f013f94fdeb2331d723b64a46594df31f28364c33314",
+        "response.json": "sha256:e8db1649c6727b1edbde0b2023ef84cf7cb8a3144d7f742c4bbcf9f9ae3c9511",
+        "review-input.json": "sha256:e56931f8509346ab0e90b1a4481a457d2b06ee95224f9deea32555e3f1765228",
+        "sources.json": "sha256:d348ace94ed84cf8f72c8d9aaf9ca876df42f72e5fe8f2c7a1eb1213f2394b3b",
+        "status.json": "sha256:5e41268ba3d42ffcdacefb72257db33ebc4e11f6d3bb860fbe895610bbe75ecb"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:9ce30302f8d64270e040e1ac04b973a189a43a7c3ba2e724564b53a20f9524fe",
+        "reviewDigest": "sha256:fdce3f232b8c59e4c3aaeaf4a3e81e95ebd3bdb6dab4ea92dbc04a07836ac549",
+        "reportDigest": "sha256:36187e597ff1fc2dde619b2f8c42dfaa132987202fa415ce6f37da8025509a17",
+        "reviewerId": "current-assistant-c3g-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 20,
+          "contradicted": 0,
+          "insufficient_evidence": 0
+        },
+        "scopeNote": "同一开发助手逐项核对已知流程、宿主合同和真实 9B 第二步元数据；非独立人员/Gold/泛化评测。父业务流程不变，未执行 Runtime 或业务工具。支持只表明具体声明有来源，不等于已实施全部限制；缺失能力仍阻断。",
+        "issues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "Approval system contract and write tool for VLAN configuration are missing."
+          }
+        ],
+        "findings": []
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:716dadfa454a1b825e3d3be29a7a36fb751a798dd07c68823687c54c734e07fc",
+      "latencyMs": 49614.51241699979,
+      "inputTokens": 3194,
+      "outputTokens": 397,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:d40d8a49118de6e65afb83b5b0450bfa07f6af1f6395c52fc914f3e915f37616",
+        "mapping.json": "sha256:e3d0e07b23805193be573f32869be33a78c0bc8c7e72c8d4633dd2db42528c78",
+        "request.json": "sha256:bead7297bd2eba6c8134440698bee443b62c4c97238cf764ad9543e0d8970113",
+        "response.json": "sha256:bd4e8e97f34104b4d79a98846a61f5d6f208d8668c7dc7b82ddd9ca1f7a762b2",
+        "review-input.json": "sha256:50af9e2e26c46f19ffa598e26d83e6594fb2d32b7ae97bef19f0ae049d12aeca",
+        "sources.json": "sha256:98272af372d47e4fb795b2eddda421b987f0e2239534a3acd82c95ad09bc682d",
+        "status.json": "sha256:a171a2d6d248a1b2789412ca54f1f07c2f2c83537ee8c40771a446bbde37faf7"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:716dadfa454a1b825e3d3be29a7a36fb751a798dd07c68823687c54c734e07fc",
+        "reviewDigest": "sha256:aacc2f0c498b1b0d42cc84f94472fc56c09ca0aab693d1d5ddb1828e42c28edb",
+        "reportDigest": "sha256:a750f3694ece04bd233c919e1f391ba12ae7feb045541cff26f84bc27166aa41",
+        "reviewerId": "current-assistant-c3g-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 16,
+          "contradicted": 0,
+          "insufficient_evidence": 0
+        },
+        "scopeNote": "同一开发助手逐项核对已知流程、宿主合同和真实 9B 第二步元数据；非独立人员/Gold/泛化评测。父业务流程不变，未执行 Runtime 或业务工具。支持只表明具体声明有来源，不等于已实施全部限制；缺失能力仍阻断。",
+        "issues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "The prerequisite script scripts/check_inventory.py is missing and the host contract does not provide it. Execution must stop."
+          }
+        ],
+        "findings": []
+      }
+    }
+  ],
+  "uniqueKnownFlows": 4,
+  "publicSkills": 0,
+  "structurallyQualified": 4,
+  "sourceReviewed": 4,
+  "reviewSupportedInactiveFlows": 0,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "independentHumanEvidence": false,
+  "boundary": "First auxiliary mapping attempts over preserved prior 9B proposals, not fresh end-to-end translation. Source reviews are same-assistant judgments, not independent Gold or calibrated accuracy. Qualified trees and safe missing-capability stops are not business completion or Runtime authority. POST cost includes waiting, excludes preflight/review/tests.",
+  "reportDigest": "sha256:82aa4991302524921a2c1f7fc904d597cfdaf5af0bde3d40741c486406acf1ce"
+}

@@ -1,0 +1,340 @@
+{
+  "evidenceRole": "known_four_flow_protocol_development_not_holdout",
+  "uniqueFlowCount": 4,
+  "publicSkillCount": 0,
+  "experiments": [
+    {
+      "protocol": "source-cited-flow/v1",
+      "manifestDigest": "sha256:d476474d776c8037c5d08ba716664d3aa973cde5928aaf8522159f59fe3d53a8",
+      "model": {
+        "model": "qwen3.5:9b",
+        "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+      },
+      "rows": [
+        {
+          "case": "direct-read",
+          "status": {
+            "status": "blocked",
+            "errorType": "ValueError",
+            "error": "quote must be an exact unique nonblank source excerpt"
+          },
+          "latencyMs": 34366.00179201923,
+          "inputTokens": 1236,
+          "outputTokens": 303,
+          "files": {
+            "cited-proposal.json": "sha256:7275ad64a8c6ec48732d93eea1fd86b68b0b88f7909a6a14a2e4d4bec0020a6d",
+            "request.json": "sha256:957b736173d8f51f5ada0a8d2ee36bdd49ec5d5176a3327d2d0a3585a7198013",
+            "response.json": "sha256:29ad8d6988b79abab5bd7cf02de94c1708b2b951495866fa0f7c011c9df82be4",
+            "sources.json": "sha256:fc173036148a6141b9ed757b56553a782613b6b24925fd84bdbdd5b5bc5019d5",
+            "status.json": "sha256:c9f064cf32f1610b6cc83d1ff0f9d3201b3e7810ec380594112825deaa7f40e4"
+          }
+        },
+        {
+          "case": "inverted-branch",
+          "status": {
+            "status": "blocked",
+            "errorType": "ValueError",
+            "error": "branch requires separate true/false source evidence"
+          },
+          "latencyMs": 47138.90591706149,
+          "inputTokens": 1275,
+          "outputTokens": 557,
+          "files": {
+            "cited-proposal.json": "sha256:5a53b3ad73c068b03520298dbe457c67ef1de4da3055340150f3257744f15152",
+            "request.json": "sha256:6b1f4a60925e64cb73a62e3b6d17d56f93b463556d769d30d96d1d15ed647df9",
+            "response.json": "sha256:d3cdf353268923e2e4f112961d09f54d892457e9fbae9db51dba0856502ea0b9",
+            "sources.json": "sha256:af4c9bd758b3fa38e84fede89f5505f57bcccf0f6f3e39ae9ccbdf7662ef3bfe",
+            "status.json": "sha256:80eb0b334be8a40ad6e5e15b29500d057e8efffc484fff59927ab7e4a0c84617"
+          }
+        },
+        {
+          "case": "missing-approval-write",
+          "status": {
+            "status": "blocked",
+            "errorType": "ValueError",
+            "error": "branch requires separate true/false source evidence"
+          },
+          "latencyMs": 47984.97195902746,
+          "inputTokens": 1301,
+          "outputTokens": 454,
+          "files": {
+            "cited-proposal.json": "sha256:90c54c6d6c893cc8628a36760e937aacfd77bfc65b58fc1de4c6d52b881788d8",
+            "request.json": "sha256:e4cd8284048d9f5eeca52761b76970d21ddae02cbb9426f33ba6c23e16d320ed",
+            "response.json": "sha256:31b7fc015d0da9cdee5a25a25e0320c2ca3007cb6edab9f02d3841773e6dda26",
+            "sources.json": "sha256:d348ace94ed84cf8f72c8d9aaf9ca876df42f72e5fe8f2c7a1eb1213f2394b3b",
+            "status.json": "sha256:80eb0b334be8a40ad6e5e15b29500d057e8efffc484fff59927ab7e4a0c84617"
+          }
+        },
+        {
+          "case": "unavailable-script-prerequisite",
+          "status": {
+            "status": "awaiting_source_review",
+            "inputDigest": "sha256:b5114872ed126f5a490da72f27a32bf1323648803401e153d4f462f1118c6ec6"
+          },
+          "latencyMs": 37021.03054197505,
+          "inputTokens": 1288,
+          "outputTokens": 289,
+          "files": {
+            "cited-proposal.json": "sha256:5a4af8dc4b720510c18c099f87c21c2088fc56facecd6528a5967ac1868e0c65",
+            "draft.json": "sha256:42188c510eb0daf0739b781c4b3944e48889af0feb764df80c91ee9ca3e9cb70",
+            "request.json": "sha256:e535799bdb9553187e7b0dbf2c2cff4009e5e39a44628a80210e24d54feafde3",
+            "response.json": "sha256:b4e01cc4f7967145031c3bc8d4168e667faac9a0a882cb1375d3c955ac42474a",
+            "review-input.json": "sha256:10cdfb758445f5e54a46db6b0ff64b6045acb0061815dbd4d9e4348ab3227e8d",
+            "sources.json": "sha256:98272af372d47e4fb795b2eddda421b987f0e2239534a3acd82c95ad09bc682d",
+            "status.json": "sha256:9b59a1437aff023344f4044b499321e92226507a284ba94253837f9bcb7849c8"
+          }
+        }
+      ],
+      "qualified": 1
+    },
+    {
+      "protocol": "source-selected-flow/v1",
+      "manifestDigest": "sha256:b69d7ff5c13d3af94d24524dda882370297413b63ecbccfe05e910bae788f398",
+      "model": {
+        "model": "qwen3.5:9b",
+        "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+      },
+      "rows": [
+        {
+          "case": "direct-read",
+          "status": {
+            "status": "awaiting_source_review",
+            "inputDigest": "sha256:b2fca27b67d853e58061877033e52ea678b8998a9d8618b191941cc4e568c370"
+          },
+          "latencyMs": 25485.968666966073,
+          "inputTokens": 1179,
+          "outputTokens": 202,
+          "files": {
+            "cited-proposal.json": "sha256:f35bfc93cf01eb762151361770effaa075b1645e10ba7b5e15c6e0e7fdc4dd9c",
+            "draft.json": "sha256:c877e92b5797175eb36359e71670099855c5873ed0506e04257aa861566fa80c",
+            "request.json": "sha256:7b0f7922169b12a9e0904cb618873080690e7b8c1634f3d1c89fa136ab1df10d",
+            "response.json": "sha256:c2e38b9c02a62c91de81214d6f613b770edeecfe41243cc8b308f83520782cb0",
+            "review-input.json": "sha256:bd6712f50dd0de4dc6a400fad97716336a350b4c0478fd7d2f066e831d72ff7d",
+            "selected-proposal.json": "sha256:c6740ad6cc3db89f0af8bd77b6da4953f6b9d441f24d20349913dc0beaaefd42",
+            "sources.json": "sha256:fc173036148a6141b9ed757b56553a782613b6b24925fd84bdbdd5b5bc5019d5",
+            "status.json": "sha256:acdc3e7849c634560f7615b5f4bafc7ff4242fb76ab8fd207db4cd0ba7377f7c"
+          }
+        },
+        {
+          "case": "inverted-branch",
+          "status": {
+            "status": "blocked",
+            "errorType": "ValueError",
+            "error": "unknown typed source field"
+          },
+          "latencyMs": 47164.01633294299,
+          "inputTokens": 1218,
+          "outputTokens": 498,
+          "files": {
+            "cited-proposal.json": "sha256:42a4e17590a4202fd1455051368143cb5289eefc0a62156243dee3a8d586384d",
+            "request.json": "sha256:9988f542269d4553da410960ee75e4e221c776b839663ca5d56fcbfaa2adeb9a",
+            "response.json": "sha256:c719821253a21a6d5e18a204ecff21352354b193969b9e2175a6d9a3ea832a39",
+            "selected-proposal.json": "sha256:c4735da0554101c8fef96707fdca9fac1cd3f0a152801fbc483e9c1dfa85e930",
+            "sources.json": "sha256:af4c9bd758b3fa38e84fede89f5505f57bcccf0f6f3e39ae9ccbdf7662ef3bfe",
+            "status.json": "sha256:40e1811cb7fb17eeb6c926e73b39efcabed8f5d8a54f5f42c78e553306a60134"
+          }
+        },
+        {
+          "case": "missing-approval-write",
+          "status": {
+            "status": "awaiting_source_review",
+            "inputDigest": "sha256:33e0f5c307a7ad5f6b9f620e9471e0c8c66d239bca1e3a8875601bc3b344e696"
+          },
+          "latencyMs": 39980.36620893981,
+          "inputTokens": 1244,
+          "outputTokens": 387,
+          "files": {
+            "cited-proposal.json": "sha256:e1d69b5f9b9b047e2eca8c31b8e7fabd6fb5f4783cb1c19982f789df3f0654f3",
+            "draft.json": "sha256:2220f5d2f0913c461d714dec351f42bcd8300649864fc5741535f02598ed356c",
+            "request.json": "sha256:d5acb4d18190be2e905b0009b58db7c4af15bcc4d2fbf22f22ad40cfbee18c57",
+            "response.json": "sha256:7f15733811c7fc3a2f526c40ffca8e08f5c6906d18d8a3506078774b3b5b2cae",
+            "review-input.json": "sha256:f9f5d8037a52d5973a28500cbcdb8ee567c85394d49c1cc0b00c0f5ce24818dd",
+            "selected-proposal.json": "sha256:654c428098f109748413ace2f576c10a3140c95c3fbf86140fb3aefe552e60cb",
+            "sources.json": "sha256:d348ace94ed84cf8f72c8d9aaf9ca876df42f72e5fe8f2c7a1eb1213f2394b3b",
+            "status.json": "sha256:0a04e9dc3421a59c78b693bbb9fd46ab24e2b85e5783025488570b149ae3b29a"
+          }
+        },
+        {
+          "case": "unavailable-script-prerequisite",
+          "status": {
+            "status": "blocked",
+            "errorType": "ValueError",
+            "error": "flow has an unknown successor"
+          },
+          "latencyMs": 27187.202624976635,
+          "inputTokens": 1231,
+          "outputTokens": 296,
+          "files": {
+            "cited-proposal.json": "sha256:48eea4ca5a1b9a6479806e46c356f17701b7b832cf4e1dd6332de0603d89263f",
+            "request.json": "sha256:0a369e8f9923296ee9f0f5e531db13ead6f68f5267feab9714764f04cc3b736a",
+            "response.json": "sha256:77ea464b0c1c6d2f7614381991d3387886560f8d3108a6326a17cf3493df4ce7",
+            "selected-proposal.json": "sha256:08a75a902bd12a6d8d2dba199466bb41ada625d8aad4bcca75c32e7518558dec",
+            "sources.json": "sha256:98272af372d47e4fb795b2eddda421b987f0e2239534a3acd82c95ad09bc682d",
+            "status.json": "sha256:dd042a30889e890b9c3a8dcdf688b603f56ee504ba1a78e5c9b95dd086e438a3"
+          }
+        }
+      ],
+      "qualified": 2
+    }
+  ],
+  "reviews": [
+    {
+      "protocol": "cited",
+      "case": "unavailable-script-prerequisite",
+      "status": "blocked",
+      "inputDigest": "sha256:b5114872ed126f5a490da72f27a32bf1323648803401e153d4f462f1118c6ec6",
+      "reviewDigest": "sha256:87c5c3aa6c2500130431deb195f52f3597a366e55dea2c23fe2e343a02fddbb3",
+      "reportDigest": "sha256:61f07ab9879b90a9f162af202071e66b1f2c2e118f61cf061686912974f2c6c2",
+      "verdictCounts": {
+        "supported": 10,
+        "contradicted": 0,
+        "insufficient_evidence": 0
+      },
+      "issues": [
+        {
+          "kind": "missing_host_capability",
+          "source_quote": "Running scripts/check_inventory.py is a prerequisite before reading input device_id. The script and host contract are absent.",
+          "question": "The source workflow requires running `scripts/check_inventory.py` as a prerequisite, but the host does not provide this script or a contract for it. This capability is missing."
+        }
+      ],
+      "reviewerKind": "ai_role_simulation",
+      "findings": []
+    },
+    {
+      "protocol": "selected",
+      "case": "direct-read",
+      "status": "blocked",
+      "inputDigest": "sha256:b2fca27b67d853e58061877033e52ea678b8998a9d8618b191941cc4e568c370",
+      "reviewDigest": "sha256:68ee6eec9e0e154bd26467da8f5144aa5310c1f11715328b83d47610c61d8d9b",
+      "reportDigest": "sha256:3a7e1a35710b3a36f6469a5ab1a5f7f3f0730dc285feb704b494dc110ca2d801",
+      "verdictCounts": {
+        "supported": 11,
+        "contradicted": 0,
+        "insufficient_evidence": 2
+      },
+      "issues": [],
+      "reviewerKind": "ai_role_simulation",
+      "findings": [
+        {
+          "pointer": "/purpose",
+          "verdict": "insufficient_evidence",
+          "explanation": "用途确为业务标题和单读步骤，不再是翻译元任务，但 purpose 本身未选择数据/权限限制；限制只在其他节点出现。"
+        },
+        {
+          "pointer": "/steps/1",
+          "verdict": "insufficient_evidence",
+          "explanation": "steps/1 选择的是数据与权限限制段，它本身不蕴含读取完成操作；原文其他段虽支持完成，但当前节点的所选引文未建立该映射。"
+        }
+      ]
+    },
+    {
+      "protocol": "selected",
+      "case": "missing-approval-write",
+      "status": "blocked",
+      "inputDigest": "sha256:33e0f5c307a7ad5f6b9f620e9471e0c8c66d239bca1e3a8875601bc3b344e696",
+      "reviewDigest": "sha256:18c905d67040cd9b01f1d1e4fe65c4f17974311bd84b42d669e5aa6ef26823ce",
+      "reportDigest": "sha256:1e2df59936dfd4b94a54562279c79119f20df5dbe2ee5558032f64068d3c8856",
+      "verdictCounts": {
+        "supported": 4,
+        "contradicted": 13,
+        "insufficient_evidence": 4
+      },
+      "issues": [],
+      "reviewerKind": "ai_role_simulation",
+      "findings": [
+        {
+          "pointer": "/source",
+          "verdict": "contradicted",
+          "explanation": "源明确没有审批/写合同，模型却新增库存 status=approved 条件，且假分支声称完成。"
+        },
+        {
+          "pointer": "/source",
+          "verdict": "contradicted",
+          "explanation": "英文源明确不能以读取替代审批或配置成功，实际图的库存条件及完成出口违反此要求。"
+        },
+        {
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "生成内容没有保留计划库存/非实时健康的完整限制，不能凭引用数据权限标题认定覆盖正文。"
+        },
+        {
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "英文数据限制未出现在用途或终态正文；没有完整保真证据。"
+        },
+        {
+          "pointer": "/purpose",
+          "verdict": "insufficient_evidence",
+          "explanation": "业务标题和步骤有源依据，但用途未选择数据真实性/权限限制；不是完整的 purpose_and_limits 映射。"
+        },
+        {
+          "pointer": "/entry",
+          "verdict": "contradicted",
+          "explanation": "图在读取后虚构审批条件并允许 read_path_completed，缺能力没有在所有路径显式停止。"
+        },
+        {
+          "pointer": "/nodes/0",
+          "verdict": "contradicted",
+          "explanation": "初始读取本身正确，next 却通向无源库存审批判断，与源规定的缺合同停止不一致。"
+        },
+        {
+          "pointer": "/nodes/1",
+          "verdict": "contradicted",
+          "explanation": "node-1 将库存字段 status 判为 approved，源与合同不赋予该字段审批含义。"
+        },
+        {
+          "pointer": "/nodes/1/left",
+          "verdict": "contradicted",
+          "explanation": "库存 status 不能充当审批系统结果；字段类型存在不证明它是对应业务事实。"
+        },
+        {
+          "pointer": "/nodes/1/equals",
+          "verdict": "contradicted",
+          "explanation": "approved 常量不是源中给出的库存状态审批编码，是模型杜撰的条件。"
+        },
+        {
+          "pointer": "/nodes/1/on_true",
+          "verdict": "contradicted",
+          "explanation": "unsupported 不能只在库存 status=approved 时触发，缺合同事实与该条件无关。"
+        },
+        {
+          "pointer": "/nodes/1/on_false",
+          "verdict": "contradicted",
+          "explanation": "status!=approved 的完成出口违反源要求的审批和写合同缺失处停止。"
+        },
+        {
+          "pointer": "/nodes/3",
+          "verdict": "contradicted",
+          "explanation": "node-3 用数据权限标题解释 read_path_completed，源没有允许缺少审批和配置后的成功完成。"
+        },
+        {
+          "pointer": "/steps/0",
+          "verdict": "insufficient_evidence",
+          "explanation": "steps/0 只选业务标题，没有为具体 tool/参数读取步骤选择足够原文；源正文有依据，但所选标题不足。"
+        },
+        {
+          "pointer": "/steps/1",
+          "verdict": "contradicted",
+          "explanation": "steps/1 引用的源要求明确否定用读取代替审批，而该步骤恰以库存值做审批判断。"
+        },
+        {
+          "pointer": "/steps/2",
+          "verdict": "contradicted",
+          "explanation": "steps/2 虽引用正确停止原文，却把虚构审批分支列为必要前序；源要求缺能力直接停止，不是条件批准后停止。"
+        },
+        {
+          "pointer": "/steps/3",
+          "verdict": "contradicted",
+          "explanation": "steps/3 的标题引用不能支持业务完成，requires=[] 也未保留源中强制审批/写依赖；不得称为完成。"
+        }
+      ]
+    }
+  ],
+  "reviewSupportedInactiveFlows": 0,
+  "runtimeExecutions": 0,
+  "thirdPartyScriptExecutions": 0,
+  "writes": 0,
+  "independentHumanEvidence": false,
+  "boundary": "Two different protocols on four known developer-selected cases, not accuracy or causal performance estimates. Citation/structure and semantic review remain separate. Same assistant authored and reviewed sources. Timings exclude preflight, source review and tests. Cited protocol is diagnostic history, not the default authoring path.",
+  "reportDigest": "sha256:54c81916c8a710a7be6feb3afff37b416b0a73650eb4d6f85c62706e8db60e93"
+}

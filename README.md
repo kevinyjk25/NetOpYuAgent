@@ -2,7 +2,7 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-03。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-07。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -39,6 +39,16 @@ B2 已闭合单操作辅助读取；C 已盘点 12 个公开 Skill，尚未运�
 [C3 首次正向实验](docs/FLOW-FORWARD-TRANSLATION.md)已跑真实 9B：前两次结构阻断，第三次结构通过但语义审查阻断；两处有源说明文字修订后才完成本地读取。辅助闭环已接通，无辅助稳定性和公开 Skill 泛化尚未证明。
 
 [C3b 冻结协议开发批次](docs/FLOW-FROZEN-DEVELOPMENT.md)扩充至 8 个已知流程，检查顺序、分支、引用、缺失依赖与不支持操作；逐项原始结果留存，不把结构通过或安全停止算成业务成功。
+
+[C3c 源文约束诊断](docs/FLOW-SOURCE-GROUNDING.md)已补充逐步引用和依赖审查；两种协议的真实 9B 结果表明，引用可追溯仍不能解决分支极性与业务事实混用，转译质量门禁尚未通过。
+
+[C3g 源约束与受限映射](docs/FLOW-SOURCE-CONSTRAINTS.md)已将原文保留、语义映射和执行保障分开：先固定 9B 流程，再由模型在编译器提供的真实节点上补映射，不能改业务操作。4 个已知流程的第二步均结构合格；2 项仍有语义问题，2 项忠实表达缺能力停止，全部仍 blocked。这是映射协议修复，不是端到端转译成功或泛化准确率；首次失败、辅助成本及定位均可查。
+
+[C3h 首轮完整双阶段验证](docs/FLOW-TWO-PASS-TRANSLATION.md)已重新从源文运行 8 次 9B 调用：4/4 流程结构合格、2/4 片段映射结构合格，完整语义审查仍未接收任何流程。细粒度引用暴露了重复映射、检查语义混用及高生成成本（总 POST 932.05 秒）。链路已实现，但可用性提升尚未证明；继续精简 C3h，不进入公开 Skill 扩展或大规模 Runtime 评测。
+
+[C3h 精简版实测](docs/FLOW-LEAN-MAPPING.md)：编译器接管锚点与解释后，第二步输出减少 73.6%，但输入增加 29.0%；完整两步总 token 仅减少 4.0%。新批映射结构合格 3/4，语义审查仍全阻断。生成负担有所下降，规则职责与完整源要求匹配仍是主要缺口；不把成本改善当作转译泛化成功。
+
+[C3h 职责映射离线修复](docs/FLOW-RESPONSIBILITY-MAPPING.md)新增精确引文子要求、类型—目标兼容检查及完整分解审查，定位职责错配和条件节点漏引用。75 项新回归通过；尚无新版模型质量/性能数据，类型合法仍不代表语义正确。
 
 项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
 
@@ -260,6 +270,16 @@ B2 closes one assisted read; C has completed intake for 12 public Skills, not tr
 The [first C3 forward experiment](docs/FLOW-FORWARD-TRANSLATION.md) used real 9B calls: two structural rejections, then a structurally valid but semantically blocked answer. Two source-backed text edits and fresh review enabled local reads. Assisted closure is demonstrated; unaided reliability and public-Skill generalization are not.
 
 The [C3b frozen development batch](docs/FLOW-FROZEN-DEVELOPMENT.md) adds eight known flows covering sequence, branching, references and unavailable/unsupported steps. Original results are preserved; structural qualification and safe stops are not business success.
+
+[C3c source-grounding diagnostics](docs/FLOW-SOURCE-GROUNDING.md) add step citations and dependency review. Real 9B results still expose branch and business-fact errors: traceability alone has not met the translation quality gate.
+
+[C3g source ledgers and restricted mapping](docs/FLOW-SOURCE-CONSTRAINTS.md) separate text retention, semantic mapping and enforcement. A second 9B pass maps immutable prior proposals onto compiler-enumerated nodes without changing business operations. All four known-flow mappings qualify structurally; two retain semantic gaps and two faithfully describe missing-capability stops. All remain blocked. This is a mapping-protocol repair, not end-to-end success or generalization accuracy; preserved failures, auxiliary costs and precise findings are linked.
+
+[First C3h fresh two-pass validation](docs/FLOW-TWO-PASS-TRANSLATION.md) made eight real 9B calls: 4/4 flows and 2/4 clause mappings qualified structurally, but none passed complete semantic acceptance. Duplicate mappings, conflated checks and high generation cost (932.05 s total POST) remain. The chain is implemented; usability improvement is unproven. C3h simplification precedes public whole-Skill expansion or large Runtime evaluation.
+
+[C3h lean results](docs/FLOW-LEAN-MAPPING.md): compiler-owned anchors/explanations reduced mapping output by 73.6%, but input increased 29.0%; whole-chain total tokens fell only 4.0%. Mapping qualification was 3/4 and semantic acceptance remained blocked. Generation burden improved; requirement-to-guarantee matching remains open. Cost changes do not establish translation generalization.
+
+[C3h offline responsibility mapping](docs/FLOW-RESPONSIBILITY-MAPPING.md) adds exact-quote requirements, type/target compatibility and complete decomposition review, with precise responsibility/node-coverage failures. Seventy-five new regressions passed; new-model quality/cost remain unmeasured. Type compatibility is not semantic correctness.
 
 The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
 

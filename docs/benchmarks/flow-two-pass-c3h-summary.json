@@ -1,0 +1,684 @@
+{
+  "protocol": "fresh-flow-clause-paired/v1",
+  "manifestDigest": "sha256:abfee7e1e4788c45200eb206ded284845fbb0464307d7b5d1e753853bf468190",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "knownFlows": 4,
+  "publicSkills": 0,
+  "modelCalls": 8,
+  "flowQualified": 4,
+  "mappingQualified": 2,
+  "sourceReviewed": 2,
+  "reviewSupportedInactiveFlows": 0,
+  "latencyMs": 932046.571956831,
+  "inputTokens": 30536,
+  "outputTokens": 10900,
+  "tokenCountsComplete": true,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "boundary": "Fresh two-pass known development. Structure/accounting is not source fidelity or activation. Reviews, if supplied, are not automatically independent Gold. Costs include failures/waiting, not preflight/review/tests.",
+  "summaryOfReportDigest": "sha256:45a5bb15a62e7152372edc13fd0ef53ccd98b47d383d0b8cc85ef6fe54a15308",
+  "rows": [
+    {
+      "case": "direct-read",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:cf07cea171b9b96fa57994a70da402f6c52cccf2a763e341e8089a93e500d89a",
+        "latencyMs": 26943.602416897193,
+        "inputTokens": 2715,
+        "outputTokens": 175,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:5990199d69986fecdf69b8a2a363dd50a3e641f0da65d1674fc691f2d0016567",
+        "request.json": "sha256:a877fc4e32fe215e4cec57641183b6c1f97dd26aba0f38151822148bc4c91864",
+        "response.json": "sha256:422fe3a9f371860866214db8e840abfe8e92102286d3e1131d24e7a037e7bd95",
+        "review-input.json": "sha256:8b0076edb9b6dd8942d00e8577a3a35200df5559d5e2c6dcf209a825a1d35e65",
+        "status.json": "sha256:c33973b955e168995a6a6773f4da1ccb66bac079ff09c2266caf0e55698876dd",
+        "tree.json": "sha256:e822b4807355751a040f0dbc2a7beedb4a1bdcd9c171b31ae4acd7963d46c83f"
+      },
+      "mapping": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:759e4430e00103d76015204f687b191cc4ee0e887a9e65c54104b3d9409e6d0a",
+        "latencyMs": 89773.92599999439,
+        "inputTokens": 4089,
+        "outputTokens": 1090,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "compilation.json": "sha256:36f6439eef966233f32782f52b168e88f14879495b5c4af4a70cbd07ab98cbde",
+        "mapping.json": "sha256:6b328cc39c26bc23185c4cbb18ae3166802b38ff044c1ec13aaf8e2a9f7742ff",
+        "request.json": "sha256:14850525c0dc68f69ac09e0a562dd2172d752d675c3ad9d93fd5cd1ae0a5602b",
+        "response.json": "sha256:0f2c20b4833ae5b0bc0223499a3ac609448c34aa279b89fec8fcd68a7956a586",
+        "review-input.json": "sha256:8ab9eae63b83df1831e19e3336e273172146126c099eb5bd1738a44e915f728e",
+        "status.json": "sha256:8bb1beebca77a3c8f56e54687725b65ab1d05ff9bba90d9214bb2b13a32c72a3"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:759e4430e00103d76015204f687b191cc4ee0e887a9e65c54104b3d9409e6d0a",
+        "reviewDigest": "sha256:dc2e516a839dfd39b77f0cc4b44c94a0b6d811cc21bb050d9409ad691494d773",
+        "reportDigest": "sha256:bde22fb3cbc8052021db6f8eba7f298ce6a972331d644094e3a1574fd75f2562",
+        "verdictCounts": {
+          "supported": 27,
+          "contradicted": 0,
+          "insufficient_evidence": 6
+        },
+        "reviewerKind": "ai_role_simulation",
+        "reviewerId": "current-assistant-c3h-development",
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "限制原文有保留，但片段 4 的规则映射缺输入/返回检查依据，片段 8 又把无授权范围缩窄；不能据段落投影判定整体限制覆盖。",
+            "suggested_revision": "分别绑定实际输入/结果检查和不授任何权限的原义；不足项显式未解决。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文要求明确所有输入/返回非法均阻断且源不授任何权；当前片段映射未完整支持这些要求。",
+            "suggested_revision": "补齐具体规则证据，保留读取也不由源文授权的限制。"
+          },
+          {
+            "claimId": "claim-0022",
+            "l05Pointer": "/objective_clause_ids",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "objective_clause_ids 混入纯数据解释限制 clause-0003，与只选业务目的的字段约定不一致；业务读取本身在 clause-0002 中。",
+            "suggested_revision": "将纯数据限制留在约束映射，目的引用只保留真实业务操作。"
+          },
+          {
+            "claimId": "claim-0026",
+            "l05Pointer": "/clause_dispositions/clause-0004/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "规则只列访问及错误传播，未明确提供输入形状和返回形状检查；说明的全范围保障不能由这些引用充分支持。",
+            "suggested_revision": "为输入和返回检查提供独立实际规则引用，错误传播只承担传播职责。"
+          },
+          {
+            "claimId": "claim-0029",
+            "l05Pointer": "/clause_dispositions/clause-0007/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "仅引用错误传播规则不足以说明所有输入、访问与结果是否合法的检查；不能将传播错误当作发现所有非法条件。",
+            "suggested_revision": "分开合法性检查与错误传播，逐项提供宿主依据；不能支持的范围保留未解决。"
+          },
+          {
+            "claimId": "claim-0030",
+            "l05Pointer": "/clause_dispositions/clause-0008/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "源文不授予任何权限，解释却只否认 beyond reading 的权限，留下读取授权范围不清；不能把未授权范围缩窄。",
+            "suggested_revision": "保留 source grants no authority 的完整范围，读取权限也必须来自宿主。"
+          }
+        ]
+      },
+      "clauseAccountingDiagnostic": {
+        "clauses": 9,
+        "records": 9,
+        "missingAnchors": 0,
+        "findings": []
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:7436cd671870849c736c5b1f53d28e8f0137b872a2d1b03305a23cfb83c86071",
+        "latencyMs": 40090.85395792499,
+        "inputTokens": 2754,
+        "outputTokens": 440,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:2559c87cd8e0f14187ba83e645595b77d3d131a08800f85ff3b1cf4c1275b5bd",
+        "request.json": "sha256:dba396d5c9a584403c003d792e76d6da78453841f1a708eb56e382281b1cdcf6",
+        "response.json": "sha256:584b438b6d3705af53ff39d8b5f421cc17c210c6d3c22ecbb39edded88c9a8d9",
+        "review-input.json": "sha256:e843ec8dd784af0887ad1c76968161b8401a4146b71bfb13031230ca185a6ef3",
+        "status.json": "sha256:9a15ed57ba2544e2405f3b7f49e59e644226b67f9eb21424f81cd3c0425582aa",
+        "tree.json": "sha256:13d627386ffe0a0acc2b1650dfeb981fbc472623f9b1e9daed56501f7374957a"
+      },
+      "mapping": {
+        "status": "blocked",
+        "errorType": "ValueError",
+        "error": "clause disposition must cite its own exact anchor",
+        "latencyMs": 304408.84895797353,
+        "inputTokens": 5711,
+        "outputTokens": 4016,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "mapping.json": "sha256:a16fe3707d003325ff259abc6effb0399fa1a582d7b19cb7844e3902ffb91583",
+        "request.json": "sha256:fa7f857cf1a12d4f338a97d982059cfe778264d49cdc6bf2845c9f8451c47584",
+        "response.json": "sha256:54afcae130df7926d2a8eb43526e4cb4783a743091c023e2c8532db3892183c9",
+        "status.json": "sha256:43e1084b227d8a34caeaad1dbe98b65c2c2b162f7cf4f7d648ec0e30891c691c"
+      },
+      "clauseAccountingDiagnostic": {
+        "clauses": 13,
+        "records": 44,
+        "missingAnchors": 31,
+        "findings": [
+          {
+            "pointer": "/clause_dispositions/clause-0001/1",
+            "anchor": "clause-0001",
+            "cited": [
+              "clause-0004"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0001/2",
+            "anchor": "clause-0001",
+            "cited": [
+              "clause-0010"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0001/3",
+            "anchor": "clause-0001",
+            "cited": [
+              "clause-0008",
+              "clause-0011"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0002/1",
+            "anchor": "clause-0002",
+            "cited": [
+              "clause-0005"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0002/2",
+            "anchor": "clause-0002",
+            "cited": [
+              "clause-0007",
+              "clause-0012"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0003/1",
+            "anchor": "clause-0003",
+            "cited": [
+              "clause-0006"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0003/2",
+            "anchor": "clause-0003",
+            "cited": [
+              "clause-0009",
+              "clause-0013"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0003/3",
+            "anchor": "clause-0003",
+            "cited": [
+              "clause-0008",
+              "clause-0011"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0004/1",
+            "anchor": "clause-0004",
+            "cited": [
+              "clause-0001"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0004/2",
+            "anchor": "clause-0004",
+            "cited": [
+              "clause-0010"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0005/1",
+            "anchor": "clause-0005",
+            "cited": [
+              "clause-0002"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0005/2",
+            "anchor": "clause-0005",
+            "cited": [
+              "clause-0007"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0006/1",
+            "anchor": "clause-0006",
+            "cited": [
+              "clause-0003"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0006/2",
+            "anchor": "clause-0006",
+            "cited": [
+              "clause-0009"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0007/1",
+            "anchor": "clause-0007",
+            "cited": [
+              "clause-0010"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0007/2",
+            "anchor": "clause-0007",
+            "cited": [
+              "clause-0008",
+              "clause-0011"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0008/1",
+            "anchor": "clause-0008",
+            "cited": [
+              "clause-0011"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0008/2",
+            "anchor": "clause-0008",
+            "cited": [
+              "clause-0007"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0009/1",
+            "anchor": "clause-0009",
+            "cited": [
+              "clause-0012"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0009/2",
+            "anchor": "clause-0009",
+            "cited": [
+              "clause-0013"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0009/3",
+            "anchor": "clause-0009",
+            "cited": [
+              "clause-0007"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0010/1",
+            "anchor": "clause-0010",
+            "cited": [
+              "clause-0007"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0010/2",
+            "anchor": "clause-0010",
+            "cited": [
+              "clause-0012",
+              "clause-0013"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0011/1",
+            "anchor": "clause-0011",
+            "cited": [
+              "clause-0008"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0011/2",
+            "anchor": "clause-0011",
+            "cited": [
+              "clause-0012",
+              "clause-0013"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0012/1",
+            "anchor": "clause-0012",
+            "cited": [
+              "clause-0009"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0012/2",
+            "anchor": "clause-0012",
+            "cited": [
+              "clause-0013"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0012/3",
+            "anchor": "clause-0012",
+            "cited": [
+              "clause-0010"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0013/1",
+            "anchor": "clause-0013",
+            "cited": [
+              "clause-0009"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0013/2",
+            "anchor": "clause-0013",
+            "cited": [
+              "clause-0012"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0013/3",
+            "anchor": "clause-0013",
+            "cited": [
+              "clause-0010"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:2f5f24a5faca48f2324df4192e48617c091d1d0cc86fa07f5dd3fcf20caaaf7e",
+        "latencyMs": 26577.571625006385,
+        "inputTokens": 2780,
+        "outputTokens": 223,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:a130791501879d274cb2e865640fc181289cf7b60ff8172b2ff0bcbdb802c617",
+        "request.json": "sha256:0c772f7e6edb47a7f678f06f0385e87d1fb3263e7ad3c9d6d20e9bc55a18ce70",
+        "response.json": "sha256:23b9facfb55ccfbdc286b7b082893a3199089fa638d9e396ed55349ec06fb141",
+        "review-input.json": "sha256:9ac9ff06fa123b8459613fbe4fb2d1bf6411aa7c32a60a26e49826c471919a51",
+        "status.json": "sha256:e1f230312f6ea991592fce11dded73e5b8f949509970c2d85a9f8707559da43b",
+        "tree.json": "sha256:84831fae78b1f83de417eebd4c15e977e725b5947361ce45231bff633fd7799b"
+      },
+      "mapping": {
+        "status": "blocked",
+        "errorType": "ValueError",
+        "error": "clause disposition must cite its own exact anchor",
+        "latencyMs": 233342.6179579692,
+        "inputTokens": 5016,
+        "outputTokens": 2857,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "mapping.json": "sha256:63fe4d5e1107a8979adb9d18be9f677b8f34dce12e08063061d370bc7920b324",
+        "request.json": "sha256:6ebdb0455e9fa3d2071c04402905897daf08e048e9957766818c0480452530e7",
+        "response.json": "sha256:ccaab3867dc989b85d85544dbee33c85ea4e2d2bb4241f8e43eb5edf36ee6b3e",
+        "status.json": "sha256:8c3a33b751717ee057c0aaa75d8e0b14882e471566ef6843edc6f7f9871efae2"
+      },
+      "clauseAccountingDiagnostic": {
+        "clauses": 15,
+        "records": 30,
+        "missingAnchors": 15,
+        "findings": [
+          {
+            "pointer": "/clause_dispositions/clause-0001/1",
+            "anchor": "clause-0001",
+            "cited": [
+              "clause-0012",
+              "clause-0013"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0002/1",
+            "anchor": "clause-0002",
+            "cited": [
+              "clause-0006",
+              "clause-0014"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0003/1",
+            "anchor": "clause-0003",
+            "cited": [
+              "clause-0015",
+              "clause-0014"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0004/1",
+            "anchor": "clause-0004",
+            "cited": [
+              "clause-0010",
+              "clause-0013"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0005/1",
+            "anchor": "clause-0005",
+            "cited": [
+              "clause-0001",
+              "clause-0002"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0006/1",
+            "anchor": "clause-0006",
+            "cited": [
+              "clause-0003",
+              "clause-0015"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0007/1",
+            "anchor": "clause-0007",
+            "cited": [
+              "clause-0013",
+              "clause-0010"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0008/1",
+            "anchor": "clause-0008",
+            "cited": [
+              "clause-0015",
+              "clause-0014"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0009/1",
+            "anchor": "clause-0009",
+            "cited": [
+              "clause-0013",
+              "clause-0010"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0010/1",
+            "anchor": "clause-0010",
+            "cited": [
+              "clause-0014",
+              "clause-0015"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0011/1",
+            "anchor": "clause-0011",
+            "cited": [
+              "clause-0015",
+              "clause-0003"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0012/1",
+            "anchor": "clause-0012",
+            "cited": [
+              "clause-0013",
+              "clause-0010"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0013/1",
+            "anchor": "clause-0013",
+            "cited": [
+              "clause-0014",
+              "clause-0015"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0014/1",
+            "anchor": "clause-0014",
+            "cited": [
+              "clause-0015",
+              "clause-0003"
+            ]
+          },
+          {
+            "pointer": "/clause_dispositions/clause-0015/1",
+            "anchor": "clause-0015",
+            "cited": [
+              "clause-0013",
+              "clause-0010"
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:6dddf5d006a5d2deae943dc834f3a46ed6de711751c98c2a82d86bd2258f002c",
+        "latencyMs": 27232.02933301218,
+        "inputTokens": 2767,
+        "outputTokens": 143,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:4251d57272d688d49d080023e318bf6b3fe75e9d30fe708f0fbc9cfe8973106a",
+        "request.json": "sha256:0358e039a03af1ccba4af4e80bbee604c7796743765001e3f89fd669d4553314",
+        "response.json": "sha256:d4a34344ee4bd501959efade53f57c38013fa2f1d1b4a8da46eaf533167abf6a",
+        "review-input.json": "sha256:43cf3a78d465be8daa92497678bf897f298e5532d10a05f9351dde0c4e2db033",
+        "status.json": "sha256:b83427a36ca7139b7729ab01aa888750b31c4e2ceac405a9d5429407836b2637",
+        "tree.json": "sha256:435b8ef55de32582b54224abe1dff9947994d6a19648d06db360d6eb5df4bb3d"
+      },
+      "mapping": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:411f62fc168e0ab15486e161c8619f584abc9480419933c80e218857ebe03144",
+        "latencyMs": 183677.12170805316,
+        "inputTokens": 4704,
+        "outputTokens": 1956,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "compilation.json": "sha256:a0c36d9a53bf19a747cad1930bcd061416fd20689d1034a261024afd45beec75",
+        "mapping.json": "sha256:20d901990a135cbacff65d700fd618aa634e53841b7f6816a87d0c59a66c5bdf",
+        "request.json": "sha256:a659c708e25021a87bcbdfeeae0b3d34f588d325779e5f40ccff4f7f5ac73285",
+        "response.json": "sha256:6d863e6290c00e7c2fb6226d1c5ee1667b11c8267e35b03cf840568c5b16fc6a",
+        "review-input.json": "sha256:1b4ed4bd9efabf4025800b5e531f7e13b064040c6de36ff4e374381ffacb9c65",
+        "status.json": "sha256:12d2008c6d1885462057e9652f07a188abd76022d9a18096dc75fd681c95ca1d"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:411f62fc168e0ab15486e161c8619f584abc9480419933c80e218857ebe03144",
+        "reviewDigest": "sha256:053f80c962b400d694ac76c7ab2b4bf9f392ea8d9db771bce10f2e7a1d718735",
+        "reportDigest": "sha256:d70be97f661c7ec9cd7ebdaa1388febac434f52118c01e3a1be7da977b68fad8",
+        "verdictCounts": {
+          "supported": 26,
+          "contradicted": 0,
+          "insufficient_evidence": 9
+        },
+        "reviewerKind": "ai_role_simulation",
+        "reviewerId": "current-assistant-c3h-development",
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "完整源文虽保留，片段 10 却把非法输入检查归于普通 unsupported 节点，片段 11 又声称严格只读；整体限制映射不足。",
+            "suggested_revision": "将真实校验规则与缺能力停止区分，撤回未经证明的整个流程严格只读断言。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文限制中的非法访问/结果校验被映射到无对应检查的停止节点，不能以保留原文认定约束已经对应。",
+            "suggested_revision": "引用实际输入/返回检查或标未解决，不能将缺脚本终态冒充所有错误检查。"
+          },
+          {
+            "claimId": "claim-0021",
+            "l05Pointer": "/clause_dispositions/clause-0002/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "说明将缺少脚本合同说成缺少忽略前置依赖的合同，并以 cannot be 暗示无法解决；源只说明当前缺失和不得绕过。",
+            "suggested_revision": "准确保留当前缺脚本合同、不得绕过的事实，不虚构忽略依赖的合同或永久不可解。"
+          },
+          {
+            "claimId": "claim-0025",
+            "l05Pointer": "/clause_dispositions/clause-0006/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "缺脚本停止有依据，但说明追加 false branch recovery，而所引 5/6/7 没有该规则；实际规则在片段 13。",
+            "suggested_revision": "若解释错误分支限制，补引用实际片段 13，并区分缺能力停止与错误检查。"
+          },
+          {
+            "claimId": "claim-0029",
+            "l05Pointer": "/clause_dispositions/clause-0010/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "唯一 unsupported 节点只表示缺脚本停止，没有非法输入/访问/引用检测逻辑；不能作为这些检查的 flow_reference。",
+            "suggested_revision": "只将该节点映射为缺能力停止；其他检查需宿主规则或显式未解决。"
+          },
+          {
+            "claimId": "claim-0030",
+            "l05Pointer": "/clause_dispositions/clause-0011/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "无源授权和无自动动作有依据，但源含未知脚本前置操作，不能断言整个 operation strictly read-only；被阻断不证明脚本只读。",
+            "suggested_revision": "仅描述无自动动作和当前阻断，不推断未知脚本的副作用属性。"
+          },
+          {
+            "claimId": "claim-0032",
+            "l05Pointer": "/clause_dispositions/clause-0013/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "停止节点没有实际输入/访问/结果检测；说明还引入 ambiguous device_id 条件，不能由所引片段及该节点充分支持。",
+            "suggested_revision": "删除未有来源的歧义条件，分别提供真实检查依据，不能以终态替代检查。"
+          },
+          {
+            "claimId": "claim-0033",
+            "l05Pointer": "/clause_dispositions/clause-0014/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "所引来源支持无授权，但未包含缺脚本应保留 unsupported 的具体要求；这一附加解释需要引用真实前置依赖片段。",
+            "suggested_revision": "为缺脚本停止的附加解释补足真实源片段，而非泛用权限段落。"
+          },
+          {
+            "claimId": "claim-0034",
+            "l05Pointer": "/clause_dispositions/clause-0015/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "无自动动作由片段 15 支持，但缺脚本停止的附加解释不在所引 12 至 15 中；跨来源说明未给足来源。",
+            "suggested_revision": "增加实际脚本前置依赖来源，或将说明限制到当前引用真正支持的无自动动作。"
+          }
+        ]
+      },
+      "clauseAccountingDiagnostic": {
+        "clauses": 15,
+        "records": 15,
+        "missingAnchors": 0,
+        "findings": []
+      }
+    }
+  ],
+  "reportDigest": "sha256:c7605f2ae9a93afcca08dd54ad1ee1740e40fe93ca2b4435430d8659f350748e"
+}

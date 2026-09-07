@@ -1,0 +1,132 @@
+{
+  "protocol": "source-constraint-flow/v1",
+  "manifestDigest": "sha256:c4f5a73d4005aed3cbcb9625a47fe864c93df64c0fce057a7c24981309d312ec",
+  "parentManifestDigest": "sha256:5ce0633ee1aa9449cf875c11fcfd7fad26454385a14a11772cf6a59fa53d2308",
+  "evidenceRole": "known_development_semantic_flow_not_holdout",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "rows": [
+    {
+      "case": "direct-read",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:87965c6c3cc9905c1ca2bf38c883ffd5a6cbfd4d1314bc774a24960a5c47fc86",
+      "latencyMs": 34433.819958008826,
+      "inputTokens": 3569,
+      "outputTokens": 190,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:a2b455c213e2ca7d4ad86b058b6046f9353ddc3e1157dda22fa1a05f646a319a",
+        "request.json": "sha256:67a593855728920d77752ea1286b890916d39707222f07811511d1cfb3e73133",
+        "response.json": "sha256:e058b3a48e367412d21233d9777b5c02a256f32070835eb2a45df11f0168a001",
+        "review-input.json": "sha256:0af65b12419cf41157922a9fcadc4eb334e43043729ca7d96743fc8af7521adc",
+        "sources.json": "sha256:fc173036148a6141b9ed757b56553a782613b6b24925fd84bdbdd5b5bc5019d5",
+        "status.json": "sha256:e381634dc871f8efcbe0c3ab0d58a132f92b1e6f159c852e188713c5416548b2",
+        "tree.json": "sha256:ede3eb4a439ad8fa70745eb99bc116db8faae8fd54fb150c8b7c00f40f74d082"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:87965c6c3cc9905c1ca2bf38c883ffd5a6cbfd4d1314bc774a24960a5c47fc86",
+        "reviewDigest": "sha256:7b71a96e8c8b8e64e29f7ea42d524ed861b96b8b93054a5acbdcb61453bdab52",
+        "reportDigest": "sha256:61e3bd5a58d66225e0d2d4d09e54466fd2db55742af2f9f4a4dd1ae4db834206",
+        "reviewerId": "current-assistant-c3g-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 10,
+          "contradicted": 0,
+          "insufficient_evidence": 3
+        },
+        "scopeNote": "同一助手审查新的可选约束协议首次结果，非独立/非盲测。原文归档不等于显式语义映射：本例 constraints 为空，数据限制仍未在用途或约束映射中保留。",
+        "issues": [],
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "宿主仍检查参数和权限且没有写路径，但提案 purpose/节点引文均未保留计划库存非实时健康的限制，不能判定整段源要求已完整表达。",
+            "suggested_revision": "在新版本中显式绑定数据与权限限制及其源证据；不改本批首次输出，不以宿主执行门禁代替解释性覆盖。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "底层权限门禁仍有效，但英文源文中的数据解释限制未进入用途或节点说明；缺少显式未解决事项，故完整覆盖证据不足。",
+            "suggested_revision": "在新版本中显式绑定数据与权限限制及其源证据；不改本批首次输出，不以宿主执行门禁代替解释性覆盖。"
+          },
+          {
+            "claimId": "claim-0005",
+            "l05Pointer": "/purpose",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "purpose 只选业务标题和读取完成步骤，没有选择数据/权限限制；不是业务步骤错误，但不满足 purpose_and_limits 的完整性要求。",
+            "suggested_revision": "在新版本中显式绑定数据与权限限制及其源证据；不改本批首次输出，不以宿主执行门禁代替解释性覆盖。"
+          }
+        ]
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "documentation/unresolved rows cannot claim enforcement references",
+      "latencyMs": 56357.10416606162,
+      "inputTokens": 3608,
+      "outputTokens": 601,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:424a07c43eea8e3d72274b59cca899ff35fd93137d1823f9b3e963b1b1cc4cbf",
+        "response.json": "sha256:df9307dd17a85b75539c7df430734c4e833c00a2022c2e71d15691ebfe373eb9",
+        "sources.json": "sha256:af4c9bd758b3fa38e84fede89f5505f57bcccf0f6f3e39ae9ccbdf7662ef3bfe",
+        "status.json": "sha256:a9e0c12ab8864eeb5c5eb1a0b231b092e39641725d45fce2922884c0b643b402",
+        "tree.json": "sha256:92d2f41fc85ebd0d7e8f7fc221455c1e725138b46cb0a1a442e4f5b387a5f8c9"
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "documentation/unresolved rows cannot claim enforcement references",
+      "latencyMs": 41779.61754205171,
+      "inputTokens": 3634,
+      "outputTokens": 376,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:004d7cc6aac7a787b3e2eda825c1fa1cd062e11e75d7ab36af0e5c5c604e34df",
+        "response.json": "sha256:e3339949a4757cebb83d22708de9da63cea5c2608baf35e28f026e3955eb7d89",
+        "sources.json": "sha256:d348ace94ed84cf8f72c8d9aaf9ca876df42f72e5fe8f2c7a1eb1213f2394b3b",
+        "status.json": "sha256:96da519b5190b431be5d5fbdb71546c15368688e15d1425543f83b61af0f22cb",
+        "tree.json": "sha256:2ed247c0baec8d484d1a15909f0a39c5fa819f156dfbcda057a7b2443e875bf4"
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "documentation/unresolved rows cannot claim enforcement references",
+      "latencyMs": 40094.01624999009,
+      "inputTokens": 3621,
+      "outputTokens": 328,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:c89f8346a535677703b5dd3c8ec3994419b16d1b7fe3d8e6f21ed877bc4aa86b",
+        "response.json": "sha256:ed977395fae98dfe92162bb4d0ac2e90a172938f4512adeef3771b186f53ff72",
+        "sources.json": "sha256:98272af372d47e4fb795b2eddda421b987f0e2239534a3acd82c95ad09bc682d",
+        "status.json": "sha256:4b3f682a80b208da2c783bf6b913acf43334885a6e72a65de0b841183c8e1272",
+        "tree.json": "sha256:c3f3d4735c96b39a7691e6b7ed29cf08fc4d779cfb326d8121c1dbb73c3489ce"
+      }
+    }
+  ],
+  "uniqueKnownFlows": 4,
+  "publicSkills": 0,
+  "structurallyQualified": 1,
+  "sourceReviewed": 1,
+  "reviewSupportedInactiveFlows": 0,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "independentHumanEvidence": false,
+  "boundary": "Answer-free first attempts on known development sources. Source reviews are same-assistant judgments, not independent Gold or calibrated accuracy. Qualified trees and safe missing-capability stops are not business completion or Runtime authority. POST cost includes waiting, excludes preflight/review/tests.",
+  "reportDigest": "sha256:2644a9113143e3125ec98d19d807ad373a10dfdbc040a549499c97960db5d619"
+}

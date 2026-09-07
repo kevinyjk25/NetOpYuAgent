@@ -1,0 +1,87 @@
+{
+  "evidenceRole": "known_development_tree_protocol_not_holdout",
+  "manifestDigest": "sha256:78f95ddaabc771e4b54df3c2fbc2897daebeb01a87c6e29dd7faaa79578af02f",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "uniqueKnownFlows": 4,
+  "publicSkills": 0,
+  "rows": [
+    {
+      "case": "direct-read",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "host effect target is missing",
+      "latencyMs": 20956.070666899905,
+      "inputTokens": 1124,
+      "outputTokens": 187,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:e4161a3882a4cc4130eb7f2859f10159ca3483bbeebcc0043e0518ea8b76cad7",
+        "response.json": "sha256:3577460c5c34d747730224aaefef593e31b8bde3c6564d603e09433b026bb075",
+        "sources.json": "sha256:fc173036148a6141b9ed757b56553a782613b6b24925fd84bdbdd5b5bc5019d5",
+        "status.json": "sha256:61df750bffbe4c8962330cba541d80a820d18b7ebbe7843dfe033da52afcc853",
+        "tree.json": "sha256:83278c830fa7dab32b5bef603ff0ef7ef7f8f4e81f274810dff5d703d3943b42"
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "host effect target is missing",
+      "latencyMs": 37230.138750048354,
+      "inputTokens": 1163,
+      "outputTokens": 460,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:2905f3cabf345a7b6b4bd357284c4a31cd10aecffb4b4040e1104fec76d1f128",
+        "response.json": "sha256:63113763e72535ddc713d8d5a5f032bcc8c568362f2e4e277d6f188e76528140",
+        "sources.json": "sha256:af4c9bd758b3fa38e84fede89f5505f57bcccf0f6f3e39ae9ccbdf7662ef3bfe",
+        "status.json": "sha256:61df750bffbe4c8962330cba541d80a820d18b7ebbe7843dfe033da52afcc853",
+        "tree.json": "sha256:f128926a50cf7ddf6dc449b58f8f0f551bfec7d41905a834da71f9b5e72a5cfe"
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "status": "blocked",
+      "errorType": "ValidationError",
+      "error": "1 validation error for FlowTree\n  Invalid JSON: EOF while parsing an object at line 318 column 7 [type=json_invalid, input_value='{\\n  \"business_source_id...id\"\\n        }\\n      }', input_type=str]\n    For further information visit https://errors.pydantic.dev/2.13/v/json_invalid",
+      "latencyMs": 149212.92162500322,
+      "inputTokens": 1189,
+      "outputTokens": 2200,
+      "doneReason": "length",
+      "files": {
+        "request.json": "sha256:5c1ce1067bd8c754fbe4f63022860f3625dfe12222b2a829d49087ee6da8c177",
+        "response.json": "sha256:e488e5ae8d4fe54cda85936bcc3a4e0f7dd2f05d227c770c060fe705e719d4df",
+        "sources.json": "sha256:d348ace94ed84cf8f72c8d9aaf9ca876df42f72e5fe8f2c7a1eb1213f2394b3b",
+        "status.json": "sha256:d66d65243265f7e96faf8e788f954438f0394e86a610bfcfa0f274cc0e14f99d"
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "statement after terminal flow is unreachable; never drop it",
+      "latencyMs": 54289.773707976565,
+      "inputTokens": 1176,
+      "outputTokens": 737,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:3452964f01f5df7e4819f521c43b3e7a1579232dcf30796c65ef016ea9a9b32e",
+        "response.json": "sha256:27b786c8d3e18b91945d7233654199147fe6ba3685047ebb767b31eebfaa49f9",
+        "sources.json": "sha256:98272af372d47e4fb795b2eddda421b987f0e2239534a3acd82c95ad09bc682d",
+        "status.json": "sha256:4e85bc89b5898dd8cb9768c0277fc7507fa38e0922851192ffd33ffa16d8af76",
+        "tree.json": "sha256:2bb6cf966805b706cc1b860ea2d94be25ee836431643590038382b9fbbd49163"
+      }
+    }
+  ],
+  "structurallyQualified": 0,
+  "sourceReviewed": 0,
+  "reviewSupportedInactiveFlows": 0,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "independentHumanEvidence": false,
+  "boundary": "One attempt per known development flow; no answer trees supplied. Compilation is not semantic fidelity. Same assistant source review is not independent evidence or calibrated accuracy. Timings exclude preflight/review/tests. No Runtime activation or provider execution.",
+  "reportDigest": "sha256:cf916bcbe06193df8a497c7dba17c38668b09e9a7abc5e4a24dfa967aeb184fa"
+}
