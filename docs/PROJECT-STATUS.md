@@ -6,6 +6,17 @@
 
 **当前主阶段：L1→L0 转译泛化门禁。**
 
+#### 2026-09-07 C2：本地分支证据绑定与单写事务闭环完成
+
+- [x] 在用户提交 `955bc92` 后继续实现；未修改旧基线或提交记录。新增 HostFlowGate，实际读取求值，不信任外部提交的“分支通过”报告。
+- [x] 带流程门禁的计划采用 schema 11：流程/合同、读取上下文、路径/事实/来源与目标参数纳入 planHash。旧无门禁计划保留 schema 10 兼容；启用门禁的实例拒绝省略 gate 及旧无绑定计划。
+- [x] 审批后重新读取，原预检之后、发送之前再读一次；变更/缺失/越权/超时均阻断。重启需恢复同一宿主 gate；不恢复则 fail closed。继续复用原审批、一次性 nonce、Verify 与补偿。
+- [x] 本地三用例：verified_success；分支变化 precondition_changed（0 次 mock 变更）；注入验证失败后 rollback_verified。读取实际临时库存，写入为 LAN mock，0 次 LLM/真实网络设备调用。
+- [x] 新增 **25 项回归**；全量 **910 tests + 81 subtests** 通过（86.03 秒），定向 Ruff、diff 校验通过。
+- [ ] 下一步 C3：宿主上下文驱动的 9B 整流程提案与逐节点保真审查；12 个公开 Skill 的完整转译仍 not_run。当前接线是手工规则，不计为转译准确率。
+
+这是本地原型单写门禁闭环，不证明源数据实时性、跨设备原子性或生产成功概率。完整投影值/Provider 证据比较可能保守拒绝；最后重读与写入间仍有 TOCTOU 窗口。多写、循环、并行和 DSH UI 全链未纳入此次成果。见[设计与复现](L0-BUSINESS-FLOW.md)、[最终报告](benchmarks/flow-effect-local-v2-summary.json)。
+
 #### 2026-09-07 C1：确定性只读业务流程接线完成
 
 - [x] 用户确认宿主上下文＋整 Skill 混合提案路线，同时要求补齐最小业务流程执行；不得只做提案即结项。
@@ -277,6 +288,8 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 详细原则、指标 Gate、角色边界和任务模板见[后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md)。
 
 ## English
+
+**2026-09-07 C2 local single-Effect closure:** implemented after user commit `955bc92`. HostFlowGate reruns reads rather than trusting submitted reports. Flow-bound schema-11 plans hash contracts/context/path/facts/provenance/target arguments; standalone schema-10 compatibility remains. Configured instances reject omitted gates and old unbound plans. Restart requires the same host gate. Reads are repeated after approval and again at final dispatch; drift, missing context, access denial and expired read budgets prevent Effect. Existing approval, nonce, verification and recovery are retained. Three local cases reached verified_success, zero-mutation precondition_changed and rollback_verified. Reads use actual temporary files; writes use the LAN mock; no LLM or real-device calls. Twenty-five new regressions and **910 tests + 81 subtests** passed (86.03 s), with targeted Ruff/diff checks. C3 whole-flow 9B generation/source review remains open; twelve public Skills remain not_run. This is a hand-authored local prototype, not source-freshness/atomicity/production proof. Full-payload comparison may over-stop and a final read/write TOCTOU gap remains. See [design](L0-BUSINESS-FLOW.md) and [final report](benchmarks/flow-effect-local-v2-summary.json).
 
 **2026-09-07 C1 read-path wiring complete:** the approved scope requires actual minimal business-flow execution as well as proposals. Added scalar data references, deterministic equality branches, acyclic/reachability/dominance checks and distinct unknown/error stops. Exact host flow/request consent and existing read-contract access checks govern real local reads. Campus performed two reads; IDC performed one then stopped at needs_l1; inventory bytes unchanged, zero model calls/writes. Thirty-three new regressions and **885 tests + 81 subtests** passed (86.49 s), with targeted Ruff/diff and report-digest checks. C2 still needs branch evidence/flow identity bound to PreparedPlan and revalidated before original Effect/approval/verification/compensation. C3 still needs 9B whole-flow generation and source fidelity review; the twelve public Skills remain not_run for whole translation. C1 is a stage-commit checkpoint, not complete phase C or production readiness. See [flow scope](L0-BUSINESS-FLOW.md) and [local report](benchmarks/read-flow-local-summary.json).
 

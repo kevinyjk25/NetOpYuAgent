@@ -48,7 +48,7 @@ B2a 已实现未激活的 `AtomicRead`，绑定源文本及输入/输出/适配�
 
 ### C：异质开发小批闭环（选样完成，转译尚未开始）
 
-用户已确认先补最小业务流程执行，不能只产出提案。目前 [C1](L0-BUSINESS-FLOW.md) 完成真实本地只读条件/数据依赖接线；C2 需把分支依据与 PreparedPlan 绑定并写前重校验，C3 再开展整流程 9B 正向生成和保真审查。原 Effect/Saga 保留，不新造并行执行器；当前写候选不会执行。
+用户已确认先补最小业务流程执行，不能只产出提案。目前 [C1/C2](L0-BUSINESS-FLOW.md) 已完成只读条件/数据依赖，以及分支依据绑定 PreparedPlan、写前重读和原单写事务验证/补偿的本地接线。C3 仍需整流程 9B 正向生成和保真审查。原 Effect/Saga 保留；C1 候选本身不可执行，只有显式配置的宿主 gate 能进入原审批/执行入口。
 
 已完成 12 Skill / 11 仓库 / 10 类结构的源绑定盘点，未提交各 Skill 的完整宿主工具环境，因此本轮模型/Runtime 调用均为 0，结果是 `not_run` 而非 0% 转译准确率。详见[边界小批报告与下一步设计收口](TRANSLATION-BOUNDARY-PILOT.md)。下一步建议将整流程提案与逐步可编译范围显式化，保留 L1 推理和未支持项，不能用 12 个专用适配器或一次读取来代替泛化。
 
@@ -80,7 +80,7 @@ The binder supports a bounded named-scalar grammar, not arbitrary prose entailme
 
 ### B–D: remaining implementation
 
-The user approved minimal business-flow execution alongside whole-flow authoring. [C1](L0-BUSINESS-FLOW.md) now runs local read branches and typed data dependencies. C2 must bind branch evidence to PreparedPlan and revalidate before Effect; C3 must add whole-flow 9B generation and fidelity review. Existing Effect/Saga remain; current write candidates are non-executable.
+The approved [C1/C2](L0-BUSINESS-FLOW.md) local chain now supports read branches/data references, plan-bound business evidence, pre-write rereads and the original single-Effect verification/recovery. C3 whole-flow 9B generation and fidelity review remain open. Effect/Saga are reused; candidates alone remain unauthorized and only explicit host gates enter existing approval/execution.
 
 The latest B2 experiment closes one assisted local chain using auditable inventory code, an original 9B proposal, evidence-backed resolution, fresh current-assistant review and explicit host authorization. Original blocked artifacts remain unchanged; the new [resolution evidence](benchmarks/read-local-resolution-summary.json) is separate. C can proceed as a heterogeneous known-development pilot, counting raw first-pass and assisted outcomes/costs separately. This does not establish autonomous whole-Skill translation or unseen generalization.
 

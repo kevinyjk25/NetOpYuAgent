@@ -217,6 +217,7 @@ class PreparedPlan:
     plan_hash: str
     state: PlanState = PlanState.PLAN_READY
     schema_version: int = SCHEMA_VERSION
+    flow_binding: dict[str, Any] | None = None
 
     @classmethod
     def create(
@@ -262,9 +263,10 @@ class PreparedPlan:
         l1_decision_binding: dict[str, Any] | None,
         created_at: str,
         expires_at: str,
+        flow_binding: dict[str, Any] | None = None,
     ) -> "PreparedPlan":
         stable = {
-            "schema_version": SCHEMA_VERSION,
+            "schema_version": 11 if flow_binding is not None else SCHEMA_VERSION,
             "plan_id": plan_id,
             "profile": profile,
             "tool_name": tool_name,
@@ -305,6 +307,7 @@ class PreparedPlan:
             "l1_decision_binding": l1_decision_binding,
             "created_at": created_at,
             "expires_at": expires_at,
+            **({"flow_binding": flow_binding} if flow_binding is not None else {}),
         }
         return cls(plan_hash=sha256_json(stable), **{
             **stable,
@@ -322,6 +325,18 @@ class PreparedPlan:
         return value
 
     def verify_integrity(self) -> None:
+        if self.flow_binding is not None:
+            if self.schema_version < 11:
+                raise PlanIntegrityError("legacy plan cannot carry an unhashed flow binding")
+            from .l0.flow_admission import validate_admission
+            try:
+                validate_admission(self.flow_binding, profile=self.profile, tool=self.tool_name,
+                                   skill_id=self.l0_skill_id, contract_hash=self.l0_contract_hash,
+                                   arguments=self.arguments)
+            except (ValueError, KeyError, TypeError) as error:
+                raise PlanIntegrityError("invalid business-flow binding") from error
+        elif self.schema_version >= 11:
+            raise PlanIntegrityError("flow-bound plan is missing its flow binding")
         if self.schema_version < 10 and self.l1_decision_binding is not None:
             raise PlanIntegrityError(
                 f"legacy plan {self.plan_id} cannot carry an unhashed L1 Decision binding"
@@ -440,6 +455,7 @@ class PreparedPlan:
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
+            **({"flow_binding": self.flow_binding} if self.flow_binding is not None else {}),
             "plan_id": self.plan_id,
             "profile": self.profile,
             "tool_name": self.tool_name,
@@ -541,6 +557,7 @@ class PreparedPlan:
             expires_at=str(value["expires_at"]),
             plan_hash=str(value["plan_hash"]),
             state=PlanState(value.get("state", PlanState.PLAN_READY.value)),
+            flow_binding=value.get("flow_binding"),
         )
         plan.verify_integrity()
         return plan

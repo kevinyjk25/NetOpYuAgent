@@ -48,7 +48,7 @@
 - 复用现有只读/效果合同编译与审查。可编译子步骤不等于全 Skill 可执行；写入继续安全停止，不能用 L1 fallback 绕过审批。
 - 先以确定性回归验证上下文/范围报告，再做少量 9B 正向开发实验，分别记录首次生成与辅助修订、全 Skill/步骤覆盖及成本。真实本地执行仍仅限明确宿主授权的能力。
 
-此范围已经用户确认，并补充要求：整阶段必须包括最小业务流程 Runtime 闭环，不能只有提案。当前已实现[只读条件流程 C1](L0-BUSINESS-FLOW.md)；写前分支证据绑定/重校验和整流程正向转译仍待完成。生产凭据系统、通用 shell 沙箱和规模化 Runtime 性能评测不在本阶段。
+此范围已经用户确认，并补充要求：整阶段必须包括最小业务流程 Runtime 闭环，不能只有提案。当前已实现[条件流程 C1 与本地单写门禁 C2](L0-BUSINESS-FLOW.md)，包括写前分支证据绑定和重读；整流程 9B 正向转译仍待完成，12 项选样的原 not_run 状态不变。生产凭据系统、通用 shell 沙箱和规模化 Runtime 性能评测不在本阶段。
 
 ### 复现
 
@@ -75,4 +75,4 @@ Keep three diagnoses separate: missing environment facts, unsupported flow seman
 
 The recommended next scope is **host tool-context binding plus mixed-flow proposals**: immutable Skill sources and explicit host contracts; 9B-proposed steps, conditions and dependencies; per-step L0-candidate/L1-reasoning/missing/unsupported status; existing compilers and review gates retained. No new executor or arbitrary shell permission is implied. Typed APIs, MCP and constrained CLI can share contract semantics without replacing a source-mandated transport. Partial compilation is not whole-Skill success, and unsupported writes cannot fall back to native agent execution.
 
-The user approved this scope with minimal business-flow execution required, not proposals alone. [C1 read-flow wiring](L0-BUSINESS-FLOW.md) is now implemented; write-time branch binding/revalidation and whole-flow forward translation remain open. Production identity, a general shell sandbox and large Runtime benchmarks remain out of scope. First-pass versus assisted outcomes and whole-Skill versus step coverage remain separate. Reproduction requires the original sealed corpus and a new output path; source-only clones can inspect the report but cannot replay its source checks without that corpus.
+The user approved minimal business-flow execution, not proposals alone. [C1 read wiring and C2 local single-Effect admission](L0-BUSINESS-FLOW.md) now include plan-bound branch evidence and pre-write rereads. Whole-flow 9B translation remains open; the twelve intake outcomes remain not_run. Production identity, a general shell sandbox and large Runtime benchmarks are out of scope. First-pass versus assisted outcomes and whole-Skill versus step coverage remain separate. Reproduction requires the sealed corpus and a new output path; source-only clones can inspect the report but cannot replay source checks without that corpus.

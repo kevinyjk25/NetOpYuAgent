@@ -56,6 +56,7 @@ from .graph_runtime import JournalGraphScheduler, stage_latency_summary
 from .identity import ApprovalControlPlane
 from .l0_skills import REGISTRY as L0_SKILLS, L0SkillContract, compile_intent
 from .l0.models import CompiledAtomicEffect
+from .l0.flow_admission import HostFlowGate, validate_admission
 from .l0.runtime_loader import require_effect_arguments, validate_runtime_projection
 from .policies import ToolContract, project_arguments, resolve_contract
 from .provenance import build_provenance_dag
@@ -171,11 +172,13 @@ class NetworkRuntime:
         fault_hook: FaultHook | None = None,
         observation_policy: ObservationPolicy | None = None,
         approval_control_plane: ApprovalControlPlane | None = None,
+        flow_gates: dict[str, HostFlowGate] | None = None,
     ) -> None:
         if not 30 <= plan_ttl_seconds <= 3600:
             raise ValueError("plan_ttl_seconds must be between 30 and 3600")
         self.journal_path = Path(journal_path or default_journal_path())
         self.backend_factory = backend_factory
+        self.flow_gates = dict(flow_gates or {})
         self.plan_ttl_seconds = plan_ttl_seconds
         self.execution_timeout_seconds = execution_timeout_seconds or float(
             os.environ.get("NETOPYU_EXECUTION_TIMEOUT")
@@ -220,8 +223,15 @@ class NetworkRuntime:
         harness: str = "local",
         l1_decision_envelope: dict[str, Any] | None = None,
         l1_route_context: dict[str, Any] | None = None,
+        flow_gate_id: str | None = None,
     ) -> dict[str, Any]:
         """Compile a request into an immutable plan before approval is shown."""
+        protected = {
+            key for key, gate in self.flow_gates.items()
+            if any((target.profile, target.tool) == (profile_id, tool_name) for target in gate.effects.values())
+        }
+        if (flow_gate_id is not None and flow_gate_id not in protected) or (protected and flow_gate_id is None):
+            return {"ok": False, "status": "rejected", "errors": ["explicit configured business-flow gate required"]}
         if (l1_decision_envelope is None) != (l1_route_context is None):
             return {
                 "ok": False,
@@ -588,6 +598,15 @@ class NetworkRuntime:
                         "status": "rejected",
                         "errors": [f"L1 Decision-to-plan binding rejected: {error}"],
                     }
+            flow_binding = None
+            if flow_gate_id is not None:
+                try:
+                    flow_binding, _ = self.flow_gates[flow_gate_id].evaluate(flow_gate_id)
+                    validate_admission(flow_binding, profile=backend.profile_id, tool=tool_name,
+                                       skill_id=l0_contract.skill_id, contract_hash=l0_contract.contract_hash,
+                                       arguments=compiled.arguments)
+                except Exception:
+                    return {"ok": False, "status": "rejected", "errors": ["business-flow admission failed"]}
             plan = PreparedPlan.create(
                 plan_id=str(uuid.uuid4()),
                 profile=backend.profile_id,
@@ -643,6 +662,7 @@ class NetworkRuntime:
                 approval_policy_version=self.approval_control_plane.policy_version,
                 approval_policy_hash=self.approval_control_plane.policy_hash,
                 l1_decision_binding=l1_binding,
+                flow_binding=flow_binding,
                 created_at=created.isoformat(),
                 expires_at=expires.isoformat(),
             )
@@ -892,6 +912,7 @@ class NetworkRuntime:
                 "approval_policy_hash": approval_evidence["policy_hash"],
             })
             backend: BackendSession | None = None
+            flow_deadline: float | None = None
             result: str | None = None
             effect_dispatched = False
             try:
@@ -906,6 +927,24 @@ class NetworkRuntime:
                         L0_SKILLS.get(plan.l0_skill_id, plan.l0_skill_version),
                         plan.arguments,
                     )
+                    if plan.flow_binding is None and any(
+                        (target.profile, target.tool) == (plan.profile, plan.tool_name)
+                        for gate in self.flow_gates.values() for target in gate.effects.values()
+                    ):
+                        raise PlanIntegrityError("configured flow gate cannot execute an older unbound plan")
+                    if plan.flow_binding is not None:
+                        try:
+                            gate = self.flow_gates[plan.flow_binding["gate_id"]]
+                            refreshed, flow_deadline = gate.revalidate(plan.flow_binding)
+                            validate_admission(refreshed, profile=plan.profile, tool=plan.tool_name,
+                                               skill_id=plan.l0_skill_id, contract_hash=plan.l0_contract_hash,
+                                               arguments=plan.arguments)
+                            journal.append_event(plan.plan_id, "business_flow_revalidated", {
+                                "flow_digest": refreshed["flow_digest"], "decision_digest": refreshed["decision_digest"],
+                                "read_report_digest": refreshed["read_report_digest"],
+                            })
+                        except Exception as error:
+                            raise PlanIntegrityError("business-flow binding missing, changed or unreadable") from error
                 except PlanIntegrityError as error:
                     graph_run.finish(
                         "revalidate",
@@ -1021,6 +1060,34 @@ class NetworkRuntime:
                     "intent_hash": plan.intent_hash,
                 })
                 await self._fault("before_send", plan)
+                if plan.flow_binding is not None:
+                    try:
+                        if flow_deadline is None or time.monotonic() > flow_deadline:
+                            raise ValueError("business-flow read budget expired")
+                        # Original preflight may perform I/O. Re-read the
+                        # business path once more at the final dispatch boundary.
+                        refreshed, flow_deadline = self.flow_gates[plan.flow_binding["gate_id"]].revalidate(plan.flow_binding)
+                        validate_admission(refreshed, profile=plan.profile, tool=plan.tool_name,
+                                           skill_id=plan.l0_skill_id, contract_hash=plan.l0_contract_hash,
+                                           arguments=plan.arguments)
+                        journal.append_event(plan.plan_id, "business_flow_dispatch_revalidated", {
+                            "decision_digest": refreshed["decision_digest"],
+                            "read_report_digest": refreshed["read_report_digest"],
+                        })
+                        if time.monotonic() > flow_deadline:
+                            raise ValueError("business-flow read budget expired")
+                    except Exception:
+                        graph_run.start("abort")
+                        graph_run.finish("abort", "succeeded", details={"reason": "business_flow_changed_before_send"})
+                        journal.transition(plan.plan_id, PlanState.PRECONDITION_CHANGED,
+                                           "business_flow_dispatch_rejected", {"write_sent": False})
+                        outcome = ExecutionOutcome(plan.plan_id, plan.plan_hash, PlanState.PRECONDITION_CHANGED,
+                                                   None, error="business-flow evidence changed or expired; write not sent")
+                        journal.store_outcome(plan.plan_id, outcome.to_dict(), outcome.error)
+                        journal.release_locks(plan.plan_id)
+                        self._skip_compensation(journal, plan, "write_not_sent")
+                        self._complete_audit(journal, plan, outcome.state)
+                        return outcome
                 graph_run.start(
                     "execute",
                     input_evidence_ids=_evidence_ids(plan.preflight),
