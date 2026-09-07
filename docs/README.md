@@ -32,6 +32,7 @@
 | 公开 Skill 小批缺什么，为什么不能直接套单次读取 | [异质 Skill 边界小批](TRANSLATION-BOUNDARY-PILOT.md) |
 | 条件分支与步骤输出引用如何实际执行，写路径还缺什么 | [最小业务流程](L0-BUSINESS-FLOW.md) |
 | 9B 能否正向生成整个流程，原始失败与辅助修订如何区分 | [整流程正向转译实验](FLOW-FORWARD-TRANSLATION.md) |
+| 固定协议后，顺序/分支/依赖缺失有哪些真实失败 | [C3b 冻结开发小批](FLOW-FROZEN-DEVELOPMENT.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -99,6 +100,8 @@
 ---
 
 ## English
+
+For the eight known development flows, frozen input/protocol boundaries and preserved 9B failures, see [C3b frozen flow development](FLOW-FROZEN-DEVELOPMENT.md). These are not public-Skill generalization results.
 
 ### Reading path
 

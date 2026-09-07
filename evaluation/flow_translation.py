@@ -304,8 +304,8 @@ def _write(path: Path, value: Any) -> None:
         output.write(json.dumps(value, ensure_ascii=False, indent=2, allow_nan=False) + "\n")
 
 
-def author(sources: FlowSources, output: Path) -> dict:
-    output.mkdir(parents=True, exist_ok=False)
+def author_request(sources: FlowSources) -> dict:
+    """Pure request construction, shared by freezing and actual generation."""
     sources = FlowSources.model_validate(sources.model_dump())
     payload = {"sourceSkill": sources.source_text, "hostInputSchema": sources.input_schema.model_dump(by_alias=True),
                "hostReadTools": [{"name": name, "inputSchema": contract.spec.input_schema.model_dump(by_alias=True),
@@ -341,14 +341,22 @@ def author(sources: FlowSources, output: Path) -> dict:
             return [decoder_compat(item) for item in value]
         return value
 
-    wire = {"model": MODEL, "stream": False, "think": False, "format": decoder_compat(schema),
+    return {"model": MODEL, "stream": False, "think": False, "format": decoder_compat(schema),
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": json.dumps(payload, ensure_ascii=False)}],
             "options": {"temperature": 0, "seed": 20260907, "num_ctx": 12288, "num_predict": 2200}}
+
+
+def author(sources: FlowSources, output: Path, *, expected_model: dict | None = None) -> dict:
+    sources = FlowSources.model_validate(sources.model_dump())
+    wire = author_request(sources)
+    output.mkdir(parents=True, exist_ok=False)
     _write(output / "sources.json", sources.model_dump(mode="json"))
-    _write(output / "request.json", {"wireRequest": wire, "model": OllamaAnchoredAuthorAdapter().preflight(),
-                                     "draftProtocol": "indexed-v1"})
     started = time.monotonic()
     try:
+        model = OllamaAnchoredAuthorAdapter().preflight()
+        if expected_model is not None and model != expected_model:
+            raise ValueError("model identity differs from frozen batch")
+        _write(output / "request.json", {"wireRequest": wire, "model": model, "draftProtocol": "indexed-v1"})
         with httpx.Client(timeout=240, trust_env=False) as client:
             response = client.post("http://127.0.0.1:11434/api/chat", json=wire)
         _write(output / "response.json", {"httpStatus": response.status_code, "body": response.text,

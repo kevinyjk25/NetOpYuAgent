@@ -38,6 +38,8 @@ B2 已闭合单操作辅助读取；C 已盘点 12 个公开 Skill，尚未运�
 
 [C3 首次正向实验](docs/FLOW-FORWARD-TRANSLATION.md)已跑真实 9B：前两次结构阻断，第三次结构通过但语义审查阻断；两处有源说明文字修订后才完成本地读取。辅助闭环已接通，无辅助稳定性和公开 Skill 泛化尚未证明。
 
+[C3b 冻结协议开发批次](docs/FLOW-FROZEN-DEVELOPMENT.md)扩充至 8 个已知流程，检查顺序、分支、引用、缺失依赖与不支持操作；逐项原始结果留存，不把结构通过或安全停止算成业务成功。
+
 项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
 
 当前静态开发库包含 100 个公开 Skill、72 个仓库、9 个领域：53 个 Runtime 包门禁通过，18 个是标准格式但引用上下文不完整的“仅转译”样本，29 个非标准格式只用于鲁棒性测试。主要转译语料为 71 个 Skill/7 个开发批次；它们已经可见，所以不冒充 unseen 证明。只有冻结 Translator 后，在至少 3 个互不重叠的未知 cohort 上累计达到 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case，并同时通过安全、召回、macro-F1、参数和证据门槛，才允许大规模 Runtime A/B。完整口径、命令和指标见 [L1→L0 泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)。
@@ -256,6 +258,8 @@ B2 closes one assisted read; C has completed intake for 12 public Skills, not tr
 [Business-flow C1/C2](docs/L0-BUSINESS-FLOW.md) runs read branches/data references, plan-bound evidence, pre-write rereads and the original single-Effect verification/recovery path. Local writes are mock; public whole-Skill generalization remains open.
 
 The [first C3 forward experiment](docs/FLOW-FORWARD-TRANSLATION.md) used real 9B calls: two structural rejections, then a structurally valid but semantically blocked answer. Two source-backed text edits and fresh review enabled local reads. Assisted closure is demonstrated; unaided reliability and public-Skill generalization are not.
+
+The [C3b frozen development batch](docs/FLOW-FROZEN-DEVELOPMENT.md) adds eight known flows covering sequence, branching, references and unavailable/unsupported steps. Original results are preserved; structural qualification and safe stops are not business success.
 
 The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
 

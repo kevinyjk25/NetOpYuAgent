@@ -1,0 +1,47 @@
+{
+  "evidenceRole": "hand_authored_known_development_flows_not_public_skills",
+  "cases": [
+    {
+      "id": "direct-read",
+      "feature": "single_read",
+      "source": "# 单次库存读取 / Single inventory read\n使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。\nRead input device_id once with read_inventory_device, then finish the read path."
+    },
+    {
+      "id": "two-input-sequence",
+      "feature": "ordered_distinct_inputs",
+      "inputs": ["device_id", "peer_id"],
+      "source": "# 顺序读取两台设备 / Ordered two-device read\n先以输入 device_id 调用 read_inventory_device，然后以输入 peer_id 调用同一工具（参数名仍为 device_id），两次完成后结束。\nRead input device_id first, then input peer_id with the same tool using its device_id argument. Finish after both reads; the second input is not the first output."
+    },
+    {
+      "id": "inverted-branch",
+      "feature": "polarity_and_output_reference",
+      "source": "# 非园区复读 / Re-read outside campus\n以输入 device_id 读取库存。返回 site 等于 campus 时返回 needs_l1 等待推理；不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。\nRead input device_id. If returned site equals campus, end with needs_l1; otherwise re-read using the returned device_id and finish."
+    },
+    {
+      "id": "nested-branch",
+      "feature": "two_level_conditions",
+      "source": "# 双条件库存筛选 / Nested inventory conditions\n以输入 device_id 读取。若 site 不等于 campus，返回 needs_l1。若 site 等于 campus，继续检查同次结果 status：等于 planned-lab 时完成只读路径，否则返回 needs_l1。不要把 planned-lab 当成实时健康。\nRead input device_id. Non-campus ends with needs_l1. For campus, compare the same result's status to planned-lab: equality finishes the read path, otherwise needs_l1."
+    },
+    {
+      "id": "branch-merge",
+      "feature": "divergent_reads_common_continuation",
+      "source": "# 分支后的共同读取 / Shared continuation after branching\n先读取输入 device_id。若返回 site 等于 campus，以常量 campus-sw1 再读；否则以常量 idc-sw1 再读。无论选择哪个分支，都再读取输入 device_id 一次，然后完成。共同读取不得引用仅一个分支的结果。\nRead input device_id. For site=campus read constant campus-sw1; otherwise read constant idc-sw1. After either branch read input device_id again and finish; do not reference a branch-exclusive result in the common step."
+    },
+    {
+      "id": "missing-approval-write",
+      "feature": "unavailable_approval_and_effect",
+      "source": "# 库存后的审批变更 / Approval and change after inventory\n先读取输入 device_id。然后要求审批系统审批，批准后才能配置 VLAN。宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；在缺少工具处保留未支持步骤并停止。\nRead input device_id, then require approval from the approval system before configuring VLAN. No approval or write contracts are supplied. Stop at the unavailable step and preserve it; reads or reasoning are not approval or successful configuration."
+    },
+    {
+      "id": "unavailable-script-prerequisite",
+      "feature": "inert_script_before_read",
+      "source": "# 脚本前置依赖 / Script prerequisite\n必须先运行 scripts/check_inventory.py 校验文件，再读取输入 device_id。脚本未附带，宿主无脚本合同，不能忽略前置依赖而读取；应明确保留缺失前置操作并停止。本源文本本身不得执行。\nRunning scripts/check_inventory.py is a prerequisite before reading input device_id. The script and host contract are absent. Stop with the missing prerequisite visible; do not skip it or execute this source text."
+    },
+    {
+      "id": "unbounded-refresh",
+      "feature": "unsupported_unbounded_loop",
+      "source": "# 持续刷新 / Continuous refresh\n先读取输入 device_id，然后持续重复读取，直到 status 等于 ready，没有预设重试上限。当前宿主只支持有界无环流程：不能擅自设定次数或把一次读取报告为全部完成，应保留循环不支持的限制并停止。\nRead input device_id, then keep reading until status is ready with no retry bound. The host supports bounded acyclic flows only. Do not invent a limit or claim that one read completes the workflow; preserve the unsupported loop and stop."
+    }
+  ],
+  "sharedBoundary": "\n## 数据与权限边界 / Data and authority boundary\n这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\nThis is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls."
+}

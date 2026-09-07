@@ -1,0 +1,145 @@
+{
+  "manifestDigest": "sha256:001bd725bbabc16d3dfccc6d0067867b3b60293d4b96d0ba020771611d39470c",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "evidenceRole": "known_synthetic_single_domain_development",
+  "flowCount": 8,
+  "publicSkillCount": 0,
+  "domainCount": 1,
+  "structurallyQualified": 5,
+  "semanticAccepted": null,
+  "semanticReviewStatus": "pending_bidirectional_source_review",
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "scriptExecutions": 0,
+  "rows": [
+    {
+      "id": "direct-read",
+      "feature": "single_read",
+      "status": "awaiting_source_review",
+      "receiptDigest": "sha256:6054e143b2ed6fed221e1f9cd66329010fb7e2989a6f9aaa1c771eb45d05f6a2",
+      "latencyMs": 23834.80654109735,
+      "httpStatus": 200,
+      "inputTokens": 732,
+      "outputTokens": 195,
+      "unresolvedQuestions": [
+        "None: The source text describes a complete, single-step read path with no branching conditions requiring resolution."
+      ],
+      "diagnostics": []
+    },
+    {
+      "id": "two-input-sequence",
+      "feature": "ordered_distinct_inputs",
+      "status": "awaiting_source_review",
+      "receiptDigest": "sha256:6e60887f35f7cdfac875ee92ae459b6a0f9ccba7084015cb01ed065fc4ef417e",
+      "latencyMs": 30293.938749935478,
+      "httpStatus": 200,
+      "inputTokens": 786,
+      "outputTokens": 270,
+      "unresolvedQuestions": [
+        "None: The source text describes a linear sequence with no branching conditions or missing facts."
+      ],
+      "diagnostics": []
+    },
+    {
+      "id": "inverted-branch",
+      "feature": "polarity_and_output_reference",
+      "status": "blocked",
+      "receiptDigest": "sha256:aa89bcd3b58d0e823504878cd9fb675f510c827b540e72903c4acf0ab8374d05",
+      "latencyMs": 103579.24154191278,
+      "httpStatus": 200,
+      "inputTokens": 771,
+      "outputTokens": 1089
+    },
+    {
+      "id": "nested-branch",
+      "feature": "two_level_conditions",
+      "status": "awaiting_source_review",
+      "receiptDigest": "sha256:116cd116bfde392dbdc47d8851f031ac025792db553bbd05efbeb482fc4b0f31",
+      "latencyMs": 38314.871249953285,
+      "httpStatus": 200,
+      "inputTokens": 795,
+      "outputTokens": 389,
+      "unresolvedQuestions": [],
+      "diagnostics": []
+    },
+    {
+      "id": "branch-merge",
+      "feature": "divergent_reads_common_continuation",
+      "status": "awaiting_source_review",
+      "receiptDigest": "sha256:1b488488d6a93ce6cfe35cfa445ee001760cfe0151da71d8ea47c0975d7e7d9c",
+      "latencyMs": 48451.01874996908,
+      "httpStatus": 200,
+      "inputTokens": 806,
+      "outputTokens": 495,
+      "unresolvedQuestions": [
+        "None: All steps, conditions, and terminal limitations are explicitly defined in the source text."
+      ],
+      "diagnostics": []
+    },
+    {
+      "id": "missing-approval-write",
+      "feature": "unavailable_approval_and_effect",
+      "status": "awaiting_source_review",
+      "receiptDigest": "sha256:411c2168271f06a805e6d250d28627bfeede1dc44eae2a9649831eee6ade474f",
+      "latencyMs": 33159.19437492266,
+      "httpStatus": 200,
+      "inputTokens": 797,
+      "outputTokens": 325,
+      "unresolvedQuestions": [
+        "What is the exact status value indicating 'approved' in the read_inventory_device output?"
+      ],
+      "diagnostics": []
+    },
+    {
+      "id": "unavailable-script-prerequisite",
+      "feature": "inert_script_before_read",
+      "status": "blocked",
+      "receiptDigest": "sha256:0dac26c4f8c869dfa86a42e8326c042c0af49b62599415c959e000211668fd44",
+      "latencyMs": 42909.351084032096,
+      "httpStatus": 200,
+      "inputTokens": 784,
+      "outputTokens": 439,
+      "unresolvedQuestions": [
+        "What is the expected value for 'status' to pass the branch at node 2?",
+        "How should the system handle the missing 'scripts/check_inventory.py' if a substitute validation method exists?"
+      ],
+      "diagnostics": [
+        {
+          "pointer": "/",
+          "code": "qualification_rejected",
+          "detail": "flow constants require finite JSON scalars"
+        }
+      ]
+    },
+    {
+      "id": "unbounded-refresh",
+      "feature": "unsupported_unbounded_loop",
+      "status": "blocked",
+      "receiptDigest": "sha256:dacf3b3e39735c8fbcaa408174ff18d27868bdf7297dc02f5c30137b30716628",
+      "latencyMs": 39641.84220798779,
+      "httpStatus": 200,
+      "inputTokens": 797,
+      "outputTokens": 394,
+      "unresolvedQuestions": [
+        "The source text implies an infinite loop until 'ready' but the host enforces a bounded acyclic flow. The translation captures this conflict by routing to an 'unsupported' terminal node when the condition fails, rather than inventing a retry limit."
+      ],
+      "diagnostics": [
+        {
+          "pointer": "/nodes/1",
+          "code": "self_loop",
+          "target": "node-1"
+        },
+        {
+          "pointer": "/",
+          "code": "qualification_rejected",
+          "detail": "flow cycles are unsupported"
+        }
+      ]
+    }
+  ],
+  "boundary": "Structural qualification is not semantic acceptance. Missing environment and unsupported steps may form valid stop proposals, not completed business tasks.",
+  "reportDigest": "sha256:7bb55530ce0d2e95d67e1527e33a59950f35871771f8ed2db3bd6f5938fe547b"
+}
