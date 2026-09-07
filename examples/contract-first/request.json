@@ -1,0 +1,14 @@
+{
+  "skill_source": {
+    "origin": "fixture://contract-first/skill",
+    "text": "This synthetic development fixture uses health_snapshot to observe service health. It takes no arguments and never changes state.",
+    "sha256": "sha256:14c4114a851929476444134de532a45c1f3169ab40e5a6168e68029f812728f8"
+  },
+  "tool_source": {
+    "origin": "fixture://contract-first/tool-schema",
+    "text": "{\"name\": \"health_snapshot\", \"description\": \"Read-only synthetic development fixture: observe service health without arguments or mutations.\", \"inputSchema\": {\"type\": \"object\", \"additionalProperties\": false, \"properties\": {}, \"required\": []}}",
+    "sha256": "sha256:2d67b05d4c810e6c0becb0283527a7c14989296889f7472834ae5963d28b021f"
+  },
+  "action_type": "read_only",
+  "fixture_values": {}
+}

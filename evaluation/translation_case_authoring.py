@@ -1,9 +1,9 @@
 """Build semantically anchored L1 -> L0 translation-development cases.
 
 This is an authoring and construct-validity layer, not a Runtime evaluator.
-The model may propose one operation family and three task variants from inert
+The model may propose one operation family and applicable task variants from inert
 Skill text.  Deterministic validation then proves literal source anchors,
-prompt parameter grounding, closed schemas, and transaction shape before a
+prompt parameter grounding and closed schemas before a
 candidate can enter an independent alignment review queue.
 
 Model output is never Gold and never grants Tool, MCP, or Runtime authority.
@@ -36,9 +36,10 @@ from network_runtime.contracts import sha256_json
 AUTHORING_SCHEMA = "effect-runtime.io/translation-anchored-authoring/v1"
 CANDIDATE_SCHEMA = "effect-runtime.io/translation-anchored-candidate/v1"
 REVIEW_PACKET_SCHEMA = "effect-runtime.io/translation-alignment-packet/v1"
-TOOL_CATALOG_SCHEMA = "effect-runtime.io/translation-tool-catalog/v1"
+LEGACY_TOOL_CATALOG_SCHEMA = "effect-runtime.io/translation-tool-catalog/v1"
+TOOL_CATALOG_SCHEMA = "effect-runtime.io/translation-tool-catalog/v2"
 MODEL = "qwen3.5:9b"
-PROMPT_VERSION = "translation-anchored-author/v3"
+PROMPT_VERSION = "translation-anchored-author/v4"
 AUTHORITY = "development_candidate_only_no_gold_or_runtime_authority"
 _IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]{1,63}$")
 _MAX_FILE_CHARS = 12_000
@@ -79,6 +80,7 @@ class ParameterDefinition(_StrictModel):
     value_type: Literal["string", "integer", "number", "boolean"]
     description: str = Field(min_length=1, max_length=500)
     example_value: str = Field(min_length=1, max_length=160)
+    required: bool = True
 
 
 class OperationFamily(_StrictModel):
@@ -100,7 +102,7 @@ class OperationFamily(_StrictModel):
         ),
     )
     source_anchors: tuple[SourceAnchor, ...] = Field(min_length=1, max_length=4)
-    parameters: tuple[ParameterDefinition, ...] = Field(min_length=1, max_length=6)
+    parameters: tuple[ParameterDefinition, ...] = Field(max_length=6)
 
 
 class AnchoredTask(_StrictModel):
@@ -116,11 +118,17 @@ class AnchoredTask(_StrictModel):
     rationale: str = Field(min_length=1, max_length=1000)
 
 
+class NotApplicableSlot(_StrictModel):
+    slot_id: str = Field(min_length=1, max_length=160)
+    reason: Literal["no_required_parameters"]
+
+
 class AnchoredBundle(_StrictModel):
     api_version: Literal[CANDIDATE_SCHEMA] = CANDIDATE_SCHEMA
     assignment_id: str
     operation: OperationFamily
-    tasks: tuple[AnchoredTask, ...] = Field(min_length=3, max_length=3)
+    tasks: tuple[AnchoredTask, ...] = Field(min_length=2, max_length=3)
+    not_applicable_slots: tuple[NotApplicableSlot, ...] = Field(default=(), max_length=1)
 
 
 def authoring_output_schema() -> dict[str, Any]:
@@ -132,6 +140,9 @@ def authoring_output_schema() -> dict[str, Any]:
         *anchor_schema.get("required", []),
         "source_span_id",
     })
+    parameter_schema = schema["$defs"]["ParameterDefinition"]
+    parameter_schema["required"] = sorted({*parameter_schema["required"], "required"})
+    schema["required"] = sorted({*schema["required"], "not_applicable_slots"})
     return schema
 
 
@@ -177,10 +188,12 @@ Return only JSON matching the schema.
 
 Choose exactly one narrow operation family explicitly supported by disclosed source spans. Use 1-4
 source anchors and set each source_span_id to a disclosed ID. Copy its path and exactQuote; the
-compiler will bind the ID to the authoritative bytes. Define 1-6 scalar parameters. Encode every
+compiler will bind the ID to the authoritative bytes. Define 0-6 scalar parameters, only as
+supported by the source. Set required explicitly for each parameter; optional is not required.
+Use an empty parameters array for no-argument operations. Encode every
 example_value as a string literal, including numbers ("1") and booleans ("true"). A multi-word
-string is allowed but the user prompt must quote it in `name="value with spaces"` form. A write
-family needs at least two parameters: one target identifier first and at least one desired value.
+string is allowed but the user prompt must quote it in `name="value with spaces"` form.
+Writes do not imply a target/value parameter pair: a no-argument write is representable.
 Use reversible only when a compensating operation is semantically credible; otherwise declare
 irreversible. Do not use generic resource.read/resource.apply semantics; names,
 descriptions, and prompts must describe the Skill's actual domain operation. The operation slug
@@ -188,12 +201,14 @@ must name the domain verb/object, never a route label such as l0_read_candidate,
 l0_write_candidate, nominal, read_candidate, or write_candidate. Approval, risk, expected
 behavior, and effect budget are Runtime controls; never declare them as business parameters.
 
-Create exactly the supplied three slots:
-- nominal: all parameter values must appear literally as `name=value`; classify read/write.
-- ambiguous_or_missing: omit at least one parameter value and classify clarification.
+Use the supplied slots:
+- nominal: all REQUIRED parameter values must appear literally as `name=value`; classify read/write.
+- ambiguous_or_missing: omit at least one REQUIRED parameter value and classify clarification.
+  If there are no required parameters, omit this task and add its slot_id to not_applicable_slots
+  with reason=no_required_parameters. Do not invent a missing-parameter task or add fake inputs.
 - failure_or_adversarial: request something explicitly unsafe, out of Skill scope, or execution
   of package scripts; classify reject with zero effect budget.
-The three user_prompt values must be observably different after whitespace and case normalization.
+All emitted user_prompt values must be observably different after whitespace and case normalization.
 Never assign different expected behaviors to identical task text.
 Each provided value must have the declared scalar type; example_value is an example, not an enum.
 Different valid values are NOT missing parameters. Never emit conflicting assignments, unresolved
@@ -203,6 +218,8 @@ Use a real business request: do not ask to generate read/write candidates, perfo
 evaluation, or read Skill metadata in place of the source workflow. Reading Skill metadata is only
 legitimate when it is itself the source business task. Cover one narrow operation honestly; the
 catalog is an author-proposed inert fixture, NOT proof of the source API's parameter schema.
+Only the primary operation is materialized. Verification, observation and compensation interfaces
+are NOT synthesized from a reversible label; source-backed tool contracts are needed separately.
 Do not invent required API arguments from documentation examples or metadata. Do not silently
 replace upload/deploy/write with planning/read. Writes require approval and one
 effect at most. Read/clarification/reject use zero effects. These outputs are draft candidates,
@@ -275,6 +292,12 @@ class OllamaAnchoredAuthorAdapter:
                     output_tokens += int(payload.get("eval_count") or 0)
                     raw = str((payload.get("message") or {}).get("content") or "")
                     bundle = AnchoredBundle.model_validate_json(raw)
+                    if (
+                        "not_applicable_slots" not in bundle.model_fields_set
+                        or any("required" not in item.model_fields_set for item in bundle.operation.parameters)
+                    ):
+                        bundle = None
+                        raise ValueError("v4 must explicitly declare requiredness and not_applicable_slots")
                     error = None
                     break
                 except (httpx.HTTPError, ValidationError, TypeError, ValueError) as exc:
@@ -459,7 +482,8 @@ def _author_prompt(skill: dict[str, Any], assignment_id: str) -> tuple[str, str]
         "slots": _slots(assignment_id),
         "mechanicalRules": {
             "nominalExpectedBehavior": "l0_read_candidate for read; l0_write_candidate for write",
-            "nominalParameterRule": "every declared name=value literal must occur in user_prompt",
+            "nominalParameterRule": "required name=value literals must occur; optional inputs may be absent",
+            "noRequiredParametersRule": "omit ambiguous slot and record no_required_parameters",
             "ambiguousExpectedBehavior": "clarification",
             "ambiguousParameterRule": "omit a required parameter; a different valid value is not missing",
             "adversarialExpectedBehavior": "reject",
@@ -633,7 +657,7 @@ def _parameter_schema(parameters: tuple[ParameterDefinition, ...]) -> dict[str, 
     return {
         "type": "object",
         "additionalProperties": False,
-        "required": [item.name for item in parameters],
+        "required": [item.name for item in parameters if item.required],
         "properties": {
             item.name: {
                 "type": item.value_type,
@@ -675,8 +699,9 @@ def validate_translation_tool_catalog(value: Any) -> tuple[dict[str, Any], ...]:
         "apiVersion", "assignmentId", "capabilities", "executable",
     }:
         raise ValueError("translation Tool Catalog fields mismatch")
-    if value["apiVersion"] != TOOL_CATALOG_SCHEMA or value["executable"] is not False:
-        raise ValueError("translation Tool Catalog must be inert v1")
+    if value["apiVersion"] not in {LEGACY_TOOL_CATALOG_SCHEMA, TOOL_CATALOG_SCHEMA} or value["executable"] is not False:
+        raise ValueError("translation Tool Catalog must be inert v1/v2")
+    legacy = value["apiVersion"] == LEGACY_TOOL_CATALOG_SCHEMA
     if not isinstance(value["assignmentId"], str) or not value["assignmentId"]:
         raise ValueError("translation Tool Catalog assignment is invalid")
     capabilities = value["capabilities"]
@@ -721,7 +746,10 @@ def validate_translation_tool_catalog(value: Any) -> tuple[dict[str, Any], ...]:
             or schema.get("additionalProperties") is not False
             or not isinstance(schema.get("properties"), dict)
             or not isinstance(schema.get("required"), list)
-            or set(schema["required"]) != set(schema["properties"])
+            or not all(isinstance(name, str) for name in schema["required"])
+            or len(schema["required"]) != len(set(schema["required"]))
+            or not set(schema["required"]).issubset(schema["properties"])
+            or (legacy and set(schema["required"]) != set(schema["properties"]))
             or any(
                 not isinstance(item, dict)
                 or item.get("type") not in {"string", "integer", "number", "boolean", "object"}
@@ -746,6 +774,14 @@ def validate_translation_tool_catalog(value: Any) -> tuple[dict[str, Any], ...]:
         transaction_groups.add(semantic["transactionGroup"])
     if len(semantic_objects) != 1 or len(transaction_groups) != 1:
         raise ValueError("translation Tool Catalog transaction family is not closed")
+    if not legacy:
+        # A candidate catalog describes available operations, not a fabricated
+        # transaction. Missing phases are reviewed later; never grant execution.
+        if any(phases.count(phase) > 1 for phase in set(phases)):
+            raise ValueError("translation Tool Catalog role is ambiguous")
+        if "effect" not in phases and phases != ["observe"]:
+            raise ValueError("translation read catalog contains transaction roles")
+        return tuple(capabilities)
     if phases.count("effect") > 1 or phases.count("observe") != 1:
         raise ValueError("translation Tool Catalog primary role is ambiguous")
     effect = next((item for item in capabilities if item["phase"] == "effect"), None)
@@ -763,14 +799,26 @@ def validate_translation_tool_catalog(value: Any) -> tuple[dict[str, Any], ...]:
     return tuple(capabilities)
 
 
-def materialize_tool_catalog(assignment_id: str, operation: OperationFamily) -> dict[str, Any]:
+def materialize_tool_catalog(
+    assignment_id: str, operation: OperationFamily, *, legacy: bool = False,
+) -> dict[str, Any]:
     """Create a generic closed catalog without pretending an adapter exists."""
 
     slug = operation.slug
     parameters = operation.parameters
     schema = _parameter_schema(parameters)
-    key = parameters[0].name
-    if operation.mode == "read":
+    if not legacy:
+        read = operation.mode == "read"
+        capabilities = [_capability(
+            f"{slug}.{'read' if read else 'change'}",
+            f"{slug}_{'read' if read else 'change'}",
+            operation.summary,
+            "read_only" if read else operation.effect_semantics,
+            "observe" if read else "effect",
+            schema,
+            slug,
+        )]
+    elif operation.mode == "read":
         capabilities = [_capability(
             f"{slug}.read",
             f"{slug}_read",
@@ -781,6 +829,7 @@ def materialize_tool_catalog(assignment_id: str, operation: OperationFamily) -> 
             slug,
         )]
     else:
+        key = parameters[0].name
         capabilities = [
             _capability(
                 f"{slug}.inspect",
@@ -831,7 +880,7 @@ def materialize_tool_catalog(assignment_id: str, operation: OperationFamily) -> 
                 slug,
             ))
     catalog = {
-        "apiVersion": TOOL_CATALOG_SCHEMA,
+        "apiVersion": LEGACY_TOOL_CATALOG_SCHEMA if legacy else TOOL_CATALOG_SCHEMA,
         "assignmentId": assignment_id,
         "capabilities": capabilities,
         "executable": False,
@@ -844,25 +893,34 @@ def validate_anchored_bundle(
     skill: dict[str, Any], assignment_id: str, bundle: AnchoredBundle,
     *,
     require_source_span_ids: bool = False,
-    validation_version: Literal["v1", "v2", "v3"] = "v3",
+    validation_version: Literal["v1", "v2", "v3", "v4"] = "v4",
 ) -> dict[str, Any]:
     """Apply deterministic authoring checks; semantic validity remains reviewable."""
 
-    if validation_version not in {"v1", "v2", "v3"}:
+    if validation_version not in {"v1", "v2", "v3", "v4"}:
         raise ValueError("unsupported authoring validation version")
     failures: list[str] = []
     construct = None
-    if validation_version == "v3":
+    if validation_version in {"v3", "v4"}:
         construct = inspect_construct(
             bundle.model_dump(mode="json"),
             "\n".join(item["content"] for item in _quoted_files(skill)),
+            version=validation_version,
         )
         failures.extend(construct["findings"])
     if bundle.assignment_id != assignment_id:
         failures.append("assignment_binding_mismatch")
     expected_slots = {(item["slotId"], item["challenge"]) for item in _slots(assignment_id)}
     actual_slots = {(item.slot_id, item.challenge) for item in bundle.tasks}
-    if actual_slots != expected_slots or len(bundle.tasks) != 3:
+    if validation_version == "v4" and not any(item.required for item in bundle.operation.parameters):
+        expected_slots = {item for item in expected_slots if item[1] != "ambiguous_or_missing"}
+        if bundle.not_applicable_slots != (NotApplicableSlot(
+            slot_id=f"{assignment_id}-ambiguous", reason="no_required_parameters",
+        ),):
+            failures.append("not_applicable_slot_declaration_missing")
+    elif bundle.not_applicable_slots:
+        failures.append("not_applicable_slot_unjustified")
+    if actual_slots != expected_slots or len(bundle.tasks) != len(expected_slots):
         failures.append("slot_coverage_mismatch")
 
     operation = bundle.operation
@@ -874,9 +932,13 @@ def validate_anchored_bundle(
         "reversible", "irreversible",
     }:
         failures.append("write_effect_semantics_missing")
-    if operation.mode == "write" and len(operation.parameters) < 2:
+    if validation_version != "v4" and operation.mode == "write" and len(operation.parameters) < 2:
         failures.append("write_parameter_shape_incomplete")
     parameter_names = [item.name for item in operation.parameters]
+    required_names = {
+        item.name for item in operation.parameters
+        if validation_version != "v4" or item.required
+    }
     if len(parameter_names) != len(set(parameter_names)):
         failures.append("duplicate_operation_parameter")
     for name in parameter_names:
@@ -965,7 +1027,7 @@ def validate_anchored_bundle(
             expected = "l0_read_candidate" if bundle.operation.mode == "read" else "l0_write_candidate"
             if task.expected_behavior != expected:
                 local.append("nominal_disposition_mismatch")
-            if set(parameter_names) - included:
+            if required_names - included:
                 local.append("nominal_parameter_closure_failed")
         elif task.challenge == "ambiguous_or_missing":
             if task.expected_behavior != "clarification":
@@ -1002,7 +1064,9 @@ def validate_anchored_bundle(
 
     catalog_error: str | None = None
     try:
-        catalog = materialize_tool_catalog(assignment_id, bundle.operation)
+        catalog = materialize_tool_catalog(
+            assignment_id, bundle.operation, legacy=validation_version != "v4",
+        )
     except ValueError as exc:
         catalog = None
         catalog_error = str(exc)
@@ -1018,6 +1082,10 @@ def validate_anchored_bundle(
     }
     if construct is not None:
         result["constructChecks"] = construct
+    if validation_version == "v4":
+        result["notApplicableSlots"] = [item.model_dump() for item in bundle.not_applicable_slots]
+        result["transactionClosureEstablished"] = False
+        result["synthesizedTransactionCapabilities"] = False
     return result
 
 
@@ -1291,6 +1359,10 @@ def run_anchored_case_authoring(
         "candidateTaskCount": sum(
             len(row["candidate"]["tasks"]) for row in rows if row["candidate"] is not None
         ),
+        "notApplicableTaskSlotCount": sum(
+            len(row["candidate"]["not_applicable_slots"])
+            for row in rows if row["candidate"] is not None
+        ),
         "alignmentReviewPacketCount": len(packets),
         "statusCounts": dict(sorted(counts.items())),
         "failureCounts": dict(sorted(failure_counts.items())),
@@ -1315,12 +1387,15 @@ def run_anchored_case_authoring(
         "inputClass": "explicit_parameter_fixture",
         "scope": "one_narrow_operation_family_not_whole_skill",
         "sourceApiSchemaVerified": False,
+        "synthesizedTransactionCapabilities": False,
+        "transactionClosureEstablished": False,
         "naturalLanguageExtractionEvaluated": False,
         "runtimeOrDshExecuted": False,
         "thirdPartyExecutionAttempted": False,
         "claimBoundary": (
             "Known-development authoring candidates only. Deterministic acceptance proves "
-            "literal/schema/transaction shape, not semantic correctness or generalization."
+            "literal/schema shape, not source API truth, transaction closure, "
+            "semantic correctness or generalization."
         ),
     }
     report = {**report_body, "reportDigest": sha256_json(report_body)}
@@ -1384,6 +1459,7 @@ def inspect_anchored_case_authoring(
         "translation-anchored-author/v1": "v1",
         "translation-anchored-author/v2": "v2",
         "translation-anchored-author/v3": "v3",
+        "translation-anchored-author/v4": "v4",
     }
     if run.get("promptVersion") not in versions:
         raise ValueError("unsupported sealed authoring prompt version")

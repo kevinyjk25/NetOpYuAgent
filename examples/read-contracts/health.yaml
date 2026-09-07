@@ -1,0 +1,39 @@
+# Synthetic, inactive compiler fixture. This is not a real provider integration.
+apiVersion: netopyu.io/l0-effect/v2
+kind: AtomicRead
+metadata:
+  id: fixture.health.read
+  version: 1.0.0
+  owner: research-fixture
+  description: 无参只读合同示例 / Zero-input inactive read contract
+spec:
+  capability: fixture.health.read
+  tool: health_snapshot
+  effect: read_only
+  inputSchema:
+    type: object
+    properties: {}
+    required: []
+    additionalProperties: false
+  outputSchema:
+    type: object
+    properties:
+      healthy: {type: boolean}
+    required: [healthy]
+    additionalProperties: false
+  access:
+    requiredScopes: ["health:read"]
+    dataClassification: internal
+  sources:
+    - role: skill
+      origin: fixture://health/SKILL.md
+      text: 'Synthetic fixture: read health status; no parameters; no tool execution is authorized.'
+      sha256: sha256:70e5cc1a1c070bf240a9de8c8a683491f4708c603ef9a5146a9abf6e77c06697
+    - role: tool
+      origin: fixture://health/tool.json
+      text: '{"name":"health_snapshot","inputSchema":{"type":"object","properties":{},"required":[],"additionalProperties":false},"outputSchema":{"type":"object","properties":{"healthy":{"type":"boolean"}},"required":["healthy"],"additionalProperties":false}}'
+      sha256: sha256:8c56d47260e21b126dfe8748ed62357ca4a510d4f9fa9d19f46077dcc91ab0e6
+    - role: adapter
+      origin: fixture://health/adapter.json
+      text: '{"capability":"fixture.health.read","tool":"health_snapshot","effect":"read_only","access":{"requiredScopes":["health:read"],"dataClassification":"internal"}}'
+      sha256: sha256:ae5adde7f67826a2e7999482413ffd85dc91cfb1e171c021b6f980a3de7a2ba8

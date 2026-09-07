@@ -26,6 +26,11 @@
 | 如何构造与审查语义对齐的 Skill–Task–Tool 用例 | [转译用例构造与语义对齐](TRANSLATION-CASE-AUTHORING.md) |
 | 为什么结构通过仍不代表转译准确，当前用例有哪些问题 | [转译测试构造质量](TRANSLATION-CONSTRUCT-QUALITY.md) |
 | 参数、类型、必填性和验证/回滚步骤有什么源证据 | [转译源证据对齐](TRANSLATION-SOURCE-ALIGNMENT.md) |
+| 本轮纠偏修改了什么，距离真正转译闭环还差什么 | [转译纠偏与闭环计划](TRANSLATION-CORRECTION-PLAN.md) |
+| 有源工具合同后，如何让 9B 只生成适用任务文本 | [合同优先任务构造](CONTRACT-FIRST-TASKS.md) |
+| 无参/可选参数的只读操作如何编译为未激活 L0 | [只读 L0 合同](L0-READ-CONTRACTS.md) |
+| 公开 Skill 小批缺什么，为什么不能直接套单次读取 | [异质 Skill 边界小批](TRANSLATION-BOUNDARY-PILOT.md) |
+| 条件分支与步骤输出引用如何实际执行，写路径还缺什么 | [最小业务流程](L0-BUSINESS-FLOW.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -115,6 +120,11 @@
 | How are semantically aligned Skill–Task–Tool cases authored and reviewed? | [Translation case authoring and alignment](TRANSLATION-CASE-AUTHORING.md) |
 | Why can a valid structure still misrepresent a Skill? | [Translation construct quality](TRANSLATION-CONSTRUCT-QUALITY.md) |
 | What source evidence supports each parameter and execution step? | [Source evidence alignment](TRANSLATION-SOURCE-ALIGNMENT.md) |
+| What changed and what remains before translation closure? | [Translation correction plan](TRANSLATION-CORRECTION-PLAN.md) |
+| How does a source-backed contract constrain 9B task authoring? | [Contract-first task authoring](CONTRACT-FIRST-TASKS.md) |
+| How are zero/optional-input reads compiled into inactive L0 contracts? | [Read-only L0 contracts](L0-READ-CONTRACTS.md) |
+| What prevents heterogeneous public Skills from using a single-read path? | [Skill boundary pilot](TRANSLATION-BOUNDARY-PILOT.md) |
+| How do branches and step-output references run, and what remains for writes? | [Minimal business flow](L0-BUSINESS-FLOW.md) |
 | How do I run a demo or integrate my systems? | [Usage and integration](getting-started-integration.md) |
 
 ### Topic index

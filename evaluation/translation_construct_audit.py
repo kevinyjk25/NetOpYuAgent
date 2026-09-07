@@ -45,7 +45,7 @@ def audit_constructs(
                 continue
             validation = validate_anchored_bundle(
                 skills[row["packageId"]], row["assignmentId"],
-                AnchoredBundle.model_validate(row["candidate"]), validation_version="v3",
+                AnchoredBundle.model_validate(row["candidate"]), validation_version="v4",
             )
             rows.append({
                 "sourceWorkspaceDigest": inspection["workspaceDigest"],

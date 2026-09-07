@@ -2,6 +2,8 @@
 
 ## 中文
 
+2026-09-07 更新：作者 v4 已支持无参/可选参数并停止合成事务工具；真实 9B 的 N/A 槽位错误仍被拒绝。本文 9 月 4 日数字保留为历史源审查实验，当前修正与后续合同优先流程见[纠偏计划](TRANSLATION-CORRECTION-PLAN.md)。
+
 ### 本阶段解决什么
 
 结构合法不等于业务正确；审阅模型给出五个 `true` 也不能解释一个参数从哪里来。本阶段将整体布尔判断拆成**由代码生成、逐项引用原文的声明审查**。它位于测试候选构造之后、参考答案编写之前，不是 Translator，也不执行 L0 或第三方脚本。
@@ -73,6 +75,8 @@ python -m evaluation.translation_source_review inspect \
 另一个已在代码中确认的设计限制是：旧作者 `OperationFamily.parameters` 至少要求一个参数，`_parameter_schema` 将所有参数列为必填，`_slots` 固定包含缺参追问任务。**源 API 即便无参数或参数可选，也无法被当前作者格式忠实表达。** 因此后续不能只调整提示词或归咎于小模型；需要放开参数形状、区分缺参挑战是否适用，并显式保留无法依据源文判定的 Effect/验证/恢复语义。该构造格式修订尚未完成。
 
 ## English
+
+2026-09-07 update: author v4 supports zero/optional parameters and no longer synthesizes transaction tools; the real 9B N/A-slot failure was rejected. September 4 results below remain historical source-review evidence. See the [correction plan](TRANSLATION-CORRECTION-PLAN.md) for the current contract-first direction.
 
 ### Purpose and mechanism
 

@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import re
 import time
 from collections import Counter
@@ -36,7 +37,7 @@ TRANSLATION_CASE_SCHEMA = "effect-runtime.io/public-skill-model-translation-case
 L05_SCHEMA = "effect-runtime.io/public-skill-l0.5-contract/v2"
 L0_PLAN_SCHEMA = "effect-runtime.io/public-skill-declarative-l0-plan/v2"
 AUTHORITY = "translation_evidence_only_no_gold_or_execution_authority"
-EVALUATOR_VERSION = "ensured-skill-translator/v2"
+EVALUATOR_VERSION = "ensured-skill-translator/v2.1"
 
 
 class ParameterEvidence(BaseModel):
@@ -139,6 +140,7 @@ Return exactly one discriminated decision inside `decision`.
 Do not invent Capability IDs, tools, parameters, values, approval, or authority. `capability_hint` is optional evidence copied from the catalog; a deterministic linker makes the final selection.
 The Tool Catalog is an available declarative interface for translation. Selecting a catalog capability is not executing Skill package code. Do not demand that Skill prose itself contain an API endpoint, implementation, or the user's concrete resource ID. Skill–Task–Tool construct validity is reviewed by a separate gate; here, report skill_tool_conflict only for an explicit textual contradiction.
 For each task parameter you can identify, return its typed value and exact character evidence from case.userPrompt. start is zero-based and end is exclusive. Prefer the value token itself, without `name=` or surrounding punctuation. Never take parameter values from Skill text.
+The current binding subset requires an explicit named scalar assignment (name=value, name: value, name is value, or name value). Unnamed natural-language values and conflicting assignments require clarification, not a guessed binding. Optional parameters may be omitted; never invent defaults.
 Do not use confidence as permission. Output only JSON matching the supplied schema."""
 
 
@@ -301,6 +303,8 @@ class CatalogLink(BaseModel):
 
 
 def _value_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
+    if isinstance(value, float) and not math.isfinite(value):
+        return False
     expected = {
         "string": str,
         "integer": int,
@@ -329,7 +333,11 @@ def _value_matches_schema(value: Any, schema: dict[str, Any]) -> bool:
 def _coerce_literal(text: str, schema: dict[str, Any]) -> Any:
     token = text.strip()
     if len(token) >= 2 and token[0] == token[-1] and token[0] in {'"', "'"}:
-        token = token[1:-1]
+        if token.startswith('"'):
+            token = json.loads(token)
+        else:
+            # Single-quoted fixture literals only escape quote/backslash.
+            token = token[1:-1].replace("\\'", "'").replace("\\\\", "\\")
     kind = schema.get("type")
     if kind == "string":
         return token
@@ -363,7 +371,11 @@ def _validate_model_evidence(
         reconstructed = _coerce_literal(source, schema)
     except ValueError:
         return None
-    if reconstructed != evidence.value or not _value_matches_schema(reconstructed, schema):
+    if (
+        type(reconstructed) is not type(evidence.value)
+        or reconstructed != evidence.value
+        or not _value_matches_schema(reconstructed, schema)
+    ):
         return None
     return reconstructed, {
         "sourceText": source,
@@ -373,31 +385,41 @@ def _validate_model_evidence(
     }
 
 
-def _named_parameter_evidence(
+def _named_parameter_candidates(
     prompt: str, name: str, schema: dict[str, Any],
-) -> tuple[Any, dict[str, Any]] | None:
-    """Extract only explicit ``name=value``/``name: value`` scalar bindings.
+) -> tuple[list[tuple[Any, dict[str, Any]]], bool]:
+    """Inspect every named assignment, including malformed/invalid ones.
 
-    The token boundary intentionally treats a trailing full stop as punctuation,
-    not part of a number.  This fixes V1's ``expected_revision=1.`` failure.
+    This bounded fixture grammar does not prove arbitrary prose consistency.
+    Invalid assignments cannot disappear when another valid value is present.
     """
 
-    pattern = re.compile(
-        rf"(?<![A-Za-z0-9_.-]){re.escape(name)}\s*(?:=|:)\s*"
-        r"(?P<value>\"(?:[^\"\\]|\\.)*\"|'(?:[^'\\]|\\.)*'|[^\s,;]+)",
-        flags=re.IGNORECASE,
+    prefix = re.compile(
+        rf"(?<![\w.-]){re.escape(name)}(?:\s*[=:]\s*|\s+is\s+|\s+)", re.IGNORECASE,
     )
-    matches = list(pattern.finditer(prompt))
+    token_pattern = re.compile(
+        r'''(?P<value>"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|[^\s,;"'=]+)(?=$|[\s,;.!?])''',
+    )
     accepted: list[tuple[Any, dict[str, Any]]] = []
-    for match in matches:
+    invalid = False
+    for named in prefix.finditer(prompt):
+        match = token_pattern.match(prompt, named.end())
+        if match is None:
+            invalid = True
+            continue
         raw = match.group("value")
         # Sentence punctuation is not part of an unquoted scalar.
         token = raw if raw[:1] in {'"', "'"} else raw.rstrip(".!?)]}")
         start = match.start("value")
         end = start + len(token)
         try:
+            if not token or re.search(r"\$[({]|<[^<>]+>|\{\{", token):
+                raise ValueError("unresolved or empty literal")
             value = _coerce_literal(token, schema)
+            if isinstance(value, str) and re.search(r"\$[({]|<[^<>]+>|\{\{", value):
+                raise ValueError("decoded unresolved literal")
         except ValueError:
+            invalid = True
             continue
         if _value_matches_schema(value, schema):
             accepted.append((value, {
@@ -406,7 +428,16 @@ def _named_parameter_evidence(
                 "end": end,
                 "method": "deterministic_named_literal",
             }))
-    if len(accepted) != 1:
+        else:
+            invalid = True
+    return accepted, invalid
+
+
+def _named_parameter_evidence(
+    prompt: str, name: str, schema: dict[str, Any],
+) -> tuple[Any, dict[str, Any]] | None:
+    accepted, invalid = _named_parameter_candidates(prompt, name, schema)
+    if invalid or not accepted or len({json.dumps(item[0]) for item in accepted}) != 1:
         return None
     return accepted[0]
 
@@ -416,7 +447,19 @@ def bind_parameters(
     capability: FixtureCapability,
     evidence: tuple[ParameterEvidence, ...],
 ) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]:
-    """Materialize catalog parameters only from exact prompt evidence."""
+    return bind_schema_parameters(prompt, capability.input_schema, evidence)
+
+
+def bind_schema_parameters(
+    prompt: str,
+    input_schema: dict[str, Any],
+    evidence: tuple[ParameterEvidence, ...] = (),
+) -> tuple[dict[str, Any], dict[str, dict[str, Any]], list[str]]:
+    """Require named ownership, no conflicting values and valid model citations.
+
+    A real token somewhere in the prompt is not evidence of field ownership.
+    Model evidence may corroborate a binding, never override named conflicts.
+    """
 
     by_name: dict[str, list[ParameterEvidence]] = {}
     for item in evidence:
@@ -424,20 +467,33 @@ def bind_parameters(
     values: dict[str, Any] = {}
     sources: dict[str, dict[str, Any]] = {}
     failures: list[str] = []
-    properties = capability.input_schema["properties"]
+    properties = input_schema["properties"]
     for name, schema in properties.items():
-        candidates = [
-            bound for item in by_name.get(name, ())
-            if (bound := _validate_model_evidence(item, prompt, schema)) is not None
-        ]
-        if len(candidates) == 1:
-            values[name], sources[name] = candidates[0]
+        named, invalid = _named_parameter_candidates(prompt, name, schema)
+        proposals = by_name.get(name, ())
+        if invalid:
+            failures.append(f"parameter_invalid:{name}")
             continue
-        deterministic = _named_parameter_evidence(prompt, name, schema)
-        if deterministic is not None:
-            values[name], sources[name] = deterministic
+        if len({json.dumps(item[0]) for item in named}) > 1:
+            failures.append(f"parameter_conflicting:{name}")
             continue
-        failures.append(f"parameter_unbound:{name}")
+        if not named:
+            if proposals or name in input_schema["required"]:
+                failures.append(f"parameter_unbound:{name}")
+            continue
+        value, source = named[0]
+        supported_spans = {(item[1]["start"], item[1]["end"]) for item in named}
+        evidence_invalid = False
+        for proposal in proposals:
+            bound = _validate_model_evidence(proposal, prompt, schema)
+            if bound is None or (bound[1]["start"], bound[1]["end"]) not in supported_spans:
+                evidence_invalid = True
+                break
+            value, source = bound
+        if evidence_invalid:
+            failures.append(f"parameter_evidence_not_owned:{name}")
+            continue
+        values[name], sources[name] = value, source
     unknown = sorted(set(by_name) - set(properties))
     failures.extend(f"parameter_unknown:{name}" for name in unknown)
     return values, sources, failures
@@ -639,8 +695,10 @@ def _repair_feedback(
             for item in capabilities
         ],
         "bindingRule": (
-            "Every public input must have an exact case.userPrompt source span. "
-            "Do not source values from Skill text."
+            "Every supplied input must match its named case.userPrompt assignment; "
+            "all required inputs must be present and optional inputs may be absent. "
+            "No conflicting/invalid assignments or cross-field citations. "
+            "Do not source values from Skill text or invent defaults."
         ),
         "catalogCandidatesClosedByExplicitTaskParameters": list(
             _closed_catalog_candidates(capabilities, user_prompt)
@@ -715,12 +773,14 @@ def _prompt(case: dict[str, Any], catalog: dict[str, Any], package: Path) -> tup
         raise ValueError("public translation Skill package drift")
     payload = {
         "case": {
-            "caseId": case["caseId"],
-            "challenge": case["challenge"],
-            "language": case["language"],
             "userPrompt": case["userPrompt"],
         },
-        "toolCatalog": catalog,
+        # Scoring identities/categories are kept in sealed checkpoints, not
+        # model context. Real capability identifiers remain usable references.
+        "toolCatalog": {
+            "apiVersion": catalog["apiVersion"],
+            "capabilities": catalog["capabilities"],
+        },
         "skill": {
             "sourceSnapshotPackageDigest": case["packageDigest"],
             "runtimePackageDigest": case["runtimePackageDigest"],

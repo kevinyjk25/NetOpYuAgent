@@ -1,0 +1,301 @@
+{
+  "corpus_index_digest": "sha256:ff46b1197aefbefd53226bd3b54180fe11ab6960c00ec3a17080a9510ca8241e",
+  "reviewer_kind": "ai_role_simulation",
+  "reviewer_id": "codex-current-agent-visible-context-not-independent",
+  "evidence_role": "known_development_intake_only",
+  "entries": [
+    {
+      "package_id": "iamds-gmbh-aimds-agent-skills-aimds-custom-doc-ingest-analyze-skill-md-b3cc45540e",
+      "structures": [
+        "no_argument_call",
+        "multi_step",
+        "conditional_branch",
+        "read_write_mixed"
+      ],
+      "required_environment": [
+        "go-mcp-customer tool schemas",
+        "HTTP upload effect and authorization",
+        "vault and absence-table write contracts"
+      ],
+      "single_read_gap": "无参prepare不能代表全流程只读；上传、索引、笔记和缺勤写入的步骤/依赖尚不能用AtomicRead表达。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Call `storage_ingest_upload({})` (no arguments)."
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "### Step 4: Store the document note in the vault"
+        }
+      ]
+    },
+    {
+      "package_id": "iamds-gmbh-aimds-agent-skills-aimds-custom-customer-crm-lookup-skill-md-89729ec65e",
+      "structures": [
+        "multi_step",
+        "conditional_branch",
+        "read_write_mixed"
+      ],
+      "required_environment": [
+        "CRM storage MCP schemas",
+        "M365 observation tools",
+        "optional vault-write binding"
+      ],
+      "single_read_gap": "查询、读取、跨系统关联和可选目录同步属于混合流程，不能只保留首个搜索调用而宣称整个Skill完成。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "**Cross-reference context:** Link customer results with M365 calendar or email context."
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "**Directory sync:** When needed, store customer excerpts"
+        }
+      ]
+    },
+    {
+      "package_id": "javakishore-veleti-claude-code-enterprise-it-harnessing-enterprise-it-ha-f879cc6be3",
+      "structures": [
+        "multi_step",
+        "conditional_branch"
+      ],
+      "required_environment": [
+        "business-unit/service-resolution schemas",
+        "bounded Elasticsearch query/output contract"
+      ],
+      "single_read_gap": "正文提供查服务、别名与输出限制，但未给完整查询接口Schema；size限制不能凭空变成某个工具的必填参数。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Call `list_business_units` or `resolve_service`"
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Keep `size` at 20 or below."
+        }
+      ]
+    },
+    {
+      "package_id": "gui-montanari-skills-backend-object-storage-skill-md-b295cfa537",
+      "structures": [
+        "references",
+        "conditional_branch",
+        "read_write_mixed"
+      ],
+      "required_environment": [
+        "ObjectStoragePort concrete provider",
+        "tenant authorization",
+        "auth and persistence Skill dependencies"
+      ],
+      "single_read_gap": "只有抽象方法签名，不等于已审查工具实现；服务器生成path、租户授权、上传检验和删除事务均需保留。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "ObjectStoragePort.put(path, bytes, content_type) -> location"
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "**REQUIRED SUB-SKILL:** `auth` (quem lê), `persistence-ports` (metadado no banco do dono)."
+        }
+      ]
+    },
+    {
+      "package_id": "joinrpg-joinrpg-net-claude-skills-prod-db-readonly-skill-md-29e14b88de",
+      "structures": [
+        "references",
+        "script_dependency",
+        "freeform_cli",
+        "conditional_branch"
+      ],
+      "required_environment": [
+        "SQL executor with bounded SELECT grammar",
+        "read-only credentials supplied by host",
+        "database schema and field-release policy"
+      ],
+      "single_read_gap": "只读查询与创建登录脚本须分离；不能执行随附SQL建立权限，也不能将任意sqlcmd当作安全单次读取。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "**Только `SELECT`.**"
+        },
+        {
+          "path": "create-readonly-user.sql",
+          "exact_quote": "CREATE LOGIN [claude_joinrpg_readonly]"
+        }
+      ]
+    },
+    {
+      "package_id": "edenbuilds-touchline-skills-network-architecture-audit-skill-md-894c0829ce",
+      "structures": [
+        "approval",
+        "open_ended_reasoning",
+        "multi_step"
+      ],
+      "required_environment": [
+        "browser/network observation tools",
+        "sanitized HAR output contract",
+        "authenticated-capture approval context"
+      ],
+      "single_read_gap": "抓包、脱敏和架构推断非一个固定Schema读取；认证捕获审批与原始敏感数据释放不能丢失。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Authenticated capture requires approval."
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Save HAR metadata without credentials or sensitive bodies."
+        }
+      ]
+    },
+    {
+      "package_id": "mikezaby-hal-rules-registry-skills-workflow-project-new-task-skill-md-9b9407f0e8",
+      "structures": [
+        "optional_parameters",
+        "conditional_branch",
+        "multi_step",
+        "read_write_mixed",
+        "references"
+      ],
+      "required_environment": [
+        "tracker MCP schemas or constrained CLI",
+        "repository/worktree effect contract",
+        "host tracker and credential context"
+      ],
+      "single_read_gap": "可选ticket和name决定分支；MCP连接配置不是工具Schema，分支/worktree写操作不能降为读取issue。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Both ticket and name are optional."
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "git worktree add <worktrees dir>/<branch> -b <branch> origin/<default>"
+        }
+      ]
+    },
+    {
+      "package_id": "naturalselect-angela-internal-skills-builtin-jq-skill-md-b2d6618545",
+      "structures": [
+        "freeform_cli",
+        "optional_parameters",
+        "conditional_branch"
+      ],
+      "required_environment": [
+        "host gojq tool version and interface",
+        "bounded filter language",
+        "input/output and egress limits"
+      ],
+      "single_read_gap": "jq自由表达式、流式多值和管道需单独执行边界；不能由一个JSON示例反推完整输入/输出Schema。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "jq -n --arg msg hello"
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "jq -r '.url' data.json | xargs curl"
+        }
+      ]
+    },
+    {
+      "package_id": "zznabil-lean-agent-skill-collection-skills-release-skill-md-827bff88a7",
+      "structures": [
+        "references",
+        "multi_step",
+        "approval",
+        "read_write_mixed",
+        "open_ended_reasoning"
+      ],
+      "required_environment": [
+        "host build/test commands",
+        "artifact and release state contract",
+        "publish authorization and effect bindings"
+      ],
+      "single_read_gap": "发布Skill包含构建/验证/决策/发布等多阶段和审批，不能以只读报告代替真实流程。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Publish, tag, upload, notify, merge, or deploy only when authorized."
+        },
+        {
+          "path": "SUPPLY-CHAIN.md",
+          "exact_quote": "These answer different questions and do not prove correctness or security by themselves."
+        }
+      ]
+    },
+    {
+      "package_id": "analyticsengineering-ae-toolkit-dist-antigravity-agents-skills-data-qual-00308ffa77",
+      "structures": [
+        "multi_step",
+        "approval",
+        "open_ended_reasoning",
+        "conditional_branch"
+      ],
+      "required_environment": [
+        "observability/warehouse schemas",
+        "incident-record boundary",
+        "bounded queries and outbound-update authorization"
+      ],
+      "single_read_gap": "假设-证据迭代与成本/权限边界须保留，不能用固定调用替代根因推断或暗中执行修复。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Use for diagnosis; do not implement remediation unless the user asks."
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Costly queries, reruns, backfills, mutations, or outbound updates require approval."
+        }
+      ]
+    },
+    {
+      "package_id": "obviyus-telly-agents-skills-find-docs-skill-md-89ef20f59e",
+      "structures": [
+        "freeform_cli",
+        "conditional_branch",
+        "multi_step"
+      ],
+      "required_environment": [
+        "pinned ctx7/API interface",
+        "bounded network read provider",
+        "quota and output format contract"
+      ],
+      "single_read_gap": "源Skill明确要求CLI并存在ID解析分支，不能私自换MCP或执行bunx安装；API示例也未给完整输出约束。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Context7 through the `ctx7` CLI, never the MCP server."
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Max 3 calls per question"
+        }
+      ]
+    },
+    {
+      "package_id": "codecrafter98-fivem-agent-skills-agents-skills-02-networking-fivem-onesy-02df839736",
+      "structures": [
+        "references",
+        "multi_step",
+        "open_ended_reasoning"
+      ],
+      "required_environment": [
+        "installed FiveM project API/version",
+        "client/server state model",
+        "isolated multi-client test harness"
+      ],
+      "single_read_gap": "这是设计/实现/验证指导，不是已有单工具运行手册；缺项目代码与动态组网环境不能由模型猜API补齐。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Never invent natives, framework APIs, events, exports, or schema."
+        },
+        {
+          "path": "SKILL.md",
+          "exact_quote": "Test with at least two clients and ownership migration for networked gameplay."
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,60 @@
+{
+  "schema": "effect-runtime.io/translation-correction-development-summary/v1",
+  "date": "2026-09-07",
+  "evidenceClass": "known_development_correction_not_generalization_score",
+  "authoringProtocol": "translation-anchored-author/v4",
+  "translatorVersion": "ensured-skill-translator/v2.1",
+  "authoringImplementationDigest": "sha256:f0681b528785543578c5a5e413716dadca5d84b482d325474ba3c4003dae2bb8",
+  "probe": {
+    "outputRoot": "artifacts/translator-v2/anchored-doc-ingest-v4-20260907",
+    "workspaceDigest": "sha256:acf89b8c6c9c94a3bf833df40420fa0cf9d36acde406d85567609325d9449665",
+    "reportDigest": "sha256:05044694fa2bdc07d7ba3a2fd741f80d9d01266a22ffd33814183f34e1b2ef99",
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+    "skillCount": 1,
+    "candidateTaskCount": 3,
+    "acceptedCandidateCount": 0,
+    "alignmentReviewPacketCount": 0,
+    "declaredNotApplicableSlotCount": 1,
+    "validatedNotApplicableSlotCount": 0,
+    "modelCalls": 2,
+    "totalLatencyMs": 234110.317,
+    "status": "rejected_candidate",
+    "findings": [
+      "The model identified the source no-argument API and returned parameters=[].",
+      "It still generated a missing-input task and attached no_required_parameters to the adversarial slot.",
+      "Two model calls did not repair the inconsistency; deterministic checks refused review admission.",
+      "Read-only classification of session preparation remains unsupported; zero arguments do not imply read-only behavior."
+    ],
+    "artifactIntegrityVerified": true,
+    "performanceComparisonEligible": false
+  },
+  "verification": {
+    "targetedTestsPassed": 116,
+    "newCorrectionRegressionTests": 20,
+    "initialFullEnvironmentFailures": 19,
+    "environmentCorrection": "Local ignored .venv symlink to the existing installed interpreter; no dependency installation.",
+    "fullTestsPassed": 696,
+    "subtestsPassed": 81,
+    "fullSuiteElapsedSeconds": 111.09,
+    "legacyRevalidationPassed": [
+      "anchored-development-04-v1",
+      "anchored-development-06-v1",
+      "anchored-development-07-v1",
+      "construct-v3-object-storage"
+    ],
+    "preExistingValidationDriftReproducedAtHead": [
+      "anchored-development-01-v2",
+      "anchored-development-02-v1",
+      "anchored-development-03-v1",
+      "anchored-development-05-v1"
+    ],
+    "historicalArtifactsRewritten": false
+  },
+  "semanticAlignmentProven": false,
+  "wholeSkillCompilationProven": false,
+  "humanIndependentEvidence": false,
+  "runtimeOrDshExecutedInModelProbe": false,
+  "thirdPartyExecutionAttempted": false,
+  "claimBoundary": "Regression and known-development failure diagnosis only. No new translation accuracy, generalization, acceleration or production-success claim."
+}

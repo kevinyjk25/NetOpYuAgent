@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 from .compiler import L0CompileError, compile_documents, load_documents
 from .models import (
     CompiledAtomicEffect,
+    CompiledAtomicRead,
     CompiledCompositeEffect,
     CompiledContract,
     SEMVER,
@@ -92,6 +93,15 @@ class L0Catalog:
                 lines.append("Lineage: " + " -> ".join(
                     f"{item.id}@{item.version}" for item in contract.lineage
                 ))
+        elif isinstance(contract, CompiledAtomicRead):
+            lines.extend([
+                f"Read capability: {contract.spec.capability}",
+                f"Tool: {contract.spec.tool}",
+                "Required inputs: " + ", ".join(contract.spec.input_schema.required),
+                "Declared scopes: " + ", ".join(contract.spec.access.required_scopes),
+                "Authority: inactive; semantic review and authorization required",
+                f"Contract hash: {contract.contract_hash}",
+            ])
         else:
             lines.extend([
                 "Steps: " + " -> ".join(item.id for item in contract.steps),
@@ -117,6 +127,12 @@ class L0Catalog:
                 lines.append(f"  {left} --> {right}")
             lines.append(f'  execute["{contract.spec.effect.capability}"]')
             lines.append(f'  verify["verify: {contract.spec.verification.capability}"]')
+        elif isinstance(contract, CompiledAtomicRead):
+            lines.extend([
+                "  source[Source declarations] --> compile[Compile inactive contract]",
+                "  compile --> validate[Validate request arguments]",
+                "  validate --> draft[Request draft - no execution authority]",
+            ])
         else:
             for step in contract.steps:
                 lines.append(f'  {step.id}["{step.id}\\n{step.skill_ref.id}@{step.skill_ref.version}"]')

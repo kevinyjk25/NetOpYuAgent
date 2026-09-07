@@ -6,6 +6,103 @@
 
 **当前主阶段：L1→L0 转译泛化门禁。**
 
+#### 2026-09-07 C1：确定性只读业务流程接线完成
+
+- [x] 用户确认宿主上下文＋整 Skill 混合提案路线，同时要求补齐最小业务流程执行；不得只做提案即结项。
+- [x] 增加封闭标量类型的数据引用、确定性相等分支、无环/可达性与全路径引用校验。权限、字段缺失、过期与工具错误均阻断，不能当成 false 分支。
+- [x] 宿主分别绑定精确流程/请求和读取合同；实际读取继续走原 `execute_host_read`。新增可复现本地命令：园区路径读取两次、IDC 路径读取一次后 needs_l1，库存文件不变。没有模型调用或写入，非转译准确率。
+- [x] 新增 **33 项回归**；全量 **885 tests + 81 subtests** 通过（86.49 秒），定向 Ruff、报告摘要和 diff 校验通过。
+- [ ] C2：将分支事实/流程摘要绑定入 PreparedPlan，并在写前重新校验，再接通原审批、Effect、验证和补偿。当前写叶仅 awaiting_effect_admission，禁止直接执行；多写/并行/循环尚不支持。
+- [ ] C3：9B 正向整流程提案、逐节点源保真审查与异质开发小批，首次与辅助结果分开。原 12 个公开 Skill 的完整转译仍 not_run。
+
+见[最小业务流程与安全边界](L0-BUSINESS-FLOW.md)、[本地运行报告](benchmarks/read-flow-local-summary.json)。C1 可独立作为阶段提交检查点，但不是完整 C 阶段验收或生产就绪。
+
+#### 2026-09-07 C：异质开发小批选样与源绑定盘点完成
+
+- [x] 从封存已知开发库选择 **12 Skill / 11 仓库 / 10 类结构**；沿用 8 个源领域标签，不把标签数量宣称为跨域泛化。
+- [x] 每项保存环境依赖、单读范围缺口、原文引句/位置/摘要；本轮当前助手非独立标注。授权与人工审批区分，第三方脚本保持惰性。
+- [x] 新增源绑定 intake 命令和 **18 项回归**；全量 **852 tests + 81 subtests** 通过（85.87 秒），定向 Ruff / diff 校验通过。
+- [ ] C 完整转译/执行未开始：本次未提交完整宿主工具环境，结果为 `not_run`，**不是 0% 转译准确率或 Skill 无效**。本轮模型调用、Runtime 执行、第三方代码执行均为 0。
+- [ ] 设计检查点：建议“宿主工具上下文绑定 + 整 Skill 混合流程提案”，区分可编译步骤、L1 推理、缺环境和不支持，不以子操作成功代替整个 Skill。确认后再扩展单操作 authoring；不新造并行执行器或恢复大规模 Runtime A/B。
+
+见[小批报告、12 项清单与下一步边界](TRANSLATION-BOUNDARY-PILOT.md)和[可重算报告](benchmarks/translation-boundary-pilot.json)。下面保留历史阶段记录；历史“下一步”不覆盖本节当前状态。
+
+#### 2026-09-07 B2：问题解析留痕与单操作辅助闭环完成
+
+- [x] 新增独立解析侧文件：固定父提案摘要、问题原文/序号、答案和源引文位置；父提案不变，子提案只处理未解决问题，不修改工具、参数、输出或权限。
+- [x] 新审查要求基础声明与答案充分性全部覆盖，答案引用必须对应具体证据；旧审查、删题、重复问题、错误引文和不支持的答案均不能通过。当前助手解疑/重审仍标为非独立 AI 模拟。
+- [x] 23 项声明/答案经本轮重审获支持后，宿主授权实际读取 `campus-sw1`，返回 campus / planned-lab 库存快照，文件内容保持不变。父提案两个问题与原始回答仍完整保留；未追加 9B 调用，也未全局激活合同。
+- [x] 实际负向检查：缺少宿主授权、复用旧审查、越权设备、否定命令均拒绝，Provider 调用数均为 0。制品绑定和报告重算一致。
+- [x] 新增 **16 项回归**；相关 **62 项**、全量 **834 tests + 81 subtests** 通过（86.33 秒），定向 Ruff / diff 校验通过。
+- [ ] 下一步 C：8–12 个异质已知开发 Skill 的小批闭环，分别报告原始生成、辅助修订、危险误接受和覆盖率。当前只是 1 个新建单操作样例，未证明全自动转译、完整 Skill/DSH 循环或未知集泛化；规模化 Runtime A/B 仍暂停。
+
+查看[解析与运行说明](L0-READ-CONTRACTS.md)和[本轮证据摘要](benchmarks/read-local-resolution-summary.json)。以下条目保留各自历史阶段，原 blocked 结果没有被改写为成功。
+
+#### 2026-09-07 B2：正向 9B 与宿主授权本地读取接线
+
+- [x] 新建库存 L1 Skill 和可审查的本地文件读取适配器，工具名在 Skill 中明确声明，实际代码只读取宿主固定文件并投影输出字段。没有补改旧健康检查样例。
+- [x] 宿主读取入口复用 `ObservationPolicy`，校验精确合同/能力/Schema/敏感级别、显式身份、角色和能力/设备范围；拒绝隐式系统身份、通配权限、额外路径参数和不合格结果。仅本地实验信任边界，不是生产身份认证。
+- [x] 真实 9B 正向提出用途/工具/只读分类/问题，源 Schema 由代码组装进 L0.5。两次 HTTP 400 失败目录保留；诊断为解码 grammar 失败，调整解码提示且保留完整输出校验后，第三次生成成功（10.80 秒、547/115 输入/输出 token）。首次没有留存错误正文，不能声称所有失败证据完整。
+- [x] 模型选择和用途正确，但有 2 个未解决问题；当前助手模拟审查支持 21 项声明，仍判 blocked。执行前检查确认模型提案调用 0 次，未删改原回答以获通过。接线回归单独读取实际实验库存，不计为模型执行成功。
+- [x] 新增 **32 项回归**；相关 **86 项**、全量 **818 tests + 81 subtests** 通过（84.87 秒），定向 Ruff / diff 校验通过。
+- [ ] 下一步：基于既有 Schema/适配器代码解析问题，保存原始→证据→修订提案轨迹，再重新审查并验证本地读取；完整自然语言请求、DSH Agent 循环和未知 Skill 泛化仍未证明。
+
+入口和限制见[只读合同使用](L0-READ-CONTRACTS.md)，结果见[正向实验摘要](benchmarks/read-local-forward-summary.json)。
+
+#### 2026-09-07 B2b：只读 L0.5 映射与审查子链
+
+- [x] 增加可读 `ReadL05Proposal`，用途和操作字段确定性映射到现有只读合同；未解决问题单独保留，不补造执行语义。
+- [x] 自动列全源证据检查项，绑定 L0.5/L0 位置、源原文/位置/摘要，复用已有审查协议；缺项、错引用、矛盾和证据不足不能晋级，全部 supported 仍未授权。
+- [x] 提供 scaffold / review-input / assess 本地命令，拒绝覆盖已有输出；scaffold 明确是从手工 L0 反向构造的编辑模板，不计为 L1 正向转译成果。
+- [x] 当前助手模拟审查 12 项：10 项声明 supported、2 项 insufficient_evidence，另有 1 个未解决待办；最终 blocked、0 个晋级合同、0 次工具执行。问题定位到 Skill–工具名映射和缺少适配器只读实现证据；不是独立人员测试或转译准确率。
+- [x] 新增 **14 项回归**；相关 **70 项**、全量 **786 tests + 81 subtests** 通过（84.86 秒），定向 Ruff / diff 校验通过。
+- [ ] B2 剩余：可审查的真实/本地适配器证据、正向 L1→L0.5 提案、请求语义审查和授权读取。本轮没有推进到执行，未恢复大规模 Runtime A/B。
+
+命令与定位说明见[只读 L0 合同](L0-READ-CONTRACTS.md)，数据见[诊断摘要](benchmarks/read-l05-b2b-summary.json)。
+
+#### 2026-09-07 B2a：未激活只读合同与独立请求实例化
+
+- [x] 在现有 L0 v2 类型/编译器/目录/CLI 增加 `AtomicRead` / `CompiledAtomicRead`；支持无参、可选参数与有参读取，不更改写操作的审批、预检和验证规则。
+- [x] 固定 Skill/tool/adapter 原文及摘要，对齐工具名、读写声明、输入/输出 Schema 与权限范围声明；摘要不等于来源认证，声明一致不等于语义正确。
+- [x] `instantiate_read` 单独生成结构化参数请求草案；复核合同摘要，不固化测试参数、不授权执行。`validate_read_result_shape` 只校验结构，不宣称业务成功。
+- [x] 写能力查询不返回 read，Saga 拒绝 read，旧 effect L0.5 promotion 明确阻断 read；无第三方脚本、真实设备或模型调用。
+- [x] 新增 **40 项回归**；相关 **76 项**、全量 **772 tests + 81 subtests** 通过（85.20 秒），定向 Ruff / diff 校验通过。合成示例的 CLI validate/explain/schema 和 Python 草案/返回形状接口已本地验证。
+- [ ] B2b：只读 L0.5 的逐项来源映射和语义审查，真实工具/适配器证据，参数提取与授权后受限读取。B2 尚未整体完成，未恢复规模化 Runtime A/B。
+
+使用和限制见[只读 L0 合同](L0-READ-CONTRACTS.md)。新增示例是独立的手工合成夹具，不修改 B1 的密封制品，不计为 LLM 转译或泛化成绩。
+
+#### 2026-09-07 A/B1 复查与 B2 边界修正
+
+- [x] 修复转义字符串被错误还原，以及数值溢出为 Infinity 仍被接受的问题；解码后占位符、非法 JSON 转义、非有限夹具值和源 JSON 常量/指数溢出均拒绝。
+- [x] 新增 20 项字面量边界回归，相关 **63 项**通过；全量 **732 tests + 81 subtests** 通过（81.96 秒），定向 Ruff 和 diff 校验通过。
+- [x] B1 原 9B 制品只读复核 `verified=true`、`implementationDrift=true`：原报告/检查点仍完整，当前实现已变化。仍有 1 个待语义审查任务，没有改写历史结果，也未新增模型调用。
+- [x] 确认既有写合同编译器无法直接表达 B1 无参只读例子；没有伪造目标/预检/验证，也没有放松写审批门禁。
+- [ ] B2 先在既有 L0 类型/编译体系补充只读合同，再做源证据绑定与独立请求实例化；具体验收顺序见[纠偏计划](TRANSLATION-CORRECTION-PLAN.md)。本轮未完成 B2、未运行 Runtime，字面量测试不代表语义准确率或泛化率。
+
+#### 2026-09-07 B1：合同优先的任务构造
+
+- [x] 新接口从带摘要的工具源文本解析 Schema，经源声明审查后确定适用槽位；无参/全可选只生成 1 个正常槽位，k 个必填项生成 k 个缺参槽位。
+- [x] 9B 只允许输出 `user_prompt`，不能改合同、N/A、槽位或参考答案；源证据不支持、读写未知、Schema 不支持时 0 次调用。
+- [x] 参数检查复用 Translator 的 schema binder，保存实际模型输入、逐调用 checkpoint 和摘要；完成后只读重入，中断不自动覆盖/重跑。
+- [x] 新增 16 个定向回归；相关 43 项通过，全量 **712 tests + 81 subtests** 通过，Ruff/diff 校验通过。
+- [x] 真实 9B + 显式合成合同/审查夹具：1 次调用、5.93 秒、1 个适用任务，缺参族 N/A 由代码确定。模型只返回 `health_snapshot`，参数检查后仍是 `needs_task_semantic_review`，不是理想的业务请求，未认定为合格用例或 Gold。
+- [ ] B2：真实源合同/适配器证据、任务语义审查，L0.5→现有可复用 L0 编译器→请求实例化。
+
+接口与命令见[合同优先任务构造](CONTRACT-FIRST-TASKS.md)。该入口适用于已有工具合同的场景；旧 v4 源 Skill 作者仍只是非权威候选发现，不能冒充已审查合同。Runtime 大规模评测继续暂停。
+
+#### 2026-09-07 基础纠偏 A
+
+- [x] Translator v2.1 移除模型输入的 caseId/challenge/language/catalog assignmentId，并增加评分元数据变化不影响 Prompt 的回归；原始业务请求不改写。
+- [x] 字段归属、同名冲突和无效值联合校验；复现的跨字段错误引用、冲突值采信被拦截，可选参数不再强制补齐。
+- [x] 作者 v4 / Catalog v2 支持无参、可选参数和缺参槽位不适用；只生成候选主操作，不再虚构预检、验证、补偿接口。
+- [x] 116 项定向测试通过；补齐开发目录指向已有本地环境的 `.venv` 链接后，全量 **696 tests + 81 subtests** 通过。首次全量的 19 个环境失败保留为诊断，不算代码测试成功。
+- [x] 真实 9B 单 Skill 验证：doc-ingest-analyze，2 次调用，234.1 秒。模型识别了 `parameters=[]`，但仍输出缺参任务且把 N/A 标记放错槽位，最终拒绝，0 个审查包，未生成可执行 L0。这不是泛化提升成绩。
+- [x] 新制品完整性校验通过；旧 development-04/06/07 与 construct-v3-object-storage 重检通过。旧 01-v2/02-v1/03-v1/05-v1 的同版本规则漂移在修改前 HEAD 也可复现，未改写原件或标签。
+- [ ] B：工具合同/源证据先于任务生成，任务适用性由已审查合同确定；贯通 L0.5→现有可复用 L0 编译器→请求参数实例化。
+- [ ] C/D：异质小批语义闭环、隔离参考答案和冻结后未知集合；规模化 Runtime A/B 继续暂停，生产工程仍冻结。
+
+实施边界见[纠偏与闭环计划](TRANSLATION-CORRECTION-PLAN.md)，证据见[本轮摘要](benchmarks/translation-correction-v4-summary.json)。以下日期条目保留历史状态，不能代替当前结论。
+
 权威命题是：概率性 Reasoning 只提出 Candidate Plan；Contract、Evidence、Guard、Risk 和 Transaction 决定是否允许 Effect；不合格转换安全停机，不能回退原生写。
 
 ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesis_supported`，但不再被解释为 L1→L0 高泛化证明。只有转译器先在冻结后采集的跨 Skill/仓库/领域未知集合上通过门禁，L0→Runtime 的规模化安全、稳定和准确性评测才具有研究意义。
@@ -181,7 +278,27 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 
 ## English
 
+**2026-09-07 C1 read-path wiring complete:** the approved scope requires actual minimal business-flow execution as well as proposals. Added scalar data references, deterministic equality branches, acyclic/reachability/dominance checks and distinct unknown/error stops. Exact host flow/request consent and existing read-contract access checks govern real local reads. Campus performed two reads; IDC performed one then stopped at needs_l1; inventory bytes unchanged, zero model calls/writes. Thirty-three new regressions and **885 tests + 81 subtests** passed (86.49 s), with targeted Ruff/diff and report-digest checks. C2 still needs branch evidence/flow identity bound to PreparedPlan and revalidated before original Effect/approval/verification/compensation. C3 still needs 9B whole-flow generation and source fidelity review; the twelve public Skills remain not_run for whole translation. C1 is a stage-commit checkpoint, not complete phase C or production readiness. See [flow scope](L0-BUSINESS-FLOW.md) and [local report](benchmarks/read-flow-local-summary.json).
+
+**2026-09-07 C intake complete, translation still open:** selected 12 known-development Skills from 11 repositories covering 10 annotated structures. Eight domain labels are inherited, not independently validated generalization evidence. Each entry retains source quotes/offsets/digests, environment dependencies and single-read limits; reviewer is the current non-independent assistant. Eighteen new regressions and **852 tests + 81 subtests** passed (85.87 s), plus targeted Ruff/diff checks. No complete host tool-environment bundle was supplied, so all outcomes are `not_run`, not zero translation accuracy or invalid Skills. No model, Runtime or third-party-code execution occurred. The design checkpoint recommends host tool-context binding plus whole-Skill mixed-flow proposals, preserving L0/L1/missing/unsupported step boundaries and reusing existing compilers. Large Runtime A/B remains paused. See [pilot and proposed next scope](TRANSLATION-BOUNDARY-PILOT.md) and [report](benchmarks/translation-boundary-pilot.json). Entries below retain their historical next steps rather than superseding this current status.
+
+**2026-09-07 B2 assisted single-operation closure:** added parent-bound question-resolution sidecars with exact question/quote offsets and renewed full review. The child only resolves questions; operation/schema/access fields and the original model answer remain unchanged. After the current assistant's non-independent review of 23 base/answer claims, an explicit host authorization performed one real local inventory read (campus-sw1/campus/planned-lab), with unchanged file content and no new 9B call/global activation. Missing host approval, old-review reuse, another device's scope and a negated command were denied with zero provider calls. Sixteen new regressions, 62 related tests and **834 tests + 81 subtests** passed (86.33 s), plus Ruff/diff and evidence replay checks. Next is an 8–12-Skill heterogeneous known-development pilot, reporting raw vs assisted outcomes separately. Autonomous translation, whole-Skill/DSH loops and unseen generalization remain unproven. See [usage](L0-READ-CONTRACTS.md) and [evidence summary](benchmarks/read-local-resolution-summary.json); historical blocked results remain intact.
+
+**2026-09-07 B2 forward/local wiring:** added a new inventory L1 Skill, auditable fixed-file reader and explicit host-bound read execution reusing `ObservationPolicy`. Contract/schema/capability/sensitivity and role/capability/object scopes are checked; implicit-system/wildcard shortcuts are rejected. No production identity or global activation claim. Two 9B HTTP 400 attempts were retained (first error body missing); grammar diagnostics led to simpler decoder hints with unchanged output validation. The third request generated in 10.80 s (547/115 tokens) with correct tool/purpose but two unresolved questions. The current assistant supported 21 source declarations; the proposal remains blocked with zero executions. Separate local wiring tests read actual experimental inventory and verify denials/filtering; they are not model execution evidence. Thirty-two new tests, 86 related tests and **818 tests + 81 subtests** passed (84.87 s), with Ruff/diff checks. Next: evidence-backed question resolution, explicit revision lineage and fresh review; arbitrary-prose intent, DSH loops and unseen-Skill generalization remain open. See [usage](L0-READ-CONTRACTS.md) and [summary](benchmarks/read-local-forward-summary.json).
+
+**2026-09-07 B2b review subchain implemented:** `ReadL05Proposal` maps purpose/operation fields into existing inactive read contracts. An exhaustive source checklist binds L0.5/L0 pointers and source spans/digests using the existing assessment protocol. Missing/incorrect citations, contradictions, insufficient evidence and unresolved questions block promotion; supported candidates remain unauthorized. Local scaffold/review-input/assess commands refuse overwrites. The scaffold is explicitly a reverse editing template, not forward translation evidence. The current assistant's visible-context AI simulation found 10 supported declarations and 2 evidence gaps among 12 claims, plus one unresolved question; outcome blocked, zero promoted contracts/executions. Fourteen new regressions, 70 related tests and **786 tests + 81 subtests** passed (84.86 s), with targeted Ruff/diff checks. Genuine/auditable adapter evidence, forward L1→L0.5 proposals, request semantics and authorized reads remain open. See [read contracts](L0-READ-CONTRACTS.md) and the [diagnostic summary](benchmarks/read-l05-b2b-summary.json).
+
+**2026-09-07 B2a implemented:** the existing L0 v2 models/compiler/catalog/CLI now support inactive `AtomicRead` / `CompiledAtomicRead` with zero, optional or required scalar inputs. Source text/digests and tool/adapter/schema/access declarations are cross-checked, without claiming authenticated origin or semantic correctness. Typed request drafts are instantiated separately; result checks validate shape only. Write gates remain unchanged; effect lookup, Saga and effect L0.5 promotion do not admit reads. Forty new regressions, 76 related tests and the full **772 tests + 81 subtests** passed (85.20 s), with targeted Ruff/diff and local CLI/Python checks. The example is a new hand-authored synthetic fixture, not LLM or generalization evidence; prior sealed artifacts remain unchanged. B2b read-L0.5 source/semantic review, genuine interface evidence and authorized execution remain open. See [read contracts](L0-READ-CONTRACTS.md).
+
+**2026-09-07 A/B1 review:** corrected escaped-string reconstruction and acceptance of numeric overflow as Infinity. Added 20 literal-boundary regressions covering invalid escapes, decoded placeholders, non-finite fixtures and source JSON constants/exponent overflow. All 63 related tests and **732 tests + 81 subtests** passed (81.96 s); targeted Ruff and diff checks passed. The original B1 9B artifact verifies read-only with implementation drift explicitly reported; its one task still needs semantic review. No historical evidence was rewritten and no model/Runtime run was added. B2 remains open: extend the existing L0 type/compiler system for explicit read contracts before source-bound reusable compilation and request instantiation. Existing effect contracts cannot honestly represent the zero-input read fixture; write approval/observation gates were not weakened. See the [correction plan](TRANSLATION-CORRECTION-PLAN.md). Literal integrity is not semantic accuracy or generalization evidence.
+
 ### Current phase
+
+**2026-09-07 B1 implemented:** pinned source-tool Schema review now precedes deterministic slot applicability, while 9B outputs only task prose. Unknown/unsupported contracts make zero model calls. Actual inputs and per-call checkpoints are sealed; completed reentry is read-only. Sixteen new regressions were added; 43 related tests and the full **712 tests + 81 subtests** passed. A real 9B call on an explicitly synthetic contract/review fixture took 5.93 seconds and returned only `health_snapshot`; it remains `needs_task_semantic_review`, not an accepted business task, Gold or generalization evidence. B2 reusable L0 compilation/request instantiation and real interface evidence remain open. See [contract-first authoring](CONTRACT-FIRST-TASKS.md).
+
+**2026-09-07: correction A implemented.** Translator v2.1 excludes scoring metadata and requires named ownership/conflict checks. Author v4 supports zero/optional inputs and explicit N/A slots; Catalog v2 no longer invents transaction tools. Targeted regression passed 116 tests; after restoring the local `.venv` link, the full suite passed **696 tests + 81 subtests** (the first run had 19 missing-interpreter environment failures).
+
+A real 9B doc-ingest probe used two calls / 234.1 seconds. It identified zero arguments but still generated a missing-input task and attached N/A to the wrong slot; it was rejected, producing zero review packets and no executable L0. Artifact integrity verified. Historical development-04/06/07 and construct-v3-object-storage revalidate; four older roots have pre-existing rule drift also reproduced at the unmodified HEAD. No historical labels/artifacts were rewritten. Next: source-backed contracts before task generation, deterministic applicability, reusable-contract compilation and separate request instantiation. See the [plan](TRANSLATION-CORRECTION-PLAN.md) and [diagnostic summary](benchmarks/translation-correction-v4-summary.json). Dated entries below are historical, not current acceptance claims.
 
 **Active phase: L1-to-L0 translation generalization gate.** ES-P0 Runtime mechanics and small-sample wiring remain `local_hypothesis_supported`, but they are not broad translation evidence. No scaled Runtime study is meaningful until the Translator passes post-freeze, cross-Skill, cross-repository, and cross-domain unseen cohorts.
 

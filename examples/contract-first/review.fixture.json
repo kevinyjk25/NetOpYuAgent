@@ -1,0 +1,31 @@
+{
+  "reviewer_id": "synthetic-fixture-not-independent-review",
+  "reviewer_kind": "test_fixture",
+  "assessment": {
+    "input_digest": "sha256:0dbb5254097f7a76aecca9d609de7c95b715ab83ecfa7110fdf33c7064e531ef",
+    "claims": [
+      {
+        "claim_id": "claim-0001",
+        "verdict": "supported",
+        "source_span_ids": ["skill-0001", "tool-0001"],
+        "rationale": "Synthetic integration fixture: both pinned texts explicitly name health_snapshot. This is not independent semantic evidence.",
+        "suggested_revision": ""
+      },
+      {
+        "claim_id": "claim-0002",
+        "verdict": "supported",
+        "source_span_ids": ["skill-0001", "tool-0001"],
+        "rationale": "Synthetic integration fixture: both texts declare observation without mutations. No real provider qualification is asserted.",
+        "suggested_revision": ""
+      },
+      {
+        "claim_id": "claim-0003",
+        "verdict": "supported",
+        "source_span_ids": ["tool-0001"],
+        "rationale": "The pinned synthetic tool Schema explicitly has no properties and no required parameters.",
+        "suggested_revision": ""
+      }
+    ],
+    "scope_note": "Synthetic protocol integration example only, not a public Skill sample, independent review, Gold, translation score or Runtime authority."
+  }
+}

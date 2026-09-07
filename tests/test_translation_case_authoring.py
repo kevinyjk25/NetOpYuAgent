@@ -321,7 +321,7 @@ def test_identical_challenge_prompts_are_rejected() -> None:
     assert any(item.startswith("duplicate_task_prompt:") for item in result["failures"])
 
 
-def test_write_catalog_is_semantic_and_transaction_closed() -> None:
+def test_write_catalog_does_not_fabricate_transaction_capabilities() -> None:
     operation = OperationFamily(
         slug="incident_status",
         summary="Update one incident status after validating its current state.",
@@ -345,7 +345,9 @@ def test_write_catalog_is_semantic_and_transaction_closed() -> None:
     )
     catalog = materialize_tool_catalog("development-01-001", operation)
     capabilities = validate_translation_tool_catalog(catalog)
-    assert [item["phase"] for item in capabilities] == [
+    assert [item["phase"] for item in capabilities] == ["effect"]
+    legacy = materialize_tool_catalog("development-01-001", operation, legacy=True)
+    assert [item["phase"] for item in validate_translation_tool_catalog(legacy)] == [
         "observe", "effect", "verify", "compensate",
     ]
     assert all("incident status" in item["description"] for item in capabilities)

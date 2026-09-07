@@ -28,6 +28,14 @@ flowchart TB
 
 ### 当前研究门禁
 
+2026-09-07：正在推进[转译纠偏与闭环](docs/TRANSLATION-CORRECTION-PLAN.md)。已移除转译输入中的评测元数据，强化字段归属/冲突绑定，并支持无参、可选参数和缺参任务“不适用”；不再自动补造验证/回滚工具。这是基础修正，不是新的泛化成绩，完整 Skill 合同编译闭环仍在建设。
+
+B1 已提供[合同优先任务构造接口与本地样例](docs/CONTRACT-FIRST-TASKS.md)：先审查源工具 Schema，再由代码确定适用槽位，9B 只写请求文本。其输出仍须语义审查，不自动成为 Gold 或 L0。
+
+B2 已闭合单操作辅助读取；C 已盘点 12 个公开 Skill，尚未运行转译，不能计为准确率。环境依赖、整流程缺口与下一步范围见[异质 Skill 小批报告](docs/TRANSLATION-BOUNDARY-PILOT.md)。
+
+[最小业务流程 C1](docs/L0-BUSINESS-FLOW.md)已实际接通只读条件分支和步骤输出引用；写前分支证据绑定与整流程正向转译仍待完成。
+
 项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
 
 当前静态开发库包含 100 个公开 Skill、72 个仓库、9 个领域：53 个 Runtime 包门禁通过，18 个是标准格式但引用上下文不完整的“仅转译”样本，29 个非标准格式只用于鲁棒性测试。主要转译语料为 71 个 Skill/7 个开发批次；它们已经可见，所以不冒充 unseen 证明。只有冻结 Translator 后，在至少 3 个互不重叠的未知 cohort 上累计达到 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case，并同时通过安全、召回、macro-F1、参数和证据门槛，才允许大规模 Runtime A/B。完整口径、命令和指标见 [L1→L0 泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)。
@@ -236,6 +244,14 @@ EnsuredSkill is a network-first Reliability Runtime research prototype. DSH, the
 The [authoritative prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes conflicting production-engineering plans. Enterprise identity, provider supply chain, multi-team governance, Hermes/A2A productization, HA/DR, WORM audit, and production SLOs are frozen future work rather than current architecture or exit criteria.
 
 ### Design
+
+The [translation correction plan](docs/TRANSLATION-CORRECTION-PLAN.md), updated 2026-09-07, removes scoring metadata from translator inputs, enforces named parameter ownership/conflict checks, supports zero/optional inputs and explicit not-applicable slots, and stops synthesizing transaction tools. These are foundational corrections, not new generalization results; whole-Skill contract compilation remains in progress.
+
+B1 adds a [contract-first task-authoring interface and local example](docs/CONTRACT-FIRST-TASKS.md): source Schema review precedes deterministic applicability; 9B writes only task prose. Outputs still require semantic review and are not Gold or L0.
+
+B2 closes one assisted read; C has completed intake for 12 public Skills, not translation or accuracy measurement. See the [heterogeneous Skill pilot](docs/TRANSLATION-BOUNDARY-PILOT.md) for environment dependencies, whole-flow gaps and proposed next scope.
+
+[Business-flow C1](docs/L0-BUSINESS-FLOW.md) runs real read branches and step-output references. Write-time branch evidence binding and whole-flow forward translation remain open.
 
 The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
 
