@@ -34,7 +34,9 @@ B1 已提供[合同优先任务构造接口与本地样例](docs/CONTRACT-FIRST-
 
 B2 已闭合单操作辅助读取；C 已盘点 12 个公开 Skill，尚未运行转译，不能计为准确率。环境依赖、整流程缺口与下一步范围见[异质 Skill 小批报告](docs/TRANSLATION-BOUNDARY-PILOT.md)。
 
-[最小业务流程 C1/C2](docs/L0-BUSINESS-FLOW.md)已接通只读条件/数据依赖，以及分支证据绑定、写前重读和原单写事务验证/补偿；本地接线使用 mock 写入，整流程 9B 正向转译仍待完成。
+[最小业务流程 C1/C2](docs/L0-BUSINESS-FLOW.md)已接通只读条件/数据依赖，以及分支证据绑定、写前重读和原单写事务验证/补偿；本地接线使用 mock 写入，公开 Skill 整流程泛化仍待验证。
+
+[C3 首次正向实验](docs/FLOW-FORWARD-TRANSLATION.md)已跑真实 9B：前两次结构阻断，第三次结构通过但语义审查阻断；两处有源说明文字修订后才完成本地读取。辅助闭环已接通，无辅助稳定性和公开 Skill 泛化尚未证明。
 
 项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
 
@@ -251,7 +253,9 @@ B1 adds a [contract-first task-authoring interface and local example](docs/CONTR
 
 B2 closes one assisted read; C has completed intake for 12 public Skills, not translation or accuracy measurement. See the [heterogeneous Skill pilot](docs/TRANSLATION-BOUNDARY-PILOT.md) for environment dependencies, whole-flow gaps and proposed next scope.
 
-[Business-flow C1/C2](docs/L0-BUSINESS-FLOW.md) runs read branches/data references, plan-bound evidence, pre-write rereads and the original single-Effect verification/recovery path. Local writes are mock; whole-flow 9B forward translation remains open.
+[Business-flow C1/C2](docs/L0-BUSINESS-FLOW.md) runs read branches/data references, plan-bound evidence, pre-write rereads and the original single-Effect verification/recovery path. Local writes are mock; public whole-Skill generalization remains open.
+
+The [first C3 forward experiment](docs/FLOW-FORWARD-TRANSLATION.md) used real 9B calls: two structural rejections, then a structurally valid but semantically blocked answer. Two source-backed text edits and fresh review enabled local reads. Assisted closure is demonstrated; unaided reliability and public-Skill generalization are not.
 
 The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
 

@@ -31,6 +31,7 @@
 | 无参/可选参数的只读操作如何编译为未激活 L0 | [只读 L0 合同](L0-READ-CONTRACTS.md) |
 | 公开 Skill 小批缺什么，为什么不能直接套单次读取 | [异质 Skill 边界小批](TRANSLATION-BOUNDARY-PILOT.md) |
 | 条件分支与步骤输出引用如何实际执行，写路径还缺什么 | [最小业务流程](L0-BUSINESS-FLOW.md) |
+| 9B 能否正向生成整个流程，原始失败与辅助修订如何区分 | [整流程正向转译实验](FLOW-FORWARD-TRANSLATION.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -125,6 +126,7 @@
 | How are zero/optional-input reads compiled into inactive L0 contracts? | [Read-only L0 contracts](L0-READ-CONTRACTS.md) |
 | What prevents heterogeneous public Skills from using a single-read path? | [Skill boundary pilot](TRANSLATION-BOUNDARY-PILOT.md) |
 | How do branches and step-output references run, and what remains for writes? | [Minimal business flow](L0-BUSINESS-FLOW.md) |
+| What did 9B whole-flow generation achieve unaided versus with revision? | [Forward flow experiment](FLOW-FORWARD-TRANSLATION.md) |
 | How do I run a demo or integrate my systems? | [Usage and integration](getting-started-integration.md) |
 
 ### Topic index

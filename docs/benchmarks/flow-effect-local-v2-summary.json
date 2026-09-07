@@ -1,0 +1,540 @@
+{
+  "evidenceRole": "synthetic_local_wiring_not_translation",
+  "modelCalls": 0,
+  "networkBackend": "mock",
+  "sourceReads": "actual temporary local inventory file",
+  "outcomes": [
+    {
+      "case": "success",
+      "state": "verified_success",
+      "ok": true,
+      "planHash": "sha256:b5d3541eeea41d7c7345661a44e648d24b6a35c863abb4bfe8a2efaf66edbb9c",
+      "flowBinding": {
+        "gate_id": "local",
+        "flow_digest": "sha256:e7b9b96201dcb60fff17cbc22b02514fec61ae74dad637c521dd3a43015dc4fd",
+        "arguments_digest": "sha256:f8a7536893f82faadd4a60a0fdfbe596602473026ad745768145b510eeeca9ba",
+        "context_digest": "sha256:76e31e2c68ca0fbc9eafaefaa5ce170478d75c048ad6b0f87e4a28f9628a7a23",
+        "decision": {
+          "candidate": {
+            "target": {
+              "profile": "lan",
+              "tool": "grant_user_access",
+              "skill_id": "network.lan.user-access.grant",
+              "contract_hash": "sha256:98206a9defa6e464800205dbf375abd5faf0bce9718e24cea392156a607efa68",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "description": ""
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": ""
+                  }
+                },
+                "required": [
+                  "user_id",
+                  "reason"
+                ],
+                "additional_properties": false,
+                "description": ""
+              }
+            },
+            "arguments": {
+              "user_id": "erin",
+              "reason": "Local flow/transaction wiring test"
+            }
+          },
+          "steps": [
+            {
+              "node": "lookup",
+              "kind": "read",
+              "payload": {
+                "device_id": "campus-sw1",
+                "site": "campus",
+                "status": "planned-lab"
+              },
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+              "providerEvidence": {
+                "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+                "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+              }
+            },
+            {
+              "node": "site",
+              "kind": "branch",
+              "matched": true,
+              "source": {
+                "kind": "reference",
+                "source": "lookup",
+                "field": "site"
+              },
+              "selected": "reread"
+            },
+            {
+              "node": "reread",
+              "kind": "read",
+              "payload": {
+                "device_id": "campus-sw1",
+                "site": "campus",
+                "status": "planned-lab"
+              },
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+              "providerEvidence": {
+                "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+                "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+              }
+            },
+            {
+              "node": "done",
+              "kind": "effect_candidate"
+            }
+          ]
+        },
+        "decision_digest": "sha256:8833ea4b56d046ca302a82d37efca57e887561dadd1f124c5303fcb0e45c44e1",
+        "read_report_digest": "sha256:e73978ef49d589b96103ff78e1a3d7b6cb5877d71d988184f8ec34b6394082cc"
+      },
+      "graph": {
+        "schema": "netopyu.io/typed-graph-execution/v1",
+        "graph_digest": "sha256:ae3e369ae4f9535d059d494f8989404b4225099e968a5511fe019020d843bd9a",
+        "active_node_id": null,
+        "terminal_phase": "commit",
+        "complete": true,
+        "results": [
+          {
+            "node_id": "snapshot",
+            "phase": "snapshot",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "precheck",
+            "phase": "precheck",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "approval",
+            "phase": "awaiting_approval",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "5959bf90-702b-4f90-80fa-99b76c3fca16"
+            ]
+          },
+          {
+            "node_id": "revalidate",
+            "phase": "revalidate",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "execute",
+            "phase": "execute",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "sha256:947ce47c06b7626ded75983e24be96d1dc2bb27fbf8114016ffe6efc0f48387b"
+            ]
+          },
+          {
+            "node_id": "verify",
+            "phase": "verify",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "postcondition:0:sha256:2518fcbb5deda3bb6b7206cf4967016ae026b8ebbf7e329cfdc4c3ff359f6b42"
+            ]
+          },
+          {
+            "node_id": "commit",
+            "phase": "commit",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "postcondition:0:sha256:2518fcbb5deda3bb6b7206cf4967016ae026b8ebbf7e329cfdc4c3ff359f6b42"
+            ]
+          }
+        ],
+        "claim_boundary": "Graph conformance proves scheduled control flow, not external-state truth."
+      },
+      "mockChanges": [
+        {
+          "user_id": "erin",
+          "op": "grant",
+          "changes": {
+            "radius": "pass",
+            "dot1x": "authorized",
+            "nac": "compliant",
+            "vlan": 20
+          },
+          "reason": "Local flow/transaction wiring test"
+        }
+      ]
+    },
+    {
+      "case": "branch_drift",
+      "state": "precondition_changed",
+      "ok": false,
+      "planHash": "sha256:bda2d59faeaf65ed3e10f13b8ce290f1d16557145e021be8e3433a37e51ccd6e",
+      "flowBinding": {
+        "gate_id": "local",
+        "flow_digest": "sha256:e7b9b96201dcb60fff17cbc22b02514fec61ae74dad637c521dd3a43015dc4fd",
+        "arguments_digest": "sha256:f8a7536893f82faadd4a60a0fdfbe596602473026ad745768145b510eeeca9ba",
+        "context_digest": "sha256:76e31e2c68ca0fbc9eafaefaa5ce170478d75c048ad6b0f87e4a28f9628a7a23",
+        "decision": {
+          "candidate": {
+            "target": {
+              "profile": "lan",
+              "tool": "grant_user_access",
+              "skill_id": "network.lan.user-access.grant",
+              "contract_hash": "sha256:98206a9defa6e464800205dbf375abd5faf0bce9718e24cea392156a607efa68",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "description": ""
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": ""
+                  }
+                },
+                "required": [
+                  "user_id",
+                  "reason"
+                ],
+                "additional_properties": false,
+                "description": ""
+              }
+            },
+            "arguments": {
+              "user_id": "erin",
+              "reason": "Local flow/transaction wiring test"
+            }
+          },
+          "steps": [
+            {
+              "node": "lookup",
+              "kind": "read",
+              "payload": {
+                "device_id": "campus-sw1",
+                "site": "campus",
+                "status": "planned-lab"
+              },
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+              "providerEvidence": {
+                "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+                "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+              }
+            },
+            {
+              "node": "site",
+              "kind": "branch",
+              "matched": true,
+              "source": {
+                "kind": "reference",
+                "source": "lookup",
+                "field": "site"
+              },
+              "selected": "reread"
+            },
+            {
+              "node": "reread",
+              "kind": "read",
+              "payload": {
+                "device_id": "campus-sw1",
+                "site": "campus",
+                "status": "planned-lab"
+              },
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+              "providerEvidence": {
+                "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+                "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+              }
+            },
+            {
+              "node": "done",
+              "kind": "effect_candidate"
+            }
+          ]
+        },
+        "decision_digest": "sha256:8833ea4b56d046ca302a82d37efca57e887561dadd1f124c5303fcb0e45c44e1",
+        "read_report_digest": "sha256:e73978ef49d589b96103ff78e1a3d7b6cb5877d71d988184f8ec34b6394082cc"
+      },
+      "graph": {
+        "schema": "netopyu.io/typed-graph-execution/v1",
+        "graph_digest": "sha256:ae3e369ae4f9535d059d494f8989404b4225099e968a5511fe019020d843bd9a",
+        "active_node_id": null,
+        "terminal_phase": "abort",
+        "complete": true,
+        "results": [
+          {
+            "node_id": "snapshot",
+            "phase": "snapshot",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "precheck",
+            "phase": "precheck",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "approval",
+            "phase": "awaiting_approval",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "5cc27006-fd94-4515-b16d-c995dbbc5e5a"
+            ]
+          },
+          {
+            "node_id": "revalidate",
+            "phase": "revalidate",
+            "outcome": "failed",
+            "evidence_ids": []
+          },
+          {
+            "node_id": "abort",
+            "phase": "abort",
+            "outcome": "succeeded",
+            "evidence_ids": []
+          }
+        ],
+        "claim_boundary": "Graph conformance proves scheduled control flow, not external-state truth."
+      },
+      "mockChanges": []
+    },
+    {
+      "case": "rollback",
+      "state": "rollback_verified",
+      "ok": false,
+      "planHash": "sha256:3ff2084f3e99a81bbaa45e7e5ba1378823105fe95ec0e003dcd3bede34b8fe1c",
+      "flowBinding": {
+        "gate_id": "local",
+        "flow_digest": "sha256:e7b9b96201dcb60fff17cbc22b02514fec61ae74dad637c521dd3a43015dc4fd",
+        "arguments_digest": "sha256:f8a7536893f82faadd4a60a0fdfbe596602473026ad745768145b510eeeca9ba",
+        "context_digest": "sha256:76e31e2c68ca0fbc9eafaefaa5ce170478d75c048ad6b0f87e4a28f9628a7a23",
+        "decision": {
+          "candidate": {
+            "target": {
+              "profile": "lan",
+              "tool": "grant_user_access",
+              "skill_id": "network.lan.user-access.grant",
+              "contract_hash": "sha256:98206a9defa6e464800205dbf375abd5faf0bce9718e24cea392156a607efa68",
+              "input_schema": {
+                "type": "object",
+                "properties": {
+                  "user_id": {
+                    "type": "string",
+                    "description": ""
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": ""
+                  }
+                },
+                "required": [
+                  "user_id",
+                  "reason"
+                ],
+                "additional_properties": false,
+                "description": ""
+              }
+            },
+            "arguments": {
+              "user_id": "erin",
+              "reason": "Local flow/transaction wiring test"
+            }
+          },
+          "steps": [
+            {
+              "node": "lookup",
+              "kind": "read",
+              "payload": {
+                "device_id": "campus-sw1",
+                "site": "campus",
+                "status": "planned-lab"
+              },
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+              "providerEvidence": {
+                "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+                "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+              }
+            },
+            {
+              "node": "site",
+              "kind": "branch",
+              "matched": true,
+              "source": {
+                "kind": "reference",
+                "source": "lookup",
+                "field": "site"
+              },
+              "selected": "reread"
+            },
+            {
+              "node": "reread",
+              "kind": "read",
+              "payload": {
+                "device_id": "campus-sw1",
+                "site": "campus",
+                "status": "planned-lab"
+              },
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+              "providerEvidence": {
+                "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+                "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+              }
+            },
+            {
+              "node": "done",
+              "kind": "effect_candidate"
+            }
+          ]
+        },
+        "decision_digest": "sha256:8833ea4b56d046ca302a82d37efca57e887561dadd1f124c5303fcb0e45c44e1",
+        "read_report_digest": "sha256:e73978ef49d589b96103ff78e1a3d7b6cb5877d71d988184f8ec34b6394082cc"
+      },
+      "graph": {
+        "schema": "netopyu.io/typed-graph-execution/v1",
+        "graph_digest": "sha256:ae3e369ae4f9535d059d494f8989404b4225099e968a5511fe019020d843bd9a",
+        "active_node_id": null,
+        "terminal_phase": "abort",
+        "complete": true,
+        "results": [
+          {
+            "node_id": "snapshot",
+            "phase": "snapshot",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "precheck",
+            "phase": "precheck",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "approval",
+            "phase": "awaiting_approval",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "91952823-4945-43bd-be86-0cddc9c2f63e"
+            ]
+          },
+          {
+            "node_id": "revalidate",
+            "phase": "revalidate",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "preflight:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "execute",
+            "phase": "execute",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "sha256:e22b6169de44fd58a01b591debba30e7ce7b0d9cf52d412f2b5043281efc6fdc"
+            ]
+          },
+          {
+            "node_id": "verify",
+            "phase": "verify",
+            "outcome": "failed",
+            "evidence_ids": [
+              "postcondition:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c"
+            ]
+          },
+          {
+            "node_id": "compensate",
+            "phase": "compensate",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "sha256:e75ecb40282da555fe916c799e15a8c1ea268781cb526d5a351ca6609e47a8d4",
+              "sha256:f3cb111e4058557c49a62b1ab7149a481bdcf23769eb110eadac66d2c6fd749f"
+            ]
+          },
+          {
+            "node_id": "verify_recovery",
+            "phase": "verify_recovery",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "postcondition:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c",
+              "sha256:e75ecb40282da555fe916c799e15a8c1ea268781cb526d5a351ca6609e47a8d4",
+              "sha256:f3cb111e4058557c49a62b1ab7149a481bdcf23769eb110eadac66d2c6fd749f"
+            ]
+          },
+          {
+            "node_id": "abort",
+            "phase": "abort",
+            "outcome": "succeeded",
+            "evidence_ids": [
+              "postcondition:0:sha256:347c84c3f164a6442ca43eb73e82a02afe9fbe362a6d7cf36b5eecc00603543c",
+              "sha256:e75ecb40282da555fe916c799e15a8c1ea268781cb526d5a351ca6609e47a8d4",
+              "sha256:f3cb111e4058557c49a62b1ab7149a481bdcf23769eb110eadac66d2c6fd749f"
+            ]
+          }
+        ],
+        "claim_boundary": "Graph conformance proves scheduled control flow, not external-state truth."
+      },
+      "mockChanges": [
+        {
+          "user_id": "erin",
+          "op": "grant",
+          "changes": {
+            "radius": "pass",
+            "dot1x": "authorized",
+            "nac": "compliant",
+            "vlan": 20
+          },
+          "reason": "Local flow/transaction wiring test"
+        },
+        {
+          "user_id": "erin",
+          "op": "fault",
+          "changes": {
+            "radius": "fail",
+            "dot1x": "rejected",
+            "nac": "quarantine",
+            "vlan": null
+          },
+          "reason": "isolated verification failure"
+        },
+        {
+          "user_id": "erin",
+          "op": "revoke",
+          "changes": {
+            "radius": "fail",
+            "dot1x": "rejected",
+            "nac": "quarantine",
+            "vlan": null
+          },
+          "reason": "automatic rollback of network runtime plan 36daeec3-d689-4cbe-9475-e2eb6d1b431b"
+        }
+      ]
+    }
+  ],
+  "productionCorrectnessProven": false,
+  "reportDigest": "sha256:4c54d4cc78c7635fbe03e2c68c5472873292c9f673b3f257ccbdd0ee0292f123"
+}

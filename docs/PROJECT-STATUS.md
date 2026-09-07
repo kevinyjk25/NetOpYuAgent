@@ -6,6 +6,19 @@
 
 **当前主阶段：L1→L0 转译泛化门禁。**
 
+#### 2026-09-07 C3a：真实 9B 正向流程与辅助语义修订闭环
+
+- [x] 输入源文＋宿主工具合同，不提供手工参考图；9B 生成步骤、条件、参数引用及终态。编译器只绑定工具合同和宿主规则，不替模型补步骤。
+- [x] 三次开发调用：命名节点协议两次结构阻断；序号协议由编译器生成 ID 后结构通过，但用途元任务化、needs_l1/blocked 解释混淆被审查拦下。原始回答不改写，三个原始版本均未执行。
+- [x] 双向检查覆盖源要求和输出节点/条件/参数。第三次 32 项审查中 24 supported、5 contradicted、3 insufficient_evidence；8 项发现交叉覆盖两个解释性根因，不是准确率。
+- [x] 独立 sidecar 保存父提案/源摘要、两处说明旧值/新值及引文，禁止更改图、参数、分支和问题。当前助手重新审查后，辅助版本实际完成 3 次本地文件读取：园区 read_path_completed，IDC needs_l1；0 写入，未接 DSH Agent 循环。
+- [x] 新增 **34 项回归**；全量 **944 tests + 81 subtests** 通过（86.91 秒），定向 Ruff 与 diff 校验通过。两次结构失败、原始语义阻断及修订结果分别保存。
+- [ ] C3b：冻结通用序号协议，扩充异质已知开发流程及源合同；区分原始/辅助结果、语义错误、环境缺失和 unsupported。12 个公开 Skill 的完整流程转译仍 not_run，规模化 Runtime A/B 不恢复。
+
+这是 **1 个已知本地流程、3 个不同开发协议、同一助手修订/审查**，不是独立人工或泛化证据；合计模型响应 148.80 秒、2,535/1,348 输入/输出 token，不把辅助通过算成无辅助成功率。见[实验与用法](FLOW-FORWARD-TRANSLATION.md)、[可重算摘要](benchmarks/flow-forward-9b-summary.json)。
+
+提交核查：本次按用户要求将 `acf0afb` 后的 C2 新模块、回归与报告和 C3a 正向转译闭环一并纳入本地 `dev` 阶段提交；不推送远端，不修改无关文件。原始大体积实验制品保留在本地 `artifacts/`，Git 保存带摘要的报告，二者不应混淆为完整可移植原始证据包。
+
 #### 2026-09-07 C2：本地分支证据绑定与单写事务闭环完成
 
 - [x] 在用户提交 `955bc92` 后继续实现；未修改旧基线或提交记录。新增 HostFlowGate，实际读取求值，不信任外部提交的“分支通过”报告。
@@ -288,6 +301,8 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 详细原则、指标 Gate、角色边界和任务模板见[后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md)。
 
 ## English
+
+**2026-09-07 C3a assisted forward-flow closure:** real 9B received source prose/host contracts, not an answer graph. Two named-node development calls failed structure; compiler-owned indexed identities enabled structural qualification on call three, but source review blocked a meta-task purpose and needs_l1/blocked explanation mismatch. All original answers remain unexecuted. The 32-claim review recorded 24 supported, five contradicted and three insufficient-evidence judgments, overlapping two explanation-level roots. A parent/source-bound sidecar revised only two text leaves; fresh same-assistant review enabled three real local reads (campus read_path_completed; IDC needs_l1), with zero writes or DSH loop. Thirty-four new regressions and **944 tests + 81 subtests** passed (86.91 s), plus targeted Ruff/diff checks. This is one known flow and three different development protocols (148.80 s, 2,535/1,348 tokens), not autonomous accuracy or independent generalization evidence. C3b must freeze the protocol and expand heterogeneous development examples; twelve public Skills remain not_run and large Runtime A/B remains paused. See [experiment](FLOW-FORWARD-TRANSLATION.md) and [summary](benchmarks/flow-forward-9b-summary.json). After commit `acf0afb`, several C2 dependencies remain untracked, including flow_admission.py, the Effect demo/tests and reports; include them in the next stage commit. No commit/push was performed here; unrelated user data is untouched.
 
 **2026-09-07 C2 local single-Effect closure:** implemented after user commit `955bc92`. HostFlowGate reruns reads rather than trusting submitted reports. Flow-bound schema-11 plans hash contracts/context/path/facts/provenance/target arguments; standalone schema-10 compatibility remains. Configured instances reject omitted gates and old unbound plans. Restart requires the same host gate. Reads are repeated after approval and again at final dispatch; drift, missing context, access denial and expired read budgets prevent Effect. Existing approval, nonce, verification and recovery are retained. Three local cases reached verified_success, zero-mutation precondition_changed and rollback_verified. Reads use actual temporary files; writes use the LAN mock; no LLM or real-device calls. Twenty-five new regressions and **910 tests + 81 subtests** passed (86.03 s), with targeted Ruff/diff checks. C3 whole-flow 9B generation/source review remains open; twelve public Skills remain not_run. This is a hand-authored local prototype, not source-freshness/atomicity/production proof. Full-payload comparison may over-stop and a final read/write TOCTOU gap remains. See [design](L0-BUSINESS-FLOW.md) and [final report](benchmarks/flow-effect-local-v2-summary.json).
 
