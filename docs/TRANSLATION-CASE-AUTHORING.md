@@ -39,15 +39,15 @@
 
 新增[源证据逐项审查](TRANSLATION-SOURCE-ALIGNMENT.md)，区分每个参数的名称、类型、必填性及工具阶段的真实来源。当前 `inspect_alignment_review` 将旧布尔满分降为 `candidateSetReadyForSourceEvidenceReview`，不再直接提供 Gold 排队资格。密封的旧评分报告及历史 `review-inspect` 字段保留供重放，不具备新的准入权。
 
-当前作者协议为 `translation-anchored-author/v3`。它**不再自动追加参数**；候选按实际参数类型与值检查，不同于 `example_value` 的合法值不能被判成缺参。正常任务中的显式冲突、未求值占位符及无源支持的评测元任务会被拦截。结果只标记为显式参数夹具；任意自然语言冲突、真实 API Schema 与完整步骤覆盖仍未证明。详见[构造质量 v3](TRANSLATION-CONSTRUCT-QUALITY.md)。历史 v1/v2 报告按原规则只读校验，不被新规则覆盖。
+当前作者协议为 `translation-anchored-author/v4`。它保留 v3 不追加参数、类型化证据、显式冲突和元任务拦截，并支持零参数、逐项 required 与缺参任务 N/A。历史制品不改写；旧版本内已有的校验规则漂移单独记录，不静默重新评分。完整修正、真实 9B 拒绝案例和后续闭环见[纠偏计划](TRANSLATION-CORRECTION-PLAN.md)及[项目进展](PROJECT-STATUS.md)。
 
-`evaluation/translation_case_authoring.py` 对 71 个已知开发 Skill 按 7 个仓库聚合批次工作。每个 Skill 生成一个窄操作族和三类任务：正常、缺参追问、越界/恶意拒绝。每个候选必须满足：
+`evaluation/translation_case_authoring.py` 对 71 个已知开发 Skill 按 7 个仓库聚合批次工作。每个 Skill 提议一个窄操作族；正常和越界/恶意任务保留，无必填参数时缺参槽位必须标记不适用，不算有效测试。每个候选必须满足：
 
 - 1–4 个 `SourceAnchor` 必须逐字存在于固定 Skill/reference；
-- 参数名、类型和示例值进入封闭 JSON Schema，正常任务中的每个值都有显式字面证据；
+- 0–6 个标量参数、类型、必填性和示例值进入封闭 JSON Schema；必填值必须出现，可选值可缺省，提供的值仍需证据；
 - read 无 Effect；write 最多一个 Effect 且必须审批；不可逆写风险不得低于 high；
-- 通用 Tool Catalog 明确 `observe/effect/verify/compensate` 角色，但固定 `executable=false`；
-- 可逆写必须有唯一补偿；不可逆写不得伪造补偿；
+- 通用 Tool Catalog v2 只物化候选主操作，固定 `executable=false`；不再按“可逆”标签合成 observe/verify/compensate；
+- 主操作存在不代表验证或补偿接口存在，事务闭合由后续源证据和受信工具合同建立；
 - 失败候选不能进入对齐审查队列；第三方脚本始终不执行。
 
 作者规范化只进行受限的机械处理并完整记录：将 `write + none` 保守解释为 `irreversible`；把不可逆写风险抬到 high；按声明的 read/write 类型闭合审批和 Effect budget；把仅有空白、换行或大小写差异且在原文中**唯一匹配**的 quote 重绑为真实原文 span。它不再追加参数，不做编辑距离或语义模糊匹配，不能修改用户问题、read/write 意图、参数集合或处置标签，也不能把 clarify/reject 改成可执行候选；非唯一或词义变化的 anchor 继续 fail-closed。原始模型候选和显式修复版本保存在 `authoringAttempts[].modelCandidate`；引用和参数字符串匹配都不是语义证明。
@@ -139,7 +139,9 @@ scripts/netopyu-market-corpus anchored-review-run-inspect \
 
 ## English
 
-### Current author protocol: v3
+### Current author protocol: v4
+
+V4 retains v3's immutable prompts and typed construct checks, adds zero/optional parameters and explicit not-applicable missing-input slots, and materializes only the primary operation in inert Catalog v2. It never synthesizes transaction interfaces from a reversible label. See the [correction plan](TRANSLATION-CORRECTION-PLAN.md) and [current status](PROJECT-STATUS.md); dated results below remain historical diagnostics.
 
 The [source-evidence review](TRANSLATION-SOURCE-ALIGNMENT.md) adds exhaustive field/step obligations and resolved citations. Current alignment inspection only queues source review, not Gold authoring. Sealed legacy scores and historical `review-inspect` fields remain reproducible but do not satisfy the new prerequisite.
 
@@ -157,7 +159,7 @@ The same 9B artifact and development-07 source packets were re-reviewed under v2
 
 The former public-Skill study could validate wiring while pairing some real Skills with generic record tools that did not represent their documented operation. The new authoring layer precedes the Translator: pinned inert Skill → non-Gold 9B candidate → deterministic structural gate and recorded mechanical normalization → answer-hidden Skill–Task–Tool review → independent Gold → gold-blind Translator evaluation → Runtime only after generalization admission.
 
-Each candidate binds exact source quotes, scalar parameter definitions, three task challenges, and a generic non-executable Tool Catalog with explicit observe/effect/verify/compensate roles. Reversible writes require one compensation; irreversible writes cannot claim a false rollback. This generic semantic catalog is intentionally distinct from a Fixture MCP or real Provider adapter, so translation capability and current execution support can be measured separately.
+Each candidate binds exact source quotes, zero to six scalar parameters with requiredness, and applicable task challenges. The no-required-input case records the missing-input slot as N/A. Catalog v2 remains non-executable and materializes only the primary operation; transaction support requires separate source-backed contracts. This generic catalog is distinct from Fixture MCP or real Provider adapters, allowing translation and execution support to be measured separately.
 
 The first qwen3.5:9b development batch covered 12 Skills and 36 tasks. All 12 produced protocol-valid structures; six passed the deterministic author gate and produced 18 blind-review packets. After adding unique whitespace/case-only source-span rebinding and mechanical read/write safety closure, an implementation-bound rerun accepted 10/12 Skills and emitted 30 blind tasks. The two remaining failures were non-exact anchors that the non-fuzzy aligner correctly refused. Authoring p50/p95 was 67.7/193.0 seconds.
 

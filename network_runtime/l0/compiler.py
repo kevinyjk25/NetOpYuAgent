@@ -16,6 +16,7 @@ from .models import (
     APPROVAL_RANK,
     RISK_RANK,
     AtomicEffectManifest,
+    AtomicReadManifest,
     AtomicEffectSpec,
     AuthoringManifest,
     BoundCompositeStep,
@@ -132,6 +133,7 @@ def parse_document(value: dict[str, Any], *, source: str = "<memory>") -> Author
         raise L0CompileError(f"{source}: unsupported apiVersion {value.get('apiVersion')!r}")
     model = {
         "AtomicEffect": AtomicEffectManifest,
+        "AtomicRead": AtomicReadManifest,
         "DerivedEffect": DerivedEffectManifest,
         "CompositeEffect": CompositeEffectManifest,
     }.get(value.get("kind"))
@@ -428,6 +430,13 @@ def compile_documents(documents: Iterable[AuthoringManifest]) -> list[CompiledCo
         visiting.add(key)
         if isinstance(manifest, AtomicEffectManifest):
             compiled: CompiledContract = _compile_atomic(manifest)
+        elif isinstance(manifest, AtomicReadManifest):
+            from .read_contracts import compile_read
+
+            try:
+                compiled = compile_read(manifest)
+            except ValueError as error:
+                raise L0CompileError(str(error)) from error
         elif isinstance(manifest, DerivedEffectManifest):
             parent = resolve(manifest.extends.key)
             if not isinstance(parent, CompiledAtomicEffect):

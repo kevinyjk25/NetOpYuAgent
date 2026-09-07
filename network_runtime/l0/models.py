@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import re
 from typing import Any, Literal
 
@@ -375,5 +376,94 @@ class CompiledCompositeEffect(StrictModel):
     definition_hash: str = Field(alias="definitionHash")
 
 
-AuthoringManifest = AtomicEffectManifest | DerivedEffectManifest | CompositeEffectManifest
-CompiledContract = CompiledAtomicEffect | CompiledCompositeEffect
+class ReadScalarSchema(StrictModel):
+    type: Literal["string", "integer", "number", "boolean"]
+    description: str = ""
+
+
+class ReadObjectSchema(StrictModel):
+    """Explicit bounded JSON Schema subset; unsupported keywords fail closed."""
+
+    type: Literal["object"]
+    properties: dict[str, ReadScalarSchema]
+    required: tuple[str, ...]
+    additional_properties: Literal[False] = Field(alias="additionalProperties")
+    description: str = ""
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "ReadObjectSchema":
+        if len(self.properties) > 64:
+            raise ValueError("read schema supports at most 64 scalar properties")
+        if len(set(self.required)) != len(self.required) or set(self.required) - set(self.properties):
+            raise ValueError("read schema required fields must be unique declared properties")
+        if any(not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name) for name in self.properties):
+            raise ValueError("unsupported read schema property name")
+        return self
+
+
+class ReadSource(StrictModel):
+    """Pinned declared source, not authenticated provider/semantic evidence."""
+
+    role: Literal["skill", "tool", "adapter"]
+    origin: str = Field(min_length=1)
+    text: str = Field(min_length=1, max_length=64000)
+    sha256: str = Field(pattern=r"^sha256:[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def verify_digest(self) -> "ReadSource":
+        if self.sha256 != "sha256:" + hashlib.sha256(self.text.encode("utf-8")).hexdigest():
+            raise ValueError("read source digest mismatch")
+        return self
+
+
+class ReadAccessDeclaration(StrictModel):
+    required_scopes: tuple[str, ...] = Field(alias="requiredScopes", min_length=1)
+    data_classification: Literal["public", "internal", "confidential", "restricted"] = Field(
+        alias="dataClassification",
+    )
+
+    @model_validator(mode="after")
+    def validate_scopes(self) -> "ReadAccessDeclaration":
+        if any(not item.strip() for item in self.required_scopes):
+            raise ValueError("read access scopes cannot be blank")
+        if len(set(self.required_scopes)) != len(self.required_scopes):
+            raise ValueError("read access scopes must be unique")
+        return self
+
+
+class AtomicReadSpec(StrictModel):
+    capability: str = Field(min_length=1)
+    tool: str = Field(min_length=1)
+    effect: Literal["read_only"]
+    input_schema: ReadObjectSchema = Field(alias="inputSchema")
+    output_schema: ReadObjectSchema = Field(alias="outputSchema")
+    access: ReadAccessDeclaration
+    sources: tuple[ReadSource, ...]
+
+    @model_validator(mode="after")
+    def source_roles(self) -> "AtomicReadSpec":
+        if sorted(item.role for item in self.sources) != ["adapter", "skill", "tool"]:
+            raise ValueError("read contract requires exactly one skill, tool and adapter source")
+        return self
+
+
+class AtomicReadManifest(StrictModel):
+    api_version: Literal[API_VERSION] = Field(alias="apiVersion")
+    kind: Literal["AtomicRead"]
+    metadata: Metadata
+    spec: AtomicReadSpec
+
+
+class CompiledAtomicRead(StrictModel):
+    api_version: Literal[COMPILED_API_VERSION] = Field(alias="apiVersion")
+    kind: Literal["CompiledAtomicRead"]
+    metadata: Metadata
+    spec: AtomicReadSpec
+    # This compiler stage does not authenticate a provider or grant permissions.
+    runtime_authority_granted: Literal[False] = Field(default=False, alias="runtimeAuthorityGranted")
+    semantic_alignment_proven: Literal[False] = Field(default=False, alias="semanticAlignmentProven")
+    contract_hash: str = Field(alias="contractHash")
+
+
+AuthoringManifest = AtomicEffectManifest | DerivedEffectManifest | CompositeEffectManifest | AtomicReadManifest
+CompiledContract = CompiledAtomicEffect | CompiledCompositeEffect | CompiledAtomicRead

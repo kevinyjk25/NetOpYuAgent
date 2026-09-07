@@ -1,0 +1,505 @@
+{
+  "apiVersion": "effect-runtime.io/translation-boundary-intake/v1",
+  "indexDigest": "sha256:ff46b1197aefbefd53226bd3b54180fe11ab6960c00ec3a17080a9510ca8241e",
+  "pilotDigest": "sha256:dc80145ea44e9992341265579e0346c836f751d0693365e154de3f66d9b3fd84",
+  "reviewerKind": "ai_role_simulation",
+  "reviewerId": "codex-current-agent-visible-context-not-independent",
+  "evidenceRole": "known_development_intake_only",
+  "skillCount": 12,
+  "repositoryCount": 11,
+  "domainCount": 8,
+  "structureCounts": {
+    "approval": 3,
+    "conditional_branch": 9,
+    "freeform_cli": 3,
+    "multi_step": 9,
+    "no_argument_call": 1,
+    "open_ended_reasoning": 4,
+    "optional_parameters": 2,
+    "read_write_mixed": 5,
+    "references": 5,
+    "script_dependency": 1
+  },
+  "rows": [
+    {
+      "packageId": "iamds-gmbh-aimds-agent-skills-aimds-custom-doc-ingest-analyze-skill-md-b3cc45540e",
+      "name": "doc-ingest-analyze",
+      "repository": "iamds-gmbh/aimds-agent",
+      "commitSha": "e3f75047ec56be99502a1779c08f88f51b013194",
+      "packageDigest": "sha256:e8251ba258f1842588d64756a4022f23b6bc9947f4c5d699be6f5805f09cc31a",
+      "domain": "customer support",
+      "structures": [
+        "conditional_branch",
+        "multi_step",
+        "no_argument_call",
+        "read_write_mixed"
+      ],
+      "requiredEnvironment": [
+        "go-mcp-customer tool schemas",
+        "HTTP upload effect and authorization",
+        "vault and absence-table write contracts"
+      ],
+      "singleReadGap": "无参prepare不能代表全流程只读；上传、索引、笔记和缺勤写入的步骤/依赖尚不能用AtomicRead表达。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 1113,
+          "end": 1161,
+          "exactQuote": "Call `storage_ingest_upload({})` (no arguments).",
+          "sourceDigest": "sha256:8c63c6108a358f2d2d9abe6877b985263720a8e805ec36641ea13275029ddd6a"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 2023,
+          "end": 2071,
+          "exactQuote": "### Step 4: Store the document note in the vault",
+          "sourceDigest": "sha256:8c63c6108a358f2d2d9abe6877b985263720a8e805ec36641ea13275029ddd6a"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "iamds-gmbh-aimds-agent-skills-aimds-custom-customer-crm-lookup-skill-md-89729ec65e",
+      "name": "customer-crm-lookup",
+      "repository": "iamds-gmbh/aimds-agent",
+      "commitSha": "e3f75047ec56be99502a1779c08f88f51b013194",
+      "packageDigest": "sha256:7ab0a2ae7e80913626e968244ac84411f68382be5c8a90b15d7fbe968139f44d",
+      "domain": "customer support",
+      "structures": [
+        "conditional_branch",
+        "multi_step",
+        "read_write_mixed"
+      ],
+      "requiredEnvironment": [
+        "CRM storage MCP schemas",
+        "M365 observation tools",
+        "optional vault-write binding"
+      ],
+      "singleReadGap": "查询、读取、跨系统关联和可选目录同步属于混合流程，不能只保留首个搜索调用而宣称整个Skill完成。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 522,
+          "end": 609,
+          "exactQuote": "**Cross-reference context:** Link customer results with M365 calendar or email context.",
+          "sourceDigest": "sha256:4336610096b07ddf24e1927ee9d1b9672c1e709410ed8e0d001ffa789d0183b4"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 613,
+          "end": 669,
+          "exactQuote": "**Directory sync:** When needed, store customer excerpts",
+          "sourceDigest": "sha256:4336610096b07ddf24e1927ee9d1b9672c1e709410ed8e0d001ffa789d0183b4"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "javakishore-veleti-claude-code-enterprise-it-harnessing-enterprise-it-ha-f879cc6be3",
+      "name": "elasticsearch-query",
+      "repository": "javakishore-veleti/claude-code-enterprise-it-harnessing",
+      "commitSha": "d3dac4e9ef1de1599cf281253d693f122d426b78",
+      "packageDigest": "sha256:0536d5d1985f5ba99037cde9e6edbb783d5360312ce3859a4595bbb4467ee335",
+      "domain": "customer support",
+      "structures": [
+        "conditional_branch",
+        "multi_step"
+      ],
+      "requiredEnvironment": [
+        "business-unit/service-resolution schemas",
+        "bounded Elasticsearch query/output contract"
+      ],
+      "singleReadGap": "正文提供查服务、别名与输出限制，但未给完整查询接口Schema；size限制不能凭空变成某个工具的必填参数。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 146,
+          "end": 193,
+          "exactQuote": "Call `list_business_units` or `resolve_service`",
+          "sourceDigest": "sha256:9780a7f759491cec0bd30c903e82b31754fb91ee464e9f24da5b181de6bd0b44"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 563,
+          "end": 590,
+          "exactQuote": "Keep `size` at 20 or below.",
+          "sourceDigest": "sha256:9780a7f759491cec0bd30c903e82b31754fb91ee464e9f24da5b181de6bd0b44"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "gui-montanari-skills-backend-object-storage-skill-md-b295cfa537",
+      "name": "object-storage",
+      "repository": "gui-montanari/skills",
+      "commitSha": "7fedde45ead3de21d62a5e0bd99d4212b0dadd3f",
+      "packageDigest": "sha256:89d0038c60c7fd8d5f300a7544a81667285e6a2887b4f4aaf39fa29f7c7083fa",
+      "domain": "database operations",
+      "structures": [
+        "conditional_branch",
+        "read_write_mixed",
+        "references"
+      ],
+      "requiredEnvironment": [
+        "ObjectStoragePort concrete provider",
+        "tenant authorization",
+        "auth and persistence Skill dependencies"
+      ],
+      "singleReadGap": "只有抽象方法签名，不等于已审查工具实现；服务器生成path、租户授权、上传检验和删除事务均需保留。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 911,
+          "end": 971,
+          "exactQuote": "ObjectStoragePort.put(path, bytes, content_type) -> location",
+          "sourceDigest": "sha256:078292b7e7ceba5f69212fbb2dd92313e990676fbdf641a13be31f8bce405fb9"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 513,
+          "end": 603,
+          "exactQuote": "**REQUIRED SUB-SKILL:** `auth` (quem lê), `persistence-ports` (metadado no banco do dono).",
+          "sourceDigest": "sha256:078292b7e7ceba5f69212fbb2dd92313e990676fbdf641a13be31f8bce405fb9"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "joinrpg-joinrpg-net-claude-skills-prod-db-readonly-skill-md-29e14b88de",
+      "name": "prod-db-readonly",
+      "repository": "joinrpg/joinrpg-net",
+      "commitSha": "5125d7916a940633208b1f941b2bd932f0c85193",
+      "packageDigest": "sha256:c5606a0149f5b0e12aadb8d39bb494c7ecb2317220b47387dafcbb1ac17f6f3a",
+      "domain": "cloud infrastructure",
+      "structures": [
+        "conditional_branch",
+        "freeform_cli",
+        "references",
+        "script_dependency"
+      ],
+      "requiredEnvironment": [
+        "SQL executor with bounded SELECT grammar",
+        "read-only credentials supplied by host",
+        "database schema and field-release policy"
+      ],
+      "singleReadGap": "只读查询与创建登录脚本须分离；不能执行随附SQL建立权限，也不能将任意sqlcmd当作安全单次读取。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 2206,
+          "end": 2226,
+          "exactQuote": "**Только `SELECT`.**",
+          "sourceDigest": "sha256:8cc8d62af3b1a0d8c48104fb686876daa78242e971dccfa548c3b699a01fe02c"
+        },
+        {
+          "path": "create-readonly-user.sql",
+          "start": 617,
+          "end": 655,
+          "exactQuote": "CREATE LOGIN [claude_joinrpg_readonly]",
+          "sourceDigest": "sha256:41d77d23b10b8bff09154c17e89f90b405728fac430d021fef75cd97ce677e0f"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "edenbuilds-touchline-skills-network-architecture-audit-skill-md-894c0829ce",
+      "name": "network-architecture-audit",
+      "repository": "edenbuilds/touchline",
+      "commitSha": "06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1",
+      "packageDigest": "sha256:bec4558ccbacea12ffb643c2edb45f9a4cfe35ff729f6c1ffbcaa647a3cc8b86",
+      "domain": "network operations",
+      "structures": [
+        "approval",
+        "multi_step",
+        "open_ended_reasoning"
+      ],
+      "requiredEnvironment": [
+        "browser/network observation tools",
+        "sanitized HAR output contract",
+        "authenticated-capture approval context"
+      ],
+      "singleReadGap": "抓包、脱敏和架构推断非一个固定Schema读取；认证捕获审批与原始敏感数据释放不能丢失。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 656,
+          "end": 696,
+          "exactQuote": "Authenticated capture requires approval.",
+          "sourceDigest": "sha256:36d274503057fa27e58ab5169dd0e8469e7320c180b5816f6d65d4939c0d3cbc"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 363,
+          "end": 421,
+          "exactQuote": "Save HAR metadata without credentials or sensitive bodies.",
+          "sourceDigest": "sha256:36d274503057fa27e58ab5169dd0e8469e7320c180b5816f6d65d4939c0d3cbc"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "mikezaby-hal-rules-registry-skills-workflow-project-new-task-skill-md-9b9407f0e8",
+      "name": "project-new-task",
+      "repository": "mikezaby/hal-rules",
+      "commitSha": "3fcab60fa9ac3b918a677375e3937407824a906d",
+      "packageDigest": "sha256:a0260c1307c58b4df1108e535f4d04b545573de960e89a456fea6d94aaa8f245",
+      "domain": "project management",
+      "structures": [
+        "conditional_branch",
+        "multi_step",
+        "optional_parameters",
+        "read_write_mixed",
+        "references"
+      ],
+      "requiredEnvironment": [
+        "tracker MCP schemas or constrained CLI",
+        "repository/worktree effect contract",
+        "host tracker and credential context"
+      ],
+      "singleReadGap": "可选ticket和name决定分支；MCP连接配置不是工具Schema，分支/worktree写操作不能降为读取issue。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 1311,
+          "end": 1345,
+          "exactQuote": "Both ticket and name are optional.",
+          "sourceDigest": "sha256:cd574f2df7be1f1249ea506a065075f5eae70949d263ba888b3a430c6a9e4515"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 4455,
+          "end": 4525,
+          "exactQuote": "git worktree add <worktrees dir>/<branch> -b <branch> origin/<default>",
+          "sourceDigest": "sha256:cd574f2df7be1f1249ea506a065075f5eae70949d263ba888b3a430c6a9e4515"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "naturalselect-angela-internal-skills-builtin-jq-skill-md-b2d6618545",
+      "name": "jq",
+      "repository": "naturalselect/angela",
+      "commitSha": "87de2c336f257e1cde6c71da0bf8b675c506ea38",
+      "packageDigest": "sha256:eca0209a844d1abf8ce0893fa820c3cac13761c09b2e9c67ab367e9390ac74a2",
+      "domain": "data engineering",
+      "structures": [
+        "conditional_branch",
+        "freeform_cli",
+        "optional_parameters"
+      ],
+      "requiredEnvironment": [
+        "host gojq tool version and interface",
+        "bounded filter language",
+        "input/output and egress limits"
+      ],
+      "singleReadGap": "jq自由表达式、流式多值和管道需单独执行边界；不能由一个JSON示例反推完整输入/输出Schema。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 2585,
+          "end": 2606,
+          "exactQuote": "jq -n --arg msg hello",
+          "sourceDigest": "sha256:c73a84c0949e7a3f4b64c5b7155dabc35067c42c17c2c1d660a0163aa8fe9ed6"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 2678,
+          "end": 2713,
+          "exactQuote": "jq -r '.url' data.json | xargs curl",
+          "sourceDigest": "sha256:c73a84c0949e7a3f4b64c5b7155dabc35067c42c17c2c1d660a0163aa8fe9ed6"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "zznabil-lean-agent-skill-collection-skills-release-skill-md-827bff88a7",
+      "name": "release",
+      "repository": "zznabil/lean-agent-skill-collection",
+      "commitSha": "fbc30ccb81072c9d112400523884de309bde26bd",
+      "packageDigest": "sha256:eff3829d7944a7624fe9e9c0ff4e51894f0c579723766636e1288d074912f8b2",
+      "domain": "software testing",
+      "structures": [
+        "approval",
+        "multi_step",
+        "open_ended_reasoning",
+        "read_write_mixed",
+        "references"
+      ],
+      "requiredEnvironment": [
+        "host build/test commands",
+        "artifact and release state contract",
+        "publish authorization and effect bindings"
+      ],
+      "singleReadGap": "发布Skill包含构建/验证/决策/发布等多阶段和审批，不能以只读报告代替真实流程。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 3256,
+          "end": 3324,
+          "exactQuote": "Publish, tag, upload, notify, merge, or deploy only when authorized.",
+          "sourceDigest": "sha256:ca08fdbe7583279e703ac891eedeae807e2b25b4cefa616475f8ae38fb84035e"
+        },
+        {
+          "path": "SUPPLY-CHAIN.md",
+          "start": 166,
+          "end": 254,
+          "exactQuote": "These answer different questions and do not prove correctness or security by themselves.",
+          "sourceDigest": "sha256:236e4768e35d0ae50aec12d6064b1df851e3e6b115304af8274bd860b692ec4b"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "analyticsengineering-ae-toolkit-dist-antigravity-agents-skills-data-qual-00308ffa77",
+      "name": "data-quality-investigation",
+      "repository": "analyticsengineering/ae-toolkit",
+      "commitSha": "9aaa14ed6215f237e01a34f0b470dab20055c801",
+      "packageDigest": "sha256:82fcabb8aaf00d56dbdd29390785382d28d64905871014a27447ce6d636526e5",
+      "domain": "incident response",
+      "structures": [
+        "approval",
+        "conditional_branch",
+        "multi_step",
+        "open_ended_reasoning"
+      ],
+      "requiredEnvironment": [
+        "observability/warehouse schemas",
+        "incident-record boundary",
+        "bounded queries and outbound-update authorization"
+      ],
+      "singleReadGap": "假设-证据迭代与成本/权限边界须保留，不能用固定调用替代根因推断或暗中执行修复。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 630,
+          "end": 699,
+          "exactQuote": "Use for diagnosis; do not implement remediation unless the user asks.",
+          "sourceDigest": "sha256:80cb670714f29fc6e5c51998cbe39cbf4ddd6bf3ac63e3c5d52d1ef2735f9139"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 2637,
+          "end": 2720,
+          "exactQuote": "Costly queries, reruns, backfills, mutations, or outbound updates require approval.",
+          "sourceDigest": "sha256:80cb670714f29fc6e5c51998cbe39cbf4ddd6bf3ac63e3c5d52d1ef2735f9139"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "obviyus-telly-agents-skills-find-docs-skill-md-89ef20f59e",
+      "name": "find-docs",
+      "repository": "obviyus/telly",
+      "commitSha": "9cc4a7b73140c0f40a20a8dfacceaeea6b4fdd1f",
+      "packageDigest": "sha256:36258dcb47c3967cd4872575f950abce70ca173623ef982ae0305fcea23d49cb",
+      "domain": "data engineering",
+      "structures": [
+        "conditional_branch",
+        "freeform_cli",
+        "multi_step"
+      ],
+      "requiredEnvironment": [
+        "pinned ctx7/API interface",
+        "bounded network read provider",
+        "quota and output format contract"
+      ],
+      "singleReadGap": "源Skill明确要求CLI并存在ID解析分支，不能私自换MCP或执行bunx安装；API示例也未给完整输出约束。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 224,
+          "end": 278,
+          "exactQuote": "Context7 through the `ctx7` CLI, never the MCP server.",
+          "sourceDigest": "sha256:697b493f39b32db184c867255e38e4790efa0931474e20ace7893b329c293ef4"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 1271,
+          "end": 1295,
+          "exactQuote": "Max 3 calls per question",
+          "sourceDigest": "sha256:697b493f39b32db184c867255e38e4790efa0931474e20ace7893b329c293ef4"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    },
+    {
+      "packageId": "codecrafter98-fivem-agent-skills-agents-skills-02-networking-fivem-onesy-02df839736",
+      "name": "fivem-onesync",
+      "repository": "codecrafter98/fivem-agent-skills",
+      "commitSha": "2212e67faec9f6c9f30f361589dd4358caed4617",
+      "packageDigest": "sha256:b09d620534b6de069161ded69491aca24a14e7670688430121b8367fd5e98b51",
+      "domain": "network operations",
+      "structures": [
+        "multi_step",
+        "open_ended_reasoning",
+        "references"
+      ],
+      "requiredEnvironment": [
+        "installed FiveM project API/version",
+        "client/server state model",
+        "isolated multi-client test harness"
+      ],
+      "singleReadGap": "这是设计/实现/验证指导，不是已有单工具运行手册；缺项目代码与动态组网环境不能由模型猜API补齐。",
+      "citations": [
+        {
+          "path": "SKILL.md",
+          "start": 1084,
+          "end": 1149,
+          "exactQuote": "Never invent natives, framework APIs, events, exports, or schema.",
+          "sourceDigest": "sha256:42a4c1fb6ee2ac4174cf3515865951f2e6d9ff9cd976554e9476e136628511c0"
+        },
+        {
+          "path": "SKILL.md",
+          "start": 891,
+          "end": 969,
+          "exactQuote": "Test with at least two clients and ownership migration for networked gameplay.",
+          "sourceDigest": "sha256:42a4c1fb6ee2ac4174cf3515865951f2e6d9ff9cd976554e9476e136628511c0"
+        }
+      ],
+      "status": "needs_environment_and_flow_qualification",
+      "toolEnvironmentSuppliedToThisPilot": false,
+      "translationOutcome": "not_run",
+      "runtimeAuthorityGranted": false
+    }
+  ],
+  "translationRuns": 0,
+  "runtimeRuns": 0,
+  "modelCalls": 0,
+  "proofCohortEligible": false,
+  "thirdPartyExecutionAttempted": false,
+  "boundary": "Intake annotations only. No environment contracts were supplied to this run; this is NOT zero translation accuracy, invalid Skills, or intrinsic untranslatability. Corpora package-format readiness does not establish executable tool availability.",
+  "reportDigest": "sha256:d935e3b862fca096343041e0dad56a4d1d46fef6131f658b4f525103cbfcae3a"
+}

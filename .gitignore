@@ -11,6 +11,7 @@ __pycache__/
 
 # Local virtualenv and runtime state
 .venv/
+.venv
 data/agents/
 data/dsh_hitl.sqlite
 data/network_runtime.sqlite

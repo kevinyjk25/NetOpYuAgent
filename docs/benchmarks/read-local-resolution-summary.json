@@ -1,0 +1,68 @@
+{
+  "date": "2026-09-07",
+  "scopeZh": "单个新建 Skill：原始9B提案 + 当前助手证据解疑/重审 + 宿主授权本地读取；非全自动、非独立盲审、非未知集。",
+  "scopeEn": "One new development Skill: original 9B proposal plus current-assistant evidence resolution/review and host-authorized local read; not autonomous, independent or unseen.",
+  "workspace": "artifacts/translator-v2/read-local-resolution-20260907",
+  "parentWorkspace": "artifacts/translator-v2/read-local-forward-9b-20260907-decoder-v2",
+  "checks": [
+    {
+      "case": "missing_host_approval",
+      "status": "denied",
+      "reason": "explicit local host approval required; AI review cannot authorize reads",
+      "providerCalls": 0
+    },
+    {
+      "case": "old_review_reuse",
+      "status": "denied",
+      "reason": "source assessment input digest mismatch",
+      "providerCalls": 0
+    },
+    {
+      "case": "resource_scope_denied",
+      "status": "denied",
+      "reason": "scope_denied",
+      "providerCalls": 0
+    },
+    {
+      "case": "negated_request",
+      "status": "denied",
+      "reason": "local smoke accepts only: read_inventory_device device_id=<literal-id>",
+      "providerCalls": 0
+    }
+  ],
+  "reportDigest": "sha256:32672392c1a8db3e42eb5b65df8bab8eb5da2713ed1543978e2970f872363de0",
+  "parentProposalDigest": "sha256:ae71984a74eba8e6e8b84788c9128a44736ec78e6ed06035dc5ecc3aa7d8004b",
+  "childProposalDigest": "sha256:a88a0d1d912009c8396f5e347e62b2c665e0f184f74858468132bdb15376f501",
+  "resolutionDigest": "sha256:02c130b01cb328fa76a213666002a4341258973f830b8c4d8be658ba4e2d1e78",
+  "reviewInputDigest": "sha256:a101861632b802f0fab756fa08c48b1f89fec30bf6dfcb83e1a75f2b82e1c34a",
+  "status": "review_supported_inactive_candidate",
+  "receiptDigest": "sha256:fb2ad129b18afab12dcafa5f7b3747d75b203247a94a1e0dfc3b31b9ae033025",
+  "payload": {
+    "device_id": "campus-sw1",
+    "site": "campus",
+    "status": "planned-lab"
+  },
+  "originalQuestionsRetained": 2,
+  "inventoryContentUnchanged": true,
+  "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+  "new9bCalls": 0,
+  "originalModelQuestions": 2,
+  "resolvedQuestionCount": 2,
+  "reviewClaimCount": 23,
+  "reviewerKind": "ai_role_simulation",
+  "authorAndReviewerSameAgent": true,
+  "humanIndependentEvidence": false,
+  "wholeSkillCoverageProven": false,
+  "autonomousTranslationProven": false,
+  "contractGloballyActivated": false,
+  "realLocalReadCount": 1,
+  "dshOrAgentLoopExecuted": false,
+  "validation": {
+    "newTests": 16,
+    "relatedTestsPassed": 62,
+    "fullTestsPassed": 834,
+    "subtestsPassed": 81,
+    "fullTestSeconds": 86.33
+  },
+  "next": "Heterogeneous known-development pilot; retain failure/assistance costs before freezing unknown-cohort evaluation."
+}

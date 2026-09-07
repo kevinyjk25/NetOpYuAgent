@@ -2081,6 +2081,8 @@ def assess_promotion(
     compiled: CompiledContract | None = None
     catalog: L0Catalog | None = None
     try:
+        if bound.kind == "AtomicRead":
+            raise L0CompileError("read L0.5 promotion is not implemented; read contracts remain inactive")
         contracts = compile_documents([*_dependencies(dependency_paths), bound])
         catalog = L0Catalog(contracts)
         compiled = catalog.require(bound.metadata.id, bound.metadata.version)

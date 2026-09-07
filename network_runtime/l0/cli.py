@@ -11,6 +11,7 @@ from .catalog import L0Catalog
 from .compiler import L0CompileError
 from .models import (
     AtomicEffectManifest,
+    AtomicReadManifest,
     CompositeEffectManifest,
     DerivedEffectManifest,
 )
@@ -60,7 +61,7 @@ def main(argv: list[str] | None = None) -> int:
     compile_command.add_argument("--output", required=True)
     schema_command = sub.add_parser("schema", help="print strict authoring JSON schemas")
     schema_command.add_argument(
-        "--kind", choices=("atomic", "derived", "composite", "all"), default="all",
+        "--kind", choices=("atomic", "derived", "composite", "read", "all"), default="all",
     )
 
     inspect_command = sub.add_parser(
@@ -428,6 +429,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "schema":
             models = {
                 "atomic": AtomicEffectManifest,
+                "read": AtomicReadManifest,
                 "derived": DerivedEffectManifest,
                 "composite": CompositeEffectManifest,
             }
@@ -799,17 +801,19 @@ def main(argv: list[str] | None = None) -> int:
         catalog = L0Catalog.from_path(args.source)
         if args.command == "validate":
             atomic = sum(item.kind == "CompiledAtomicEffect" for item in catalog.contracts())
-            composite = len(catalog.contracts()) - atomic
+            composite = sum(item.kind == "CompiledCompositeEffect" for item in catalog.contracts())
+            reads = sum(item.kind == "CompiledAtomicRead" for item in catalog.contracts())
             print(json.dumps({
                 "ok": True,
                 "source": str(Path(args.source).expanduser().resolve()),
                 "contracts": len(catalog.contracts()),
                 "atomic_or_derived": atomic,
                 "composite": composite,
+                "read": reads,
             }, ensure_ascii=False, indent=2))
         elif args.command == "list":
             for item in catalog.contracts():
-                relation = getattr(item, "derivation", "composite")
+                relation = getattr(item, "derivation", "read" if item.kind == "CompiledAtomicRead" else "composite")
                 print(f"{item.metadata.id}@{item.metadata.version}\t{relation}\t{item.metadata.description}")
         elif args.command == "show":
             value = _contract(catalog, args.skill_id, args.version)

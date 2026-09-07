@@ -24,6 +24,8 @@ L1→L0 跨 Skill 泛化 → L0 结构确定性 → Runtime 行为评测
 
 Runtime 不得用小范围人工适配合同上的高分反向证明转译正确。已知开发库只用于修复通用转译算法；只有冻结后、仓库隔离的未知 cohort 通过[泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)，规模化 Runtime 评测才获得研究资格。
 
+2026-09-07 转译链纠偏：公共 Skill evaluator 当前生成的是单主操作、绑定具体参数的计划，不是完整可复用 Skill 合同。作者 Catalog v2 不再合成事务工具，缺失能力不等于闭合流程。下一步连接源证据、L0.5 和现有 L0 合同编译器，再单独实例化请求参数；见[实施边界与计划](docs/TRANSLATION-CORRECTION-PLAN.md)。三平面执行权威不变。
+
 ### 2. 三平面
 
 ```mermaid
@@ -196,6 +198,8 @@ NetOpYuAgent is currently a network-first EnsuredSkill research prototype. The [
 Reasoning correctness does not imply execution safety. The LLM decides what to attempt; the Runtime decides what is allowed to happen. No evidence means no action.
 
 Research evidence also has a strict dependency order: cross-Skill L1-to-L0 generalization, then deterministic L0 validity, then Runtime behavior evaluation. Strong Runtime results over hand-fitted contracts cannot back-prove translation validity. Known corpora are development inputs only; scaled Runtime studies require the post-freeze unseen-cohort [generalization gate](docs/TRANSLATION-GENERALIZATION-GATE.md).
+
+The 2026-09-07 correction distinguishes the public evaluator's single-operation, argument-bound plan from a reusable whole-Skill contract. Author Catalog v2 no longer synthesizes transaction tools. Connecting source evidence and L0.5 to the existing L0 compiler, followed by separate request instantiation, remains the next stage; see the [correction plan](docs/TRANSLATION-CORRECTION-PLAN.md). Execution authority is unchanged.
 
 ### 2. Three planes
 

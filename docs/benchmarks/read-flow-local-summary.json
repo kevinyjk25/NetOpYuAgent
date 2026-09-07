@@ -1,0 +1,163 @@
+{
+  "evidenceRole": "hand_authored_local_wiring_not_translation",
+  "modelCalls": 0,
+  "thirdPartyCodeExecuted": false,
+  "sourceDigest": "sha256:570c682480281b502e6bb6051e4e169bc0731e0321b7d335ad9e77300712dea4",
+  "flowDigest": "sha256:5a4f900a19850df6c88cd6c697e342a45cfd29c9f585d7ae079964279e48b5f6",
+  "datasetUnchanged": true,
+  "datasetDigest": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+  "outcomes": [
+    {
+      "status": "read_path_completed",
+      "flowDigest": "sha256:5a4f900a19850df6c88cd6c697e342a45cfd29c9f585d7ae079964279e48b5f6",
+      "argumentsDigest": "sha256:f8a7536893f82faadd4a60a0fdfbe596602473026ad745768145b510eeeca9ba",
+      "trace": [
+        {
+          "node": "lookup",
+          "kind": "read",
+          "receipt": {
+            "status": "local_read_completed_shape_valid",
+            "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+            "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+            "subjectId": "local-flow-demo",
+            "accessDecision": "allowed",
+            "payload": {
+              "device_id": "campus-sw1",
+              "site": "campus",
+              "status": "planned-lab"
+            },
+            "providerEvidence": {
+              "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+              "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+            },
+            "shapeCheck": {
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "resultDigest": "sha256:d434bc642c3ad9e168734b628c3b32544791bded6bdcc544b02a73b3e42e83f9",
+              "shapeValid": true,
+              "businessCorrectnessProven": false,
+              "sourceAuthenticityVerified": false,
+              "runtimeAuthorityGranted": false
+            },
+            "executionAuthority": "explicit_host_binding_local_experiment_only",
+            "contractActivated": false,
+            "businessCorrectnessProven": false,
+            "productionIdentityVerified": false,
+            "receiptDigest": "sha256:a1fd36cd763c809dfa91c0f9e71b503838c0bad26b8b5bf9ff62ee8530f31fdf"
+          }
+        },
+        {
+          "node": "site",
+          "kind": "branch",
+          "matched": true,
+          "source": {
+            "kind": "reference",
+            "source": "lookup",
+            "field": "site"
+          },
+          "selected": "reread"
+        },
+        {
+          "node": "reread",
+          "kind": "read",
+          "receipt": {
+            "status": "local_read_completed_shape_valid",
+            "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+            "requestDigest": "sha256:0a871fa1743ca1c641af2805c19142c9c9d27ad2af0f861ec5781c4be90cebec",
+            "subjectId": "local-flow-demo",
+            "accessDecision": "allowed",
+            "payload": {
+              "device_id": "campus-sw1",
+              "site": "campus",
+              "status": "planned-lab"
+            },
+            "providerEvidence": {
+              "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+              "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+            },
+            "shapeCheck": {
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "resultDigest": "sha256:d434bc642c3ad9e168734b628c3b32544791bded6bdcc544b02a73b3e42e83f9",
+              "shapeValid": true,
+              "businessCorrectnessProven": false,
+              "sourceAuthenticityVerified": false,
+              "runtimeAuthorityGranted": false
+            },
+            "executionAuthority": "explicit_host_binding_local_experiment_only",
+            "contractActivated": false,
+            "businessCorrectnessProven": false,
+            "productionIdentityVerified": false,
+            "receiptDigest": "sha256:a1fd36cd763c809dfa91c0f9e71b503838c0bad26b8b5bf9ff62ee8530f31fdf"
+          }
+        },
+        {
+          "node": "done",
+          "kind": "end"
+        }
+      ],
+      "effectExecuted": false,
+      "wholeSkillCorrectnessProven": false,
+      "explanation": "Local read path complete; no live-health or whole-Skill correctness claim.",
+      "reportDigest": "sha256:3793f50ac0eeb4d5096c21513bdf04d85355152972fdc41b000a2b2087d5dc63"
+    },
+    {
+      "status": "needs_l1",
+      "flowDigest": "sha256:5a4f900a19850df6c88cd6c697e342a45cfd29c9f585d7ae079964279e48b5f6",
+      "argumentsDigest": "sha256:32676d732fce894bfe5f438dda7badd5e7ab1875aef1638a1bd9fc1978025786",
+      "trace": [
+        {
+          "node": "lookup",
+          "kind": "read",
+          "receipt": {
+            "status": "local_read_completed_shape_valid",
+            "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+            "requestDigest": "sha256:de3375ff1dbf15d784a740e430c1eff364cc96c4101e8ce29b30f2782e49c1fa",
+            "subjectId": "local-flow-demo",
+            "accessDecision": "allowed",
+            "payload": {
+              "device_id": "idc-sw1",
+              "site": "idc",
+              "status": "planned-lab"
+            },
+            "providerEvidence": {
+              "sourceSha256": "sha256:47a3f5ec98decf1aebed7d4155752eb9461ba7312eb0bc700f3c1c36f2a1f5f1",
+              "sourceKind": "local_inventory_snapshot_not_live_telemetry"
+            },
+            "shapeCheck": {
+              "contractHash": "sha256:6c762f4668e521f33257f7875e46638204aae949e175e96fa2897d00448c1077",
+              "resultDigest": "sha256:06a36f6f407aa3372cb20ff33225c205e1d224f9107f854dc04b7136cf8b04f5",
+              "shapeValid": true,
+              "businessCorrectnessProven": false,
+              "sourceAuthenticityVerified": false,
+              "runtimeAuthorityGranted": false
+            },
+            "executionAuthority": "explicit_host_binding_local_experiment_only",
+            "contractActivated": false,
+            "businessCorrectnessProven": false,
+            "productionIdentityVerified": false,
+            "receiptDigest": "sha256:355299cb6f278ac9735ca71f5515f620cc6ee8e6770a84a7deb8a758e11a3d39"
+          }
+        },
+        {
+          "node": "site",
+          "kind": "branch",
+          "matched": false,
+          "source": {
+            "kind": "reference",
+            "source": "lookup",
+            "field": "site"
+          },
+          "selected": "reason"
+        },
+        {
+          "node": "reason",
+          "kind": "end"
+        }
+      ],
+      "effectExecuted": false,
+      "wholeSkillCorrectnessProven": false,
+      "explanation": "Host should request L1 reasoning. No model is called by this smoke.",
+      "reportDigest": "sha256:3e1648aa7663dbfbdfbf00024bb013d61b743603a01fb3f1d255b69e48ed8348"
+    }
+  ],
+  "reportDigest": "sha256:ea45936635e0c52fd1497c0c6fb9f21271de40fa36e6bce9f6702cbac0fc1941"
+}

@@ -12,7 +12,7 @@ import re
 from typing import Any
 
 
-CONSTRUCT_VERSION = "translation-construct/v3"
+CONSTRUCT_VERSION = "translation-construct/v4"
 _META_TASK = re.compile(
     r"\b(?:generate|create|produce|construct)\s+(?:a\s+|three\s+)?"
     r"(?:(?:l0\s+)?(?:read|write)|translation[- ]development)\s+candidates?\b"
@@ -41,7 +41,9 @@ def _scalar(value: str, value_type: str) -> Any:
     raise ValueError("scalar type mismatch")
 
 
-def inspect_task_parameters(prompt: str, parameters: list[dict[str, Any]]) -> dict[str, Any]:
+def inspect_task_parameters(
+    prompt: str, parameters: list[dict[str, Any]], *, respect_required: bool = False,
+) -> dict[str, Any]:
     """Find typed name=value and narrowly supported name-is-value evidence.
 
     Values are case-sensitive and independent of the author's example_value.
@@ -92,7 +94,8 @@ def inspect_task_parameters(prompt: str, parameters: list[dict[str, Any]]) -> di
         if starts:
             invalid.append(name)
         if not values:
-            missing.append(name)
+            if not respect_required or parameter.get("required", True):
+                missing.append(name)
         elif len({json.dumps(value, sort_keys=True) for value in values}) > 1:
             conflicting.append(name)
         elif name not in invalid and name not in unresolved:
@@ -106,9 +109,13 @@ def inspect_task_parameters(prompt: str, parameters: list[dict[str, Any]]) -> di
     }
 
 
-def inspect_construct(bundle: dict[str, Any], source_text: str) -> dict[str, Any]:
+def inspect_construct(
+    bundle: dict[str, Any], source_text: str, *, version: str = "v4",
+) -> dict[str, Any]:
     """Return transparent, bounded fixture findings without changing the input."""
 
+    if version not in {"v3", "v4"}:
+        raise ValueError("unsupported construct version")
     operation = bundle["operation"]
     findings: list[str] = []
     operation_meta = _META_TASK.search(operation["summary"])
@@ -116,7 +123,9 @@ def inspect_construct(bundle: dict[str, Any], source_text: str) -> dict[str, Any
         findings.append("unsupported_evaluation_meta_operation")
     tasks = []
     for task in bundle["tasks"]:
-        result = inspect_task_parameters(task["user_prompt"], operation["parameters"])
+        result = inspect_task_parameters(
+            task["user_prompt"], operation["parameters"], respect_required=version == "v4",
+        )
         meta = _META_TASK.search(task["user_prompt"])
         result.update(
             slotId=task["slot_id"],
@@ -127,7 +136,7 @@ def inspect_construct(bundle: dict[str, Any], source_text: str) -> dict[str, Any
         )
         tasks.append(result)
     return {
-        "version": CONSTRUCT_VERSION,
+        "version": f"translation-construct/{version}",
         "inputClass": "explicit_parameter_fixture",
         "parameterValuePolicy": "typed_evidence_not_example_value_equality",
         "findings": findings, "tasks": tasks,
