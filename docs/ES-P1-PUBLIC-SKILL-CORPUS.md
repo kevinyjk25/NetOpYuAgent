@@ -2,6 +2,8 @@
 
 ## 中文
 
+> 2026-09-08：新增 `inert-text`，脚本原文隔离为不可自动执行的 `.txt` 证据，支持在索引中审阅但不进入 Runtime 资源。旧脚本排除项作为开发补充，不能改称未见集；新的抽样规则、历史偏差和采集限制见[公开批次准备](PUBLIC-TRANSLATION-BATCH.md)。下文首轮数字及命令仍是历史记录。
+
 ### 定位
 
 SkillsMP、GitHub 和厂商公开仓库中的 Skill 可以降低用例构造成本，并增加跨作者、跨领域、真实格式和长尾写法的覆盖。它们应作为 `ES-P1-Wild` 公开外部语料层，而不是替代正式的 `ES-P1-Private` 独立私有资格门。
@@ -231,6 +233,8 @@ scripts/netopyu-market-corpus paired-run /ABS/PATH/bound-study \
 9B 转译协议有效 45/45，后验路由一致 43/45（95.56%），unsafe Runtime 误接纳 0；两处偏差都是只读任务的保守降级。唯一 Treatment 残余是 `fivem-debugging` 的一个原生只读 case 三次失败，证明 Runtime 没有掩盖 L1/Tool 选择缺口。完整声明、失败分类、命令和摘要链见 [ES-P1-Wild 角色隔离模拟结果](ES-P1-WILD-SIMULATED-RESULTS.md)。该结果完成本地模拟协议，不改变真人 45-slot 工作区仍 pending 的事实，也不替代 ES-P1-Private。
 
 ## English
+
+2026-09-08 update: `inert-text` retains quarantined script source for text-only inspection without making it a Runtime resource. Historical script exclusions are development recovery, not an unseen cohort. See [batch preparation, sampling bias and acquisition limits](PUBLIC-TRANSLATION-BATCH.md). The initial pilot numbers below remain historical.
 
 Public Skills from SkillsMP, GitHub, and vendor repositories should form an `ES-P1-Wild` ecological-validity track. They reduce authoring cost and expose the system to real package structures and cross-author variation, but they do not replace `ES-P1-Private`: public content may be present in model training data, duplicated or generated, and normally lacks task inputs and trusted outcome Oracles.
 

@@ -1,0 +1,284 @@
+{
+  "actualDeviceCalls": 0,
+  "apiVersion": "netopyu.io/task-alignment-summary/v1",
+  "baseCommit": "14baa0a269fdffdac8443cb41ec7f22fbd2d44ad",
+  "branch": "dev",
+  "caseCount": 4,
+  "cases": [
+    {
+      "bundleDigest": "sha256:d56d2823b31a0793618d085fb3b559dc8ea016b672880876567b3f11e4ccd5bd",
+      "candidateId": "calesthio-openmontage-agents-skills-agents-skill-md",
+      "findingCount": 2,
+      "missingHostRequirements": 3,
+      "obligationCount": 7,
+      "report": "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/agent-name-update/report.json",
+      "reportDigest": "sha256:09b08f3cbc999e645943bc87becf7e9a6e8afee0a8e964237d80f600ca411eea",
+      "status": "review_dossier_bound_not_translation_qualified",
+      "taskId": "agent-name-update"
+    },
+    {
+      "bundleDigest": "sha256:a2b0c0fccaabda3fe11a593594c1c907be5592e9513271605b91ae7cdfca9537",
+      "candidateId": "addyosmani-agent-skills-skills-browser-testing-with-devtools-skill-md",
+      "findingCount": 2,
+      "missingHostRequirements": 3,
+      "obligationCount": 9,
+      "report": "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/isolated-browser-diagnosis/report.json",
+      "reportDigest": "sha256:f32ea4bea90667dd4a3b29a890fb1f9e0df07ae1801ecd646b6a3716039382d0",
+      "status": "review_dossier_bound_not_translation_qualified",
+      "taskId": "isolated-browser-diagnosis"
+    },
+    {
+      "bundleDigest": "sha256:47f06b89b0b5177fbcd91883e3d4e21335facea838c3fe512e971e5b32626516",
+      "candidateId": "bytedance-deer-flow-skills-public-code-documentation-skill-md",
+      "findingCount": 2,
+      "missingHostRequirements": 3,
+      "obligationCount": 7,
+      "report": "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/project-readme-generation/report.json",
+      "reportDigest": "sha256:4b9625b24d16ff3a14f04051ef2a2ac9ffb2dc07b35bb754a674aabe7164883c",
+      "status": "review_dossier_bound_not_translation_qualified",
+      "taskId": "project-readme-generation"
+    },
+    {
+      "bundleDigest": "sha256:ef838bdff84763a8ea493133d282a2eb1db039f645ae28cfd2624ae6bd5675a6",
+      "candidateId": "netdata-netdata-docs-netdata-ai-skills-query-snmp-traps-skill-md",
+      "findingCount": 5,
+      "missingHostRequirements": 3,
+      "obligationCount": 12,
+      "report": "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/snmp-single-device-security/report.json",
+      "reportDigest": "sha256:c2609fcfaa2c8d79d46b43d7291f7c374f0eec6b2e012e987a701e48f4736abe",
+      "status": "review_dossier_bound_not_translation_qualified",
+      "taskId": "snmp-single-device-security"
+    }
+  ],
+  "claimBoundary": "四份已知开发源的任务/义务与缺口档案；非独立 Gold、语义转译通过率或生产成功概率。 / Four known development source dossiers, not independent Gold, semantic translation accuracy or production success probability.",
+  "date": "2026-09-09",
+  "declaredObligations": 35,
+  "defaultDshRuntimeChanged": false,
+  "dispositionCounts": {
+    "candidate_effect": 4,
+    "candidate_read": 4,
+    "conditional": 2,
+    "constraint": 13,
+    "host_precondition": 3,
+    "l1_reasoning": 4,
+    "outside_task": 4,
+    "unresolved": 1
+  },
+  "dossierRevision": "v2_host_requirement_kind_separation",
+  "evidence": {
+    "artifacts/translator-v2/intake-20260908/public-01/original-v2/bundle.json": "sha256:e9d32997631d6911ba8088940c0398a414b2d2c009831ee36326032635bb85cd",
+    "artifacts/translator-v2/intake-20260908/public-03/original-v2/bundle.json": "sha256:e5c7446407368d107d40c66f5d8d65c3b83daadeef4865fecb0e1047823e5147",
+    "artifacts/translator-v2/intake-20260908/public-04/original-v2/bundle.json": "sha256:26cc1da96f2454f07f2e776ccd3f74a4c4e73b5a8c37189ebf0511b65d2946d4",
+    "artifacts/translator-v2/structured-flow-20260909/source-snapshot.tar.gz": "sha256:931bf532aba22bf96fa5c6a953415bc1f10de011d10c6ad65bf6037bde41882a",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/agent-name-update/alignment.json": "sha256:4f0a7d3ef065ea326f20b940f7e6e0e575d17515da5fcdb907026b3a9156c8a6",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/agent-name-update/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/agent-name-update/model-input.json": "sha256:62ac48aa288f2c444eb5ec6eb075c1f7a6b22a75733b0a7b0e338e10376b7056",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/agent-name-update/report.json": "sha256:20e73abc4b17946b0e4b9a3b6646f354441bc8e8941710a3c842113a774bf08e",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/agent-name-update/source-bundle.json": "sha256:e9d32997631d6911ba8088940c0398a414b2d2c009831ee36326032635bb85cd",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/isolated-browser-diagnosis/alignment.json": "sha256:b39f262e61a31925ceea5ec5ded3bcbceeadf1ea19e699a44f8de628a1090ce9",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/isolated-browser-diagnosis/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/isolated-browser-diagnosis/model-input.json": "sha256:2eb9f90cdc278a1b530e90649f2550bbf1ce5d5bab61c4d721c429c91301bc89",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/isolated-browser-diagnosis/report.json": "sha256:070f4443bcf6c06d488e22d3ceef49e0ca4236a87613ac78cd188b81aaec127c",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/isolated-browser-diagnosis/source-bundle.json": "sha256:26cc1da96f2454f07f2e776ccd3f74a4c4e73b5a8c37189ebf0511b65d2946d4",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/project-readme-generation/alignment.json": "sha256:f681c31bea5ea1171a5ff87c1548c62d26d5fbadb1d0d1f431aaaa0650a0e384",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/project-readme-generation/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/project-readme-generation/model-input.json": "sha256:4c63141d9409030a2c3075395d854b40ac6a03295b9e300f4aeb4a0d88190b2c",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/project-readme-generation/report.json": "sha256:78f349081521018c5679142d5e3660d20dfecb9c54b58b5a55384e9ae881c93c",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/project-readme-generation/source-bundle.json": "sha256:e5c7446407368d107d40c66f5d8d65c3b83daadeef4865fecb0e1047823e5147",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/snmp-single-device-security/alignment.json": "sha256:6f40fadfc5c526506ad42e17ec701353daecd29532d3fa864e7826e40e75fdf7",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/snmp-single-device-security/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/snmp-single-device-security/model-input.json": "sha256:7de5d7eedd31ebd8852f2d7951282b7461efd62eccf5bcc39b2fda3702b25ff4",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/snmp-single-device-security/report.json": "sha256:8ea217374766ef7a860b5f48a1841600cce7100ed046f26944f8dca2244e6f95",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers-v2/snmp-single-device-security/source-bundle.json": "sha256:d7aa17610fca385016b4b73c06c80ef3f91534c0de61b3504bbe921d354d9ce2",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/agent-name-update/alignment.json": "sha256:632bc9c3e75b98deb27df48ba5f745311579ad312efe7b6c7073daff64436e06",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/agent-name-update/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/agent-name-update/model-input.json": "sha256:62ac48aa288f2c444eb5ec6eb075c1f7a6b22a75733b0a7b0e338e10376b7056",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/agent-name-update/report.json": "sha256:2c6c33dac92b04be5514f104e6316678f5fe86d32247b8e478edab6b3ae93de1",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/agent-name-update/source-bundle.json": "sha256:e9d32997631d6911ba8088940c0398a414b2d2c009831ee36326032635bb85cd",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/isolated-browser-diagnosis/alignment.json": "sha256:76caaf5a6274491757eecd553af1479e5a39a6eceefed2b46d8b69db9ccbdd7d",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/isolated-browser-diagnosis/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/isolated-browser-diagnosis/model-input.json": "sha256:2eb9f90cdc278a1b530e90649f2550bbf1ce5d5bab61c4d721c429c91301bc89",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/isolated-browser-diagnosis/report.json": "sha256:5e2e744d99b099d354983b65827008090870f786b4d03eeb543d7dc2065b30bf",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/isolated-browser-diagnosis/source-bundle.json": "sha256:26cc1da96f2454f07f2e776ccd3f74a4c4e73b5a8c37189ebf0511b65d2946d4",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/project-readme-generation/alignment.json": "sha256:472c358db97cc09647544b90ee6f985acbc472207c0eeda4a54ee9bcb229d425",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/project-readme-generation/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/project-readme-generation/model-input.json": "sha256:4c63141d9409030a2c3075395d854b40ac6a03295b9e300f4aeb4a0d88190b2c",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/project-readme-generation/report.json": "sha256:299bb695d30c7688cd8ea7015497a1c6438df63980825eb7c8233afcca7d17fa",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/project-readme-generation/source-bundle.json": "sha256:e5c7446407368d107d40c66f5d8d65c3b83daadeef4865fecb0e1047823e5147",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/snmp-single-device-security/alignment.json": "sha256:c6dd0b59d8f00a6317d8b342f7f101cedd4ade50e511293a77660e9098b2f8ce",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/snmp-single-device-security/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/snmp-single-device-security/model-input.json": "sha256:7de5d7eedd31ebd8852f2d7951282b7461efd62eccf5bcc39b2fda3702b25ff4",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/snmp-single-device-security/report.json": "sha256:ee09ecbea188be79e5bc12adda81502089311c922b71942bcb607e006989aca3",
+    "artifacts/translator-v2/task-alignment-20260909/dossiers/snmp-single-device-security/source-bundle.json": "sha256:d7aa17610fca385016b4b73c06c80ef3f91534c0de61b3504bbe921d354d9ce2",
+    "artifacts/translator-v2/task-alignment-20260909/netdata-source/bundle.json": "sha256:d7aa17610fca385016b4b73c06c80ef3f91534c0de61b3504bbe921d354d9ce2",
+    "artifacts/translator-v2/task-alignment-20260909/netdata-source/report.json": "sha256:895e4e3c82dc1656343a795500e0d3bef946bad20dcf8224049d55ee201b5799",
+    "artifacts/translator-v2/task-alignment-20260909/netdata-source/review-pages.json": "sha256:088e77674c1d09c0e43fb6266ea001b95c40a025d8face1f152c6a1633030bb1",
+    "artifacts/translator-v2/task-alignment-20260909/replay/agent-name-update/alignment.json": "sha256:632bc9c3e75b98deb27df48ba5f745311579ad312efe7b6c7073daff64436e06",
+    "artifacts/translator-v2/task-alignment-20260909/replay/agent-name-update/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/replay/agent-name-update/model-input.json": "sha256:62ac48aa288f2c444eb5ec6eb075c1f7a6b22a75733b0a7b0e338e10376b7056",
+    "artifacts/translator-v2/task-alignment-20260909/replay/agent-name-update/report.json": "sha256:2c6c33dac92b04be5514f104e6316678f5fe86d32247b8e478edab6b3ae93de1",
+    "artifacts/translator-v2/task-alignment-20260909/replay/agent-name-update/source-bundle.json": "sha256:e9d32997631d6911ba8088940c0398a414b2d2c009831ee36326032635bb85cd",
+    "artifacts/translator-v2/task-alignment-20260909/replay/isolated-browser-diagnosis/alignment.json": "sha256:76caaf5a6274491757eecd553af1479e5a39a6eceefed2b46d8b69db9ccbdd7d",
+    "artifacts/translator-v2/task-alignment-20260909/replay/isolated-browser-diagnosis/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/replay/isolated-browser-diagnosis/model-input.json": "sha256:2eb9f90cdc278a1b530e90649f2550bbf1ce5d5bab61c4d721c429c91301bc89",
+    "artifacts/translator-v2/task-alignment-20260909/replay/isolated-browser-diagnosis/report.json": "sha256:5e2e744d99b099d354983b65827008090870f786b4d03eeb543d7dc2065b30bf",
+    "artifacts/translator-v2/task-alignment-20260909/replay/isolated-browser-diagnosis/source-bundle.json": "sha256:26cc1da96f2454f07f2e776ccd3f74a4c4e73b5a8c37189ebf0511b65d2946d4",
+    "artifacts/translator-v2/task-alignment-20260909/replay/project-readme-generation/alignment.json": "sha256:472c358db97cc09647544b90ee6f985acbc472207c0eeda4a54ee9bcb229d425",
+    "artifacts/translator-v2/task-alignment-20260909/replay/project-readme-generation/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/replay/project-readme-generation/model-input.json": "sha256:4c63141d9409030a2c3075395d854b40ac6a03295b9e300f4aeb4a0d88190b2c",
+    "artifacts/translator-v2/task-alignment-20260909/replay/project-readme-generation/report.json": "sha256:299bb695d30c7688cd8ea7015497a1c6438df63980825eb7c8233afcca7d17fa",
+    "artifacts/translator-v2/task-alignment-20260909/replay/project-readme-generation/source-bundle.json": "sha256:e5c7446407368d107d40c66f5d8d65c3b83daadeef4865fecb0e1047823e5147",
+    "artifacts/translator-v2/task-alignment-20260909/replay/snmp-single-device-security/alignment.json": "sha256:c6dd0b59d8f00a6317d8b342f7f101cedd4ade50e511293a77660e9098b2f8ce",
+    "artifacts/translator-v2/task-alignment-20260909/replay/snmp-single-device-security/host-catalog.json": "sha256:38e0b9de817f645c4bec37c0d4a3e58baecccb040f5718dc069a72c7385a0bed",
+    "artifacts/translator-v2/task-alignment-20260909/replay/snmp-single-device-security/model-input.json": "sha256:7de5d7eedd31ebd8852f2d7951282b7461efd62eccf5bcc39b2fda3702b25ff4",
+    "artifacts/translator-v2/task-alignment-20260909/replay/snmp-single-device-security/report.json": "sha256:ee09ecbea188be79e5bc12adda81502089311c922b71942bcb607e006989aca3",
+    "artifacts/translator-v2/task-alignment-20260909/replay/snmp-single-device-security/source-bundle.json": "sha256:d7aa17610fca385016b4b73c06c80ef3f91534c0de61b3504bbe921d354d9ce2",
+    "artifacts/translator-v2/task-alignment-20260909/source-snapshot-v2.tar.gz": "sha256:5a1f8e91aa12bd13efce4a3e15b420e24c3edcc10feefa4695329a7d7b9c2ffe",
+    "artifacts/translator-v2/task-alignment-20260909/source-snapshot.tar.gz": "sha256:5661de74dccea5723fd63db54b74be24e6ac4cf61ef4393787cad6f90c9f312f",
+    "artifacts/translator-v2/task-alignment-20260909/summary-v1.json": "sha256:b75625c688d00549d38544c9d8584613f6c3bc26aa784b22582148e930baa38b",
+    "data/task-alignment/agent-name-update.json": "sha256:88c0578c6cc32b3835bfcaf61b540ecd675987e522dfe9185fd12e346593c540",
+    "data/task-alignment/isolated-browser-diagnosis.json": "sha256:840e3a827e404698207982148a67d60acfa65f864f96b9c0d7c76e970dfda360",
+    "data/task-alignment/project-readme-generation.json": "sha256:9b15dbc796f69f828a4f96e231d05d66c5a7b957e0b390bbb8906c063e93feb6",
+    "data/task-alignment/snmp-single-device-security.json": "sha256:b80e836c4c5d3ff2c1be084660307a6f4cf30849583724d231dd0113915cae4c",
+    "evaluation/task_alignment.py": "sha256:7527a1f06081868ad41fc0f3634cd7c32cf3f8fc6b4f46525d69b77f7f01d65d",
+    "tests/test_task_alignment.py": "sha256:733984e2690d66961bf0603a27fb89e23a1a5b49ed88740825d03b2de4847fca"
+  },
+  "finalValidation": {
+    "canonicalDocumentTests": {
+      "passed": 3
+    },
+    "changedDocumentLocalLinks": {
+      "count": 439,
+      "passed": true
+    },
+    "changedPythonLint": {
+      "files": 31,
+      "passed": true
+    },
+    "diffCheckPassed": true,
+    "fullSuite": {
+      "failed": 0,
+      "passed": 1975,
+      "seconds": 161.82,
+      "stationaryWorktree": true,
+      "subtests": 81
+    },
+    "previousRevisionEvidenceBoundToArchive": 54,
+    "semanticAccuracyMeasured": false,
+    "targeted": {
+      "failed": 0,
+      "passed": 122,
+      "seconds": 4.85
+    }
+  },
+  "gitCommitted": false,
+  "hostRequirementKinds": {
+    "context": 2,
+    "policy": 1,
+    "tool": 9
+  },
+  "isolatedReplay": {
+    "baselinePlusOrderedOverlays": true,
+    "byteIdenticalFiles": 20,
+    "directory": "/private/tmp/netopyu-c3o-replay-v2.V7civG",
+    "modelCalls": 0,
+    "providerCalls": 0
+  },
+  "newModelCalls": 0,
+  "priorC3nEvidenceFilesUnchanged": 76,
+  "priorRevision": {
+    "isolatedReplay": {
+      "baselinePlusOrderedOverlays": true,
+      "byteIdenticalFiles": 20,
+      "directory": "/private/tmp/netopyu-c3o-replay.4YRGWx",
+      "modelCalls": 0,
+      "providerCalls": 0
+    },
+    "reason": "Separate tool requirements from host context/policy; not improved semantic accuracy or host readiness.",
+    "sourceOverlay": {
+      "applyAfter": "artifacts/translator-v2/structured-flow-20260909/source-snapshot.tar.gz",
+      "archive": "artifacts/translator-v2/task-alignment-20260909/source-snapshot.tar.gz",
+      "paths": [
+        "evaluation/task_alignment.py",
+        "tests/test_task_alignment.py",
+        "data/task-alignment/agent-name-update.json",
+        "data/task-alignment/isolated-browser-diagnosis.json",
+        "data/task-alignment/project-readme-generation.json",
+        "data/task-alignment/snmp-single-device-security.json"
+      ],
+      "sourceBundlesRequiredSeparately": true
+    },
+    "sourcePathHashesApplyToArchivedOverlay": true,
+    "summary": "artifacts/translator-v2/task-alignment-20260909/summary-v1.json"
+  },
+  "providerCalls": 0,
+  "reviewerKind": "development_assistant_not_independent_gold",
+  "runtimeAuthorityGranted": false,
+  "runtimeLatencyMetrics": null,
+  "selectedCandidateIdsUnchanged": true,
+  "selectionRule": "First sampled candidate in each repository-grouped source batch; retain format variants and unavailable candidates, never replace by translator suitability.",
+  "sourceOverlay": {
+    "applyAfter": "artifacts/translator-v2/structured-flow-20260909/source-snapshot.tar.gz",
+    "archive": "artifacts/translator-v2/task-alignment-20260909/source-snapshot-v2.tar.gz",
+    "paths": [
+      "evaluation/task_alignment.py",
+      "tests/test_task_alignment.py",
+      "data/task-alignment/agent-name-update.json",
+      "data/task-alignment/isolated-browser-diagnosis.json",
+      "data/task-alignment/project-readme-generation.json",
+      "data/task-alignment/snmp-single-device-security.json"
+    ],
+    "sourceBundlesRequiredSeparately": true
+  },
+  "sourceSupplement": {
+    "bundleDigest": "sha256:ef838bdff84763a8ea493133d282a2eb1db039f645ae28cfd2624ae6bd5675a6",
+    "characters": 202930,
+    "commit": "b11b44dbdb620dfc9566081334c7488445b5f99f",
+    "files": 17,
+    "pages": 28,
+    "parentBundleDigest": "sha256:2cb68e06d3d254e0ea44cc6f74b06041f0780c39580f834b92fb2425fb41ed34",
+    "path": "src/plugins.d/FUNCTION_UI_REFERENCE.md",
+    "repository": "netdata/netdata",
+    "status": "saved",
+    "transitiveReferenceClosureProven": false
+  },
+  "sourceTaskCatalogModelInputUnchangedFromV1": {
+    "byteIdenticalFiles": 12,
+    "caseCount": 4
+  },
+  "sourceTensions": 3,
+  "stage": "C3o_task_dossiers_complete_host_semantic_closure_pending",
+  "summaryDigest": "sha256:710e5d932813036a88b9c6abee447e9057f255da02d157f6dc3e1ce58a27126c",
+  "thirdPartyExecutionAttempted": false,
+  "translationMetrics": null,
+  "unboundHostRequirements": 12,
+  "unresolvedFindings": 11,
+  "validationObservations": [
+    {
+      "passed": 24,
+      "scope": "new dossier integrity tests",
+      "semanticAccuracyMeasured": false
+    },
+    {
+      "failed": 0,
+      "passed": 120,
+      "scope": "dossier + intake + existing source alignment + structured flow",
+      "seconds": 6.64
+    },
+    {
+      "failed": 0,
+      "passed": 1973,
+      "scope": "pre-kind-separation stationary-worktree full suite",
+      "seconds": 159.95,
+      "subtests": 81
+    },
+    {
+      "failed": 0,
+      "passed": 122,
+      "scope": "v2 dossier + intake + existing source alignment + structured flow",
+      "seconds": 4.85,
+      "semanticAccuracyMeasured": false
+    }
+  ],
+  "wholeSkillTranslationProven": false
+}

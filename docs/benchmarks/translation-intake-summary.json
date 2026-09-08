@@ -1,0 +1,294 @@
+{
+  "apiVersion": "effect-runtime.io/translation-intake-summary/v1",
+  "baseCommit": "14baa0a269fdffdac8443cb41ec7f22fbd2d44ad",
+  "branch": "dev",
+  "claimBoundary": "原文保真、引用补取及 Schema 诊断，不是完整语义转译、宿主授权或生产概率。 / Source fidelity, pinned supplements and schema diagnosis are not complete semantic translation, host authorization or production reliability.",
+  "date": "2026-09-08",
+  "defaultRuntimeChanged": false,
+  "evidence": {
+    "artifacts/translator-v2/intake-20260908/netdata-supplement-selection.json": "sha256:3101df7ba76f75337657067027a44f2b0c0071393cb235c9f11f4246ac7dbdd6",
+    "artifacts/translator-v2/intake-20260908/public-01/original-v2/bundle.json": "sha256:e9d32997631d6911ba8088940c0398a414b2d2c009831ee36326032635bb85cd",
+    "artifacts/translator-v2/intake-20260908/public-01/original-v2/report.json": "sha256:b0e08a85125783a40f4b7c48d82b5e63f6c4824b065dfbd6b1d9cbf884f5fc7c",
+    "artifacts/translator-v2/intake-20260908/public-01/original-v2/review-pages.json": "sha256:0976fda23ef3fa9ad62a4af03c6ee3d938f255bd14ceaafebf39ec0fc30618d8",
+    "artifacts/translator-v2/intake-20260908/public-02/original-v2/bundle.json": "sha256:4542bbca3ea0a78050451b281180e56588f0a03ec06c2d17526d01afbde71e2c",
+    "artifacts/translator-v2/intake-20260908/public-02/original-v2/report.json": "sha256:b24678f09dca7deec89d42021330bfdbf3fc21e340546be58943eb98fa9c4d13",
+    "artifacts/translator-v2/intake-20260908/public-02/original-v2/review-pages.json": "sha256:230669c167592d1cbf4ed8fefe77753adbab11ec32b4cf0cfee93f93e2e5d117",
+    "artifacts/translator-v2/intake-20260908/public-02/supplement-v2/bundle.json": "sha256:d1bcb5e1073d2af01b6c7cb4f0c5fb60cbc08867271b13e445de42b292d6db07",
+    "artifacts/translator-v2/intake-20260908/public-02/supplement-v2/report.json": "sha256:5a40dde5d0a19092744fbc123baf94fca04f235bfbbd43e81d0bf96e39b3129c",
+    "artifacts/translator-v2/intake-20260908/public-02/supplement-v2/review-pages.json": "sha256:dc07daba1d1e17d34af63d53a37d3d77f5d84c1bbfd6744ea61b05d2af76d78e",
+    "artifacts/translator-v2/intake-20260908/public-02/supplement/bundle.json": "sha256:41dd4ad9d1c0defa440ccd0d4afc00a06efade0cbf37526a6ff58ebff4340b60",
+    "artifacts/translator-v2/intake-20260908/public-02/supplement/report.json": "sha256:fb906f69c6592a2dda71d2f7cde107a92a4b851605628dd9b0ee8e6a1bcad923",
+    "artifacts/translator-v2/intake-20260908/public-02/supplement/review-pages.json": "sha256:370470dcd2262f6f520bdbf36cf28ab24c53e4d939734c96c450c72c72a001df",
+    "artifacts/translator-v2/intake-20260908/public-03/original-v2/bundle.json": "sha256:e5c7446407368d107d40c66f5d8d65c3b83daadeef4865fecb0e1047823e5147",
+    "artifacts/translator-v2/intake-20260908/public-03/original-v2/report.json": "sha256:c57d0be35aefde701a69448afe186c51ef2667803d953f017358b1b18cc5d8be",
+    "artifacts/translator-v2/intake-20260908/public-03/original-v2/review-pages.json": "sha256:be704814d2d938860aa4a9aa583ce062a9c9b8a468e5c88d8ff9604e60e06f9b",
+    "artifacts/translator-v2/intake-20260908/public-04/original-v2/bundle.json": "sha256:26cc1da96f2454f07f2e776ccd3f74a4c4e73b5a8c37189ebf0511b65d2946d4",
+    "artifacts/translator-v2/intake-20260908/public-04/original-v2/report.json": "sha256:2203de4a418ed929aaaa1c657a45e68750eb55ca11e18eea7006d36e24a5db54",
+    "artifacts/translator-v2/intake-20260908/public-04/original-v2/review-pages.json": "sha256:5ab91652a13443d7e0e6abb50666f45d31683e859d2a757ed0d30b69dd8e6f07",
+    "artifacts/translator-v2/intake-20260908/source-snapshot.tar.gz": "sha256:73a2ae072cf6049b9e5b80d7cf344dc13b1994c2a5d2c8fa1262644f2201c7f7",
+    "evaluation/flow_condition_expression.py": "sha256:083af6dc05ffe92d970005257106b94fde511cef9b02b8d6ac414fac94ee366f",
+    "evaluation/flow_contract_authoring.py": "sha256:47cf58a41130b2e74d1b3345a255c39d1beb4f4adf38b12f6bcb8ef2e2845e99",
+    "evaluation/flow_joint_conditions.py": "sha256:d225198d315f7231e2299c643beee393caff8a773c6fc033c66e330947e0c775",
+    "evaluation/flow_joint_lowering.py": "sha256:9f790f26687f4a054c7b55ea5424cd8217a81ee4e21194faacaf02f24868b037",
+    "evaluation/flow_read_region.py": "sha256:5d615031c8f5a9fe7eaf1bf5125e71a18ce21d1ab6f6c75a0f0bbf604454336e",
+    "evaluation/flow_semantic_examples.py": "sha256:64773b0d94f2a2860e219996bbcf1a2eb7df82f129c59158e07be91723e3797f",
+    "evaluation/flow_semantic_probe.py": "sha256:1903079eb08cd5692151d0a9f176fb42fb0aa0e7ce29e415526548e279670c40",
+    "evaluation/public_skill_corpus.py": "sha256:2a94aa47779882a111e1e3449397b2e2360d06994367c0938646905609903012",
+    "evaluation/translation_corpus.py": "sha256:12d99fed5fe8a516ecb8e19c4d0fd6565e0c47b4cb63e0e01d74696be546ce66",
+    "evaluation/translation_intake.py": "sha256:d6105d581106578b6df09c47da778a4851b7dd503726767a0f3ed0a4b426fc0c",
+    "examples/semantic-transfer/archive/scripts/precheck.py": "sha256:f67fde73a60c846bc5f368eeb0f49b113db99f9c77b7fd9b192e5a99bfece04a",
+    "examples/translation-intake/mcp-catalog.json": "sha256:9c9d78061d47b4c20bf7e9e4a1a8f441fdc21062eb43ce676f5f141bc45d8a4b",
+    "scripts/netopyu-market-corpus": "sha256:a729344af71103a3c462f12a8eaef0e3145a2a74341f2ae47bfdb7536ed70ade",
+    "tests/test_flow_condition_expression.py": "sha256:3d3bc6575f293dcc99d9dacaeff8273c64849872be72ba7e54abb8d2de19f67a",
+    "tests/test_flow_joint_conditions.py": "sha256:e21a5b5a4d78c227eb780c7c2afe39abfb28c6908cfb236a3246a0e871829009",
+    "tests/test_flow_read_region.py": "sha256:c3a9b4f2b7794dbcdd07b5c4465399f17277dd2ec0c4898fc7229383a1e5b82a",
+    "tests/test_flow_semantic_probe.py": "sha256:cb954277787db87ac122f9ba65e4a2c3a67d4f41fe51494b5861744fd28f7364",
+    "tests/test_public_skill_corpus.py": "sha256:7846b2a06a8713afb4a6bd4b59360cd651ed77b2b7327ed4913644f7409444c1",
+    "tests/test_translation_corpus.py": "sha256:44758b1072fabd7cd053ae859f80ce927b413b8ff095386e4622987dcfd27d6d",
+    "tests/test_translation_intake.py": "sha256:dabe61a6749ddb5d3b276d5b26455cebc92c40a862f1b74cadff70befab261a7"
+  },
+  "formalGateChanged": false,
+  "historicalEvidenceOverwritten": false,
+  "independentGold": false,
+  "mechanicalChecks": {
+    "existingCorpusCliByteIdenticalOfflineReplay": true,
+    "originalBundlesByteFaithfulToSnapshots": 4,
+    "originalPagesChecked": 20,
+    "originalTextFilesReconstructed": 16,
+    "supplementChainDigestsVerified": true,
+    "supplementPagesReconstructSource": true
+  },
+  "netdataSupplementChain": [
+    {
+      "attempts": {},
+      "bundleDigest": "sha256:816cba4fdee6beb60530b8875d42640e5b746274e4dfcecf34055c0e5bda63af",
+      "directory": "artifacts/translator-v2/intake-20260908/public-02/original-v2",
+      "fileCount": 8,
+      "pageCount": 8,
+      "parentBundleDigest": null,
+      "referenceCount": 40,
+      "reportDigest": "sha256:759464d89b193a96aa17571648ec1a03c6a8d66e70443c1c74d276e22ef556f0",
+      "sourceCharacters": 31967
+    },
+    {
+      "attempts": {
+        "unavailable": 8
+      },
+      "bundleDigest": "sha256:5392ab71fe34391ca3a6cea4c6b3f47895c6c88d4fa4e48205d8e5363bb617dc",
+      "directory": "artifacts/translator-v2/intake-20260908/public-02/supplement",
+      "fileCount": 8,
+      "pageCount": 8,
+      "parentBundleDigest": "sha256:816cba4fdee6beb60530b8875d42640e5b746274e4dfcecf34055c0e5bda63af",
+      "referenceCount": 40,
+      "reportDigest": "sha256:62afd882710c1d1a4729bf5a10ce5531ab1cffcf3b4461bbaa94b8fa97abb584",
+      "sourceCharacters": 31967
+    },
+    {
+      "attempts": {
+        "saved": 8,
+        "unavailable": 8
+      },
+      "bundleDigest": "sha256:2cb68e06d3d254e0ea44cc6f74b06041f0780c39580f834b92fb2425fb41ed34",
+      "directory": "artifacts/translator-v2/intake-20260908/public-02/supplement-v2",
+      "fileCount": 16,
+      "pageCount": 23,
+      "parentBundleDigest": "sha256:5392ab71fe34391ca3a6cea4c6b3f47895c6c88d4fa4e48205d8e5363bb617dc",
+      "referenceCount": 107,
+      "reportDigest": "sha256:70ebe419421e35b2888b18ca90659f34a0c22ef63d3a88cfe921bfae7159cce5",
+      "sourceCharacters": 146532
+    }
+  ],
+  "newTranslationModelCalls": 0,
+  "originalSources": [
+    {
+      "batchId": "public-01",
+      "bundleDigest": "sha256:d56d2823b31a0793618d085fb3b559dc8ea016b672880876567b3f11e4ccd5bd",
+      "candidateId": "calesthio-openmontage-agents-skills-agents-skill-md",
+      "commitSha": "08e2151fa02de28a5d6a312b3d575692bf147ad7",
+      "fileCount": 6,
+      "hostStatus": "missing_host_catalog",
+      "pageCount": 8,
+      "referenceContexts": {
+        "prose_reference_candidate": 14
+      },
+      "referenceCount": 14,
+      "reportDigest": "sha256:0a1db5de59545bbdc0796d1367d6a51355d7fbd7f6f0343e323cd987858e1acd",
+      "repository": "calesthio/openmontage",
+      "snapshotDigest": "sha256:d927702721164637393d526224eb60249451a37ca44a7040f21c652f8a97d98f",
+      "sourceCharacters": 65778
+    },
+    {
+      "batchId": "public-02",
+      "bundleDigest": "sha256:816cba4fdee6beb60530b8875d42640e5b746274e4dfcecf34055c0e5bda63af",
+      "candidateId": "netdata-netdata-docs-netdata-ai-skills-query-snmp-traps-skill-md",
+      "commitSha": "b11b44dbdb620dfc9566081334c7488445b5f99f",
+      "fileCount": 8,
+      "hostStatus": "missing_host_catalog",
+      "pageCount": 8,
+      "referenceContexts": {
+        "prose_reference_candidate": 40
+      },
+      "referenceCount": 40,
+      "reportDigest": "sha256:759464d89b193a96aa17571648ec1a03c6a8d66e70443c1c74d276e22ef556f0",
+      "repository": "netdata/netdata",
+      "snapshotDigest": "sha256:26024eb842d89914cdd529b1facb01dc62cd6bf6aace9542cbeb38178281560e",
+      "sourceCharacters": 31967
+    },
+    {
+      "batchId": "public-03",
+      "bundleDigest": "sha256:47f06b89b0b5177fbcd91883e3d4e21335facea838c3fe512e971e5b32626516",
+      "candidateId": "bytedance-deer-flow-skills-public-code-documentation-skill-md",
+      "commitSha": "065f84f711453b289cac2bc3bd190767c095a6d9",
+      "fileCount": 1,
+      "hostStatus": "missing_host_catalog",
+      "pageCount": 2,
+      "referenceContexts": {
+        "prose_reference_candidate": 1,
+        "template_example_candidate": 4
+      },
+      "referenceCount": 5,
+      "reportDigest": "sha256:18c4938e379dca6652c649177c91e4885cae7a919e3373aeefdcea71fcf71dcd",
+      "repository": "bytedance/deer-flow",
+      "snapshotDigest": "sha256:51cf76e342e7ee2525ce9f1cbf1f51c9e8e04be996793abdf65aa31055f9184e",
+      "sourceCharacters": 13823
+    },
+    {
+      "batchId": "public-04",
+      "bundleDigest": "sha256:a2b0c0fccaabda3fe11a593594c1c907be5592e9513271605b91ae7cdfca9537",
+      "candidateId": "addyosmani-agent-skills-skills-browser-testing-with-devtools-skill-md",
+      "commitSha": "6ca0cd7db39b41b1c37e26d335c507ee92382c6d",
+      "fileCount": 1,
+      "hostStatus": "missing_host_catalog",
+      "pageCount": 2,
+      "referenceContexts": {},
+      "referenceCount": 0,
+      "reportDigest": "sha256:d1d5aaf568ab44663eea19fcba743641bae084509c4fc77beb785be651a24b1a",
+      "repository": "addyosmani/agent-skills",
+      "snapshotDigest": "sha256:c27ba142f194167cc86ff303584428b736137bf2e652f3428d0b0f77b1d02206",
+      "sourceCharacters": 13935
+    }
+  ],
+  "runtimeAuthorityGranted": false,
+  "runtimeLatencyMetrics": null,
+  "sourceOverlay": {
+    "archive": "artifacts/translator-v2/intake-20260908/source-snapshot.tar.gz",
+    "paths": [
+      "evaluation/flow_condition_expression.py",
+      "evaluation/flow_contract_authoring.py",
+      "evaluation/flow_joint_conditions.py",
+      "evaluation/flow_joint_lowering.py",
+      "evaluation/flow_read_region.py",
+      "evaluation/flow_semantic_examples.py",
+      "evaluation/flow_semantic_probe.py",
+      "evaluation/public_skill_corpus.py",
+      "evaluation/translation_corpus.py",
+      "evaluation/translation_intake.py",
+      "examples/semantic-transfer/archive/scripts/precheck.py",
+      "tests/test_flow_condition_expression.py",
+      "tests/test_flow_joint_conditions.py",
+      "tests/test_flow_read_region.py",
+      "tests/test_flow_semantic_probe.py",
+      "tests/test_public_skill_corpus.py",
+      "tests/test_translation_corpus.py",
+      "tests/test_translation_intake.py",
+      "examples/translation-intake/mcp-catalog.json",
+      "scripts/netopyu-market-corpus"
+    ]
+  },
+  "sourceReview": {
+    "allSupplementFilesFullyReviewed": false,
+    "fullTransitiveReferenceClosure": false,
+    "fullWrapperReviewed": {
+      "findings": [
+        {
+          "kind": "shell_environment_loading_not_executed",
+          "lines": [
+            62,
+            81
+          ]
+        },
+        {
+          "kind": "bearer_issuance_not_pure_read",
+          "lines": [
+            201,
+            212
+          ]
+        },
+        {
+          "kind": "credential_cache_filesystem_effects",
+          "lines": [
+            246,
+            300
+          ]
+        },
+        {
+          "kind": "general_http_method_path_body_wrapper",
+          "lines": [
+            307,
+            332
+          ]
+        },
+        {
+          "kind": "cloud_agent_conditional_arguments_and_defaults",
+          "lines": [
+            384,
+            429
+          ]
+        }
+      ],
+      "lines": 546,
+      "path": "docs/netdata-ai/skills/query-netdata-agents/scripts/_lib.sh",
+      "sha256": "sha256:1ba2db9be7425fc7c95401376f49477f6a4fa974deb4e5c45709887a3bf9db80"
+    },
+    "role": "development_source_inspection_not_independent_gold"
+  },
+  "stage": "C3l_intake_implemented_alignment_pending",
+  "summaryDigest": "sha256:264c4b442def253dbd5faa4efad2fdb7c498977e1140820fc1fa702325833150",
+  "supplementNewSkills": 0,
+  "syntheticHostDiagnostic": {
+    "catalogDigest": "sha256:fa5315c08264181b19910764429ed8b3ed88ae580224f8c7dd379fcc323212ae",
+    "currentReadSchemaCompatible": false,
+    "diagnosticDigest": "sha256:2b232a8e0f5f5e71367d65e6192cfec8e68746dbbd98229555433b1a24f48ffc",
+    "diagnostics": [
+      {
+        "code": "unsupported_current_read_contract",
+        "detail": "Extra inputs are not permitted",
+        "pointer": "/tools/0/inputSchema/properties/deviceId/minLength"
+      },
+      {
+        "code": "unsupported_current_read_contract",
+        "detail": "Input should be 'string', 'integer', 'number' or 'boolean'",
+        "pointer": "/tools/0/inputSchema/properties/selections/type"
+      },
+      {
+        "code": "unsupported_current_read_contract",
+        "detail": "Extra inputs are not permitted",
+        "pointer": "/tools/0/inputSchema/properties/selections/properties"
+      },
+      {
+        "code": "unsupported_current_read_contract",
+        "detail": "Extra inputs are not permitted",
+        "pointer": "/tools/0/inputSchema/properties/selections/required"
+      },
+      {
+        "code": "unsupported_current_read_contract",
+        "detail": "Extra inputs are not permitted",
+        "pointer": "/tools/0/inputSchema/properties/selections/additionalProperties"
+      },
+      {
+        "code": "unsupported_current_read_contract",
+        "detail": "Input should be 'string', 'integer', 'number' or 'boolean'",
+        "pointer": "/tools/0/outputSchema/properties/interfaces/type"
+      },
+      {
+        "code": "unsupported_current_read_contract",
+        "detail": "Extra inputs are not permitted",
+        "pointer": "/tools/0/outputSchema/properties/interfaces/items"
+      }
+    ],
+    "source": "examples/translation-intake/mcp-catalog.json",
+    "syntheticNotPublicSkillHost": true
+  },
+  "thirdPartyExecutionAttempted": false,
+  "translationMetrics": null
+}

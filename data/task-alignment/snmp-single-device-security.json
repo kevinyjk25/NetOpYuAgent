@@ -1,0 +1,584 @@
+{
+  "api_version": "netopyu.io/task-alignment/v1",
+  "bundle_digest": "sha256:ef838bdff84763a8ea493133d282a2eb1db039f645ae28cfd2624ae6bd5675a6",
+  "task_id": "snmp-single-device-security",
+  "task": "评测请求：通过 Cloud 查询合成节点 00000000-0000-4000-8000-000000000001 上 local listener 中，设备 10.0.0.8 最近 24 小时的 security 类普通 trap。仅返回脱敏计数/摘要，不保存原始日志，不请求 token；没有必要权限、有效 source 或明确参数时停止追问。设备与节点值只用于隔离 fixture，不得访问实际网络。",
+  "task_origin": "developer_authored_evaluation_request",
+  "task_basis": [
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+      "start": 41,
+      "end": 416,
+      "quote": "## Question\n\nWhich security-category SNMP traps did one device send recently?\n\n## Inputs\n\n- `NODE_UUID`: node running the `snmp_traps` collector.\n- `SNMP_TRAPS_JOB`: trap listener job name. Default examples use `local`.\n- One of:\n  - `DEVICE_IP`: the expected `TRAP_SOURCE_IP`.\n  - `DEVICE_HOSTNAME`: the expected `_HOSTNAME`.\n- Time window, defaulting to the last 24 hours.\n"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+      "start": 1209,
+      "end": 1409,
+      "quote": "   agents_call_function \\\n     --via cloud \\\n     --node \"$NODE_UUID\" \\\n     --function \"$SNMP_TRAPS_FUNCTION\" \\\n     --body \"$BODY\" \\\n     > .local/audits/query-snmp-traps/security-traps-device.json\n"
+    }
+  ],
+  "documents": [
+    {
+      "path": "docs/netdata-ai/skills/query-netdata-agents/SKILL.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-netdata-agents/query-functions.md",
+      "ranges": [
+        {
+          "start": 0,
+          "end": 4101
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-netdata-agents/query-logs.md",
+      "ranges": [
+        {
+          "start": 0,
+          "end": 3709
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-netdata-agents/scripts/_lib.sh",
+      "ranges": [
+        {
+          "start": 12357,
+          "end": 13369
+        },
+        {
+          "start": 14684,
+          "end": 16908
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-netdata-cloud/query-functions.md",
+      "ranges": [
+        {
+          "start": 1008,
+          "end": 8228
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-netdata-cloud/query-logs.md",
+      "ranges": [
+        {
+          "start": 2476,
+          "end": 4268
+        },
+        {
+          "start": 7693,
+          "end": 10965
+        },
+        {
+          "start": 14454,
+          "end": 15812
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-netdata-cloud/query-nodes.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+      "ranges": [
+        {
+          "start": 0,
+          "end": 8203
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/INDEX.md",
+      "ranges": [
+        {
+          "start": 0,
+          "end": 1846
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/convert-custom-mibs-to-trap-profiles.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/filter-by-severity-across-fleet.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/inspect-dedup-summary-entries.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+      "ranges": [
+        {
+          "start": 0,
+          "end": 3518
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/search-varbind-value-in-trap-json.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/top-trap-senders-last-hour.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "src/go/plugin/go.d/config/go.d/snmp.trap-profiles/profile-format.md",
+      "ranges": [],
+      "rationale": "本文档尚未审阅；完整保留，不推断其与任务无关，也不宣称整 Skill 源义务闭合。"
+    },
+    {
+      "path": "src/plugins.d/FUNCTION_UI_REFERENCE.md",
+      "ranges": [
+        {
+          "start": 13505,
+          "end": 17642
+        },
+        {
+          "start": 35958,
+          "end": 36871
+        },
+        {
+          "start": 43826,
+          "end": 47491
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    }
+  ],
+  "obligations": [
+    {
+      "id": "o01",
+      "statement": "本任务对应已有的单设备 security trap recipe。",
+      "disposition": "candidate_read",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+          "start": 41,
+          "end": 416,
+          "quote": "## Question\n\nWhich security-category SNMP traps did one device send recently?\n\n## Inputs\n\n- `NODE_UUID`: node running the `snmp_traps` collector.\n- `SNMP_TRAPS_JOB`: trap listener job name. Default examples use `local`.\n- One of:\n  - `DEVICE_IP`: the expected `TRAP_SOURCE_IP`.\n  - `DEVICE_HOSTNAME`: the expected `_HOSTNAME`.\n- Time window, defaulting to the last 24 hours.\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+          "start": 1209,
+          "end": 1409,
+          "quote": "   agents_call_function \\\n     --via cloud \\\n     --node \"$NODE_UUID\" \\\n     --function \"$SNMP_TRAPS_FUNCTION\" \\\n     --body \"$BODY\" \\\n     > .local/audits/query-snmp-traps/security-traps-device.json\n"
+        }
+      ],
+      "rationale": "任务限定单节点/IP/窗口，不等于整个查询工具或所有 recipe 已转译。",
+      "host_needs": [
+        "query"
+      ]
+    },
+    {
+      "id": "o02",
+      "statement": "先 info 发现有效参数与 __logs_sources，再构造实际查询。",
+      "disposition": "conditional",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+          "start": 7206,
+          "end": 7480,
+          "quote": "## Source Selection\n\nStart with `{\"info\":true}` for `snmp:traps` and inspect the\n`__logs_sources` required parameter. By default, the SDK selects all\ndirect-journal sources. To target one listener job, add:\n\n```json\n{\n  \"selections\": {\n    \"__logs_sources\": [\"local\"]\n  }\n}\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-functions.md",
+          "start": 5669,
+          "end": 5980,
+          "quote": "## `info=true` discovery\n\nThe single most important call to make before constructing a real\nquery: pass `{\"info\": true}` and read `accepted_params` plus\n`required_params`. The agent itself is the authoritative source --\nif a parameter exists there, the Function accepts it; if it\ndoesn't, no other doc matters.\n"
+        }
+      ],
+      "rationale": "根 Skill 要求来源发现；不能只复制 how-to 中直接数据调用跳过校验。",
+      "host_needs": [
+        "query"
+      ]
+    },
+    {
+      "id": "o03",
+      "statement": "selections 下使用 source、report type、category 和设备字段；字段间 AND、同字段值间 OR。",
+      "disposition": "constraint",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+          "start": 759,
+          "end": 1156,
+          "quote": "   BODY=\"$(jq -n --arg job \"$SNMP_TRAPS_JOB\" --arg device_ip \"$DEVICE_IP\" '{\n     after: -86400,\n     before: 0,\n     last: 200,\n     direction: \"backward\",\n     selections: {\n       __logs_sources: [$job],\n       TRAP_REPORT_TYPE: [\"trap\"],\n       TRAP_CATEGORY: [\"security\"],\n       TRAP_SOURCE_IP: [$device_ip]\n     },\n     facets: [\"TRAP_NAME\", \"TRAP_SEVERITY\", \"TRAP_SOURCE_IP\", \"_HOSTNAME\"]\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-logs.md",
+          "start": 10652,
+          "end": 10961,
+          "quote": "Semantics (verified at\n`<repo>/src/libnetdata/facets/logs_query_status.h:386-466`):\n\n- **Between fields: AND.** All listed fields must match.\n- **Between values for the same field: OR.** Any one of the\n  listed values matches.\n\nSo the example above is logically:\n\n```\n(FIELD1 in A, B, C) AND (FIELD2 in D, E)\n"
+        }
+      ],
+      "rationale": "原字段名/嵌套层级/逻辑极性必须保留，不能把 source 改成顶层。",
+      "host_needs": []
+    },
+    {
+      "id": "o04",
+      "statement": "after/before 使用秒，anchor/行时间戳使用微秒。",
+      "disposition": "constraint",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-logs.md",
+          "start": 2572,
+          "end": 3780,
+          "quote": "| `info` | bool | Discovery only; do not combine with a real query |\n| `after` | int | Lower time bound, in **seconds** (struct field `after_s`). Positive = absolute Unix seconds; negative = relative seconds from `before`. NOT ms, NOT µs |\n| `before` | int | Upper time bound, in **seconds** (struct field `before_s`). Positive = absolute Unix seconds; negative = relative seconds from now (`0` = now) |\n| `last` | int | Page size (rows). Default 200 |\n| `direction` | string | `backward` (default; newest first) or `forward` |\n| `anchor` | int | Per-row cursor for pagination, in **microseconds** (matches the row timestamp values, which are µs — a different unit from `after`/`before`) |\n| `query` | string | Free-text search (FTS) across indexed fields |\n| `facets` | string[] | Field names to group by (returns counts per value) |\n| `histogram` | string | Field name to bucket-by-time |\n| `selections` | object | **The only working way to filter by source or by field** in the JSON body. `{\"__logs_sources\":[...]}` selects sources; `{\"FIELD\":[...]}` filters a facet. See [Selecting log sources](#selecting-log-sources-info--selections) — passing `__logs_sources` as a top-level key is silently ignored |\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-agents/query-logs.md",
+          "start": 2754,
+          "end": 3128,
+          "quote": "- **Time bounds**: `after`/`before` are in **seconds** (the agent\n  parses them into `after_s`/`before_s`). Negative = relative\n  seconds from now; positive = absolute Unix seconds. `anchor` and\n  the row timestamps are in **microseconds** -- a different unit, so\n  do not reuse a row timestamp as a positive `after`/`before`.\n  Mixing the two units is the most common bug.\n"
+        }
+      ],
+      "rationale": "数字类型相同不代表量纲相同；JSON Schema integer 不能单独证明正确单位。",
+      "host_needs": []
+    },
+    {
+      "id": "o05",
+      "statement": "body 默认 info、via 默认 cloud；agent 分支额外需要 host 与 machine-guid。",
+      "disposition": "host_precondition",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-agents/scripts/_lib.sh",
+          "start": 15208,
+          "end": 15739,
+          "quote": "# Convenience: Function call with automatic transport selection.\n# Wraps agents_query_cloud (preferred) or agents_query_agent.\n#\n# Flags:\n#   --via cloud|agent       default: cloud\n#   --node <node_id>        REQUIRED\n#   --host <host:port>      REQUIRED for --via agent\n#   --machine-guid <mg>     REQUIRED for --via agent\n#   --function <name>       REQUIRED (e.g. systemd-journal)\n#   --body <json>           default: {\"info\":true}\nagents_call_function() {\n    local via=\"cloud\" node=\"\" mg=\"\" host=\"\" fn=\"\" body='{\"info\":true}'\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-agents/scripts/_lib.sh",
+          "start": 16250,
+          "end": 16754,
+          "quote": "    : \"${node:?--node required}\"\n    : \"${fn:?--function required}\"\n\n    case \"${via}\" in\n        cloud)\n            agents_query_cloud POST \"/api/v2/nodes/${node}/function?function=${fn}\" \"${body}\"\n            ;;\n        agent)\n            : \"${mg:?--machine-guid required for --via agent}\"\n            : \"${host:?--host required for --via agent}\"\n            agents_query_agent --node \"${node}\" --host \"${host}\" --machine-guid \"${mg}\" \\\n                POST \"/api/v3/function?function=${fn}\" \"${body}\"\n"
+        }
+      ],
+      "rationale": "本任务选 Cloud，但需记录条件必填而非把全部字段统一必填。",
+      "host_needs": [
+        "query",
+        "identity"
+      ]
+    },
+    {
+      "id": "o06",
+      "statement": "不能把通用 HTTP wrapper 整体认定为只读。",
+      "disposition": "constraint",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-agents/scripts/_lib.sh",
+          "start": 12357,
+          "end": 12868,
+          "quote": "# Call any Netdata Cloud REST endpoint. Reads NETDATA_CLOUD_TOKEN\n# from .env internally; emits ONLY the response body to stdout.\n# stderr shows the curl invocation with `<CLOUD_TOKEN>` masked.\n#\n# Args:\n#   $1 = METHOD        -- GET / POST / PUT / DELETE / ...\n#   $2 = PATH          -- e.g. /api/v2/spaces\n#   $3 = BODY (json)   -- optional; passed via -d\n#\n# Example:\n#   agents_query_cloud GET /api/v2/spaces\n#   agents_query_cloud POST /api/v2/nodes/$NODE/function?function=systemd-journal '{\"info\":true}'\n"
+        }
+      ],
+      "rationale": "它接受任意 HTTP method/path；实际 read 能力需要窄化且受审的宿主绑定。",
+      "host_needs": []
+    },
+    {
+      "id": "o07",
+      "statement": "按 columns.<key>.index 解码所有返回行，再处理摘要。",
+      "disposition": "unresolved",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+          "start": 6906,
+          "end": 7201,
+          "quote": "## Row Decoding Helper\n\nLog Function responses store rows as arrays. Use `columns` to map row\npositions back to field names:\n\n```bash\njq '.columns as $c\n    | .data[]? as $row\n    | $c\n    | to_entries\n    | sort_by(.value.index)\n    | map({(.key): $row[.value.index]})\n    | add' response.json\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-logs.md",
+          "start": 9722,
+          "end": 10062,
+          "quote": "### Reading rows\n\n`data` is an array of rows. Each row is itself an array whose\npositions match `columns.<key>.index`. To pretty-print a single\nrow by column name:\n\n```bash\njq '.columns as $c\n   | .data[0] as $row\n   | $c | to_entries\n        | sort_by(.value.index)\n        | map({(.key): $row[.value.index]})\n        | add' response.json\n"
+        }
+      ],
+      "rationale": "当前固定 JSON Pointer 无法表达数据驱动的列索引与逐行映射。",
+      "host_needs": []
+    },
+    {
+      "id": "o08",
+      "statement": "不保存原始 trap rows，不持久化敏感身份字段或完整 payload。",
+      "disposition": "constraint",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+          "start": 3003,
+          "end": 3310,
+          "quote": "4. **Treat trap content as sensitive.** Do not paste raw trap rows,\n   SNMP communities, USM secrets, MAC addresses, usernames, public\n   device IPs, customer hostnames, or full `TRAP_JSON` payloads into\n   durable artifacts. Return summarized fields unless the user\n   explicitly needs raw output locally.\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/INDEX.md",
+          "start": 1150,
+          "end": 1331,
+          "quote": "Do not include raw Cloud tokens, agent bearers, SNMP communities, USM\nsecrets, public device IPs, raw MAC addresses, customer hostnames, or\nfull trap payloads in durable artifacts.\n"
+        }
+      ],
+      "rationale": "任务禁止原始日志落盘；与 recipe 的重定向及摘要字段存在需要审查的张力。",
+      "host_needs": [
+        "publication"
+      ]
+    },
+    {
+      "id": "o09",
+      "statement": "新问题才触发新增 how-to 及索引更新。",
+      "disposition": "conditional",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+          "start": 2043,
+          "end": 2309,
+          "quote": "1. **If you analyze, you author a how-to.** When asked a concrete\n   SNMP trap query question that is not already covered under\n   [`how-tos/`](./how-tos/), author a new how-to and add it to\n   [`how-tos/INDEX.md`](./how-tos/INDEX.md) before completing the\n   task.\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/INDEX.md",
+          "start": 327,
+          "end": 768,
+          "quote": "The catalog is live. Every time an AI assistant or operator answers a\nnew concrete SNMP trap query that needs multiple wrapper calls, jq\npipelines, or cross-referencing more than one guide, add the recipe\nhere before completing the task.\n\nKeep these how-tos operator-facing. Developer validation, schema\nwork, collector implementation, test fixtures, or SOW handoff notes\nbelong in `.agents/skills/` and SOW files, not in this public skill.\n"
+        }
+      ],
+      "rationale": "本请求来自已有 recipe，但是否实质新增查询必须保留判断，不能一律删除写义务。",
+      "host_needs": []
+    },
+    {
+      "id": "o10",
+      "statement": "fleet 节点循环与聚合在本任务之外。",
+      "disposition": "outside_task",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+          "start": 3310,
+          "end": 3596,
+          "quote": "5. **Remember the Function is node-scoped.** Cloud-proxied\n   `snmp:traps` calls target one node. For a room or fleet query,\n   list nodes first and loop over each node's Function, then aggregate\n   client-side. Use `__logs_sources` to narrow to a specific listener\n   job when needed.\n"
+        }
+      ],
+      "rationale": "明确选择单节点，不宣称循环已由两次读取代替。",
+      "host_needs": []
+    },
+    {
+      "id": "o11",
+      "statement": "结果分析与隐私审查保留 L1 职责，不凭字段名推断已脱敏。",
+      "disposition": "l1_reasoning",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+          "start": 2292,
+          "end": 3022,
+          "quote": "4. Print a sanitized summary:\n\n   ```bash\n   jq '.columns as $c\n       | .data[]? as $row\n       | $c | to_entries | sort_by(.value.index)\n       | map({(.key): $row[.value.index]}) | add\n       | {\n           host: (._HOSTNAME // \"\"),\n           source_ip_present: ((.TRAP_SOURCE_IP // \"\") | length > 0),\n           severity: (.TRAP_SEVERITY // \"\"),\n           trap: (.TRAP_NAME // .TRAP_OID // \"\"),\n           message: (.MESSAGE // \"\")\n         }' \\\n     .local/audits/query-snmp-traps/security-traps-device.json\n   ```\n\n## Output\n\nReturn counts and sanitized rows: trap name/OID, severity, hostname\nor source-present flag, and message. Do not paste public IPs, MACs,\nusernames, or full varbind payloads into durable artifacts.\n"
+        }
+      ],
+      "rationale": "MESSAGE/hostname 可含敏感信息，源示例不是独立脱敏 Oracle。",
+      "host_needs": [
+        "publication"
+      ]
+    },
+    {
+      "id": "o12",
+      "statement": "空 data 可以合法；错误响应不要求 data，不能制造成功查询。",
+      "disposition": "constraint",
+      "citations": [
+        {
+          "path": "src/plugins.d/FUNCTION_UI_REFERENCE.md",
+          "start": 35993,
+          "end": 36322,
+          "quote": "### Empty Result Sets\n\nThe protocol handles empty results gracefully:\n\n```json\n{\n  \"status\": 200,\n  \"type\": \"table\",\n  \"has_history\": false,\n  \"columns\": {...},  // Full column definitions\n  \"data\": []         // Empty array is valid\n}\n```\n\n- Minimum valid response: `{\"status\": 200, \"type\": \"table\", \"columns\": {}, \"data\": []}`\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-functions.md",
+          "start": 4568,
+          "end": 5663,
+          "quote": "| `data` | array OR object | conditional | Family-specific result. **Absent on `info=true` calls and on errors.** Array for `logs` and `table` families; object (with `actors`/`links` or `flows`/`columns`/`stats`) for `topology` and `flows` |\n| `columns` | object | logs / table | Column-metadata, keyed by column name. Each entry has `index` (position inside each row of `data`), `name`, `type`, `visible`, `sort`, `summary`, `filter`, ... |\n| `facets` | array | logs / flows | Per-field value distribution and option counts |\n| `histogram` | object | logs (when requested) | Bucketed counts over time |\n| `pagination` | object | logs | `anchor`, `direction`, `last`, etc. |\n| `presentation` | object | topology / flows | Visualization metadata for the Cloud UI |\n| `expires` / `last_modified` / `partial` / `message` | scalar | optional | Caching, freshness, partial-result diagnostics |\n| `versions` | object | optional | Source/version hashes for client cache invalidation |\n\n`status >= 400` responses follow the same envelope but include an\n`errorMessage` / `errorMsgKey` instead of `data`.\n"
+        }
+      ],
+      "rationale": "缺列、无数据、权限错误和未发现 source 要区分，不能统一当 false 条件。",
+      "host_needs": []
+    }
+  ],
+  "host_needs": [
+    {
+      "id": "query",
+      "operation": "agents_call_function --via cloud --node ... --function snmp:traps --body ...",
+      "tool_name": null,
+      "rationale": "同一原语执行 info 与数据读取，不能发明 fleet 汇总工具；源 wrapper 支持更广行为，需限定适配器。"
+    },
+    {
+      "id": "identity",
+      "kind": "context",
+      "operation": "token-safe cloud credential context",
+      "tool_name": null,
+      "rationale": "不执行 source .env，也不把原始 token 放进候选或制品。"
+    },
+    {
+      "id": "publication",
+      "kind": "policy",
+      "operation": "sanitized result/artifact policy",
+      "tool_name": null,
+      "rationale": "需明确输出与保留策略，白名单字段不能自动证明 MESSAGE 或 hostname 已脱敏。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "f01",
+      "category": "source_tension",
+      "explanation": "隐私规则限制原始日志持久化，但 recipe 重定向原始响应到 .local/audits 文件。",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+          "start": 3003,
+          "end": 3310,
+          "quote": "4. **Treat trap content as sensitive.** Do not paste raw trap rows,\n   SNMP communities, USM secrets, MAC addresses, usernames, public\n   device IPs, customer hostnames, or full `TRAP_JSON` payloads into\n   durable artifacts. Return summarized fields unless the user\n   explicitly needs raw output locally.\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+          "start": 1165,
+          "end": 1409,
+          "quote": "   mkdir -p .local/audits/query-snmp-traps\n\n   agents_call_function \\\n     --via cloud \\\n     --node \"$NODE_UUID\" \\\n     --function \"$SNMP_TRAPS_FUNCTION\" \\\n     --body \"$BODY\" \\\n     > .local/audits/query-snmp-traps/security-traps-device.json\n"
+        }
+      ],
+      "next_action": "显式解释本任务禁止原始落盘的取舍；后续隔离宿主定义保留/脱敏策略，不静默执行示例脚本。"
+    },
+    {
+      "id": "f02",
+      "category": "source_tension",
+      "explanation": "协议示例 message 列 index=3，但示例行 index=3 是 nginx，而消息在 index=4；level index=1 也落在 rowOptions 上。",
+      "citations": [
+        {
+          "path": "src/plugins.d/FUNCTION_UI_REFERENCE.md",
+          "start": 14489,
+          "end": 14888,
+          "quote": "    \"level\": {\n      \"index\": 1,\n      \"id\": \"priority\",        // Links to facet\n      \"name\": \"Level\",\n      \"type\": \"string\",\n      \"visualization\": \"pill\",\n      \"filter\": \"facet\",       // Not multiselect!\n      \"options\": [\"facet\", \"visible\", \"sticky\"]\n    },\n    \"message\": {\n      \"index\": 3,\n      \"id\": \"message\",\n      \"name\": \"Message\",\n      \"type\": \"string\",\n      \"full_width\": true,\n"
+        },
+        {
+          "path": "src/plugins.d/FUNCTION_UI_REFERENCE.md",
+          "start": 15145,
+          "end": 15422,
+          "quote": "  // Data with microsecond timestamps\n  \"data\": [\n    [\n      1697644320000000,        // Microseconds\n      {\"severity\": \"error\"},   // rowOptions\n      \"ERROR\",                 // level\n      \"nginx\",                 // source\n      \"Connection failed\"      // message\n    ]\n"
+        }
+      ],
+      "next_action": "记录来源示例内部不一致，不用此表反构造 Gold；实际解码应绑定观察到的元数据并检测不一致。"
+    },
+    {
+      "id": "f03",
+      "category": "unsupported_representation",
+      "explanation": "动态列索引、逐行转换及需要时的分页，不是固定数组索引即可表达。",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-logs.md",
+          "start": 9722,
+          "end": 10062,
+          "quote": "### Reading rows\n\n`data` is an array of rows. Each row is itself an array whose\npositions match `columns.<key>.index`. To pretty-print a single\nrow by column name:\n\n```bash\njq '.columns as $c\n   | .data[0] as $row\n   | $c | to_entries\n        | sort_by(.value.index)\n        | map({(.key): $row[.value.index]})\n        | add' response.json\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-logs.md",
+          "start": 9025,
+          "end": 9567,
+          "quote": "| `pagination` | Cursor info (`anchor`, `direction`, `last`, ...) for the next page |\n| `default_charts` | Suggested chart configuration |\n| `default_sort_column` | Recommended sort column |\n| `available_histograms` | Field names that the agent can histogram-bucket |\n| `_request` | Echo of the parsed request (defaults applied) |\n| `versions` | Source/version map for cache invalidation |\n| `last_modified` | Last-data timestamp |\n| `expires` | Suggested cache expiry |\n| `partial` | True if the result was capped by `sampling` or timeout |\n"
+        }
+      ],
+      "next_action": "下一步设计独立可审计的有界集合/列投影原语，不执行 jq 或藏入假汇总 API。"
+    },
+    {
+      "id": "f04",
+      "category": "missing_context",
+      "explanation": "当前 docs 表格不是该节点版本的完整权威参数合同，info 才决定有效参数。",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-netdata-cloud/query-functions.md",
+          "start": 7790,
+          "end": 8222,
+          "quote": "The widget array is the contract between the agent and any UI or\nscript. To programmatically construct a valid body for a Function,\nwalk `required_params` and emit the body shape it implies. There\nis no central widget builder API in source -- each collector emits\nthe array directly via `buffer_json_*` calls -- so the agent's own\n`info=true` response is the only authoritative place to read the\nschema for a specific node version.\n"
+        }
+      ],
+      "next_action": "定义隔离适配器和受验证的 info fixture；保持源支持事实与评测环境声明分开。"
+    },
+    {
+      "id": "f05",
+      "category": "source_tension",
+      "explanation": "recipe 声称 sanitized summary，却仍输出 hostname 与自由 MESSAGE。",
+      "citations": [
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+          "start": 3003,
+          "end": 3310,
+          "quote": "4. **Treat trap content as sensitive.** Do not paste raw trap rows,\n   SNMP communities, USM secrets, MAC addresses, usernames, public\n   device IPs, customer hostnames, or full `TRAP_JSON` payloads into\n   durable artifacts. Return summarized fields unless the user\n   explicitly needs raw output locally.\n"
+        },
+        {
+          "path": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+          "start": 2480,
+          "end": 2807,
+          "quote": "       | {\n           host: (._HOSTNAME // \"\"),\n           source_ip_present: ((.TRAP_SOURCE_IP // \"\") | length > 0),\n           severity: (.TRAP_SEVERITY // \"\"),\n           trap: (.TRAP_NAME // .TRAP_OID // \"\"),\n           message: (.MESSAGE // \"\")\n         }' \\\n     .local/audits/query-snmp-traps/security-traps-device.json\n"
+        }
+      ],
+      "next_action": "不能按字段白名单自动认证脱敏；需 source-aware 审查和明确输出策略，未知则不发布。"
+    }
+  ],
+  "dependencies": [
+    {
+      "target": "docs/netdata-ai/skills/query-netdata-agents/scripts/_lib.sh",
+      "disposition": "required_for_task",
+      "citation": {
+        "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+        "start": 2309,
+        "end": 2605,
+        "quote": "2. **Use token-safe wrappers.** Source\n   `docs/netdata-ai/skills/query-netdata-agents/scripts/_lib.sh`,\n   call `agents_load_env`, then use `agents_call_function`,\n   `agents_query_cloud`, or `agents_query_agent`. Do not paste raw\n   Cloud tokens, agent bearers, or token-bearing curl commands.\n"
+      },
+      "rationale": "按仓库根 docs 路径显式选取，保留路径解释；只读文本不执行 wrapper。"
+    },
+    {
+      "target": "docs/netdata-ai/skills/query-snmp-traps/how-tos/recent-security-traps-from-device.md",
+      "disposition": "required_for_task",
+      "citation": {
+        "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+        "start": 1100,
+        "end": 1239,
+        "quote": "| Recent security traps from one device | [how-tos/recent-security-traps-from-device.md](./how-tos/recent-security-traps-from-device.md) |\n"
+      },
+      "rationale": "现有单设备问题的步骤依据，不凭名字构造新业务工具。"
+    },
+    {
+      "target": "docs/netdata-ai/skills/query-netdata-cloud/query-logs.md",
+      "disposition": "required_for_task",
+      "citation": {
+        "path": "docs/netdata-ai/skills/query-snmp-traps/SKILL.md",
+        "start": 951,
+        "end": 1060,
+        "quote": "Log Function request shape from\n[`query-netdata-cloud/query-logs.md`](../query-netdata-cloud/query-logs.md).\n"
+      },
+      "rationale": "保留结构化查询、单位及行解码约束。"
+    },
+    {
+      "target": "src/plugins.d/FUNCTION_UI_REFERENCE.md",
+      "disposition": "required_for_task",
+      "citation": {
+        "path": "docs/netdata-ai/skills/query-netdata-cloud/query-functions.md",
+        "start": 3110,
+        "end": 3432,
+        "quote": "For full protocol semantics (facet pills, histograms, charts\nconfiguration, anchor/delta/PLAY modes, error handling, edge\ncases), the authoritative source is\n`<repo>/src/plugins.d/FUNCTION_UI_REFERENCE.md`. This skill\nsummarizes the surface that matters for a Cloud-side curl client;\nthe reference covers everything else.\n"
+      },
+      "rationale": "人工发现 <repo> 普通文本引用，词法链接扫描未捕获；本轮按同 commit 补取。"
+    }
+  ]
+}

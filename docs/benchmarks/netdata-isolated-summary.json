@@ -1,0 +1,145 @@
+{
+  "apiVersion": "netopyu.io/netdata-isolated-summary/v1",
+  "baseCommit": "14baa0a269fdffdac8443cb41ec7f22fbd2d44ad",
+  "branch": "dev",
+  "claimBoundary": "本轮为通用纯数据算子与明确合成宿主的局部接线；不是完整 Skill 转译、9B 准确率或生产成功概率。 / Bounded data-operator and synthetic-host wiring, not whole-Skill translation, 9B accuracy or production success probability.",
+  "contractActivated": false,
+  "date": "2026-09-09",
+  "defaultDshRouteChanged": false,
+  "effectCalls": 0,
+  "evidence": {
+    "artifacts/translator-v2/netdata-isolated-20260909/demo/host-catalog.json": "sha256:e141a9745b8d3bc163568892a498b061a9e16615d40c5cb57a79406a7198bafd",
+    "artifacts/translator-v2/netdata-isolated-20260909/demo/projection.json": "sha256:b015c7b8cb5cb4fdda29506b43c87c979066e94ab07100e2da807cc967641480",
+    "artifacts/translator-v2/netdata-isolated-20260909/demo/report.json": "sha256:ece2153bcac1b1e08bd6f15e2e795c2a58e4a9ba10e95bb011769517bcebdf3a",
+    "artifacts/translator-v2/netdata-isolated-20260909/demo/source-map.json": "sha256:fe0fc667307eeb1c482a42b977e361990f87c99e1949356005ddeb5f08dac96d",
+    "artifacts/translator-v2/netdata-isolated-20260909/demo/summary.json": "sha256:decb9be30eaca4cc8cb22601f7fb21f80fb17a73b6e3661c178ecf2cc8a32bc6",
+    "artifacts/translator-v2/netdata-isolated-20260909/demo/trace.json": "sha256:8c3d72f8f5907120a5105697d084dac7f8106e67d7b3fde1e0520810cd877005",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/arguments.json": "sha256:0ef33e63b19de1924643c1d6d3457b4081646a59f792c34b3977b254217f8b2f",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/calls.json": "sha256:05bf90caea35e7d2e22b132cac8112831f295d19d0afc2044f0f388a8a64e2c4",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/compilation.json": "sha256:b623c44821f422d20d4165e416f4e49d0768b15daaecba32082fc50a3774fdfc",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/effect-targets.json": "sha256:918263419482adc5e0c68886e0a68a23c4c5256573845590295780f821c69ada",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/execution.json": "sha256:bf1c00795aade931ab98bfc317885a2ed3e077ce90c53fa366f2900edb18a2ed",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/read-contracts.json": "sha256:c700e60af62efba09ac39b73379ab725ab5331423f7949d253675842864ed1cf",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/report.json": "sha256:b55efa873c42a896b2fb5bb027ede6f23c03c4546311cb5b3fe96a373daf9ae3",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/source-bundle.json": "sha256:25ce6377f62eac9248d557636d09ab58132e0e08ecdce6458639e67b3cc42d3c",
+    "artifacts/translator-v2/netdata-isolated-20260909/legacy-flow-replay/tree.json": "sha256:db8c5b16d9aead285520dc305a314feb4bcb9f5ebaa7eab5e2f19116dcdad5ba",
+    "artifacts/translator-v2/netdata-isolated-20260909/source-snapshot.tar.gz": "sha256:7e6e5b7275597d91102378f98c78e8efcd3f022905522208753cd199568efa2d",
+    "artifacts/translator-v2/structured-flow-20260909/source-snapshot.tar.gz": "sha256:931bf532aba22bf96fa5c6a953415bc1f10de011d10c6ad65bf6037bde41882a",
+    "artifacts/translator-v2/task-alignment-20260909/netdata-source/bundle.json": "sha256:d7aa17610fca385016b4b73c06c80ef3f91534c0de61b3504bbe921d354d9ce2",
+    "artifacts/translator-v2/task-alignment-20260909/source-snapshot-v2.tar.gz": "sha256:5a1f8e91aa12bd13efce4a3e15b420e24c3edcc10feefa4695329a7d7b9c2ffe",
+    "evaluation/netdata_fixture.py": "sha256:cb5088359d92fc94b6f80bf9b9de6de504203bd1a7c841e5ce1192960a98e741",
+    "evaluation/netdata_task_demo.py": "sha256:d329ee4917cce0fb6b0edb32a6c451fdefab383a639e3fd83c60804db56f9bf8",
+    "evaluation/structured_flow_tree.py": "sha256:8ce808e53be382849b6275d31de85d23fc2df1e7271f28a7550041bb5fc5d89a",
+    "network_runtime/l0/column_rows.py": "sha256:cc7e1a0fc624f41ce7df089f6d3a8f6fa8887b2193c8cab043e53fd1ec9df093",
+    "network_runtime/l0/flow.py": "sha256:3dd0ce42502945ef2567f1aa7fdc88860d78ec00185d170ef56972197b4a2908",
+    "network_runtime/l0/structured_bindings.py": "sha256:c494de2d5cd2b8527fab8e82644a9992aff7316e3b12df149d2a33b7afd1c67b",
+    "tests/test_column_rows.py": "sha256:2d50138834f8ce2f618b179f357b3b948f5799d8710796c8444cd2bb7cd25de0",
+    "tests/test_netdata_fixture.py": "sha256:4bd36f02054757703eb71f66c4ac62d5c34462d527ad784eb800ef7116fcbf40"
+  },
+  "evidenceRole": "developer_wired_synthetic_host_not_model_translation",
+  "finalValidation": {
+    "canonicalDocumentTests": {
+      "passed": 3
+    },
+    "changedDocumentLocalLinks": {
+      "count": 468,
+      "passed": true
+    },
+    "changedPythonLint": {
+      "files": 36,
+      "passed": true
+    },
+    "diffCheckPassed": true,
+    "fullSuite": {
+      "failed": 0,
+      "passed": 2041,
+      "seconds": 161.07,
+      "stationaryWorktree": true,
+      "subtests": 81
+    },
+    "semanticAccuracyMeasured": false,
+    "targeted": {
+      "failed": 0,
+      "passed": 190,
+      "seconds": 10.76
+    }
+  },
+  "genericPermutationChecks": 24,
+  "gitCommitted": false,
+  "isolatedReplay": {
+    "baselinePlusOrderedOverlays": true,
+    "byteIdenticalFiles": 6,
+    "directory": "/private/tmp/netopyu-c3p-replay.AIHhxZ"
+  },
+  "legacyWiringCompatibility": {
+    "byteIdenticalFiles": 9,
+    "priorC3nEvidenceVerifiedViaArchivedSource": 76
+  },
+  "modelCalls": 0,
+  "networkCalls": 0,
+  "newModelTranslationSamples": 0,
+  "newOperator": "column_rows",
+  "positiveDemo": {
+    "readGatewayCalls": 2,
+    "receivedPageRows": 3,
+    "report": "artifacts/translator-v2/netdata-isolated-20260909/demo/report.json",
+    "reportDigest": "sha256:8283356938b4540f0ccee3858c57e751d9c5daca7f193aba557afe832530dbe4",
+    "severityCounts": {
+      "crit": 1,
+      "warning": 2
+    },
+    "taskCompleted": false,
+    "wholeWindowCount": null
+  },
+  "publicSourceSkillsUsed": 1,
+  "remaining": [
+    "Full model authoring and source-obligation review",
+    "L1/unsupported region representation",
+    "Pagination, retention and full-window proof",
+    "Vendor service/transport interoperability",
+    "9B first-construction and separate semantic scoring"
+  ],
+  "runtimeLatencyMetrics": null,
+  "sourceBundleDigest": "sha256:ef838bdff84763a8ea493133d282a2eb1db039f645ae28cfd2624ae6bd5675a6",
+  "sourceOverlay": {
+    "orderedArchives": [
+      "artifacts/translator-v2/structured-flow-20260909/source-snapshot.tar.gz",
+      "artifacts/translator-v2/task-alignment-20260909/source-snapshot-v2.tar.gz",
+      "artifacts/translator-v2/netdata-isolated-20260909/source-snapshot.tar.gz"
+    ],
+    "paths": [
+      "network_runtime/l0/column_rows.py",
+      "network_runtime/l0/structured_bindings.py",
+      "network_runtime/l0/flow.py",
+      "evaluation/structured_flow_tree.py",
+      "evaluation/netdata_fixture.py",
+      "evaluation/netdata_task_demo.py",
+      "tests/test_column_rows.py",
+      "tests/test_netdata_fixture.py"
+    ],
+    "sourceBundlesRequiredSeparately": true
+  },
+  "sourceScriptCalls": 0,
+  "stage": "C3p_local_host_and_column_projection_complete_whole_skill_authoring_pending",
+  "summaryDigest": "sha256:8897036ec85293288703cd3c016cadf60fb2cfa18d09630b73f83b2bb43639c3",
+  "translationMetrics": null,
+  "validationObservations": [
+    {
+      "failed": 0,
+      "passed": 65,
+      "scope": "new operator/host tests, first pass",
+      "seconds": 6.26
+    },
+    {
+      "failed": 0,
+      "passed": 190,
+      "scope": "final targeted regression including freshness/dominance and overwrite refusal",
+      "seconds": 10.76
+    },
+    {
+      "scope": "initial lint",
+      "status": "new test one-line suites required formatting; formatted, no Oracle changes"
+    }
+  ],
+  "wholeSkillTranslationProven": false
+}

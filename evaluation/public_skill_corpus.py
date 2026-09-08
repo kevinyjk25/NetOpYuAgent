@@ -118,6 +118,13 @@ def _repo_key(github_url: str) -> str:
     return f"{parts[0].lower()}/{parts[1].lower()}"
 
 
+def _source_key(github_url: str) -> str:
+    """GitHub owner/repo are case-insensitive; refs and file paths are not."""
+    repo = _repo_key(github_url)
+    tail = urllib.parse.urlparse(github_url).path.strip("/").split("/")[2:]
+    return repo + "/" + "/".join(tail)
+
+
 def _parse_github_source(github_url: str, *, default_branch: str) -> dict[str, str]:
     parsed = urllib.parse.urlparse(github_url)
     parts = [urllib.parse.unquote(part) for part in parsed.path.split("/") if part]
@@ -242,6 +249,197 @@ def load_discovery(path: str | Path) -> dict[str, Any]:
     return value
 
 
+def merge_public_discoveries(paths: Iterable[str | Path], output: str | Path) -> dict[str, Any]:
+    """Merge saved query responses without another request or outcome filtering.
+
+    Preserve every query's digest and cross-query memberships. Only identical
+    canonical source URLs are deduplicated; repository caps belong to sampling.
+    """
+    inputs = [load_discovery(path) for path in paths]
+    if not inputs or len({(x["source"], x["sortBy"], x["language"]) for x in inputs}) != 1:
+        raise ValueError("discovery merge requires consistent source/sort/language")
+    by_url: dict[str, dict] = {}
+    ids: dict[str, str] = {}
+    duplicate_count = 0
+    for discovery in inputs:
+        for candidate in discovery["candidates"]:
+            url = _source_key(candidate["githubUrl"])
+            if candidate["id"] in ids and ids[candidate["id"]] != url:
+                raise ValueError("same candidate ID has conflicting source URLs")
+            ids[candidate["id"]] = url
+            if url in by_url:
+                duplicate_count += 1
+                queries = by_url[url]["discoveredInQueries"]
+                if candidate["discoveryQuery"] not in queries:
+                    queries.append(candidate["discoveryQuery"])
+            else:
+                by_url[url] = {**candidate, "discoveredInQueries": [candidate["discoveryQuery"]]}
+    rows = list(by_url.values())
+    if len(rows) > 500:
+        raise ValueError("merged discovery exceeds 500 candidates; do not silently truncate strata")
+    counts = Counter(_repo_key(row["githubUrl"]) for row in rows)
+    body = {
+        **{key: inputs[0][key] for key in ("apiVersion", "source", "sortBy", "language", "claimBoundary")},
+        "createdAt": _utc_now(), "candidateCount": len(rows), "candidates": rows,
+        "requestedLimit": sum(x["requestedLimit"] for x in inputs),
+        "queries": list(dict.fromkeys(q for x in inputs for q in x["queries"])),
+        "maxPerRepository": max(counts.values(), default=0),
+        "parentDiscoveryDigests": [x["discoveryDigest"] for x in inputs],
+        "duplicateSourceCount": duplicate_count,
+    }
+    result = {**body, "discoveryDigest": sha256_json(body)}
+    target = Path(output).expanduser().resolve()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    with target.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return result
+
+
+def sample_public_skills(
+    discovery_path: str | Path, output_root: str | Path, *,
+    prior_snapshots: Iterable[str | Path], seed: str, limit: int = 60,
+    max_per_repo: int = 2, batch_size: int = 20,
+    protocol_path: str | Path | None = None,
+    prior_repositories: Iterable[str] = (),
+) -> dict[str, Any]:
+    """Freeze metadata-only sampling before looking at new package contents.
+
+    Every previously attempted repository is excluded, not just accepted ones.
+    Query strata are balanced, but are NOT independently reviewed domains.
+    Failed downloads stay in the sampled denominator; no convenient replacement.
+    This never certifies all historical exposure, source independence or Gold.
+    """
+    if not seed.strip() or not 1 <= max_per_repo <= batch_size <= limit <= 500:
+        raise ValueError("invalid public sampling limits/seed")
+    protocol = None
+    if protocol_path is not None:
+        path = Path(protocol_path).expanduser().resolve()
+        protocol = {"path": str(path), "sha256": _file_digest(path), "content": json.loads(path.read_text())}
+        config = protocol["content"]
+        if (config["sampleTarget"], config["maxSkillsPerRepository"], config["batchSize"], config["samplingSeed"]) != (
+            limit, max_per_repo, batch_size, seed,
+        ):
+            raise ValueError("sampling arguments differ from the frozen protocol")
+    discovery = load_discovery(discovery_path)
+    excluded: set[str] = set()
+    additional = sorted(set(value.strip().lower() for value in prior_repositories))
+    if any(not re.fullmatch(r"[a-z0-9_.-]+/[a-z0-9_.-]+", value) for value in additional):
+        raise ValueError("invalid explicitly exposed repository")
+    excluded.update(additional)
+    priors = []
+    for value in prior_snapshots:
+        root = Path(value).expanduser().resolve()
+        checked = inspect_public_snapshot(root)
+        priors.append({"root": str(root), "manifestDigest": checked["manifestDigest"]})
+        for line in (root / "records.jsonl").read_text().splitlines():
+            record = json.loads(line)
+            excluded.add(_repo_key(record["githubUrl"]))
+    if not priors:
+        raise ValueError("sampling requires an explicit prior-exposure inventory")
+    strata: dict[str, list[dict]] = {}
+    rejection: list[dict] = []
+    ids: set[str] = set()
+    urls: set[str] = set()
+    for row in discovery["candidates"]:
+        if row["id"] in ids:
+            raise ValueError("duplicate public candidate ID")
+        ids.add(row["id"])
+        repo, url = _repo_key(row["githubUrl"]), _source_key(row["githubUrl"])
+        reason = "prior_repository" if repo in excluded else "duplicate_url" if url in urls else None
+        urls.add(url)
+        if reason:
+            rejection.append({"candidateId": row["id"], "reason": reason})
+        else:
+            strata.setdefault(row["discoveryQuery"], []).append(row)
+    def rank(value: str) -> str:
+        return hashlib.sha256(f"{seed}:{value}".encode()).hexdigest()
+    queues = {key: sorted(values, key=lambda row: rank(row["id"])) for key, values in strata.items()}
+    selected, counts = [], Counter()
+    while any(queues.values()) and len(selected) < limit:
+        for key in sorted(queues, key=rank):
+            while queues[key]:
+                row = queues[key].pop(0)
+                repo = _repo_key(row["githubUrl"])
+                if counts[repo] >= max_per_repo:
+                    rejection.append({"candidateId": row["id"], "reason": "repository_cap"})
+                    continue
+                selected.append(row)
+                counts[repo] += 1
+                break
+            if len(selected) >= limit:
+                break
+    selected_ids = {row["id"] for row in selected}
+    # Group repositories without consulting source text or translation outcomes.
+    groups: dict[str, list[str]] = {}
+    for row in selected:
+        groups.setdefault(_repo_key(row["githubUrl"]), []).append(row["id"])
+    batches: list[list[str]] = []
+    for group in groups.values():
+        if not batches or len(batches[-1]) + len(group) > batch_size:
+            batches.append([])
+        batches[-1].extend(group)
+    body = {key: value for key, value in discovery.items() if key != "discoveryDigest"}
+    body.update(candidates=selected, candidateCount=len(selected), requestedLimit=limit,
+                maxPerRepository=max_per_repo, parentDiscoveryDigest=discovery["discoveryDigest"])
+    sampled = {**body, "discoveryDigest": sha256_json(body)}
+    plan = {
+        "apiVersion": "effect-runtime.io/public-skill-metadata-sampling/v1",
+        "createdAt": _utc_now(), "seed": seed, "requestedCount": limit,
+        "selectedCount": len(selected), "repositoryCount": len(counts),
+        "queryStrataCounts": dict(sorted(Counter(row["discoveryQuery"] for row in selected).items())),
+        "maxPerRepository": max_per_repo, "batchSize": batch_size,
+        "priorSnapshots": priors, "explicitlyExposedRepositories": additional, "excludedRepositories": sorted(excluded),
+        "rejected": rejection,
+        "unselectedCandidateIds": sorted(ids - selected_ids - {row["candidateId"] for row in rejection}),
+        "sampledDiscoveryDigest": sampled["discoveryDigest"],
+        "batches": [{"batchId": f"public-{i:02d}", "candidateIds": batch} for i, batch in enumerate(batches, 1)],
+        "complete": len(selected) == limit, "replacementPolicy": "none_report_missing",
+        "evidenceRole": "repository_disjoint_from_supplied_snapshots_pending_source_review",
+        "independentGold": False, "proofCohortEligible": False, "runtimeAuthorityGranted": False,
+        "claimBoundary": "Query strata are discovery labels, not verified domains. Public metadata sampling does not certify unseen provenance or semantic accuracy.",
+    }
+    if protocol is not None:
+        project = Path(__file__).resolve().parents[1]
+        plan["protocol"] = protocol
+        plan["implementation"] = {
+            path.relative_to(project).as_posix(): _file_digest(path)
+            for directory in ("evaluation", "network_runtime", "effect_runtime", "l1_runtime", "tools")
+            for path in sorted((project / directory).rglob("*.py"))
+        }
+    plan["samplingDigest"] = sha256_json(plan)
+    root = Path(output_root).expanduser().resolve()
+    root.mkdir(parents=True, exist_ok=False)
+    for name, data in (("discovery.json", sampled), ("sampling.json", plan)):
+        (root / name).write_text(json.dumps(data, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return plan
+
+
+def recover_script_discovery(discovery_path: str | Path, snapshot_root: str | Path, output: str | Path) -> dict:
+    """Recover all script exclusions for development, never relabel as unseen."""
+    source = load_discovery(discovery_path)
+    root = Path(snapshot_root).expanduser().resolve()
+    inspect_public_snapshot(root)
+    manifest = json.loads((root / "manifest.json").read_text())
+    if manifest["discoveryDigest"] != source["discoveryDigest"] or manifest["scriptPolicy"] != "exclude":
+        raise ValueError("script recovery requires the original discovery/exclude snapshot")
+    ids = {row["candidateId"] for line in (root / "records.jsonl").read_text().splitlines()
+           if (row := json.loads(line)).get("reason") == "executable_surface_excluded"}
+    rows = [row for row in source["candidates"] if row["id"] in ids]
+    if len(rows) != len(ids) or not rows:
+        raise ValueError("script recovery candidates missing or duplicated")
+    body = {key: value for key, value in source.items() if key != "discoveryDigest"}
+    body.update(candidates=rows, candidateCount=len(rows), requestedLimit=len(rows),
+                createdAt=_utc_now(), parentDiscoveryDigest=source["discoveryDigest"],
+                sourceSnapshotDigest=manifest["manifestDigest"],
+                evidenceRole="known_metadata_script_recovery_development_not_holdout")
+    result = {**body, "discoveryDigest": sha256_json(body)}
+    path = Path(output).expanduser().resolve()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("x", encoding="utf-8") as handle:
+        handle.write(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True) + "\n")
+    return result
+
+
 def _safe_relative(path: str) -> PurePosixPath:
     relative = PurePosixPath(path)
     if relative.is_absolute() or not relative.parts or any(part in {"", ".", ".."} for part in relative.parts):
@@ -254,12 +452,70 @@ def _executable_surface(path: PurePosixPath, mode: str, object_type: str) -> str
         return "symlink"
     if mode == "160000" or object_type != "blob":
         return "special-or-submodule"
+    if mode == "100755":
+        return "executable-mode"
     lowered_parts = {part.lower() for part in path.parts}
     if lowered_parts & _EXECUTABLE_DIRS:
         return "executable-directory"
     if path.suffix.lower() in _EXECUTABLE_SUFFIXES or path.name.lower() in _EXECUTABLE_NAMES:
         return "executable-file"
     return None
+
+
+def _quarantine_text(root: Path, package_id: str, entry: dict, data: bytes) -> dict:
+    """Keep source evidence outside the package, never at an importable path.
+
+    This is storage isolation, not a sandbox granting permission to execute it.
+    Non-text blobs remain hash-only. Symlink blobs are stored as text, not links.
+    """
+    record = {
+        "sourcePath": entry["relative"], "sourceMode": entry.get("mode"),
+        "sourceBytes": len(data), "sourceDigest": "sha256:" + hashlib.sha256(data).hexdigest(),
+        "evidencePath": None,
+    }
+    try:
+        data.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return {**record, "representation": "binary_hash_only"}
+    if b"\x00" in data:
+        return {**record, "representation": "binary_hash_only"}
+    relative = f"quarantine/{package_id}/{hashlib.sha256(entry['relative'].encode()).hexdigest()}.txt"
+    path = root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
+    path.chmod(0o600)
+    return {**record, "evidencePath": relative, "representation": "inert_utf8_text"}
+
+
+def _inspect_quarantine(root: Path, records: list[dict]) -> None:
+    expected: set[str] = set()
+    for record in records:
+        for item in record.get("quarantinedFiles", []):
+            _safe_relative(item["sourcePath"])
+            relative = item["evidencePath"]
+            if relative is None:
+                if item["representation"] != "binary_hash_only":
+                    raise ValueError("invalid quarantine representation")
+                continue
+            required = f"quarantine/{record['packageId']}/{hashlib.sha256(item['sourcePath'].encode()).hexdigest()}.txt"
+            if relative != required or relative in expected:
+                raise ValueError("invalid/duplicate quarantine evidence path")
+            path = root / relative
+            if (not path.is_file() or path.is_symlink() or not path.resolve().is_relative_to(root)
+                    or path.stat().st_mode & 0o111):
+                raise ValueError("quarantine evidence is missing or unsafe")
+            if (item["representation"] != "inert_utf8_text" or path.stat().st_size != item["sourceBytes"]
+                    or _file_digest(path) != item["sourceDigest"]):
+                raise ValueError("quarantine evidence digest drift")
+            expected.add(relative)
+    actual: set[str] = set()
+    for path in (root / "quarantine").rglob("*"):
+        if path.is_symlink():
+            raise ValueError("quarantine cannot contain symlinks")
+        if path.is_file():
+            actual.add(path.relative_to(root).as_posix())
+    if (root / "quarantine").is_symlink() or actual != expected:
+        raise ValueError("quarantine contains unsealed files")
 
 
 def _package_id(candidate: dict[str, Any]) -> str:
@@ -311,7 +567,9 @@ def _parse_git_tree(raw: bytes) -> list[dict[str, Any]]:
         if not record:
             continue
         header, path = record.split(b"\t", 1)
-        header_parts = header.decode("ascii").split(" ")
+        # ls-tree -l right-aligns sizes with multiple spaces. File names are
+        # separated by the tab above and must never be whitespace-split.
+        header_parts = header.decode("ascii").split()
         if len(header_parts) == 3:
             mode, object_type, object_sha = header_parts
             size = "-"
@@ -414,7 +672,7 @@ def snapshot_public_skills(
     source_backend: str = "api", seed_snapshot_root: str | Path | None = None,
 ) -> dict[str, Any]:
     if (
-        script_policy not in {"exclude", "metadata-only"}
+        script_policy not in {"exclude", "metadata-only", "inert-text"}
         or license_policy not in {"known", "record-only"}
         or source_backend not in {"api", "git"}
         or limit < 1
@@ -457,6 +715,9 @@ def snapshot_public_skills(
                 seed_root / "packages" / item["packageId"],
                 package_root / item["packageId"],
             )
+            quarantine = seed_root / "quarantine" / item["packageId"]
+            if quarantine.is_dir():
+                shutil.copytree(quarantine, root / "quarantine" / item["packageId"])
         seed_manifest_digest = str(seed_manifest["manifestDigest"])
     github_token = _github_token()
     repo_meta_cache: dict[str, dict[str, Any]] = {}
@@ -516,6 +777,8 @@ def snapshot_public_skills(
             if source_backend == "git":
                 total_bytes = 0
                 for entry in entries:
+                    if entry["type"] != "blob":
+                        continue  # Never fetch a submodule or dereference a special entry.
                     source_path = "/".join(
                         part for part in (source["path"], entry["relative"]) if part
                     )
@@ -546,11 +809,16 @@ def snapshot_public_skills(
             target_root = package_root / package_id
             target_root.mkdir()
             file_records: list[dict[str, Any]] = []
+            quarantined: list[dict[str, Any]] = []
+            withheld: list[dict[str, Any]] = []
             instruction_findings: set[str] = set()
             for entry in entries:
-                if _executable_surface(
+                surface = _executable_surface(
                     PurePosixPath(entry["relative"]), str(entry.get("mode") or ""), str(entry.get("type") or ""),
-                ) and script_policy == "metadata-only":
+                )
+                if surface:
+                    withheld.append({"path": entry["relative"], "reason": surface})
+                if entry["type"] != "blob" or (surface and script_policy == "metadata-only"):
                     continue
                 source_path = "/".join(part for part in (source["path"], entry["relative"]) if part)
                 data = (
@@ -560,19 +828,22 @@ def snapshot_public_skills(
                 )
                 if len(data) != entry["size"]:
                     raise ValueError("public Skill blob size drift")
-                target = (target_root / entry["relative"]).resolve()
-                if not target.is_relative_to(target_root.resolve()):
-                    raise ValueError("public Skill target path escapes quarantine")
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(data)
+                if surface and script_policy == "inert-text":
+                    quarantined.append(_quarantine_text(root, package_id, entry, data))
+                else:
+                    target = (target_root / entry["relative"]).resolve()
+                    if not target.is_relative_to(target_root.resolve()):
+                        raise ValueError("public Skill target path escapes quarantine")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    target.write_bytes(data)
+                    file_records.append({
+                        "path": entry["relative"], "bytes": len(data), "sha256": _file_digest(target),
+                    })
                 if b"\x00" not in data:
                     text = data.decode("utf-8", errors="replace")
                     instruction_findings.update(
                         code for code, pattern in _INSTRUCTION_PATTERNS.items() if pattern.search(text)
                     )
-                file_records.append({
-                    "path": entry["relative"], "bytes": len(data), "sha256": _file_digest(target),
-                })
             package_digest = sha256_json(file_records)
             record.update({
                 "status": "accepted", "packageId": package_id,
@@ -580,10 +851,17 @@ def snapshot_public_skills(
                 "instructionRiskCodes": sorted(instruction_findings),
                 "materializedExecutableFiles": False,
             })
+            if script_policy == "inert-text":
+                record.update(quarantinedFiles=quarantined, withheldFiles=withheld,
+                              sourceEvidenceDigest=sha256_json({"files": file_records, "quarantined": quarantined,
+                                                               "withheld": withheld}))
             accepted += 1
         except Exception as exc:  # each remote candidate is an independently excluded record
             if target_root is not None and target_root.exists():
                 shutil.rmtree(target_root)
+                quarantine = root / "quarantine" / target_root.name
+                if quarantine.is_dir():
+                    shutil.rmtree(quarantine)
             record["reason"] = f"snapshot_error:{type(exc).__name__}:{exc}"
         records.append(record)
     scratch_handle.cleanup()
@@ -649,7 +927,12 @@ def inspect_public_snapshot(root_path: str | Path) -> dict[str, Any]:
         raise ValueError("public Skill snapshot accepted count drift")
     package_gates: Counter[str] = Counter()
     package_findings: Counter[str] = Counter()
+    _inspect_quarantine(root, accepted)
     for record in accepted:
+        if manifest["scriptPolicy"] == "inert-text" and record.get("sourceEvidenceDigest") != sha256_json({
+            "files": record["files"], "quarantined": record["quarantinedFiles"], "withheld": record["withheldFiles"],
+        }):
+            raise ValueError("public Skill source evidence digest drift")
         if record.get("materializedExecutableFiles") is not False:
             raise ValueError("public Skill snapshot executable materialization is forbidden")
         package = (root / "packages" / record["packageId"]).resolve()
@@ -676,7 +959,9 @@ def inspect_public_snapshot(root_path: str | Path) -> dict[str, Any]:
         if sha256_json(observed) != record["packageDigest"]:
             raise ValueError("public Skill snapshot package digest drift")
         package_report = inspect_skill_package(package)
-        package_gates[str(package_report["gate"])] += 1
+        package_gates["blocked" if record.get("withheldFiles") else str(package_report["gate"])] += 1
+        if record.get("withheldFiles"):
+            package_findings["QUARANTINED_SOURCE_NOT_RUNTIME_RESOURCE"] += 1
         package_findings.update(str(item["code"]) for item in package_report["findings"])
     if manifest.get("packageDigests") != {item["packageId"]: item["packageDigest"] for item in accepted}:
         raise ValueError("public Skill snapshot package index drift")
@@ -710,11 +995,12 @@ def build_public_pilot_report(
     blocked: list[dict[str, Any]] = []
     for record in accepted:
         package_report = inspect_skill_package(root / "packages" / record["packageId"])
-        if package_report["gate"] != "passed":
+        if package_report["gate"] != "passed" or record.get("withheldFiles"):
             blocked.append({
                 "candidateId": record["candidateId"], "name": record["name"],
-                "repository": record["repository"], "gate": package_report["gate"],
-                "findingCodes": sorted({item["code"] for item in package_report["findings"]}),
+                "repository": record["repository"], "gate": "blocked",
+                "findingCodes": sorted({item["code"] for item in package_report["findings"]}
+                                       | ({"QUARANTINED_SOURCE_NOT_RUNTIME_RESOURCE"} if record.get("withheldFiles") else set())),
             })
     discovery_count: int | None = None
     if discovery_path is not None:
@@ -877,7 +1163,7 @@ def export_public_author_kit(
         if record.get("status") != "accepted":
             continue
         report = inspect_skill_package(source_root / "packages" / record["packageId"])
-        if report["gate"] == "passed":
+        if report["gate"] == "passed" and not record.get("withheldFiles"):
             selected.append(record)
     if not selected:
         raise ValueError("public author kit requires at least one package that passes the Runtime gate")
@@ -1026,11 +1312,28 @@ def main(argv: list[str] | None = None) -> int:
     discover.add_argument("--language")
     discover.add_argument("--sort-by", choices=("recent", "stars"), default="recent")
     discover.add_argument("--output", required=True)
+    sample = commands.add_parser("sample", help="freeze query-balanced, repository-disjoint metadata sampling")
+    sample.add_argument("discovery")
+    sample.add_argument("--output-root", required=True)
+    sample.add_argument("--prior-snapshot", action="append", required=True)
+    sample.add_argument("--prior-repository", action="append", default=[], help="also exclude manually inspected/search-exposed repositories")
+    sample.add_argument("--seed", required=True)
+    sample.add_argument("--limit", type=int, default=60)
+    sample.add_argument("--max-per-repo", type=int, default=2)
+    sample.add_argument("--batch-size", type=int, default=20)
+    sample.add_argument("--protocol", help="pin the preparation protocol and local source implementation")
+    merge = commands.add_parser("merge-discoveries", help="combine saved query metadata without re-fetching")
+    merge.add_argument("discoveries", nargs="+")
+    merge.add_argument("--output", required=True)
+    recover = commands.add_parser("recover-scripts", help="recover all previous script exclusions as development metadata")
+    recover.add_argument("discovery")
+    recover.add_argument("snapshot_root")
+    recover.add_argument("--output", required=True)
     snapshot = commands.add_parser("snapshot")
     snapshot.add_argument("discovery")
     snapshot.add_argument("--output-root", required=True)
     snapshot.add_argument("--limit", type=int, default=20)
-    snapshot.add_argument("--script-policy", choices=("exclude", "metadata-only"), default="exclude")
+    snapshot.add_argument("--script-policy", choices=("exclude", "metadata-only", "inert-text"), default="exclude")
     snapshot.add_argument("--license-policy", choices=("known", "record-only"), default="known")
     snapshot.add_argument("--source-backend", choices=("api", "git"), default="api")
     snapshot.add_argument(
@@ -1074,6 +1377,12 @@ def main(argv: list[str] | None = None) -> int:
     translation_corpus.add_argument("--batch-size", type=int, default=12)
     inspect_translation_corpus = commands.add_parser("translation-corpus-inspect")
     inspect_translation_corpus.add_argument("root")
+    intake = commands.add_parser("translation-intake", help="preserve whole source files and diagnose host schema gaps without model/tool execution")
+    intake.add_argument("snapshot_root")
+    intake.add_argument("candidate_id")
+    intake.add_argument("--output-root", required=True)
+    intake.add_argument("--host-catalog")
+    intake.add_argument("--supplement-path", action="append", default=[])
     anchored_author = commands.add_parser(
         "anchored-author",
         help="author Skill-grounded translation candidates without running Runtime/DSH",
@@ -1185,6 +1494,17 @@ def main(argv: list[str] | None = None) -> int:
             args.output, queries=args.query, limit=args.limit, per_query=args.per_query,
             max_per_repo=args.max_per_repo, language=args.language, sort_by=args.sort_by,
         )
+    elif args.command == "merge-discoveries":
+        result = merge_public_discoveries(args.discoveries, args.output)
+    elif args.command == "recover-scripts":
+        result = recover_script_discovery(args.discovery, args.snapshot_root, args.output)
+    elif args.command == "sample":
+        result = sample_public_skills(
+            args.discovery, args.output_root, prior_snapshots=args.prior_snapshot,
+            seed=args.seed, limit=args.limit, max_per_repo=args.max_per_repo, batch_size=args.batch_size,
+            protocol_path=args.protocol,
+            prior_repositories=args.prior_repository,
+        )
     elif args.command == "snapshot":
         result = snapshot_public_skills(
             args.discovery, args.output_root, limit=args.limit, script_policy=args.script_policy,
@@ -1232,6 +1552,10 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "translation-corpus-inspect":
         from evaluation.translation_corpus import inspect_translation_corpus
         result = inspect_translation_corpus(args.root)
+    elif args.command == "translation-intake":
+        from evaluation.translation_intake import prepare_intake
+        result = prepare_intake(args.snapshot_root, args.candidate_id, args.output_root,
+                                host_catalog=args.host_catalog, supplement_paths=args.supplement_path)
     elif args.command == "anchored-author":
         from evaluation.translation_case_authoring import run_anchored_case_authoring
         result = run_anchored_case_authoring(

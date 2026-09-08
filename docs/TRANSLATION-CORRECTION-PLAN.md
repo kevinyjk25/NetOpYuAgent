@@ -2,46 +2,51 @@
 
 ## 中文
 
-更新：2026-09-08。当前执行顺序：**清理收敛 → 提交 → 等待合入 → 源语义审查与未见小批 → 泛化门禁 → Runtime 规模化评测**。本轮只完成合入前工作。
-
-本页只维护有效计划；旧 A/B/C 子阶段及所有当时决策保存在[纠偏历史](TRANSLATION-CORRECTION-HISTORY.md)。阶段事实由[项目进展](PROJECT-STATUS.md)统一汇总。
+更新：2026-09-09。用户授权推进至批量验证决策点。有效顺序：**源审查 → 新输入小批 → 机制纠偏与诊断 → 跨 Skill 泛化验证 → Runtime 对照**。不从授权推断合入状态。见[进展](PROJECT-STATUS.md)、[旧计划](TRANSLATION-CORRECTION-HISTORY.md)。
 
 ### 不变原则
 
-- 研究原型优先，不继续扩建生产控制面。Reasoning、Reliability Runtime、Infrastructure 三平面不变。
-- L1 原文与真实宿主工具合同是输入；模型输出是待审提案，不是事实、Gold、授权或已执行结果。
-- 复用现有 L0 合同与执行器；参数、顺序、分支、来源、缺失能力及未决条件必须可定位，不用额外执行语义掩盖转译缺口。
-- 首次生成、辅助修订、可执行片段、正确停止和完整 Skill 分开计数。已用于修复的案例属于开发集。
-- 不改历史源文、模型回答、Oracle、基线或代码指纹来提高成绩。脚本/第三方参考默认惰性，不在转译时运行。
+- 原型优先，生产控制面冻结，Reasoning / Reliability Runtime / Infrastructure 三平面不变。
+- L1 原文及真实宿主合同是输入；模型产物是待审解释，不是事实、Gold、授权或执行结果。
+- 易用性/通过性不能靠降低安全标准换取；缺能力、未知、源冲突显式保留，源脚本惰性。
+- 首次、修订、结构通过、有效片段、正确停止、完整 Skill 分开计数；不改旧失败/Oracle/指纹。
 
-### 当前路线及缺口
+### 已调整设计
 
-当前研究入口是合同约束构造 → FlowTree → 必要条件候选 → 完整源审查；模块和历史实验分类见[代码导航](../evaluation/README.md)。这是推荐继续验证的路径，不是已替换默认 DSH 的自动高准确转译器。
+1. **退出单条件自动补全。** 旧反事实判断会误解 OR/否定并阻断正确图；保留作诊断。
+2. **模型提取语义，代码计算逻辑。** 可读 and/or/not → 白名单结构 → 联合条件 → 原 FlowTree 编译，禁止 eval/exec，不新增运行时。
+3. **分歧先定位，不按高分自动择优。** 保留原候选、表达式、具体赋值、引文和节点；修订另存且未激活，未知/范围外不算接受。
+4. **前端对齐既有编译约束。** 无效长度/重复引文提前排除，完整原文保留；不据此声称引用语义正确。
 
-最新 33/33 来自六个已知开发案例的后处理，首次生成仍为 29/33；正向路径可行性未知、必要条件充分性和完整源语义均未证明。生成候选未激活。详细原始数据见[行为修复](FLOW-BEHAVIOR-REPAIR.md)。
+目前辅助模块只验证最多四个布尔事实的两阶段读取区域，不覆盖任意多步/循环/数值谓词或完整 Skill。参数、引用角色、宿主真实性及完整源审查仍需独立验证。[实际结果与限制](FLOW-SEMANTIC-TRANSFER.md)。
 
-### 合入后的验收顺序
+### 接下来评估什么
 
-1. **核实推导前提。** 逐项检查模型的禁止/可能/未知判断和引用位置；覆盖否定极性、字段别名、OR 与 AND、缺失前置及被废弃示例。反事实逻辑正确不能补偿错误的自然语言前提。
-2. **做新的首次完整转译。** 冻结实现、源/宿主接口和协议后再选未见 Skill；从 L1 重新生成，不复用手工 L0 或已修好的候选。生成、审查、评分分离；如用 AI 审查则标记角色隔离模拟，不宣称真人 Gold。
-3. **先小批，再规模化。** 不把首次小批称为正式泛化结论。若发现错误，保留测试结果并另开开发修订；不在同一密封集合调参再当独立验证。
-4. **满足既有泛化门禁后再做 Runtime 对照。** ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 不下调；具体安全、召回、参数与证据标准见[门禁](TRANSLATION-GENERALIZATION-GATE.md)。
+C3p 已实现[隔离宿主与动态列解码](NETDATA-ISOLATED-VALIDATION.md)，两次原网关读取后仅输出合成本页计数。接下来将明确的可编译段、L1 职责、未支持的分页/完整性区分开，把当前开发者接线映射成可审查候选并接入小批 9B 首次构造；不能继续只增加脚本检查，也不能把手写 demo 算作模型转译通过。原始 Skill 不裁剪，适配和发布策略变化显式保留。完整任务/语义门禁未通过前，不解锁规模 Runtime 比较。
 
-每批同时报告：接受后的语义正确率、适用 Skill 召回、步骤/整 Skill 覆盖、不安全误接受、过度停止、参数错误、首次及辅助结果、调用/token 与含失败的 p50/p95；按 Skill/仓库聚类。不能用 Schema 通过率、语句数量或测试数量替代它们。
+C3o 的[四份任务对齐档案](TASK-SOURCE-ALIGNMENT.md)保留 35 项开发者声明义务、11 个问题与当时 12 条未绑定宿主需求。C3p 针对其中 Netdata 的一部分建立隔离宿主、列解码和单位/页级输出检查，不回填 C3o 成绩，也未解决全部隐私张力及完整任务语义。明确声明的本地评测 adapter 不需真实设备；但不得冒充原厂合同、运行来源脚本或把聚合/推理隐藏成一个工具。源审阅与编译结果始终分开。
+
+此前 C3l 已落实[无损输入与引用补取](TRANSLATION-INTAKE.md)，C3m 已实现[版本化结构化参数绑定](STRUCTURED-DATA-BINDING.md)，C3n 将源锚定 Tree/嵌套参数接入[原共享流程执行器](STRUCTURED-FLOW-WIRING.md)，保持支配关系、资源权限、本地回执时效与候选边界。C3o 在这些基础上绑定了具体任务与未决源义务，但并未完成全部引用/宿主/语义闭合。数据形状不等同集合循环语义，范围外、参数含义、分支极性及 L1 职责继续保留。这四轮没有模型调用或新的语义评分。
+
+分批采集现已处理 60 个冻结候选，保存 53 个 Skill／38 仓库；失败保留，不以旧缓存补数。四份根源文初审发现包外引用、模板占位误报、长源文与结构化读取限制。先做完整引用/任务/宿主对齐，再固定候选版本做小批 9B 转译；不把问题全部归因模型，也不虚构汇总工具隐藏缺口。命令、证据和边界见[公开批次准备](PUBLIC-TRANSLATION-BATCH.md)。本轮不改 Translator 或既有 Oracle 来迎合新库。
+
+- 冻结实现/协议，独立抽样不同 Skill/仓库/领域；分批完成转译资格和源审查，再决定 Runtime/DSH 成本。
+- 以 Skill 级适用召回、接受后的源语义正确率、引用蕴含、参数角色正确率为主；报告不安全误接受、过度停止、范围外比例。真值/Schema 通过不能替代它们。
+- 分开记录构造、条件提取、编译、审查四类失败及所有调用/token/含失败 p50/p95。AI 审查只是模拟角色，不称真人 Gold。
+- 正式门禁仍为 ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 及既有质量阈值；通过前不扩大 Runtime A/B。
 
 ## English
 
-Updated 2026-09-08. Active order: **consolidate → commit → wait for merge → source-semantic audit and fresh small batch → generalization gate → large Runtime evaluation**. This cleanup stops before merge. The [historical plan](TRANSLATION-CORRECTION-HISTORY.md) preserves earlier A/B/C decisions; [project status](PROJECT-STATUS.md) owns current facts.
+C3p now implements an [isolated host and column decoding](NETDATA-ISOLATED-VALIDATION.md), producing synthetic page-only counts through two original-gateway reads. Next separate compilable regions, L1 duties and unsupported pagination/completeness, map developer wiring into reviewable candidates, and connect small 9B first construction. More script checks alone are not the goal; the handwritten demo cannot count as translation success. Keep full Skills and explicit adaptation/publication changes. Large Runtime evaluation remains locked.
 
-Preserve the prototype's three planes, real source/tool contracts, inactive proposals and the existing L0 compiler/executor. Never infer authority from confidence, rewrite old answers/oracles/hashes, execute source scripts, or count safe stops as complete business Skills. Known repaired cases remain development data.
+C3o's [four task-alignment dossiers](TASK-SOURCE-ALIGNMENT.md) retain 35 declared obligations, eleven findings and twelve then-unbound host needs. C3p addresses part of Netdata with an isolated host, column decoding and unit/page checks, without revising historical scores or closing all privacy/whole-task semantics. A disclosed local evaluation adapter needs no live devices but cannot impersonate vendor interfaces, execute source scripts or hide aggregation/reasoning in tools. Source review and compilation remain distinct.
 
-The [recommended research path](../evaluation/README.md) is contract-grounded constructors → FlowTree → necessary-guard candidates → full-source review. It has not replaced default DSH authoring. The 33/33 result is postprocessed known-development evidence, with first-pass still 29/33, retained positive-path unknowns and unproven complete semantics.
+The user authorized progress up to the bulk-validation decision point. The route is source audit, fresh-input small probes, mechanism correction, cross-Skill validation, then Runtime comparison. Prototype-first scope, inert sources, inactive proposals and immutable evidence remain mandatory.
 
-After merge:
+Unary necessary-guard addition is no longer recommended. The model extracts readable Boolean conditions; code evaluates and compiles them using existing FlowTree semantics. Disagreements and unknowns remain explicit; revisions are separate and inactive. Citation constraints mirror compiler structure, not semantic entailment.
 
-1. Audit model premises/citations, polarity, aliases, alternatives, missing prerequisites and discarded examples. Valid inference does not establish a correct language premise.
-2. Freeze the implementation/protocol before sampling unseen Skills. Run fresh L1-to-candidate generation, not prebuilt L0. Separate generation, review and scoring; AI review is not human Gold.
-3. Start small. Preserve failures and use separate development revisions, never tuned reruns on a sealed set as independent evidence.
-4. Meet the unchanged [generalization gate](TRANSLATION-GENERALIZATION-GATE.md) before large Runtime comparison: at least three cohorts, 50 Skills, 15 repositories, eight domains and 600 cases, including its safety/recall/parameter/evidence thresholds.
+The helper covers up to four Boolean facts in a two-stage read region, not arbitrary workflows or complete Skills. Citation roles, parameter meanings and full-source review remain open. [Evidence](FLOW-SEMANTIC-TRANSFER.md) preserves failures and scope.
 
-Report semantic precision, eligible-Skill recall, step/whole-Skill coverage, unsafe acceptance, excessive stops, parameter errors, first-pass/assisted outcomes and failure-inclusive calls/tokens/p50/p95, clustered by Skill/repository. Schema passes and test counts cannot replace these measures.
+After the current task/authoring closure, freeze a separate public-Skill evaluation protocol. Measure eligible-Skill recall, semantic precision, citation entailment, parameter accuracy, unsafe acceptance, over-stops and unsupported scope; separate all four failure layers and costs. The unchanged [gate](TRANSLATION-GENERALIZATION-GATE.md) requires three cohorts, 50 Skills, 15 repositories, eight domains and 600 cases plus quality thresholds before large Runtime comparison.
+
+[Public acquisition](PUBLIC-TRANSLATION-BATCH.md) processed 60 frozen candidates and saved 53 Skills/38 repositories, retaining failures. C3l added [lossless intake](TRANSLATION-INTAKE.md), C3m implemented [structured bindings](STRUCTURED-DATA-BINDING.md), and C3n connected nested data to the [shared executor](STRUCTURED-FLOW-WIRING.md). C3o now binds concrete tasks and unresolved source duties, but does not complete reference/host/semantic closure. Parameter meanings, branch polarity, L1 duties and unsupported scope remain explicit. Collection loops are separate; none of these four rounds added model calls or semantic scores. Synthetic catalogs must not masquerade as public-Skill hosts. Historical oracles and failures are unchanged.

@@ -2,49 +2,85 @@
 
 ## 中文
 
-本目录包含研究代码和评测，不是默认 DSH 的生产转译器。**当前推荐研究入口只有“合同构造 + 必要条件推导”这一条；旧探针只用于历史诊断/回放。** 全部候选仍须完整源审查和独立宿主授权。合入前不运行新模型批次。
+这是研究 authoring/评测，不是默认 DSH 的生产转译器。**推荐：合同约束构造 → 可读源条件 → 确定性编译 → 完整源审查。** 单变量反事实补全会损害正确路径，已退出推荐流程，原文件保留作历史回放。
 
-### 当前模块职责
+| 模块 | 职责与边界 |
+|---|---|
+| [netdata_fixture](netdata_fixture.py) / [netdata_task_demo](netdata_task_demo.py) | 一个合成进程内 Function 宿主，经原读取网关执行 info/query；解码与页级计数在工具外进行，不是 9B 转译或真实 Netdata。见[演示和边界](../docs/NETDATA-ISOLATED-VALIDATION.md) |
+| [public_skill_corpus](public_skill_corpus.py) / [translation_corpus](translation_corpus.py) | 多查询合并、固定抽样、显式暴露仓库排除、脚本隔离文本、原文索引及保留全部失败的 sample-report；入库不等于转译通过。见[新批次结果与源文诊断](../docs/PUBLIC-TRANSLATION-BATCH.md) |
+| [translation_intake](translation_intake.py) | 转译前的无损原文/分页、显式同 commit 引用补取、原始宿主 Schema 及 JSON Pointer 诊断；不做跨页语义编译，不给旧 L0 增加执行权限。见[用法和边界](../docs/TRANSLATION-INTAKE.md) |
+| [task_alignment](task_alignment.py) | 完整保留原始分页，核对任务引用/已读区间/义务与宿主需求；审阅档案与未来模型输入分离，不是自动语义准入。见[四份实际材料](../docs/TASK-SOURCE-ALIGNMENT.md) |
+| [structured_binding_probe](structured_binding_probe.py) | 新结构化数据绑定原语的离线 compile/materialize/demo；验证嵌套参数与输出，不调用模型/Provider。尚未接入下方旧 FlowSources。见[实际例子](../docs/STRUCTURED-DATA-BINDING.md) |
+| [structured_flow_tree](structured_flow_tree.py) / [structured_flow_demo](structured_flow_demo.py) | 源偏移 + 嵌套数据 Tree → FlowProposal v2 → 原共享执行器；本地 fixture 读取/分支/候选演示，不是 9B authoring 或完整语义审核。见[使用与边界](../docs/STRUCTURED-FLOW-WIRING.md) |
+| [flow_contract_authoring](flow_contract_authoring.py) | 原文/宿主合同 → 受约束提案；参数词表、AND/OR 及引文结构约束，不证明语义 |
+| [flow_read_region](flow_read_region.py) | 可选的两阶段读取入口：源文直接生成工具/参数/条件，编译器负责别名/边/结束节点；不是通用替代品 |
+| [flow_condition_expression](flow_condition_expression.py) | 9B 提取 `and/or/not` → 白名单结构；代码计算真值，不使用 eval/exec |
+| [flow_joint_conditions](flow_joint_conditions.py) | 非修改型核对，定位具体赋值、源引用、Tree/L0 节点；直接让模型填真值表仅作诊断 |
+| [flow_joint_lowering](flow_joint_lowering.py) | 显式生成另一份未激活修订；保留原图、数据绑定、未知项和来源 |
+| [flow_semantic_probe](flow_semantic_probe.py) | 冻结 1–12 案例，分列首次构造/条件阶段/惰性评分；预算、一次尝试、零调用回放 |
+| [flow_tree](flow_tree.py) / [flow_checkpoint](flow_checkpoint.py) | 原有编译/源审查；共用摘要、原始响应及严格检查点 |
+| [flow_behavior](flow_behavior.py) | 有限私有 Oracle + 原执行器/惰性 Provider，不证明完整 Skill 或独立语义 |
 
-| 模块 | 输入 → 输出 | 不负责什么 |
-|---|---|---|
-| [flow_contract_authoring](flow_contract_authoring.py) | 原文 + 实际工具合同 → 受约束请求；模型提案 → FlowTree | 不证明参数语义归属，不执行工具 |
-| [flow_guard_binding](flow_guard_binding.py) | 显式重复停止规范化、可用布尔事实槽位、条件绑定 | 不猜未提供的前置，不把 OR 改成 AND |
-| [flow_guard_counterfactual](flow_guard_counterfactual.py) | 原文/宿主/已有候选 → 正反事实问题和保存的回答 | 不以模型判断授予权限；旧严格 bind 仅保留作比较 |
-| [flow_guard_necessity](flow_guard_necessity.py) | 原始正反回答 → 未激活必要条件候选、引用和未知项 | 不证明充分性、路径可行性或完整源语义 |
-| [flow_tree](flow_tree.py) | 层级表示 → 现有 L0 流程及可审查来源 | 不新增执行器、不激活合同 |
-| [flow_checkpoint](flow_checkpoint.py) | 版本指纹、一次调用、原始响应、严格回放 | 不含案例/Oracle，不自动重试或放宽语义标准 |
-| [flow_behavior](flow_behavior.py) / [flow_behavior_probe](flow_behavior_probe.py) / [flow_contract_probe](flow_contract_probe.py) | 私有有限 Oracle → 已有执行器的惰性内存行为比较 | 不把测试成功或正确停止当整 Skill 泛化 |
+### 使用
 
-### 使用入口
+公开包首先用 `scripts/netopyu-market-corpus translation-intake SNAPSHOT CANDIDATE_ID --output-root NEW_DIRECTORY` 检查输入。可提供 `--host-catalog`；原始 Schema 能被保留不等于能转换为以下旧 FlowSources。缺口不得通过截断原文、重命名参数或虚构工具消除。
 
-从项目根目录执行；`sources.json` 必须是完整 `FlowSources`（原文、真实宿主输入/读合同/效果目标），不是只有一个 Markdown 路径。`proposal.json` 是本轮真实模型输出，`tree.json` 是编译结果中的 `tree` 对象。
+从项目根目录执行。`sources.json` 是完整 FlowSources（原文、宿主输入、读合同和效果目标），不是仅 Markdown 路径。成功构造后的 `output/construction/candidate.json` 就是下条命令使用的 FlowTree；失败时该文件不存在，不应编造。
 
 ```bash
-# 离线生成请求和编译保存的提案；不调用模型或设备。
-.venv/bin/python -m evaluation.flow_contract_authoring request sources.json --output request.json
-.venv/bin/python -m evaluation.flow_contract_authoring compile sources.json --proposal proposal.json --output compilation.json
+# 一次 9B 构造。已有完整目录可去掉预算，零调用回放。
+.venv/bin/python -m evaluation.flow_contract_authoring author sources.json --output output/construction --max-new-calls 1
 
-# 离线推导保存的原始回答。
-.venv/bin/python -m evaluation.flow_guard_necessity bind sources.json tree.json --answers answers.json --output necessity.json
+# 条件解释、结构表达式、联合比较及未激活修订。
+.venv/bin/python -m evaluation.flow_condition_expression author sources.json output/construction/candidate.json --output output/condition --max-new-calls 1
+
+# 离线重建保存的表达式，不调用模型或系统。
+.venv/bin/python -m evaluation.flow_condition_expression derive sources.json output/construction/candidate.json --proposal output/condition/expression.json --output derivation.json
+
+# 可选：只有符合两阶段读取范围时使用，不按 Oracle 自动择优。
+.venv/bin/python -m evaluation.flow_read_region author sources.json --output output/read-region --max-new-calls 1
+
+# 显式小批：私有 Oracle 不传入生成接口。
+.venv/bin/python -m evaluation.flow_semantic_probe freeze output/probe --cases cases.json
+.venv/bin/python -m evaluation.flow_semantic_probe run output/probe --max-new-calls 12
+.venv/bin/python -m evaluation.flow_semantic_probe report output/probe --output output/probe/report.json
 ```
 
-`flow_guard_necessity author` 是以后经授权运行一次 9B 的入口，不是本轮命令；`--max-new-calls` 默认为 0，已有完整检查点可零调用回放，缺失/失败/版本漂移不会偷偷重跑。此接口只负责候选的布尔前置推导，不等于一个完整 Skill 自动接纳流水线。
+已知案例修订必须在 freeze 添加 `--evidence-role known_case_development_revision`。原文见[示例目录](../examples/semantic-transfer/README.md)，完整结果见[本轮报告](../docs/FLOW-SEMANTIC-TRANSFER.md)。源脚本不执行。
 
-结果先看 `status`、`runtimeAuthorityGranted` 和 `fullSourceReview`，再看 `derivations`、`sourceQuotes`、`retainedUncertainty`。生成 Guard 不是授权，保留的 unknown 不能被解释成通过。
+`flow_contract_authoring author --proposal rejected.json` 是显式编译报错修订：只接受真实编译失败的合法形状提案，在**另一输出目录**保存一次新尝试。它不接收 Oracle，也不会自动循环重试；本轮工单实验未观察到这条路径的改善。
 
-### 历史与版本
+### 能力与权威边界
 
-旧 mapping / canonical / node-evidence / source-duty / compact / common-JSON 探针不再作为推荐入口，路径为兼容旧导入和冻结指纹而保留；不是已证明可删除的无效代码。路线和负结果统一见[实验索引](../docs/FLOW-EXPERIMENTS.md)。
+- 辅助条件模块覆盖一次事实读取及后续目标读取，允许分支上等价目标/参数；最多 4 个布尔事实、16 个组合。当前表达式只支持标识符字段和布尔操作，不支持数值计算或特殊符号键名的显式索引。范围外是该模块未验证，**不是底层 FlowTree 不支持多分支**。
+- 未知不变成通过；不把任意流程压成两步。全停止判断不自动生成“成功”修订。参数语义、引用蕴含及完整源审查仍独立存在。
+- finite_agreement 是代码与模型解释一致，不是解释正确。查看 `expression.json`、`structured-expression.json`、`derivation.json` 的 comparison.rows、expressionOrigins、revision.tableOrigins 和 preservedUnverified，定位 L1→L0.5→L0。
+- 候选永不因测试或 confidence 获得执行权限，默认 DSH 激活不变。
 
-历史检查点必须使用对应 Git 版本；本次之前的修复快照为 `c2ebd78`。新指纹覆盖公共转译依赖与整个 `network_runtime` Python 源码，保守地拒绝代码漂移，不通过旧实验的 import 链继承。不得手改旧 manifest 或将旧数据重新冻结冒充新评测。参见[收敛与回放](../docs/FLOW-CONSOLIDATION.md)。
+### 回放
+
+原始失败、协议和成本见[实验索引](../docs/FLOW-EXPERIMENTS.md)。旧指纹在新代码下拒绝回放是预期行为，不得改 manifest 绕过。本轮回放以 Git 基线 `14baa0a` 为底，再覆盖该轮 source-snapshot.tar.gz，其他未改依赖由基线提供；位置及复验见[报告](../docs/FLOW-SEMANTIC-TRANSFER.md)。清理前历史快照仍为 c2ebd78。
 
 ## English
 
-This directory contains research authoring/evaluation, not the default DSH production translator. The recommended research path is **contract-grounded constructors + necessary-guard synthesis**; historical probes remain diagnostic/replay references. All candidates stay inactive pending complete source review and host authority. No new model batch runs before merge.
+`netdata_fixture` provides one synthetic in-process Function-call primitive. `netdata_task_demo` uses the original read gateway, bounded column binding and explicit page/domain/egress checks. It is developer wiring, not model translation or live Netdata; see [scope and reproduction](../docs/NETDATA-ISOLATED-VALIDATION.md).
 
-`flow_contract_authoring` prepares constrained requests and lowers saved proposals; `flow_guard_binding` owns explicit normalization/slots/binding; `flow_guard_counterfactual` collects two-sided source judgments; `flow_guard_necessity` derives inactive necessary predicates while retaining uncertainty. `flow_tree` reuses existing L0 semantics. `flow_checkpoint` centralizes fingerprints, one-attempt recording and strict offline replay without cases/oracles. Behavior probes use finite private oracles and inert providers, not whole-Skill acceptance.
+`task_alignment` prepares bound task/source/host dossiers while keeping the original source pages and future model inputs separate from developer review decisions. It records missing host schemas, source tensions and unsupported semantics without certifying acceptance. See [four concrete source cases](../docs/TASK-SOURCE-ALIGNMENT.md).
 
-Run the commands above from the repository root. `sources.json` is a complete `FlowSources` document with actual host contracts, not merely a Markdown filename. `tree.json` is the compiled `tree` object. These commands do not call models or devices. A future explicitly budgeted `flow_guard_necessity author` call handles Boolean guard synthesis only, not an end-to-end semantic admission pipeline.
+`structured_flow_tree` adds source-anchored nested-data trees lowering into FlowProposal v2 and the existing execution gateways. `structured_flow_demo` performs explicitly host-bound local fixture reads, branches and candidate generation, with zero writes/models. This is wiring, not complete semantic or model authoring. See [reproduction and boundaries](../docs/STRUCTURED-FLOW-WIRING.md).
 
-Inspect status/authority/full-source-review first, then derivations, quotes and retained uncertainty. Unknown feasibility is not success. Historical variants remain at their old paths for compatible replay, indexed [here](../docs/FLOW-EXPERIMENTS.md). Use snapshot `c2ebd78` for pre-cleanup evidence; never bypass code-hash drift or relabel old outputs as fresh evaluation. See [replay guidance](../docs/FLOW-CONSOLIDATION.md).
+`structured_binding_probe` exposes the versioned data-binding primitive through offline compile/materialize/demo commands. Nested schemas and explicit paths do not automatically integrate with legacy FlowSources or acquire authority. See [usage and limits](../docs/STRUCTURED-DATA-BINDING.md).
+
+Start public packages with `netopyu-market-corpus translation-intake`: lossless inert source pages, explicit same-commit supplements and raw host-schema diagnostics. This does not compile cross-page semantics or widen the old L0 executor. Do not truncate source, rename parameters or invent tools to fit FlowSources. See [intake usage and evidence](../docs/TRANSLATION-INTAKE.md).
+
+Public corpus tools now support repository-disjoint sampling, recovery of known script exclusions and `inert-text` quarantine. The static index displays original script evidence without making it a Runtime resource. See [batch preparation](../docs/PUBLIC-TRANSLATION-BATCH.md); this adds no semantic pass claims.
+
+Recommended research path: **contract-grounded construction → readable source condition → deterministic compilation → full-source review**. Default DSH/Runtime is unchanged. Unary guard addition is historical diagnostics after measured regressions.
+
+The model emits symbolic and/or/not expressions; an allowlisted parser and existing compiler handle logic without code execution. Joint checks locate disagreements; explicit revisions retain original candidates, data bindings, unknowns and provenance. Shared checkpoints enforce one attempt and strict replay. Use the commands above; known-case repairs require the explicit evidence-role flag.
+
+The optional read-region author takes source/host contracts directly and lets code own aliases/edges/terminals. It is scope-limited, not an automatic replacement or oracle-selected fallback. Explicit compiler feedback is opt-in in a new checkpoint, with no observed improvement in this round. The expression language currently excludes numeric computation and indexed special-character field names.
+
+This auxiliary checker covers one fact read and an equivalent downstream read across branches, at most four Boolean fields / sixteen assignments. Unsupported scope is not a limitation of the underlying FlowTree. Unknowns, all-stop judgments and malformed proposals do not grant authority. Parameters, citation entailment and whole-Skill semantics require separate review. Inspect raw/structured expressions, comparison rows and origins, not just a pass count.
+
+See [results and immutable snapshots](../docs/FLOW-SEMANTIC-TRANSFER.md), [examples](../examples/semantic-transfer/README.md) and [history](../docs/FLOW-EXPERIMENTS.md). Replay with base commit 14baa0a plus the per-run source overlay; never bypass a fingerprint with edited manifests.

@@ -2,7 +2,7 @@
 
 ## 中文
 
-当前推荐接口见[代码导航](../evaluation/README.md)，有效下一步只以[进展](PROJECT-STATUS.md)和[计划](TRANSLATION-CORRECTION-PLAN.md)为准。下表是历史研究轨迹，不是多个并列的产品实现。原始回答、失败、审查和成本均保留；本轮不运行新模型、不改旧答案。
+当前推荐接口见[代码导航](../evaluation/README.md)，有效下一步只以[进展](PROJECT-STATUS.md)和[计划](TRANSLATION-CORRECTION-PLAN.md)为准。下表是研究轨迹，不是多个并列的产品实现。原始回答、失败、审查和成本均保留；旧答案不修改。
 
 | 路线 / 文档 | 定位与保留原因 |
 |---|---|
@@ -18,7 +18,12 @@
 | [节点证据](FLOW-NODE-EVIDENCE.md) | 显式反驳/未决是诊断信息，不是完整接纳 |
 | [源义务/宿主分层](FLOW-SOURCE-DUTIES.md) | 自由 after/when 引入新错误；不采纳为默认质量升级 |
 | [9B common-JSON](FLOW-9B-COMMON-JSON.md)、[跨模型设计](FLOW-MODEL-COMPARISON.md) | 未证明 common-JSON 质量提升；GPT 对照暂缓 |
-| [行为修复](FLOW-BEHAVIOR-REPAIR.md) | compact/ordered/thinking 负结果保留；合同构造/必要条件为当前候选路线，完整语义未证明 |
+| [行为修复](FLOW-BEHAVIOR-REPAIR.md) | compact/ordered/thinking 与必要条件推导的历史证据；旧 33/33 不再作为新一轮泛化依据 |
+| [语义迁移](FLOW-SEMANTIC-TRANSFER.md) | 单条件补全退步、真值表/递归语法负结果、可读表达式、编译反馈和范围受限构造；首次/修订分列 |
+| [无损输入](TRANSLATION-INTAKE.md)、[结构化数据绑定](STRUCTURED-DATA-BINDING.md) | 源文/宿主保真与版本化嵌套数据原语；零模型调用的机械验证，不计入语义转译成功率 |
+| [结构化流程接线](STRUCTURED-FLOW-WIRING.md) | 新 Tree/图表示接入原执行器；本地嵌套读取、分支、权限/时效与候选边界，不是完整模型转译或实际设备执行 |
+| [任务/源义务对齐](TASK-SOURCE-ALIGNMENT.md) | 四份固定公开材料的源锚定任务、35 项声明义务及未决问题；发现源张力和动态解码缺口，未宣称转译成功 |
+| [Netdata 隔离宿主与列解码](NETDATA-ISOLATED-VALIDATION.md) | 单次 Function 宿主、通用有界列投影、权限/单位/本页输出验证；不是原厂服务、完整窗口或模型转译成绩 |
 
 代码仍保留原文件名，避免破坏旧版本引用。当前入口已解除对 `flow_source_duty_pilot` 等历史探针的依赖。历史检查点使用对应版本回放；清理前实现快照为 `c2ebd78`，操作与验证见[收敛记录](FLOW-CONSOLIDATION.md)。
 
@@ -26,8 +31,14 @@
 
 ## English
 
+[Task/source alignment](TASK-SOURCE-ALIGNMENT.md) records four concrete public-source development tasks, declared obligations and unresolved host/source gaps. Source-example tensions and dynamic decoding are explicit; there is no new translation success claim.
+
+[Structured flow wiring](STRUCTURED-FLOW-WIRING.md) connects versioned source-anchored trees and nested bindings to the shared executor with explicit local host permissions. Fixture read/branch/candidate checks do not prove whole-Skill translation or device execution.
+
+[Lossless intake](TRANSLATION-INTAKE.md) and [structured data bindings](STRUCTURED-DATA-BINDING.md) retain source context and add versioned nested-data primitives. Their zero-model mechanical checks are not semantic translation scores.
+
 Use the [code map](../evaluation/README.md) for the recommended research path and [current status](PROJECT-STATUS.md) / [plan](TRANSLATION-CORRECTION-PLAN.md) for active decisions. The table above indexes historical investigations, not competing production paths.
 
-FlowTree compilation and offline diagnostics remain reusable foundations. Mapping/lean/responsibility/canonical/node-evidence/source-duty/common-JSON and compact/ordered/thinking probes preserve structural, semantic and cost failures; none becomes a default quality improvement solely because its schema passes. Contract-grounded constructors and necessary-guard inference are the current research candidates, not proven whole-Skill translation. GPT comparison is deferred.
+FlowTree compilation and offline diagnostics remain reusable foundations. Historical probes preserve structural, semantic and cost failures; none becomes a default improvement because its schema passes. [Current evidence](FLOW-SEMANTIC-TRANSFER.md) replaces unary guard addition with source-expression extraction and code-owned logic, retaining failed table/grammar/feedback variants. Complete Skill semantics remain unproven; GPT comparison is deferred.
 
 Keep old module names for historical references and pinned evidence. Current authoring no longer imports historical pilots for shared infrastructure. Replay historical checkpoints with their original implementation; pre-cleanup snapshot: `c2ebd78`. See [consolidation verification](FLOW-CONSOLIDATION.md), [phase history](PROJECT-HISTORY.md) and [plan history](TRANSLATION-CORRECTION-HISTORY.md). Superseded next steps do not authorize new work.

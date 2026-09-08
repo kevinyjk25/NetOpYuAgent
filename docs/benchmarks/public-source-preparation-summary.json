@@ -1,0 +1,74 @@
+{
+  "acceptedSkills": 33,
+  "cachedReserve": {
+    "complete": false,
+    "excludedHistoricalRepositories": 199,
+    "queryStrata": {
+      "finance analysis": 22
+    },
+    "repositories": 15,
+    "selected": 22
+  },
+  "claimBoundary": "Static source recovery and preparation only. Query labels are not verified domains; no semantic or production probability claim.",
+  "combinedKnownInventory": {
+    "primaryEligibleSkills": 91,
+    "repositories": 93,
+    "uniquePackageIds": 133
+  },
+  "evidenceRole": "known_metadata_script_recovery_development_not_holdout",
+  "excluded": [
+    {
+      "candidateId": "rka-project-rka-writer-skills-ai-cyber-paper-reviewer-skill-md",
+      "reason": "snapshot_error:ValueError:public Skill package does not contain root SKILL.md",
+      "repository": "rka-project/rka-writer"
+    },
+    {
+      "candidateId": "rka-project-rka-writer-claude-plugin-skills-ai-cyber-paper-reviewer-skill-md",
+      "reason": "snapshot_error:ValueError:public Skill package does not contain root SKILL.md",
+      "repository": "rka-project/rka-writer"
+    }
+  ],
+  "freshDiscovery": {
+    "automaticRetries": 0,
+    "evidence": "tool_observed_no_response_body_saved",
+    "httpStatus": 429,
+    "status": "rate_limited"
+  },
+  "newModelCalls": 0,
+  "newTranslationResults": 0,
+  "proofCohortEligible": false,
+  "protocol": "public-source-preparation-evidence/v1",
+  "quarantinedSourceFiles": 322,
+  "quarantinedTextFiles": 321,
+  "recoveryClassifications": {
+    "format_variant_robustness_only": 13,
+    "translation_only_partial_context": 20
+  },
+  "recoveryStatistics": {
+    "domainCount": 7,
+    "partialContextCount": 20,
+    "primaryEligibleCount": 20,
+    "primaryRepositoryCount": 16,
+    "repositoryCount": 24,
+    "robustnessOnlyCount": 13,
+    "runtimeReadyCount": 0,
+    "skillCount": 33,
+    "thirdPartyExecutionAttempted": false
+  },
+  "reportDigest": "sha256:2b458000162ba22d50bd26b618dee4af43bfa9b0a36109118610754c8b18d95d",
+  "runtimeAuthorityGranted": false,
+  "sampledCandidates": 35,
+  "sealedFiles": {
+    "artifacts/translator-v2/public-source-20260908/cached-reserve/sampling.json": "sha256:59c99e883bee77a68b9a6407d5a0f18bbb404e38c74e962d7f6e88edca6ca745",
+    "artifacts/translator-v2/script-recovery-20260908/discovery.json": "sha256:f50f64ae0c737da03507e991a5d71433e4331e0fe10817b8aba16b8058562248",
+    "artifacts/translator-v2/script-recovery-20260908/library-v2/workspace.json": "sha256:66a569e717a7ef336d08bb992d0326ed9a01127df0fb52f46c2ddf257c48dd20",
+    "artifacts/translator-v2/script-recovery-20260908/library/workspace.json": "sha256:8fe5ab2c52dd991c88dfb876a961c2eb5d1c73b2bf314e207b5534a841844ae9",
+    "artifacts/translator-v2/script-recovery-20260908/report/public-skill-pilot-report.json": "sha256:392ce89268686affda7d2be24930525479e9468d4d6013e3e5dd449d9a7f6752",
+    "artifacts/translator-v2/script-recovery-20260908/snapshot/manifest.json": "sha256:4739a2df40723887ed61645e95fbfd760d4372c22611daf2d014c096dbff1d79",
+    "artifacts/translator-v2/script-recovery-20260908/snapshot/records.jsonl": "sha256:2fdd0ec6e6e60ffee899fb4b50a829e75cdc0d0c8ff934b483cf944807c491eb",
+    "data/public_translation_protocol.json": "sha256:8d1691ea3bfba06c6f8399d79fe364f3ee49e400fd996ae00a5b22dfdb8a3323"
+  },
+  "semanticAccuracy": null,
+  "snapshotInspection": "valid",
+  "thirdPartyExecutionAttempted": false
+}

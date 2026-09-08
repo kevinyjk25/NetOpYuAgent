@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import html
 import json
 from collections import Counter
 from datetime import datetime, timezone
@@ -23,10 +24,12 @@ from typing import Any
 
 from effect_runtime.skill_package import inspect_skill_package
 from evaluation.public_skill_corpus import (
+    _repo_key,
     inspect_public_snapshot,
     load_discovery,
 )
 from network_runtime.contracts import sha256_json
+from skills.skill_format import SkillFormatError, parse_skill_md
 
 
 CORPUS_SCHEMA = "effect-runtime.io/translation-generalization-corpus/v1"
@@ -95,6 +98,38 @@ def _display_files(package: Path, sealed_files: list[dict[str, Any]]) -> list[di
             "content": content,
         })
     return result
+
+
+def _display_quarantine(snapshot: Path, record: dict[str, Any]) -> list[dict[str, Any]]:
+    """The inspected snapshot authenticates these text-only evidence files."""
+    return [
+        {
+            "path": "[quarantine] " + item["sourcePath"],
+            "sourcePath": item["sourcePath"], "bytes": item["sourceBytes"],
+            "sha256": item["sourceDigest"], "displayedAsInertText": item["evidencePath"] is not None,
+            "content": (snapshot / item["evidencePath"]).read_text(encoding="utf-8")
+            if item["evidencePath"] is not None and item["sourceBytes"] <= _MAX_DISPLAY_BYTES else None,
+            "runtimeResource": False,
+        }
+        for item in record.get("quarantinedFiles", [])
+    ]
+
+
+def _quarantined_entry(snapshot: Path, record: dict[str, Any]) -> tuple[dict | None, bool]:
+    """Read a quarantined executable-mode SKILL.md as data, never a symlink.
+
+    Format qualification is separate from missing Runtime resources. This
+    does not restore files, infer reference closure or grant package authority.
+    """
+    for item in record.get("quarantinedFiles", []):
+        if (item["sourcePath"] == "SKILL.md" and item["sourceMode"] == "100755"
+                and item["representation"] == "inert_utf8_text"):
+            try:
+                parsed = parse_skill_md((snapshot / item["evidencePath"]).read_text(encoding="utf-8"))
+            except SkillFormatError:
+                return None, True
+            return parsed.frontmatter, True
+    return None, False
 
 
 def _development_batches(
@@ -187,12 +222,21 @@ def build_translation_corpus(
         package = snapshot / "packages" / record["packageId"]
         report = inspect_skill_package(package)
         classification, primary_eligible = _classification(report)
+        withheld = bool(record.get("withheldFiles"))
+        source_skill = report.get("skill")
+        quarantined_entry, entry_seen = _quarantined_entry(snapshot, record)
+        if source_skill is None and entry_seen:
+            source_skill = quarantined_entry
+            primary_eligible = source_skill is not None
+            classification = "translation_only_partial_context" if primary_eligible else "format_variant_robustness_only"
+        if withheld and primary_eligible:
+            classification = "translation_only_partial_context"
         discovery_row = discovery_by_id.get(str(record["candidateId"]), {})
         finding_codes = sorted({str(item["code"]) for item in report["findings"]})
         skills.append({
             "packageId": record["packageId"],
             "candidateId": record["candidateId"],
-            "name": (report.get("skill") or {}).get("name") or record["name"],
+            "name": (source_skill or {}).get("name") or record["name"],
             "description": discovery_row.get("description", ""),
             "repository": record["repository"],
             "sourcePath": record["sourcePath"],
@@ -203,12 +247,16 @@ def build_translation_corpus(
             "domain": discovery_row.get("discoveryQuery", "unclassified"),
             "classification": classification,
             "primaryTranslationEligible": primary_eligible,
-            "runtimeReady": report["executionEligible"] is True,
-            "contextComplete": not bool(set(finding_codes) & _REFERENCE_ERRORS),
-            "formatConformant": report["skill"] is not None,
+            "runtimeReady": report["executionEligible"] is True and not withheld,
+            "contextComplete": not withheld and not bool(set(finding_codes) & _REFERENCE_ERRORS),
+            "sourceEvidenceDigest": record.get("sourceEvidenceDigest", record["packageDigest"]),
+            "quarantinedSourceFileCount": len(record.get("quarantinedFiles", [])),
+            "withheldResourceCount": len(record.get("withheldFiles", [])),
+            "formatConformant": source_skill is not None,
+            "entrySource": "quarantined_text" if entry_seen else "package",
             "findingCodes": finding_codes,
             "instructionRiskCodes": record.get("instructionRiskCodes", []),
-            "files": _display_files(package, record["files"]),
+            "files": _display_files(package, record["files"]) + _display_quarantine(snapshot, record),
         })
     skills.sort(key=lambda item: item["packageId"])
     primary = [item for item in skills if item["primaryTranslationEligible"]]
@@ -345,6 +393,144 @@ def inspect_translation_corpus(root_path: str | Path) -> dict[str, Any]:
     }
 
 
+def build_public_sampling_report(
+    sampling_root: str | Path, batches_root: str | Path, output_root: str | Path,
+) -> dict[str, Any]:
+    """Join frozen sampling to static evidence, retaining every failed candidate.
+
+    This is a source-acquisition report, not a new corpus, translator result or
+    admission decision. Inspect existing snapshots/libraries; never fetch sources,
+    substitute candidates, rewrite old evidence or infer semantic qualification.
+    """
+    sampling, batches = Path(sampling_root).resolve(), Path(batches_root).resolve()
+    plan = json.loads((sampling / "sampling.json").read_text(encoding="utf-8"))
+    body = {k: v for k, v in plan.items() if k != "samplingDigest"}
+    if plan.get("samplingDigest") != sha256_json(body):
+        raise ValueError("sampling digest mismatch")
+    discovery = load_discovery(sampling / "discovery.json")
+    if plan.get("sampledDiscoveryDigest") != discovery["discoveryDigest"]:
+        raise ValueError("sampled discovery mismatch")
+    candidates = {row["id"]: row for row in discovery["candidates"]}
+    ids = [cid for batch in plan["batches"] for cid in batch["candidateIds"]]
+    if len(ids) != len(set(ids)) or set(ids) != set(candidates) or len(ids) != plan["selectedCount"]:
+        raise ValueError("sampling candidate coverage mismatch")
+    evidence, outcomes, texts, seen_repositories = [], [], {}, set()
+    for batch in plan["batches"]:
+        batch_id = batch["batchId"]
+        # These names come from a manifest, not a trusted path argument.
+        if not isinstance(batch_id, str) or not batch_id or Path(batch_id).name != batch_id or batch_id in {".", ".."}:
+            raise ValueError("unsafe source batch path")
+        root = (batches / batch_id).resolve()
+        if not root.is_relative_to(batches):
+            raise ValueError("unsafe source batch path")
+        batch_discovery = load_discovery(root / "discovery.json")
+        if (batch_discovery.get("parentSamplingDigest") != plan["samplingDigest"]
+                or batch_discovery["candidates"] != [candidates[cid] for cid in batch["candidateIds"]]):
+            raise ValueError("source batch differs from frozen selection")
+        snapshot = inspect_public_snapshot(root / "snapshot")
+        manifest = json.loads((root / "snapshot/manifest.json").read_text())
+        library = inspect_translation_corpus(root / "library")
+        if (manifest["discoveryDigest"] != batch_discovery["discoveryDigest"]
+                or library["sourceSnapshotDigest"] != snapshot["manifestDigest"]):
+            raise ValueError("source batch evidence binding mismatch")
+        records = _read_jsonl(root / "snapshot/records.jsonl")
+        by_id = {row["candidateId"]: row for row in records}
+        if len(records) != len(by_id) or not set(by_id) <= set(batch["candidateIds"]):
+            raise ValueError("snapshot has duplicate or unselected candidate")
+        if any(row["status"] not in {"accepted", "excluded"} for row in records):
+            raise ValueError("unexpected acquisition outcome")
+        if any(row["githubUrl"] != candidates[row["candidateId"]]["githubUrl"] for row in records):
+            raise ValueError("snapshot source differs from selected candidate")
+        index = json.loads((root / "library/index.json").read_text())
+        indexed = {row["candidateId"]: row for row in index["skills"]}
+        if (len(indexed) != len(index["skills"])
+                or set(indexed) != {row["candidateId"] for row in records if row["status"] == "accepted"}):
+            raise ValueError("library omitted or added an accepted candidate")
+        repos = {_repo_key(row["githubUrl"]) for row in batch_discovery["candidates"]}
+        if repos & (seen_repositories | set(plan["excludedRepositories"])):
+            raise ValueError("repository exposure or cross-batch overlap")
+        seen_repositories.update(repos)
+        evidence.append({
+            "batchId": batch_id, "selectedCount": len(batch["candidateIds"]),
+            "processedCount": len(records), "acceptedCount": len(indexed),
+            "allCandidatesProcessed": len(records) == len(batch["candidateIds"]),
+            "importerAcceptedTargetMet": manifest["complete"],
+            "discoveryDigest": batch_discovery["discoveryDigest"],
+            "snapshotDigest": snapshot["manifestDigest"], "libraryDigest": library["workspaceDigest"],
+        })
+        for cid in batch["candidateIds"]:
+            row, skill, candidate = by_id.get(cid, {}), indexed.get(cid, {}), candidates[cid]
+            if skill and skill["packageDigest"] != row["packageDigest"]:
+                raise ValueError("package digest differs across snapshot and index")
+            outcomes.append({
+                "candidateId": cid, "batchId": batch_id, "name": candidate["name"],
+                "githubUrl": candidate["githubUrl"], "queryStratum": candidate["discoveryQuery"],
+                "status": row.get("status", "not_processed"), "reason": row.get("reason"),
+                "packageId": skill.get("packageId"), "commitSha": skill.get("commitSha"),
+                "sourceEvidenceDigest": skill.get("sourceEvidenceDigest"),
+                "classification": skill.get("classification"),
+                "staticPackageGatePassed": skill.get("runtimeReady", False),
+                "formatQualified": skill.get("primaryTranslationEligible", False),
+                "quarantinedSourceFileCount": skill.get("quarantinedSourceFileCount", 0),
+            })
+            texts[cid] = skill.get("files", [])
+    counts = Counter(row["status"] for row in outcomes)
+    report = {
+        "apiVersion": "effect-runtime.io/public-skill-sampling-report/v1",
+        "samplingDigest": plan["samplingDigest"], "batches": evidence, "candidates": outcomes,
+        "statistics": {
+            "sampledCandidates": len(outcomes), "acceptedSkills": counts["accepted"],
+            "excludedCandidates": counts["excluded"], "unprocessedCandidates": counts["not_processed"],
+            "sampledRepositories": len(seen_repositories),
+            "acceptedRepositories": len({_repo_key(row["githubUrl"])
+                                         for row in outcomes if row["status"] == "accepted"}),
+            "queryStrata": len({row["queryStratum"] for row in outcomes}), "verifiedDomains": None,
+            "formatQualified": sum(row["formatQualified"] for row in outcomes),
+            "staticPackageGatePassed": sum(row["staticPackageGatePassed"] for row in outcomes),
+            "classificationCounts": dict(Counter(row["classification"] for row in outcomes if row["classification"])),
+            "exclusionReasons": dict(Counter(row["reason"] for row in outcomes if row["reason"])),
+            "quarantinedSourceFiles": sum(row["quarantinedSourceFileCount"] for row in outcomes),
+        },
+        "allCandidatesProcessed": counts["not_processed"] == 0,
+        "proofCohortEligible": False, "runtimeAuthorityGranted": False,
+        "thirdPartyExecutionAttempted": False, "translationMetrics": None,
+        "claimBoundary": "入库与静态包检查不等于转译成功或执行许可。搜索类别不是核实领域。"
+        " / Acquisition and static package checks are not semantic success or execution authority; query labels are not verified domains.",
+    }
+    report["reportDigest"] = sha256_json(report)
+    target = Path(output_root).resolve()
+    target.mkdir(parents=True, exist_ok=False)
+    _write_json(target / "report.json", report)
+    # Native details are closed by default. Escape every byte of untrusted text;
+    # no script, remote resource, Markdown rendering or source execution.
+    sections = []
+    for row in outcomes:
+        files = "".join(
+            "<details><summary>" + html.escape(f["path"]) + "</summary><pre>"
+            + html.escape(f["content"] if f["content"] is not None else "[仅摘要 / hash only]")
+            + "</pre></details>" for f in texts[row["candidateId"]]
+        )
+        sections.append("<details><summary>" + html.escape(
+            f'{row["batchId"]} · {row["name"]} · {row["classification"] or row["status"]}'
+        ) + "</summary><pre>" + html.escape(json.dumps(row, ensure_ascii=False, indent=2))
+            + "</pre>" + files + "</details>")
+    page = ('<!doctype html><html lang="zh-CN"><meta charset="utf-8">'
+            '<meta name="viewport" content="width=device-width,initial-scale=1">'
+            '<meta http-equiv="Content-Security-Policy" content="default-src \'none\'; '
+            'style-src \'unsafe-inline\'; form-action \'none\'; base-uri \'none\'">'
+            '<title>公开 Skill 抽样与原文 / Public Skill Sources</title>'
+            '<style>body{max-width:1200px;margin:24px auto;padding:0 16px;font:15px/1.6 system-ui;'
+            'color:#183042;background:#f4f7fa}details{border:1px solid #ccd6df;padding:10px;margin:8px 0;'
+            'background:white}summary{cursor:pointer;overflow-wrap:anywhere}pre{white-space:pre-wrap;'
+            'overflow-wrap:anywhere;max-height:600px;overflow:auto;font:12px/1.6 monospace}</style>'
+            '<h1>公开 Skill 抽样与原文</h1><p>' + html.escape(report["claimBoundary"])
+            + '</p><p>全部候选均保留；点击展开信息与原文。All sampled candidates retained; click to inspect.</p><pre>'
+            + html.escape(json.dumps(report["statistics"], ensure_ascii=False, indent=2))
+            + '</pre>' + "".join(sections) + '</html>')
+    (target / "skill-library.html").write_text(page, encoding="utf-8")
+    return report
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
@@ -356,6 +542,10 @@ def main(argv: list[str] | None = None) -> int:
     build.add_argument("--batch-size", type=int, default=12)
     inspect = commands.add_parser("inspect")
     inspect.add_argument("root")
+    sample_report = commands.add_parser("sample-report")
+    sample_report.add_argument("sampling_root")
+    sample_report.add_argument("--batches-root", required=True)
+    sample_report.add_argument("--output-root", required=True)
     args = parser.parse_args(argv)
     if args.command == "build":
         result = build_translation_corpus(
@@ -365,6 +555,8 @@ def main(argv: list[str] | None = None) -> int:
             seed=args.seed,
             batch_size=args.batch_size,
         )
+    elif args.command == "sample-report":
+        result = build_public_sampling_report(args.sampling_root, args.batches_root, args.output_root)
     else:
         result = inspect_translation_corpus(args.root)
     print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))

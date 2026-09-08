@@ -1,0 +1,78 @@
+{
+  "apiVersion": "effect-runtime.io/public-source-alignment-notes/v1",
+  "samplingDigest": "sha256:ad124ee3a80736eb90462e5aad570300ac47ee7f59297b01aa4ad0c616bfae60",
+  "selectionRule": "First sampled candidate in each repository-grouped source batch; retain format variants and unavailable candidates, never replace by translator suitability.",
+  "reviewerKind": "development_assistant_source_review_not_independent_gold",
+  "reviewStatus": "entry_review_complete_reference_and_host_alignment_pending",
+  "translationModelCalls": 0,
+  "translationAccuracy": null,
+  "wholeSkillsTranslated": 0,
+  "independentGold": false,
+  "runtimeAuthorityGranted": false,
+  "notes": "SKILL.md files were read in full as untrusted evidence. This is not a full transitive-reference audit, frozen task/host catalog or proof of semantic correctness.",
+  "skills": [
+    {
+      "batchId": "public-01",
+      "candidateId": "calesthio-openmontage-agents-skills-agents-skill-md",
+      "sourceDigest": "sha256:e763c739e8a87f5cf06a06d3e962d9c09c94d30db7c8ba00df98c4ef5c7c997c",
+      "reviewedFiles": ["SKILL.md"],
+      "pendingReferenceFiles": ["references/installation.md", "references/agent-configuration.md", "references/client-tools.md", "references/widget-embedding.md", "references/outbound-calls.md"],
+      "findings": [
+        {"kind": "format_variant", "lines": [6, 6], "explanation": "Nested OpenClaw metadata is rejected by the current scalar-metadata parser. This is an intake limitation, not a measured 9B semantic error."},
+        {"kind": "mixed_effects_and_host_missing", "lines": [15, 88], "explanation": "Installation, authentication and remote agent creation are distinct effects. SDK examples do not supply a closed installed host catalog or transaction guarantees."},
+        {"kind": "external_effect", "lines": [190, 225], "explanation": "Outbound calling and recording must not be silently reduced to a read-only operation or executed during evaluation."},
+        {"kind": "source_budget", "lines": [296, 302], "explanation": "Entry plus five downloaded references total 65,778 Unicode characters, already above FlowSources.source_text's 64,000 limit before delimiters. Full concatenation must not silently truncate references."}
+      ],
+      "nextAction": "Preserve metadata and per-file evidence; audit referenced material, select a task and bind real or explicitly inert host contracts before authoring. No flattening of nested SDK structures by an unreviewed model."
+    },
+    {
+      "batchId": "public-02",
+      "candidateId": "netdata-netdata-docs-netdata-ai-skills-query-snmp-traps-skill-md",
+      "sourceDigest": "sha256:4c0a6eeb1bffe35bea125b3b5336aaeb849e93f10dca8d09906034ee132cc1db",
+      "reviewedFiles": ["SKILL.md", "how-tos/INDEX.md"],
+      "pendingReferenceFiles": ["how-tos/recent-security-traps-from-device.md", "how-tos/filter-by-severity-across-fleet.md", "how-tos/top-trap-senders-last-hour.md", "how-tos/inspect-dedup-summary-entries.md", "how-tos/search-varbind-value-in-trap-json.md", "how-tos/convert-custom-mibs-to-trap-profiles.md"],
+      "findings": [
+        {"kind": "missing_external_reference", "lines": [15, 18], "explanation": "The package delegates request shape and token-safe wrappers to sibling Skills outside this snapshot. Package-root confinement preserved safety but not full source closure."},
+        {"kind": "conditional_write_obligation", "lines": [34, 43], "explanation": "Novel concrete queries require authoring a how-to and updating its index; a query-only fragment cannot claim completion of the whole Skill. Required wrapper implementation is not present."},
+        {"kind": "privacy_and_iteration", "lines": [50, 59], "explanation": "Summarization/privacy constraints and node-wise fleet iteration are source obligations. FlowTree is acyclic and has no native collection loop; do not invent an aggregate tool to hide the gap."},
+        {"kind": "representation_gap", "lines": [139, 165], "explanation": "Row arrays, columns, nested selections and uppercase fields do not fit the current flat scalar ReadObjectSchema. Deterministic schema probes reject these shapes without any LLM call."}
+      ],
+      "nextAction": "Resolve sibling references as separate inert evidence at the same commit; define source-preserving structured host bindings and bounded collection handling. Keep genuine L1 analysis and conditional document writes explicit."
+    },
+    {
+      "batchId": "public-03",
+      "candidateId": "bytedance-deer-flow-skills-public-code-documentation-skill-md",
+      "sourceDigest": "sha256:75721d7bc1b294592dc31a1e1d92ff9c390115af4b08ed42e7e0a2b094060676",
+      "reviewedFiles": ["SKILL.md"],
+      "pendingReferenceFiles": [],
+      "findings": [
+        {"kind": "template_reference_false_positive", "lines": [91, 96], "explanation": "RESOURCE_REFERENCE_MISSING for 'link' comes from a badge placeholder inside the README template, not an actual missing bundled reference. Do not use this finding as proof of missing source context."},
+        {"kind": "needs_l1_reasoning", "lines": [38, 83], "explanation": "Understanding an arbitrary codebase and choosing documentation scope are generative tasks, not a fixed read/Boolean-check workflow."},
+        {"kind": "missing_host_capability", "lines": [398, 405], "explanation": "The Skill assumes a project filesystem, output directory and present_files host tool. None is supplied as a closed evaluation catalog by the source package."}
+      ],
+      "nextAction": "Separate template examples from required references in research intake without weakening the execution gate. Keep analysis/writing in L1 and bind deterministic filesystem/validation fragments only for an explicit task."
+    },
+    {
+      "batchId": "public-04",
+      "candidateId": "addyosmani-agent-skills-skills-browser-testing-with-devtools-skill-md",
+      "sourceDigest": "sha256:4e3aacd6a380cd25bc6c2d67fdd1c926a9b22535b8a62109ecd33cefd909e3d9",
+      "reviewedFiles": ["SKILL.md"],
+      "pendingReferenceFiles": [],
+      "findings": [
+        {"kind": "static_gate_not_host_binding", "lines": [24, 58], "explanation": "The package passes static inspection but lists conceptual DevTools capabilities rather than pinned tools/list input/output schemas. Installation commands are source data, not authorization."},
+        {"kind": "security_obligations", "lines": [60, 107], "explanation": "Profile isolation, untrusted page content, secret restrictions and mutation confirmation must survive translation. A readOnly label or package gate cannot enforce them."},
+        {"kind": "mixed_flow", "lines": [109, 182], "explanation": "Debug/fix/verify and performance diagnosis mix observation, reasoning and side effects. An unconditional stop or a two-read fragment is not whole-Skill conversion."}
+      ],
+      "nextAction": "Pin a declared DevTools host catalog and an explicit browser task, record allowed URLs/profile/approval constraints, and separate L1 diagnosis from auditable read/effect fragments. Do not connect to a user's authenticated browser for this corpus audit."
+    }
+  ],
+  "schemaProbe": {
+    "target": "network_runtime.l0.models.ReadObjectSchema",
+    "evidenceKind": "mechanism_shape_probes_not_real_provider_schema_validation",
+    "flatScalarAccepted": true,
+    "nestedObjectAccepted": false,
+    "arrayAccepted": false,
+    "uppercasePropertyAccepted": false,
+    "scopeBoundary": "These are limits of the present read-contract subset, not a claim that all L0 effect schemas or the entire Runtime lack structured data or branching."
+  }
+}

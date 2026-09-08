@@ -1,6 +1,6 @@
 # NetOpYuAgent 架构 / Architecture
 
-> 架构基线 / Architecture baseline: 2026-09-03。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 架构基线 / Architecture baseline: 2026-09-09。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 ## 中文
 
@@ -26,7 +26,15 @@ Runtime 不得用小范围人工适配合同上的高分反向证明转译正确
 
 2026-09-07 转译链纠偏：公共 Skill evaluator 当前生成的是单主操作、绑定具体参数的计划，不是完整可复用 Skill 合同。作者 Catalog v2 不再合成事务工具，缺失能力不等于闭合流程。下一步连接源证据、L0.5 和现有 L0 合同编译器，再单独实例化请求参数；见[实施边界与计划](docs/TRANSLATION-CORRECTION-PLAN.md)。三平面执行权威不变。
 
+C3o 的 `evaluation.task_alignment` 是编译前的研究审阅档案：保留任务、源审查区间、候选/L1/条件义务、源冲突和宿主缺口；模型输入与开发审阅判定分开。它只检查材料绑定，不生成语义许可、合同激活或新控制面。真实设备不是准备此层的前提，但隔离宿主与源 API 映射必须明确，不能隐藏副作用或集合语义。见[任务对齐](docs/TASK-SOURCE-ALIGNMENT.md)。
+
 ### 2. 三平面
+
+C3p 在原结构化绑定中增加 `column_rows` 纯数据算子，复用 Tree/Flow 的来源支配和时效检查。`evaluation.netdata_fixture` 只提供显式合成的单次 Function 宿主；info/query 通过原读取网关，领域验证和枚举计数在工具外，不新增执行器/写权限。完整模型 authoring 与分页完成性尚未闭合，见[宿主与数据边界](docs/NETDATA-ISOLATED-VALIDATION.md)。
+
+2026-09-08 新增的 `evaluation.translation_intake` 属于无执行权的 authoring 输入层：完整惰性源文与引用 → 有摘要/偏移的分页 → 原始宿主 Schema 缺口诊断 → 待审任务/合同对齐。它不进入 Runtime 依赖、不跨页汇总语义、不将复杂 Schema 强行转换为旧扁平合同，也不将脚本名称或 MCP 只读提示当权限证明。见[输入能力与边界](docs/TRANSLATION-INTAKE.md)。
+
+2026-09-09：`structured_schema` / `structured_bindings` 为不依赖 `evaluation`、不持有回调的版本化数据原语。C3n 新增 `structured_reads` 合同及源锚定的 `evaluation.structured_flow_tree` 前端，降为 FlowProposal v2 后进入**原有** `qualify_flow`、`run_read_flow`、`execute_host_read`。每节点绑定保留支配关系、嵌套资源权限与本地回执时效；Effect 仍只生成候选。旧 v1 表示保留，不静默改写历史合同。此处只是显式宿主授权的接线实验，完整模型 authoring/源语义审核与默认 DSH 路由未接通；数组不自动提供循环语义。见[数据原语](docs/STRUCTURED-DATA-BINDING.md)、[共享执行接线及信任边界](docs/STRUCTURED-FLOW-WIRING.md)。
 
 ```mermaid
 flowchart TB
@@ -126,7 +134,7 @@ L0.5 和未激活 L0 都是 review artifact，不在在线请求中临场取得�
 | `network_lab/`, `network_provider/`, `service_layer/` | Infrastructure | 本地 Observation/Effect Provider 和 Containerlab/FRR 网络锚点 |
 | `evaluation/`, `data/ensured_skill_scenarios.yaml` | Evaluation | 配对实验、故障注入、消融和指标；不得进入执行链 |
 
-2026-09-08 的转译研究入口仍在 `evaluation/`，未替换默认 DSH/Runtime。合同构造、必要条件推导和共用检查点的职责见[代码导航](evaluation/README.md)；旧实验与[当前阶段](docs/PROJECT-STATUS.md)分开维护。新候选仍未激活，研究依赖不得反向进入 Runtime。
+2026-09-08 的转译研究入口仍在 `evaluation/`，未替换默认 DSH/Runtime。当前把**源语义提取**与**逻辑求值/编译**分开：9B 生成可读的 `and/or/not` 条件，白名单解析器转成结构表达式，代码展开联合条件并复用原有 FlowTree 编译器；不使用 eval/exec，不新增执行器。单变量反事实补条件已降为历史诊断。分歧、未知、范围外流程和未审引用不产生执行权限。完整职责见[代码导航](evaluation/README.md)、[语义迁移证据](docs/FLOW-SEMANTIC-TRANSFER.md)。研究依赖不得反向进入 Runtime。
 
 ### 5. 依赖规则
 
@@ -193,6 +201,12 @@ Evaluation → all public test surfaces
 
 ## English
 
+C3o's `evaluation.task_alignment` is pre-compilation research review: task/source ranges, candidate/L1/conditional obligations, source tensions and host gaps. Future model inputs exclude developer review decisions. Binding checks grant no semantic acceptance, activation or new control-plane authority. Live devices are not required to prepare it, but isolated hosts and source API mappings must be explicit. See [task alignment](docs/TASK-SOURCE-ALIGNMENT.md).
+
+The September 8 `evaluation.translation_intake` module belongs to authority-free authoring: complete inert sources/references → digest/offset-bound pages → raw-host-schema diagnostics → pending task/contract alignment. It is not a Runtime dependency, cross-page semantic compiler or permission mechanism. Complex schemas are not coerced into old flat contracts. See [intake scope](docs/TRANSLATION-INTAKE.md).
+
+September 9: versioned `structured_schema` / `structured_bindings` primitives have no evaluation dependency or callbacks. C3n adds structured read contracts and a source-anchored `evaluation.structured_flow_tree` front end lowering into FlowProposal v2 and the **existing** qualifier, flow runner and read gateway. Per-node bindings retain dominance, nested resource scopes and local receipt-age checks. Effect leaves remain candidates. Legacy v1 contracts are not silently rewritten; complete model authoring, semantic review and default DSH routing remain open. Array data types do not imply loops. See [data primitives](docs/STRUCTURED-DATA-BINDING.md) and [shared wiring and trust boundaries](docs/STRUCTURED-FLOW-WIRING.md).
+
 ### 1. Authority and thesis
 
 NetOpYuAgent is currently a network-first EnsuredSkill research prototype. The [prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes historical P1/P2 productization architecture.
@@ -204,6 +218,8 @@ Research evidence also has a strict dependency order: cross-Skill L1-to-L0 gener
 The 2026-09-07 correction distinguishes the public evaluator's single-operation, argument-bound plan from a reusable whole-Skill contract. Author Catalog v2 no longer synthesizes transaction tools. Connecting source evidence and L0.5 to the existing L0 compiler, followed by separate request instantiation, remains the next stage; see the [correction plan](docs/TRANSLATION-CORRECTION-PLAN.md). Execution authority is unchanged.
 
 ### 2. Three planes
+
+C3p adds bounded `column_rows` projection to existing bindings, retaining Tree/Flow dominance and freshness. An explicitly synthetic single-Function host uses the original read gateway; domain checks and enum-count publication stay outside the tool. No new executor or write authority. Full model authoring and pagination completeness remain open; see [boundaries](docs/NETDATA-ISOLATED-VALIDATION.md).
 
 The **Reasoning Plane** contains DSH, the LLM, and L1 semantic guidance. It understands, diagnoses, clarifies, plans, and emits Candidate Plans without write authority.
 
@@ -223,7 +239,7 @@ Read observations pass access, capability, schema, and parameter checks without 
 
 ### 4. Dependencies and invariants
 
-The September 8 translation research path remains in `evaluation/`, separate from default DSH/Runtime. The [code map](evaluation/README.md) distinguishes contract constructors, necessary-guard synthesis, shared checkpoints and historical experiments. Candidates remain inactive; research dependencies must not enter the Runtime. See [current status](docs/PROJECT-STATUS.md).
+The September 8 research path separates source interpretation from logic evaluation: 9B emits readable `and/or/not` conditions; an allowlisted, non-executing parser and deterministic lowering reuse existing FlowTree semantics. Unary counterfactual guard addition is historical diagnostics, not the recommended path. Disagreements, unknowns, unsupported scope and unreviewed citations never grant authority. Default DSH/Runtime remains unchanged. See the [code map](evaluation/README.md) and [evidence](docs/FLOW-SEMANTIC-TRANSFER.md); research dependencies must not enter Runtime.
 
 The Runtime depends on L0 contracts and a domain-neutral Capability gateway, never on DSH UI, prompts, model SDKs, or evaluation code. L1 and providers cannot bypass the Runtime. A journal-backed Typed Graph scheduler gates every current transaction branch and records crash-boundary uncertainty without replaying Effect. Evidence must be typed, fresh, scoped, integrity-checked, and action-bound; the inspection view projects Evidence → Observation → Capability/Collector → Object lineage with hashed collector/object identifiers. Approval and execution share an immutable plan digest. Postconditions require independent observations. Outcome uncertainty enters reconciliation, not blind retry. Compensation and recovery verification are explicit.
 

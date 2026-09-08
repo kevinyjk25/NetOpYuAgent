@@ -2,7 +2,7 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-08。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-09。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -28,17 +28,17 @@ flowchart TB
 
 ### 当前研究门禁
 
-**当前：转译原型清理收敛，提交后等待合入。** 默认 DSH/Runtime 执行路径不变，新转译研究模块仍只产生未激活候选。阶段与待办见[项目进展](docs/PROJECT-STATUS.md)，当前接口见[转译代码导航](evaluation/README.md)。
+**当前：通用动态列解码和 Netdata 隔离宿主已接通，完整模型转译仍待验证。** 新公开库保存 **53 个 Skill／38 个仓库**，不是 53 个转译成功。[本地 Netdata 演示](docs/NETDATA-ISOLATED-VALIDATION.md)通过原读取网关完成 info/query，输出 3 条合成记录的本页枚举计数；不声称全窗口完整、运行原厂服务或模型自动编译。四份[任务/源义务档案](docs/TASK-SOURCE-ALIGNMENT.md)保留未决问题。本轮无新 9B 成绩或默认 DSH 路由变更；下面是最近一次转译实测。
 
 | 本轮转译证据 | 结果 | 能说明什么 |
 |---|---|---|
-| 首次生成 | 4/6 案例、29/33 场景 | 已知开发样例的原始结果 |
-| 显式修复后 | 6/6 案例、33/33 场景 | 23 个执行片段场景 + 10 个正确停止场景匹配 |
-| 完整源语义 / 未见 Skill 泛化 | 尚未证明 | 必要条件不等于充分性，正向 unknown 保留 |
+| 新六份开发 Skill：构造阶段 | 2/6 案例、30/46 场景 | 原始生成结果；含一份结构失败 |
+| 同批：加源条件表达式后 | 5/6 案例、35/46 场景 | 四个可执行片段案例 + 一个正确停止案例；结构失败的 11 场景仍未运行 |
+| 完整源语义 / 未见 Skill 泛化 | 尚未证明 | 引用仍有语义错位；布尔结果正确不等于整 Skill 正确 |
 
-以上来自同一开发助手构造的有限 Oracle，不是新一轮端到端生成、独立 Gold 或生产成功概率。[行为修复报告](docs/FLOW-BEHAVIOR-REPAIR.md)保留原始失败、推导与成本；[实验索引](docs/FLOW-EXPERIMENTS.md)统一收录历史路线，不把每轮“下一步”放进 README。
+本批从 L1 用 9B 新生成，但 Skill/Oracle 仍由同一开发助手构造，不是独立 Gold 或公开未见集。10 次模型请求的 p50/p95 为 20.91/35.82 秒，是本地请求耗时，不是 Runtime 时延。[语义迁移报告](docs/FLOW-SEMANTIC-TRANSFER.md)保留负结果、修订、成本和源码回放入口；[实验索引](docs/FLOW-EXPERIMENTS.md)保留历史路线。
 
-项目的证据顺序是 **L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测**。当前 100 个公开 Skill / 72 仓库 / 9 领域属于已知开发库，不是未见集；小批新验证及后续 ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 的完整门禁见[泛化要求](docs/TRANSLATION-GENERALIZATION-GATE.md)。未通过前不扩大 Runtime A/B。
+项目的证据顺序是 **L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测**。原 100 个公开 Skill / 72 仓库 / 9 个搜索类别属于已知开发库，不是未见集；搜索类别尚不等于核实的业务领域。小批新验证及后续 ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 的完整门禁见[泛化要求](docs/TRANSLATION-GENERALIZATION-GATE.md)。未通过前不扩大 Runtime A/B。
 
 ### Skill 与系统怎样交互
 
@@ -258,11 +258,11 @@ The Runtime mechanism and wiring prototype is complete, but the core project hyp
 
 ### Active research gate
 
-**Current: consolidate the translation prototype, commit, then wait for merge.** The default DSH/Runtime path is unchanged; research authoring produces inactive candidates. See [current status](docs/PROJECT-STATUS.md) and the [code map](evaluation/README.md).
+**Current: generic column decoding and an isolated Netdata-shaped host are wired; complete model translation remains open.** The inventory contains **53 Skills from 38 repositories**, not successful translations. The [local demo](docs/NETDATA-ISOLATED-VALIDATION.md) uses the original read gateway for info/query and returns enum counts for a three-row synthetic page, not full-window coverage, a vendor-server test or model compilation. Four [task dossiers](docs/TASK-SOURCE-ALIGNMENT.md) retain unresolved findings. No new 9B score or default DSH route change; the figures below are the latest translation experiment.
 
-First-pass remains **4/6 cases and 29/33 scenarios**. Explicit postprocessing matches **6/6 and 33/33**: 23 executable-fragment scenarios and 10 safe stops. These are known examples with development-assistant reference answers, not a fresh end-to-end batch or independent Gold. Full-source semantics/generalization remain unproven; positive unknowns are retained. [Repair evidence](docs/FLOW-BEHAVIOR-REPAIR.md) and the [historical experiment index](docs/FLOW-EXPERIMENTS.md) retain failures and costs.
+The new six-package development batch improves from **2/6 cases, 30/46 scenarios** after construction to **5/6, 35/46** with source expressions: four executable-fragment cases and one safe stop. Eleven scenarios of a structurally invalid case remain unrun. These are fresh 9B generations on assistant-authored packages/oracles, not independent Gold or unseen public Skills. Ten model requests have local p50/p95 of **20.91/35.82 seconds**, not Runtime latency. Citation-role errors and complete-source semantics remain open. See [results, failures and revisions](docs/FLOW-SEMANTIC-TRANSFER.md).
 
-Evidence order remains **L1-to-L0 generalization → L0 validation → Runtime evaluation**. The existing 100 public Skills from 72 repositories/nine domains are known development data. Large Runtime A/B remains gated by at least three disjoint unseen cohorts totaling 50 Skills, 15 repositories, eight domains and 600 cases, including the unchanged [quality thresholds](docs/TRANSLATION-GENERALIZATION-GATE.md).
+Evidence order remains **L1-to-L0 generalization → L0 validation → Runtime evaluation**. The original 100 public Skills from 72 repositories/nine discovery-query strata are known development data; query strata are not verified business domains. Large Runtime A/B remains gated by at least three disjoint unseen cohorts totaling 50 Skills, 15 repositories, eight domains and 600 cases, including the unchanged [quality thresholds](docs/TRANSLATION-GENERALIZATION-GATE.md).
 
 ### Capabilities and evidence
 
