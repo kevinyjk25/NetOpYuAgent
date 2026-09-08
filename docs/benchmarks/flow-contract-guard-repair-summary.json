@@ -1,0 +1,305 @@
+{
+  "protocol": "contract-guard-repair-summary/v1",
+  "evidenceRole": "same_visible_development_not_independent_gold",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "sources": 6,
+  "publicSkills": 0,
+  "baselineManifestDigest": "sha256:db68c37836a310c1a91eabe71bf90c58ab0b2c29bf579e6fb1ca78e07f514dc0",
+  "unchangedSuites": {
+    "direct-read": "sha256:d2b037c864b282071242f7b21365467c2873d0158a430a076f681b7fafacfebd",
+    "inverted-branch": "sha256:0b0e43424065ef8586c8573e774e6db414abcf3b4a039e84a307de2f3ba47c07",
+    "missing-approval-write": "sha256:fce5238cbd9f371e714cda11dd42e2693ebf881c65af79b9803ce8daa0e1cc9b",
+    "unavailable-script-prerequisite": "sha256:ca5859fd44608467d40ae9589d5f39a96dfe2a317fb8d1db5f6f6f99121819ff",
+    "backup-prerequisite": "sha256:82f6fc38739a0e2009d4287a8f496ea80329cb9a13634f1e2856320cff9a5164",
+    "access-guide": "sha256:825106430dd7b72878bdfd7aacd3c7eb24905360af2bf4e798d20d1d6e159a8f"
+  },
+  "baseline": {
+    "matchedCases": 4,
+    "passedScenarios": 21,
+    "totalScenarios": 33,
+    "reportDigest": "sha256:eb28bad3c2e014d8e182a3ca216cc22394610c934a233c03b62e367cc8f049ad"
+  },
+  "contractFirstPass": {
+    "reportDigest": "sha256:e4aafb0faf30d00179c4c03718305813c710678bd47778fc4e161e8fbf5f3ea8",
+    "rows": [
+      {
+        "id": "direct-read",
+        "status": "matched_finite_oracle",
+        "representation": "compiled",
+        "passed": 6,
+        "total": 6,
+        "scope": "executable_fragment",
+        "latencyMs": 28667.70695906598,
+        "inputTokens": 4341,
+        "outputTokens": 175,
+        "error": null,
+        "counterexamples": []
+      },
+      {
+        "id": "inverted-branch",
+        "status": "matched_finite_oracle",
+        "representation": "compiled",
+        "passed": 6,
+        "total": 6,
+        "scope": "executable_fragment",
+        "latencyMs": 42327.00820895843,
+        "inputTokens": 4484,
+        "outputTokens": 430,
+        "error": null,
+        "counterexamples": []
+      },
+      {
+        "id": "missing-approval-write",
+        "status": "matched_finite_oracle",
+        "representation": "compiled",
+        "passed": 6,
+        "total": 6,
+        "scope": "safe_partial_stop",
+        "latencyMs": 31087.113249930553,
+        "inputTokens": 4614,
+        "outputTokens": 234,
+        "error": null,
+        "counterexamples": []
+      },
+      {
+        "id": "unavailable-script-prerequisite",
+        "status": "matched_finite_oracle",
+        "representation": "compiled",
+        "passed": 3,
+        "total": 3,
+        "scope": "safe_partial_stop",
+        "latencyMs": 28218.00324996002,
+        "inputTokens": 4557,
+        "outputTokens": 181,
+        "error": null,
+        "counterexamples": []
+      },
+      {
+        "id": "backup-prerequisite",
+        "status": "invalid_candidate",
+        "representation": null,
+        "passed": 0,
+        "total": 1,
+        "scope": "safe_partial_stop",
+        "latencyMs": 24947.53695896361,
+        "inputTokens": 3654,
+        "outputTokens": 179,
+        "error": "statement after terminal flow is unreachable; never drop it",
+        "counterexamples": []
+      },
+      {
+        "id": "access-guide",
+        "status": "counterexample_found",
+        "representation": "compiled",
+        "passed": 8,
+        "total": 11,
+        "scope": "executable_fragment",
+        "latencyMs": 43477.39825001918,
+        "inputTokens": 4181,
+        "outputTokens": 418,
+        "error": null,
+        "counterexamples": [
+          {
+            "id": "0-0-1",
+            "differences": [
+              {
+                "facet": "operation_order_arguments_or_count",
+                "callIndex": 1,
+                "expected": [],
+                "actual": [
+                  {
+                    "tool": "read_protected_attributes",
+                    "arguments": {
+                      "request_id": "Q6"
+                    }
+                  }
+                ]
+              },
+              {
+                "facet": "outcome",
+                "expected": "unsupported",
+                "actual": "read_path_completed"
+              }
+            ]
+          },
+          {
+            "id": "0-1-1",
+            "differences": [
+              {
+                "facet": "operation_order_arguments_or_count",
+                "callIndex": 1,
+                "expected": [],
+                "actual": [
+                  {
+                    "tool": "read_protected_attributes",
+                    "arguments": {
+                      "request_id": "Q6"
+                    }
+                  }
+                ]
+              },
+              {
+                "facet": "outcome",
+                "expected": "unsupported",
+                "actual": "read_path_completed"
+              }
+            ]
+          },
+          {
+            "id": "1-0-1",
+            "differences": [
+              {
+                "facet": "operation_order_arguments_or_count",
+                "callIndex": 1,
+                "expected": [],
+                "actual": [
+                  {
+                    "tool": "read_protected_attributes",
+                    "arguments": {
+                      "request_id": "Q6"
+                    }
+                  }
+                ]
+              },
+              {
+                "facet": "outcome",
+                "expected": "unsupported",
+                "actual": "read_path_completed"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "matchedCases": 4,
+    "passedScenarios": 29,
+    "totalScenarios": 33,
+    "executedScenarios": 32,
+    "newCalls": 6,
+    "inputTokens": 25831,
+    "outputTokens": 1617,
+    "postTotalMs": 198724.76687689777,
+    "p50Ms": 28667.70695906598,
+    "p95Ms": 43477.39825001918
+  },
+  "explicitFollowup": {
+    "reportDigest": "sha256:3d8e0e9f8386f23b94dbed2354701308332492da868f5669fbc4a753bd017eab",
+    "matchedCases": 5,
+    "unresolvedCases": 1,
+    "passedScenarios": 22,
+    "executedScenarios": 22,
+    "notRunScenarios": 11,
+    "totalScenarios": 33,
+    "newCalls": 1,
+    "modelResult": {
+      "latencyMs": 15869.451208040118,
+      "inputTokens": 1327,
+      "outputTokens": 124,
+      "reasoningTokens": null,
+      "reportedModel": "qwen3.5:9b",
+      "doneReason": "stop",
+      "status": "text_received",
+      "candidateStatus": "unresolved_not_executable"
+    },
+    "decisions": {
+      "g000": {
+        "decision": "require_true",
+        "source_id": "s0003",
+        "on_failure": "unsupported"
+      },
+      "g001": {
+        "decision": "unresolved",
+        "source_id": "s0003"
+      },
+      "g002": {
+        "decision": "require_true",
+        "source_id": "s0004",
+        "on_failure": "unsupported"
+      }
+    },
+    "slots": [
+      {
+        "id": "g000",
+        "targetPointer": "/steps/1/when_equal/0",
+        "targetTool": "read_protected_attributes",
+        "targetArguments": {
+          "request_id": {
+            "kind": "constant",
+            "value": "Q6"
+          }
+        },
+        "factTool": "read_owner_decision",
+        "reference": {
+          "kind": "reference",
+          "source": "r0",
+          "field": "available"
+        }
+      },
+      {
+        "id": "g001",
+        "targetPointer": "/steps/1/when_equal/0",
+        "targetTool": "read_protected_attributes",
+        "targetArguments": {
+          "request_id": {
+            "kind": "constant",
+            "value": "Q6"
+          }
+        },
+        "factTool": "read_owner_decision",
+        "reference": {
+          "kind": "reference",
+          "source": "r0",
+          "field": "current"
+        }
+      },
+      {
+        "id": "g002",
+        "targetPointer": "/steps/1/when_equal/0",
+        "targetTool": "read_protected_attributes",
+        "targetArguments": {
+          "request_id": {
+            "kind": "constant",
+            "value": "Q6"
+          }
+        },
+        "factTool": "read_owner_decision",
+        "reference": {
+          "kind": "reference",
+          "source": "r0",
+          "field": "granted"
+        }
+      }
+    ],
+    "normalization": [
+      {
+        "rule": "adjacent_identical_stop_outcome",
+        "pointer": "/steps/1",
+        "retainedSourceId": "s0002",
+        "redundantStatement": {
+          "kind": "end",
+          "source_id": "s0003",
+          "outcome": "unsupported"
+        }
+      }
+    ]
+  },
+  "verdict": "argument_binding_improved_missing_guard_now_explicit_but_automatic_semantic_availability_unresolved",
+  "totalNewCalls": 7,
+  "totalInputTokens": 27158,
+  "totalOutputTokens": 1741,
+  "totalPostMs": 214594.2180849379,
+  "semanticAccuracy": null,
+  "wholeSkillTranslations": 0,
+  "runtimeAuthorityGranted": false,
+  "caveats": [
+    "Source-only follow-up adds a model call; it is not first-pass success.",
+    "No source/oracle/reference was altered. No test answers supplied to model.",
+    "Original access candidate has 3 premature protected reads in inert fixtures; no external system accessed.",
+    "Unresolved current prevents producing a followed-up candidate, not evidence of correct Runtime execution.",
+    "Finite developer-visible examples do not establish unseen generalization or production reliability."
+  ],
+  "reportDigest": "sha256:da768eb0d3bcb08e4eac04228f6b9fa239faca476349251c443322d042fd08ff"
+}

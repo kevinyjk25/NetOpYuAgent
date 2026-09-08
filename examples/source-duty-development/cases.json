@@ -1,0 +1,21 @@
+[
+  {
+    "id": "storage-pagination",
+    "bundle": {"documents": [{"path": "storage/SKILL.md", "kind": "prose", "text": "# 只读存储检查：不得删除对象\n对用户给出的 bucket 调用 list_objects；只有返回 truncated=true 时才按原游标继续读取。\n若游标缺失则停止并追问，不得把缺失当作没有更多对象。\n示例 bucket demo 只是文档示例，不能当作用户参数。\n"}]}
+  },
+  {
+    "id": "ticket-approval",
+    "bundle": {"documents": [{"path": "tickets/SKILL.md", "kind": "prose", "text": "# Change ticket priority\nRead ticket T-42, then request approval for setting its priority to high.\nOnly when that approval is valid may update_ticket set priority to high; an open ticket is not approval.\nIf approval is unavailable or denied, stop without calling update_ticket.\nAfter the update, read the priority again; a mismatch must be reported as failure, not success.\n"}]}
+  },
+  {
+    "id": "backup-prerequisite",
+    "bundle": {"documents": [{"path": "backup/SKILL.md", "kind": "prose", "text": "# Backup inspection\nBefore reading backup metadata, run the prerequisites described in references/precheck.md.\nIf that reference or its required runner is unavailable, stop before reading metadata and explain the missing dependency.\nDo not infer successful verification from the name verify_backup.py.\n```python\nraise RuntimeError('This supplied example must never run in translation')\n```\n"}]}
+  },
+  {
+    "id": "sensor-branch-reference",
+    "bundle": {"documents": [
+      {"path": "sensors/SKILL.md", "kind": "prose", "text": "# Observe only\nRead the requested sensor once. Apply the interpretation limits in references/limits.md.\nIf reading.status is not stale, finish; otherwise request human interpretation without taking another reading.\n"},
+      {"path": "references/limits.md", "kind": "prose", "text": "A stored reading is not a live measurement.\nDo not infer equipment safety or permission to change settings from reading.status.\n"}
+    ]}
+  }
+]

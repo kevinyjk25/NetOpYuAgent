@@ -1,0 +1,383 @@
+{
+  "evidenceRole": "known_development_finite_oracles_not_independent_gold",
+  "verdict": "behavior_verification_fixed_but_generator_quality_not_improved",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "newModelCalls": 16,
+  "knownDevelopmentSources": 6,
+  "publicSkills": 0,
+  "wholeSkillTranslations": 0,
+  "semanticAccuracy": null,
+  "runtimeAuthorityGranted": false,
+  "referenceWitnesses": {
+    "cases": 6,
+    "finiteScenarios": 33,
+    "executableFragmentScenarios": 23,
+    "partialStopScenarios": 10
+  },
+  "historicalRecheck": {
+    "cases": 4,
+    "finiteScenariosMatched": 21,
+    "newModelCalls": 0,
+    "originalSourceReviewsUnchanged": true
+  },
+  "batches": [
+    {
+      "artifact": "artifacts/translator-v2/behavior-repair-6-20260908-report.json",
+      "reportDigest": "sha256:eb28bad3c2e014d8e182a3ca216cc22394610c934a233c03b62e367cc8f049ad",
+      "completed": true,
+      "postTotalMs": 131365.65658194013,
+      "p50Ms": 20122.794332914054,
+      "p95Ms": 34184.370292001404,
+      "inputTokens": 16508,
+      "outputTokens": 1203,
+      "rows": [
+        {
+          "id": "direct-read",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 6,
+          "total": 6,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "inverted-branch",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 6,
+          "total": 6,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "missing-approval-write",
+          "scope": "safe_partial_stop",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 6,
+          "total": 6,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "unavailable-script-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 3,
+          "total": 3,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "backup-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "counterexample_found",
+          "passed": 0,
+          "total": 1,
+          "structuralError": null,
+          "firstCounterexample": [
+            {
+              "facet": "outcome",
+              "expected": "unsupported",
+              "actual": "needs_l1"
+            }
+          ]
+        },
+        {
+          "id": "access-guide",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "counterexample_found",
+          "passed": 0,
+          "total": 11,
+          "structuralError": null,
+          "firstCounterexample": [
+            {
+              "facet": "operation_order_arguments_or_count",
+              "callIndex": 0,
+              "expected": [
+                {
+                  "tool": "read_owner_decision",
+                  "arguments": {
+                    "request_id": "Q6"
+                  }
+                }
+              ],
+              "actual": []
+            },
+            {
+              "facet": "outcome",
+              "expected": "unsupported",
+              "actual": "read_path_completed"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "artifact": "artifacts/translator-v2/behavior-compact-6-20260908-partial-report.json",
+      "reportDigest": "sha256:fdacbd85f7f6634cd0777c34e3cb6939c9fe0f80239ac8b7d2b8053c3f24126c",
+      "completed": false,
+      "postTotalMs": 272496.7116668122,
+      "p50Ms": 27211.874624947086,
+      "p95Ms": 232209.7950419411,
+      "inputTokens": 2645,
+      "outputTokens": 4722,
+      "rows": [
+        {
+          "id": "direct-read",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "invalid_candidate",
+          "behavior": "not_run",
+          "passed": 0,
+          "total": 6,
+          "structuralError": "read alias unavailable in lexical scope",
+          "firstCounterexample": null
+        },
+        {
+          "id": "inverted-branch",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "invalid_candidate",
+          "behavior": "not_run",
+          "passed": 0,
+          "total": 6,
+          "structuralError": "read alias unavailable in lexical scope",
+          "firstCounterexample": null
+        },
+        {
+          "id": "missing-approval-write",
+          "scope": "safe_partial_stop",
+          "responseStatus": "incomplete_response",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "unavailable-script-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "backup-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "access-guide",
+          "scope": "executable_fragment",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        }
+      ]
+    },
+    {
+      "artifact": "artifacts/translator-v2/behavior-ordered-6-20260908-report.json",
+      "reportDigest": "sha256:ea68aff550094dc97ed99db7d8417a8fa6e0e04a44d490aec2e63ff43094fdf7",
+      "completed": true,
+      "postTotalMs": 126549.0699178772,
+      "p50Ms": 18619.811333948746,
+      "p95Ms": 36448.7108750036,
+      "inputTokens": 16970,
+      "outputTokens": 1442,
+      "rows": [
+        {
+          "id": "direct-read",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 6,
+          "total": 6,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "inverted-branch",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 6,
+          "total": 6,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "missing-approval-write",
+          "scope": "safe_partial_stop",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 6,
+          "total": 6,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "unavailable-script-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "matched_finite_oracle",
+          "passed": 3,
+          "total": 3,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "backup-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "text_received",
+          "representation": "compiled",
+          "behavior": "counterexample_found",
+          "passed": 0,
+          "total": 1,
+          "structuralError": null,
+          "firstCounterexample": [
+            {
+              "facet": "operation_order_arguments_or_count",
+              "callIndex": 0,
+              "expected": [],
+              "actual": [
+                {
+                  "tool": "read_backup_metadata",
+                  "arguments": {}
+                }
+              ]
+            },
+            {
+              "facet": "outcome",
+              "expected": "unsupported",
+              "actual": "blocked"
+            }
+          ]
+        },
+        {
+          "id": "access-guide",
+          "scope": "executable_fragment",
+          "responseStatus": "text_received",
+          "representation": "invalid_candidate",
+          "behavior": "not_run",
+          "passed": 0,
+          "total": 11,
+          "structuralError": "unknown typed source field",
+          "firstCounterexample": null
+        }
+      ]
+    },
+    {
+      "artifact": "artifacts/translator-v2/behavior-thinking-6-20260908-partial-report.json",
+      "reportDigest": "sha256:7dfd6c5ec27740226a6b1edd34700fed2c7cc4922cfbe482bc9114a77fa35d61",
+      "completed": false,
+      "postTotalMs": 225350.31474998686,
+      "p50Ms": 225350.31474998686,
+      "p95Ms": 225350.31474998686,
+      "inputTokens": 2809,
+      "outputTokens": 4096,
+      "rows": [
+        {
+          "id": "direct-read",
+          "scope": "executable_fragment",
+          "responseStatus": "incomplete_response",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "inverted-branch",
+          "scope": "executable_fragment",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "missing-approval-write",
+          "scope": "safe_partial_stop",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "unavailable-script-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "backup-prerequisite",
+          "scope": "safe_partial_stop",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        },
+        {
+          "id": "access-guide",
+          "scope": "executable_fragment",
+          "responseStatus": "not_run",
+          "representation": null,
+          "behavior": null,
+          "passed": null,
+          "total": null,
+          "structuralError": null,
+          "firstCounterexample": null
+        }
+      ]
+    }
+  ],
+  "reportDigest": "sha256:2f79d4c495a1cd3e3bb9013d1d9372d096373e818a196f99734de5b93399a3f9"
+}

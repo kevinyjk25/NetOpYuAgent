@@ -1,0 +1,3199 @@
+{
+  "protocol": "offline-flow-diagnostics/v1",
+  "evidenceRole": "posthoc_mechanical_diagnostics_known_development_not_rescore",
+  "originalManifestDigest": "sha256:ee93c6ff83c1d6c332b9d47f49a8ee83dd5d2ecf22ffc089db1a54c7b877dab8",
+  "originalReportDigest": "sha256:e856360c9fa44bd7b4bc143dac8175cf991123182a260813df71bdc5ac2d5607",
+  "originalFlowQualified": 4,
+  "originalMappingQualified": 0,
+  "cases": [
+    {
+      "case": "direct-read",
+      "diagnosis": {
+        "protocol": "offline-flow-diagnostics/v1",
+        "diagnosticImplementationDigest": "sha256:ed20be348227331256128b51d8b833b073483772c9b4cfc0d114f7603fafb174",
+        "inputDigests": {
+          "sources": "sha256:917e77d13eb8917a10e8fec33b3ff4909556210ef18742239dcb8524ed73813d",
+          "tree": "sha256:1a1c48a5c2234df1f5030e8aed935555d2717dd075ba751c4aa3d3674319b1e4",
+          "mapping": "sha256:58141ec5f2d48a83e6d1021ae47ad2d0e82b4062f0ca27d470c2da8d8486727a"
+        },
+        "stages": {
+          "source": {
+            "status": "mechanically_valid",
+            "reason": "Exact source retained; decomposition completeness is unreviewed."
+          },
+          "representation": {
+            "status": "structurally_qualified",
+            "reason": "This candidate compiles under the actual host contract; fidelity and general expressiveness remain unproven."
+          },
+          "parent_semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "mapping": {
+            "status": "failed",
+            "findingIds": [
+              "sha256:1673c65dae0950e3940249c847292ca8b744fda6511f5d46469d4108d495423c",
+              "sha256:2254cf051229791538c1d66915591c21e96f8e4ac2ed92f40ef331e40ea342a7"
+            ],
+            "reason": "Independent checks aggregate defects; frozen compiler remains unchanged."
+          },
+          "lowering_consistency": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "runtime": {
+            "status": "not_evaluated",
+            "reason": "Offline diagnostics never invokes Runtime, tools, scripts or models."
+          }
+        },
+        "findings": [
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0006"
+            ],
+            "sourceClauseIds": [
+              "clause-0006"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:1673c65dae0950e3940249c847292ca8b744fda6511f5d46469d4108d495423c"
+          },
+          {
+            "code": "node_evidence_missing",
+            "stage": "mapping",
+            "pointer": "/steps/1",
+            "relatedPointers": [
+              "/nodes/1"
+            ],
+            "sourceClauseIds": [
+              "clause-0002"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Node exists and lowers, but has no mechanically eligible source mapping. This is not proof that its operation was lost.",
+            "suggestedAction": "Inspect the original clause and existing node. Supply faithful evidence or flag an unsupported/invented node; never auto-justify the node.",
+            "findingId": "sha256:2254cf051229791538c1d66915591c21e96f8e4ac2ed92f40ef331e40ea342a7"
+          }
+        ],
+        "candidateRequirements": [
+          {
+            "candidateId": "sha256:bd74628223cafa633be260b40ecf59f2acc626bbc9b4008951dd8fb85143f253",
+            "sourceSpanId": "sha256:6822dde655ee28f78e46d034b48d9efe76eafb51f6dec1af3d08c45b1795c346",
+            "pointer": "/selections/clause-0001/0",
+            "clauseId": "clause-0001",
+            "sourceSpan": {
+              "start": 33,
+              "end": 83,
+              "exactQuote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。"
+            },
+            "kind": "operation",
+            "targets": [
+              "node:/steps/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:7c09006aa1d3eae44672d9969b7f9e443958b9655e01c2448ab1c6609fb589d8",
+            "sourceSpanId": "sha256:b1fe547304965807b90c06bc14faa40c3e79a585844f635fd0215bd9ed99cc4d",
+            "pointer": "/selections/clause-0002/0",
+            "clauseId": "clause-0002",
+            "sourceSpan": {
+              "start": 84,
+              "end": 164,
+              "exactQuote": "Read input device_id once with read_inventory_device, then finish the read path."
+            },
+            "kind": "operation",
+            "targets": [
+              "node:/steps/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:99c88cbbb59eb11fca3cb8b3c64ecf0ed4cc97e431247aa0a66259d4db71f066",
+            "sourceSpanId": "sha256:906ae221486a84a45a499ca3ba89dc20d1078e9b541707f8a5fc9d666795d330",
+            "pointer": "/selections/clause-0003/0",
+            "clauseId": "clause-0003",
+            "sourceSpan": {
+              "start": 206,
+              "end": 238,
+              "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。"
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "documentation"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:93754c41af0e26ddb72b0273d2a7b24e9d911321f9f4882df612b8c18fe36b5d",
+            "sourceSpanId": "sha256:122575be7da349e6ffe808ba3b224d3cf1a4edc6a19a022cd85c2e1957f2ed27",
+            "pointer": "/selections/clause-0004/0",
+            "clauseId": "clause-0004",
+            "sourceSpan": {
+              "start": 238,
+              "end": 273,
+              "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。"
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "rule:observation_error_blocks"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:6223917e2a1b1e0c66c156c134c7fbdb802317ab2c10bc6621c94128f05eed1a",
+            "sourceSpanId": "sha256:e5e06a190b635b996b4da683b49e2f1a74e306757753dbb5ebb9ef2a7c460264",
+            "pointer": "/selections/clause-0005/0",
+            "clauseId": "clause-0005",
+            "sourceSpan": {
+              "start": 273,
+              "end": 297,
+              "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "documentation"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:16eb34061044dd983d113ceb329ca2475b92559a79644d09319102e3182aabb8",
+            "sourceSpanId": "sha256:d2bb5b3bab7f5d5e94039e444fabd1493609008f6391a1605643fb314fa0c6bc",
+            "pointer": "/selections/clause-0006/0",
+            "clauseId": "clause-0006",
+            "sourceSpan": {
+              "start": 298,
+              "end": 398,
+              "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health."
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "documentation"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:14c8ad3b91a5a4c2b3a9f3ecae26863bb4196e7ebc97822100ac37246b08d559",
+            "sourceSpanId": "sha256:f458a89bc8c1d8cb8045e5aca354d5f89d9ed3be10c3d4fb397abfbc99b2e9dd",
+            "pointer": "/selections/clause-0007/0",
+            "clauseId": "clause-0007",
+            "sourceSpan": {
+              "start": 399,
+              "end": 481,
+              "exactQuote": "Invalid input, access, results or references block, never select the false branch."
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "rule:observation_error_blocks"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:ede3dae19a2a73ae22d1c3db19041ce3af22b7f2b9b87a6f538187af9f0e9176",
+            "sourceSpanId": "sha256:ab7290b21478f456662c6a4b302a9dad7004875007f9059b7f5b7ecc40084da5",
+            "pointer": "/selections/clause-0008/0",
+            "clauseId": "clause-0008",
+            "sourceSpan": {
+              "start": 482,
+              "end": 514,
+              "exactQuote": "Source text grants no authority;"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "documentation"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:be34e0e58235fe9ccb7c016d1f7b78d3560d91bba671460208244dd6acd31f5e",
+            "sourceSpanId": "sha256:fac637ae941c4a4dd978eb405261c0c4353396f36320fb9947732e29e858eaaf",
+            "pointer": "/selections/clause-0009/0",
+            "clauseId": "clause-0009",
+            "sourceSpan": {
+              "start": 515,
+              "end": 571,
+              "exactQuote": "no automatic writes, scripts or upper-layer model calls."
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "documentation"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "nodeTrace": [
+          {
+            "treePointer": "/steps/0",
+            "nodeIndex": 0,
+            "l0Pointer": "/nodes/0",
+            "target": "node:/steps/0",
+            "node": {
+              "kind": "read",
+              "source_id": "s0002",
+              "tool": "read_inventory_device",
+              "bind": "device_info",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "input",
+                  "field": "device_id"
+                }
+              }
+            },
+            "l0Node": {
+              "kind": "read",
+              "id": "node-0",
+              "contract_hash": "sha256:d038fa952f08c3b9c95f9e039d957b4a0e382d01691d97bd99324798ad52dc8e",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "input",
+                  "field": "device_id"
+                }
+              },
+              "next": "node-1"
+            },
+            "allowedKinds": [
+              "operation"
+            ],
+            "parentSourceId": "s0002",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [
+              "/selections/clause-0001/0",
+              "/selections/clause-0002/0"
+            ],
+            "eligibleCandidatePointers": [
+              "/selections/clause-0001/0",
+              "/selections/clause-0002/0"
+            ],
+            "mappingStatus": "mechanically_linked_semantics_unreviewed",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "treePointer": "/steps/1",
+            "nodeIndex": 1,
+            "l0Pointer": "/nodes/1",
+            "target": "node:/steps/1",
+            "node": {
+              "kind": "end",
+              "source_id": "s0003",
+              "outcome": "read_path_completed"
+            },
+            "l0Node": {
+              "kind": "end",
+              "id": "node-1",
+              "outcome": "read_path_completed",
+              "explanation": "Read input device_id once with read_inventory_device, then finish the read path."
+            },
+            "allowedKinds": [
+              "completion"
+            ],
+            "parentSourceId": "s0003",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [],
+            "eligibleCandidatePointers": [],
+            "mappingStatus": "missing_eligible_evidence",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "sourceClauses": [
+          {
+            "clauseId": "clause-0001",
+            "sourceId": "s0002",
+            "start": 33,
+            "end": 83,
+            "exactQuote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0001/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0002",
+            "sourceId": "s0003",
+            "start": 84,
+            "end": 164,
+            "exactQuote": "Read input device_id once with read_inventory_device, then finish the read path.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0002/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0003",
+            "sourceId": "s0005",
+            "start": 206,
+            "end": 238,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0003/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0004",
+            "sourceId": "s0005",
+            "start": 238,
+            "end": 273,
+            "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0004/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0005",
+            "sourceId": "s0005",
+            "start": 273,
+            "end": 297,
+            "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0005/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0006",
+            "sourceId": "s0006",
+            "start": 298,
+            "end": 398,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0006/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0007",
+            "sourceId": "s0006",
+            "start": 399,
+            "end": 481,
+            "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0007/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0008",
+            "sourceId": "s0006",
+            "start": 482,
+            "end": 514,
+            "exactQuote": "Source text grants no authority;",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0008/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0009",
+            "sourceId": "s0006",
+            "start": 515,
+            "end": 571,
+            "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0009/0"
+            ],
+            "semanticCoverage": "not_established"
+          }
+        ],
+        "sourceLines": [
+          {
+            "sourceId": "s0001",
+            "start": 0,
+            "end": 33,
+            "exactQuote": "# 单次库存读取 / Single inventory read\n"
+          },
+          {
+            "sourceId": "s0002",
+            "start": 33,
+            "end": 84,
+            "exactQuote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。\n"
+          },
+          {
+            "sourceId": "s0003",
+            "start": 84,
+            "end": 165,
+            "exactQuote": "Read input device_id once with read_inventory_device, then finish the read path.\n"
+          },
+          {
+            "sourceId": "s0004",
+            "start": 165,
+            "end": 206,
+            "exactQuote": "## 数据与权限边界 / Data and authority boundary\n"
+          },
+          {
+            "sourceId": "s0005",
+            "start": 206,
+            "end": 298,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\n"
+          },
+          {
+            "sourceId": "s0006",
+            "start": 298,
+            "end": 571,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls."
+          }
+        ],
+        "declaredIssues": [],
+        "sourceReview": null,
+        "parentSourceReview": null,
+        "semanticAccuracy": null,
+        "semanticLossRate": null,
+        "confidenceProbability": null,
+        "independentObligationCount": null,
+        "runtimeAuthorityGranted": false,
+        "modelCalls": 0,
+        "runtimeExecutions": 0,
+        "writes": 0,
+        "boundary": "Mechanical defects and supplied review evidence only; not automatic causal attribution, Gold, admission or a success probability.",
+        "parentCompilationDigest": "sha256:0cea537935cde3680e04c63da4df108bc2cc76c0d53d212520e98cb149d34730",
+        "parentFlowDigest": "sha256:ee431c61e9523b85da569e609a41dd74ec7a6dda2fdf447b4dbc4b6130b356ba",
+        "earliestFailedStage": "mapping",
+        "counts": {
+          "byCode": {
+            "node_evidence_missing": 1,
+            "objective_kind_conflict": 1
+          },
+          "candidateRequirements": 9,
+          "sourceClauses": 9,
+          "nodes": 2,
+          "nodesWithEligibleEvidence": 1,
+          "unresolvedCandidates": 0
+        },
+        "reportDigest": "sha256:dbd44e7937d4d4cdd0e283609b16ff570b0f293debce6b93c75573ff48d94d64"
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "diagnosis": {
+        "protocol": "offline-flow-diagnostics/v1",
+        "diagnosticImplementationDigest": "sha256:ed20be348227331256128b51d8b833b073483772c9b4cfc0d114f7603fafb174",
+        "inputDigests": {
+          "sources": "sha256:fa1cd01b499f927f32f1cf42785a0b66059dcbc88b58dd6471717d65cfc6c4e3",
+          "tree": "sha256:fb2102796186e8edd7ddeec1da8f67d936e93be2479dbac38e08e8c64ffbf20a",
+          "mapping": "sha256:f5bc454a188c0f9e58a67a247f9678dfca3de00968ac28bed3e9dc54be87127b"
+        },
+        "stages": {
+          "source": {
+            "status": "mechanically_valid",
+            "reason": "Exact source retained; decomposition completeness is unreviewed."
+          },
+          "representation": {
+            "status": "structurally_qualified",
+            "reason": "This candidate compiles under the actual host contract; fidelity and general expressiveness remain unproven."
+          },
+          "parent_semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "mapping": {
+            "status": "failed",
+            "findingIds": [
+              "sha256:31b65d7d912c50cd2d5ac742597937dd02ce7e5963a42051c335faf2d255d371",
+              "sha256:ba5891a761e6926739bbee79d7cbac123ec823085d863a8454ad0e08be1af63a",
+              "sha256:86f2cecd36d1d1aa0325b4a36fc81f941b1825a7a815ce61cba91a839c8e299f",
+              "sha256:4a779abb98417ecb88490fa9b86be8c4db9e020d5bde15bc63d5be69bbf3833d",
+              "sha256:bbdc164c6e59d4029be35eee8725a469af87158dda02483b22b00bbd8854c637"
+            ],
+            "reason": "Independent checks aggregate defects; frozen compiler remains unchanged."
+          },
+          "lowering_consistency": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "runtime": {
+            "status": "not_evaluated",
+            "reason": "Offline diagnostics never invokes Runtime, tools, scripts or models."
+          }
+        },
+        "findings": [
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0007/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0007"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:1f9e6355b6ae3c797c346407d2d75107a93b70e15bafb994c45fe36105a2817b"
+          },
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0007"
+            ],
+            "sourceClauseIds": [
+              "clause-0007"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:31b65d7d912c50cd2d5ac742597937dd02ce7e5963a42051c335faf2d255d371"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0008/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0008"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:4d7c4e4088c5c19fe7a2dfaece11a712b696c92486d2ebb61268e8058e37b674"
+          },
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0008"
+            ],
+            "sourceClauseIds": [
+              "clause-0008"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:ba5891a761e6926739bbee79d7cbac123ec823085d863a8454ad0e08be1af63a"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0009/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0009"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7d79afdb533e194bead9a42997142045a8dbe9db89a8b176c6d2033c9ecaf90b"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0010/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0010"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:73152e5e5f8fb0e99af1a6fb0fe2dce53acd63a742efd50f2ba95284ea1eaee4"
+          },
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0010"
+            ],
+            "sourceClauseIds": [
+              "clause-0010"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:86f2cecd36d1d1aa0325b4a36fc81f941b1825a7a815ce61cba91a839c8e299f"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0011/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0011"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7ce30c93cab64e9a2096b3316959a13869021d292c8659725454537172b104a2"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0012/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0012"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:5e07b3ab0363180e390b14f7ff802e9978830ce3012388a37a2751bb379ace0b"
+          },
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0012"
+            ],
+            "sourceClauseIds": [
+              "clause-0012"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:4a779abb98417ecb88490fa9b86be8c4db9e020d5bde15bc63d5be69bbf3833d"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0013/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0013"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:804a4b7d28743641696216db3f2a2d2d9da7716fa3677c460b6d11cfb569cdc5"
+          },
+          {
+            "code": "node_evidence_missing",
+            "stage": "mapping",
+            "pointer": "/steps/1",
+            "relatedPointers": [
+              "/nodes/1"
+            ],
+            "sourceClauseIds": [
+              "clause-0001",
+              "clause-0002",
+              "clause-0003"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Node exists and lowers, but has no mechanically eligible source mapping. This is not proof that its operation was lost.",
+            "suggestedAction": "Inspect the original clause and existing node. Supply faithful evidence or flag an unsupported/invented node; never auto-justify the node.",
+            "findingId": "sha256:bbdc164c6e59d4029be35eee8725a469af87158dda02483b22b00bbd8854c637"
+          }
+        ],
+        "candidateRequirements": [
+          {
+            "candidateId": "sha256:8d440ad8a0aaccdef1ed577d0419f859e1c009a007ec9e78e6f55ddf54d71b12",
+            "sourceSpanId": "sha256:9e8aeec9fbddf8cac3ab34ab55fc8fb0946463b91f3541f8a5ea8f49739639ab",
+            "pointer": "/selections/clause-0001/0",
+            "clauseId": "clause-0001",
+            "sourceSpan": {
+              "start": 33,
+              "end": 52,
+              "exactQuote": "以输入 device_id 读取库存。"
+            },
+            "kind": "operation",
+            "targets": [
+              "node:/steps/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:cef2682dc72d41a6da94d1090553963541043a6077ac15d12efc3beea8e901e0",
+            "sourceSpanId": "sha256:b00be5769812752651345342e99ad9c40c90eed605a0621dc64471b820053e96",
+            "pointer": "/selections/clause-0002/0",
+            "clauseId": "clause-0002",
+            "sourceSpan": {
+              "start": 52,
+              "end": 88,
+              "exactQuote": "返回 site 等于 campus 时返回 needs_l1 等待推理；"
+            },
+            "kind": "handoff",
+            "targets": [
+              "node:/steps/1/when_equal/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:ed89b4b328a28c791ef5d943251aeaca6ff059c85949ea7a5e2b9f569370b439",
+            "sourceSpanId": "sha256:a085ce21a1759be132c11d72d78210e40a1fb878c809849c216cf00cec5a02ff",
+            "pointer": "/selections/clause-0003/0",
+            "clauseId": "clause-0003",
+            "sourceSpan": {
+              "start": 88,
+              "end": 124,
+              "exactQuote": "不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。"
+            },
+            "kind": "operation",
+            "targets": [
+              "node:/steps/1/otherwise/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:c8b546e9f8f977bb88237291d6af65941fc52c184b44c863abba415d6f7f17a3",
+            "sourceSpanId": "sha256:a085ce21a1759be132c11d72d78210e40a1fb878c809849c216cf00cec5a02ff",
+            "pointer": "/selections/clause-0003/1",
+            "clauseId": "clause-0003",
+            "sourceSpan": {
+              "start": 88,
+              "end": 124,
+              "exactQuote": "不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。"
+            },
+            "kind": "completion",
+            "targets": [
+              "node:/steps/1/otherwise/1"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:11426791a3f09cf3e267732643ff909bd93b8cd485d425759aa366945fa4bcef",
+            "sourceSpanId": "sha256:ee1c4ef79b1b91ee71b73f21c3e5582219873b17b433cebf6027885b4b05052e",
+            "pointer": "/selections/clause-0004/0",
+            "clauseId": "clause-0004",
+            "sourceSpan": {
+              "start": 125,
+              "end": 146,
+              "exactQuote": "Read input device_id."
+            },
+            "kind": "operation",
+            "targets": [
+              "node:/steps/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:b559b283752d45d45509ea829f193daa84183a35e2d7ef6aade130572fc40d36",
+            "sourceSpanId": "sha256:f1e5190223967625f86f3bfccab27c913b59230b546762f94b4e30bd6622c171",
+            "pointer": "/selections/clause-0005/0",
+            "clauseId": "clause-0005",
+            "sourceSpan": {
+              "start": 147,
+              "end": 197,
+              "exactQuote": "If returned site equals campus, end with needs_l1;"
+            },
+            "kind": "handoff",
+            "targets": [
+              "node:/steps/1/when_equal/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:75991dabde7b5ac81eb10a203a2e2376b26ad0432a3dfeac282aa4713edcb586",
+            "sourceSpanId": "sha256:be93b01905a977cc4c25751ed5f267c94bbec9c79dc56a6369688ade3f4c92ec",
+            "pointer": "/selections/clause-0006/0",
+            "clauseId": "clause-0006",
+            "sourceSpan": {
+              "start": 198,
+              "end": 256,
+              "exactQuote": "otherwise re-read using the returned device_id and finish."
+            },
+            "kind": "operation",
+            "targets": [
+              "node:/steps/1/otherwise/0"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:5a049e412bad6d44c0fa9853a80b916ae136de6c81a3311dc036fb1aad2f521c",
+            "sourceSpanId": "sha256:be93b01905a977cc4c25751ed5f267c94bbec9c79dc56a6369688ade3f4c92ec",
+            "pointer": "/selections/clause-0006/1",
+            "clauseId": "clause-0006",
+            "sourceSpan": {
+              "start": 198,
+              "end": 256,
+              "exactQuote": "otherwise re-read using the returned device_id and finish."
+            },
+            "kind": "completion",
+            "targets": [
+              "node:/steps/1/otherwise/1"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:5a987e472046dcfd512ec05c1434c7ca889d80d5b544cbcac9fe32f38ab9953c",
+            "sourceSpanId": "sha256:41b3a3466fe5108dba326e413562fed2ae87f881183bc468b547a39add797222",
+            "pointer": "/selections/clause-0007/0",
+            "clauseId": "clause-0007",
+            "sourceSpan": {
+              "start": 298,
+              "end": 330,
+              "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。"
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:9783fa714e0483196369aacd704aee82525e42461ee5be35d0e8548c23b9f775",
+            "sourceSpanId": "sha256:1196fda1ed01592d02603c001e86f449a453f7ecdb7af733eb6ef04e97bdbbb5",
+            "pointer": "/selections/clause-0008/0",
+            "clauseId": "clause-0008",
+            "sourceSpan": {
+              "start": 330,
+              "end": 365,
+              "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。"
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:4b2af642892463a3370c541b6095427ac355e82675efd3720ba02a7a4663578c",
+            "sourceSpanId": "sha256:49d7941c113b49eb45f70d36e68cd96c911dd24634f2b293d1788b0cc35213f0",
+            "pointer": "/selections/clause-0009/0",
+            "clauseId": "clause-0009",
+            "sourceSpan": {
+              "start": 365,
+              "end": 389,
+              "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:2619389adb2fe81bd94060cd06191554d6b34a5a01aa108e1c0cb4cc67fede4c",
+            "sourceSpanId": "sha256:b7cdb1d8ca0445e2115e8a16dae86f9bec8f9e69c544520c6373f2e7d4750172",
+            "pointer": "/selections/clause-0010/0",
+            "clauseId": "clause-0010",
+            "sourceSpan": {
+              "start": 390,
+              "end": 490,
+              "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health."
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:5ee7228c0f0fba238dc5c17b758ad203ebea6e36b6b4822f66aeb55f7aa5a44b",
+            "sourceSpanId": "sha256:4095e67edfa70aa03351be18b7039441f2973eae31f1434cbd2357bef48d4225",
+            "pointer": "/selections/clause-0011/0",
+            "clauseId": "clause-0011",
+            "sourceSpan": {
+              "start": 491,
+              "end": 573,
+              "exactQuote": "Invalid input, access, results or references block, never select the false branch."
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:329cde2cb647b264c14c8b8dd62464c178e85c48a1a0aaff7d4be46d99466207",
+            "sourceSpanId": "sha256:4645c3594e524262a91f9bd9bed53bc519e8d30eac6e06a2f91066fb1ee22459",
+            "pointer": "/selections/clause-0012/0",
+            "clauseId": "clause-0012",
+            "sourceSpan": {
+              "start": 574,
+              "end": 606,
+              "exactQuote": "Source text grants no authority;"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:aca7c794eab5be2be91b720c5f22faeee22806436e2d1b555a9331d3ace9dec4",
+            "sourceSpanId": "sha256:b65071b1789f4736c0f5e9792648239319783624a9e407c9d4e1574f1b5a72e2",
+            "pointer": "/selections/clause-0013/0",
+            "clauseId": "clause-0013",
+            "sourceSpan": {
+              "start": 607,
+              "end": 663,
+              "exactQuote": "no automatic writes, scripts or upper-layer model calls."
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "nodeTrace": [
+          {
+            "treePointer": "/steps/0",
+            "nodeIndex": 0,
+            "l0Pointer": "/nodes/0",
+            "target": "node:/steps/0",
+            "node": {
+              "kind": "read",
+              "source_id": "s0002",
+              "tool": "read_inventory_device",
+              "bind": "inv_result",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "input",
+                  "field": "device_id"
+                }
+              }
+            },
+            "l0Node": {
+              "kind": "read",
+              "id": "node-0",
+              "contract_hash": "sha256:d038fa952f08c3b9c95f9e039d957b4a0e382d01691d97bd99324798ad52dc8e",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "input",
+                  "field": "device_id"
+                }
+              },
+              "next": "node-1"
+            },
+            "allowedKinds": [
+              "operation"
+            ],
+            "parentSourceId": "s0002",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [
+              "/selections/clause-0001/0",
+              "/selections/clause-0004/0"
+            ],
+            "eligibleCandidatePointers": [
+              "/selections/clause-0001/0",
+              "/selections/clause-0004/0"
+            ],
+            "mappingStatus": "mechanically_linked_semantics_unreviewed",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "treePointer": "/steps/1",
+            "nodeIndex": 1,
+            "l0Pointer": "/nodes/1",
+            "target": "node:/steps/1",
+            "node": {
+              "kind": "if_equal",
+              "source_id": "s0002",
+              "left": {
+                "kind": "reference",
+                "source": "inv_result",
+                "field": "site"
+              },
+              "equals": {
+                "kind": "constant",
+                "value": "campus"
+              },
+              "true_source_id": "s0002",
+              "false_source_id": "s0002",
+              "when_equal": [
+                {
+                  "kind": "end",
+                  "source_id": "s0002",
+                  "outcome": "needs_l1"
+                }
+              ],
+              "otherwise": [
+                {
+                  "kind": "read",
+                  "source_id": "s0002",
+                  "tool": "read_inventory_device",
+                  "bind": "inv_result_2",
+                  "arguments": {
+                    "device_id": {
+                      "kind": "reference",
+                      "source": "inv_result",
+                      "field": "device_id"
+                    }
+                  }
+                },
+                {
+                  "kind": "end",
+                  "source_id": "s0002",
+                  "outcome": "read_path_completed"
+                }
+              ]
+            },
+            "l0Node": {
+              "kind": "branch",
+              "id": "node-1",
+              "left": {
+                "kind": "reference",
+                "source": "node-0",
+                "field": "site"
+              },
+              "equals": {
+                "kind": "constant",
+                "value": "campus"
+              },
+              "on_true": "node-2",
+              "on_false": "node-3"
+            },
+            "allowedKinds": [
+              "branch",
+              "business_prerequisite"
+            ],
+            "parentSourceId": "s0002",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [],
+            "eligibleCandidatePointers": [],
+            "mappingStatus": "missing_eligible_evidence",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "treePointer": "/steps/1/when_equal/0",
+            "nodeIndex": 2,
+            "l0Pointer": "/nodes/2",
+            "target": "node:/steps/1/when_equal/0",
+            "node": {
+              "kind": "end",
+              "source_id": "s0002",
+              "outcome": "needs_l1"
+            },
+            "l0Node": {
+              "kind": "end",
+              "id": "node-2",
+              "outcome": "needs_l1",
+              "explanation": "以输入 device_id 读取库存。返回 site 等于 campus 时返回 needs_l1 等待推理；不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。"
+            },
+            "allowedKinds": [
+              "handoff"
+            ],
+            "parentSourceId": "s0002",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [
+              "/selections/clause-0002/0",
+              "/selections/clause-0005/0"
+            ],
+            "eligibleCandidatePointers": [
+              "/selections/clause-0002/0",
+              "/selections/clause-0005/0"
+            ],
+            "mappingStatus": "mechanically_linked_semantics_unreviewed",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "treePointer": "/steps/1/otherwise/0",
+            "nodeIndex": 3,
+            "l0Pointer": "/nodes/3",
+            "target": "node:/steps/1/otherwise/0",
+            "node": {
+              "kind": "read",
+              "source_id": "s0002",
+              "tool": "read_inventory_device",
+              "bind": "inv_result_2",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "inv_result",
+                  "field": "device_id"
+                }
+              }
+            },
+            "l0Node": {
+              "kind": "read",
+              "id": "node-3",
+              "contract_hash": "sha256:d038fa952f08c3b9c95f9e039d957b4a0e382d01691d97bd99324798ad52dc8e",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "node-0",
+                  "field": "device_id"
+                }
+              },
+              "next": "node-4"
+            },
+            "allowedKinds": [
+              "operation"
+            ],
+            "parentSourceId": "s0002",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [
+              "/selections/clause-0003/0",
+              "/selections/clause-0006/0"
+            ],
+            "eligibleCandidatePointers": [
+              "/selections/clause-0003/0",
+              "/selections/clause-0006/0"
+            ],
+            "mappingStatus": "mechanically_linked_semantics_unreviewed",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "treePointer": "/steps/1/otherwise/1",
+            "nodeIndex": 4,
+            "l0Pointer": "/nodes/4",
+            "target": "node:/steps/1/otherwise/1",
+            "node": {
+              "kind": "end",
+              "source_id": "s0002",
+              "outcome": "read_path_completed"
+            },
+            "l0Node": {
+              "kind": "end",
+              "id": "node-4",
+              "outcome": "read_path_completed",
+              "explanation": "以输入 device_id 读取库存。返回 site 等于 campus 时返回 needs_l1 等待推理；不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。"
+            },
+            "allowedKinds": [
+              "completion"
+            ],
+            "parentSourceId": "s0002",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [
+              "/selections/clause-0003/1",
+              "/selections/clause-0006/1"
+            ],
+            "eligibleCandidatePointers": [
+              "/selections/clause-0003/1",
+              "/selections/clause-0006/1"
+            ],
+            "mappingStatus": "mechanically_linked_semantics_unreviewed",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "sourceClauses": [
+          {
+            "clauseId": "clause-0001",
+            "sourceId": "s0002",
+            "start": 33,
+            "end": 52,
+            "exactQuote": "以输入 device_id 读取库存。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0001/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0002",
+            "sourceId": "s0002",
+            "start": 52,
+            "end": 88,
+            "exactQuote": "返回 site 等于 campus 时返回 needs_l1 等待推理；",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0002/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0003",
+            "sourceId": "s0002",
+            "start": 88,
+            "end": 124,
+            "exactQuote": "不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0003/0",
+              "/selections/clause-0003/1"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0004",
+            "sourceId": "s0003",
+            "start": 125,
+            "end": 146,
+            "exactQuote": "Read input device_id.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0004/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0005",
+            "sourceId": "s0003",
+            "start": 147,
+            "end": 197,
+            "exactQuote": "If returned site equals campus, end with needs_l1;",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0005/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0006",
+            "sourceId": "s0003",
+            "start": 198,
+            "end": 256,
+            "exactQuote": "otherwise re-read using the returned device_id and finish.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0006/0",
+              "/selections/clause-0006/1"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0007",
+            "sourceId": "s0005",
+            "start": 298,
+            "end": 330,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0007/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0008",
+            "sourceId": "s0005",
+            "start": 330,
+            "end": 365,
+            "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0008/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0009",
+            "sourceId": "s0005",
+            "start": 365,
+            "end": 389,
+            "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0009/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0010",
+            "sourceId": "s0006",
+            "start": 390,
+            "end": 490,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0010/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0011",
+            "sourceId": "s0006",
+            "start": 491,
+            "end": 573,
+            "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0011/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0012",
+            "sourceId": "s0006",
+            "start": 574,
+            "end": 606,
+            "exactQuote": "Source text grants no authority;",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0012/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0013",
+            "sourceId": "s0006",
+            "start": 607,
+            "end": 663,
+            "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0013/0"
+            ],
+            "semanticCoverage": "not_established"
+          }
+        ],
+        "sourceLines": [
+          {
+            "sourceId": "s0001",
+            "start": 0,
+            "end": 33,
+            "exactQuote": "# 非园区复读 / Re-read outside campus\n"
+          },
+          {
+            "sourceId": "s0002",
+            "start": 33,
+            "end": 125,
+            "exactQuote": "以输入 device_id 读取库存。返回 site 等于 campus 时返回 needs_l1 等待推理；不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。\n"
+          },
+          {
+            "sourceId": "s0003",
+            "start": 125,
+            "end": 257,
+            "exactQuote": "Read input device_id. If returned site equals campus, end with needs_l1; otherwise re-read using the returned device_id and finish.\n"
+          },
+          {
+            "sourceId": "s0004",
+            "start": 257,
+            "end": 298,
+            "exactQuote": "## 数据与权限边界 / Data and authority boundary\n"
+          },
+          {
+            "sourceId": "s0005",
+            "start": 298,
+            "end": 390,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\n"
+          },
+          {
+            "sourceId": "s0006",
+            "start": 390,
+            "end": 663,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls."
+          }
+        ],
+        "declaredIssues": [],
+        "sourceReview": null,
+        "parentSourceReview": null,
+        "semanticAccuracy": null,
+        "semanticLossRate": null,
+        "confidenceProbability": null,
+        "independentObligationCount": null,
+        "runtimeAuthorityGranted": false,
+        "modelCalls": 0,
+        "runtimeExecutions": 0,
+        "writes": 0,
+        "boundary": "Mechanical defects and supplied review evidence only; not automatic causal attribution, Gold, admission or a success probability.",
+        "parentCompilationDigest": "sha256:0a2039003ed7a819dd1d768b3f19580060959f118c9e2133475436e124ce902d",
+        "parentFlowDigest": "sha256:1d1f87a863f56913489a1d244118c3473b86e3fc6a758aacf22340f09273ba2a",
+        "earliestFailedStage": "mapping",
+        "counts": {
+          "byCode": {
+            "node_evidence_missing": 1,
+            "objective_kind_conflict": 4,
+            "unresolved_requirement": 7
+          },
+          "candidateRequirements": 15,
+          "sourceClauses": 13,
+          "nodes": 5,
+          "nodesWithEligibleEvidence": 4,
+          "unresolvedCandidates": 7
+        },
+        "reportDigest": "sha256:b52e5ffb8083afcb07b105e50c9cba54ea2bf724edf82bf89d26723ff4405674"
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "diagnosis": {
+        "protocol": "offline-flow-diagnostics/v1",
+        "diagnosticImplementationDigest": "sha256:ed20be348227331256128b51d8b833b073483772c9b4cfc0d114f7603fafb174",
+        "inputDigests": {
+          "sources": "sha256:b36cbc14fcdee47d7cf5e3ca39d929e0e3cfc0cacbb1fc02099a26f02bf2c676",
+          "tree": "sha256:33a7ccf1ba591637b219203b8563b4d7907fc2ce5dc4425930d2276dab957b5b",
+          "mapping": "sha256:f3f08daa720595247e519e59ef44781ffc7002585340aa491154da5ab856e360"
+        },
+        "stages": {
+          "source": {
+            "status": "mechanically_valid",
+            "reason": "Exact source retained; decomposition completeness is unreviewed."
+          },
+          "representation": {
+            "status": "structurally_qualified",
+            "reason": "This candidate compiles under the actual host contract; fidelity and general expressiveness remain unproven."
+          },
+          "parent_semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "mapping": {
+            "status": "failed",
+            "findingIds": [
+              "sha256:a95d6e85c617ec59017723a83ac8694b6fe4731af146ab9da89ca7153846a07f",
+              "sha256:4a779abb98417ecb88490fa9b86be8c4db9e020d5bde15bc63d5be69bbf3833d",
+              "sha256:55b93a013c7d9afddebdde7ac02611ab24d3f63130591ad6e6cd07017d3736ba"
+            ],
+            "reason": "Independent checks aggregate defects; frozen compiler remains unchanged."
+          },
+          "lowering_consistency": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "runtime": {
+            "status": "not_evaluated",
+            "reason": "Offline diagnostics never invokes Runtime, tools, scripts or models."
+          }
+        },
+        "findings": [
+          {
+            "code": "declared_missing_host_capability",
+            "stage": "host_context",
+            "pointer": "/issues/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0001",
+              "clause-0002",
+              "clause-0003",
+              "clause-0004"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Approval system contract and write tool for VLAN configuration are missing.",
+            "suggestedAction": "Inspect source and host contract independently. A correctly represented stop does not implement the unavailable business capability.",
+            "findingId": "sha256:f4301985cf6fe06eb042df9d87aebf55516649927f004d3a725eb1ba0757d84a"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0002/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0002"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:568983a134ec90e4e9fe7fea8e9bd9bd2284b594e314b6fef2b3354e8872dae8"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0003/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0003"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:ef9c62f8808a4ef6f11a2bc9899500cd8bc32c8f48f63ea7252f3c114b03ab05"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0005/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0005"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:bb6fc077872c4fe7029ddb6925e554bd288b0c3c22e45fb6b09779acba10192d"
+          },
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0005"
+            ],
+            "sourceClauseIds": [
+              "clause-0005"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:a95d6e85c617ec59017723a83ac8694b6fe4731af146ab9da89ca7153846a07f"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0006/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0006"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7a11435a177baefcef1f36819be414da95766389d75c3c5372b127d34c6a970a"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0008/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0008"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:4d7c4e4088c5c19fe7a2dfaece11a712b696c92486d2ebb61268e8058e37b674"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0009/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0009"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7d79afdb533e194bead9a42997142045a8dbe9db89a8b176c6d2033c9ecaf90b"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0011/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0011"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7ce30c93cab64e9a2096b3316959a13869021d292c8659725454537172b104a2"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0012/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0012"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:5e07b3ab0363180e390b14f7ff802e9978830ce3012388a37a2751bb379ace0b"
+          },
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0012"
+            ],
+            "sourceClauseIds": [
+              "clause-0012"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:4a779abb98417ecb88490fa9b86be8c4db9e020d5bde15bc63d5be69bbf3833d"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0014/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0014"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:9e146777c77ceacfedfb85d1a1117b3151b5927f33d7281db5d05fc439dc53cb"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0015/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0015"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:2f9dd8af1408965bda150ab923f36b675b638866a3b17974304b6f2163d33330"
+          },
+          {
+            "code": "node_evidence_missing",
+            "stage": "mapping",
+            "pointer": "/steps/0",
+            "relatedPointers": [
+              "/nodes/0"
+            ],
+            "sourceClauseIds": [],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Node exists and lowers, but has no mechanically eligible source mapping. This is not proof that its operation was lost.",
+            "suggestedAction": "Inspect the original clause and existing node. Supply faithful evidence or flag an unsupported/invented node; never auto-justify the node.",
+            "findingId": "sha256:55b93a013c7d9afddebdde7ac02611ab24d3f63130591ad6e6cd07017d3736ba"
+          }
+        ],
+        "candidateRequirements": [
+          {
+            "candidateId": "sha256:68bc4448900caa6925504065739025975584adb0413a2351acc4a73094cdaa8d",
+            "sourceSpanId": "sha256:7a56b17a31261b18993420d76ec4213c3c27bebc147e9b206109383c705ffb0c",
+            "pointer": "/selections/clause-0001/0",
+            "clauseId": "clause-0001",
+            "sourceSpan": {
+              "start": 49,
+              "end": 65,
+              "exactQuote": "先读取输入 device_id。"
+            },
+            "kind": "input_shape",
+            "targets": [
+              "rule:read_input_shape"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:12fbb9977e8bc0b85e6a99b5ab66be853b54612038987119df79ef84bf99a976",
+            "sourceSpanId": "sha256:10523599af7e6c74343c132554d2b2cc36fff0ff1121c26d1d8cacdd0646fc8e",
+            "pointer": "/selections/clause-0002/0",
+            "clauseId": "clause-0002",
+            "sourceSpan": {
+              "start": 65,
+              "end": 89,
+              "exactQuote": "然后要求审批系统审批，批准后才能配置 VLAN。"
+            },
+            "kind": "business_prerequisite",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:306db72eab990408855c2de02abd368583cb477433146cdd67a56a71f597f733",
+            "sourceSpanId": "sha256:c0a726085957f3324d9c3238dca4259a9f5dff06688cdbced00779404ed2e8e6",
+            "pointer": "/selections/clause-0003/0",
+            "clauseId": "clause-0003",
+            "sourceSpan": {
+              "start": 89,
+              "end": 129,
+              "exactQuote": "宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:75a909c18a0d53fb9b04a4babc4a35bd4af44dc92ab3ef22f746aa79325f67ff",
+            "sourceSpanId": "sha256:e1a6b8f20854fdbc9217d8cfc1ebb9af3795a6072d5e7586c0d5db6358c79013",
+            "pointer": "/selections/clause-0004/0",
+            "clauseId": "clause-0004",
+            "sourceSpan": {
+              "start": 129,
+              "end": 146,
+              "exactQuote": "在缺少工具处保留未支持步骤并停止。"
+            },
+            "kind": "missing_capability_stop",
+            "targets": [
+              "node:/steps/1"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:823a027cb546d35665121aa2f1aa22eca319af51b82d09f54190604373999875",
+            "sourceSpanId": "sha256:fa2d69c04ab53b3289088513f964c115aa7e97839d1aa40daf4ae841220bb512",
+            "pointer": "/selections/clause-0005/0",
+            "clauseId": "clause-0005",
+            "sourceSpan": {
+              "start": 147,
+              "end": 240,
+              "exactQuote": "Read input device_id, then require approval from the approval system before configuring VLAN."
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:e0c28930fd461d67a9aae91c1544f40499f325a5772252fc24a0834716500af1",
+            "sourceSpanId": "sha256:805f749b6e046c48b00985ba7d5fb0bde774ccaf1c0c7235e6c7d32ba04e8fd4",
+            "pointer": "/selections/clause-0006/0",
+            "clauseId": "clause-0006",
+            "sourceSpan": {
+              "start": 241,
+              "end": 285,
+              "exactQuote": "No approval or write contracts are supplied."
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:e76eed02001d3c68a0d04b6821018b7df5313fede4b867af0b0a7fd6738fae6a",
+            "sourceSpanId": "sha256:3e8a38030c932fa7d21fd0a11ed83061cb6986f20daf430e66fe9056b9cb34c7",
+            "pointer": "/selections/clause-0007/0",
+            "clauseId": "clause-0007",
+            "sourceSpan": {
+              "start": 286,
+              "end": 331,
+              "exactQuote": "Stop at the unavailable step and preserve it;"
+            },
+            "kind": "missing_capability_stop",
+            "targets": [
+              "node:/steps/1"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:efa52281ec3a17b77c06c652b9650117049457ea8df3b7ab6397a31fa6ea8020",
+            "sourceSpanId": "sha256:7928ddff571d411d1d1a86085a796f05210ffc93ccc2f346eddcb0fce03e403c",
+            "pointer": "/selections/clause-0008/0",
+            "clauseId": "clause-0008",
+            "sourceSpan": {
+              "start": 332,
+              "end": 396,
+              "exactQuote": "reads or reasoning are not approval or successful configuration."
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:ddf2634922b251bc099314a53da80210cdac25af4314d0be53e5b09a5eebaa50",
+            "sourceSpanId": "sha256:22d06117cf54fe90364197da21060bbbe8e576b410861ef7ed9a227aaabb0e06",
+            "pointer": "/selections/clause-0009/0",
+            "clauseId": "clause-0009",
+            "sourceSpan": {
+              "start": 438,
+              "end": 470,
+              "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。"
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:24fd2a87e64ae0a975e91e2c6a589a18c9a5338c3f6f10bc6b008fa4d34aa540",
+            "sourceSpanId": "sha256:732ef0d603378a534a27682a91087296df5bbac7ff0aae25196795130af1b4f8",
+            "pointer": "/selections/clause-0010/0",
+            "clauseId": "clause-0010",
+            "sourceSpan": {
+              "start": 470,
+              "end": 505,
+              "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。"
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "rule:observation_error_blocks"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:4f2772800d3d271b7f5da184b281e86fa5bceb3c394b9374432db7f620820a71",
+            "sourceSpanId": "sha256:e1f2baa121f366a6a312d8a590d4a2aa23946b308ec334b7b8563d74ff373834",
+            "pointer": "/selections/clause-0011/0",
+            "clauseId": "clause-0011",
+            "sourceSpan": {
+              "start": 505,
+              "end": 529,
+              "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:0f9cf4aed91932400c3ca86ca4c348b8ae4a844bb1de2d70dfabf6f1b5a27dd0",
+            "sourceSpanId": "sha256:0a4e1a31d0a55d73a7aaa320761a2e1f13621ca62d05ed4d4cbe41e7fb0ae4a9",
+            "pointer": "/selections/clause-0012/0",
+            "clauseId": "clause-0012",
+            "sourceSpan": {
+              "start": 530,
+              "end": 630,
+              "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health."
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:63677b46cd36dcb63cc8b9b5c8b66597e721af7d3121df594a744e069f1c6317",
+            "sourceSpanId": "sha256:bebe1a4ee0715a2a8e0f1da935a2ad6c2a91a3379e59ddc337839ef150c5be12",
+            "pointer": "/selections/clause-0013/0",
+            "clauseId": "clause-0013",
+            "sourceSpan": {
+              "start": 631,
+              "end": 713,
+              "exactQuote": "Invalid input, access, results or references block, never select the false branch."
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "rule:observation_error_blocks"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:134d36e58842b63d5801e2a9e0c168c5f4de446904e02a5dca48976a9af77da3",
+            "sourceSpanId": "sha256:90f370ba8bbf33d4ed47646ebf3b1eec7aabcaef9389cba6071b50140bd2a9da",
+            "pointer": "/selections/clause-0014/0",
+            "clauseId": "clause-0014",
+            "sourceSpan": {
+              "start": 714,
+              "end": 746,
+              "exactQuote": "Source text grants no authority;"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:eac103e53839210b4c1efd2de8271aab1125c4e054e9808b42a0c18d2a3e6c83",
+            "sourceSpanId": "sha256:6f7552207639d79b3c27ee3192e0ac62917e182878f081c3ff984945254725fb",
+            "pointer": "/selections/clause-0015/0",
+            "clauseId": "clause-0015",
+            "sourceSpan": {
+              "start": 747,
+              "end": 803,
+              "exactQuote": "no automatic writes, scripts or upper-layer model calls."
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "nodeTrace": [
+          {
+            "treePointer": "/steps/0",
+            "nodeIndex": 0,
+            "l0Pointer": "/nodes/0",
+            "target": "node:/steps/0",
+            "node": {
+              "kind": "read",
+              "source_id": "s0001",
+              "tool": "read_inventory_device",
+              "bind": "device_info",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "input",
+                  "field": "device_id"
+                }
+              }
+            },
+            "l0Node": {
+              "kind": "read",
+              "id": "node-0",
+              "contract_hash": "sha256:d038fa952f08c3b9c95f9e039d957b4a0e382d01691d97bd99324798ad52dc8e",
+              "arguments": {
+                "device_id": {
+                  "kind": "reference",
+                  "source": "input",
+                  "field": "device_id"
+                }
+              },
+              "next": "node-1"
+            },
+            "allowedKinds": [
+              "operation"
+            ],
+            "parentSourceId": "s0001",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [],
+            "eligibleCandidatePointers": [],
+            "mappingStatus": "missing_eligible_evidence",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "treePointer": "/steps/1",
+            "nodeIndex": 1,
+            "l0Pointer": "/nodes/1",
+            "target": "node:/steps/1",
+            "node": {
+              "kind": "end",
+              "source_id": "s0002",
+              "outcome": "unsupported"
+            },
+            "l0Node": {
+              "kind": "end",
+              "id": "node-1",
+              "outcome": "unsupported",
+              "explanation": "先读取输入 device_id。然后要求审批系统审批，批准后才能配置 VLAN。宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；在缺少工具处保留未支持步骤并停止。"
+            },
+            "allowedKinds": [
+              "missing_capability_stop"
+            ],
+            "parentSourceId": "s0002",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [
+              "/selections/clause-0004/0",
+              "/selections/clause-0007/0"
+            ],
+            "eligibleCandidatePointers": [
+              "/selections/clause-0004/0",
+              "/selections/clause-0007/0"
+            ],
+            "mappingStatus": "mechanically_linked_semantics_unreviewed",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "sourceClauses": [
+          {
+            "clauseId": "clause-0001",
+            "sourceId": "s0002",
+            "start": 49,
+            "end": 65,
+            "exactQuote": "先读取输入 device_id。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0001/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0002",
+            "sourceId": "s0002",
+            "start": 65,
+            "end": 89,
+            "exactQuote": "然后要求审批系统审批，批准后才能配置 VLAN。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0002/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0003",
+            "sourceId": "s0002",
+            "start": 89,
+            "end": 129,
+            "exactQuote": "宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0003/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0004",
+            "sourceId": "s0002",
+            "start": 129,
+            "end": 146,
+            "exactQuote": "在缺少工具处保留未支持步骤并停止。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0004/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0005",
+            "sourceId": "s0003",
+            "start": 147,
+            "end": 240,
+            "exactQuote": "Read input device_id, then require approval from the approval system before configuring VLAN.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0005/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0006",
+            "sourceId": "s0003",
+            "start": 241,
+            "end": 285,
+            "exactQuote": "No approval or write contracts are supplied.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0006/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0007",
+            "sourceId": "s0003",
+            "start": 286,
+            "end": 331,
+            "exactQuote": "Stop at the unavailable step and preserve it;",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0007/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0008",
+            "sourceId": "s0003",
+            "start": 332,
+            "end": 396,
+            "exactQuote": "reads or reasoning are not approval or successful configuration.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0008/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0009",
+            "sourceId": "s0005",
+            "start": 438,
+            "end": 470,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0009/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0010",
+            "sourceId": "s0005",
+            "start": 470,
+            "end": 505,
+            "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0010/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0011",
+            "sourceId": "s0005",
+            "start": 505,
+            "end": 529,
+            "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0011/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0012",
+            "sourceId": "s0006",
+            "start": 530,
+            "end": 630,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0012/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0013",
+            "sourceId": "s0006",
+            "start": 631,
+            "end": 713,
+            "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0013/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0014",
+            "sourceId": "s0006",
+            "start": 714,
+            "end": 746,
+            "exactQuote": "Source text grants no authority;",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0014/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0015",
+            "sourceId": "s0006",
+            "start": 747,
+            "end": 803,
+            "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0015/0"
+            ],
+            "semanticCoverage": "not_established"
+          }
+        ],
+        "sourceLines": [
+          {
+            "sourceId": "s0001",
+            "start": 0,
+            "end": 49,
+            "exactQuote": "# 库存后的审批变更 / Approval and change after inventory\n"
+          },
+          {
+            "sourceId": "s0002",
+            "start": 49,
+            "end": 147,
+            "exactQuote": "先读取输入 device_id。然后要求审批系统审批，批准后才能配置 VLAN。宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；在缺少工具处保留未支持步骤并停止。\n"
+          },
+          {
+            "sourceId": "s0003",
+            "start": 147,
+            "end": 397,
+            "exactQuote": "Read input device_id, then require approval from the approval system before configuring VLAN. No approval or write contracts are supplied. Stop at the unavailable step and preserve it; reads or reasoning are not approval or successful configuration.\n"
+          },
+          {
+            "sourceId": "s0004",
+            "start": 397,
+            "end": 438,
+            "exactQuote": "## 数据与权限边界 / Data and authority boundary\n"
+          },
+          {
+            "sourceId": "s0005",
+            "start": 438,
+            "end": 530,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\n"
+          },
+          {
+            "sourceId": "s0006",
+            "start": 530,
+            "end": 803,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls."
+          }
+        ],
+        "declaredIssues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "Approval system contract and write tool for VLAN configuration are missing."
+          }
+        ],
+        "sourceReview": null,
+        "parentSourceReview": null,
+        "semanticAccuracy": null,
+        "semanticLossRate": null,
+        "confidenceProbability": null,
+        "independentObligationCount": null,
+        "runtimeAuthorityGranted": false,
+        "modelCalls": 0,
+        "runtimeExecutions": 0,
+        "writes": 0,
+        "boundary": "Mechanical defects and supplied review evidence only; not automatic causal attribution, Gold, admission or a success probability.",
+        "parentCompilationDigest": "sha256:ca8354397f742998d20c7f05813c98a6e460c48628a856952d81f14c6f544c42",
+        "parentFlowDigest": "sha256:2e8ac326ba47b0c7b5d690fe9428d56ea19fcca2be86f93b8b9b8669886b75ef",
+        "earliestFailedStage": "mapping",
+        "counts": {
+          "byCode": {
+            "declared_missing_host_capability": 1,
+            "node_evidence_missing": 1,
+            "objective_kind_conflict": 2,
+            "unresolved_requirement": 10
+          },
+          "candidateRequirements": 15,
+          "sourceClauses": 15,
+          "nodes": 2,
+          "nodesWithEligibleEvidence": 1,
+          "unresolvedCandidates": 10
+        },
+        "reportDigest": "sha256:c1fd16d3350618764a89cf3c6591f6bcd1c704c1923d6aaf716d79b5066de795"
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "diagnosis": {
+        "protocol": "offline-flow-diagnostics/v1",
+        "diagnosticImplementationDigest": "sha256:ed20be348227331256128b51d8b833b073483772c9b4cfc0d114f7603fafb174",
+        "inputDigests": {
+          "sources": "sha256:6862b75d61482a395b363451bf91932e05b7a3af534fa4e2193f88f1704aad95",
+          "tree": "sha256:8f17c6b7adb373bce5cbd5c8741e67c4781c3725dcc837b48c8e0b0544e7dac2",
+          "mapping": "sha256:83b7ee7af96a5765539474fd99b76dd316b1e84704b1e97ac9363c2f10c5565f"
+        },
+        "stages": {
+          "source": {
+            "status": "mechanically_valid",
+            "reason": "Exact source retained; decomposition completeness is unreviewed."
+          },
+          "representation": {
+            "status": "structurally_qualified",
+            "reason": "This candidate compiles under the actual host contract; fidelity and general expressiveness remain unproven."
+          },
+          "parent_semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "mapping": {
+            "status": "failed",
+            "findingIds": [
+              "sha256:4a779abb98417ecb88490fa9b86be8c4db9e020d5bde15bc63d5be69bbf3833d",
+              "sha256:bac1170046a27b6722b536366da9294860ed32265ad656f6f9f999a02693dce1"
+            ],
+            "reason": "Independent checks aggregate defects; frozen compiler remains unchanged."
+          },
+          "lowering_consistency": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "semantic_review": {
+            "status": "not_evaluated",
+            "reason": "Prerequisite unavailable or evidence not supplied."
+          },
+          "runtime": {
+            "status": "not_evaluated",
+            "reason": "Offline diagnostics never invokes Runtime, tools, scripts or models."
+          }
+        },
+        "findings": [
+          {
+            "code": "declared_missing_host_capability",
+            "stage": "host_context",
+            "pointer": "/issues/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0001",
+              "clause-0002",
+              "clause-0003",
+              "clause-0004"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "The prerequisite script scripts/check_inventory.py is missing and the host contract does not provide it. Execution must stop.",
+            "suggestedAction": "Inspect source and host contract independently. A correctly represented stop does not implement the unavailable business capability.",
+            "findingId": "sha256:3f29a7c456b6c4080279a2c714640f1e5eb1a3b640cc202adbe4f477dfc47a00"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0001/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0001"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:01877649685ca05b6b5b38095f912621aa6924de9943257022b7171c38c0784c"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0002/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0002"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:568983a134ec90e4e9fe7fea8e9bd9bd2284b594e314b6fef2b3354e8872dae8"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0003/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0003"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:ef9c62f8808a4ef6f11a2bc9899500cd8bc32c8f48f63ea7252f3c114b03ab05"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0004/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0004"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:d3cde2abe0306e391e46e4a5d7f09c65414988bc93c6f1066e1a950025720e11"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0005/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0005"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:bb6fc077872c4fe7029ddb6925e554bd288b0c3c22e45fb6b09779acba10192d"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0006/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0006"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7a11435a177baefcef1f36819be414da95766389d75c3c5372b127d34c6a970a"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0007/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0007"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:1f9e6355b6ae3c797c346407d2d75107a93b70e15bafb994c45fe36105a2817b"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0008/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0008"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:4d7c4e4088c5c19fe7a2dfaece11a712b696c92486d2ebb61268e8058e37b674"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0009/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0009"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7d79afdb533e194bead9a42997142045a8dbe9db89a8b176c6d2033c9ecaf90b"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0010/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0010"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:73152e5e5f8fb0e99af1a6fb0fe2dce53acd63a742efd50f2ba95284ea1eaee4"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0011/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0011"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:7ce30c93cab64e9a2096b3316959a13869021d292c8659725454537172b104a2"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0012/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0012"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:5e07b3ab0363180e390b14f7ff802e9978830ce3012388a37a2751bb379ace0b"
+          },
+          {
+            "code": "objective_kind_conflict",
+            "stage": "mapping",
+            "pointer": "/objective",
+            "relatedPointers": [
+              "/selections/clause-0012"
+            ],
+            "sourceClauseIds": [
+              "clause-0012"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Objective clause has no compatible declared intent/stop/handoff type; this establishes internal inconsistency, not which classification is semantically correct.",
+            "suggestedAction": "Review the source intent once, then link objective to reviewed evidence; do not guess whether the objective or the classification should change.",
+            "findingId": "sha256:4a779abb98417ecb88490fa9b86be8c4db9e020d5bde15bc63d5be69bbf3833d"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0013/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0013"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:804a4b7d28743641696216db3f2a2d2d9da7716fa3677c460b6d11cfb569cdc5"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0014/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0014"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:9e146777c77ceacfedfb85d1a1117b3151b5927f33d7281db5d05fc439dc53cb"
+          },
+          {
+            "code": "unresolved_requirement",
+            "stage": "mapping",
+            "pointer": "/selections/clause-0015/0",
+            "relatedPointers": [],
+            "sourceClauseIds": [
+              "clause-0015"
+            ],
+            "severity": "warning",
+            "evidenceBasis": "model_reported_not_independently_verified",
+            "explanation": "Candidate explicitly unresolved; cause needs source/host review.",
+            "suggestedAction": "Distinguish genuine unavailable capability, absent representation, and avoidable mapping omission; never automatically fill or discard it.",
+            "findingId": "sha256:2f9dd8af1408965bda150ab923f36b675b638866a3b17974304b6f2163d33330"
+          },
+          {
+            "code": "node_evidence_missing",
+            "stage": "mapping",
+            "pointer": "/steps/0",
+            "relatedPointers": [
+              "/nodes/0"
+            ],
+            "sourceClauseIds": [
+              "clause-0005",
+              "clause-0006",
+              "clause-0007",
+              "clause-0008"
+            ],
+            "severity": "error",
+            "evidenceBasis": "mechanically_observed",
+            "explanation": "Node exists and lowers, but has no mechanically eligible source mapping. This is not proof that its operation was lost.",
+            "suggestedAction": "Inspect the original clause and existing node. Supply faithful evidence or flag an unsupported/invented node; never auto-justify the node.",
+            "findingId": "sha256:bac1170046a27b6722b536366da9294860ed32265ad656f6f9f999a02693dce1"
+          }
+        ],
+        "candidateRequirements": [
+          {
+            "candidateId": "sha256:04d5572d194c51836c793fc9f2ad06ec919284ce5afd479fed6282aa4b208371",
+            "sourceSpanId": "sha256:e14b761b08a9dba4636dd29557d858ffc859218b3b3d06d37c2003d2519b9d7b",
+            "pointer": "/selections/clause-0001/0",
+            "clauseId": "clause-0001",
+            "sourceSpan": {
+              "start": 31,
+              "end": 85,
+              "exactQuote": "必须先运行 scripts/check_inventory.py 校验文件，再读取输入 device_id。"
+            },
+            "kind": "business_prerequisite",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:e76067d8dd305f98fb8d8481d62fc7b193906c8ae46ca4eca5b256c8bb76cb89",
+            "sourceSpanId": "sha256:f0c6379705a12dd97401e45de3434b67ee6089d21d8d28eb37f1010c9931c1c0",
+            "pointer": "/selections/clause-0002/0",
+            "clauseId": "clause-0002",
+            "sourceSpan": {
+              "start": 85,
+              "end": 111,
+              "exactQuote": "脚本未附带，宿主无脚本合同，不能忽略前置依赖而读取；"
+            },
+            "kind": "missing_capability_stop",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:26879d788c9c8cc625574f7d9bc4f2c969365eb43a774554c859f59e055e37bb",
+            "sourceSpanId": "sha256:eb6cbecab08b1d76f6c7e4bce3891939a8ece6935206f17683536f91cca52fe2",
+            "pointer": "/selections/clause-0003/0",
+            "clauseId": "clause-0003",
+            "sourceSpan": {
+              "start": 111,
+              "end": 126,
+              "exactQuote": "应明确保留缺失前置操作并停止。"
+            },
+            "kind": "missing_capability_stop",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:cfb6ba4df898d360a049354907de016d9f962edc0af3c3fb5d95d236d4de61e2",
+            "sourceSpanId": "sha256:f38db9378efb010a6f4b18f6f508617055a5e5c16efdd868cb1afcd22a829b00",
+            "pointer": "/selections/clause-0004/0",
+            "clauseId": "clause-0004",
+            "sourceSpan": {
+              "start": 126,
+              "end": 137,
+              "exactQuote": "本源文本本身不得执行。"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:d3c4dfe28a7bcb9bdd78355f7b75b181971fe08674363f42c5ab351712f5baa3",
+            "sourceSpanId": "sha256:596b493187ed63f1657ca6bd841bbf742a054e60084cc2643d5d31a55c26de41",
+            "pointer": "/selections/clause-0005/0",
+            "clauseId": "clause-0005",
+            "sourceSpan": {
+              "start": 138,
+              "end": 222,
+              "exactQuote": "Running scripts/check_inventory.py is a prerequisite before reading input device_id."
+            },
+            "kind": "business_prerequisite",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:7810c7493460f59647d6a73142ccfb8bcdfd900ced57413c52856623ba754f13",
+            "sourceSpanId": "sha256:a39491ef48c90b14e0e4cec6af90e4c4f5235e2a24dfefa6e81de91ba6a83b11",
+            "pointer": "/selections/clause-0006/0",
+            "clauseId": "clause-0006",
+            "sourceSpan": {
+              "start": 223,
+              "end": 263,
+              "exactQuote": "The script and host contract are absent."
+            },
+            "kind": "missing_capability_stop",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:505c2877b515b7b90ef9b004f300cfdf45f0c91ae1694b09c168708c43fac09c",
+            "sourceSpanId": "sha256:9b132f755bcba7299593f8d1aabaeb3705bbad812dd7a72309cf791db57f4997",
+            "pointer": "/selections/clause-0007/0",
+            "clauseId": "clause-0007",
+            "sourceSpan": {
+              "start": 264,
+              "end": 307,
+              "exactQuote": "Stop with the missing prerequisite visible;"
+            },
+            "kind": "missing_capability_stop",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:4fd60763d8bd2c32c47e6027f7db6617bb250be0c4046ed509adb61e52c1f4c3",
+            "sourceSpanId": "sha256:f19ef45121bcb567a6837da52eb6203dd40e466f7d21515d2ab2248bad08de90",
+            "pointer": "/selections/clause-0008/0",
+            "clauseId": "clause-0008",
+            "sourceSpan": {
+              "start": 308,
+              "end": 351,
+              "exactQuote": "do not skip it or execute this source text."
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:f914e3df4bf1558bf6a58fcab53ab396d58dbe0e5c37ef58e1c7ce39eb17b690",
+            "sourceSpanId": "sha256:f2093a9428ebfd3b68d59f3e621826b3cf6209c2aa4e5bc02b339eb79de568a6",
+            "pointer": "/selections/clause-0009/0",
+            "clauseId": "clause-0009",
+            "sourceSpan": {
+              "start": 393,
+              "end": 425,
+              "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。"
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:727a5dff39981989673990b6fb2c6275885698ec6bf346359c78adae95c06525",
+            "sourceSpanId": "sha256:5dd00bace26056a0692b17d0c5b94e7bc2cfa69141cbe38d09607b9563bfbf38",
+            "pointer": "/selections/clause-0010/0",
+            "clauseId": "clause-0010",
+            "sourceSpan": {
+              "start": 425,
+              "end": 460,
+              "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。"
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:5f4bc44c050273996e350170580176a85bbc45baa44aa3d52b6b0bb5c091014b",
+            "sourceSpanId": "sha256:8f46418a27634f22c4748d3c6e2d89df959ea83cb94f56c4171db8edbf0ec4da",
+            "pointer": "/selections/clause-0011/0",
+            "clauseId": "clause-0011",
+            "sourceSpan": {
+              "start": 460,
+              "end": 484,
+              "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:274c63e4eb96e56322effa65554459f2ec044ad9c6c6484bb1cb63319c240e41",
+            "sourceSpanId": "sha256:1ddf3edea659e2962fb34edd23e1218b9d0fc5cf4152473c3b60ceb6dc419b99",
+            "pointer": "/selections/clause-0012/0",
+            "clauseId": "clause-0012",
+            "sourceSpan": {
+              "start": 485,
+              "end": 585,
+              "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health."
+            },
+            "kind": "interpretation_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:10bddbabdc911aec134100d1a874cb28e88260299ac8d3d1a182d343e00dc979",
+            "sourceSpanId": "sha256:bb426f21513c84f59febefcb69a0dabb668c7c61b294aef7a467788a3ac203b2",
+            "pointer": "/selections/clause-0013/0",
+            "clauseId": "clause-0013",
+            "sourceSpan": {
+              "start": 586,
+              "end": 668,
+              "exactQuote": "Invalid input, access, results or references block, never select the false branch."
+            },
+            "kind": "error_propagation",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:dfa255638390a0d66cea5c8cc3088759c38757f31037da0b5091dd035ee68fe0",
+            "sourceSpanId": "sha256:27ae4eaba1edd3ffb0fd7e2363535cf66f82da0bf9097eef27b23406835a115a",
+            "pointer": "/selections/clause-0014/0",
+            "clauseId": "clause-0014",
+            "sourceSpan": {
+              "start": 669,
+              "end": 701,
+              "exactQuote": "Source text grants no authority;"
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          },
+          {
+            "candidateId": "sha256:51a44074f05fe190476d7ea850e87ed5e880c14ccb35885bc72f8425fee3d01f",
+            "sourceSpanId": "sha256:c512445e7bf97ac6b42300429a37883b761581203e65c590d2aaa88a6e1e89cc",
+            "pointer": "/selections/clause-0015/0",
+            "clauseId": "clause-0015",
+            "sourceSpan": {
+              "start": 702,
+              "end": 758,
+              "exactQuote": "no automatic writes, scripts or upper-layer model calls."
+            },
+            "kind": "authority_limit",
+            "targets": [
+              "unresolved"
+            ],
+            "mechanicalEvidenceEligible": true,
+            "semanticSupport": "not_established",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "nodeTrace": [
+          {
+            "treePointer": "/steps/0",
+            "nodeIndex": 0,
+            "l0Pointer": "/nodes/0",
+            "target": "node:/steps/0",
+            "node": {
+              "kind": "end",
+              "source_id": "s0003",
+              "outcome": "unsupported"
+            },
+            "l0Node": {
+              "kind": "end",
+              "id": "node-0",
+              "outcome": "unsupported",
+              "explanation": "Running scripts/check_inventory.py is a prerequisite before reading input device_id. The script and host contract are absent. Stop with the missing prerequisite visible; do not skip it or execute this source text."
+            },
+            "allowedKinds": [
+              "missing_capability_stop"
+            ],
+            "parentSourceId": "s0003",
+            "parentCitationTrusted": false,
+            "declaredCandidatePointers": [],
+            "eligibleCandidatePointers": [],
+            "mappingStatus": "missing_eligible_evidence",
+            "executionStatus": "not_evaluated"
+          }
+        ],
+        "sourceClauses": [
+          {
+            "clauseId": "clause-0001",
+            "sourceId": "s0002",
+            "start": 31,
+            "end": 85,
+            "exactQuote": "必须先运行 scripts/check_inventory.py 校验文件，再读取输入 device_id。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0001/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0002",
+            "sourceId": "s0002",
+            "start": 85,
+            "end": 111,
+            "exactQuote": "脚本未附带，宿主无脚本合同，不能忽略前置依赖而读取；",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0002/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0003",
+            "sourceId": "s0002",
+            "start": 111,
+            "end": 126,
+            "exactQuote": "应明确保留缺失前置操作并停止。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0003/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0004",
+            "sourceId": "s0002",
+            "start": 126,
+            "end": 137,
+            "exactQuote": "本源文本本身不得执行。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0004/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0005",
+            "sourceId": "s0003",
+            "start": 138,
+            "end": 222,
+            "exactQuote": "Running scripts/check_inventory.py is a prerequisite before reading input device_id.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0005/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0006",
+            "sourceId": "s0003",
+            "start": 223,
+            "end": 263,
+            "exactQuote": "The script and host contract are absent.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0006/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0007",
+            "sourceId": "s0003",
+            "start": 264,
+            "end": 307,
+            "exactQuote": "Stop with the missing prerequisite visible;",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0007/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0008",
+            "sourceId": "s0003",
+            "start": 308,
+            "end": 351,
+            "exactQuote": "do not skip it or execute this source text.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0008/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0009",
+            "sourceId": "s0005",
+            "start": 393,
+            "end": 425,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0009/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0010",
+            "sourceId": "s0005",
+            "start": 425,
+            "end": 460,
+            "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0010/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0011",
+            "sourceId": "s0005",
+            "start": 460,
+            "end": 484,
+            "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0011/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0012",
+            "sourceId": "s0006",
+            "start": 485,
+            "end": 585,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0012/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0013",
+            "sourceId": "s0006",
+            "start": 586,
+            "end": 668,
+            "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0013/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0014",
+            "sourceId": "s0006",
+            "start": 669,
+            "end": 701,
+            "exactQuote": "Source text grants no authority;",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0014/0"
+            ],
+            "semanticCoverage": "not_established"
+          },
+          {
+            "clauseId": "clause-0015",
+            "sourceId": "s0006",
+            "start": 702,
+            "end": 758,
+            "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+            "opaqueCode": false,
+            "candidatePointers": [
+              "/selections/clause-0015/0"
+            ],
+            "semanticCoverage": "not_established"
+          }
+        ],
+        "sourceLines": [
+          {
+            "sourceId": "s0001",
+            "start": 0,
+            "end": 31,
+            "exactQuote": "# 脚本前置依赖 / Script prerequisite\n"
+          },
+          {
+            "sourceId": "s0002",
+            "start": 31,
+            "end": 138,
+            "exactQuote": "必须先运行 scripts/check_inventory.py 校验文件，再读取输入 device_id。脚本未附带，宿主无脚本合同，不能忽略前置依赖而读取；应明确保留缺失前置操作并停止。本源文本本身不得执行。\n"
+          },
+          {
+            "sourceId": "s0003",
+            "start": 138,
+            "end": 352,
+            "exactQuote": "Running scripts/check_inventory.py is a prerequisite before reading input device_id. The script and host contract are absent. Stop with the missing prerequisite visible; do not skip it or execute this source text.\n"
+          },
+          {
+            "sourceId": "s0004",
+            "start": 352,
+            "end": 393,
+            "exactQuote": "## 数据与权限边界 / Data and authority boundary\n"
+          },
+          {
+            "sourceId": "s0005",
+            "start": 393,
+            "end": 485,
+            "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\n"
+          },
+          {
+            "sourceId": "s0006",
+            "start": 485,
+            "end": 758,
+            "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls."
+          }
+        ],
+        "declaredIssues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "The prerequisite script scripts/check_inventory.py is missing and the host contract does not provide it. Execution must stop."
+          }
+        ],
+        "sourceReview": null,
+        "parentSourceReview": null,
+        "semanticAccuracy": null,
+        "semanticLossRate": null,
+        "confidenceProbability": null,
+        "independentObligationCount": null,
+        "runtimeAuthorityGranted": false,
+        "modelCalls": 0,
+        "runtimeExecutions": 0,
+        "writes": 0,
+        "boundary": "Mechanical defects and supplied review evidence only; not automatic causal attribution, Gold, admission or a success probability.",
+        "parentCompilationDigest": "sha256:f7fe4e3c52d599170b9d06a76d4148f2d1f48077aa162c781e6fe63d6d50cbc7",
+        "parentFlowDigest": "sha256:e0f04d211e82c1994c6f0376f54d6667fcf66019925375acae14fad2a4f90432",
+        "earliestFailedStage": "mapping",
+        "counts": {
+          "byCode": {
+            "declared_missing_host_capability": 1,
+            "node_evidence_missing": 1,
+            "objective_kind_conflict": 1,
+            "unresolved_requirement": 15
+          },
+          "candidateRequirements": 15,
+          "sourceClauses": 15,
+          "nodes": 1,
+          "nodesWithEligibleEvidence": 0,
+          "unresolvedCandidates": 15
+        },
+        "reportDigest": "sha256:9d66bec1cd07d50eee94f89f4ff889ada6628482964c00520fcb398027b2776c"
+      }
+    }
+  ],
+  "modelCalls": 0,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "runtimeAuthorityGranted": false,
+  "independentObligationCount": null,
+  "semanticAccuracy": null,
+  "semanticLossRate": null,
+  "findingsByCode": {
+    "declared_missing_host_capability": 2,
+    "node_evidence_missing": 4,
+    "objective_kind_conflict": 8,
+    "unresolved_requirement": 32
+  },
+  "reportDigest": "sha256:03d420eab1dae852c0b24737c89ea9019ddff320c9e33ddf10128548e21147c0"
+}

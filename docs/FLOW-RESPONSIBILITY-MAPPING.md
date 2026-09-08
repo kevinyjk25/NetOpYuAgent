@@ -2,6 +2,8 @@
 
 ## 中文
 
+> 后续真实批次已完成：流程 4/4、映射 0/4 合格，未证明可用性提升。新增类型暴露了协议表达缺口和模型分类问题，详见[真实结果与纠偏方向](FLOW-RESPONSIBILITY-PILOT.md)。以下“待验证”是本协议离线里程碑当时的状态。
+
 ### 当前结果：离线修复完成，模型收益待验证
 
 2026-09-07，C3h 新增独立实验协议 `typed-requirement-responsibility/v1`。它在[精简映射](FLOW-LEAN-MAPPING.md)之上，把一句话内的不同要求显式拆开，再检查各要求声明的类型与目标职责是否兼容。**没有修改任何旧协议、模型回答或冻结报告，没有切换产品默认入口或改变 Runtime 执行器。**
@@ -89,6 +91,8 @@
 尤其要检查是否只是把错误从“选错目标”转移成“先选错类型”。这轮证明的是已声明职责错配可被机械拒绝，以及新的审查链路完整；**尚未证明模型分解、分类或泛化提升**。不通过就继续分析抽象缺口，不能改旧答案刷通过率，也不能通过删除审查标准放行。
 
 ## English
+
+> Subsequent real-model validation is complete: 4/4 flows but 0/4 mappings qualified, with no usability gain demonstrated. See [results and protocol/model diagnosis](FLOW-RESPONSIBILITY-PILOT.md). Pending-model statements below describe the earlier offline milestone.
 
 ### Offline milestone, not a new model result
 

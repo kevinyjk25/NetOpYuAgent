@@ -42,6 +42,15 @@
 | 两次生成如何完整接起来，如何追溯到具体片段及统计全部成本 | [C3h 完整双阶段转译](FLOW-TWO-PASS-TRANSLATION.md) |
 | 精简模型输出后节省多少，哪些语义错误仍存在 | [C3h 精简映射实测](FLOW-LEAN-MAPPING.md) |
 | 如何区分业务前置、权限与校验，定位复合要求遗漏 | [C3h 源要求与保障职责](FLOW-RESPONSIBILITY-MAPPING.md) |
+| 职责类型加入真实 9B 后效果如何，模型和协议各有什么问题 | [C3h 职责映射真实验证](FLOW-RESPONSIBILITY-PILOT.md) |
+| 如何消除节点别名歧义、补齐终态，协议探针证明了什么 | [C3h 统一节点与受约束映射](FLOW-CANONICAL-MAPPING.md) |
+| 统一节点进入完整双阶段后，局部修复是否带来闭环 | [C3h 统一节点完整双阶段验证](FLOW-CANONICAL-PILOT.md) |
+| 转译失败是表达不足、语义错误还是证据遗漏，如何离线定位 | [分层诊断与命令](FLOW-DIAGNOSTICS.md) / [四例可读报告](benchmarks/flow-diagnostics-c3h-report.md) |
+| 每节点必填是否会强迫伪造支持，新一轮结果如何 | [节点证据/反驳、真实验证与方案纠偏](FLOW-NODE-EVIDENCE.md) |
+| 如何分开原文要求与宿主规则，新分层完成到哪里 | [原文义务、绑定接口与四例 9B 实测](FLOW-SOURCE-DUTIES.md) |
+| 参数/必要条件怎样修复，33/33 行为匹配为什么不等于完整语义通过 | [转译行为闭环、必要条件与可行性分离](FLOW-BEHAVIOR-REPAIR.md) |
+| 继续 9B 后实际结果如何，下一步如何调整 | [9B 单模型诊断、成本与阶段职责](FLOW-9B-COMMON-JSON.md) |
+| 后续如何进行 GPT/9B 对照，哪些因素不能混算 | [暂缓的强模型对照设计、运行方式与边界](FLOW-MODEL-COMPARISON.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -109,6 +118,22 @@
 ---
 
 ## English
+
+[Translation behavior repair](FLOW-BEHAVIOR-REPAIR.md) is the current diagnosis/repair entry. Necessary-guard inference now separates forbidden counterfactuals from positive-path feasibility: the fixed candidate batch matches 33/33 inert scenarios after explicit postprocessing, while positive unknowns and full-source review remain open. First-pass, assisted results and costs remain separate; no complete-Skill/generalization or default Runtime admission claim is made.
+
+[Source duties and host binding](FLOW-SOURCE-DUTIES.md) documents implemented source-only extraction, review and graph-binding interfaces, the initial four-case probe, and the subsequent six-case explicit-relation negative result. Free-text relations are not adopted as the default upgrade: regression/new-development source support is 0/4 and 0/2, with new scope/predecessor defects. Next investigate source-bound relation evidence; there is no fresh whole-chain model result.
+
+[9B-only diagnostics](FLOW-9B-COMMON-JSON.md) record twelve completed calls, separate fixed-tree/end-to-end results, first-stage source reviews and costs. Both modes compile 0/4 mappings; common JSON is not adopted as a quality improvement. Next separate source duties from host binding while retaining constrained schemas. The [GPT/9B comparison design](FLOW-MODEL-COMPARISON.md) remains available but GPT is deferred by user choice, not a blocker for current work.
+
+[Node evidence and residual source duties](FLOW-NODE-EVIDENCE.md) preserves explicit disagreement rather than forcing positive support. The fresh paired batch compiles 1/4 mappings but accepts none after applicable source review; it motivates source-first duty extraction separate from host guarantees.
+
+[Layered translation diagnostics](FLOW-DIAGNOSTICS.md) explains aggregate mechanical checks, first-pass/complete source reviews, L0 projection comparison and separate assisted witnesses. The [four-case report](benchmarks/flow-diagnostics-c3h-report.md) links missing evidence to source and L0.5/L0 locations without rescoring the frozen batch or claiming semantic accuracy.
+
+[Canonical-node fresh paired validation](FLOW-CANONICAL-PILOT.md) separates local Schema gains from still-unqualified complete mappings, with objective/node-coverage diagnostics and failure-inclusive costs.
+
+[Canonical nodes and constrained mapping](FLOW-CANONICAL-MAPPING.md) repairs Schema compatibility and terminal representation, with three real 9B decoder probes distinguished from whole-Skill validation.
+
+[Real responsibility-mapping validation](FLOW-RESPONSIBILITY-PILOT.md) records the fresh 9B negative result, protocol/model failures, cost changes and unchanged evidence boundaries.
 
 [Source requirements and guarantee responsibilities](FLOW-RESPONSIBILITY-MAPPING.md) explains atomic source quotes, necessary type/target compatibility, complete semantic review, offline usage and the still-unmeasured model benefit.
 

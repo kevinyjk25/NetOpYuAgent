@@ -2,7 +2,7 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-07。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-08。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -48,7 +48,15 @@ B2 已闭合单操作辅助读取；C 已盘点 12 个公开 Skill，尚未运�
 
 [C3h 精简版实测](docs/FLOW-LEAN-MAPPING.md)：编译器接管锚点与解释后，第二步输出减少 73.6%，但输入增加 29.0%；完整两步总 token 仅减少 4.0%。新批映射结构合格 3/4，语义审查仍全阻断。生成负担有所下降，规则职责与完整源要求匹配仍是主要缺口；不把成本改善当作转译泛化成功。
 
-[C3h 职责映射离线修复](docs/FLOW-RESPONSIBILITY-MAPPING.md)新增精确引文子要求、类型—目标兼容检查及完整分解审查，定位职责错配和条件节点漏引用。75 项新回归通过；尚无新版模型质量/性能数据，类型合法仍不代表语义正确。
+[C3h 职责映射真实验证](docs/FLOW-RESPONSIBILITY-PILOT.md)：8 次新 9B 调用，流程 4/4 合格、映射 0/4 合格，未证明可用性提升。发现类型/标签不匹配、条件引用遗漏、过度 unresolved，以及协议自身缺少 needs_l1 终态表示；先修协议表达，不扩大 Runtime 评测。两步总 token 减少 32.6%，不能抵消质量门禁未通过。
+
+随后完成[统一节点与受约束 Schema 修复](docs/FLOW-CANONICAL-MAPPING.md)。[新版完整双阶段结果](docs/FLOW-CANONICAL-PILOT.md)仍为映射 0/4：非法类型/目标组合已消除，needs_l1 能实际映射，但目的冲突和节点来源遗漏未解决。下一步减少第二步重复推断，以节点必填证据组织映射；不以探针或局部 Schema 合规宣称完整转译成功。
+
+2026-09-08 新增[分层诊断与使用说明](docs/FLOW-DIAGNOSTICS.md)，可直接查看[四例诊断视图](docs/benchmarks/flow-diagnostics-c3h-report.md)：区分流程表达、源文审阅、分类/映射、L0 一致性与宿主缺能力，关联原文和 L0.5/L0 位置。原始映射仍为 0/4；本轮改善定位能力，不伪造语义准确率或新增模型成绩。
+
+随后实现[每节点证据/反驳与剩余要求](docs/FLOW-NODE-EVIDENCE.md)，新的 9B 双阶段批次映射编译 **1/4**，但完整语义审阅仍无接受项。条件引用补齐了，原文义务与宿主保障混淆仍在；不以填满节点或增加拒绝宣称准确性提升。
+
+**最新进展：[必要条件推导修复](docs/FLOW-BEHAVIOR-REPAIR.md)闭合了当前开发样例的行为反例。** 一次新 9B 反事实判断后，代码将“执行必须满足什么”与“满足后是否允许执行”分开，补齐 `current` 等必要条件。同一批原始候选经显式后处理，**6/6 有限用例、33/33 内存场景匹配**；首次生成仍是 4/6、29/33，历史失败不改分。这不是新一轮端到端或泛化成绩，正向路径的未知仍保留，结果未激活。默认 DSH/Runtime 与源审查、权限门禁未切换，完整 Skill 语义证明仍待完成。
 
 项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
 
@@ -279,7 +287,15 @@ The [C3b frozen development batch](docs/FLOW-FROZEN-DEVELOPMENT.md) adds eight k
 
 [C3h lean results](docs/FLOW-LEAN-MAPPING.md): compiler-owned anchors/explanations reduced mapping output by 73.6%, but input increased 29.0%; whole-chain total tokens fell only 4.0%. Mapping qualification was 3/4 and semantic acceptance remained blocked. Generation burden improved; requirement-to-guarantee matching remains open. Cost changes do not establish translation generalization.
 
-[C3h offline responsibility mapping](docs/FLOW-RESPONSIBILITY-MAPPING.md) adds exact-quote requirements, type/target compatibility and complete decomposition review, with precise responsibility/node-coverage failures. Seventy-five new regressions passed; new-model quality/cost remain unmeasured. Type compatibility is not semantic correctness.
+[C3h real responsibility-mapping validation](docs/FLOW-RESPONSIBILITY-PILOT.md): eight fresh 9B calls yielded 4/4 qualified flows but 0/4 qualified mappings, no demonstrated usability gain. Type/alias mismatch, missing condition citations, excessive unresolved selection and the protocol's missing needs_l1 representation require correction before larger Runtime evaluation. Total tokens fell 32.6%, which does not offset the unmet quality gate.
+
+The subsequent [canonical-node/constrained-Schema repair](docs/FLOW-CANONICAL-MAPPING.md) passed terminal probes. Its [fresh paired result](docs/FLOW-CANONICAL-PILOT.md) still qualified 0/4 mappings: illegal type/target pairs disappeared and needs_l1 mapped, but objective conflicts and missing node evidence remain. Next reduce repeated second-pass inference with mandatory node evidence; local Schema compliance is not complete translation success.
+
+2026-09-08: [layered offline diagnostics](docs/FLOW-DIAGNOSTICS.md) and the [four-case readable report](docs/benchmarks/flow-diagnostics-c3h-report.md) distinguish representation, source review, mapping, L0 consistency and declared host gaps with source/L0.5/L0 pointers. The original mapping result remains 0/4. This improves fault localization, not semantic accuracy or model performance.
+
+The subsequent [mandatory node evidence/disagreement protocol](docs/FLOW-NODE-EVIDENCE.md) compiled **1/4** mappings in a fresh 9B paired batch, but no candidate passed complete semantic review. Condition evidence improved; source-duty/host-guarantee confusion remains. Full slots or more refusals are not semantic accuracy gains.
+
+**Latest: [necessary-guard inference repair](docs/FLOW-BEHAVIOR-REPAIR.md) closes the current development behavior counterexamples.** One fresh 9B counterfactual call separates necessary guards from positive-path feasibility. Explicit postprocessing of the same archived candidates matches **6/6 finite cases and 33/33 inert scenarios**; first-pass results remain 4/6 and 29/33, with historical failures preserved. This is not a fresh end-to-end or generalization result. Positive-path unknowns remain, candidates are inactive, and default DSH/Runtime, full-source review and authority gates are unchanged. Complete Skill semantics remain unproven.
 
 The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
 

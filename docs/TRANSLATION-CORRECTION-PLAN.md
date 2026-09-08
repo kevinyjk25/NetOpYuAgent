@@ -2,7 +2,15 @@
 
 ## 中文
 
+**2026-09-08 当前纠偏（覆盖下文历史下一步）：[必要条件推导修复](FLOW-BEHAVIOR-REPAIR.md)已闭合固定行为反例，完整语义仍待审查。** 一次新 9B 反事实回答明确假时禁止、真时未知；从禁止侧推导必要 Guard，不再要求先证明正向可行性。原文/宿主/Oracle 和原始回答不变，旧候选经显式后处理匹配 6/6 有限例、33/33 场景；首次生成仍为 4/6、29/33，不改历史成绩。正向 unknown 保留，候选未激活；下一项是源前提/引用审查和小范围否定、别名、替代条件检验，不扩 Skill 库或 Runtime A/B，不把有限行为匹配当完整 Skill 或泛化证明。
+
 2026-09-07。保留 Reasoning / Reliability Runtime / Infrastructure 三平面，以及 active L0、Evidence、审批和事务边界。当前优先修正转译研究链，不扩展生产工程。本文细化实施顺序；唯一阶段总表仍是 [PROJECT-STATUS](PROJECT-STATUS.md)。
+
+**2026-09-08 最新用户选择：继续使用 9B，GPT 对照暂缓。** 先完成[已冻结的两种诊断](FLOW-MODEL-COMPARISON.md)的 Ollama 臂，固定树映射与完整双阶段分开统计，再依据原始失败决定源文义务/宿主绑定修正。不再把 OpenAI API Key 作为推进前提。保留未来跨模型入口，但单臂结果不能证明 GPT/9B 差异，也不能用助手审阅或旧不同协议成绩替代对照。
+
+**上述两批已完成，随后已实现[源义务/宿主绑定分层原型](FLOW-SOURCE-DUTIES.md)。** 四个新开发输入的源提取结构 4/4，完整同助手源审查支持 1/4；原文规范性分类与显式依赖仍待修正。下一步先处理这些源表示缺口，再在真实宿主合同上验证已有骨架/绑定接口的完整 9B 链；不能把阶段一或离线绑定测试当作整 Skill 泛化结果。C4–C6/规模化 Runtime 仍锁定。
+
+**后续六例显式关系探针已完成，但不采纳为默认升级。** 回归/新开发组均结构通过，完整源审查分别 0/4、0/2 支持；自由文本 after/when 引入新前置和范围错误，成本也上升。下一步不再继续堆字段，改为可定位原文关系证据候选及独立语义判断；源行 ID 不充当执行节点，第一步不制造控制流。新纠偏尚未实施，既有分层和 Runtime 门禁不变；实测/限制见上述文档的最新小节。
 
 ### A：基础纠偏（已实现，验证结果见进展表）
 
@@ -56,7 +64,7 @@ B2 已经在独立修订记录中解析两个问题、重新审查并验证读�
 
 从现有已知库选择 8–12 个不同结构的 Skill，覆盖无参、可选参数、引用、多步骤、条件分支、脚本依赖及不可支持的流程。先明确操作/步骤覆盖范围，再生成适用任务；不强制每个 Skill 相同任务数，不执行第三方脚本。
 
-参考答案与 Translator 输出隔离。9B 作为转译器；GPT 可模拟外部审查，但保留来源、分歧与证据不足，标记 AI 模拟而非独立真人 Gold。失败样本和不适用项保留在总库中。
+参考答案与 Translator 输出隔离。转译器允许使用明确版本的 GPT 或 9B，生成和审查必须分开记录；GPT 审查保留来源、分歧与证据不足，标记 AI 模拟而非独立真人 Gold，不能用自评证明转译成功。失败样本和不适用项保留在总库中。
 
 ### D：冻结与未知集合（待实施）
 
@@ -66,7 +74,17 @@ B2 已经在独立修订记录中解析两个问题、重新审查并验证读�
 
 ## English
 
+**Latest correction, 2026-09-08:** necessary-guard inference is now separate from positive-path feasibility. A single new 9B counterfactual call and offline re-derivation on unchanged archived answers yields 6/6 finite cases and 33/33 inert scenario matches; first-pass remains 4/6 and 29/33. Positive unknowns are not filled in, candidates stay inactive, and full-source semantics/generalization remain open. Next audit source premises/citations and narrow polarity/alias/alternative-condition behavior, not corpus expansion or large Runtime A/B. [Details](FLOW-BEHAVIOR-REPAIR.md).
+
+**Current correction, 2026-09-08:** contract-grounded arguments improve local matching to 29/33 scenarios, but whole-case matching remains 4/6. Explicit duplicate-stop normalization and one source-only guard-decision call yield five matched cases and one unresolved current prerequisite (22 scenarios run, 11 not run). Next diagnose that source-to-field meaning; do not expand the corpus, substitute manual answers or unlock large Runtime A/B. Full-source review, generalization and automatic semantic availability remain open; costs rise and default admission is unchanged. [Details](FLOW-BEHAVIOR-REPAIR.md).
+
 2026-09-07. Preserve the three planes and active-L0, evidence, approval and transaction boundaries. Prioritize translation validity over production engineering. [PROJECT-STATUS](PROJECT-STATUS.md) remains the single phase summary.
+
+**2026-09-08 latest user decision:** continue with 9B and defer GPT. Run the Ollama arm of the [two frozen diagnostic modes](FLOW-MODEL-COMPARISON.md), score fixed-tree mapping and fresh end-to-end separately, then choose source/host-binding corrections from preserved failures. An OpenAI key is no longer required to advance. Keep the future cross-model entry point, but single-arm results, assistant reviews and historical scores under different decoder settings cannot establish model differences.
+
+**Both batches are complete, followed by the implemented [source-duty/host-binding prototype](FLOW-SOURCE-DUTIES.md).** Four new development inputs qualify structurally; one source candidate passes complete same-assistant review. Normative classification and explicit dependencies remain open. Correct source representation first, then measure the existing skeleton/binding interfaces on actual host contracts with a fresh whole-chain 9B batch. First-stage or offline binding results are not whole-Skill generalization; C4–C6/large Runtime evaluation remain gated.
+
+**The subsequent six-case explicit-relation probe is complete but not adopted as the default upgrade.** Regression/new-development groups qualify structurally yet receive 0/4 and 0/2 complete source support. Free-text after/when introduce new predecessors/scope errors and cost more. Next use locatable source-relation evidence and separate semantic judgment, not more unrestricted fields; source line IDs are not execution nodes and extraction must not invent control flow. This correction is not yet implemented; source/host separation and Runtime gates remain unchanged. See the latest results section in the linked document.
 
 ### A: foundational corrections (implemented; validation in the status document)
 

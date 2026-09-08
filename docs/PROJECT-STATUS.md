@@ -6,6 +6,145 @@
 
 **当前主阶段：L1→L0 转译泛化门禁。**
 
+#### 2026-09-08 当前：必要条件推导修复，固定行为闭环匹配；完整语义仍待审查
+
+- [x] 核对 current 原文/宿主字段，无漏传上下文证据。新增一个源驱动反事实判断：每项已可用布尔事实为假/为真时，指定读取是否可能被原文允许。不使用 Oracle、参考树或私有返回值，不增补字段含义。
+- [x] 一次新 9B 回答为三项“假时 forbidden、真时 unknown”。旧严格推导继续 5/6 匹配，保留失败。修复过强约束：从禁止的一侧推导必要条件，正向未知单独保留，不要求证明正向路径存在才能生成未激活 Guard。
+- [x] 同一原始候选和保存回答、原文/宿主/Oracle 不变，离线新推导为 **6/6 有限例、33/33 内存场景匹配**：3/3 可执行片段（23/23），3/3 缺能力停止（10/10）。首次生成仍 4/6、29/33；这不是新跑端到端或六个完整业务 Skill，更不是泛化/生产成功率。
+- [x] 新增可复用 `flow_guard_necessity author/bind` 入口，保留原回答、原文、逻辑规则、目标位置和 `retainedUncertainty`；正向三个 unknown 不改成 possible。`fullSourceReview=required_not_run`、`activationEligibility=not_established`，不切默认路径，不增加权限。
+- [x] 本轮仅 **1 次 qwen3.5:9b/no-think、1,856 token、23.14 秒 POST**，新规则重推导不调用模型。包含上轮失败直接 Guard 判断的累计探索为 8 次、30,755 token、237.74 秒 POST；不抹掉旧失败成本，不宣称时延改善。
+- [x] 新增 23 项回归；全量 **1692 tests + 81 subtests 通过（209.41 秒）**，定向 Ruff/diff、原始回答与新推导零调用重放检查通过。测试数不是模型准确率；未提交/推送 Git。
+- [ ] 下一步：审查模型源引用与前提判断，做小范围否定/别名/替代条件抗词面依赖验证，再判断是否具备更广泛验证资格。单项必要性不等于联合充分性；完整源语义、正向可行性、遗漏动作与未见泛化仍未闭合。暂不扩 Skill 库或开启大规模 Runtime A/B。
+
+见[方法、使用与结果](FLOW-BEHAVIOR-REPAIR.md)、[Git 内证据](benchmarks/flow-guard-necessity-summary.json)。下文为历史阶段，原数字与未决结果不改写。
+
+#### 2026-09-08 前一轮：契约化参数生成有改善，前置语义仍有未决项
+
+- [x] 新实验 authoring 前端把每个工具的必填参数、字段和类型带入生成 Schema；调用输入必须真实存在，常量保留词法来源，结果引用继续经过原编译器作用域/数据依赖校验。不依赖用例名或硬编码 Q6，不改原 Runtime。
+- [x] `require_all` 确定性展开前置条件，保留原多路径分支；固定原文/宿主/Oracle 后执行 **6 次 9B 首次生成**。场景匹配 **21/33 → 29/33**，完整例匹配仍 **4/6**；访问参数已正确，但 available/current 遗漏导致三种布尔组合提前读取。备份重复终态被拒绝。全部原始错误保留。
+- [x] 明确后处理而非改首次成绩：同为 unsupported 的相邻停止声明可规范化并保留两处源证据，操作/不同终态不能删除；逐个可用布尔事实要求模型显式判断是否为后续读取的必需条件。只新增 **1 次源判断**，模型给 available/granted 必需、current 未决，不填人工答案。
+- [x] 后处理 **5/6 有限例匹配、1/6 unresolved**：22 个场景执行且匹配，余 11 个明确 not_run，不冒充业务安全停止或 22/22 成功。七次调用合计 **28,899 token、214.59 秒 POST**；首次 p50/p95 **28.67/43.48 秒**，成本比基准上升，不能宣称性能提升。
+- [x] 新增 20 项回归；全量 **1669 tests + 81 subtests 通过（208.78 秒）**，相关定向回归 81 项、新增文件 Ruff/diff 通过；完整首次批次与源判断零调用重放校验通过。测试数不是模型准确率，未提交/推送 Git。
+- [ ] 尚未完成：全自动前置条件保真与可用率。下一步聚焦 source s0003 的 current → 真实字段的语义解疑，不扩大 Skill 库、不开大规模 Runtime A/B。布尔槽位不能发现整段遗漏、证明 OR/范围/循环或替代完整源审查；不切换默认 DSH/Runtime，不放宽权限门禁。
+
+见[实现、用法与完整结果](FLOW-BEHAVIOR-REPAIR.md)、[Git 内摘要](benchmarks/flow-contract-guard-repair-summary.json)。下文保留历史阶段，不改历史成绩。
+
+#### 2026-09-08 前一轮行为闭环修复：检验与定位已完成，生成准确性尚未修复成功
+
+- [x] 新入口复用 `FlowTree → FlowProposal → run_read_flow`，不经自由文本 scope/when/after 重写、不新增执行器。六个已知源的人工参考先通过 33 个内存行为场景；再向 9B 只提供源文和宿主合同，不提供参考树、Oracle 或评分标签。
+- [x] 实际执行器自动发现分支反转、参数来源错误、漏 available/current、提前读取与无操作成功；反例关联原文、AST/L0 指针。合法别名改变不影响成绩，不使用参考 JSON 完全相等。结构错误、业务行为、终态协议差异、能力缺口、完整源审查分别呈现；正确停止不算业务完成。
+- [x] 旧四个原始 9B 树在新事后 Oracle 上匹配 **21/21** 场景（两例业务片段、两例缺能力停止）。原文/宿主合同一致，旧响应和完整源审查未改；这不是给历史全阻断改分，而是确认全阻断不等于所有业务树错误。
+- [x] 新基准 **6 次 9B/no-think**：可执行片段 **2/3、12/23 场景**；缺能力停止 **2/3、9/10 场景**。备份例终态错用 needs_l1；访问例跳过动作宣称完成。它们不是同一类错误。
+- [x] 三个请求实验均**未证明质量提升，不采纳为默认**：精简版两例引用无效、第三例重复生成并截断，余三例未运行；调整步骤/源文顺序版仍匹配 4/6，但备份尝试越过前置读取、访问引用不存在输入且漏条件；原请求仅开启思考的对照第一例 4096 token 截断，余五例未运行。失败都保留，不换答案、不重复截断请求，不把 incomplete 当业务失败或未运行当零分。
+- [x] 共 **16 次新模型调用、50,395 token、755.76 秒 POST**；初始六例 p50/p95 **20.12/34.18 秒**，顺序调整版 **18.62/36.45 秒**，不作有收益的性能宣称。完整逐例原始数据、分母和成本可重放。
+- [x] 新增 **21 项定向测试**，全量 **1649 tests + 81 subtests 通过（204.17 秒）**；不把这些测试数当转译质量。所有业务 Provider 都在内存中；0 外部调用、0 源脚本执行。没有提交/推送，没有切换默认 DSH/Runtime 或降低激活门禁。
+- [ ] **生成器本身仍待修复**：下一项是参数来源绑定和前置条件保真生成，不是继续扩大已见测试、增加自然语言字段或无界改提示词。完整源解释审查与未见 Skill 泛化尚未通过；本轮不宣称 L1→L0 总体准确率提升，不解锁规模化 Runtime A/B。
+
+见[使用、实现、反例与结果](FLOW-BEHAVIOR-REPAIR.md)、[Git 内摘要](benchmarks/flow-behavior-repair-summary.json)。本节覆盖以下历史“下一步”，但不改写任何历史成绩。
+
+#### 2026-09-08 C3h 显式关系探针完成：出现新语义错误，不采纳为默认升级
+
+- [x] 独立 `source-duty-guarded-meaning/v1` 实现作用域/条件/前置字段、完整源审查和保留所有非空关系的旧接口文字投影；不编译成执行谓词/图边、不复用审查授权、不改默认 DSH/Runtime。旧分层接口、提示词和原始证据保持不变。
+- [x] **6 次真实 9B 首次调用**：原样四例回归 **4/4 结构、4/4 审查、0/4 源候选支持**；两例新开发 **2/2 结构、2/2 审查、0/2 支持**。组别不进入模型输入，旧答案未提供，无重试/修图/业务执行。两组均为已可见同助手开发输入，0 公开 Skill，不是未知集。
+- [x] 完整同助手源审查 **72 个重叠声明：45 supported、19 contradicted、8 insufficient**。工单 when 明确了读取后申请的局部关系，但 after 仍引用多动作源行；新增了缺 runner 先尝试执行、拒绝分支后验证、延迟重复读取禁止、缺游标条件收窄等错误。三个规范性标题仍错分 context；新增反例的拒绝/历史引用未转成执行指令。所有判断逐项留存，不是一概因 None 等占位词判整例失败。
+- [x] 回归组 **5,103/3,265 token、236.89 秒 POST、p50/p95 54.70/78.15 秒**；新开发组 **2,298/1,257 token、89.88 秒、40.34/49.53 秒**。回归成本观察增加 27.2% token、85.2% POST；协议/字段/负载不同，不作因果速度或模型容量结论。旧 1/4 与新 0/4 也不等于泛化准确率差值。
+- [x] 新增 **36 项回归**；模型结束后全量 **1628 tests + 81 subtests 通过（204.34 秒）**。定向 Ruff/diff、新原始/审查后报告与零调用重入、摘要及四份历史报告校验通过。无截断/超时/业务/脚本执行，未提交/推送 Git。
+- [ ] **方案纠偏：不将自由文本关系字段设为默认升级。** 保留其诊断证据及原文/宿主分层原则。下一步用可定位原文片段表示“关系证据候选”，单独审查规范性、作用域与关系含义；来源行不是执行节点，None/unknown 不是无前置的证明，第一步不能凭描述制造控制流。真实节点绑定留给业务骨架/完整审查阶段。该纠偏尚未实现/重新实测。
+- [ ] C3h 质量未通过，完整新 9B 绑定链、C4–C6 与大规模 Runtime 评测仍待源质量门禁，不用继续叠加字段或重复已见样本换取通过率。
+
+见[接口、完整结果与方案取舍](FLOW-SOURCE-DUTIES.md)、[六例原文/原始候选/显式判断摘要](benchmarks/flow-source-guard-6-summary.json)。以下历史下一步不覆盖本节。
+
+#### 2026-09-08 C3h 源义务/宿主分层：接口与首轮提取验证完成，完整新链待验证
+
+- [x] 实现 `source-duty-candidates/v1`：第一步只看显式提供的原文，不输入宿主规则/图/目的标签；保留标题、多文档引用、完整原文偏移和 opaque 代码，每行及每个候选均审查。未知引用不下载，路径不驱动文件读取，不解释/执行脚本。
+- [x] 实现 `source-duty-host-binding/v1` 接口：源审查后构造原 FlowTree 请求，原文不替换；不可变义务只绑定实际节点/规则，宿主基线独立。禁止 context 支持操作、缺节点证据、伪造目标、混合 retained/unresolved 冒充落实；复用原编译图且执行投影不变。完整链审查需新的摘要绑定；语义支持和能力缺口分开，始终 `runtimeReady=false`，尚未接默认 DSH 转译或激活。
+- [x] 另冻四个新开发输入：存储分页、工单审批、备份前置/脚本、传感器反向分支/引用；同一助手构造、已可见、0 公开 Skill。**4 次真实 9B 首次提取，4/4 结构合格，4/4 完整源审查，1/4 仅源候选范围获支持**。无旧答案输入、重试、修图或 Runtime/业务执行。
+- [x] 同一开发助手显式审查 **50 个重叠声明：44 supported、4 contradicted、2 insufficient**。存储/传感器将规范性标题误作 context；工单审批未明确保留 read-then-approval 依赖及作用域；备份源候选获支持不证明缺失引用、opaque 代码或宿主可执行。不能从声明比例或该四例推算准确率，也不是新的完整链转译成绩。
+- [x] **4,587 / 1,992 token，POST 127.89 秒，请求 p50/p95 31.19 / 36.34 秒**；正常 stop，无超时/截断。不与旧双阶段成本做因果比较。新增 **49 项测试**，模型结束后全量 **1592 tests + 81 subtests 通过（203.78 秒）**；定向 Ruff/diff 通过。未提交/推送 Git。
+- [ ] 下一步完善源候选的规范性范围、先后/条件/作用域依赖与引用缺口表达，用异质措辞反例验证，不通过标题一律转 requirement 或强制填正向标签提高表面通过率。另冻新首次输出，不改本批答案。
+- [ ] 新源质量更稳定后，才用实际宿主合同运行已实现的业务骨架/绑定/整链审查接口；目前该部分仅离线测试。循环/审批/脚本缺能力仍显式保留。C3h/C4–C6 与规模化 Runtime 门禁不解锁。
+
+见[设计、接口、使用、实测及边界](FLOW-SOURCE-DUTIES.md)、[原文/原始候选/显式审查与成本摘要](benchmarks/flow-source-duty-4-summary.json)。以下历史“未实现/下一步”不覆盖本节；历史失败和审查均不改写。
+
+#### 2026-09-08 C3h 继续 9B：两批已完成，下一步修正阶段分工
+
+- [x] 按最新用户选择继续 `qwen3.5:9b`，GPT 对照暂缓、API Key 不再是阻塞。仅执行已冻结的两个 Ollama 臂，父报告 GPT `not_run` / 顶层 pending 不等于本轮 9B 未完成。
+- [x] **12 次真实调用**，两批使用相同 4 个已知开发流程 / 1 工具 / 0 公开 Skill，不能合成八个 Skill。固定树映射 Schema **3/4**、编译 **0/4**；完整链第一阶段结构 **4/4**，映射 Schema **2/4**、编译 **0/4**。无自动重试、答案修改、截断、超时或批次业务执行。
+- [x] 记录无来源的宿主保障分类、所有目的标记 false、候选被误认为已执行、理由超长，以及审批首读引用标题的问题。两例第一阶段完成同一开发助手的完整清单审查：38 个重叠声明中 32 supported、6 insufficient；不是独立 Gold 或准确率。原文完整保留，不把阶段一未落实所有限制等同于不可恢复语义丢失；其余语义检查仍不完整。
+- [x] 固定树/完整链分别 **518.54 / 619.41 秒 POST**，合计 **72,236 token**。完整链案例级两步 p50/p95 **154.06 / 170.86 秒**；包含失败，不是 Runtime 时延，不混合两批质量分母。
+- [x] 本轮仅新增制品、审阅及文档，没有改执行代码/冻结协议。模型结束后全量 **1543 tests + 81 subtests 通过（137.78 秒）**；定向 Ruff/diff、两份新报告与旧节点证据报告重放、追溯摘要校验通过。未提交或推送 Git。
+- [ ] **不将 common-JSON 设为默认质量优化**：本批没有证明改善。下一步保留 Schema 约束，构建“无宿主菜单的源义务候选 → 业务骨架/工具绑定 → 完整源义务落实审查”小探针，以其他领域/措辞反例验证。新分工尚未实现，不改当前失败答案、不自动翻转目的标记、不扩 Schema 掩盖无来源语义；GPT 容量因素仍未知。
+- [ ] C3h 质量门禁仍未通过；C4–C6/规模化 Runtime 评测不解锁。
+
+见[实际结果、阶段职责与成本](FLOW-9B-COMMON-JSON.md)、[含原文/原始映射/审查的可追溯摘要](benchmarks/flow-9b-common-json-summary.json)。以下旧决策和“下一步”仅作历史记录，不覆盖最新选择。
+
+#### 2026-09-08 C3h 强模型对照初始准备（历史，后续已改为仅运行 9B）
+
+- [x] 决策调整为先建立强模型参照，再选择语义协议修复；9B 不再作为唯一转译器。原文义务/宿主绑定重构保留为候选，暂不与换模型同时引入。
+- [x] 新增 `flow-model-common-json/v1`，GPT-5.5 固定快照/high 与 qwen3.5:9b/no-think 两臂共享消息及完整原 Schema，统一 JSON 输出并应用未改原门禁。明确 provider/推理/解码器差异，不称为模型权重单变量实验，不与旧 9B 成绩混算。
+- [x] 两种批次已离线冻结：固定历史树后的 mapping-only 与源文重新生成的 end-to-end，各 4 已知开发流程 / 1 工具 / 0 公开 Skill / 1 次重复。前者不是完整转译成绩；后者禁止输入旧树。缺能力停止、机械通过、语义保真与业务可用分开判断。
+- [x] 支持显式调用预算、固定端点/无工具、凭据不落盘、检查点重放、已存响应后的派生恢复；请求不确定或传输/身份异常停止，不自动重发或换模型。源审阅额外绑定实验/臂/重复/案例，准确率字段保持 null，不从编译计数推断模型胜负。
+- [x] **32 项新回归、99 项定向测试、全量 1543 tests + 81 subtests 通过（145.45 秒）**；本轮新增文件 Ruff 与 diff 检查通过。扩展到全仓 `ruff check .` 发现 **224 项既有问题，均在未改动的跟踪文件**，未批量改写。测试是本地协议/模拟传输回归，不是 GPT 能力或 Runtime 性能成绩。
+- [ ] 当前进程未配置 `OPENAI_API_KEY`，本阶段真实 GPT/新 9B 生成调用均 **0**；两批状态 `pending_model_calls`。待配置可用 API 接入后先运行 GPT，再按同协议跑新 9B；原始输出完整源审阅后才判断改模型还是改设计。不要把助手已知样本的回答当盲测。
+- [ ] C3h 质量未通过，C4–C6 与规模化 Runtime 评测仍待门禁；不自动切换产品默认模型、不提交或推送 Git。
+
+固定树批摘要 `sha256:daeedb17d5c4ae4798ec41f5d46064bcfb6834b81fe8e1c4b0421e8fd56bd958`；完整链批摘要 `sha256:8ffab6cebdc10758364784306522dffefe0079abdd5132abe47fe15acacdead4`。对应 `artifacts/translator-v2/model-{mapping,end-to-end}-4-20260908-readiness.json` 仅是未运行状态，不是模型结果。原 9B 完整报告已重放一致，摘要仍为 `sha256:36cf4f488d646c2e204d39157d66bc67a3abe99f68f43241bb72e2110ba408d9`。
+
+见[方案比较、接入命令与判定方法](FLOW-MODEL-COMPARISON.md)。以下历史“下一步”不覆盖本节；历史协议与失败原始制品保留。
+
+#### 2026-09-08 C3h 节点证据：映射编译 1/4，原文义务/宿主保障仍混淆
+
+- [x] 新协议每个实际节点必须给候选证据、证据不足或矛盾；不强迫正向支持。编译器固定节点角色，从引用/剩余要求上的目的标记推导旧目的列表；保持原 canonical 编译与完整源审查，缺能力/未解决事项不得被删除。
+- [x] 独立冻结批次 **8 次真实 qwen3.5:9b 新调用**，4 已知流程 / 1 工具 / 0 公开 Skill。流程 4/4、映射 Schema 4/4、映射编译 **1/4**；10 节点全显式表态（7 候选支持、3 证据不足/矛盾），不能把表填满当语义正确率。无旧答案输入、修图重试或批次 Runtime/脚本/业务写执行。
+- [x] 反向分支条件证据恢复，唯一编译合格例完成同一助手 **95 声明审查：69 supported、10 contradicted、16 insufficient**，仍 blocked，未接受任何流程。其余三例仅有机械诊断及事后局部语义检查。声明非独立分母，不能报告泛化准确率。
+- [x] 暴露新/持续问题：读取句被补造宿主校验残项，业务动作被归为解释边界，库存含义与权限混淆；审批/脚本的正确候选停止被误认为已执行操作，旧 source_id 与 clause ID 也干扰判断。不是增加拒绝即可保证安全。
+- [x] **25,086 token（较上版 −3.1%）、POST 342.92 秒（+0.5% 观察值）**；输入/输出 19,090 / 5,996，不作因果性能结论。33 项新增回归、全量 **1511 tests + 81 subtests 通过（131.41 秒）**；模型完成后才跑全量，Ruff/diff 与报告重放通过。
+- [ ] **下一步方案已纠偏但未实现**：先源文义务提取、后宿主规则绑定；从第二阶段执行上下文去掉未审阅 source_id，保留独立来源追踪；减少重复目的分类而不推测用户意图；分开候选/执行/授权。先离线反例/接口，再另冻新版，不能改本批失败答案。C4–C6/规模化 Runtime 继续门禁。
+
+见[协议/结果/纠偏](FLOW-NODE-EVIDENCE.md)、[原始提案与完整单例审阅摘要](benchmarks/flow-node-evidence-c3h-summary.json)。本轮未提交/推送；以下历史“下一步”不覆盖本节。
+
+#### 2026-09-08 C3h 分层诊断 v1：定位能力闭环，原转译成绩不变
+
+- [x] 在冻结转译器旁新增离线诊断和双语可读报告，不改旧 Schema/提示词/编译器，不生成新答案。汇总独立可查的错误，不让首个目的冲突掩盖后续节点来源遗漏；保留原文、偏移、候选条目、L0.5/L0 双向索引及摘要。
+- [x] 验证原始检查点后，自动复现 **8 个目的/自身类型冲突、4 个已有节点缺证据、32 项 unresolved**；另列 2 项模型报告缺宿主能力（须独立核实）。原结果仍是 **流程 4/4、映射 0/4、0 完整源审查**；4 个已知开发流程 / 1 工具 / 0 公开 Skill。没有新模型调用或批次 Runtime/业务工具/脚本/写执行。
+- [x] 可导入摘要绑定的第一阶段源文审阅，即使映射编译未通过也能定位原流程问题；完整映射审阅仍需先编译。增加父/映射后 L0 执行投影一致性检查；独立 witness 只作辅助可构造性诊断，不替代首次输出，不自动证明语义。
+- [x] **34 项新增回归，全量 1478 tests + 81 subtests 通过（125.37 秒）**；Ruff/diff 通过，原冻结批次报告摘要保持不变。回归包含分支反转注入、否定截取但格式合法、错误目标/引用、多错误、审阅摘要漂移、源脚本惰性、报告转义和防覆盖。
+- [ ] 下一步依诊断调整每节点必填证据与目的关联，先离线反例，再另冻新批。独立源语义义务审阅、跨 Skill 表达能力矩阵、自动最小反例缩减和置信度校准仍未完成；不把当前模型生成的 54 个条目当独立语义分母。C4–C6/规模化 Runtime 评测不解锁。
+
+见[设计/使用/边界](FLOW-DIAGNOSTICS.md)、[可读报告](benchmarks/flow-diagnostics-c3h-report.md)、[完整诊断 JSON](benchmarks/flow-diagnostics-c3h-report.json)。本轮未提交或推送；以下历史“下一步”不覆盖本节。
+
+#### 2026-09-07 C3h 统一节点完整双阶段：局部表示改善，跨条目覆盖仍未闭环
+
+- [x] 新增独立冻结入口，8 次真实 `qwen3.5:9b` 新调用；4 已知开发流程 / 1 工具 / 0 公开 Skill，流程 **4/4** 合格，映射仍 **0/4**。没有完整源审查或被接受候选，不伪造语义评分。无重试、旧树替代、改答案或批次 Runtime/业务工具/脚本/写执行。
+- [x] 局部改进：四份映射符合生成 Schema，类型/目标非法组合未再观察到（上轮诊断 7 项）；反向分支 needs_l1 已映射为 handoff。但共 **8 个目的/类型冲突，4 个缺来源节点**，四例均在完整审查前阻断，不能以局部合规宣称可用性提升。
+- [x] 52 片段 / 54 项要求，精确引用不证明分解；仅两个片段生成多项。unresolved 共 32 项（上版 31），不能计算独立语义错误率。分支漏条件、直接读漏完成、审批漏读取、脚本漏停止；真实缺审批/脚本保留。第一步有正确的读取候选，第二步仍可能重新错分职责。
+- [x] 两步 **25,881 token**，比上轮少 3.5%；POST **341.16 秒**，观察增加 7.3%，映射 **248.10 秒**。载荷/协议/负载和并行回归不同，不作因果性能结论。新增 5 项批次回归，147 项定向及全量 **1444 tests + 81 subtests 通过（214.93 秒）**；Ruff/diff、新报告/检查点重入及旧三批/终态探针重放一致。
+- [ ] **下一步调整跨条目组织，而不是继续叠类型/提示词**：实际节点作为必填证据键，编译器固定已知角色；目的与已有证据条目关联，减少独立重选 ID。父源链接只作候选，标题/参数/极性/前置和完整原意继续审查，不能自动补图或信任父提案。先离线反例，另冻新批，仍在 C3h，C4–C6 不解锁。
+
+见[完整结果与后续纠偏方向](FLOW-CANONICAL-PILOT.md)、[原始选择与诊断摘要](benchmarks/flow-canonical-c3h-summary.json)。本轮入口/报告尚未提交或推送；历史“下一步”不覆盖本节。
+
+#### 2026-09-07 C3h 统一节点：表达修复与真实解码探针完成，完整转译待验证
+
+- [x] 独立 canonical-node 协议：一个实际节点只暴露一个标识，编译器管理旧别名；按类型分支的 Schema 限定真实兼容目标，并由本地独立复验。条件节点覆盖仍是跨记录必检项。
+- [x] 明确 completion / handoff / missing_capability_stop 三种终态，补齐合法 needs_l1；允许源文请求的停止/交接成为目的候选，但仍需源文审查。分开 representationReviewSupported 与 admissionBlockers，真实缺能力和 unresolved 保留，任何结果均不授予 Runtime 权限。
+- [x] **146 项新增回归**（含 104 项类型/目标参数化组合，不是 Skill 数）。另冻 3 个模型可见手工单终态父流程，各真实 `qwen3.5:9b` 调用一次，**3/3 结构编译通过**，23.38 秒、4,098 / 346 token，正常 stop，无重试。未提供映射 JSON 答案；不是完整双阶段、语义接受或泛化准确率。
+- [x] 原始回答仍各用单项引用整句，没有分别表达“不调用模型/工具”等限制；**复合分解未被证明解决**。探针完整源审查 0、公开 Skill 0、批次 Runtime/业务工具/脚本/写执行 0；上一轮职责映射 0/4 的原始结果不变。
+- [x] 全量 **1439 tests + 81 subtests 通过（111.44 秒）**，Ruff/diff，新探针重放/完整检查点重入无新调用，旧职责/精简/完整双阶段三份含适用审查的报告重放一致。回归时间不是 Runtime 性能。
+- [ ] 下一步另冻新版完整双阶段小批，测分解/分类/目标保真、条件覆盖、过度 unresolved 和正确停止表示；不能以三个简单探针或机械换旧答案标签替代。仍在 C3h，不进入 C4–C6。
+
+见[实现、正反例、真实探针与边界](FLOW-CANONICAL-MAPPING.md)、[探针报告](benchmarks/flow-canonical-canary-report.json)。本轮新增代码和文档尚未提交或推送；历史“下一步”不覆盖本节。
+
+#### 2026-09-07 C3h 职责协议真实批次：负结果，先修表达完整性
+
+- [x] 新增并冻结独立双阶段入口，8 次真实 `qwen3.5:9b` 新调用。4 个已知开发流程 / 1 工具 / 0 公开 Skill；第一步 **4/4** 合格，第二步 **0/4**，未进入完整源审查，不伪造语义评分。无重试、答案修订或旧树替代；批次 Runtime/业务工具/脚本/写执行为 0。
+- [x] 分开模型与协议缺口：直接读选对终节点但标签不兼容；分支仍漏条件节点，协议对合法 needs_l1 终态又没有任何兼容类型；审批/脚本共 31 个子要求含 unresolved，连实际已有读/停止节点也未映射。目的类型限制也可能排斥合理的停止要求。不能把全部拒绝视为安全或可用性提升。
+- [x] 52 片段 / 53 子要求，引文均精确匹配，但只有 1 片段分多项；精确引用不证明原子分解或完整原意。本轮是同一开发助手的事后诊断，不是完整语义审查或独立 Gold。
+- [x] 两步总 token **39,788→26,824（−32.6%）**；映射输出 **2,619→4,283（+63.5%）**。本轮 POST 总计 **317.90 秒**，映射 **224.21 秒**；不同协议/预算/负载及部分并行回归，不作因果速度/准确率比较。资格标准变化，不能把 3/4→0/4 算成语义准确率降幅。
+- [x] 新增 5 项批次回归，含职责协议共 **80 项定向通过**；全量 **1293 tests + 81 subtests 通过（160.90 秒）**，Ruff/diff，新报告重放/完整检查点重入无新增调用，旧精简及完整双阶段含审查报告均一致。
+- [ ] **下一步仍 C3h**：把类型—目标兼容关系编入生成 Schema，去除重复/不可用目标标签，补全合法终态和交接表达；分开真实缺能力与映射遗漏，继续检查复合要求分解。先离线反例，再另冻新批；不改本批答案、标准或冻结实现，不进入 C4。
+
+见[完整负结果、成本与复现](FLOW-RESPONSIBILITY-PILOT.md)、[摘要及原始选择](benchmarks/flow-responsibility-c3h-summary.json)。本轮新增批次入口/文档尚未提交或推送；下面 Git 检查点仍保留先前已提交成果。历史“下一步”不覆盖本节。
+
 #### 2026-09-07 Git 阶段检查点
 
 C3c–C3h 代码、测试及开发依赖已提交到本地 `dev`：`1c5fc7e`。本节及配套文档/评测摘要随独立文档提交保存；未推送、未合入 master。以下历史条目的“未提交”描述保留其当时状态，以本节为当前准。已有验证为 **1288 tests + 81 subtests 通过**，不代表语义质量验收完成；新版职责协议仍待真实 9B 验证。
@@ -419,6 +558,30 @@ ES-P0 的 Runtime 机械原型和小样本接线结论保留为 `local_hypothesi
 详细原则、指标 Gate、角色边界和任务模板见[后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md)。
 
 ## English
+
+**2026-09-08 current milestone — necessary guards separated from feasibility:** one source-only 9B call reports false forbidden / true unknown for three Boolean facts. The old rule stays unresolved; the new rule derives a necessary guard from the forbidden side without claiming that the surviving path is possible or sufficient. Reprocessing the same archived trees and unchanged answers matches 6/6 finite cases and 33/33 inert scenarios: three executable fragments (23 checks) and three missing-capability stops (10). First-pass scores remain 4/6 and 29/33; no historical results or oracles are rewritten. Positive unknowns remain explicitly recorded; candidates are inactive and full-source review/activation eligibility are not established. New cost: one qwen3.5:9b/no-think call, 1,856 tokens and 23.14 s POST. Cumulative exploration including the failed previous guard call: eight calls, 30,755 tokens and 237.74 s POST. This is not a fresh end-to-end or unseen benchmark. Next review source premises/citations and run narrow polarity/alias/alternative-condition checks; do not expand the corpus or unlock Runtime A/B. [Method](FLOW-BEHAVIOR-REPAIR.md) / [evidence](benchmarks/flow-guard-necessity-summary.json).
+
+**2026-09-08 previous milestone — local argument-binding improvement, unresolved prerequisite meaning:** tool-specific required fields/types and source-grounded literals now constrain generation, with existing scope/type/graph checks and no Runtime replacement. Six fresh 9B calls on unchanged sources/contracts/oracles improve finite-scenario matching from 21/33 to 29/33, but complete-case matching stays 4/6; the access parameter is correct while three Boolean combinations still read prematurely. A separately recorded duplicate-stop normalization and one source-only Boolean-dependency call yield five matched cases and one unresolved case. The model requires available/granted but leaves current unresolved; no answer is supplied manually. Twenty-two scenarios execute and match, eleven explicitly do not run; neither 22/22 success nor whole-Skill correctness is claimed. Seven calls cost 28,899 tokens and 214.59 s POST; first-pass p50/p95 is 28.67/43.48 s, worse than baseline. Next resolve the localized source/field meaning, not expand the corpus or Runtime A/B. Full-source review and unseen generalization remain open; default DSH/Runtime and admission are unchanged. [Report](FLOW-BEHAVIOR-REPAIR.md) / [evidence](benchmarks/flow-contract-guard-repair-summary.json). Earlier milestones below retain their historical scope.
+
+**2026-09-08 previous milestone — behavioral verification repaired, generator quality not repaired:** reuse the existing AST/compiler and real read-flow executor with inert providers. Six manual feasibility witnesses match 33 finite scenarios; the translator never sees those references or oracles. Behavioral mutants now expose actual wrong calls/arguments/order/guards and link them to source/AST/L0 locations without synthetic AI verdicts. Four archived 9B trees match 21/21 post-hoc scenarios; original source reviews remain unchanged. A fresh no-think baseline matches 2/3 executable fragments (12/23 scenarios) and 2/3 partial stops (9/10). Three request/thinking experiments fail to improve quality, including invalid references, a premature backup read and output truncations; all failures and unrun cases remain explicit. Total: 16 new calls, 50,395 tokens, 755.76 s POST. **1649 tests + 81 subtests passed in 204.17 s**, including 21 new targeted tests; these are not model accuracy. No external providers, source scripts, default DSH/Runtime changes, gate relaxation or Git commit/push. Next address faithful argument binding and prerequisite generation, not more prose fields or unbounded prompt tuning. Full-source review and unseen generalization remain open. [Report](FLOW-BEHAVIOR-REPAIR.md) / [evidence](benchmarks/flow-behavior-repair-summary.json). This milestone supersedes older next-step recommendations below.
+
+**2026-09-08 latest C3h milestone — explicit-relation probe complete, not adopted as the default upgrade:** an independent guarded-source protocol adds scope/when/after, complete review and lossless text projection with fresh review required; no predicates/edges/authority/default routing are compiled. Six real 9B first attempts: unchanged regression **4/4 structural, 4/4 reviewed, 0/4 supported**; new-development **2/2 structural, 2/2 reviewed, 0/2 supported**. Both are visible same-author development cohorts, zero public Skills, no old answers/retries/repair/execution. Seventy-two overlapping judgments (45 supported, 19 contradicted, eight insufficient) locate source-line/predecessor conflation, invented attempted-run prerequisites, refusal-path verification, delayed no-extra-read restrictions and condition narrowing. Three normative headings still become context; rejected/historical examples remain non-executable. None fillers are not blanket whole-case failures. Regression **5,103/3,265 tokens, 236.89 s POST, p50/p95 54.70/78.15 s**; new group **2,298/1,257 tokens, 89.88 s, 40.34/49.53 s**. Observed regression cost rises 27.2% tokens/85.2% POST, not a causal or generalization comparison. **36 new tests, 1628 tests + 81 subtests passed in 204.34 s** after model completion; targeted Ruff/diff, new replay/zero-call reentry, summary and four historical reports verify. Retain evidence but do not promote free-text relation fields. Next anchor relation candidates in locatable source evidence and separately judge normative meaning; source IDs are not execution nodes and blanks/None do not authorize action. Actual graph binding belongs to the business-skeleton/full-review stage. That correction remains unimplemented/unmeasured. No C3h/C4–C6/large Runtime unlock or Git commit/push. [Results/decision](FLOW-SOURCE-DUTIES.md) / [evidence](benchmarks/flow-source-guard-6-summary.json). Earlier next steps are historical.
+
+**2026-09-08 latest C3h milestone — source/host split implemented, first source-only probe complete:** source-only candidates receive no host menu, graph or objective flags. Explicit multi-document sources, headings, line offsets and opaque code remain inert; every candidate and source line receives a bound review. The host-binding interface builds existing FlowTree requests from supported source candidates without replacing originals, binds immutable duties to actual targets, retains a separate host baseline and unchanged execution projection, and requires a new complete-chain review. Context cannot justify operations; retained/unresolved cannot masquerade as implementation. RuntimeReady/authority stay false, with no default DSH/activation wiring. Four new same-author visible development inputs, zero public Skills, **four real 9B first-stage calls: 4/4 structural, 4/4 complete source-only review, 1/4 source candidates supported**. Fifty overlapping claims: **44 supported, four contradicted, two insufficient**, not accuracy or Gold. Normative headings become context in storage/sensors; ticket read-then-approval dependency/scope remains implicit. The backup candidate preserves requirements but missing-reference/opaque-code/host availability is unproven. **4,587/1,992 tokens, 127.89 s POST, p50/p95 31.19/36.34 s**; normal stops, no retry/truncation/timeout/business execution. **49 new tests; 1592 tests + 81 subtests passed (203.78 s)** after model completion, targeted Ruff/diff pass. Next refine normative scope and explicit dependencies on differently worded counterexamples, not blanket heading relabeling; freeze new originals. Fresh whole-chain 9B binding awaits more stable source quality and actual host contracts; current binding evidence is offline only. C3h/C4–C6 remain gated, no commit/push. [Design/results](FLOW-SOURCE-DUTIES.md) / [traceable summary](benchmarks/flow-source-duty-4-summary.json). Earlier next steps are historical.
+
+**2026-09-08 latest C3h scope — both 9B-only batches complete; revise stage responsibilities next:** the user deferred GPT, so credentials are not a blocker. Twelve real calls on the same four known flows/one tool/zero public Skills: fixed-tree mapping Schema **3/4**, compilation **0/4**; fresh end-to-end trees structurally **4/4**, mapping Schema **2/4**, compilation **0/4**. No retry, answer repair, timeout, truncation or batch business execution. Same-developer complete first-stage reviews of two cases contain 38 overlapping claims (32 supported, six insufficient), not independent Gold/accuracy; other reviews are partial. Source/host confusion, lost objective flags, candidate/execution confusion, overlong rationales and an approval read citing a heading remain. Source text is preserved; stage-specific acceptance must separate skeleton fidelity from full constraint coverage. Fixed-tree/end-to-end POST **518.54/619.41 s**, total **72,236 tokens**; end-to-end two-phase case p50/p95 **154.06/170.86 s**, not Runtime timing. Full regression after model completion: **1543 tests + 81 subtests, 137.78 s**. Only evidence/review/docs changed this turn. Common JSON is not adopted as a default quality optimization; retain constrained schemas and next build a source-only duty candidate → business/tool binding → full source-duty review probe with different development domains/wording. That split is not implemented or newly measured; GPT capacity attribution is unknown, C3h and C4–C6 gates remain open. No commit/push. [Results and plan](FLOW-9B-COMMON-JSON.md) / [traceable evidence](benchmarks/flow-9b-common-json-summary.json). Earlier choices and next steps below are historical, not current scope.
+
+**2026-09-08 latest C3h decision — stronger-model diagnostic prepared, live evaluation pending credentials:** freeze a GPT-5.5 snapshot/high versus fresh 9B/no-think reference before another semantic redesign. The new common-JSON protocol supplies identical messages/full schemas and unchanged local validators, while explicitly retaining provider/reasoning/decoder confounds. Fixed-tree mapping and fresh end-to-end batches are separately frozen: four known flows, one tool, zero public Skills, one repetition each. No historical trees enter end-to-end generation; old constrained-decoder scores are not the new control. Bounded calls, credential-safe tool-free transport, receipt replay/recovery and experiment-bound review are implemented. **32 new regressions, 99 targeted tests, 1543 tests + 81 subtests passed (145.45 s)**; new-file Ruff and diff checks pass. Repository-wide Ruff reports **224 pre-existing issues in unchanged tracked files**, not fixed in this experiment. Original 9B evidence replays identically. The process lacks `OPENAI_API_KEY`; **zero live GPT/new 9B generation calls**, both batches pending, accuracy null and model advantage unknown. Source-first redesign is retained as a candidate after this diagnostic. No default-model switch, Runtime gate unlock, Git commit or push. [Decision and commands](FLOW-MODEL-COMPARISON.md). Historical next steps below do not override this section.
+
+**2026-09-08 latest C3h node-evidence paired result:** mandatory evidence/insufficient/contradicted slots avoid forced justification; compiler-owned roles and evidence-linked objectives project to unchanged canonical gates. Eight fresh 9B calls, four known flows/one tool/zero public Skills: **4/4 flows, 4/4 mapping Schema, 1/4 mapping compilation**; ten explicit nodes, seven positive candidates and three gaps. The one compiled branch restores condition evidence but its complete same-developer **95-claim review (69 supported, 10 contradicted, 16 insufficient)** remains blocked; other cases have partial post-hoc observations only, no accepted candidate. Invented check residuals, source/host semantics and candidate/execution/authority confusion remain. Total **25,086 tokens (−3.1%)**, POST **342.92 s (+0.5% observed)**; no causal performance claim or batch Runtime/provider/script/write execution. **33 new tests, 1511 tests + 81 subtests passed in 131.41 s**, full tests after model completion, Ruff/diff and replay checks. Next design separates source-first obligations from host binding and removes unreviewed source aliases/redundant intent decisions without inventing meaning; not yet implemented or proven. Preserve frozen evidence; C4–C6 remain gated. [Report/design](FLOW-NODE-EVIDENCE.md) / [summary](benchmarks/flow-node-evidence-c3h-summary.json). Uncommitted/unpushed.
+
+**2026-09-08 latest C3h offline diagnostic milestone:** an additive diagnostic/report layer aggregates independent mechanical errors, traces exact source/candidate/L0.5/L0 links, accepts digest-bound first-pass reviews even when mapping fails, compares executable L0 projections and supports separately supplied assisted witnesses. Frozen translators, prompts, guards and first-pass answers are unchanged. Validated replay reproduces **8 objective/type conflicts, 4 missing-node evidence links, 32 unresolved candidates**, separately from 2 model-declared host gaps requiring independent verification. Original **4/4 flow qualification, 0/4 mapping qualification, zero complete source reviews** remain unchanged over four known flows/one tool/zero public Skills; no new model or batch Runtime/provider/script/write execution. **34 new regressions, 1478 tests + 81 subtests passed in 125.37 s**, plus Ruff/diff and unchanged original report digest. Candidate atoms are not independent obligations; accuracy/loss/confidence probabilities stay null. Next mandatory node evidence and objective associations, then a separately frozen batch; independent obligation review, cross-Skill support matrices, automatic reduction and confidence calibration remain open. C4–C6 gated. [Design](FLOW-DIAGNOSTICS.md) / [readable report](benchmarks/flow-diagnostics-c3h-report.md). Uncommitted/unpushed.
+
+**2026-09-07 latest C3h canonical fresh paired result:** eight new 9B calls, four known flows/one tool/zero public Skills, **4/4 qualified flows, 0/4 mappings**, zero complete source reviews or accepted candidates. Four raw mappings satisfy Schema and no illegal kind/target pairs were observed (seven in prior diagnostics); needs_l1 now maps. Yet eight objective/type conflicts and four missing node citations prevent qualification. Fifty-four requirements over fifty-two clauses and exact quotes do not prove decomposition; thirty-two unresolved entries are not independent error-rate samples. No retries, answer repair, old-tree substitution or batch execution. Total **25,881 tokens (−3.5%)**, POST **341.16 s (+7.3% observed)**, mapping 248.10 s; different protocol/load/payload and concurrent regressions preclude causal timing claims. Five new pilot tests, 147 focused tests and **1444 tests + 81 subtests passed in 214.93 s**, plus Ruff/diff and new/old replay/checkpoint checks. Next: mandatory per-node evidence with compiler-owned roles and objectives linked to evidence, reducing redundant inference without trusting parent citations or dropping semantic review. C3h continues; C4–C6 gated. [Report](FLOW-CANONICAL-PILOT.md) / [summary](benchmarks/flow-canonical-c3h-summary.json). This turn remains uncommitted/unpushed.
+
+**2026-09-07 latest C3h canonical-node repair:** one model-visible identity per node, Schema-bound kind/target compatibility and independent validation, complete terminal/handoff representation, and separate reviewer-supported representation versus admission blockers. 146 new regressions (104 parameterized pairs, not Skills), plus **3/3 real 9B fixed-parent terminal probes** compiled in 23.38 s with 4,098/346 tokens. Explicit hand-authored parent trees and simple terminal sources make these decoder probes, not fresh paired translation, semantic acceptance or generalization. Responses still quote whole clauses without separate non-invocation duties; decomposition remains unproven. Zero complete source reviews/public Skills/batch executions. Previous 0/4 responsibility mapping result remains unchanged. **1439 tests + 81 subtests passed in 111.44 s**, plus Ruff/diff, new canary replay/re-entry without calls and unchanged three prior reports. Next: separate fresh paired validation of complete semantics and unresolved/stop coverage. C3h continues, C4–C6 remain gated; this turn is uncommitted/unpushed. [Design and evidence](FLOW-CANONICAL-MAPPING.md) / [report](benchmarks/flow-canonical-canary-report.json).
+
+**2026-09-07 latest C3h real responsibility pilot:** eight fresh 9B calls on four known flows yielded **4/4 flow qualification, 0/4 mapping qualification**, zero complete semantic reviews or accepted inactive flows. Exact quotes (53 requirements/52 clauses) did not yield complete decomposition. Failures include type/alias mismatch, omitted condition citations, excessive unresolved selections, and a protocol defect: no compatible representation for needs_l1 terminals. Some objective restrictions may also exclude valid requested stops. Different qualification criteria prevent calling 3/4→0/4 a semantic accuracy decline. Total tokens **39,788→26,824 (−32.6%)**, mapping output **2,619→4,283 (+63.5%)**, whole POST **317.90 s**, mapping **224.21 s**; load, budgets and partial concurrent tests prevent causal timing claims. Five new batch tests, eighty focused tests, **1293 tests + 81 subtests passed in 160.90 s**; Ruff/diff and new/old replay plus checkpoint re-entry passed without new calls. Next: repair Schema compatibility, canonical targets and terminal/handoff completeness, then freeze a separate batch. No answer repair, Runtime execution or independent/production claim; C4–C6 remain gated. [Report](FLOW-RESPONSIBILITY-PILOT.md) / [summary](benchmarks/flow-responsibility-c3h-summary.json). This turn's additions remain uncommitted/unpushed.
 
 **2026-09-07 Git checkpoint:** C3c–C3h code/tests/development dependency were committed locally on `dev` as `1c5fc7e`; documentation and evidence summaries are saved in a separate documentation commit. No push or master merge. Historical “uncommitted” entries describe their earlier state and are superseded here. Prior validation: **1288 tests + 81 subtests passed**, not semantic acceptance; fresh 9B responsibility-protocol evaluation remains pending. One trailing blank line in frozen `flow_lean_pilot.py` is intentionally retained to preserve recorded implementation fingerprints; other staged whitespace checks passed. Ignored local `artifacts/` retain raw evidence, not included in the committed summaries.
 
