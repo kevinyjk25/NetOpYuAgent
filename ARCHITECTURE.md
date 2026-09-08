@@ -126,6 +126,8 @@ L0.5 和未激活 L0 都是 review artifact，不在在线请求中临场取得�
 | `network_lab/`, `network_provider/`, `service_layer/` | Infrastructure | 本地 Observation/Effect Provider 和 Containerlab/FRR 网络锚点 |
 | `evaluation/`, `data/ensured_skill_scenarios.yaml` | Evaluation | 配对实验、故障注入、消融和指标；不得进入执行链 |
 
+2026-09-08 的转译研究入口仍在 `evaluation/`，未替换默认 DSH/Runtime。合同构造、必要条件推导和共用检查点的职责见[代码导航](evaluation/README.md)；旧实验与[当前阶段](docs/PROJECT-STATUS.md)分开维护。新候选仍未激活，研究依赖不得反向进入 Runtime。
+
 ### 5. 依赖规则
 
 允许：
@@ -220,6 +222,8 @@ Authoring and execution are separate lifecycles. Offline authoring binds untrust
 Read observations pass access, capability, schema, and parameter checks without effect authority. A missing or ambiguous input clarifies. A qualified write follows the unique Runtime path. An unqualified write may clarify, propose, ask a human, or reject; native L1 fallback remains read-only. The [Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md) provides the complete lifecycle and terminal-state interpretation.
 
 ### 4. Dependencies and invariants
+
+The September 8 translation research path remains in `evaluation/`, separate from default DSH/Runtime. The [code map](evaluation/README.md) distinguishes contract constructors, necessary-guard synthesis, shared checkpoints and historical experiments. Candidates remain inactive; research dependencies must not enter the Runtime. See [current status](docs/PROJECT-STATUS.md).
 
 The Runtime depends on L0 contracts and a domain-neutral Capability gateway, never on DSH UI, prompts, model SDKs, or evaluation code. L1 and providers cannot bypass the Runtime. A journal-backed Typed Graph scheduler gates every current transaction branch and records crash-boundary uncertainty without replaying Effect. Evidence must be typed, fresh, scoped, integrity-checked, and action-bound; the inspection view projects Evidence → Observation → Capability/Collector → Object lineage with hashed collector/object identifiers. Approval and execution share an immutable plan digest. Postconditions require independent observations. Outcome uncertainty enters reconciliation, not blind retry. Compensation and recovery verification are explicit.
 

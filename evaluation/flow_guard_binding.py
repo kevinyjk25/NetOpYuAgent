@@ -14,11 +14,12 @@ from pathlib import Path
 from jsonschema import Draft202012Validator, ValidationError
 
 from evaluation.flow_behavior import _seal
+from evaluation.flow_checkpoint import author_once, implementation
 from evaluation.flow_contract_authoring import _object, constructor_request, lower_constructors
+from evaluation.flow_model_transport import decode
 from evaluation.flow_source_selection import spans
 from evaluation.flow_translation import FlowSources
 from evaluation.flow_tree import FlowTree, compile_report
-from evaluation.flow_tree_authoring import digest_file, receipt, verify_receipt
 from network_runtime.contracts import sha256_json
 
 PROTOCOL = "source-required-boolean-guards/v1"
@@ -151,18 +152,13 @@ def bind_guards(sources: FlowSources, tree: FlowTree, decisions: dict) -> dict:
 
 def author_guards(sources: FlowSources, tree: FlowTree, root: Path, *, max_new_calls: int = 0) -> dict:
     """One source-only 9B call with exact, replayable checkpoints; no oracle API."""
-    from evaluation import flow_behavior_probe as parent
-    from evaluation.flow_translation import _write
-
     wire = guard_request(sources, tree)
     inputs = dict(protocol=PROTOCOL, sourceDigest=sha256_json(sources.model_dump(mode="json")),
         treeDigest=sha256_json(tree.model_dump(mode="json")), wireRequest=wire,
-        implementation={**parent.implementation(),
-            "evaluation/flow_contract_authoring.py": digest_file(Path(__file__).with_name("flow_contract_authoring.py")),
-            "evaluation/flow_guard_binding.py": digest_file(Path(__file__))})
+        implementation=implementation())
 
     def derive(envelope):
-        text, status = parent.decode("ollama", envelope)
+        text, status = decode("ollama", envelope)
         files = {}
         if text is not None:
             try:
@@ -174,27 +170,4 @@ def author_guards(sources: FlowSources, tree: FlowTree, root: Path, *, max_new_c
                 status.update(candidateStatus="invalid_candidate", errorType=type(error).__name__, error=str(error)[:3000])
         return files, status
 
-    if root.exists():
-        verify_receipt(root)
-        request = json.loads((root / "request.json").read_text())
-        if request != {**inputs, "model": request.get("model")}:
-            raise ValueError("guard input/implementation drift")
-        files, status = derive(json.loads((root / "response.json").read_text()))
-        if (set(receipt(root)) != {"request.json", "response.json", "result.json", *files}
-                or json.loads((root / "result.json").read_text()) != status
-                or any(json.loads((root / name).read_text()) != data for name, data in files.items())):
-            raise ValueError("guard checkpoint derivation drift")
-        return {"result": status, **files}
-    if type(max_new_calls) is not int or max_new_calls < 1:
-        raise ValueError("explicit one-call budget required")
-    model = parent.OllamaAnchoredAuthorAdapter().preflight()
-    root.mkdir(parents=True)
-    _write(root / "request.json", {**inputs, "model": model})
-    envelope = parent.send("ollama", wire)
-    _write(root / "response.json", envelope)
-    files, status = derive(envelope)
-    for name, data in files.items():
-        _write(root / name, data)
-    _write(root / "result.json", status)
-    _write(root / "receipt.json", receipt(root))
-    return {"result": status, **files}
+    return author_once(root, inputs, derive, max_new_calls=max_new_calls, label="guard")

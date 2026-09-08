@@ -10,9 +10,10 @@ from jsonschema import ValidationError
 
 from evaluation import flow_behavior_probe as parent
 from evaluation.flow_behavior import _seal
+from evaluation.flow_checkpoint import replay as replay_checkpoint
 from evaluation.flow_contract_authoring import PROTOCOL, constructor_request, lower_constructors
 from evaluation.flow_translation import FlowSources, _write
-from evaluation.flow_tree_authoring import digest_file, receipt, verify_receipt
+from evaluation.flow_tree_authoring import digest_file, receipt
 
 
 def inputs_for(manifest):
@@ -40,15 +41,8 @@ def derive(case, envelope):
 
 
 def replay(folder, case, inputs):
-    verify_receipt(folder)
-    if json.loads((folder / "request.json").read_text()) != dict(wireRequest=inputs["requests"][case["id"]], model=inputs["model"]):
-        raise ValueError("actual request/model drift")
-    files, result = derive(case, json.loads((folder / "response.json").read_text()))
-    if (set(receipt(folder)) != {"request.json", "response.json", "result.json", *files}
-            or json.loads((folder / "result.json").read_text()) != result
-            or any(json.loads((folder / name).read_text()) != data for name, data in files.items())):
-        raise ValueError("checkpoint derivation drift")
-    return files, result
+    return replay_checkpoint(folder, dict(wireRequest=inputs["requests"][case["id"]], model=inputs["model"]),
+        lambda envelope: derive(case, envelope), label="constructor")
 
 
 def load(root, parent_root):

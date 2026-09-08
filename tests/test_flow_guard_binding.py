@@ -78,7 +78,7 @@ def test_only_redundant_stop_is_normalized_with_both_original_citations():
 
 
 def test_source_guard_generation_replays_and_never_retries_partial_checkpoint(tmp_path, monkeypatch):
-    from evaluation import flow_behavior_probe as parent
+    from evaluation import flow_checkpoint as parent
     _, sources, tree = access_without_guards()
     decisions = {s["id"]: dict(decision="require_true", source_id="s0003", on_failure="unsupported")
         for s in slots_for(sources, tree)}

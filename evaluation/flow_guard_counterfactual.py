@@ -14,12 +14,13 @@ from pathlib import Path
 from jsonschema import Draft202012Validator, ValidationError
 
 from evaluation.flow_behavior import _seal
+from evaluation.flow_checkpoint import author_once, implementation
 from evaluation.flow_contract_authoring import _object
 from evaluation.flow_guard_binding import bind_guards, guard_request, slots_for
+from evaluation.flow_model_transport import decode
 from evaluation.flow_source_selection import spans
 from evaluation.flow_translation import FlowSources, _write
 from evaluation.flow_tree import FlowTree
-from evaluation.flow_tree_authoring import digest_file, receipt, verify_receipt
 from network_runtime.contracts import sha256_json
 
 PROTOCOL = "counterfactual-necessary-guard/v1"
@@ -98,16 +99,12 @@ def bind(sources: FlowSources, tree: FlowTree, answers: dict) -> dict:
 
 def author(sources: FlowSources, tree: FlowTree, root: Path, *, max_new_calls: int = 0) -> dict:
     """Archive one attempt; completed, failed and ambiguous checkpoints never retry."""
-    from evaluation import flow_behavior_probe as parent
-
     wire = request(sources, tree)
     inputs = dict(protocol=PROTOCOL, sources=sources.model_dump(mode="json"), tree=tree.model_dump(mode="json"),
-        wireRequest=wire, implementation={**parent.implementation(), **{
-            "evaluation/" + name: digest_file(Path(__file__).with_name(name)) for name in
-            ("flow_contract_authoring.py", "flow_guard_binding.py", "flow_guard_counterfactual.py")}})
+        wireRequest=wire, implementation=implementation())
 
     def derive(envelope):
-        text, status = parent.decode("ollama", envelope)
+        text, status = decode("ollama", envelope)
         files = {}
         if text is not None:
             try:
@@ -119,30 +116,7 @@ def author(sources: FlowSources, tree: FlowTree, root: Path, *, max_new_calls: i
                 status.update(candidateStatus="invalid_candidate", errorType=type(error).__name__, error=str(error)[:3000])
         return files, status
 
-    if root.exists():
-        verify_receipt(root)
-        stored = json.loads((root / "request.json").read_text())
-        if stored != {**inputs, "model": stored.get("model")}:
-            raise ValueError("counterfactual input/implementation drift")
-        files, result = derive(json.loads((root / "response.json").read_text()))
-        if (set(receipt(root)) != {"request.json", "response.json", "result.json", *files}
-                or json.loads((root / "result.json").read_text()) != result
-                or any(json.loads((root / name).read_text()) != data for name, data in files.items())):
-            raise ValueError("counterfactual checkpoint derivation drift")
-        return dict(result=result, **files)
-    if type(max_new_calls) is not int or max_new_calls < 1:
-        raise ValueError("explicit one-call budget required")
-    model = parent.OllamaAnchoredAuthorAdapter().preflight()
-    root.mkdir(parents=True)
-    _write(root / "request.json", {**inputs, "model": model})
-    envelope = parent.send("ollama", wire)
-    _write(root / "response.json", envelope)
-    files, result = derive(envelope)
-    for name, value in files.items():
-        _write(root / name, value)
-    _write(root / "result.json", result)
-    _write(root / "receipt.json", receipt(root))
-    return dict(result=result, **files)
+    return author_once(root, inputs, derive, max_new_calls=max_new_calls, label="counterfactual")
 
 
 def main():

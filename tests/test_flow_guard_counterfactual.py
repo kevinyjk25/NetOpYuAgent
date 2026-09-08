@@ -8,6 +8,7 @@ import pytest
 from jsonschema import ValidationError
 
 from evaluation import flow_behavior_probe as parent
+from evaluation import flow_checkpoint as checkpoint
 from evaluation import flow_guard_counterfactual as cf
 from evaluation.flow_guard_binding import slots_for
 from tests.test_flow_guard_binding import access_without_guards
@@ -60,13 +61,13 @@ def test_completed_author_replays_without_a_call_and_failures_never_retry(tmp_pa
     _, sources, tree = access_without_guards()
     answers = {s["id"]: dict(if_false=answer("forbidden"), if_true=answer("possible")) for s in slots_for(sources, tree)}
     sent = []
-    monkeypatch.setattr(parent.OllamaAnchoredAuthorAdapter, "preflight", lambda self: {"model": "qwen3.5:9b"})
+    monkeypatch.setattr(checkpoint.OllamaAnchoredAuthorAdapter, "preflight", lambda self: {"model": "qwen3.5:9b"})
 
     def send(arm, wire):
         sent.append(wire)
         return dict(httpStatus=200, latencyMs=1, body=json.dumps(dict(model="qwen3.5:9b", done=True, done_reason="stop",
             message=dict(content=json.dumps(answers)), prompt_eval_count=2, eval_count=3)))
-    monkeypatch.setattr(parent, "send", send)
+    monkeypatch.setattr(checkpoint, "send", send)
     root = tmp_path / "counterfactual"
     with pytest.raises(ValueError, match="budget"):
         cf.author(sources, tree, root)

@@ -31,26 +31,10 @@
 | 无参/可选参数的只读操作如何编译为未激活 L0 | [只读 L0 合同](L0-READ-CONTRACTS.md) |
 | 公开 Skill 小批缺什么，为什么不能直接套单次读取 | [异质 Skill 边界小批](TRANSLATION-BOUNDARY-PILOT.md) |
 | 条件分支与步骤输出引用如何实际执行，写路径还缺什么 | [最小业务流程](L0-BUSINESS-FLOW.md) |
-| 9B 能否正向生成整个流程，原始失败与辅助修订如何区分 | [整流程正向转译实验](FLOW-FORWARD-TRANSLATION.md) |
-| 固定协议后，顺序/分支/依赖缺失有哪些真实失败 | [C3b 冻结开发小批](FLOW-FROZEN-DEVELOPMENT.md) |
-| 原文引用和编号能否解决语义错误，下一步如何改 | [C3c 源文约束与保真诊断](FLOW-SOURCE-GROUNDING.md) |
-| 如何用层级流程表达代替模型手写节点和连线 | [C3d 层级流程编译](FLOW-TREE-COMPILER.md) |
-| 9B 不看答案能否生成层级流程，失败在哪里 | [C3d 正向小批与原始失败](FLOW-TREE-FORWARD-PILOT.md) |
-| 如何区分格式协议错误与业务转译错误 | [C3e 解码探针与宿主能力收口](FLOW-TREE-PROTOCOL-CANARY.md) |
-| 新版不看答案的转译是否改善，为什么仍被阻断 | [C3f 正向结果与语义缺口](FLOW-BOUNDED-FORWARD.md) |
-| 如何避免遗漏限制和猜节点，映射正确是否代表已经执行 | [C3g 源账本与受限第二步映射](FLOW-SOURCE-CONSTRAINTS.md) |
-| 两次生成如何完整接起来，如何追溯到具体片段及统计全部成本 | [C3h 完整双阶段转译](FLOW-TWO-PASS-TRANSLATION.md) |
-| 精简模型输出后节省多少，哪些语义错误仍存在 | [C3h 精简映射实测](FLOW-LEAN-MAPPING.md) |
-| 如何区分业务前置、权限与校验，定位复合要求遗漏 | [C3h 源要求与保障职责](FLOW-RESPONSIBILITY-MAPPING.md) |
-| 职责类型加入真实 9B 后效果如何，模型和协议各有什么问题 | [C3h 职责映射真实验证](FLOW-RESPONSIBILITY-PILOT.md) |
-| 如何消除节点别名歧义、补齐终态，协议探针证明了什么 | [C3h 统一节点与受约束映射](FLOW-CANONICAL-MAPPING.md) |
-| 统一节点进入完整双阶段后，局部修复是否带来闭环 | [C3h 统一节点完整双阶段验证](FLOW-CANONICAL-PILOT.md) |
-| 转译失败是表达不足、语义错误还是证据遗漏，如何离线定位 | [分层诊断与命令](FLOW-DIAGNOSTICS.md) / [四例可读报告](benchmarks/flow-diagnostics-c3h-report.md) |
-| 每节点必填是否会强迫伪造支持，新一轮结果如何 | [节点证据/反驳、真实验证与方案纠偏](FLOW-NODE-EVIDENCE.md) |
-| 如何分开原文要求与宿主规则，新分层完成到哪里 | [原文义务、绑定接口与四例 9B 实测](FLOW-SOURCE-DUTIES.md) |
-| 参数/必要条件怎样修复，33/33 行为匹配为什么不等于完整语义通过 | [转译行为闭环、必要条件与可行性分离](FLOW-BEHAVIOR-REPAIR.md) |
-| 继续 9B 后实际结果如何，下一步如何调整 | [9B 单模型诊断、成本与阶段职责](FLOW-9B-COMMON-JSON.md) |
-| 后续如何进行 GPT/9B 对照，哪些因素不能混算 | [暂缓的强模型对照设计、运行方式与边界](FLOW-MODEL-COMPARISON.md) |
+| 当前研究代码从哪里看，哪些是历史实验 | [代码导航](../evaluation/README.md) / [实验索引](FLOW-EXPERIMENTS.md) |
+| 参数/必要条件如何修复，33/33 为什么不等于泛化 | [转译行为闭环](FLOW-BEHAVIOR-REPAIR.md) |
+| 转译失败如何定位 | [分层诊断](FLOW-DIAGNOSTICS.md) / [四例可读报告](benchmarks/flow-diagnostics-c3h-report.md) |
+| 本次清理改了什么，历史证据怎样回放 | [收敛与复验](FLOW-CONSOLIDATION.md) / [阶段历史](PROJECT-HISTORY.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -109,7 +93,7 @@
 
 - `README.md` 只维护项目设计、能力、优势、性能、场景和入口，不记录完整阶段历史。
 - `SKILL-SYSTEM-INTERACTION.md` 是 Skill 层级、authoring/执行双生命周期、用户可见结果和解释路径的统一说明；其他设计文档引用而不另造口径。
-- `docs/PROJECT-STATUS.md` 是 Done、To-do 和阶段边界的唯一汇总来源。
+- `docs/PROJECT-STATUS.md` 是当前 Done、To-do 和阶段边界的唯一汇总；完整阶段记录移入 `PROJECT-HISTORY.md`，历史下一步不覆盖当前计划。
 - `ARCHITECTURE.md`、`HLD.md`、`LLD.md`、`SSD.md` 分别拥有架构、组件、实现和安全设计事实；同一细节不在 README 重复展开。
 - 自动生成的评测报告只由对应命令刷新，不能手工把固定集结果改写成生产概率。
 - `artifacts/` 是运行证据和本地报告，不是源码设计文档；`data/` 中的基线与测试数据不能作为清理临时文件处理。
@@ -119,41 +103,7 @@
 
 ## English
 
-[Translation behavior repair](FLOW-BEHAVIOR-REPAIR.md) is the current diagnosis/repair entry. Necessary-guard inference now separates forbidden counterfactuals from positive-path feasibility: the fixed candidate batch matches 33/33 inert scenarios after explicit postprocessing, while positive unknowns and full-source review remain open. First-pass, assisted results and costs remain separate; no complete-Skill/generalization or default Runtime admission claim is made.
-
-[Source duties and host binding](FLOW-SOURCE-DUTIES.md) documents implemented source-only extraction, review and graph-binding interfaces, the initial four-case probe, and the subsequent six-case explicit-relation negative result. Free-text relations are not adopted as the default upgrade: regression/new-development source support is 0/4 and 0/2, with new scope/predecessor defects. Next investigate source-bound relation evidence; there is no fresh whole-chain model result.
-
-[9B-only diagnostics](FLOW-9B-COMMON-JSON.md) record twelve completed calls, separate fixed-tree/end-to-end results, first-stage source reviews and costs. Both modes compile 0/4 mappings; common JSON is not adopted as a quality improvement. Next separate source duties from host binding while retaining constrained schemas. The [GPT/9B comparison design](FLOW-MODEL-COMPARISON.md) remains available but GPT is deferred by user choice, not a blocker for current work.
-
-[Node evidence and residual source duties](FLOW-NODE-EVIDENCE.md) preserves explicit disagreement rather than forcing positive support. The fresh paired batch compiles 1/4 mappings but accepts none after applicable source review; it motivates source-first duty extraction separate from host guarantees.
-
-[Layered translation diagnostics](FLOW-DIAGNOSTICS.md) explains aggregate mechanical checks, first-pass/complete source reviews, L0 projection comparison and separate assisted witnesses. The [four-case report](benchmarks/flow-diagnostics-c3h-report.md) links missing evidence to source and L0.5/L0 locations without rescoring the frozen batch or claiming semantic accuracy.
-
-[Canonical-node fresh paired validation](FLOW-CANONICAL-PILOT.md) separates local Schema gains from still-unqualified complete mappings, with objective/node-coverage diagnostics and failure-inclusive costs.
-
-[Canonical nodes and constrained mapping](FLOW-CANONICAL-MAPPING.md) repairs Schema compatibility and terminal representation, with three real 9B decoder probes distinguished from whole-Skill validation.
-
-[Real responsibility-mapping validation](FLOW-RESPONSIBILITY-PILOT.md) records the fresh 9B negative result, protocol/model failures, cost changes and unchanged evidence boundaries.
-
-[Source requirements and guarantee responsibilities](FLOW-RESPONSIBILITY-MAPPING.md) explains atomic source quotes, necessary type/target compatibility, complete semantic review, offline usage and the still-unmeasured model benefit.
-
-[C3h lean mapping results](FLOW-LEAN-MAPPING.md) separate output savings from increased input burden, preserve complete semantic failures, and explain compiler-owned anchors without removing review obligations.
-
-[C3h fresh two-pass translation](FLOW-TWO-PASS-TRANSLATION.md) connects source-to-flow and exact-offset clause mapping, with per-phase checkpoints, multi-source review and costs that include failures. This is not a product activation or generalization claim.
-
-[C3g source ledgers and restricted mapping](FLOW-SOURCE-CONSTRAINTS.md) separate retention, mapping and enforcement; preserve three frozen 9B batches, semantic failures and auxiliary costs; and explain why qualified metadata or faithful missing-capability stops remain blocked.
-
-[C3f answer-free forward results](FLOW-BOUNDED-FORWARD.md) distinguish observed structural gains on four known flows from still-incomplete restriction/citation fidelity; no Runtime execution or generalization claim.
-
-[C3e protocol canaries](FLOW-TREE-PROTOCOL-CANARY.md) distinguish explicit-answer constructor checks from source translation and explain host-derived generation constraints. New answer-free validation remains pending.
-
-[C3d forward 9B pilot](FLOW-TREE-FORWARD-PILOT.md) preserves all four first attempts, qualification failures, costs and the next protocol-compatibility checks. Zero qualified flows is not a Runtime performance result.
-
-[C3d hierarchical flow compilation](FLOW-TREE-COMPILER.md) covers tree syntax, compiler-owned wiring, lexical reference limits and offline read-Runtime verification.
-
-[C3c source-grounding diagnostics](FLOW-SOURCE-GROUNDING.md) explain source IDs, dependency/polarity review, actual 9B failures and the remaining quality gap.
-
-For the eight known development flows, frozen input/protocol boundaries and preserved 9B failures, see [C3b frozen flow development](FLOW-FROZEN-DEVELOPMENT.md). These are not public-Skill generalization results.
+Current research navigation: [code map](../evaluation/README.md), [behavior repair and evidence limits](FLOW-BEHAVIOR-REPAIR.md), [consolidation/replay](FLOW-CONSOLIDATION.md). Superseded experiments and next steps are collected in the [experiment index](FLOW-EXPERIMENTS.md) and [project history](PROJECT-HISTORY.md), not active instructions.
 
 ### Reading path
 

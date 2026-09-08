@@ -14,20 +14,16 @@ from pathlib import Path
 from evaluation import flow_behavior as behavior
 from evaluation.flow_behavior_examples import cases
 from evaluation.flow_model_transport import decode, send
-from evaluation.flow_source_duty_pilot import environment, implementation as parent_implementation
+from evaluation.flow_checkpoint import environment, implementation as shared_implementation
+from evaluation.flow_checkpoint import replay as replay_checkpoint
 from evaluation.flow_translation import FlowSources, _write
 from evaluation.flow_tree import FlowTree
-from evaluation.flow_tree_authoring import ROOT, digest_file, receipt, verify_receipt
+from evaluation.flow_tree_authoring import receipt
 from evaluation.translation_case_authoring import OllamaAnchoredAuthorAdapter
 
 
 def implementation():
-    paths = set(parent_implementation()) | {
-        "evaluation/flow_behavior.py", "evaluation/flow_behavior_examples.py", "evaluation/flow_behavior_probe.py",
-        "evaluation/flow_model_transport.py", "network_runtime/l0/read_execution.py",
-        "network_runtime/l0/read_contracts.py", "network_runtime/access.py", "network_runtime/capabilities.py",
-    }
-    return {p: digest_file(ROOT / p) for p in sorted(paths)}
+    return shared_implementation("evaluation/flow_behavior_examples.py", "evaluation/flow_behavior_probe.py")
 
 
 def evaluate(case, raw):
@@ -88,15 +84,8 @@ def derive(case, envelope):
 
 
 def replay(folder, case, model):
-    verify_receipt(folder)
-    if json.loads((folder / "request.json").read_text()) != dict(wireRequest=case["request"], model=model):
-        raise ValueError("actual request/model drift")
-    files, result = derive(case, json.loads((folder / "response.json").read_text()))
-    if (set(receipt(folder)) != {"request.json", "response.json", "result.json", *files}
-            or json.loads((folder / "result.json").read_text()) != result
-            or any(json.loads((folder / name).read_text()) != data for name, data in files.items())):
-        raise ValueError("checkpoint derivation drift")
-    return files, result
+    return replay_checkpoint(folder, dict(wireRequest=case["request"], model=model),
+        lambda envelope: derive(case, envelope), label="behavior")
 
 
 def run(root, max_new_calls):

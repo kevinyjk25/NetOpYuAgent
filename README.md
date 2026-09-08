@@ -28,45 +28,17 @@ flowchart TB
 
 ### 当前研究门禁
 
-2026-09-07：正在推进[转译纠偏与闭环](docs/TRANSLATION-CORRECTION-PLAN.md)。已移除转译输入中的评测元数据，强化字段归属/冲突绑定，并支持无参、可选参数和缺参任务“不适用”；不再自动补造验证/回滚工具。这是基础修正，不是新的泛化成绩，完整 Skill 合同编译闭环仍在建设。
+**当前：转译原型清理收敛，提交后等待合入。** 默认 DSH/Runtime 执行路径不变，新转译研究模块仍只产生未激活候选。阶段与待办见[项目进展](docs/PROJECT-STATUS.md)，当前接口见[转译代码导航](evaluation/README.md)。
 
-B1 已提供[合同优先任务构造接口与本地样例](docs/CONTRACT-FIRST-TASKS.md)：先审查源工具 Schema，再由代码确定适用槽位，9B 只写请求文本。其输出仍须语义审查，不自动成为 Gold 或 L0。
+| 本轮转译证据 | 结果 | 能说明什么 |
+|---|---|---|
+| 首次生成 | 4/6 案例、29/33 场景 | 已知开发样例的原始结果 |
+| 显式修复后 | 6/6 案例、33/33 场景 | 23 个执行片段场景 + 10 个正确停止场景匹配 |
+| 完整源语义 / 未见 Skill 泛化 | 尚未证明 | 必要条件不等于充分性，正向 unknown 保留 |
 
-B2 已闭合单操作辅助读取；C 已盘点 12 个公开 Skill，尚未运行转译，不能计为准确率。环境依赖、整流程缺口与下一步范围见[异质 Skill 小批报告](docs/TRANSLATION-BOUNDARY-PILOT.md)。
+以上来自同一开发助手构造的有限 Oracle，不是新一轮端到端生成、独立 Gold 或生产成功概率。[行为修复报告](docs/FLOW-BEHAVIOR-REPAIR.md)保留原始失败、推导与成本；[实验索引](docs/FLOW-EXPERIMENTS.md)统一收录历史路线，不把每轮“下一步”放进 README。
 
-[最小业务流程 C1/C2](docs/L0-BUSINESS-FLOW.md)已接通只读条件/数据依赖，以及分支证据绑定、写前重读和原单写事务验证/补偿；本地接线使用 mock 写入，公开 Skill 整流程泛化仍待验证。
-
-[C3 首次正向实验](docs/FLOW-FORWARD-TRANSLATION.md)已跑真实 9B：前两次结构阻断，第三次结构通过但语义审查阻断；两处有源说明文字修订后才完成本地读取。辅助闭环已接通，无辅助稳定性和公开 Skill 泛化尚未证明。
-
-[C3b 冻结协议开发批次](docs/FLOW-FROZEN-DEVELOPMENT.md)扩充至 8 个已知流程，检查顺序、分支、引用、缺失依赖与不支持操作；逐项原始结果留存，不把结构通过或安全停止算成业务成功。
-
-[C3c 源文约束诊断](docs/FLOW-SOURCE-GROUNDING.md)已补充逐步引用和依赖审查；两种协议的真实 9B 结果表明，引用可追溯仍不能解决分支极性与业务事实混用，转译质量门禁尚未通过。
-
-[C3g 源约束与受限映射](docs/FLOW-SOURCE-CONSTRAINTS.md)已将原文保留、语义映射和执行保障分开：先固定 9B 流程，再由模型在编译器提供的真实节点上补映射，不能改业务操作。4 个已知流程的第二步均结构合格；2 项仍有语义问题，2 项忠实表达缺能力停止，全部仍 blocked。这是映射协议修复，不是端到端转译成功或泛化准确率；首次失败、辅助成本及定位均可查。
-
-[C3h 首轮完整双阶段验证](docs/FLOW-TWO-PASS-TRANSLATION.md)已重新从源文运行 8 次 9B 调用：4/4 流程结构合格、2/4 片段映射结构合格，完整语义审查仍未接收任何流程。细粒度引用暴露了重复映射、检查语义混用及高生成成本（总 POST 932.05 秒）。链路已实现，但可用性提升尚未证明；继续精简 C3h，不进入公开 Skill 扩展或大规模 Runtime 评测。
-
-[C3h 精简版实测](docs/FLOW-LEAN-MAPPING.md)：编译器接管锚点与解释后，第二步输出减少 73.6%，但输入增加 29.0%；完整两步总 token 仅减少 4.0%。新批映射结构合格 3/4，语义审查仍全阻断。生成负担有所下降，规则职责与完整源要求匹配仍是主要缺口；不把成本改善当作转译泛化成功。
-
-[C3h 职责映射真实验证](docs/FLOW-RESPONSIBILITY-PILOT.md)：8 次新 9B 调用，流程 4/4 合格、映射 0/4 合格，未证明可用性提升。发现类型/标签不匹配、条件引用遗漏、过度 unresolved，以及协议自身缺少 needs_l1 终态表示；先修协议表达，不扩大 Runtime 评测。两步总 token 减少 32.6%，不能抵消质量门禁未通过。
-
-随后完成[统一节点与受约束 Schema 修复](docs/FLOW-CANONICAL-MAPPING.md)。[新版完整双阶段结果](docs/FLOW-CANONICAL-PILOT.md)仍为映射 0/4：非法类型/目标组合已消除，needs_l1 能实际映射，但目的冲突和节点来源遗漏未解决。下一步减少第二步重复推断，以节点必填证据组织映射；不以探针或局部 Schema 合规宣称完整转译成功。
-
-2026-09-08 新增[分层诊断与使用说明](docs/FLOW-DIAGNOSTICS.md)，可直接查看[四例诊断视图](docs/benchmarks/flow-diagnostics-c3h-report.md)：区分流程表达、源文审阅、分类/映射、L0 一致性与宿主缺能力，关联原文和 L0.5/L0 位置。原始映射仍为 0/4；本轮改善定位能力，不伪造语义准确率或新增模型成绩。
-
-随后实现[每节点证据/反驳与剩余要求](docs/FLOW-NODE-EVIDENCE.md)，新的 9B 双阶段批次映射编译 **1/4**，但完整语义审阅仍无接受项。条件引用补齐了，原文义务与宿主保障混淆仍在；不以填满节点或增加拒绝宣称准确性提升。
-
-**最新进展：[必要条件推导修复](docs/FLOW-BEHAVIOR-REPAIR.md)闭合了当前开发样例的行为反例。** 一次新 9B 反事实判断后，代码将“执行必须满足什么”与“满足后是否允许执行”分开，补齐 `current` 等必要条件。同一批原始候选经显式后处理，**6/6 有限用例、33/33 内存场景匹配**；首次生成仍是 4/6、29/33，历史失败不改分。这不是新一轮端到端或泛化成绩，正向路径的未知仍保留，结果未激活。默认 DSH/Runtime 与源审查、权限门禁未切换，完整 Skill 语义证明仍待完成。
-
-项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
-
-当前静态开发库包含 100 个公开 Skill、72 个仓库、9 个领域：53 个 Runtime 包门禁通过，18 个是标准格式但引用上下文不完整的“仅转译”样本，29 个非标准格式只用于鲁棒性测试。主要转译语料为 71 个 Skill/7 个开发批次；它们已经可见，所以不冒充 unseen 证明。只有冻结 Translator 后，在至少 3 个互不重叠的未知 cohort 上累计达到 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case，并同时通过安全、召回、macro-F1、参数和证据门槛，才允许大规模 Runtime A/B。完整口径、命令和指标见 [L1→L0 泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)。
-
-新的[转译用例构造链](docs/TRANSLATION-CASE-AUTHORING.md)已覆盖 71 个主要已知开发 Skill，但这只是测试候选构造，不是完整 Skill 转译。2026-09-04 审计发现旧复核暴露类别 ID 与固定组序，历史 48/48 因而降级为有提示风险的开发诊断。新版使用匿名单任务审阅，并停止自动补齐参数；构造检查 v3 在 16 个旧已接受 Skill 中拦下 7 个问题夹具。**机械通过不代表语义正确**：自然语言冲突和源 API/步骤保真仍需独立审查，Runtime 继续锁定。细节见[构造质量及限制](docs/TRANSLATION-CONSTRUCT-QUALITY.md)；历史数字保留在[实现摘要](docs/benchmarks/translation-authoring-development-06-07-summary.json)。
-
-参数、类型、必填性及验证/回滚步骤现在可以逐项追溯源文；方法、真实失败案例及剩余设计限制见[源证据对齐审查](docs/TRANSLATION-SOURCE-ALIGNMENT.md)。
-
-匿名化后，同一 4-Skill/12-task 开发批次的行为一致为 7/12、构造对齐为 10/12，暂不具备 Gold 排队资格；自报高置信度也未揭示全部矛盾。这是评测方法诊断，不是 Translator 准确率。见[纠偏结果](docs/benchmarks/translation-review-blinding-v2-summary.json)。
+项目的证据顺序是 **L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测**。当前 100 个公开 Skill / 72 仓库 / 9 领域属于已知开发库，不是未见集；小批新验证及后续 ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 的完整门禁见[泛化要求](docs/TRANSLATION-GENERALIZATION-GATE.md)。未通过前不扩大 Runtime A/B。
 
 ### Skill 与系统怎样交互
 
@@ -267,43 +239,7 @@ The [authoritative prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes
 
 ### Design
 
-The [translation correction plan](docs/TRANSLATION-CORRECTION-PLAN.md), updated 2026-09-07, removes scoring metadata from translator inputs, enforces named parameter ownership/conflict checks, supports zero/optional inputs and explicit not-applicable slots, and stops synthesizing transaction tools. These are foundational corrections, not new generalization results; whole-Skill contract compilation remains in progress.
-
-B1 adds a [contract-first task-authoring interface and local example](docs/CONTRACT-FIRST-TASKS.md): source Schema review precedes deterministic applicability; 9B writes only task prose. Outputs still require semantic review and are not Gold or L0.
-
-B2 closes one assisted read; C has completed intake for 12 public Skills, not translation or accuracy measurement. See the [heterogeneous Skill pilot](docs/TRANSLATION-BOUNDARY-PILOT.md) for environment dependencies, whole-flow gaps and proposed next scope.
-
-[Business-flow C1/C2](docs/L0-BUSINESS-FLOW.md) runs read branches/data references, plan-bound evidence, pre-write rereads and the original single-Effect verification/recovery path. Local writes are mock; public whole-Skill generalization remains open.
-
-The [first C3 forward experiment](docs/FLOW-FORWARD-TRANSLATION.md) used real 9B calls: two structural rejections, then a structurally valid but semantically blocked answer. Two source-backed text edits and fresh review enabled local reads. Assisted closure is demonstrated; unaided reliability and public-Skill generalization are not.
-
-The [C3b frozen development batch](docs/FLOW-FROZEN-DEVELOPMENT.md) adds eight known flows covering sequence, branching, references and unavailable/unsupported steps. Original results are preserved; structural qualification and safe stops are not business success.
-
-[C3c source-grounding diagnostics](docs/FLOW-SOURCE-GROUNDING.md) add step citations and dependency review. Real 9B results still expose branch and business-fact errors: traceability alone has not met the translation quality gate.
-
-[C3g source ledgers and restricted mapping](docs/FLOW-SOURCE-CONSTRAINTS.md) separate text retention, semantic mapping and enforcement. A second 9B pass maps immutable prior proposals onto compiler-enumerated nodes without changing business operations. All four known-flow mappings qualify structurally; two retain semantic gaps and two faithfully describe missing-capability stops. All remain blocked. This is a mapping-protocol repair, not end-to-end success or generalization accuracy; preserved failures, auxiliary costs and precise findings are linked.
-
-[First C3h fresh two-pass validation](docs/FLOW-TWO-PASS-TRANSLATION.md) made eight real 9B calls: 4/4 flows and 2/4 clause mappings qualified structurally, but none passed complete semantic acceptance. Duplicate mappings, conflated checks and high generation cost (932.05 s total POST) remain. The chain is implemented; usability improvement is unproven. C3h simplification precedes public whole-Skill expansion or large Runtime evaluation.
-
-[C3h lean results](docs/FLOW-LEAN-MAPPING.md): compiler-owned anchors/explanations reduced mapping output by 73.6%, but input increased 29.0%; whole-chain total tokens fell only 4.0%. Mapping qualification was 3/4 and semantic acceptance remained blocked. Generation burden improved; requirement-to-guarantee matching remains open. Cost changes do not establish translation generalization.
-
-[C3h real responsibility-mapping validation](docs/FLOW-RESPONSIBILITY-PILOT.md): eight fresh 9B calls yielded 4/4 qualified flows but 0/4 qualified mappings, no demonstrated usability gain. Type/alias mismatch, missing condition citations, excessive unresolved selection and the protocol's missing needs_l1 representation require correction before larger Runtime evaluation. Total tokens fell 32.6%, which does not offset the unmet quality gate.
-
-The subsequent [canonical-node/constrained-Schema repair](docs/FLOW-CANONICAL-MAPPING.md) passed terminal probes. Its [fresh paired result](docs/FLOW-CANONICAL-PILOT.md) still qualified 0/4 mappings: illegal type/target pairs disappeared and needs_l1 mapped, but objective conflicts and missing node evidence remain. Next reduce repeated second-pass inference with mandatory node evidence; local Schema compliance is not complete translation success.
-
-2026-09-08: [layered offline diagnostics](docs/FLOW-DIAGNOSTICS.md) and the [four-case readable report](docs/benchmarks/flow-diagnostics-c3h-report.md) distinguish representation, source review, mapping, L0 consistency and declared host gaps with source/L0.5/L0 pointers. The original mapping result remains 0/4. This improves fault localization, not semantic accuracy or model performance.
-
-The subsequent [mandatory node evidence/disagreement protocol](docs/FLOW-NODE-EVIDENCE.md) compiled **1/4** mappings in a fresh 9B paired batch, but no candidate passed complete semantic review. Condition evidence improved; source-duty/host-guarantee confusion remains. Full slots or more refusals are not semantic accuracy gains.
-
-**Latest: [necessary-guard inference repair](docs/FLOW-BEHAVIOR-REPAIR.md) closes the current development behavior counterexamples.** One fresh 9B counterfactual call separates necessary guards from positive-path feasibility. Explicit postprocessing of the same archived candidates matches **6/6 finite cases and 33/33 inert scenarios**; first-pass results remain 4/6 and 29/33, with historical failures preserved. This is not a fresh end-to-end or generalization result. Positive-path unknowns remain, candidates are inactive, and default DSH/Runtime, full-source review and authority gates are unchanged. Complete Skill semantics remain unproven.
-
-The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
-
-The case-authoring lane covers 71 known-development Skills, not whole-Skill translation. Legacy 48/48 review results are downgraded due to category-bearing IDs and fixed group order. Revised reviews use opaque single-task inputs; author normalization no longer fills missing parameters. Construct checks v3 blocked seven of 16 previously accepted fixtures. Mechanical passes do not prove semantic correctness: prose conflicts and source API/step fidelity still need review before isolated references and gold-blind Translator evaluation. Runtime remains locked. See [construct quality and limits](docs/TRANSLATION-CONSTRUCT-QUALITY.md).
-
-Parameters, types, requiredness and verification/compensation steps now have per-claim source-citation review. See [source evidence alignment](docs/TRANSLATION-SOURCE-ALIGNMENT.md) for the method, real failed probe and remaining author-format limitations.
-
-On the same four-Skill/twelve-task development inputs, the revised review reached 7/12 behavior agreement and 10/12 construct alignment; Gold-queue eligibility is false despite high self-reported confidence. This is a methodology diagnostic, not Translator accuracy. See the [correction results](docs/benchmarks/translation-review-blinding-v2-summary.json).
+Separate probabilistic reasoning from deterministic execution: the LLM proposes what to attempt, while the Runtime decides what is allowed. No evidence means no action.
 
 | Layer | Authority | Boundary |
 |---|---|---|
@@ -322,7 +258,11 @@ The Runtime mechanism and wiring prototype is complete, but the core project hyp
 
 ### Active research gate
 
-The enforced evidence order is now `L1-to-L0 generalization → deterministic L0 validation → Runtime evaluation`. The known development inventory contains 100 public Skills from 72 repositories and nine domains: 53 pass the strict Runtime package gate, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only. The 71 primary Skills form seven development batches and are not unseen evidence. Large Runtime A/B work remains locked until one frozen Translator passes at least three disjoint post-freeze cohorts totaling at least 50 Skills, 15 repositories, eight domains, and 600 cases, including strict safety, recall, macro-F1, exact-parameter, evidence, and construct-alignment gates. See the [L1-to-L0 generalization gate](docs/TRANSLATION-GENERALIZATION-GATE.md).
+**Current: consolidate the translation prototype, commit, then wait for merge.** The default DSH/Runtime path is unchanged; research authoring produces inactive candidates. See [current status](docs/PROJECT-STATUS.md) and the [code map](evaluation/README.md).
+
+First-pass remains **4/6 cases and 29/33 scenarios**. Explicit postprocessing matches **6/6 and 33/33**: 23 executable-fragment scenarios and 10 safe stops. These are known examples with development-assistant reference answers, not a fresh end-to-end batch or independent Gold. Full-source semantics/generalization remain unproven; positive unknowns are retained. [Repair evidence](docs/FLOW-BEHAVIOR-REPAIR.md) and the [historical experiment index](docs/FLOW-EXPERIMENTS.md) retain failures and costs.
+
+Evidence order remains **L1-to-L0 generalization → L0 validation → Runtime evaluation**. The existing 100 public Skills from 72 repositories/nine domains are known development data. Large Runtime A/B remains gated by at least three disjoint unseen cohorts totaling 50 Skills, 15 repositories, eight domains and 600 cases, including the unchanged [quality thresholds](docs/TRANSLATION-GENERALIZATION-GATE.md).
 
 ### Capabilities and evidence
 

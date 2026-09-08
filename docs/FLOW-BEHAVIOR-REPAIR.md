@@ -2,6 +2,8 @@
 
 ## 中文
 
+> 本文保留各轮实验事实及当时的验证数字；“本轮/下一阶段/未提交”是实验发生时的记录。当前入口见[代码导航](../evaluation/README.md)，实际推进状态见[项目进展](PROJECT-STATUS.md)。旧检查点须以清理前快照 `c2ebd78` 回放，不能用新实现改写旧 manifest；见[收敛说明](FLOW-CONSOLIDATION.md)。
+
 ### 修复目标与实际边界
 
 本轮停止把“新增 Schema 字段、引用清单、拒绝测试”当成转译提升。改用原有 `FlowTree → FlowProposal → run_read_flow`：先证明人工参考表示在该执行结构中可行，再让模型从完整原文和宿主合同独立生成，最后检查真实执行器的内存调用轨迹。没有新增执行器，也没有扩大写权限。
@@ -210,6 +212,8 @@ result = check_behavior(sources, tree, suite) # 模型输出 + 私有行为用�
 新增 23 项回归覆盖全部九种正反判断组合、负向必要条件、未知保留、矛盾停止、原始行为检验与零调用重放。全量 **1692 tests + 81 subtests 通过（209.41 秒）**；定向 Ruff 与 diff 检查通过。它们验证实现，不等于模型准确率。未提交/推送 Git。
 
 ## English
+
+This document preserves historical experiments and their then-current test counts/next steps. Use the [code map](../evaluation/README.md) and [project status](PROJECT-STATUS.md) for active work. Replay old checkpoints with snapshot `c2ebd78`, never by changing old manifests; see [consolidation guidance](FLOW-CONSOLIDATION.md).
 
 This repair separates executable behavior from explanatory annotations, representation failures and missing host capabilities. It reuses the existing FlowTree compiler and real read-flow executor, with inert in-memory providers only. The translator receives source text and host contracts, never the manual reference graph, observations or expected answers. No new executable IR, script runner or activation permission is introduced.
 
