@@ -7,6 +7,13 @@
 | 模块 | 职责与边界 |
 |---|---|
 | [netdata_fixture](netdata_fixture.py) / [netdata_task_demo](netdata_task_demo.py) | 一个合成进程内 Function 宿主，经原读取网关执行 info/query；解码与页级计数在工具外进行，不是 9B 转译或真实 Netdata。见[演示和边界](../docs/NETDATA-ISOLATED-VALIDATION.md) |
+| [structured_authoring](structured_authoring.py) | 冻结原源包/任务/宿主和显式 9B 预算，按需请求原文页，再进入现有 Tree 编译；不执行候选，首轮上下文停止保留。见[真实首次结果](../docs/PROGRESSIVE-STRUCTURED-AUTHORING.md) |
+| [source_ledger](source_ledger.py) / [source_blocks](source_blocks.py) | 当前窗口 + 来源锚定 notes + 原文块 ID + 精确区间并集；保留历史失败，不将引用存在/编译通过计作语义成功。[范围和验证](../docs/SOURCE-LEDGER-AUTHORING.md) |
+| [source_retrieval](source_retrieval.py) / [source_host_binding](source_host_binding.py) | 区分文本交付和语义审核，联合回读决策；显式宿主映射与现有执行前提。没有新权限路径。[新 9B 失败与边界](../docs/SOURCE-DECISION-AUTHORING.md) |
+| [source_obligations](source_obligations.py) / [source_gap_search](source_gap_search.py) / [source_candidate_schema](source_candidate_schema.py) | 可选的源义务阶段审阅、本地字面缺口检索、生成前表达式语法。CLI/API 默认 direct，审阅未证明收益。[C3t 历史结果与诊断](../docs/SOURCE-OBLIGATION-AUTHORING.md)；新构造路径见下行。 |
+| [source_catalog](source_catalog.py) | 可选 catalog_bound：宿主类型引导、参数值出处、代码分配别名、独立问题定位。已知源的参数形状错误消除，但流程/来源/操作模式仍阻塞。[当前 9B 对照与边界](../docs/CATALOG-DIRECTED-AUTHORING.md) |
+| [source_modes](source_modes.py) | 可选 mode_bound：摘要绑定的互斥对象键合同、模式引导逐叶构造、动态形状阻断和源块行动轨迹。参数模式已修复，整 Skill 仍失败。[两次 9B 结果与边界](../docs/HOST-OPERATION-MODES.md) |
+| [source_plan](source_plan.py) | 可选 plan_first：冻结骨架、逐槽填参及来源检查、词法来源导航、不可达冗余终止规范化，复用原编译器。真实 9B 合成局部流程跑通，公开源仍失败。[全部实验与边界](../docs/PLAN-FIRST-AUTHORING.md) |
 | [public_skill_corpus](public_skill_corpus.py) / [translation_corpus](translation_corpus.py) | 多查询合并、固定抽样、显式暴露仓库排除、脚本隔离文本、原文索引及保留全部失败的 sample-report；入库不等于转译通过。见[新批次结果与源文诊断](../docs/PUBLIC-TRANSLATION-BATCH.md) |
 | [translation_intake](translation_intake.py) | 转译前的无损原文/分页、显式同 commit 引用补取、原始宿主 Schema 及 JSON Pointer 诊断；不做跨页语义编译，不给旧 L0 增加执行权限。见[用法和边界](../docs/TRANSLATION-INTAKE.md) |
 | [task_alignment](task_alignment.py) | 完整保留原始分页，核对任务引用/已读区间/义务与宿主需求；审阅档案与未来模型输入分离，不是自动语义准入。见[四份实际材料](../docs/TASK-SOURCE-ALIGNMENT.md) |
@@ -64,6 +71,10 @@
 ## English
 
 `netdata_fixture` provides one synthetic in-process Function-call primitive. `netdata_task_demo` uses the original read gateway, bounded column binding and explicit page/domain/egress checks. It is developer wiring, not model translation or live Netdata; see [scope and reproduction](../docs/NETDATA-ISOLATED-VALIDATION.md).
+
+`structured_authoring` adds frozen, explicitly budgeted 9B source-page requests and candidate lowering through the existing structured Tree compiler. No candidate or provider executes; the first two-call context stop is preserved in the [authoring report](../docs/PROGRESSIVE-STRUCTURED-AUTHORING.md). This is known-source development, not a semantic accuracy or independent holdout score.
+
+`source_ledger`/`source_blocks` retain exact windows and citations; `source_retrieval`/`source_host_binding` separate delivery, review, declarations and authority. Optional obligation inspection, literal retrieval, catalog-directed shapes and host modes remain available; default is `direct`. `source_plan` now freezes the graph before per-slot arguments, exposes lexical sources, checks origins early and records semantics-preserving dead-terminal removal. A real 9B synthetic region compiles and passes ten local execution checks; public-source semantics remain open. See [current plan-first results](../docs/PLAN-FIRST-AUTHORING.md), [host modes](../docs/HOST-OPERATION-MODES.md), [catalog construction](../docs/CATALOG-DIRECTED-AUTHORING.md), [task alignment](../docs/SOURCE-OBLIGATION-AUTHORING.md), [boundaries](../docs/SOURCE-DECISION-AUTHORING.md) and [source windows](../docs/SOURCE-LEDGER-AUTHORING.md). These are not whole-Skill accuracy scores.
 
 `task_alignment` prepares bound task/source/host dossiers while keeping the original source pages and future model inputs separate from developer review decisions. It records missing host schemas, source tensions and unsupported semantics without certifying acceptance. See [four concrete source cases](../docs/TASK-SOURCE-ALIGNMENT.md).
 

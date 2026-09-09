@@ -40,6 +40,13 @@
 | 结构化参数如何接入共享执行器，分支、权限和时效如何保留 | [结构化流程接线与本地演示](STRUCTURED-FLOW-WIRING.md) |
 | 公开 Skill 的任务范围、源冲突、未决义务和宿主缺口在哪里 | [任务、源义务与宿主对齐](TASK-SOURCE-ALIGNMENT.md) |
 | Netdata 本地宿主怎样调用，动态列、部分结果和隐私如何处理 | [隔离宿主与列解码](NETDATA-ISOLATED-VALIDATION.md) |
+| 9B 如何按需读取引用页、生成结构化候选；首轮为何停止 | [渐进源文读取与首次结果](PROGRESSIVE-STRUCTURED-AUTHORING.md) |
+| 长 Skill 如何切换窗口、不抄写引文、复用重叠原文 | [源文依赖记录与块引用](SOURCE-LEDGER-AUTHORING.md) |
+| 原文已获取为何不等于审核通过，宿主如何映射，缺凭据为何不等于不能离线构造 | [检索、构造与执行边界及新 9B 失败](SOURCE-DECISION-AUTHORING.md) |
+| 当前为何还转译不准，前置审阅是否有益，参数和别名哪里出错 | [源义务、候选生成与逐参数失败定位](SOURCE-OBLIGATION-AUTHORING.md) |
+| 新的参数约束是否有效，为何 Schema 合格仍不能执行 | [宿主 Schema 引导构造、出处与操作模式缺口](CATALOG-DIRECTED-AUTHORING.md) |
+| 操作模式缺口怎样补齐，为什么参数合法后转译仍失败 | [宿主模式、行动来源与两次真实 9B 结果](HOST-OPERATION-MODES.md) |
+| 真实模型能否生成并运行流程，为什么公开 Skill 仍失败 | [先规划后填参、全部实验与局部执行边界](PLAN-FIRST-AUTHORING.md) |
 | 转译失败如何定位 | [分层诊断](FLOW-DIAGNOSTICS.md) / [四例可读报告](benchmarks/flow-diagnostics-c3h-report.md) |
 | 本次清理改了什么，历史证据怎样回放 | [收敛与复验](FLOW-CONSOLIDATION.md) / [阶段历史](PROJECT-HISTORY.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
@@ -110,7 +117,7 @@
 
 ## English
 
-Current network-data work: [isolated Netdata-shaped host, bounded column projection and page-only result boundaries](NETDATA-ISOLATED-VALIDATION.md); not model-generated whole-Skill translation.
+Current authoring: [plan-first generation, all real-model attempts and synthetic execution](PLAN-FIRST-AUTHORING.md). A real 9B-generated read region passes 10 local path checks; public-source semantic translation remains blocked. [Host modes](HOST-OPERATION-MODES.md), [catalog-directed construction](CATALOG-DIRECTED-AUTHORING.md), [source obligations/task alignment](SOURCE-OBLIGATION-AUTHORING.md), [retrieval/host boundaries](SOURCE-DECISION-AUTHORING.md), [source-window results](SOURCE-LEDGER-AUTHORING.md) and the [earlier report](PROGRESSIVE-STRUCTURED-AUTHORING.md) remain historical evidence. The [isolated Netdata host](NETDATA-ISOLATED-VALIDATION.md) remains developer wiring, not model-generated whole-Skill translation.
 
 Current public-source stage: [53 acquired Skills, all 60 candidate outcomes, source/host diagnosis and next steps](PUBLIC-TRANSLATION-BATCH.md). Acquisition is not semantic success.
 

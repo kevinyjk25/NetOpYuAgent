@@ -28,7 +28,7 @@ flowchart TB
 
 ### 当前研究门禁
 
-**当前：通用动态列解码和 Netdata 隔离宿主已接通，完整模型转译仍待验证。** 新公开库保存 **53 个 Skill／38 个仓库**，不是 53 个转译成功。[本地 Netdata 演示](docs/NETDATA-ISOLATED-VALIDATION.md)通过原读取网关完成 info/query，输出 3 条合成记录的本页枚举计数；不声称全窗口完整、运行原厂服务或模型自动编译。四份[任务/源义务档案](docs/TASK-SOURCE-ALIGNMENT.md)保留未决问题。本轮无新 9B 成绩或默认 DSH 路由变更；下面是最近一次转译实测。
+**当前：真实 9B 已跑通“计划 → 独立填参 → 原编译器 → 合成宿主”的局部机制链；公开 Skill 语义转译仍未通过。** 生成的条件读取流程在 10/10 个本地路径检查中通过，包含权限拒绝与异常停止，不是生产成功率。公开 Netdata 候选仍被拦截。[能力、全部尝试与边界](docs/PLAN-FIRST-AUTHORING.md)。新库保存 **53 个 Skill／38 个仓库**，不是 53 个成功；默认 DSH 路由未变，下面是较早的小样本转译实测。
 
 | 本轮转译证据 | 结果 | 能说明什么 |
 |---|---|---|
@@ -258,7 +258,7 @@ The Runtime mechanism and wiring prototype is complete, but the core project hyp
 
 ### Active research gate
 
-**Current: generic column decoding and an isolated Netdata-shaped host are wired; complete model translation remains open.** The inventory contains **53 Skills from 38 repositories**, not successful translations. The [local demo](docs/NETDATA-ISOLATED-VALIDATION.md) uses the original read gateway for info/query and returns enum counts for a three-row synthetic page, not full-window coverage, a vendor-server test or model compilation. Four [task dossiers](docs/TASK-SOURCE-ALIGNMENT.md) retain unresolved findings. No new 9B score or default DSH route change; the figures below are the latest translation experiment.
+**Current: real 9B now closes a partial plan → argument binding → original compiler → synthetic-host mechanism chain; public-Skill semantic translation has not passed.** Its generated conditional read region passes 10/10 local path checks, including denial and abnormal stops—not a production success probability. Public Netdata candidates remain blocked. See [capabilities, all attempts and boundaries](docs/PLAN-FIRST-AUTHORING.md). The inventory contains **53 Skills/38 repositories**, not successful translations. Default DSH routing is unchanged; the figures below are earlier small-sample results.
 
 The new six-package development batch improves from **2/6 cases, 30/46 scenarios** after construction to **5/6, 35/46** with source expressions: four executable-fragment cases and one safe stop. Eleven scenarios of a structurally invalid case remain unrun. These are fresh 9B generations on assistant-authored packages/oracles, not independent Gold or unseen public Skills. Ten model requests have local p50/p95 of **20.91/35.82 seconds**, not Runtime latency. Citation-role errors and complete-source semantics remain open. See [results, failures and revisions](docs/FLOW-SEMANTIC-TRANSFER.md).
 

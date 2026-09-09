@@ -2,9 +2,34 @@
 
 ## 中文
 
-更新：2026-09-09。**C3p：通用有界列投影与本地合成 Netdata 宿主已实现；原读取网关完成 info/query 和页级结果验证，完整模型转译、全窗口覆盖及语义准入仍未完成。** 默认 DSH 路由未改变，研究候选未激活。不从继续授权推断 master 合入。
+更新：2026-09-09。**C3w：真实 9B 的独立规划／分槽填参／原编译器／合成局部执行机制链已闭合；公开源语义转译仍未通过。** C3i–C3p 已本地提交 dev `f0499ec`；C3q–C3w 尚未提交。本轮未推送或合入 master；下方各阶段“未提交”是当时的历史状态。默认 DSH 路由未改变，研究候选未自动激活。
 
 ### Done
+
+- C3w 可选 `plan_first`：先冻结源锚定操作骨架与分支，再逐槽构造参数；动态来源导航、原词法作用域及每槽来源校验阻止编造输入。无可达路径的冗余终止可留痕消除，不删调用、不补成功；原执行器及授权机制不变。[设计、使用、全部结果](PLAN-FIRST-AUTHORING.md)。
+- C3w **8 次实验／12 次真实 9B 调用**。同一已知 Netdata 的 5 次仍未编译，thinking／可读 Schema 没有解决源义务和操作混淆。另用原有合成接线说明隔离验证：v18 被不可达结束拒绝；v19 计划通过但编造参数；v20 正确使用输入／前序结果引用，3 次调用、42.549 秒、10,465/853 token，生成 2 个读取与条件。三版首次规划请求相同，没有预写 L0 输入。
+- C3w 经绑定摘要的开发者助手审阅后，生成的局部读取流程在原 Runtime 上 **10/10 本地路径检查通过**；仅合成读取，无网络／脚本／写操作。`errors == 0` 决策及变更候选未转译，剩余职责列表不完整，不接受整 Skill 成功。新增公开 Skill 数为 0，不扩大 Runtime A/B。
+- C3w 最终新增 49 项机械测试；**309 项定向通过（25.14 秒），全量 2292 passed + 81 subtests passed（179.83 秒）**；21 个相关 Python 文件 Ruff、文档链接与空白检查通过。[验收记录](../artifacts/translator-v2/source-plan-20260909/validation-summary/report.json)保留前一轮 2290 项全量结果和常量出处缓存修复。8 份报告按原源码隔离零调用回放一致；[摘要](../artifacts/translator-v2/source-plan-20260909/evidence-summary/report.json)绑定 127 个文件、此前 275 份证据不变。当前阶段完成的是机制接线，不是公开 Skill 高准确率门禁。
+- C3v 增加可选 mode_bound：宿主模式与原 catalog/合同/Schema 摘要绑定；只表达显式对象的必填/允许键与互斥性，逐叶构造并阻止动态引用隐藏受约束形状。行动依据复用源块 ID，保留准确原文和操作轨迹；不代表行动必要性、语义通过或权限。[范围、用法和证据](HOST-OPERATION-MODES.md)。
+- C3v **2 次新 9B 调用，0 编译通过、0 底层/脚本执行**。v12 为 2 次相同 discovery 读取，101.794 秒、8,115/1,165 token；精确命令引文抄写失败被保留。v13 回填原文块后又生成 8 次相同读取，215.441 秒、8,113/3,228 token，14 个出处错误、7 未决项、无终止。两版模式混用均为 0，但**整体可用性未提升**；不择优拼接或修改旧结果。下一步应先区分原行动、替代路径、示例和义务阶段，再冻结骨架并填参。
+- C3v 新增 40 项机械测试；跨模块 300 项定向通过（24.96 秒），全量 **2243 passed + 81 subtests passed（255.63 秒）**；19 个相关 Python 文件 Ruff、已跟踪/25 个未跟踪源码文档空白及文档链接检查通过。两份源码快照隔离零调用回放逐字节一致，[摘要](../artifacts/translator-v2/source-modes-20260909/evidence-summary/report.json)绑定 39 文件、此前 236 份绑定文件不变。测试数量不是语义准确率。
+- C3u 增加可选 catalog_bound：按原宿主 Schema 生成参数、字面值来源留痕、路径引用转为代码分配的唯一别名；不改变原编译/执行门禁。独立报告未决义务、来源、类型、作用域、缺少/越过终止，重复实参只提示不自动去重。[能力与真实结果](CATALOG-DIRECTED-AUTHORING.md)。
+- C3u **1 次新 9B 调用 / 214.388 秒 / 7,787 输入、3,452 输出 token**。同一已知源和对齐任务上，宿主 Schema 校验消息 **56→0**、额外重复别名 **7→0**；仍为 8 次相同读取、无终止、7 个未决项、8 个来源问题，**0 编译通过 / 0 底层执行**。发现宿主代码禁止 discovery/query 混用，但其简单 Schema 未声明该约束；本轮只静态核查，未执行候选或改宿主。不能称为 Skill 成功或整体性能提升。
+- C3u 新增 38 项机械测试，跨模块 333 项定向通过；全量 **2203 passed + 81 subtests passed（178.36 秒）**，17 个相关 Python 文件 Ruff、diff 和文档链接检查通过。原模型报告隔离零调用回放逐字节一致，最终静态定位独立保存；[证据摘要](../artifacts/translator-v2/source-catalog-20260909/evidence-summary/report.json)绑定 21 份文件，此前三阶段 215 份绑定证据不变。后续优先公开操作模式约束、构造操作流程骨架与逐叶参数来源，不扩 Runtime A/B。
+- C3t 增加可选源义务审阅：源规则与任务/宿主 prose 隔离，多阶段分类、解释来源和未满足门禁分开；未证明审阅收益，CLI/API 默认 direct。加入本地字面缺口检索和生成前表达式语法；Schema 注解压缩不改变约束/字面数据。[当前流程和失败定位](SOURCE-OBLIGATION-AUTHORING.md)。
+- C3t 同一已知 Skill 的 **7 次开发实验 / 12 次真实 9B 调用**：旧任务仍停于缺口；新对齐任务明确只做合成宿主离线局部构造，不能与旧 Cloud 业务任务合并计算提升。最后直接路径 **1 次 / 151.381 秒 / 8,099 输入、3,380 输出 token**，完整候选存在但未决义务阻止编译；8 次重复别名、字符串误生对象、空筛选数组仍错误。全阶段 **0 编译通过区域 / 0 底层与脚本执行**。
+- C3t **295 项定向通过（14.27 秒）；全量 2165 passed + 81 subtests passed（177.20 秒）**。15 个相关 Python 文件 Ruff 通过；7 份历史实现报告隔离零调用回放逐字节一致，[摘要](../artifacts/translator-v2/source-obligations-20260909/evidence-summary/report.json)绑定 112 份文件。首轮收尾的提前发布链接失败已保留并修正；前两阶段 103 份证据不变。前置审阅仅保留为实验，后续优先宿主类型引导的参数、值来源和稳定别名，不扩大 Runtime A/B。
+- C3s（历史）分离已交付原文、当前精确可见区间和语义未审核；重复回读转入原文联合窗口候选/缺口决策。新增源操作→宿主参数名的版本化、合同/Schema 摘要绑定声明；明确不等于语义等价或授权。[使用、边界和实测](SOURCE-DECISION-AUTHORING.md)。
+- C3s 两次同源开发修订：v4 **1 次 / 44.280 秒 / 7,868 输入、335 输出 token**，4 条引用重复一个缺凭据判断；v5 明确离线构造与现有执行门禁后 **1 次 / 27.635 秒 / 7,765 输入、83 输出 token**，仍首轮停止。都为 **0 候选、0 编译读取、0 底层调用**；引用不能证明宿主凭据缺失。联合回读分支只有机械验证，不能把更早停止称为转译提升。
+- C3s 最终 **273 项定向；全量 2132 passed + 81 subtests passed（176.33 秒）**；9 个相关 Python 文件 Ruff、diff、文档链接及证据检查通过。两版隔离零调用回放逐字节一致；旧失败/Oracle/基线保留，未调用旧 manifest 不计模型调用。下一步是义务所属阶段与停止依据的类型化诊断，不扩大 Runtime A/B。
+
+- C3r 实现 UTF-8 有界源页、窗口切换、带来源的 note 与依赖请求记录、原句回填。块 ID 取代模型抄写引文；同文件区间并集合并重复原文，不删除 note、不合并不同解释。[流程与报告](SOURCE-LEDGER-AUTHORING.md)。
+- 四份已知公开材料无损分页验证；三次协议修订对同一 Netdata 开发请求做 10 次真实 9B 调用，失败全部保留。v1 因引文换行变化停止；v2 来源校验通过但重复回填超预算；v3 同一待发状态代理从 **50,403→36,971（−26.6%）**，14 条 note 与覆盖相等。新增实际 v3 运行 6 次/535.562 秒，未再触发来源或输入预算错误，但根文/指南往返回读，**0 候选/0 底层执行**。不能计算转译准确率或解锁 Runtime 大评测。
+- C3r 最终验证：**246 项定向；全量 2105 passed + 81 subtests passed（278.90 秒）**。相关 6 个 Python 文件 Ruff、302 个本地文档链接、摘要与 diff 检查通过。三版报告分别从原源码快照离线回放，逐字节一致；[开发审阅和 72 份绑定证据](../artifacts/translator-v2/source-ledger-20260909/evidence-summary/report.json)保留循环轨迹、未决状态与宿主对应关系问题，不是独立 Gold。
+
+- C3q 冻结原始源包、任务/宿主、源码/环境/模型摘要和显式调用预算，9B 只请求保留的惰性文本页，候选送入原 Tree 编译器；精确引文、来源支配、结构失败和断点漂移均保留，不自动重试或执行。[完整处理和首次结果](PROGRESSIVE-STRUCTURED-AUTHORING.md)。
+- Netdata 首次实际调用 2 次，共 **44.426 秒、13,870 输入 / 259 输出 token**；根文→单设备指南→请求 Cloud 协议。第三次所需请求 45,057 字节超过 36,000 上限，未调用；28 页只提交 2 页，0 候选，语义准确率为空。检索理由出现 category/severity 用词混淆；不是参数执行错误的证明，也不能把预算停止归因于 Schema 或 9B 语义能力。原结果保留，不扩预算覆盖重跑。
+- C3q 新增 29 项机械测试、跨模块 211 项定向通过；全量 **2070 passed + 81 subtests passed（161.34 秒）**。两份新增 Python 文件 Ruff、279 个本地文档链接、14 份绑定证据和 diff 检查通过；基于 `f0499ec` + 源码快照的隔离离线回放逐字节一致。C3q 新工作尚未提交。
 
 - C3p 增加通用 `column_rows`：保留原字段名，按当前 metadata 解码全部有界行；重复索引、越界、缺列和非法值拒绝，不猜测/跳行。接入原绑定、Tree/Flow，来源支配与回执时效继续约束候选。[用法](NETDATA-ISOLATED-VALIDATION.md)。
 - 一个明确的进程内合成 Function 宿主，通过原读取网关实际调用 info/query；检查身份/范围、有效参数、listener、秒/微秒和返回筛选条件。输出 3 行本页计数（crit 1、warning 2），不保存原始回执；不是原厂服务、完整窗口或 9B 成绩。全任务 `taskCompleted=false`，默认路由未变。[证据](benchmarks/netdata-isolated-summary.json)。
@@ -45,10 +70,17 @@
 | 已收口 | 回归、源引用缺口、可回放报告 | 修改文件 Ruff / diff 检查通过；全仓仍有原先 224 项 lint，不混入本轮清理 |
 | 入库完成 | 60 个冻结候选、旧脚本补充库 | 新库 53/60 保存；失败保留，采集限流已解除；搜索类别/静态包检查不能证明领域独立性/语义成功 |
 | 入口完成 | 源文、分页、显式引用补取、宿主诊断 | 原文可完整拼回，旧证据不覆盖；不是跨页语义编译或完整引用闭合 |
-| 绑定/接线完成 | 版本化嵌套数据、源锚定 Tree、共享执行器 | 有离线绑定 CLI 及显式宿主只读 smoke；完整 9B authoring/语义审查未接入新 Tree，不代表整 Skill 编译完成 |
+| 绑定/接线完成 | 版本化嵌套数据、源锚定 Tree、共享执行器 | 有离线绑定 CLI、显式宿主只读 smoke 和 9B 候选入口；完整模型转译及语义准入未完成，不代表整 Skill 编译完成 |
 | 任务档案完成 | 四份固定材料的具体任务、义务/问题与宿主需求 | 有源锚定开发审阅，不是独立 Gold 或全部源义务闭合；未读附件保留 |
 | 局部实现完成 | 本地 Netdata 隔离适配器、info/query fixture、有界列解码 | 本页计数与异常检查已跑通；无原厂互操作、全窗口/保留期证明，不把枚举输出当生产隐私证明 |
-| 下一步候选 authoring | 明确可编译段、L1 职责、未支持语义，接入当前结构化 Tree 的小批 9B 构造 | 当前完整 demo 仍手写；需保留源解释、首次失败和分层结果，不能只换外壳把脚本称为模型答案 |
+| 已接入、首次停止 | 渐进 9B 源文请求与结构化 Tree 构造入口 | 2 次真实调用停于上下文预算，未生成候选；不能标记转译通过或直接进入 Runtime |
+| 已修复输入组织 | 区分字节/token 指标；UTF-8 分页、源块选择、依赖记录、原文回填和精确去重 | 资源代理不是 tokenizer 认证；不会抄错引文不等于选对语义依据。四源仅静态分页，最新模型仍只验证一个已知 Skill |
+| 边界机制完成 | 分开文本交付/语义审核、源操作/宿主声明、离线构造/执行门禁；联合窗口候选或缺口报告 | 真实 9B 新两版仍首轮拒绝，未实测触发联合回读恢复；更早停止不是可用性提升 |
+| 诊断/语法机制完成 | 可选源义务审阅、输入隔离、字面缺口检索、表达式生成 Schema、独立任务对齐 | 前置审阅收益未证实；不默认启用；完整候选有参数/别名缺陷，仍不可执行 |
+| 参数/定位机制完成 | 宿主 Schema 引导参数 + 显式值来源 + 代码分配稳定别名 + 独立错误定位 | 一个已知源的形状/别名错误消除；模型仍重复调用、来源与操作模式错误，不是语义成功 |
+| 模式机制完成 | 显式宿主互斥键合同 + 逐叶参数来源 + 源块行动轨迹 | 只证明已声明组合约束；动态对象不隐式放行；新增宿主信息必须独立标识，模型整 Skill 仍失败 |
+| 规划／绑定机制完成 | 不可变计划、分槽参数来源、动态引用导航、冗余不可达终止规范化 | 真实 9B 合成局部流程通过 10 个执行路径检查；不是公开 Skill 或整 Skill 成功 |
+| 下一步语义收敛 | 逐项义务覆盖、截断边界与 L1 交接定位；公开源操作／前置条件／宿主替代范围 | 当前 remaining 仍遗漏职责；Netdata 不得执行；保留失败，不能靠删除未决项或叠加提示语宣称通过 |
 | 对齐完成后 | 冻结任务/私有 Oracle，先小批后批量转译 | 9B；固定主候选路径、无自动重试；不把同批调参称泛化 |
 | 正式转译门禁 | ≥3 不重叠 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case | 数量只是必要条件，质量阈值不下调 |
 | 门禁通过后 | 大规模 L0→Runtime / DSH 配对 | **仍未解锁**，有限布尔区域通过不代表整 Skill 高准确转译 |
@@ -61,7 +93,25 @@ ES-P1-Private-Human = skipped_retained_open；GPT 对照暂缓，使用 qwen3.5:
 
 ## English
 
-Updated 2026-09-09. **C3p: bounded generic column projection and an isolated synthetic Netdata-shaped host run discovery/query and page checks through the original read gateway. Full model translation, window coverage and semantic admission remain open.** Default DSH routing/activation are unchanged; resumption does not prove a master merge.
+Updated 2026-09-09. **C3w closes the real-9B plan/fill/original-compiler/synthetic-execution mechanism; public-source semantic translation remains open.** C3i–C3p were locally committed as `f0499ec`; C3q–C3w are uncommitted. No push/master merge or default routing/activation changes.
+
+C3w preserves all eight experiments/twelve real 9B calls. Five known-Netdata attempts remain blocked; thinking and readable schemas do not solve source-duty/action confusion. The pre-existing synthetic wiring control progresses from redundant-terminal rejection, through invented-argument rejection, to a two-read conditional compiled from three model calls (42.549 seconds, 10,465 input/853 output tokens). Its initial planning request is identical across three versions. Dynamic-reference guidance, early origin checks and recorded dead-terminal normalization do not alter Runtime authorization. After a digest-bound developer-agent review, ten local branch/denial/abnormal-stop checks pass with zero network/script/effect calls. Counter-result decisions are delegated to L1, and remaining-duty accounting is incomplete; this is not whole-Skill acceptance or a public-Skill accuracy score. Final validation adds 49 mechanical tests: **309 targeted passes (25.14 seconds), 2292 full-suite passes plus 81 subtests (179.83 seconds)**, lint on 21 related files, links and whitespace checks. The earlier 2290-test run is preserved; equal-constant origin caching is fixed without changing the three recorded wiring requests or derived outputs. All eight original-version isolated replays are byte-identical; 127 new files are bound and 275 prior files remain unchanged. Next improve source-duty accounting and precise partial-region handoffs before public-source generalization or broad Runtime A/B. See [current design and complete results](PLAN-FIRST-AUTHORING.md).
+
+C3v adds digest-bound, closed-key mode constraints, leaf origins and block-grounded action traces without a new executor. Two new 9B calls both generate candidates but neither compiles or invokes providers/scripts. v12 has two identical discovery reads and failed exact action quotations (101.794 seconds, 8,115/1,165 tokens). v13 rehydrates source blocks but again emits eight identical reads, fourteen invalid origins, seven unresolved entries and no terminal (215.441 seconds, 8,113/3,228 tokens). Mode mixing stays zero; **overall availability has not improved**. Forty new mechanical tests and 300 targeted checks pass in 24.96 seconds; **2243 full-suite tests plus 81 subtests pass in 255.63 seconds**, with Ruff on nineteen related Python files, tracked/untracked whitespace and document-link checks. Both isolated source-snapshot replays are byte-identical with zero calls; 39 files are bound and 236 older bound files are unchanged. See [current implementation, results and next work](HOST-OPERATION-MODES.md).
+
+C3u makes one fresh 9B call in 214.388 seconds (7,787/3,452 input/output tokens). Same-source/task host-schema error messages drop 56→0 and duplicate aliases 7→0, but eight identical reads, seven unresolved entries, eight invalid origins and no terminal remain. Zero regions compile and no provider executes. Static host inspection reveals a discovery/query exclusivity rule missing from its simple schema. This is not Skill success or an overall performance improvement. There are 38 new mechanical tests and 333 targeted passes; **2203 full-suite tests plus 81 subtests pass in 178.36 seconds**, with lint on seventeen related Python files, diff and document-link checks. The original model report replays byte-identically with zero calls; final diagnostics are separately saved. The summary binds 21 files and 215 preceding bound files are unchanged. See [current evidence](CATALOG-DIRECTED-AUTHORING.md). Next expose operation modes and construct a source-grounded operation skeleton with leaf-level origins; broad Runtime evaluation stays locked.
+
+C3t records seven development variants and twelve actual calls on one known Skill, not unseen generalization. The separately aligned inactive-authoring task must not be pooled as same-task improvement over the old Cloud task. Final direct generation takes 151.381 seconds (8,099/3,380 input/output tokens) and produces an unresolved candidate with eight repeated aliases, object-for-string arguments and empty required filters. All variants have zero compiled regions and zero provider/source-script execution. **295 targeted tests (14.27 seconds); 2165 full-suite tests plus 81 subtests (177.20 seconds)** pass. Fifteen related Python files pass lint; seven isolated zero-call replays are byte-identical. The summary binds 112 files; an initial premature-document-link failure is retained and repaired, and 103 preceding evidence files remain unchanged. See [current evidence and localized failures](SOURCE-OBLIGATION-AUTHORING.md). Next prioritize catalog-directed arguments, value origins and deterministic aliases before new-source testing; broad Runtime evaluation remains gated.
+
+C3s v4/v5 make one call each (44.280/27.635 seconds; input/output 7,868/335 and 7,765/83 tokens). Both produce unverified gaps, not candidates or provider calls. Source instructions do not prove live credential absence; missing execution credentials alone should not prevent offline candidate authoring. Joint-window recovery is mechanically tested but not exercised by these early-stopping model runs. Final **273 targeted tests; 2132 full-suite tests plus 81 subtests (176.33 seconds)** pass, with lint, links, digests and byte-identical isolated replays. See [mechanisms, evidence and next work](SOURCE-DECISION-AUTHORING.md). Next type obligations by phase/evidence origin and examine premature abstention across varied sources; larger Runtime evaluation remains locked.
+
+C3r reconstructs four known bundles losslessly and records three same-Netdata development revisions (ten actual model calls). V1 preserves a quote line-wrap failure; v2 preserves a duplicate-context budget failure. V3 retains all fourteen notes and exact source coverage while reducing the pending byte proxy 50,403→36,971. Its fresh six-call/535.562-second run passes citation and resource checks but alternates between root and recipe, producing zero candidates/provider executions. This is not a semantic accuracy or Runtime score. Final validation: **246 targeted tests; 2105 full-suite tests plus 81 subtests (278.90 seconds)**; all three isolated zero-call replays are byte-identical. See [workflow and evidence](SOURCE-LEDGER-AUTHORING.md).
+
+The C3r next-step plan (retrieval/review separation, explicit host mappings and bounded convergence) was subsequently implemented in C3s/C3t above. Do not fake semantic approval or force unsafe candidates to stop a loop. The current argument-construction plan above supersedes historical next steps; broad Runtime evaluation remains gated.
+
+C3q preserves frozen inputs, implementation/environment/model bindings, exact citations, first failures and no-retry checkpoints. The model requested the linked recipe and then a Cloud protocol page. Two calls cost 44.426 seconds and 13,870 input/259 output tokens. The next 45,057-byte request exceeded the experiment's 36,000-byte limit and was not sent; this is not proof of exhausting the model's token context. Two of twenty-eight pages were submitted, zero candidates were produced, and no Runtime/provider/source script executed. A category/severity wording error in retrieval is recorded without inferring query correctness. Twenty-nine new mechanical tests and 211 targeted tests pass; the full suite passes **2070 tests plus 81 subtests in 161.34 seconds**. Lint on both added Python files, 279 local links, fourteen bound artifacts, diff and byte-identical isolated replay pass. See [results and scope](PROGRESSIVE-STRUCTURED-AUTHORING.md).
+
+C3q's then-next input-organization work is now implemented and measured in C3r above. Summaries remain navigation, not authority; both first failures and later revisions are retained. Candidate construction/semantic closure remains open, and C3q/C3r changes remain uncommitted.
 
 C3p preserves original field names, bounded all-row decoding, dominance/freshness and the candidate-only Effect boundary. The host performs two actual local callbacks with explicit identity/scope and domain checks. Its three-row page yields crit 1/warning 2; no raw receipts are persisted. This is developer wiring, not vendor interoperability, full-window coverage or a 9B score. See [scope and use](NETDATA-ISOLATED-VALIDATION.md) and [evidence](benchmarks/netdata-isolated-summary.json).
 
@@ -73,7 +123,7 @@ Final C3o validation: **122 targeted tests; 1975 full-suite tests plus 81 subtes
 
 C3n reuses the existing qualifier, runner and read gateway for nested data, explicit pointers, branches and candidates. It preserves exact citations/Tree-digest binding, dominance, nested resource scopes, control-evidence age checks, copy isolation and redacted provider errors. One developer fixture performs **two local read callbacks, zero writes and zero model calls**; additional variants cover safe completion and refusal. Seven original developer graphs retain v1 packets/digests, and the positive demo replays byte-identically. These are wiring/compatibility checks, not public-Skill accuracy or device timestamp authentication. See [the full process](STRUCTURED-FLOW-WIRING.md) and [validation evidence](benchmarks/structured-flow-summary.json).
 
-Next explicitly separate compilable regions, L1 duties and unsupported semantics, then connect small 9B construction to the current structured Tree with source review and first-attempt accounting. The full demo is still developer-wired, not a model answer. Page/retention/semantic closure remains open; large Runtime evaluation stays locked.
+The full execution demo is still developer-wired, not a model answer. The new candidate entry does not close page/retention/semantic gaps; large Runtime evaluation stays locked.
 
 Final C3n validation: **227 targeted tests; 1949 full-suite tests + 81 subtests passed in 226.55 seconds**. Lint on 29 changed Python files, 418 local documentation links, nine byte-identical artifacts from an isolated source-overlay reconstruction and diff checks pass. Prior bound evidence is unchanged. Initial fixture-construction failures remain recorded; mechanical pass counts do not become semantic metrics. Git is uncommitted.
 
