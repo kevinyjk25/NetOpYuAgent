@@ -1,0 +1,118 @@
+{
+  "evidenceRole": "hand_authored_compiler_example_not_model_translation",
+  "treePath": "examples/read-flow/flow-tree.json",
+  "sourcePath": "examples/read-flow/flow-source.md",
+  "treeDigest": "sha256:94a3876326a741aa25b2bf700f0ea16b01e1fc572b90538cdb29539ea4a88508",
+  "sourcesDigest": "sha256:e536fffdbd53f5ce1406e1ba386437250282b6db02c55426fa647e1a9f3683f5",
+  "flowDigest": "sha256:238361740a9cb7325b4b684fa124629b2bcca5dbbfa3acc45c0e24936d06617e",
+  "flow": {
+    "api_version": "netopyu.io/l0-flow-proposal/v1",
+    "source_digest": "sha256:570c682480281b502e6bb6051e4e169bc0731e0321b7d335ad9e77300712dea4",
+    "purpose": "# 本地库存条件读取 / Conditional local inventory read\n重复读取只是为了验证步骤输出到输入的接线，不是生产上推荐的库存查询方式。数据为本地计划库存，`planned-lab` 不代表实时健康。宿主分别授予两台设备的只读权限，流程文件本身无权授予权限。",
+    "input_schema": {
+      "type": "object",
+      "properties": {
+        "device_id": {
+          "type": "string",
+          "description": ""
+        }
+      },
+      "required": [
+        "device_id"
+      ],
+      "additional_properties": false,
+      "description": ""
+    },
+    "entry": "node-0",
+    "nodes": [
+      {
+        "kind": "read",
+        "id": "node-0",
+        "contract_hash": "sha256:d038fa952f08c3b9c95f9e039d957b4a0e382d01691d97bd99324798ad52dc8e",
+        "arguments": {
+          "device_id": {
+            "kind": "reference",
+            "source": "input",
+            "field": "device_id"
+          }
+        },
+        "next": "node-1"
+      },
+      {
+        "kind": "branch",
+        "id": "node-1",
+        "left": {
+          "kind": "reference",
+          "source": "node-0",
+          "field": "site"
+        },
+        "equals": {
+          "kind": "constant",
+          "value": "campus"
+        },
+        "on_true": "node-2",
+        "on_false": "node-4"
+      },
+      {
+        "kind": "read",
+        "id": "node-2",
+        "contract_hash": "sha256:d038fa952f08c3b9c95f9e039d957b4a0e382d01691d97bd99324798ad52dc8e",
+        "arguments": {
+          "device_id": {
+            "kind": "reference",
+            "source": "node-0",
+            "field": "device_id"
+          }
+        },
+        "next": "node-3"
+      },
+      {
+        "kind": "end",
+        "id": "node-3",
+        "outcome": "read_path_completed",
+        "explanation": "3. 相等时，用第一步返回的 `device_id` 再读取一次，完成只读路径。"
+      },
+      {
+        "kind": "end",
+        "id": "node-4",
+        "outcome": "needs_l1",
+        "explanation": "4. 不相等时，返回 `needs_l1`，等待上层判断；本夹具不调用模型。"
+      }
+    ],
+    "max_read_age_seconds": 30.0
+  },
+  "origins": [
+    {
+      "treePointer": "/steps/0",
+      "nodeIndex": 0,
+      "l0Pointer": "/nodes/0"
+    },
+    {
+      "treePointer": "/steps/1",
+      "nodeIndex": 1,
+      "l0Pointer": "/nodes/1"
+    },
+    {
+      "treePointer": "/steps/1/when_equal/0",
+      "nodeIndex": 2,
+      "l0Pointer": "/nodes/2"
+    },
+    {
+      "treePointer": "/steps/1/when_equal/1",
+      "nodeIndex": 3,
+      "l0Pointer": "/nodes/3"
+    },
+    {
+      "treePointer": "/steps/1/otherwise/0",
+      "nodeIndex": 4,
+      "l0Pointer": "/nodes/4"
+    }
+  ],
+  "status": "compiled_pending_source_review_not_executable",
+  "compilationDigest": "sha256:b6fe2f1f6c8c9b2b86b58cf0e432639f1d0565bbafc4541872b9f836dfdd8c89",
+  "reviewInputDigest": "sha256:2d447d985af88b2ab947caa97b3844a77666627c98bc6e8138abd0542cc55cc7",
+  "modelCalls": 0,
+  "runtimeExecutions": 0,
+  "runtimeAuthorityGranted": false,
+  "reportDigest": "sha256:e3d156dd5e70e7d6d1fe75164b3dd9ad8cc9b2a39ca8192def3ece6b261b6e55"
+}

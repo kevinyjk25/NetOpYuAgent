@@ -1,0 +1,3351 @@
+{
+  "evidenceRole": "known_development_source_only_not_holdout_or_whole_translation",
+  "manifestDigest": "sha256:2319d3627cb48ec5702303b28dc19f13df80a10d30e3eb99b6119aa711c55104",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "experimentProtocol": "source-duty-candidates/v1",
+  "cases": [
+    {
+      "id": "storage-pagination",
+      "bundle": {
+        "documents": [
+          {
+            "path": "storage/SKILL.md",
+            "text": "# 只读存储检查：不得删除对象\n对用户给出的 bucket 调用 list_objects；只有返回 truncated=true 时才按原游标继续读取。\n若游标缺失则停止并追问，不得把缺失当作没有更多对象。\n示例 bucket demo 只是文档示例，不能当作用户参数。\n",
+            "kind": "prose"
+          }
+        ]
+      },
+      "rawCandidate": {
+        "rows": {
+          "d001-l0001": [
+            {
+              "kind": "context",
+              "statement": "The document title establishes a read-only storage check constraint prohibiting object deletion.",
+              "evidence_ids": [
+                "d001-l0001"
+              ]
+            }
+          ],
+          "d001-l0002": [
+            {
+              "kind": "requirement",
+              "statement": "Invoke list_objects on the bucket provided by the user.",
+              "evidence_ids": [
+                "d001-l0002"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Continue reading using the original cursor only if list_objects returns truncated=true.",
+              "evidence_ids": [
+                "d001-l0002"
+              ]
+            }
+          ],
+          "d001-l0003": [
+            {
+              "kind": "requirement",
+              "statement": "Stop and ask for clarification if the cursor is missing.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Do not treat a missing cursor as indicating no more objects exist.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            }
+          ],
+          "d001-l0004": [
+            {
+              "kind": "requirement",
+              "statement": "Do not use the example bucket 'demo' as a user parameter.",
+              "evidence_ids": [
+                "d001-l0004"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "ticket-approval",
+      "bundle": {
+        "documents": [
+          {
+            "path": "tickets/SKILL.md",
+            "text": "# Change ticket priority\nRead ticket T-42, then request approval for setting its priority to high.\nOnly when that approval is valid may update_ticket set priority to high; an open ticket is not approval.\nIf approval is unavailable or denied, stop without calling update_ticket.\nAfter the update, read the priority again; a mismatch must be reported as failure, not success.\n",
+            "kind": "prose"
+          }
+        ]
+      },
+      "rawCandidate": {
+        "rows": {
+          "d001-l0001": [
+            {
+              "kind": "context",
+              "statement": "The document defines a skill for changing ticket priority.",
+              "evidence_ids": [
+                "d001-l0001"
+              ]
+            }
+          ],
+          "d001-l0002": [
+            {
+              "kind": "requirement",
+              "statement": "Read ticket T-42.",
+              "evidence_ids": [
+                "d001-l0002"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Request approval for setting the priority to high.",
+              "evidence_ids": [
+                "d001-l0002"
+              ]
+            }
+          ],
+          "d001-l0003": [
+            {
+              "kind": "requirement",
+              "statement": "Only when approval is valid may update_ticket set priority to high.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "An open ticket is not considered approval.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            }
+          ],
+          "d001-l0004": [
+            {
+              "kind": "requirement",
+              "statement": "If approval is unavailable or denied, stop without calling update_ticket.",
+              "evidence_ids": [
+                "d001-l0004"
+              ]
+            }
+          ],
+          "d001-l0005": [
+            {
+              "kind": "requirement",
+              "statement": "After the update, read the priority again.",
+              "evidence_ids": [
+                "d001-l0005"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "If a mismatch is found, report it as failure.",
+              "evidence_ids": [
+                "d001-l0005"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Do not report success if a mismatch is found.",
+              "evidence_ids": [
+                "d001-l0005"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "backup-prerequisite",
+      "bundle": {
+        "documents": [
+          {
+            "path": "backup/SKILL.md",
+            "text": "# Backup inspection\nBefore reading backup metadata, run the prerequisites described in references/precheck.md.\nIf that reference or its required runner is unavailable, stop before reading metadata and explain the missing dependency.\nDo not infer successful verification from the name verify_backup.py.\n```python\nraise RuntimeError('This supplied example must never run in translation')\n```\n",
+            "kind": "prose"
+          }
+        ]
+      },
+      "rawCandidate": {
+        "rows": {
+          "d001-l0001": [
+            {
+              "kind": "context",
+              "statement": "The document serves as a guide for backup inspection procedures.",
+              "evidence_ids": [
+                "d001-l0001"
+              ]
+            }
+          ],
+          "d001-l0002": [
+            {
+              "kind": "requirement",
+              "statement": "Execute prerequisites described in references/precheck.md before reading backup metadata.",
+              "evidence_ids": [
+                "d001-l0002"
+              ]
+            }
+          ],
+          "d001-l0003": [
+            {
+              "kind": "requirement",
+              "statement": "Stop before reading metadata if the reference in references/precheck.md or its required runner is unavailable.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Explain the missing dependency if the reference or its required runner is unavailable.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            }
+          ],
+          "d001-l0004": [
+            {
+              "kind": "requirement",
+              "statement": "Do not infer successful verification from the name verify_backup.py.",
+              "evidence_ids": [
+                "d001-l0004"
+              ]
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "sensor-branch-reference",
+      "bundle": {
+        "documents": [
+          {
+            "path": "sensors/SKILL.md",
+            "text": "# Observe only\nRead the requested sensor once. Apply the interpretation limits in references/limits.md.\nIf reading.status is not stale, finish; otherwise request human interpretation without taking another reading.\n",
+            "kind": "prose"
+          },
+          {
+            "path": "references/limits.md",
+            "text": "A stored reading is not a live measurement.\nDo not infer equipment safety or permission to change settings from reading.status.\n",
+            "kind": "prose"
+          }
+        ]
+      },
+      "rawCandidate": {
+        "rows": {
+          "d001-l0001": [
+            {
+              "kind": "context",
+              "statement": "The section is titled 'Observe only'.",
+              "evidence_ids": [
+                "d001-l0001"
+              ]
+            }
+          ],
+          "d001-l0002": [
+            {
+              "kind": "requirement",
+              "statement": "Read the requested sensor exactly once.",
+              "evidence_ids": [
+                "d001-l0002"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Apply interpretation limits defined in references/limits.md.",
+              "evidence_ids": [
+                "d001-l0002"
+              ]
+            }
+          ],
+          "d001-l0003": [
+            {
+              "kind": "requirement",
+              "statement": "If reading.status is not stale, finish the process.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "If reading.status is stale, request human interpretation.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Do not take another reading if reading.status is stale.",
+              "evidence_ids": [
+                "d001-l0003"
+              ]
+            }
+          ],
+          "d002-l0001": [
+            {
+              "kind": "requirement",
+              "statement": "Treat a stored reading as not being a live measurement.",
+              "evidence_ids": [
+                "d002-l0001"
+              ]
+            }
+          ],
+          "d002-l0002": [
+            {
+              "kind": "requirement",
+              "statement": "Do not infer equipment safety from reading.status.",
+              "evidence_ids": [
+                "d002-l0002"
+              ]
+            },
+            {
+              "kind": "requirement",
+              "statement": "Do not infer permission to change settings from reading.status.",
+              "evidence_ids": [
+                "d002-l0002"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "completeSourceOnlyReviewDecisions": {
+    "reviewerId": "same-development-assistant-20260908-source-duties",
+    "reviewerKind": "ai_role_simulation",
+    "manifestDigest": "sha256:2319d3627cb48ec5702303b28dc19f13df80a10d30e3eb99b6119aa711c55104",
+    "scope": "Post-hoc complete source-only checklists by the same assistant that authored the four visible development inputs. Not independent Gold, calibrated accuracy, full Skill translation, host availability review or evidence of execution. Each decision below is explicit; no default-supported fill. Line and duty claims overlap.",
+    "cases": {
+      "storage-pagination": {
+        "inputDigest": "sha256:cb4bfa0139ee335bc150886516ef5683a59c04619e6614a79ba4d8c982fa7b91",
+        "decisions": [
+          [
+            "claim-0001",
+            "contradicted",
+            "The heading explicitly forbids deletion and imposes read-only scope. The paraphrase retains that text but kind=context contradicts its normative role and cannot justify binding the restriction.",
+            "Keep the read-only and no-delete requirements normative; do not classify them as mere context."
+          ],
+          [
+            "claim-0002",
+            "contradicted",
+            "The line's imperative restriction is represented only as context. Text retention does not fully account for a mandatory prohibition in the source-duty contract.",
+            "Represent the heading's actual restrictions as requirements and obtain a newly bound review."
+          ],
+          [
+            "claim-0003",
+            "supported",
+            "The source explicitly requests list_objects on the user's bucket; the candidate preserves operation and parameter origin without substituting the example.",
+            ""
+          ],
+          [
+            "claim-0004",
+            "supported",
+            "The candidate preserves both the only-if truncated=true condition and use of the original cursor for continuation; no success or authorization is invented.",
+            ""
+          ],
+          [
+            "claim-0005",
+            "supported",
+            "Both source duties, initial listing on the supplied bucket and conditional cursor-based continuation, remain in this line's candidates. This is prose fidelity, not proof that the current Runtime can loop.",
+            ""
+          ],
+          [
+            "claim-0006",
+            "supported",
+            "Missing cursor triggers stopping and clarification in both source and candidate.",
+            ""
+          ],
+          [
+            "claim-0007",
+            "supported",
+            "The explicit prohibition against treating a missing cursor as no more objects is preserved.",
+            ""
+          ],
+          [
+            "claim-0008",
+            "supported",
+            "The line's exceptional stop/clarification and interpretation prohibition are separately retained, with the same missing-cursor condition.",
+            ""
+          ],
+          [
+            "claim-0009",
+            "supported",
+            "The candidate keeps demo as an example rather than a user-provided bucket argument, as required by the source.",
+            ""
+          ],
+          [
+            "claim-0010",
+            "supported",
+            "The source example's non-authoritative role and the ban on substituting it as a user parameter are accounted for. No actual bucket is supplied by the candidate.",
+            ""
+          ]
+        ]
+      },
+      "ticket-approval": {
+        "inputDigest": "sha256:c834de66bde7152afb1ebb6f9ab90e4cbb6db8d0e5b60029b7d0af3d058dec59",
+        "decisions": [
+          [
+            "claim-0001",
+            "supported",
+            "The heading names the priority-change task. The candidate's descriptive title role adds no operation beyond the body, which separately requests the change.",
+            ""
+          ],
+          [
+            "claim-0002",
+            "supported",
+            "The topic heading is retained and its actual operational meaning is expanded in the body candidates; no independent prohibition is removed from this heading.",
+            ""
+          ],
+          [
+            "claim-0003",
+            "supported",
+            "Read ticket T-42 is an explicit source action, with the literal ticket identifier preserved.",
+            ""
+          ],
+          [
+            "claim-0004",
+            "insufficient_evidence",
+            "The requested approval for high priority is retained, but the candidate does not explicitly state that it follows reading T-42 or binds to that ticket. Array position alone has no declared temporal-control semantics in this source-duty protocol.",
+            "Retain the after-read prerequisite and the T-42 approval scope in the duty statement; original source text remains available, so this is incomplete candidate semantics, not deleted source."
+          ],
+          [
+            "claim-0005",
+            "insufficient_evidence",
+            "The two actions remain, but their required then relation is implicit in their list positions. This stage has no defined execution ordering for independent duty rows, so complete temporal accounting is not established.",
+            "Express the source's read-then-request-approval relation explicitly rather than expecting later binding to reconstruct it from list order."
+          ],
+          [
+            "claim-0006",
+            "supported",
+            "The source permits update_ticket only when approval is valid. The candidate retains this predicate, the tool and high priority, without treating a candidate as executed.",
+            ""
+          ],
+          [
+            "claim-0007",
+            "supported",
+            "An open ticket is not approval is preserved as an explicit interpretation restriction, not converted into permission.",
+            ""
+          ],
+          [
+            "claim-0008",
+            "supported",
+            "The line's valid-approval gate and open-ticket-not-approval distinction are both accounted for in context of the preceding approval request.",
+            ""
+          ],
+          [
+            "claim-0009",
+            "supported",
+            "Both unavailable and denied approvals require a stop without update_ticket in source and candidate.",
+            ""
+          ],
+          [
+            "claim-0010",
+            "supported",
+            "The candidate preserves both refusal conditions and the prohibition on the update call. It does not claim that stopping implements the requested update.",
+            ""
+          ],
+          [
+            "claim-0011",
+            "supported",
+            "After the update, read priority again preserves the source's explicit post-update verification order.",
+            ""
+          ],
+          [
+            "claim-0012",
+            "supported",
+            "The mismatch from the priority reread must be reported as failure; this conditional result requirement is retained in source context.",
+            ""
+          ],
+          [
+            "claim-0013",
+            "supported",
+            "The candidate preserves the explicit ban on reporting success after the mismatch, rather than inventing a commit.",
+            ""
+          ],
+          [
+            "claim-0014",
+            "supported",
+            "The source line's reread-after-update, mismatch-as-failure and no-success requirements are all retained. Verification effectiveness still requires later host and execution evidence.",
+            ""
+          ]
+        ]
+      },
+      "backup-prerequisite": {
+        "inputDigest": "sha256:97a3394f58052ec9a7b69970b282b90f3cbd4c82efd0ef4a9345f05744133a58",
+        "decisions": [
+          [
+            "claim-0001",
+            "supported",
+            "Backup inspection is a descriptive topic heading; calling it a guide does not invent a business step or permission.",
+            ""
+          ],
+          [
+            "claim-0002",
+            "supported",
+            "The heading topic is retained as context, while concrete requirements are in subsequent source lines.",
+            ""
+          ],
+          [
+            "claim-0003",
+            "supported",
+            "The candidate keeps the required prerequisites from references/precheck.md before metadata reading. It does not claim to know the absent file's contents or implementation.",
+            ""
+          ],
+          [
+            "claim-0004",
+            "supported",
+            "The ordering and external prerequisite reference are preserved. Source-only extraction does not certify that this missing reference can be bound or executed.",
+            ""
+          ],
+          [
+            "claim-0005",
+            "supported",
+            "In context of the previous line, that reference resolves to references/precheck.md. The candidate preserves both missing-reference and missing-runner conditions and the stop-before-read order.",
+            ""
+          ],
+          [
+            "claim-0006",
+            "supported",
+            "Explaining the missing dependency under the same unavailable-reference/runner condition is an explicit source duty.",
+            ""
+          ],
+          [
+            "claim-0007",
+            "supported",
+            "The source line's two unavailable dependencies, stop-before-read and explanation duty are accounted for. No fabricated successful precheck or read is asserted.",
+            ""
+          ],
+          [
+            "claim-0008",
+            "supported",
+            "The name verify_backup.py is explicitly not proof of successful verification in both source and candidate.",
+            ""
+          ],
+          [
+            "claim-0009",
+            "supported",
+            "This entire interpretation prohibition is retained without inferring a verify API or running a file.",
+            ""
+          ],
+          [
+            "claim-0010",
+            "supported",
+            "The fenced-code opening is archived as opaque; no executable or behavioral claim is derived from it.",
+            ""
+          ],
+          [
+            "claim-0011",
+            "supported",
+            "The supplied raise statement is retained exactly as opaque source. The protocol makes no claim about script meaning, completion or safety; no execution is performed.",
+            ""
+          ],
+          [
+            "claim-0012",
+            "supported",
+            "The closing fence remains in opaque accounting. Together with the full source archive this preserves the code block without interpretation.",
+            ""
+          ]
+        ]
+      },
+      "sensor-branch-reference": {
+        "inputDigest": "sha256:94bc4d38f33d5c58dd89c82ab8bfeda15358f44cb9f682f7ec117bb7e0cc10fe",
+        "decisions": [
+          [
+            "claim-0001",
+            "contradicted",
+            "Observe only restricts the task to observation. Reporting only that this is the title, with kind=context, drops its normative scope even though the body also asks for a read.",
+            "Retain the observe-only scope as a requirement; do not reduce an imperative restriction to a descriptive heading."
+          ],
+          [
+            "claim-0002",
+            "contradicted",
+            "The heading's only restriction is not represented as a duty that the binding stage may enforce. The descriptive title entry does not fully account for it.",
+            "Represent the normative observation-only boundary and review it against the original heading."
+          ],
+          [
+            "claim-0003",
+            "supported",
+            "Read the requested sensor once is faithfully represented as exactly one requested-sensor read.",
+            ""
+          ],
+          [
+            "claim-0004",
+            "supported",
+            "The candidate retains the requirement to apply interpretation limits in the supplied reference file; it does not auto-load another path.",
+            ""
+          ],
+          [
+            "claim-0005",
+            "supported",
+            "The source line's single read and incorporation of the supplied interpretation limits are both retained. The limits themselves are also represented under the second document.",
+            ""
+          ],
+          [
+            "claim-0006",
+            "supported",
+            "The finish branch keeps not stale, preserving the source's negative predicate rather than reversing it.",
+            ""
+          ],
+          [
+            "claim-0007",
+            "supported",
+            "The otherwise branch of status not stale requests human interpretation; status stale expresses the complement in this stated predicate, not approval or automatic repair.",
+            ""
+          ],
+          [
+            "claim-0008",
+            "supported",
+            "The otherwise branch's ban on another reading is retained with the stale condition; the earlier single-read duty remains as well.",
+            ""
+          ],
+          [
+            "claim-0009",
+            "supported",
+            "The finish predicate, human-interpretation alternative and no-extra-reading restriction are all represented with matching polarity.",
+            ""
+          ],
+          [
+            "claim-0010",
+            "supported",
+            "The supplied limits file says stored readings are not live measurements, and the main source asks to apply those limits. The interpretation duty is grounded in that cross-document context.",
+            ""
+          ],
+          [
+            "claim-0011",
+            "supported",
+            "The stored-versus-live distinction is preserved as an interpretation constraint, not asserted as a read API result or actual live verification.",
+            ""
+          ],
+          [
+            "claim-0012",
+            "supported",
+            "The explicit prohibition on inferring equipment safety from status is preserved.",
+            ""
+          ],
+          [
+            "claim-0013",
+            "supported",
+            "The separate prohibition on inferring permission to change settings from status is preserved without substituting it for business approval.",
+            ""
+          ],
+          [
+            "claim-0014",
+            "supported",
+            "Both forbidden inferences in the reference line are retained as separate duties, rather than merged into a generic shape or access check.",
+            ""
+          ]
+        ]
+      }
+    },
+    "additionalCitations": {
+      "backup-prerequisite": {
+        "claim-0005": [
+          "d001-l0002"
+        ],
+        "claim-0007": [
+          "d001-l0002"
+        ]
+      },
+      "sensor-branch-reference": {
+        "claim-0005": [
+          "d002-l0001",
+          "d002-l0002"
+        ],
+        "claim-0010": [
+          "d001-l0002"
+        ]
+      },
+      "ticket-approval": {
+        "claim-0006": [
+          "d001-l0002"
+        ],
+        "claim-0008": [
+          "d001-l0002"
+        ]
+      }
+    }
+  },
+  "report": {
+    "manifestDigest": "sha256:2319d3627cb48ec5702303b28dc19f13df80a10d30e3eb99b6119aa711c55104",
+    "model": {
+      "model": "qwen3.5:9b",
+      "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+    },
+    "evidenceRole": "known_development_source_only_not_holdout_or_whole_translation",
+    "rows": [
+      {
+        "case": "storage-pagination",
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:cb4bfa0139ee335bc150886516ef5683a59c04619e6614a79ba4d8c982fa7b91",
+        "latencyMs": 31194.037041976117,
+        "doneReason": "stop",
+        "inputTokens": 972,
+        "outputTokens": 428,
+        "files": {
+          "candidate.json": "sha256:d1e8d507b6514929abac7483fa363a61098ac0589d705469ab4f303a6620c32b",
+          "compilation.json": "sha256:e316a7775a9480ab03f0bb04c7a33a36db453206754d0858501c4ea806fb0a50",
+          "raw-candidate.json": "sha256:d1e8d507b6514929abac7483fa363a61098ac0589d705469ab4f303a6620c32b",
+          "request.json": "sha256:848dfa10e3d5fd7662adac5540ef330241054ff52e3303edda183045e368a3fb",
+          "response.json": "sha256:c3028d42a1290329f9d7ccee392c24f7ffb465d5cfa41bace0480ae5beaa3c10",
+          "review-input.json": "sha256:71030ae3ecc4d11356a51910b60a8eedcd984eb27efee04c62393424f465809e",
+          "status.json": "sha256:53277839b14002ab85699952435f8a790cdaf159947a2f47dd1ef4928aaa0586"
+        },
+        "review": {
+          "status": "blocked",
+          "compilationDigest": "sha256:bc4976679c13609354b4933307c47855483b4522d3f584fe35d192916108ebca",
+          "assessment": {
+            "inputDigest": "sha256:cb4bfa0139ee335bc150886516ef5683a59c04619e6614a79ba4d8c982fa7b91",
+            "status": "revise_construct",
+            "claimCount": 10,
+            "reviewedClaimCount": 10,
+            "verdictCounts": {
+              "supported": 8,
+              "contradicted": 2,
+              "insufficient_evidence": 0
+            },
+            "supportedClaimFraction": 0.8,
+            "claimCoverage": 1.0,
+            "rows": [
+              {
+                "claimId": "claim-0001",
+                "pointer": "/duties/d001-l0001:0",
+                "l05Pointer": "/duties/d001-l0001:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "context",
+                  "statement": "The document title establishes a read-only storage check constraint prohibiting object deletion.",
+                  "evidence_ids": [
+                    "d001-l0001"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0001",
+                "verdict": "contradicted",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "The heading explicitly forbids deletion and imposes read-only scope. The paraphrase retains that text but kind=context contradicts its normative role and cannot justify binding the restriction.",
+                "suggested_revision": "Keep the read-only and no-delete requirements normative; do not classify them as mere context.",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 0,
+                    "end": 16,
+                    "exactQuote": "# 只读存储检查：不得删除对象\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0002",
+                "pointer": "/sourceLines/d001-l0001",
+                "l05Pointer": "/sourceLines/d001-l0001",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 0,
+                    "end": 16,
+                    "exactQuote": "# 只读存储检查：不得删除对象\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "context",
+                      "statement": "The document title establishes a read-only storage check constraint prohibiting object deletion.",
+                      "evidence_ids": [
+                        "d001-l0001"
+                      ],
+                      "sourceLine": "d001-l0001"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0002",
+                "verdict": "contradicted",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "The line's imperative restriction is represented only as context. Text retention does not fully account for a mandatory prohibition in the source-duty contract.",
+                "suggested_revision": "Represent the heading's actual restrictions as requirements and obtain a newly bound review.",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 0,
+                    "end": 16,
+                    "exactQuote": "# 只读存储检查：不得删除对象\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0003",
+                "pointer": "/duties/d001-l0002:0",
+                "l05Pointer": "/duties/d001-l0002:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Invoke list_objects on the bucket provided by the user.",
+                  "evidence_ids": [
+                    "d001-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0003",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "The source explicitly requests list_objects on the user's bucket; the candidate preserves operation and parameter origin without substituting the example.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 16,
+                    "end": 78,
+                    "exactQuote": "对用户给出的 bucket 调用 list_objects；只有返回 truncated=true 时才按原游标继续读取。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0004",
+                "pointer": "/duties/d001-l0002:1",
+                "l05Pointer": "/duties/d001-l0002:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Continue reading using the original cursor only if list_objects returns truncated=true.",
+                  "evidence_ids": [
+                    "d001-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0004",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "The candidate preserves both the only-if truncated=true condition and use of the original cursor for continuation; no success or authorization is invented.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 16,
+                    "end": 78,
+                    "exactQuote": "对用户给出的 bucket 调用 list_objects；只有返回 truncated=true 时才按原游标继续读取。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0005",
+                "pointer": "/sourceLines/d001-l0002",
+                "l05Pointer": "/sourceLines/d001-l0002",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 16,
+                    "end": 78,
+                    "exactQuote": "对用户给出的 bucket 调用 list_objects；只有返回 truncated=true 时才按原游标继续读取。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Invoke list_objects on the bucket provided by the user.",
+                      "evidence_ids": [
+                        "d001-l0002"
+                      ],
+                      "sourceLine": "d001-l0002"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Continue reading using the original cursor only if list_objects returns truncated=true.",
+                      "evidence_ids": [
+                        "d001-l0002"
+                      ],
+                      "sourceLine": "d001-l0002"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0005",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "Both source duties, initial listing on the supplied bucket and conditional cursor-based continuation, remain in this line's candidates. This is prose fidelity, not proof that the current Runtime can loop.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 16,
+                    "end": 78,
+                    "exactQuote": "对用户给出的 bucket 调用 list_objects；只有返回 truncated=true 时才按原游标继续读取。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0006",
+                "pointer": "/duties/d001-l0003:0",
+                "l05Pointer": "/duties/d001-l0003:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Stop and ask for clarification if the cursor is missing.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0006",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "Missing cursor triggers stopping and clarification in both source and candidate.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 78,
+                    "end": 105,
+                    "exactQuote": "若游标缺失则停止并追问，不得把缺失当作没有更多对象。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0007",
+                "pointer": "/duties/d001-l0003:1",
+                "l05Pointer": "/duties/d001-l0003:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Do not treat a missing cursor as indicating no more objects exist.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0007",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "The explicit prohibition against treating a missing cursor as no more objects is preserved.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 78,
+                    "end": 105,
+                    "exactQuote": "若游标缺失则停止并追问，不得把缺失当作没有更多对象。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0008",
+                "pointer": "/sourceLines/d001-l0003",
+                "l05Pointer": "/sourceLines/d001-l0003",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 78,
+                    "end": 105,
+                    "exactQuote": "若游标缺失则停止并追问，不得把缺失当作没有更多对象。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Stop and ask for clarification if the cursor is missing.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Do not treat a missing cursor as indicating no more objects exist.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0008",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "The line's exceptional stop/clarification and interpretation prohibition are separately retained, with the same missing-cursor condition.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 78,
+                    "end": 105,
+                    "exactQuote": "若游标缺失则停止并追问，不得把缺失当作没有更多对象。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0009",
+                "pointer": "/duties/d001-l0004:0",
+                "l05Pointer": "/duties/d001-l0004:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Do not use the example bucket 'demo' as a user parameter.",
+                  "evidence_ids": [
+                    "d001-l0004"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0004"
+                ],
+                "claim_id": "claim-0009",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0004"
+                ],
+                "rationale": "The candidate keeps demo as an example rather than a user-provided bucket argument, as required by the source.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 105,
+                    "end": 137,
+                    "exactQuote": "示例 bucket demo 只是文档示例，不能当作用户参数。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0010",
+                "pointer": "/sourceLines/d001-l0004",
+                "l05Pointer": "/sourceLines/d001-l0004",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 105,
+                    "end": 137,
+                    "exactQuote": "示例 bucket demo 只是文档示例，不能当作用户参数。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Do not use the example bucket 'demo' as a user parameter.",
+                      "evidence_ids": [
+                        "d001-l0004"
+                      ],
+                      "sourceLine": "d001-l0004"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0004"
+                ],
+                "claim_id": "claim-0010",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0004"
+                ],
+                "rationale": "The source example's non-authoritative role and the ban on substituting it as a user parameter are accounted for. No actual bucket is supplied by the candidate.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "storage/SKILL.md",
+                    "start": 105,
+                    "end": 137,
+                    "exactQuote": "示例 bucket demo 只是文档示例，不能当作用户参数。\n",
+                    "sourceDigest": "sha256:3248c321411f572f92c0d082469934ce569facf6b2131a960bd046958fb58839",
+                    "opaque": false
+                  }
+                ]
+              }
+            ],
+            "scopeNote": "Post-hoc complete source-only checklists by the same assistant that authored the four visible development inputs. Not independent Gold, calibrated accuracy, full Skill translation, host availability review or evidence of execution. Each decision below is explicit; no default-supported fill. Line and duty claims overlap.",
+            "citationBindingVerified": true,
+            "semanticEntailmentProven": false,
+            "sourceApiSchemaVerified": false,
+            "wholeSkillCoverageProven": false,
+            "humanIndependentEvidence": false,
+            "goldAuthored": false,
+            "runtimeAuthorityGranted": false,
+            "authority": "ai_source_review_only_no_gold_or_runtime_authority",
+            "claimBoundary": "AI claim support fraction is not calibrated confidence or translation accuracy."
+          },
+          "reviewerId": "same-development-assistant-20260908-source-duties",
+          "reviewerKind": "ai_role_simulation",
+          "reviewDigest": "sha256:cce1a8c77c65f80f4f6e78fdb4cf159f8fae158c1f5e02f59e23fa5a3ef3894d",
+          "semanticAccuracy": null,
+          "runtimeAuthorityGranted": false,
+          "independentHumanEvidence": false,
+          "reportDigest": "sha256:c5e76a51c16022a9749588df0ae18d61fac7420a8bc36fd162d530d41d393fac"
+        }
+      },
+      {
+        "case": "ticket-approval",
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:c834de66bde7152afb1ebb6f9ab90e4cbb6db8d0e5b60029b7d0af3d058dec59",
+        "latencyMs": 35562.210333067924,
+        "doneReason": "stop",
+        "inputTokens": 1125,
+        "outputTokens": 593,
+        "files": {
+          "candidate.json": "sha256:3b1f052ebc0dab84b04f0fa620519c9e2befb125ee2e34ccb16aa286bfad19a0",
+          "compilation.json": "sha256:c3c5ab39b127bc02087ca6e301610e1d1577d6b28bc4d2eea5cacc2762aef2d7",
+          "raw-candidate.json": "sha256:3b1f052ebc0dab84b04f0fa620519c9e2befb125ee2e34ccb16aa286bfad19a0",
+          "request.json": "sha256:2145357b56ccbbb86b36fc32cda0de19dfb7ced62d07aa65418fff6500e86a2d",
+          "response.json": "sha256:19fc48bd2694e53d509868022c1a1881defebebfba374a233512c15e4466a786",
+          "review-input.json": "sha256:21929a03673bd315d1dbd951e5ac4689e95e58e546041741f40629aa25d925c7",
+          "status.json": "sha256:f277df29adfeb8834e73869923ae3e3345af52177404da2e93d1f47af3c1d429"
+        },
+        "review": {
+          "status": "blocked",
+          "compilationDigest": "sha256:677b8f92438116c527f9a9ec202f952e8fa629ce68c081b4b49d6b7580bd8f0b",
+          "assessment": {
+            "inputDigest": "sha256:c834de66bde7152afb1ebb6f9ab90e4cbb6db8d0e5b60029b7d0af3d058dec59",
+            "status": "needs_source_evidence",
+            "claimCount": 14,
+            "reviewedClaimCount": 14,
+            "verdictCounts": {
+              "supported": 12,
+              "contradicted": 0,
+              "insufficient_evidence": 2
+            },
+            "supportedClaimFraction": 0.8571428571428571,
+            "claimCoverage": 1.0,
+            "rows": [
+              {
+                "claimId": "claim-0001",
+                "pointer": "/duties/d001-l0001:0",
+                "l05Pointer": "/duties/d001-l0001:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "context",
+                  "statement": "The document defines a skill for changing ticket priority.",
+                  "evidence_ids": [
+                    "d001-l0001"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0001",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "The heading names the priority-change task. The candidate's descriptive title role adds no operation beyond the body, which separately requests the change.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 0,
+                    "end": 25,
+                    "exactQuote": "# Change ticket priority\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0002",
+                "pointer": "/sourceLines/d001-l0001",
+                "l05Pointer": "/sourceLines/d001-l0001",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 0,
+                    "end": 25,
+                    "exactQuote": "# Change ticket priority\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "context",
+                      "statement": "The document defines a skill for changing ticket priority.",
+                      "evidence_ids": [
+                        "d001-l0001"
+                      ],
+                      "sourceLine": "d001-l0001"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0002",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "The topic heading is retained and its actual operational meaning is expanded in the body candidates; no independent prohibition is removed from this heading.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 0,
+                    "end": 25,
+                    "exactQuote": "# Change ticket priority\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0003",
+                "pointer": "/duties/d001-l0002:0",
+                "l05Pointer": "/duties/d001-l0002:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Read ticket T-42.",
+                  "evidence_ids": [
+                    "d001-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0003",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "Read ticket T-42 is an explicit source action, with the literal ticket identifier preserved.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 25,
+                    "end": 99,
+                    "exactQuote": "Read ticket T-42, then request approval for setting its priority to high.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0004",
+                "pointer": "/duties/d001-l0002:1",
+                "l05Pointer": "/duties/d001-l0002:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Request approval for setting the priority to high.",
+                  "evidence_ids": [
+                    "d001-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0004",
+                "verdict": "insufficient_evidence",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "The requested approval for high priority is retained, but the candidate does not explicitly state that it follows reading T-42 or binds to that ticket. Array position alone has no declared temporal-control semantics in this source-duty protocol.",
+                "suggested_revision": "Retain the after-read prerequisite and the T-42 approval scope in the duty statement; original source text remains available, so this is incomplete candidate semantics, not deleted source.",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 25,
+                    "end": 99,
+                    "exactQuote": "Read ticket T-42, then request approval for setting its priority to high.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0005",
+                "pointer": "/sourceLines/d001-l0002",
+                "l05Pointer": "/sourceLines/d001-l0002",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 25,
+                    "end": 99,
+                    "exactQuote": "Read ticket T-42, then request approval for setting its priority to high.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Read ticket T-42.",
+                      "evidence_ids": [
+                        "d001-l0002"
+                      ],
+                      "sourceLine": "d001-l0002"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Request approval for setting the priority to high.",
+                      "evidence_ids": [
+                        "d001-l0002"
+                      ],
+                      "sourceLine": "d001-l0002"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0005",
+                "verdict": "insufficient_evidence",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "The two actions remain, but their required then relation is implicit in their list positions. This stage has no defined execution ordering for independent duty rows, so complete temporal accounting is not established.",
+                "suggested_revision": "Express the source's read-then-request-approval relation explicitly rather than expecting later binding to reconstruct it from list order.",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 25,
+                    "end": 99,
+                    "exactQuote": "Read ticket T-42, then request approval for setting its priority to high.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0006",
+                "pointer": "/duties/d001-l0003:0",
+                "l05Pointer": "/duties/d001-l0003:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Only when approval is valid may update_ticket set priority to high.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0006",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003",
+                  "d001-l0002"
+                ],
+                "rationale": "The source permits update_ticket only when approval is valid. The candidate retains this predicate, the tool and high priority, without treating a candidate as executed.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 99,
+                    "end": 204,
+                    "exactQuote": "Only when that approval is valid may update_ticket set priority to high; an open ticket is not approval.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  },
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 25,
+                    "end": 99,
+                    "exactQuote": "Read ticket T-42, then request approval for setting its priority to high.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0007",
+                "pointer": "/duties/d001-l0003:1",
+                "l05Pointer": "/duties/d001-l0003:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "An open ticket is not considered approval.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0007",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "An open ticket is not approval is preserved as an explicit interpretation restriction, not converted into permission.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 99,
+                    "end": 204,
+                    "exactQuote": "Only when that approval is valid may update_ticket set priority to high; an open ticket is not approval.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0008",
+                "pointer": "/sourceLines/d001-l0003",
+                "l05Pointer": "/sourceLines/d001-l0003",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 99,
+                    "end": 204,
+                    "exactQuote": "Only when that approval is valid may update_ticket set priority to high; an open ticket is not approval.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Only when approval is valid may update_ticket set priority to high.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "An open ticket is not considered approval.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0008",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003",
+                  "d001-l0002"
+                ],
+                "rationale": "The line's valid-approval gate and open-ticket-not-approval distinction are both accounted for in context of the preceding approval request.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 99,
+                    "end": 204,
+                    "exactQuote": "Only when that approval is valid may update_ticket set priority to high; an open ticket is not approval.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  },
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 25,
+                    "end": 99,
+                    "exactQuote": "Read ticket T-42, then request approval for setting its priority to high.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0009",
+                "pointer": "/duties/d001-l0004:0",
+                "l05Pointer": "/duties/d001-l0004:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "If approval is unavailable or denied, stop without calling update_ticket.",
+                  "evidence_ids": [
+                    "d001-l0004"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0004"
+                ],
+                "claim_id": "claim-0009",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0004"
+                ],
+                "rationale": "Both unavailable and denied approvals require a stop without update_ticket in source and candidate.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 204,
+                    "end": 278,
+                    "exactQuote": "If approval is unavailable or denied, stop without calling update_ticket.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0010",
+                "pointer": "/sourceLines/d001-l0004",
+                "l05Pointer": "/sourceLines/d001-l0004",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 204,
+                    "end": 278,
+                    "exactQuote": "If approval is unavailable or denied, stop without calling update_ticket.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "If approval is unavailable or denied, stop without calling update_ticket.",
+                      "evidence_ids": [
+                        "d001-l0004"
+                      ],
+                      "sourceLine": "d001-l0004"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0004"
+                ],
+                "claim_id": "claim-0010",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0004"
+                ],
+                "rationale": "The candidate preserves both refusal conditions and the prohibition on the update call. It does not claim that stopping implements the requested update.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 204,
+                    "end": 278,
+                    "exactQuote": "If approval is unavailable or denied, stop without calling update_ticket.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0011",
+                "pointer": "/duties/d001-l0005:0",
+                "l05Pointer": "/duties/d001-l0005:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "After the update, read the priority again.",
+                  "evidence_ids": [
+                    "d001-l0005"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0005"
+                ],
+                "claim_id": "claim-0011",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0005"
+                ],
+                "rationale": "After the update, read priority again preserves the source's explicit post-update verification order.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0005",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 278,
+                    "end": 374,
+                    "exactQuote": "After the update, read the priority again; a mismatch must be reported as failure, not success.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0012",
+                "pointer": "/duties/d001-l0005:1",
+                "l05Pointer": "/duties/d001-l0005:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "If a mismatch is found, report it as failure.",
+                  "evidence_ids": [
+                    "d001-l0005"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0005"
+                ],
+                "claim_id": "claim-0012",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0005"
+                ],
+                "rationale": "The mismatch from the priority reread must be reported as failure; this conditional result requirement is retained in source context.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0005",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 278,
+                    "end": 374,
+                    "exactQuote": "After the update, read the priority again; a mismatch must be reported as failure, not success.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0013",
+                "pointer": "/duties/d001-l0005:2",
+                "l05Pointer": "/duties/d001-l0005:2",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Do not report success if a mismatch is found.",
+                  "evidence_ids": [
+                    "d001-l0005"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0005"
+                ],
+                "claim_id": "claim-0013",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0005"
+                ],
+                "rationale": "The candidate preserves the explicit ban on reporting success after the mismatch, rather than inventing a commit.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0005",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 278,
+                    "end": 374,
+                    "exactQuote": "After the update, read the priority again; a mismatch must be reported as failure, not success.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0014",
+                "pointer": "/sourceLines/d001-l0005",
+                "l05Pointer": "/sourceLines/d001-l0005",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0005",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 278,
+                    "end": 374,
+                    "exactQuote": "After the update, read the priority again; a mismatch must be reported as failure, not success.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "After the update, read the priority again.",
+                      "evidence_ids": [
+                        "d001-l0005"
+                      ],
+                      "sourceLine": "d001-l0005"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "If a mismatch is found, report it as failure.",
+                      "evidence_ids": [
+                        "d001-l0005"
+                      ],
+                      "sourceLine": "d001-l0005"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Do not report success if a mismatch is found.",
+                      "evidence_ids": [
+                        "d001-l0005"
+                      ],
+                      "sourceLine": "d001-l0005"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0005"
+                ],
+                "claim_id": "claim-0014",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0005"
+                ],
+                "rationale": "The source line's reread-after-update, mismatch-as-failure and no-success requirements are all retained. Verification effectiveness still requires later host and execution evidence.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0005",
+                    "kind": "skill",
+                    "path": "tickets/SKILL.md",
+                    "start": 278,
+                    "end": 374,
+                    "exactQuote": "After the update, read the priority again; a mismatch must be reported as failure, not success.\n",
+                    "sourceDigest": "sha256:254a56dd6117633fca8eb839fce9992c31837f4f3b9d71fe2a2ec0e471ba5f0d",
+                    "opaque": false
+                  }
+                ]
+              }
+            ],
+            "scopeNote": "Post-hoc complete source-only checklists by the same assistant that authored the four visible development inputs. Not independent Gold, calibrated accuracy, full Skill translation, host availability review or evidence of execution. Each decision below is explicit; no default-supported fill. Line and duty claims overlap.",
+            "citationBindingVerified": true,
+            "semanticEntailmentProven": false,
+            "sourceApiSchemaVerified": false,
+            "wholeSkillCoverageProven": false,
+            "humanIndependentEvidence": false,
+            "goldAuthored": false,
+            "runtimeAuthorityGranted": false,
+            "authority": "ai_source_review_only_no_gold_or_runtime_authority",
+            "claimBoundary": "AI claim support fraction is not calibrated confidence or translation accuracy."
+          },
+          "reviewerId": "same-development-assistant-20260908-source-duties",
+          "reviewerKind": "ai_role_simulation",
+          "reviewDigest": "sha256:3d3deb2a141a1e030bf829db564b22550c48dfb69679d053cda2f42a943a8ebb",
+          "semanticAccuracy": null,
+          "runtimeAuthorityGranted": false,
+          "independentHumanEvidence": false,
+          "reportDigest": "sha256:2b02aa7bde079d7c3a4a1b9b30d46c731b42f3bc2959182f3fd96ff35333027a"
+        }
+      },
+      {
+        "case": "backup-prerequisite",
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:97a3394f58052ec9a7b69970b282b90f3cbd4c82efd0ef4a9345f05744133a58",
+        "latencyMs": 24792.764749960043,
+        "doneReason": "stop",
+        "inputTokens": 1361,
+        "outputTokens": 377,
+        "files": {
+          "candidate.json": "sha256:2270ec51a0e0bab28ff84c483c161e34cdf94d5794b1e843edf2bd17be110ed3",
+          "compilation.json": "sha256:e1f469ee9d83bc998328aa6e3029fcbcdd38ad233cf319172afc057beba18679",
+          "raw-candidate.json": "sha256:2270ec51a0e0bab28ff84c483c161e34cdf94d5794b1e843edf2bd17be110ed3",
+          "request.json": "sha256:abe83f4c09a35532d9148f6cb3434a66801931be78d900bb1556f5bb620d97f8",
+          "response.json": "sha256:6b8cac108f274810d807972c7c19fea33e68492ee43a04b9437866b0c71f2583",
+          "review-input.json": "sha256:b455d5d557ed3a78b820dd55fe69056f5260031686d6c37091512504c031623a",
+          "status.json": "sha256:00f465d2e50ecb81007d7394c17561a5b54abb4467fc44b3e7cd061f6baed50e"
+        },
+        "review": {
+          "status": "review_supported_source_candidates",
+          "compilationDigest": "sha256:fefa5bbcebe4ddede2ea47a5093c40942c2de66df16de593908a47831490ea80",
+          "assessment": {
+            "inputDigest": "sha256:97a3394f58052ec9a7b69970b282b90f3cbd4c82efd0ef4a9345f05744133a58",
+            "status": "ready_for_reference_drafting_review",
+            "claimCount": 12,
+            "reviewedClaimCount": 12,
+            "verdictCounts": {
+              "supported": 12,
+              "contradicted": 0,
+              "insufficient_evidence": 0
+            },
+            "supportedClaimFraction": 1.0,
+            "claimCoverage": 1.0,
+            "rows": [
+              {
+                "claimId": "claim-0001",
+                "pointer": "/duties/d001-l0001:0",
+                "l05Pointer": "/duties/d001-l0001:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "context",
+                  "statement": "The document serves as a guide for backup inspection procedures.",
+                  "evidence_ids": [
+                    "d001-l0001"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0001",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "Backup inspection is a descriptive topic heading; calling it a guide does not invent a business step or permission.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 0,
+                    "end": 20,
+                    "exactQuote": "# Backup inspection\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0002",
+                "pointer": "/sourceLines/d001-l0001",
+                "l05Pointer": "/sourceLines/d001-l0001",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 0,
+                    "end": 20,
+                    "exactQuote": "# Backup inspection\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "context",
+                      "statement": "The document serves as a guide for backup inspection procedures.",
+                      "evidence_ids": [
+                        "d001-l0001"
+                      ],
+                      "sourceLine": "d001-l0001"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0002",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "The heading topic is retained as context, while concrete requirements are in subsequent source lines.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 0,
+                    "end": 20,
+                    "exactQuote": "# Backup inspection\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0003",
+                "pointer": "/duties/d001-l0002:0",
+                "l05Pointer": "/duties/d001-l0002:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Execute prerequisites described in references/precheck.md before reading backup metadata.",
+                  "evidence_ids": [
+                    "d001-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0003",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "The candidate keeps the required prerequisites from references/precheck.md before metadata reading. It does not claim to know the absent file's contents or implementation.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 20,
+                    "end": 111,
+                    "exactQuote": "Before reading backup metadata, run the prerequisites described in references/precheck.md.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0004",
+                "pointer": "/sourceLines/d001-l0002",
+                "l05Pointer": "/sourceLines/d001-l0002",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 20,
+                    "end": 111,
+                    "exactQuote": "Before reading backup metadata, run the prerequisites described in references/precheck.md.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Execute prerequisites described in references/precheck.md before reading backup metadata.",
+                      "evidence_ids": [
+                        "d001-l0002"
+                      ],
+                      "sourceLine": "d001-l0002"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0004",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "The ordering and external prerequisite reference are preserved. Source-only extraction does not certify that this missing reference can be bound or executed.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 20,
+                    "end": 111,
+                    "exactQuote": "Before reading backup metadata, run the prerequisites described in references/precheck.md.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0005",
+                "pointer": "/duties/d001-l0003:0",
+                "l05Pointer": "/duties/d001-l0003:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Stop before reading metadata if the reference in references/precheck.md or its required runner is unavailable.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0005",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003",
+                  "d001-l0002"
+                ],
+                "rationale": "In context of the previous line, that reference resolves to references/precheck.md. The candidate preserves both missing-reference and missing-runner conditions and the stop-before-read order.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 111,
+                    "end": 233,
+                    "exactQuote": "If that reference or its required runner is unavailable, stop before reading metadata and explain the missing dependency.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  },
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 20,
+                    "end": 111,
+                    "exactQuote": "Before reading backup metadata, run the prerequisites described in references/precheck.md.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0006",
+                "pointer": "/duties/d001-l0003:1",
+                "l05Pointer": "/duties/d001-l0003:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Explain the missing dependency if the reference or its required runner is unavailable.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0006",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "Explaining the missing dependency under the same unavailable-reference/runner condition is an explicit source duty.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 111,
+                    "end": 233,
+                    "exactQuote": "If that reference or its required runner is unavailable, stop before reading metadata and explain the missing dependency.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0007",
+                "pointer": "/sourceLines/d001-l0003",
+                "l05Pointer": "/sourceLines/d001-l0003",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 111,
+                    "end": 233,
+                    "exactQuote": "If that reference or its required runner is unavailable, stop before reading metadata and explain the missing dependency.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Stop before reading metadata if the reference in references/precheck.md or its required runner is unavailable.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Explain the missing dependency if the reference or its required runner is unavailable.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0007",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003",
+                  "d001-l0002"
+                ],
+                "rationale": "The source line's two unavailable dependencies, stop-before-read and explanation duty are accounted for. No fabricated successful precheck or read is asserted.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 111,
+                    "end": 233,
+                    "exactQuote": "If that reference or its required runner is unavailable, stop before reading metadata and explain the missing dependency.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  },
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 20,
+                    "end": 111,
+                    "exactQuote": "Before reading backup metadata, run the prerequisites described in references/precheck.md.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0008",
+                "pointer": "/duties/d001-l0004:0",
+                "l05Pointer": "/duties/d001-l0004:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Do not infer successful verification from the name verify_backup.py.",
+                  "evidence_ids": [
+                    "d001-l0004"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0004"
+                ],
+                "claim_id": "claim-0008",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0004"
+                ],
+                "rationale": "The name verify_backup.py is explicitly not proof of successful verification in both source and candidate.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 233,
+                    "end": 302,
+                    "exactQuote": "Do not infer successful verification from the name verify_backup.py.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0009",
+                "pointer": "/sourceLines/d001-l0004",
+                "l05Pointer": "/sourceLines/d001-l0004",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 233,
+                    "end": 302,
+                    "exactQuote": "Do not infer successful verification from the name verify_backup.py.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Do not infer successful verification from the name verify_backup.py.",
+                      "evidence_ids": [
+                        "d001-l0004"
+                      ],
+                      "sourceLine": "d001-l0004"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0004"
+                ],
+                "claim_id": "claim-0009",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0004"
+                ],
+                "rationale": "This entire interpretation prohibition is retained without inferring a verify API or running a file.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0004",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 233,
+                    "end": 302,
+                    "exactQuote": "Do not infer successful verification from the name verify_backup.py.\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0010",
+                "pointer": "/sourceLines/d001-l0005",
+                "l05Pointer": "/sourceLines/d001-l0005",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0005",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 302,
+                    "end": 312,
+                    "exactQuote": "```python\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": true
+                  },
+                  "candidates": [
+                    {
+                      "kind": "opaque",
+                      "statement": "Uninterpreted source; not execution evidence.",
+                      "evidence_ids": [
+                        "d001-l0005"
+                      ],
+                      "sourceLine": "d001-l0005"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0005"
+                ],
+                "claim_id": "claim-0010",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0005"
+                ],
+                "rationale": "The fenced-code opening is archived as opaque; no executable or behavioral claim is derived from it.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0005",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 302,
+                    "end": 312,
+                    "exactQuote": "```python\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": true
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0011",
+                "pointer": "/sourceLines/d001-l0006",
+                "l05Pointer": "/sourceLines/d001-l0006",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0006",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 312,
+                    "end": 386,
+                    "exactQuote": "raise RuntimeError('This supplied example must never run in translation')\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": true
+                  },
+                  "candidates": [
+                    {
+                      "kind": "opaque",
+                      "statement": "Uninterpreted source; not execution evidence.",
+                      "evidence_ids": [
+                        "d001-l0006"
+                      ],
+                      "sourceLine": "d001-l0006"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0006"
+                ],
+                "claim_id": "claim-0011",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0006"
+                ],
+                "rationale": "The supplied raise statement is retained exactly as opaque source. The protocol makes no claim about script meaning, completion or safety; no execution is performed.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0006",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 312,
+                    "end": 386,
+                    "exactQuote": "raise RuntimeError('This supplied example must never run in translation')\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": true
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0012",
+                "pointer": "/sourceLines/d001-l0007",
+                "l05Pointer": "/sourceLines/d001-l0007",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0007",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 386,
+                    "end": 390,
+                    "exactQuote": "```\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": true
+                  },
+                  "candidates": [
+                    {
+                      "kind": "opaque",
+                      "statement": "Uninterpreted source; not execution evidence.",
+                      "evidence_ids": [
+                        "d001-l0007"
+                      ],
+                      "sourceLine": "d001-l0007"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0007"
+                ],
+                "claim_id": "claim-0012",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0007"
+                ],
+                "rationale": "The closing fence remains in opaque accounting. Together with the full source archive this preserves the code block without interpretation.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0007",
+                    "kind": "skill",
+                    "path": "backup/SKILL.md",
+                    "start": 386,
+                    "end": 390,
+                    "exactQuote": "```\n",
+                    "sourceDigest": "sha256:be6715bba9606a206dce466ca4e1d3e4adc5eddd6ada0fb3f5bfc1f7740b3546",
+                    "opaque": true
+                  }
+                ]
+              }
+            ],
+            "scopeNote": "Post-hoc complete source-only checklists by the same assistant that authored the four visible development inputs. Not independent Gold, calibrated accuracy, full Skill translation, host availability review or evidence of execution. Each decision below is explicit; no default-supported fill. Line and duty claims overlap.",
+            "citationBindingVerified": true,
+            "semanticEntailmentProven": false,
+            "sourceApiSchemaVerified": false,
+            "wholeSkillCoverageProven": false,
+            "humanIndependentEvidence": false,
+            "goldAuthored": false,
+            "runtimeAuthorityGranted": false,
+            "authority": "ai_source_review_only_no_gold_or_runtime_authority",
+            "claimBoundary": "AI claim support fraction is not calibrated confidence or translation accuracy."
+          },
+          "reviewerId": "same-development-assistant-20260908-source-duties",
+          "reviewerKind": "ai_role_simulation",
+          "reviewDigest": "sha256:f32f549b99dbc36c4624fd28f2e5dbb0d36839b5a9d887a61f9a3a923d1c5477",
+          "semanticAccuracy": null,
+          "runtimeAuthorityGranted": false,
+          "independentHumanEvidence": false,
+          "reportDigest": "sha256:e2f34660d4fb2b15b3c85e92df65dcbda5bded727123cfd274c5ebcb44141679"
+        }
+      },
+      {
+        "case": "sensor-branch-reference",
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:94bc4d38f33d5c58dd89c82ab8bfeda15358f44cb9f682f7ec117bb7e0cc10fe",
+        "latencyMs": 36343.66495790891,
+        "doneReason": "stop",
+        "inputTokens": 1129,
+        "outputTokens": 594,
+        "files": {
+          "candidate.json": "sha256:246c9ff4c6bf79ccb22c80c9268a0bd4a154ecced32ed2439ddc80de7cbff5b0",
+          "compilation.json": "sha256:ecb9252181593af236f7a85056e499643edda0653c59fe1f1f20be7de4d8f913",
+          "raw-candidate.json": "sha256:246c9ff4c6bf79ccb22c80c9268a0bd4a154ecced32ed2439ddc80de7cbff5b0",
+          "request.json": "sha256:a962c11089374f2c2d1b46b4d5ed1620781dfb91173349df3f11b9a83255eaa1",
+          "response.json": "sha256:c2320d3fd79ab7807871319a42382801c02c1e0afc8256238dc85e392f4d946d",
+          "review-input.json": "sha256:b369f5f6d798d76d60f53e77412d5545762195c96c05341b60129375f8101875",
+          "status.json": "sha256:e85330395fc88a9af39ef2acb290a63126e82a3de0db45522d5565ee5926eae5"
+        },
+        "review": {
+          "status": "blocked",
+          "compilationDigest": "sha256:0f6652fb3efee9cf16be84ec2f8cd677d5baeb584c46de28a0706f1e6b6dba98",
+          "assessment": {
+            "inputDigest": "sha256:94bc4d38f33d5c58dd89c82ab8bfeda15358f44cb9f682f7ec117bb7e0cc10fe",
+            "status": "revise_construct",
+            "claimCount": 14,
+            "reviewedClaimCount": 14,
+            "verdictCounts": {
+              "supported": 12,
+              "contradicted": 2,
+              "insufficient_evidence": 0
+            },
+            "supportedClaimFraction": 0.8571428571428571,
+            "claimCoverage": 1.0,
+            "rows": [
+              {
+                "claimId": "claim-0001",
+                "pointer": "/duties/d001-l0001:0",
+                "l05Pointer": "/duties/d001-l0001:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "context",
+                  "statement": "The section is titled 'Observe only'.",
+                  "evidence_ids": [
+                    "d001-l0001"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0001",
+                "verdict": "contradicted",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "Observe only restricts the task to observation. Reporting only that this is the title, with kind=context, drops its normative scope even though the body also asks for a read.",
+                "suggested_revision": "Retain the observe-only scope as a requirement; do not reduce an imperative restriction to a descriptive heading.",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 0,
+                    "end": 15,
+                    "exactQuote": "# Observe only\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0002",
+                "pointer": "/sourceLines/d001-l0001",
+                "l05Pointer": "/sourceLines/d001-l0001",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 0,
+                    "end": 15,
+                    "exactQuote": "# Observe only\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "context",
+                      "statement": "The section is titled 'Observe only'.",
+                      "evidence_ids": [
+                        "d001-l0001"
+                      ],
+                      "sourceLine": "d001-l0001"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0001"
+                ],
+                "claim_id": "claim-0002",
+                "verdict": "contradicted",
+                "source_span_ids": [
+                  "d001-l0001"
+                ],
+                "rationale": "The heading's only restriction is not represented as a duty that the binding stage may enforce. The descriptive title entry does not fully account for it.",
+                "suggested_revision": "Represent the normative observation-only boundary and review it against the original heading.",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0001",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 0,
+                    "end": 15,
+                    "exactQuote": "# Observe only\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0003",
+                "pointer": "/duties/d001-l0002:0",
+                "l05Pointer": "/duties/d001-l0002:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Read the requested sensor exactly once.",
+                  "evidence_ids": [
+                    "d001-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0003",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "Read the requested sensor once is faithfully represented as exactly one requested-sensor read.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 15,
+                    "end": 104,
+                    "exactQuote": "Read the requested sensor once. Apply the interpretation limits in references/limits.md.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0004",
+                "pointer": "/duties/d001-l0002:1",
+                "l05Pointer": "/duties/d001-l0002:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Apply interpretation limits defined in references/limits.md.",
+                  "evidence_ids": [
+                    "d001-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0004",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002"
+                ],
+                "rationale": "The candidate retains the requirement to apply interpretation limits in the supplied reference file; it does not auto-load another path.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 15,
+                    "end": 104,
+                    "exactQuote": "Read the requested sensor once. Apply the interpretation limits in references/limits.md.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0005",
+                "pointer": "/sourceLines/d001-l0002",
+                "l05Pointer": "/sourceLines/d001-l0002",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 15,
+                    "end": 104,
+                    "exactQuote": "Read the requested sensor once. Apply the interpretation limits in references/limits.md.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Read the requested sensor exactly once.",
+                      "evidence_ids": [
+                        "d001-l0002"
+                      ],
+                      "sourceLine": "d001-l0002"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Apply interpretation limits defined in references/limits.md.",
+                      "evidence_ids": [
+                        "d001-l0002"
+                      ],
+                      "sourceLine": "d001-l0002"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0002"
+                ],
+                "claim_id": "claim-0005",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0002",
+                  "d002-l0001",
+                  "d002-l0002"
+                ],
+                "rationale": "The source line's single read and incorporation of the supplied interpretation limits are both retained. The limits themselves are also represented under the second document.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 15,
+                    "end": 104,
+                    "exactQuote": "Read the requested sensor once. Apply the interpretation limits in references/limits.md.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  },
+                  {
+                    "source_span_id": "d002-l0001",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 0,
+                    "end": 44,
+                    "exactQuote": "A stored reading is not a live measurement.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  },
+                  {
+                    "source_span_id": "d002-l0002",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 44,
+                    "end": 128,
+                    "exactQuote": "Do not infer equipment safety or permission to change settings from reading.status.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0006",
+                "pointer": "/duties/d001-l0003:0",
+                "l05Pointer": "/duties/d001-l0003:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "If reading.status is not stale, finish the process.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0006",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "The finish branch keeps not stale, preserving the source's negative predicate rather than reversing it.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 104,
+                    "end": 215,
+                    "exactQuote": "If reading.status is not stale, finish; otherwise request human interpretation without taking another reading.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0007",
+                "pointer": "/duties/d001-l0003:1",
+                "l05Pointer": "/duties/d001-l0003:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "If reading.status is stale, request human interpretation.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0007",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "The otherwise branch of status not stale requests human interpretation; status stale expresses the complement in this stated predicate, not approval or automatic repair.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 104,
+                    "end": 215,
+                    "exactQuote": "If reading.status is not stale, finish; otherwise request human interpretation without taking another reading.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0008",
+                "pointer": "/duties/d001-l0003:2",
+                "l05Pointer": "/duties/d001-l0003:2",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Do not take another reading if reading.status is stale.",
+                  "evidence_ids": [
+                    "d001-l0003"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0008",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "The otherwise branch's ban on another reading is retained with the stale condition; the earlier single-read duty remains as well.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 104,
+                    "end": 215,
+                    "exactQuote": "If reading.status is not stale, finish; otherwise request human interpretation without taking another reading.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0009",
+                "pointer": "/sourceLines/d001-l0003",
+                "l05Pointer": "/sourceLines/d001-l0003",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 104,
+                    "end": 215,
+                    "exactQuote": "If reading.status is not stale, finish; otherwise request human interpretation without taking another reading.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "If reading.status is not stale, finish the process.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "If reading.status is stale, request human interpretation.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Do not take another reading if reading.status is stale.",
+                      "evidence_ids": [
+                        "d001-l0003"
+                      ],
+                      "sourceLine": "d001-l0003"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d001-l0003"
+                ],
+                "claim_id": "claim-0009",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d001-l0003"
+                ],
+                "rationale": "The finish predicate, human-interpretation alternative and no-extra-reading restriction are all represented with matching polarity.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d001-l0003",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 104,
+                    "end": 215,
+                    "exactQuote": "If reading.status is not stale, finish; otherwise request human interpretation without taking another reading.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0010",
+                "pointer": "/duties/d002-l0001:0",
+                "l05Pointer": "/duties/d002-l0001:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Treat a stored reading as not being a live measurement.",
+                  "evidence_ids": [
+                    "d002-l0001"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d002-l0001"
+                ],
+                "claim_id": "claim-0010",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d002-l0001",
+                  "d001-l0002"
+                ],
+                "rationale": "The supplied limits file says stored readings are not live measurements, and the main source asks to apply those limits. The interpretation duty is grounded in that cross-document context.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d002-l0001",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 0,
+                    "end": 44,
+                    "exactQuote": "A stored reading is not a live measurement.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  },
+                  {
+                    "source_span_id": "d001-l0002",
+                    "kind": "skill",
+                    "path": "sensors/SKILL.md",
+                    "start": 15,
+                    "end": 104,
+                    "exactQuote": "Read the requested sensor once. Apply the interpretation limits in references/limits.md.\n",
+                    "sourceDigest": "sha256:c93c166d4c3834d2d11cd2b3440f9780791feb14aa4d1e68d2dd65e99cd42e22",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0011",
+                "pointer": "/sourceLines/d002-l0001",
+                "l05Pointer": "/sourceLines/d002-l0001",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d002-l0001",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 0,
+                    "end": 44,
+                    "exactQuote": "A stored reading is not a live measurement.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Treat a stored reading as not being a live measurement.",
+                      "evidence_ids": [
+                        "d002-l0001"
+                      ],
+                      "sourceLine": "d002-l0001"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d002-l0001"
+                ],
+                "claim_id": "claim-0011",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d002-l0001"
+                ],
+                "rationale": "The stored-versus-live distinction is preserved as an interpretation constraint, not asserted as a read API result or actual live verification.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d002-l0001",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 0,
+                    "end": 44,
+                    "exactQuote": "A stored reading is not a live measurement.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0012",
+                "pointer": "/duties/d002-l0002:0",
+                "l05Pointer": "/duties/d002-l0002:0",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Do not infer equipment safety from reading.status.",
+                  "evidence_ids": [
+                    "d002-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d002-l0002"
+                ],
+                "claim_id": "claim-0012",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d002-l0002"
+                ],
+                "rationale": "The explicit prohibition on inferring equipment safety from status is preserved.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d002-l0002",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 44,
+                    "end": 128,
+                    "exactQuote": "Do not infer equipment safety or permission to change settings from reading.status.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0013",
+                "pointer": "/duties/d002-l0002:1",
+                "l05Pointer": "/duties/d002-l0002:1",
+                "l0Pointer": null,
+                "facet": "source_entails_kind_and_complete_statement_without_added_duties",
+                "declaredValue": {
+                  "kind": "requirement",
+                  "statement": "Do not infer permission to change settings from reading.status.",
+                  "evidence_ids": [
+                    "d002-l0002"
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d002-l0002"
+                ],
+                "claim_id": "claim-0013",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d002-l0002"
+                ],
+                "rationale": "The separate prohibition on inferring permission to change settings from status is preserved without substituting it for business approval.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d002-l0002",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 44,
+                    "end": 128,
+                    "exactQuote": "Do not infer equipment safety or permission to change settings from reading.status.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  }
+                ]
+              },
+              {
+                "claimId": "claim-0014",
+                "pointer": "/sourceLines/d002-l0002",
+                "l05Pointer": "/sourceLines/d002-l0002",
+                "l0Pointer": null,
+                "facet": "complete_line_accounting_in_context_including_conditions_negation_and_omissions",
+                "declaredValue": {
+                  "source": {
+                    "source_span_id": "d002-l0002",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 44,
+                    "end": 128,
+                    "exactQuote": "Do not infer equipment safety or permission to change settings from reading.status.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  },
+                  "candidates": [
+                    {
+                      "kind": "requirement",
+                      "statement": "Do not infer equipment safety from reading.status.",
+                      "evidence_ids": [
+                        "d002-l0002"
+                      ],
+                      "sourceLine": "d002-l0002"
+                    },
+                    {
+                      "kind": "requirement",
+                      "statement": "Do not infer permission to change settings from reading.status.",
+                      "evidence_ids": [
+                        "d002-l0002"
+                      ],
+                      "sourceLine": "d002-l0002"
+                    }
+                  ]
+                },
+                "requiredEvidenceKinds": [
+                  "skill"
+                ],
+                "requiredCitationIds": [
+                  "d002-l0002"
+                ],
+                "claim_id": "claim-0014",
+                "verdict": "supported",
+                "source_span_ids": [
+                  "d002-l0002"
+                ],
+                "rationale": "Both forbidden inferences in the reference line are retained as separate duties, rather than merged into a generic shape or access check.",
+                "suggested_revision": "",
+                "resolvedCitations": [
+                  {
+                    "source_span_id": "d002-l0002",
+                    "kind": "skill",
+                    "path": "references/limits.md",
+                    "start": 44,
+                    "end": 128,
+                    "exactQuote": "Do not infer equipment safety or permission to change settings from reading.status.\n",
+                    "sourceDigest": "sha256:c1ad43bddd4211518c67a6f5a2f2981f14c9f531c735067b986e3824627c2324",
+                    "opaque": false
+                  }
+                ]
+              }
+            ],
+            "scopeNote": "Post-hoc complete source-only checklists by the same assistant that authored the four visible development inputs. Not independent Gold, calibrated accuracy, full Skill translation, host availability review or evidence of execution. Each decision below is explicit; no default-supported fill. Line and duty claims overlap.",
+            "citationBindingVerified": true,
+            "semanticEntailmentProven": false,
+            "sourceApiSchemaVerified": false,
+            "wholeSkillCoverageProven": false,
+            "humanIndependentEvidence": false,
+            "goldAuthored": false,
+            "runtimeAuthorityGranted": false,
+            "authority": "ai_source_review_only_no_gold_or_runtime_authority",
+            "claimBoundary": "AI claim support fraction is not calibrated confidence or translation accuracy."
+          },
+          "reviewerId": "same-development-assistant-20260908-source-duties",
+          "reviewerKind": "ai_role_simulation",
+          "reviewDigest": "sha256:47af69322044027afd93b1a512a56745478fa0a74fa4042c1cdc1ecd3c32be5b",
+          "semanticAccuracy": null,
+          "runtimeAuthorityGranted": false,
+          "independentHumanEvidence": false,
+          "reportDigest": "sha256:3287d10a021ea260db873923c060344a4ed50e4e809da1c676da79685c559cf2"
+        }
+      }
+    ],
+    "completed": true,
+    "knownDevelopmentCases": 4,
+    "publicSkills": 0,
+    "structurallyQualified": 4,
+    "sourceReviewed": 4,
+    "reviewSupported": 1,
+    "postTotalMs": 127892.677082913,
+    "p50Ms": 31194.037041976117,
+    "p95Ms": 36343.66495790891,
+    "inputTokens": 4587,
+    "outputTokens": 1992,
+    "semanticAccuracy": null,
+    "runtimeExecutions": 0,
+    "wholeSkillTranslations": 0,
+    "runtimeAuthorityGranted": false,
+    "reportDigest": "sha256:462c38bf81513a08419659ded92d7d5403211db9bbe196194316cfbce5b66685"
+  },
+  "wholeSkillTranslations": 0,
+  "runtimeExecutions": 0,
+  "semanticAccuracy": null,
+  "boundary": "Four same-author visible development cases, 50 overlapping source-only claims; not independent Gold or a whole-chain accuracy comparison.",
+  "summaryDigest": "sha256:533bd589914b369f73825af7f5f936b14c2ce63cebb210d27902d00c29ba46dc"
+}

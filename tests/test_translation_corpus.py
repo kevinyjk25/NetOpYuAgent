@@ -106,3 +106,32 @@ def test_translation_corpus_detects_index_tampering(
     (output / "index.json").write_text("{}", encoding="utf-8")
     with pytest.raises(ValueError, match="sealed file drift"):
         inspect_translation_corpus(output)
+
+
+@pytest.mark.parametrize("mode,valid,primary,classification", [
+    ("100755", True, True, "translation_only_partial_context"),
+    ("100755", False, False, "format_variant_robustness_only"),
+    ("120000", True, False, "excluded_from_translation"),
+])
+def test_quarantined_markdown_qualification_never_restores_runtime_resources(
+    tmp_path, monkeypatch, mode, valid, primary, classification,
+):
+    import evaluation.public_skill_corpus as corpus
+
+    snapshot = tmp_path / "snapshot"
+    snapshot.mkdir()
+    row = _package(snapshot, "entry", "owner/repo", b"temporary")
+    (snapshot / "packages/entry/SKILL.md").unlink()
+    row["files"] = []
+    data = b"---\nname: entry\ndescription: Static data.\n---\nRead.\n" if valid else b"bad format"
+    evidence = corpus._quarantine_text(snapshot, "entry", {"relative": "SKILL.md", "mode": mode}, data)
+    row.update(quarantinedFiles=[evidence], withheldFiles=[{"path": "SKILL.md", "reason": "executable-mode"}])
+    (snapshot / "records.jsonl").write_text(json.dumps(row) + "\n")
+    (snapshot / "manifest.json").write_text("{}")
+    monkeypatch.setattr("evaluation.translation_corpus.inspect_public_snapshot", lambda _: {"manifestDigest": "test"})
+    build_translation_corpus(snapshot, tmp_path / "library")
+    skill = json.loads((tmp_path / "library/index.json").read_text())["skills"][0]
+    assert skill["primaryTranslationEligible"] is primary
+    assert skill["classification"] == classification
+    assert not skill["runtimeReady"]
+    assert not (snapshot / "packages/entry/SKILL.md").exists()

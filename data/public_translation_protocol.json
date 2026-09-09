@@ -1,0 +1,60 @@
+{
+  "protocol": "public-source-translation-pilot/v1",
+  "model": "qwen3.5:9b",
+  "modelDigestExpected": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7",
+  "think": false,
+  "seed": 20260908,
+  "candidatePath": "flow_contract_authoring/v3_then_condition_expression/v3_if_structurally_applicable",
+  "compactReadRegion": "disabled_in_primary_path",
+  "maxCallsPerAlignedTask": 2,
+  "automaticRetry": false,
+  "oracleBasedCandidateSelection": false,
+  "sampleTarget": 60,
+  "maxSkillsPerRepository": 2,
+  "batchSize": 20,
+  "samplingSeed": "ensuredskill-public-source-20260908-v1",
+  "discoveryQueries": [
+    "network operations", "cloud infrastructure", "database operations",
+    "cybersecurity", "data engineering", "software testing",
+    "incident response", "customer support", "project management",
+    "finance analysis", "developer tools", "observability"
+  ],
+  "discoverySort": "stars",
+  "discoveryPerQuery": 40,
+  "discoveryLimit": 500,
+  "scriptPolicy": "inert-text",
+  "licensePolicy": "known",
+  "replacementPolicy": "none_report_missing",
+  "inventoryDenominator": "all_sampled_candidates_including_failed_acquisition",
+  "primaryAccuracyDenominator": "aligned_format_conformant_tasks_frozen_before_model_calls",
+  "excludedCases": "format_and_construct_misalignment_reported_separately_not_silent_removal",
+  "preModelRequirements": [
+    "pinned_package_and_inert_reference_evidence",
+    "source_task_host_alignment_review",
+    "closed_host_catalog_with_provenance_not_inferred_from_model",
+    "frozen_private_task_oracle_and_parameter_provenance",
+    "full_source_scope_review_with_uncovered_obligations",
+    "model_and_implementation_match"
+  ],
+  "scopeLabels": [
+    "whole_skill_representable", "fragment_representable",
+    "needs_l1_reasoning", "missing_host_capability", "missing_source_context",
+    "unresolved_scope", "format_variant", "acquisition_failed"
+  ],
+  "requiredMetrics": [
+    "unique_skills_repositories_verified_domains",
+    "scope_confusion_and_false_scope_rejection",
+    "first_attempt_parse_and_compile_rate",
+    "whole_skill_and_fragment_coverage_separate",
+    "behavior_precision_and_eligible_recall",
+    "exact_parameters_and_parameter_source_closure",
+    "citation_role_support_and_uncovered_obligations",
+    "all_attempt_cost_tokens_and_p50_p95"
+  ],
+  "taskCaseTargetAfterAlignment": "600_or_more_across_at_least_50_skills_not_yet_authored",
+  "goldRole": "AI_assisted_pending_not_independent_human",
+  "formalAdmissionPolicy": "docs/TRANSLATION-GENERALIZATION-GATE.md_unchanged",
+  "proofCohortEligible": false,
+  "runtimeAuthorityGranted": false,
+  "thirdPartyExecutionAllowed": false
+}

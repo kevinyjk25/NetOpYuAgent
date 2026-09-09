@@ -1,0 +1,208 @@
+{
+  "protocol": "explicit-tree-decoder-canary/v1",
+  "manifestDigest": "sha256:976521c6a4b2bbb5f016aff78e45765c474cf029f73aea73ae9afc6844ae1a5a",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "rows": [
+    {
+      "id": "end--format-only",
+      "arm": "format-only",
+      "probe": "end",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 124,
+      "outputTokens": 47,
+      "latencyMs": 8041.040499927476,
+      "files": {
+        "request.json": "sha256:f1c34fd69aa2a88dd00f1bf7cf86ea8723ee963c61d69b0c1f310a80f61f0fa2",
+        "response.json": "sha256:982839ea0ee40a0afa1aaf6acead814ad422815f36155b00f49c0d92bad0a4b3",
+        "result.json": "sha256:030af383c2d1959c5f270fa6bd5b927c923a1b07a7b305bce8d3269665ee67b4"
+      }
+    },
+    {
+      "id": "end--format-visible",
+      "arm": "format-visible",
+      "probe": "end",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 1652,
+      "outputTokens": 76,
+      "latencyMs": 15921.592541970313,
+      "files": {
+        "request.json": "sha256:ad000d41423329053e0c654dbe6e0220f223cc92a41a8e6c60d00fc537aa69d1",
+        "response.json": "sha256:3a319cfcbb0d916b45ab021f05b8b4ca78ea42dcf9fd8ec46e7817243207ebbd",
+        "result.json": "sha256:8f931e5856160d3028a1a63ebfbff2a98f9e001bd49faa5a4171d3ff261455b4"
+      }
+    },
+    {
+      "id": "end--json-visible",
+      "arm": "json-visible",
+      "probe": "end",
+      "parseAndCompile": false,
+      "exactCopy": false,
+      "errorType": "JSONDecodeError",
+      "error": "Expecting property name enclosed in double quotes: line 144 column 19 (char 3423)",
+      "files": {
+        "request.json": "sha256:ca99ab2af190e5ff7b1d2f2a274ee30eb5dd8491e5c0c6920863383df3b096b3",
+        "response.json": "sha256:86672a7d99a644ca9872ea3dc50913f70be33a5fe76216b187728a13f78c5f39",
+        "result.json": "sha256:6c8a75f26432e3dd518d04ac9eefb595ae880642b172c460a46b74c563172e89"
+      }
+    },
+    {
+      "id": "unsupported--format-only",
+      "arm": "format-only",
+      "probe": "unsupported",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 158,
+      "outputTokens": 81,
+      "latencyMs": 7161.98016598355,
+      "files": {
+        "request.json": "sha256:8f8300ee5c0abdcffa0c2509d37b3364c16afa8cb0047ad59c2eeea16ca98f02",
+        "response.json": "sha256:23edd3caf45efa51d6d992b79057d21280e644dc41c18e1b456215d8c2cfc40b",
+        "result.json": "sha256:4108affee19f325241ad020b25459f2f5bf8638b10939e28665ecb19fe98c48a"
+      }
+    },
+    {
+      "id": "unsupported--format-visible",
+      "arm": "format-visible",
+      "probe": "unsupported",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 1686,
+      "outputTokens": 125,
+      "latencyMs": 20452.381249982864,
+      "files": {
+        "request.json": "sha256:55b3edc57176fc4968f43717336eac7f4cc9237e8bb16f11b00df7e39d0b7ee2",
+        "response.json": "sha256:022b1dffcbfe47f7a11f8e4d53acb26d801c2d8d4fbee136eb0234a1fde7474b",
+        "result.json": "sha256:b95b2dfdec00e1c4caeb14bfd6ff6be30cb7ca76a8ad5845e4d0078e59cdc4aa"
+      }
+    },
+    {
+      "id": "unsupported--json-visible",
+      "arm": "json-visible",
+      "probe": "unsupported",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 1686,
+      "outputTokens": 125,
+      "latencyMs": 12617.743249982595,
+      "files": {
+        "request.json": "sha256:047e8c2099715470cac57bf59890592192305bf406c424d5b2286fc7240db74a",
+        "response.json": "sha256:2dad1de0bc5d6bdac10b67b0380c269ee0f34c45cebae5c8e820e657201951c8",
+        "result.json": "sha256:3b9dd5e4f6de497391de1657db8c42a6487e4adf8d89138324781fa9b40f2a21"
+      }
+    },
+    {
+      "id": "conditional--format-only",
+      "arm": "format-only",
+      "probe": "conditional",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 240,
+      "outputTokens": 250,
+      "latencyMs": 21041.001249919645,
+      "files": {
+        "request.json": "sha256:a5cfc6ae268eb115c8ed486d225b68ba92ea2f6d60177586154ae621df908005",
+        "response.json": "sha256:e30109a93a2f07dc891be1c8763a0c6c6b7522223e308021482bfe2e83bbdcbb",
+        "result.json": "sha256:53e0ca08468bb8653caa864a6f49ed4cb38bef2f1f6c8c25c720829dce7f6909"
+      }
+    },
+    {
+      "id": "conditional--format-visible",
+      "arm": "format-visible",
+      "probe": "conditional",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 1768,
+      "outputTokens": 250,
+      "latencyMs": 31522.604959085584,
+      "files": {
+        "request.json": "sha256:f327ba9ffd01b5ceeb90987380d5f5022ad74e9bb86a2a3c56a9bfb8a8e8f200",
+        "response.json": "sha256:8c18609dcabf836bb1a4b3a0cfd778b0e90cbe9b62b8d9cb5082483af6b3f37f",
+        "result.json": "sha256:7982e32dd24d17712a694b1bd0b62a0d5ee828c4f2926b092c9543a68d73cf4b"
+      }
+    },
+    {
+      "id": "conditional--json-visible",
+      "arm": "json-visible",
+      "probe": "conditional",
+      "parseAndCompile": false,
+      "exactCopy": false,
+      "errorType": "ValidationError",
+      "error": "4 validation errors for FlowTree\nbusiness_source_ids\n  Field required [type=missing, input_value={'expectedObject': {'busi...ted'}]}], 'issues': []}}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nsteps\n  Field required [type=missing, input_value={'expectedObject': {'busi...ted'}]}], 'issues': []}}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nissues\n  Field required [type=missing, input_value={'expectedObject': {'busi...ted'}]}], 'issues': []}}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/missing\nexpectedObject\n  Extra inputs are not permitted [type=extra_forbidden, input_value={'business_source_ids': [...eted'}]}], 'issues': []}, input_type=dict]\n    For further information visit https://errors.pydantic.dev/2.13/v/extra_forbidden",
+      "files": {
+        "request.json": "sha256:d4480f9cbea59545e1276a855663e8fe90874c781efe6fb0c86d84010ed513e2",
+        "response.json": "sha256:cafd91c69b253f027b273a5495ce5d9c2bbefc61ee6a21844da86d192df51b06",
+        "result.json": "sha256:d561903f14287f7833cda30462bba11b9d5339429cc4abce4d250b5aac3742f6"
+      }
+    },
+    {
+      "id": "empty-branch--format-only",
+      "arm": "format-only",
+      "probe": "empty-branch",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 216,
+      "outputTokens": 207,
+      "latencyMs": 18039.681958034635,
+      "files": {
+        "request.json": "sha256:11c7ab0a8fcb01368a89bb59122064c06ab2c842817a0bfbc0e5f0e5625645b3",
+        "response.json": "sha256:55f0ca9f41bff3fd64ed83cd9e6062beb61db486c251ceee6a437cec1b1f511b",
+        "result.json": "sha256:6881c595039a03173c6103e6b6cc7be4cd9cc533de1fe5cd41511880a21afb90"
+      }
+    },
+    {
+      "id": "empty-branch--format-visible",
+      "arm": "format-visible",
+      "probe": "empty-branch",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 1744,
+      "outputTokens": 207,
+      "latencyMs": 27617.02970904298,
+      "files": {
+        "request.json": "sha256:12b4f68cfdfa5a9e25b5eb1dbe8acf7567db2426e721ffbd89bb7e4d74039697",
+        "response.json": "sha256:d24627b294622fe1a037765a8625d77c1af51ea244e3ed390404971098815a74",
+        "result.json": "sha256:e053304a4ffc329a22ab64b98f11d947cf780c86308edab5f51d7a2575e33c69"
+      }
+    },
+    {
+      "id": "empty-branch--json-visible",
+      "arm": "json-visible",
+      "probe": "empty-branch",
+      "parseAndCompile": true,
+      "exactCopy": true,
+      "doneReason": "stop",
+      "inputTokens": 1744,
+      "outputTokens": 207,
+      "latencyMs": 18533.208083943464,
+      "files": {
+        "request.json": "sha256:22d3666909c9cdf93d68e25eb947371ae9d1c6ab9ec49839233ef5b3fa0aa209",
+        "response.json": "sha256:3fda6672da8a212ffcfcadf6f6f2a5ed38e442ac22b809f950eb9ff913c4f1a2",
+        "result.json": "sha256:eef820ac10844b8c0438c6e31bede72a2809ae14ddac585a7e2dfedfbf8b05a5"
+      }
+    }
+  ],
+  "exactCopiesByArm": {
+    "format-only": 4,
+    "format-visible": 4,
+    "json-visible": 2
+  },
+  "evidenceRole": "explicit_answer_protocol_probe_not_translation",
+  "uniqueSkills": 0,
+  "runtimeExecutions": 0,
+  "boundary": "Explicit answers are model-visible in copying probes. Not source fidelity, Skill accuracy, independent review or Runtime safety. Single attempts in fixed order do not establish a causal performance estimate.",
+  "reportDigest": "sha256:1590692e31a87ca694ef99fec21cd914e2586f1f2628dcf3e3f81c5c7da0883b"
+}

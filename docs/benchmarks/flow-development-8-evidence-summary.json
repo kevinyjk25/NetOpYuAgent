@@ -1,0 +1,282 @@
+{
+  "evidenceRole": "known_development_same_assistant_review_not_independent",
+  "structuralReportDigest": "sha256:7bb55530ce0d2e95d67e1527e33a59950f35871771f8ed2db3bd6f5938fe547b",
+  "manifestDigest": "sha256:001bd725bbabc16d3dfccc6d0067867b3b60293d4b96d0ba020771611d39470c",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "flowCount": 8,
+  "publicSkillCount": 0,
+  "domainCount": 1,
+  "modelResponses": 8,
+  "modelResponseTotalMs": 360184.2644998105,
+  "inputTokens": 6268,
+  "outputTokens": 3596,
+  "structurallyQualified": 5,
+  "sourceReviewedFlows": 5,
+  "claimVerdicts": {
+    "supported": 63,
+    "contradicted": 15,
+    "insufficient_evidence": 11
+  },
+  "reviewSupportedInactiveFlows": 0,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "scriptExecutions": 0,
+  "assistedEdits": 0,
+  "reviews": [
+    {
+      "id": "direct-read",
+      "status": "blocked",
+      "inputDigest": "sha256:b2d23661113daf9ed03537e5a57ec226373a61b1a8da13cf495b0e4531375692",
+      "reviewDigest": "sha256:a9f5534c3abff5098fc144c56ac26a14668ff9c742beb37b1876da8caa9efa31",
+      "reportDigest": "sha256:0c8fbf3df5575ef4ddcba52e5f4bfcb7ddb3780e270946508eb1364b3c8c2857",
+      "reviewerId": "current-assistant-c3b-known-development-20260907",
+      "reviewerKind": "ai_role_simulation",
+      "verdictCounts": {
+        "supported": 8,
+        "contradicted": 1,
+        "insufficient_evidence": 2
+      },
+      "unresolvedQuestions": [
+        "None: The source text describes a complete, single-step read path with no branching conditions requiring resolution."
+      ],
+      "findings": [
+        {
+          "claimId": "claim-0003",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0004",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0005",
+          "pointer": "/purpose",
+          "verdict": "contradicted",
+          "explanation": "purpose 描述了把源文翻译为 JSON 的元任务，而不是源文业务用途；业务目的和计划库存/非实时健康限制未被忠实表述。"
+        }
+      ]
+    },
+    {
+      "id": "two-input-sequence",
+      "status": "blocked",
+      "inputDigest": "sha256:ba922b0c6c94995cec68564c9a5b6fd551c11c666c4af70e4fb628e9c5882fba",
+      "reviewDigest": "sha256:02b9891f556ec8fe50b411ef5a833c77f657a27717bdf507c05ae2675c6a1ad9",
+      "reportDigest": "sha256:2014ce092b918c2017a4f1ae91ad9c6efe8d673b2eee738783b6684e83572e81",
+      "reviewerId": "current-assistant-c3b-known-development-20260907",
+      "reviewerKind": "ai_role_simulation",
+      "verdictCounts": {
+        "supported": 11,
+        "contradicted": 1,
+        "insufficient_evidence": 2
+      },
+      "unresolvedQuestions": [
+        "None: The source text describes a linear sequence with no branching conditions or missing facts."
+      ],
+      "findings": [
+        {
+          "claimId": "claim-0003",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0004",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0005",
+          "pointer": "/purpose",
+          "verdict": "contradicted",
+          "explanation": "purpose 描述了把源文翻译为 JSON 的元任务，而不是源文业务用途；业务目的和计划库存/非实时健康限制未被忠实表述。"
+        }
+      ]
+    },
+    {
+      "id": "nested-branch",
+      "status": "blocked",
+      "inputDigest": "sha256:76a88635de679fa13f3d7b8fbc486f54b279485250f0a4d82e7b9b63cee06199",
+      "reviewDigest": "sha256:715522144fa5d969323bed55b4d73646922771947cf86b89d5b0e2edc5e07112",
+      "reportDigest": "sha256:1237cc1facb3b33a4796413ead1a41a83c4b4a17c132c0351d7bd3c7ac9349ec",
+      "reviewerId": "current-assistant-c3b-known-development-20260907",
+      "reviewerKind": "ai_role_simulation",
+      "verdictCounts": {
+        "supported": 18,
+        "contradicted": 1,
+        "insufficient_evidence": 3
+      },
+      "unresolvedQuestions": [],
+      "findings": [
+        {
+          "claimId": "claim-0001",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "node-0 读取；site=campus 才到 status=planned-lab 检查，两者满足完成，任一不满足 needs_l1；两次比较均引用 node-0。 中文源另含非实时健康限制，生成文本未明确保留该部分。"
+        },
+        {
+          "claimId": "claim-0003",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0004",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0005",
+          "pointer": "/purpose",
+          "verdict": "contradicted",
+          "explanation": "purpose 描述了把源文翻译为 JSON 的元任务，而不是源文业务用途；业务目的和计划库存/非实时健康限制未被忠实表述。"
+        }
+      ]
+    },
+    {
+      "id": "branch-merge",
+      "status": "blocked",
+      "inputDigest": "sha256:dc712abd595d6f05e58a1306d1c7d0cfebb4fcf41a6dc3172175fca844ad8ff3",
+      "reviewDigest": "sha256:57191fa88f713089e6ff59ae215b86691ca405691589b23d863b2f499efbe996",
+      "reportDigest": "sha256:5bc66cc07cef65c745bce2fcace0db8d84a8d4bd0405c36048af9eb59a1dbc63",
+      "reviewerId": "current-assistant-c3b-known-development-20260907",
+      "reviewerKind": "ai_role_simulation",
+      "verdictCounts": {
+        "supported": 22,
+        "contradicted": 1,
+        "insufficient_evidence": 2
+      },
+      "unresolvedQuestions": [
+        "None: All steps, conditions, and terminal limitations are explicitly defined in the source text."
+      ],
+      "findings": [
+        {
+          "claimId": "claim-0003",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0004",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0005",
+          "pointer": "/purpose",
+          "verdict": "contradicted",
+          "explanation": "purpose 描述了把源文翻译为 JSON 的元任务，而不是源文业务用途；业务目的和计划库存/非实时健康限制未被忠实表述。"
+        }
+      ]
+    },
+    {
+      "id": "missing-approval-write",
+      "status": "blocked",
+      "inputDigest": "sha256:b2f8c5c3591419664fa0262ecc0fa2718b62b61ba3df626c3b52cb0d66fc253d",
+      "reviewDigest": "sha256:308a06b0751394b4836ebe7bb519191441f4fe1204457fcd0b55a86918442520",
+      "reportDigest": "sha256:daaf42764493eecb2001cfde55882df1a1a6a860b1d8afc7cc25c71b165ef479",
+      "reviewerId": "current-assistant-c3b-known-development-20260907",
+      "reviewerKind": "ai_role_simulation",
+      "verdictCounts": {
+        "supported": 4,
+        "contradicted": 11,
+        "insufficient_evidence": 2
+      },
+      "unresolvedQuestions": [
+        "What is the exact status value indicating 'approved' in the read_inventory_device output?"
+      ],
+      "findings": [
+        {
+          "claimId": "claim-0001",
+          "pointer": "/source",
+          "verdict": "contradicted",
+          "explanation": "源文要求库存读取后停在未提供的审批/写工具处。模型却新增库存 status==approved 判断，无法作为审批事实，且真分支伪装成 needs_l1。"
+        },
+        {
+          "claimId": "claim-0002",
+          "pointer": "/source",
+          "verdict": "contradicted",
+          "explanation": "源文要求库存读取后停在未提供的审批/写工具处。模型却新增库存 status==approved 判断，无法作为审批事实，且真分支伪装成 needs_l1。"
+        },
+        {
+          "claimId": "claim-0003",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0004",
+          "pointer": "/source",
+          "verdict": "insufficient_evidence",
+          "explanation": "宿主规则可约束输入/访问错误，但本提案用途及终态没有完整表达已知开发、计划库存而非实时健康的说明；源绑定本身不等于生成内容保留全部限制。"
+        },
+        {
+          "claimId": "claim-0005",
+          "pointer": "/purpose",
+          "verdict": "contradicted",
+          "explanation": "purpose 描述了把源文翻译为 JSON 的元任务，而不是源文业务用途；业务目的和计划库存/非实时健康限制未被忠实表述。"
+        },
+        {
+          "claimId": "claim-0006",
+          "pointer": "/entry",
+          "verdict": "contradicted",
+          "explanation": "源文要求库存读取后停在未提供的审批/写工具处。模型却新增库存 status==approved 判断，无法作为审批事实，且真分支伪装成 needs_l1。"
+        },
+        {
+          "claimId": "claim-0008",
+          "pointer": "/nodes/0",
+          "verdict": "contradicted",
+          "explanation": "node-0 的读本身有源依据，但 next 指向虚构的库存审批条件，不是源要求的缺合同停止。"
+        },
+        {
+          "claimId": "claim-0011",
+          "pointer": "/nodes/1",
+          "verdict": "contradicted",
+          "explanation": "node-1 将库存 status 与 approved 比较；源和宿主只提供库存，明确没有审批合同，此判断无依据。"
+        },
+        {
+          "claimId": "claim-0012",
+          "pointer": "/nodes/1/left",
+          "verdict": "contradicted",
+          "explanation": "node-1 将库存 status 与 approved 比较；源和宿主只提供库存，明确没有审批合同，此判断无依据。 已按 /nodes/1/left 对照上述条件及真假后继。"
+        },
+        {
+          "claimId": "claim-0013",
+          "pointer": "/nodes/1/equals",
+          "verdict": "contradicted",
+          "explanation": "node-1 将库存 status 与 approved 比较；源和宿主只提供库存，明确没有审批合同，此判断无依据。 已按 /nodes/1/equals 对照上述条件及真假后继。"
+        },
+        {
+          "claimId": "claim-0014",
+          "pointer": "/nodes/1/on_true",
+          "verdict": "contradicted",
+          "explanation": "node-1 将库存 status 与 approved 比较；源和宿主只提供库存，明确没有审批合同，此判断无依据。 已按 /nodes/1/on_true 对照上述条件及真假后继。"
+        },
+        {
+          "claimId": "claim-0015",
+          "pointer": "/nodes/1/on_false",
+          "verdict": "contradicted",
+          "explanation": "node-1 将库存 status 与 approved 比较；源和宿主只提供库存，明确没有审批合同，此判断无依据。 已按 /nodes/1/on_false 对照上述条件及真假后继。"
+        },
+        {
+          "claimId": "claim-0016",
+          "pointer": "/nodes/2",
+          "verdict": "contradicted",
+          "explanation": "node-2 的解释承认没有审批/写合同，但以库存 approved 条件进入 needs_l1 不能等同缺能力的 unsupported；不能通过上层推理取得审批事实。"
+        }
+      ]
+    }
+  ],
+  "independentHumanEvidence": false,
+  "boundary": "Structurally qualified drafts receive complete claim review; structurally invalid replies do not. Claim counts overlap and are not translation accuracy. No repair/retry or execution, no production/generalization claim. Latency excludes source review and testing.",
+  "reportDigest": "sha256:ac62f8dced76bcab75b527f8c74562bcc5f19ab3a250c01ec311ea5f8655e1a1"
+}

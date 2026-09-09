@@ -1,0 +1,272 @@
+{
+  "protocol": "semantic-transfer-evidence-index/v1",
+  "phases": [
+    {
+      "id": "semantic-transfer-6-20260908-v2",
+      "root": "artifacts/translator-v2/semantic-transfer-6-20260908-v2",
+      "modelCalls": 11,
+      "inputTokens": 39397,
+      "outputTokens": 3602,
+      "postTotalMs": 367816.2584149977,
+      "requestP50Ms": 28161.749541061,
+      "requestP95Ms": 57928.58820792753,
+      "checkpointReceiptSetDigest": "sha256:bb6e7c30736be712b014cb5922bf1be3954f35cdd96c7672b382644fd7c2079f",
+      "outcomes": [
+        "inactive_candidate",
+        "inactive_candidate",
+        "bound_pending_full_source_review",
+        "inactive_candidate",
+        "unresolved_not_executable",
+        "inactive_candidate",
+        "unresolved_not_executable",
+        "inactive_candidate",
+        "unresolved_not_executable",
+        "inactive_candidate",
+        "unresolved_not_executable"
+      ],
+      "manifestFileDigest": "sha256:9d8419f99df67f28cee329bf33783a3fe7cda91b1fc6bf66aea7918b3b1b0ac7",
+      "reportFileDigest": "sha256:81f18dc9d50a29acaec5fa15d744b86d1e6da1cece2e41456da97319e6b8e3f0",
+      "metrics": {
+        "firstBehavior": {
+          "matchedCases": 4,
+          "passedScenarios": 38,
+          "executableMatched": 3,
+          "safeStopMatched": 1
+        },
+        "finalBehavior": {
+          "matchedCases": 1,
+          "passedScenarios": 20,
+          "executableMatched": 0,
+          "safeStopMatched": 1
+        }
+      },
+      "evidenceRole": "fresh_9b_first_pass_same_assistant_visible_development_not_holdout"
+    },
+    {
+      "id": "joint-condition-diagnostic-5-20260908-v1",
+      "root": "artifacts/translator-v2/joint-condition-diagnostic-5-20260908-v1",
+      "modelCalls": 5,
+      "inputTokens": 5200,
+      "outputTokens": 2813,
+      "postTotalMs": 154643.77891703043,
+      "requestP50Ms": 25546.920832945034,
+      "requestP95Ms": 49543.66404202301,
+      "checkpointReceiptSetDigest": "sha256:99f24fa1c82ed17b7161c130bfd66d586d4069136f111f350a8b5002605b88bf",
+      "outcomes": [
+        "finite_agreement_pending_source_review",
+        "finite_agreement_pending_source_review",
+        "needs_source_resolution",
+        "needs_source_resolution",
+        "needs_source_resolution"
+      ],
+      "manifestFileDigest": "sha256:04bb701d689b4fc3216bb93309090b2fb5bf78185573d6dc6e37e8e6e4708cd5",
+      "evidenceRole": "development_diagnostic_known_first_pass_candidates_not_independent"
+    },
+    {
+      "id": "condition-expression-development-5-20260908-v1",
+      "root": "artifacts/translator-v2/condition-expression-development-5-20260908-v1",
+      "modelCalls": 5,
+      "inputTokens": 4785,
+      "outputTokens": 738,
+      "postTotalMs": 44369.48795907665,
+      "requestP50Ms": 8618.60974994488,
+      "requestP95Ms": 10390.266707981937,
+      "checkpointReceiptSetDigest": "sha256:f00345100ed7d6f78531912dcb196ff313c370fd02529f34aeb8a96c45410207",
+      "outcomes": [
+        "unresolved_no_revision",
+        "unresolved_no_revision",
+        "unresolved_no_revision",
+        "unresolved_no_revision",
+        "unresolved_no_revision"
+      ],
+      "manifestFileDigest": "sha256:899bbe67b87fae02c6bfb8957fd3d789a28f20400c6cb6d1c84cc24a8a1f6fc6",
+      "sourceSnapshotDigest": "sha256:f07a39ee4b8e558e8b92190db7fd6c70e6de4b733a9c4983b5dba06c727ff961",
+      "evidenceRole": "known_development_source_expression_revision_not_fresh_full_translation"
+    },
+    {
+      "id": "condition-expression-development-5-20260908-v2",
+      "root": "artifacts/translator-v2/condition-expression-development-5-20260908-v2",
+      "modelCalls": 5,
+      "inputTokens": 11108,
+      "outputTokens": 1039,
+      "postTotalMs": 79645.64499794506,
+      "requestP50Ms": 14575.35966602154,
+      "requestP95Ms": 21860.816958011128,
+      "checkpointReceiptSetDigest": "sha256:d48800971713202c6c644830a355684f5eba9798c04a2df4b5ffad8e31cbfd6f",
+      "outcomes": [
+        "unresolved_no_revision",
+        "unchanged_finite_agreement",
+        "unchanged_finite_agreement",
+        "revised_inactive_pending_source_review",
+        "unresolved_no_revision"
+      ],
+      "manifestFileDigest": "sha256:35c334ec4dea30689df0ba8be8f62d38b1258b20ec8161cb58e1c5af2991df85",
+      "sourceSnapshotDigest": "sha256:1b2fb1dd849016d6375506363a0b841cd4f780fc8db19b2f804c809431e0e78f",
+      "evidenceRole": "known_development_protocol_repair_not_fresh_full_translation"
+    },
+    {
+      "id": "condition-expression-development-5-20260908-v3",
+      "root": "artifacts/translator-v2/condition-expression-development-5-20260908-v3",
+      "modelCalls": 5,
+      "inputTokens": 7392,
+      "outputTokens": 473,
+      "postTotalMs": 41094.34687404428,
+      "requestP50Ms": 8442.251833039336,
+      "requestP95Ms": 8901.414416031912,
+      "checkpointReceiptSetDigest": "sha256:3831be107fa36f4cda884cbbb814af9ac054e0c47b925b3d9da6f4f715f9d65b",
+      "outcomes": [
+        "unchanged_finite_agreement",
+        "unchanged_finite_agreement",
+        "unchanged_finite_agreement",
+        "revised_inactive_pending_source_review",
+        "revised_inactive_pending_source_review"
+      ],
+      "manifestFileDigest": "sha256:61faaf723d7efe4fca417b841287e91a83f16a0cb7454d345c14b73e19fc24d0",
+      "evidenceRole": "known_development_readable_language_revision_not_fresh_full_translation"
+    },
+    {
+      "id": "semantic-followup-6-20260908-v3",
+      "root": "artifacts/translator-v2/semantic-followup-6-20260908-v3",
+      "modelCalls": 10,
+      "inputTokens": 36853,
+      "outputTokens": 2704,
+      "postTotalMs": 213557.80850024894,
+      "requestP50Ms": 20914.721874985844,
+      "requestP95Ms": 35815.18904201221,
+      "checkpointReceiptSetDigest": "sha256:2fcb2cbb7933591b80465afde8f0a35959e25fd906a83c925c9d4226eb01294f",
+      "outcomes": [
+        "inactive_candidate",
+        "unchanged_finite_agreement",
+        "inactive_candidate",
+        "revised_inactive_pending_source_review",
+        "inactive_candidate",
+        "invalid_candidate",
+        "revised_inactive_pending_source_review",
+        "inactive_candidate",
+        "revised_inactive_pending_source_review",
+        "inactive_candidate"
+      ],
+      "manifestFileDigest": "sha256:4cb5230cdda4eae33f2a86370bbb4f3ed1c156352ad67b4240c269ae4a1ace01",
+      "reportFileDigest": "sha256:f94350b27d235443a6b05da7991594aef8dc6ca7c7401a3ff3847c35cd0cf5e6",
+      "sourceSnapshotDigest": "sha256:fb089b6370bd9dee81ab54f4a6842dda649619a897e299275d3be17930991c9f",
+      "metrics": {
+        "firstBehavior": {
+          "matchedCases": 2,
+          "passedScenarios": 30,
+          "executableMatched": 1,
+          "safeStopMatched": 1
+        },
+        "finalBehavior": {
+          "matchedCases": 5,
+          "passedScenarios": 35,
+          "executableMatched": 4,
+          "safeStopMatched": 1
+        }
+      },
+      "evidenceRole": "fresh_9b_first_pass_same_assistant_visible_development_not_holdout"
+    },
+    {
+      "id": "semantic-helpdesk-repair-20260908",
+      "root": "artifacts/translator-v2/semantic-helpdesk-repair-20260908",
+      "modelCalls": 1,
+      "inputTokens": 5106,
+      "outputTokens": 812,
+      "postTotalMs": 51128.11575003434,
+      "requestP50Ms": 51128.11575003434,
+      "requestP95Ms": 51128.11575003434,
+      "checkpointReceiptSetDigest": "sha256:b38646235a3555aa32f075096dcd5f96091568b2a731b0927be376311d17b0cd",
+      "outcomes": [
+        "invalid_candidate"
+      ],
+      "manifestFileDigest": "sha256:ea01edb0445858faa8e22170940f5abc50b012e340b7146f8fc8f0d6d429424c",
+      "reportFileDigest": "sha256:0c62cce3ac2c20e992c39bfd7829218746ffd160a9675445f55a34740981a5b5",
+      "sourceSnapshotDigest": "sha256:ab5f78cf81284ea7f662beaa671a7eb3d3339cbd0e48ef5706ea95e0b27eddf4",
+      "metrics": {
+        "firstBehavior": {
+          "matchedCases": 0,
+          "passedScenarios": 0,
+          "executableMatched": 0,
+          "safeStopMatched": 0
+        },
+        "finalBehavior": {
+          "matchedCases": 0,
+          "passedScenarios": 0,
+          "executableMatched": 0,
+          "safeStopMatched": 0
+        }
+      },
+      "evidenceRole": "known_case_development_revision_same_assistant_not_holdout"
+    },
+    {
+      "id": "semantic-helpdesk-compiler-repair-20260908",
+      "root": "artifacts/translator-v2/semantic-helpdesk-compiler-repair-20260908",
+      "modelCalls": 1,
+      "inputTokens": 5743,
+      "outputTokens": 820,
+      "postTotalMs": 48260.55316696875,
+      "requestP50Ms": 48260.55316696875,
+      "requestP95Ms": 48260.55316696875,
+      "checkpointReceiptSetDigest": "sha256:90b1ce0e5cc0beca4699720c12c118a748e65611894bc9128f03e04ee94b0f96",
+      "outcomes": [
+        "invalid_candidate"
+      ]
+    },
+    {
+      "id": "compact-read-region-development-5-20260908-v1",
+      "root": "artifacts/translator-v2/compact-read-region-development-5-20260908-v1",
+      "modelCalls": 5,
+      "inputTokens": 12349,
+      "outputTokens": 843,
+      "postTotalMs": 60099.42133212462,
+      "requestP50Ms": 11887.917959014885,
+      "requestP95Ms": 14249.612666084431,
+      "checkpointReceiptSetDigest": "sha256:cc71cddfc8f30ce54930ac2c9d0188c65a0959a0bbe0dffd524e113235559071",
+      "outcomes": [
+        "unresolved_no_candidate",
+        "unresolved_no_candidate",
+        "unresolved_no_candidate",
+        "invalid_candidate",
+        "unresolved_no_candidate"
+      ],
+      "manifestFileDigest": "sha256:80083e2c47d4ba31d5143106dd1a8ba5ba1ef25a3bb7fe6be76400ea4fe4b339",
+      "sourceSnapshotDigest": "sha256:c6d4bc37daa305464f3540072f8063cc3f84ec6e2f31cf02498e5e26c2ad3dba",
+      "evidenceRole": "known_development_compact_scope_revision_not_fresh_unseen_skills"
+    },
+    {
+      "id": "compact-read-region-development-5-20260908-v2",
+      "root": "artifacts/translator-v2/compact-read-region-development-5-20260908-v2",
+      "modelCalls": 5,
+      "inputTokens": 13094,
+      "outputTokens": 1151,
+      "postTotalMs": 75089.67354195192,
+      "requestP50Ms": 14902.871917001903,
+      "requestP95Ms": 17016.263040946797,
+      "checkpointReceiptSetDigest": "sha256:2171607fedfd835f67a1205e26aa0fd6baed76e7f063b84fac3f30bdc4595025",
+      "outcomes": [
+        "inactive_region_pending_source_review",
+        "inactive_region_pending_source_review",
+        "inactive_region_pending_source_review",
+        "inactive_region_pending_source_review",
+        "unresolved_no_candidate"
+      ],
+      "manifestFileDigest": "sha256:4007e5202e5325ea7f3407cce8e022690367812226de5e75080c47b4afab7b8e",
+      "reportFileDigest": "sha256:459090fa968c14ace5aeb2ce7846501e3daa910abda4ddaaaaf3588d45cfcff3",
+      "metrics": null,
+      "evidenceRole": "known_development_compiler_capability_binding_not_fresh_unseen_skills"
+    }
+  ],
+  "uniqueNewDevelopmentSkills": 12,
+  "publicSkills": 0,
+  "independentHumanGold": false,
+  "wholeSkillTranslations": 0,
+  "semanticAccuracy": null,
+  "runtimeAuthorityGranted": false,
+  "modelCalls": 53,
+  "inputTokens": 141027,
+  "outputTokens": 14995,
+  "postTotalMs": 1135705.0894544227,
+  "requestP50Ms": 14902.871917001903,
+  "requestP95Ms": 51128.11575003434,
+  "boundary": "All failure-inclusive development attempts. Different protocols and known-source revisions are not independent cohorts or a latency A/B.",
+  "reportDigest": "sha256:bbd34dd432486f56663607baffd5cc8cd27bcfeefea8d2510144bdf895b3eb44"
+}

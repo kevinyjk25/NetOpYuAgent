@@ -1,0 +1,40 @@
+{
+  "evidenceKind": "synthetic_interface_example_not_a_public_skill_host_or_benchmark_gold",
+  "tools": [
+    {
+      "name": "get_device_status",
+      "description": "Illustrative structured MCP declaration only. No server or executable implementation is provided.",
+      "annotations": {"readOnlyHint": true},
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "deviceId": {"type": "string", "minLength": 1},
+          "selections": {
+            "type": "object",
+            "properties": {"states": {"type": "array", "items": {"type": "string", "enum": ["up", "down"]}}},
+            "required": ["states"],
+            "additionalProperties": false
+          }
+        },
+        "required": ["deviceId"],
+        "additionalProperties": false
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "interfaces": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {"ifName": {"type": "string"}, "state": {"type": "string", "enum": ["up", "down"]}},
+              "required": ["ifName", "state"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["interfaces"],
+        "additionalProperties": false
+      }
+    }
+  ]
+}

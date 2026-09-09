@@ -1,0 +1,121 @@
+{
+  "protocol": "fixed-parent-canonical-terminal-canary/v1",
+  "manifestDigest": "sha256:b78626d9e6003a9b57bc8bea557aeed4956abed7ad0e104443b46e3da1b3d6e5",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "rows": [
+    {
+      "case": "read_path_completed",
+      "status": "compiled_pending_source_review",
+      "inputDigest": "sha256:726570210c4077e107c082635958ab6081c8f90266bf9b668064864f79aad9df",
+      "latencyMs": 8604.371291934513,
+      "inputTokens": 1365,
+      "outputTokens": 115,
+      "doneReason": "stop",
+      "proposal": {
+        "objective": [
+          "clause-0001"
+        ],
+        "selections": {
+          "clause-0001": [
+            {
+              "exact_quote": "Return read_path_completed without invoking any model, tool, script or write.",
+              "kind": "completion",
+              "targets": [
+                "node:/steps/0"
+              ],
+              "extra_sources": []
+            }
+          ]
+        }
+      },
+      "files": {
+        "compilation.json": "sha256:88907e7fd7f7782067aa4a45390f0e057f400f2e8955a8407da28e8d25f2d97c",
+        "mapping.json": "sha256:666cb581e80407546fedf59d3b767822e026659590605a216e38545c87a5e15b",
+        "request.json": "sha256:1ba59884b72d9ff63d332143b52347e3fc5c77e0ee662b54f216050ce11235fe",
+        "response.json": "sha256:214fd976dc1c00636e44d01193191adc3e03b9d355ef440a33535297c27ab3af",
+        "status.json": "sha256:4a814c4f444af75c70add958c57f0d9691f0b2c5358c8d261c824255e11fa862"
+      }
+    },
+    {
+      "case": "needs_l1",
+      "status": "compiled_pending_source_review",
+      "inputDigest": "sha256:cef5092ada11932fb9f273fb93e2b5d62656e996e830514c6903959c6571c0af",
+      "latencyMs": 7313.244750024751,
+      "inputTokens": 1370,
+      "outputTokens": 116,
+      "doneReason": "stop",
+      "proposal": {
+        "objective": [
+          "clause-0001"
+        ],
+        "selections": {
+          "clause-0001": [
+            {
+              "exact_quote": "Return needs_l1 without invoking any model, tool, script or write.",
+              "kind": "handoff",
+              "targets": [
+                "node:/steps/0"
+              ],
+              "extra_sources": []
+            }
+          ]
+        }
+      },
+      "files": {
+        "compilation.json": "sha256:4580f862bcfe3210c42feff36b2e675c0d5b2934800a9fb666a341b52b824cc3",
+        "mapping.json": "sha256:e2a6f320f3cc66ba76185790b2fb1abf5aec1363522c2223ec96708e5e079ce6",
+        "request.json": "sha256:37f1b032fe86abd63b59ccaa24ed9446eee816f9f263b9c9bdd51a41646dbf78",
+        "response.json": "sha256:c22fce8595c2d865a3845e13a0c1665ad7852d0ebcd56145e4b79b05ff7ab880",
+        "status.json": "sha256:6280ccc5d8206641de18247049a89f6c1a696be5747853f16187ff095b40f646"
+      }
+    },
+    {
+      "case": "unsupported",
+      "status": "compiled_pending_source_review",
+      "inputDigest": "sha256:34ede68595e5a4e8ac6f3a18e973fd44892bfdb741a37ecebc4df956ffcdd1ad",
+      "latencyMs": 7460.674083093181,
+      "inputTokens": 1363,
+      "outputTokens": 115,
+      "doneReason": "stop",
+      "proposal": {
+        "objective": [
+          "clause-0001"
+        ],
+        "selections": {
+          "clause-0001": [
+            {
+              "exact_quote": "Return unsupported without invoking any model, tool, script or write.",
+              "kind": "missing_capability_stop",
+              "targets": [
+                "node:/steps/0"
+              ],
+              "extra_sources": []
+            }
+          ]
+        }
+      },
+      "files": {
+        "compilation.json": "sha256:38ff40ec3913602c6dfd8ece0a656e5c7b9b6b93ad8a46c964e2df8ca38816bf",
+        "mapping.json": "sha256:84a0128706df5d6f3b074e8107989fbbc8e407e39d9b74a7e647eae8323f9724",
+        "request.json": "sha256:45060916e035559897a6be48c3d75f50e97cf7b130d04a1ee3b1eeaf6fc5a48f",
+        "response.json": "sha256:7fa344df80dbffad36e75883abe95a57c887d7cc11b44291550e5f4a175bcb97",
+        "status.json": "sha256:dd117aa1ce676ba6f687c14e17da468108f5dbda6045e908577e2ead719c19cb"
+      }
+    }
+  ],
+  "modelCalls": 3,
+  "qualified": 3,
+  "latencyMs": 23378.290125052445,
+  "inputTokens": 4098,
+  "outputTokens": 346,
+  "tokenCountsComplete": true,
+  "sourceReviewed": 0,
+  "runtimeExecutions": 0,
+  "publicSkills": 0,
+  "evidenceRole": "fixed_hand_authored_parent_decoder_canary_not_fresh_translation",
+  "boundary": "Fixed model-visible hand-authored terminal trees, no mapping answer supplied. Decoder/representation probes only, not source fidelity or fresh two-pass accuracy. No retries or execution. Failures included in cost.",
+  "reportDigest": "sha256:fddc4671795284a267025ff3f54db3f70e815ceadf799ba510e08afe87f8a124"
+}

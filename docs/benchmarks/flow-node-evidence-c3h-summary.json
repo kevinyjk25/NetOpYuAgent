@@ -1,0 +1,1988 @@
+{
+  "summaryProtocol": "node-evidence-known-development-summary/v1",
+  "summaryOfReportDigest": "sha256:36cf4f488d646c2e204d39157d66bc67a3abe99f68f43241bb72e2110ba408d9",
+  "reportSummary": {
+    "protocol": "fresh-node-evidence-paired/v1",
+    "manifestDigest": "sha256:7d5d60d68f4496e3c213dc128f3fbfda67f1007d8ddb7132175b9b7547be4aec",
+    "model": {
+      "model": "qwen3.5:9b",
+      "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+    },
+    "rows": [
+      {
+        "case": "direct-read",
+        "flow": {
+          "status": "awaiting_source_review",
+          "inputDigest": "sha256:cf07cea171b9b96fa57994a70da402f6c52cccf2a763e341e8089a93e500d89a",
+          "latencyMs": 17087.831416982226,
+          "inputTokens": 2715,
+          "outputTokens": 175,
+          "doneReason": "stop"
+        },
+        "flowFiles": {
+          "compilation.json": "sha256:5990199d69986fecdf69b8a2a363dd50a3e641f0da65d1674fc691f2d0016567",
+          "request.json": "sha256:a877fc4e32fe215e4cec57641183b6c1f97dd26aba0f38151822148bc4c91864",
+          "response.json": "sha256:990ed027eb7704361415b6f957c7b4046632de1d835b133cb82f5cc2d5c3c5ef",
+          "review-input.json": "sha256:8b0076edb9b6dd8942d00e8577a3a35200df5559d5e2c6dcf209a825a1d35e65",
+          "status.json": "sha256:0aa9257f8c642b64b05cabaacfd9d3c93be30eca6ebbc3fe7df3199bd5dbd344",
+          "tree.json": "sha256:e822b4807355751a040f0dbc2a7beedb4a1bdcd9c171b31ae4acd7963d46c83f"
+        },
+        "mapping": {
+          "status": "blocked",
+          "errorType": "ValueError",
+          "error": "[{\"code\": \"objective_evidence_missing_or_budget\", \"pointer\": \"\", \"reason\": \"Require 1..6 source clauses with explicit business-intent evidence; never inherit headings or invent it.\"}]",
+          "latencyMs": 66804.11249992903,
+          "inputTokens": 1703,
+          "outputTokens": 1344,
+          "doneReason": "stop"
+        },
+        "mappingFiles": {
+          "diagnostics.json": "sha256:437c05265876b8df3b4aab14a51174d8bfcb0a50f5fa828f0a8dbe9ee24ff2a9",
+          "mapping.json": "sha256:708649910f9eb952ac34013ef4b6c720d0880b8bf7c3dc7b3752352c8b274c64",
+          "request.json": "sha256:8bcb3ae8812744ae00d85be26a371ec9b34069464e84d803ea427766e68769eb",
+          "response.json": "sha256:e2114b178192f5eb7c360968e7686033f73ab391a24308056566550939005861",
+          "status.json": "sha256:e8a973e7588cb3879497052227f86aabf9910d1240be9b607706323ba3c2de7f"
+        },
+        "mappingDiagnostics": {
+          "schemaQualified": true,
+          "nodeSlots": 2,
+          "evidenceCandidates": 2,
+          "explicitNodeGaps": 0,
+          "residualRequirements": 22,
+          "unresolvedResiduals": 0,
+          "errors": [
+            {
+              "code": "objective_evidence_missing_or_budget",
+              "pointer": "",
+              "reason": "Require 1..6 source clauses with explicit business-intent evidence; never inherit headings or invent it."
+            }
+          ]
+        }
+      },
+      {
+        "case": "inverted-branch",
+        "flow": {
+          "status": "awaiting_source_review",
+          "inputDigest": "sha256:7436cd671870849c736c5b1f53d28e8f0137b872a2d1b03305a23cfb83c86071",
+          "latencyMs": 30933.966375072487,
+          "inputTokens": 2754,
+          "outputTokens": 440,
+          "doneReason": "stop"
+        },
+        "flowFiles": {
+          "compilation.json": "sha256:2559c87cd8e0f14187ba83e645595b77d3d131a08800f85ff3b1cf4c1275b5bd",
+          "request.json": "sha256:dba396d5c9a584403c003d792e76d6da78453841f1a708eb56e382281b1cdcf6",
+          "response.json": "sha256:f502eee98d69879ca2f60a13cf6ffd80930db2686cbb65f53f8f4b01c16f85ed",
+          "review-input.json": "sha256:e843ec8dd784af0887ad1c76968161b8401a4146b71bfb13031230ca185a6ef3",
+          "status.json": "sha256:db213a0b23a088f05673dee31e90d11e1c9219b2d08bd211d4ad6b334b8fa149",
+          "tree.json": "sha256:13d627386ffe0a0acc2b1650dfeb981fbc472623f9b1e9daed56501f7374957a"
+        },
+        "mapping": {
+          "status": "awaiting_source_review",
+          "inputDigest": "sha256:1f259ddfb80f3ca39fb095df206be316054734742049f09cc39be4a697779741",
+          "latencyMs": 68571.6094999807,
+          "inputTokens": 2277,
+          "outputTokens": 1203,
+          "doneReason": "stop"
+        },
+        "mappingFiles": {
+          "compilation.json": "sha256:97eaf367004072b0d756f1a9dc68fac926dbd15c6be953927c1504ad7f769cf9",
+          "diagnostics.json": "sha256:8e4a4b2b548898ccbba4eaa1a6726b54113671bc7ebb4abfb9b6f65ede1e8a6f",
+          "mapping.json": "sha256:149bd8e78626dae31e5c8ba84882e4a6ad65eaf30ef9f9ddd5909a5630dc0b8c",
+          "request.json": "sha256:c500db797739af13895f37db4471c67361b2bd99cc2572e91106c3e72107d292",
+          "response.json": "sha256:63d6e78c2243def2a8910007e2c1898a98ae8f0fd5abf73fa80f300a86a8b542",
+          "review-input.json": "sha256:c0813d87850dd6f7d30e68f73c07eeddabb1260208ab9659ea329cf408d86a00",
+          "status.json": "sha256:cce06b7e54c44e81af0f326e24c4070e69b88fb557db2b30aee58a54f94ffa91"
+        },
+        "mappingDiagnostics": {
+          "schemaQualified": true,
+          "nodeSlots": 5,
+          "evidenceCandidates": 5,
+          "explicitNodeGaps": 0,
+          "residualRequirements": 13,
+          "unresolvedResiduals": 0,
+          "errors": []
+        },
+        "review": {
+          "status": "blocked",
+          "representationReviewSupported": false,
+          "admissionBlockers": [
+            "source_review_not_supported"
+          ],
+          "inputDigest": "sha256:1f259ddfb80f3ca39fb095df206be316054734742049f09cc39be4a697779741",
+          "reviewDigest": "sha256:4bafa7e199eff9492a4212687f96a0dd020fa640516d33f8c9c37f902cdac043",
+          "reviewerId": "same-development-assistant-20260908-node-evidence",
+          "reviewerKind": "ai_role_simulation",
+          "runtimeAuthorityGranted": false,
+          "semanticAlignmentProven": false,
+          "allRequirementsImplemented": false,
+          "reportDigest": "sha256:37824cedae5781a1d43dc9b437b160a2447897db812d4073c88eeb578840fb3b"
+        }
+      },
+      {
+        "case": "missing-approval-write",
+        "flow": {
+          "status": "awaiting_source_review",
+          "inputDigest": "sha256:2f5f24a5faca48f2324df4192e48617c091d1d0cc86fa07f5dd3fcf20caaaf7e",
+          "latencyMs": 18789.53333303798,
+          "inputTokens": 2780,
+          "outputTokens": 223,
+          "doneReason": "stop"
+        },
+        "flowFiles": {
+          "compilation.json": "sha256:a130791501879d274cb2e865640fc181289cf7b60ff8172b2ff0bcbdb802c617",
+          "request.json": "sha256:0c772f7e6edb47a7f678f06f0385e87d1fb3263e7ad3c9d6d20e9bc55a18ce70",
+          "response.json": "sha256:557e30d903c4b2aea888b6655ea4a04423a658bf69ed55f935574df8cf763d25",
+          "review-input.json": "sha256:9ac9ff06fa123b8459613fbe4fb2d1bf6411aa7c32a60a26e49826c471919a51",
+          "status.json": "sha256:4aebfc6e37aedb0616ea7b3182bbdf3aac1f6bb41c714ce7b350bc952300cd94",
+          "tree.json": "sha256:84831fae78b1f83de417eebd4c15e977e725b5947361ce45231bff633fd7799b"
+        },
+        "mapping": {
+          "status": "blocked",
+          "errorType": "ValueError",
+          "error": "[{\"code\": \"node_insufficient_evidence\", \"pointer\": \"/node_evidence/~1steps~10\", \"reason\": \"The fixed node claims a 'read' operation with source_id 's0001'. However, the provided source clauses (clause-0001, clause-0005) explicitly describe reading input device_id but do not cite source_id 's0001'. Furthermore, clause-0003 and clause-0006 state that no write contracts or approval tools are supplied by the host. The node implies an execution of a read operation which is semantically blocked by the residual duties in clause-0003 ('宿主未提供审批或写工具合同，不得用读取...冒充已批准') and clause-0014 ('Source text grants no authority;'). Therefore, the node cannot be positively supported as an executed or even\"}, {\"code\": \"node_contradicted\", \"pointer\": \"/node_evidence/~1steps~11\", \"reason\": \"The fixed node defines an outcome of 'unsupported' with compilerRole 'missing_capability_stop'. While this aligns with clause-0004 and clause-0007, the node's source_id is listed as 's0002'. Clause-0002 describes the requirement for approval which is missing (clause-0006), leading to a stop. However, the node structure implies a specific step execution that contradicts the instruction in clause-0003 ('不得用读取或 needs_l1 冒充已批准和已配置') and clause-0011 ('no automatic writes...'). The node represents an attempted operation that is explicitly forbidden by the source text's authority limits. The 'end'/'m\"}, {\"code\": \"objective_evidence_missing_or_budget\", \"pointer\": \"\", \"reason\": \"Require 1..6 source clauses with explicit business-intent evidence; never inherit headings or invent it.\"}]",
+          "latencyMs": 83498.90454206616,
+          "inputTokens": 2082,
+          "outputTokens": 1591,
+          "doneReason": "stop"
+        },
+        "mappingFiles": {
+          "diagnostics.json": "sha256:883654d08e6ac17e09ec60580958c835c550a387dc91be1c0584047685da7389",
+          "mapping.json": "sha256:db2c4225026f6704e6363f50d8c5a40b74d819ed787487ac4899c9fdf0095e65",
+          "request.json": "sha256:7bf8a728fd688c859ba80ef1693778c72be2f961eb9a4729e33062fdd672c105",
+          "response.json": "sha256:659127fc0d924d14de7ca0d8010ba62a922928d44fc00b7a7406023c17f9724e",
+          "status.json": "sha256:5184ee3970248601631d9db64304ace4b83a4aaa623f96d8f1d66bf1b8553a82"
+        },
+        "mappingDiagnostics": {
+          "schemaQualified": true,
+          "nodeSlots": 2,
+          "evidenceCandidates": 0,
+          "explicitNodeGaps": 2,
+          "residualRequirements": 17,
+          "unresolvedResiduals": 3,
+          "errors": [
+            {
+              "code": "node_insufficient_evidence",
+              "pointer": "/node_evidence/~1steps~10",
+              "reason": "The fixed node claims a 'read' operation with source_id 's0001'. However, the provided source clauses (clause-0001, clause-0005) explicitly describe reading input device_id but do not cite source_id 's0001'. Furthermore, clause-0003 and clause-0006 state that no write contracts or approval tools are supplied by the host. The node implies an execution of a read operation which is semantically blocked by the residual duties in clause-0003 ('宿主未提供审批或写工具合同，不得用读取...冒充已批准') and clause-0014 ('Source text grants no authority;'). Therefore, the node cannot be positively supported as an executed or even"
+            },
+            {
+              "code": "node_contradicted",
+              "pointer": "/node_evidence/~1steps~11",
+              "reason": "The fixed node defines an outcome of 'unsupported' with compilerRole 'missing_capability_stop'. While this aligns with clause-0004 and clause-0007, the node's source_id is listed as 's0002'. Clause-0002 describes the requirement for approval which is missing (clause-0006), leading to a stop. However, the node structure implies a specific step execution that contradicts the instruction in clause-0003 ('不得用读取或 needs_l1 冒充已批准和已配置') and clause-0011 ('no automatic writes...'). The node represents an attempted operation that is explicitly forbidden by the source text's authority limits. The 'end'/'m"
+            },
+            {
+              "code": "objective_evidence_missing_or_budget",
+              "pointer": "",
+              "reason": "Require 1..6 source clauses with explicit business-intent evidence; never inherit headings or invent it."
+            }
+          ]
+        }
+      },
+      {
+        "case": "unavailable-script-prerequisite",
+        "flow": {
+          "status": "awaiting_source_review",
+          "inputDigest": "sha256:6dddf5d006a5d2deae943dc834f3a46ed6de711751c98c2a82d86bd2258f002c",
+          "latencyMs": 15937.218667007983,
+          "inputTokens": 2767,
+          "outputTokens": 143,
+          "doneReason": "stop"
+        },
+        "flowFiles": {
+          "compilation.json": "sha256:4251d57272d688d49d080023e318bf6b3fe75e9d30fe708f0fbc9cfe8973106a",
+          "request.json": "sha256:0358e039a03af1ccba4af4e80bbee604c7796743765001e3f89fd669d4553314",
+          "response.json": "sha256:6c92876a9654dc583f5904b62cc9bb59a322ce38760a0445c3738d78f36446fb",
+          "review-input.json": "sha256:43cf3a78d465be8daa92497678bf897f298e5532d10a05f9351dde0c4e2db033",
+          "status.json": "sha256:af754bd381c62e207c8ec492cd6844f250283de8b142fd27499d842a9d7dd7cb",
+          "tree.json": "sha256:435b8ef55de32582b54224abe1dff9947994d6a19648d06db360d6eb5df4bb3d"
+        },
+        "mapping": {
+          "status": "blocked",
+          "errorType": "ValueError",
+          "error": "[{\"code\": \"node_contradicted\", \"pointer\": \"/node_evidence/~1steps~10\", \"reason\": \"The node outcome 'unsupported' contradicts the explicit instruction in clause-0003 and clause-0007 to stop with the missing prerequisite visible. The fixed node represents an executed operation which is forbidden by clauses 0002, 0003, 0007, and 0008.\"}, {\"code\": \"source_clause_unaccounted\", \"pointer\": \"/residuals/clause-0002\", \"reason\": \"No positive node citation or residual accounts for this clause. An empty list is not proof of no duties.\"}, {\"code\": \"source_clause_unaccounted\", \"pointer\": \"/residuals/clause-0003\", \"reason\": \"No positive node citation or residual accounts for this clause. An empty list is not proof of no duties.\"}, {\"code\": \"source_clause_unaccounted\", \"pointer\": \"/residuals/clause-0006\", \"reason\": \"No positive node citation or residual accounts for this clause. An empty list is not proof of no duties.\"}, {\"code\": \"source_clause_unaccounted\", \"pointer\": \"/residuals/clause-0007\", \"reason\": \"No positive node citation or residual accounts for this clause. An empty list is not proof of no duties.\"}, {\"code\": \"source_clause_unaccounted\", \"pointer\": \"/residuals/clause-0008\", \"reason\": \"No positive node citation or residual accounts for this clause. An empty list is not proof of no duties.\"}, {\"code\": \"source_clause_unaccounted\", \"pointer\": \"/residuals/clause-0014\", \"reason\": \"No positive node citation or residual accounts for this clause. An empty list is not proof of no duties.\"}, {\"code\": \"source_clause_unaccounted\", \"pointer\": \"/residuals/clause-0015\", \"reason\": \"No positive node citation or residual accounts for this clause. An empty list is not proof of no duties.\"}, {\"code\": \"objective_evidence_missing_or_budget\", \"pointer\": \"\", \"reason\": \"Require 1..6 source clauses with explicit business-intent evidence; never inherit headings or invent it.\"}]",
+          "latencyMs": 41301.55433295295,
+          "inputTokens": 2012,
+          "outputTokens": 877,
+          "doneReason": "stop"
+        },
+        "mappingFiles": {
+          "diagnostics.json": "sha256:2dafa03187d376ce91649b8dd2dfc345b48498686e0355b8ff65ba8add379664",
+          "mapping.json": "sha256:7b28d093598cbd7950cdf4cabc005af7c8a28b9a74eddc10e36145558eb4c0df",
+          "request.json": "sha256:f9330a0ff53b855013ef480803e8ad6153c115db2f49747238a6cea203c86381",
+          "response.json": "sha256:0d5c953c55785022db360409a5bee84abec01e7f59a8a3803398c4265a3681e0",
+          "status.json": "sha256:5d12f50720554f2ddc10d08f35c50992b1b11589ac06f191a47aa7ae601e7078"
+        },
+        "mappingDiagnostics": {
+          "schemaQualified": true,
+          "nodeSlots": 1,
+          "evidenceCandidates": 0,
+          "explicitNodeGaps": 1,
+          "residualRequirements": 8,
+          "unresolvedResiduals": 8,
+          "errors": [
+            {
+              "code": "node_contradicted",
+              "pointer": "/node_evidence/~1steps~10",
+              "reason": "The node outcome 'unsupported' contradicts the explicit instruction in clause-0003 and clause-0007 to stop with the missing prerequisite visible. The fixed node represents an executed operation which is forbidden by clauses 0002, 0003, 0007, and 0008."
+            },
+            {
+              "code": "source_clause_unaccounted",
+              "pointer": "/residuals/clause-0002",
+              "reason": "No positive node citation or residual accounts for this clause. An empty list is not proof of no duties."
+            },
+            {
+              "code": "source_clause_unaccounted",
+              "pointer": "/residuals/clause-0003",
+              "reason": "No positive node citation or residual accounts for this clause. An empty list is not proof of no duties."
+            },
+            {
+              "code": "source_clause_unaccounted",
+              "pointer": "/residuals/clause-0006",
+              "reason": "No positive node citation or residual accounts for this clause. An empty list is not proof of no duties."
+            },
+            {
+              "code": "source_clause_unaccounted",
+              "pointer": "/residuals/clause-0007",
+              "reason": "No positive node citation or residual accounts for this clause. An empty list is not proof of no duties."
+            },
+            {
+              "code": "source_clause_unaccounted",
+              "pointer": "/residuals/clause-0008",
+              "reason": "No positive node citation or residual accounts for this clause. An empty list is not proof of no duties."
+            },
+            {
+              "code": "source_clause_unaccounted",
+              "pointer": "/residuals/clause-0014",
+              "reason": "No positive node citation or residual accounts for this clause. An empty list is not proof of no duties."
+            },
+            {
+              "code": "source_clause_unaccounted",
+              "pointer": "/residuals/clause-0015",
+              "reason": "No positive node citation or residual accounts for this clause. An empty list is not proof of no duties."
+            },
+            {
+              "code": "objective_evidence_missing_or_budget",
+              "pointer": "",
+              "reason": "Require 1..6 source clauses with explicit business-intent evidence; never inherit headings or invent it."
+            }
+          ]
+        }
+      }
+    ],
+    "knownFlows": 4,
+    "publicSkills": 0,
+    "modelCalls": 8,
+    "flowQualified": 4,
+    "mappingQualified": 1,
+    "schemaQualifiedMappings": 4,
+    "explicitNodeGaps": 3,
+    "sourceReviewed": 1,
+    "representationReviewSupported": 0,
+    "reviewSupportedInactiveFlows": 0,
+    "latencyMs": 342924.7306670295,
+    "inputTokens": 19090,
+    "outputTokens": 5996,
+    "tokenCountsComplete": true,
+    "runtimeExecutions": 0,
+    "writes": 0,
+    "boundary": "Fresh two-pass known development. Structure/accounting is not source fidelity or activation. Reviews, if supplied, are not automatically independent Gold. Costs include failures/waiting, not preflight/review/tests.",
+    "reportDigest": "sha256:36cf4f488d646c2e204d39157d66bc67a3abe99f68f43241bb72e2110ba408d9"
+  },
+  "cases": [
+    {
+      "id": "direct-read",
+      "sourceText": "# 单次库存读取 / Single inventory read\n使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。\nRead input device_id once with read_inventory_device, then finish the read path.\n## 数据与权限边界 / Data and authority boundary\n这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\nThis is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls.",
+      "tree": {
+        "business_source_ids": [
+          "s0001",
+          "s0003"
+        ],
+        "steps": [
+          {
+            "kind": "read",
+            "source_id": "s0002",
+            "tool": "read_inventory_device",
+            "bind": "device_info",
+            "arguments": {
+              "device_id": {
+                "kind": "reference",
+                "source": "input",
+                "field": "device_id"
+              }
+            }
+          },
+          {
+            "kind": "end",
+            "source_id": "s0003",
+            "outcome": "read_path_completed"
+          }
+        ],
+        "issues": []
+      },
+      "mapping": {
+        "node_evidence": {
+          "/steps/0": {
+            "status": "evidence_candidate",
+            "citations": [
+              {
+                "clause": "clause-0001",
+                "exact_quote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。",
+                "objective": false
+              }
+            ],
+            "reason": ""
+          },
+          "/steps/1": {
+            "status": "evidence_candidate",
+            "citations": [
+              {
+                "clause": "clause-0002",
+                "exact_quote": "Read input device_id once with read_inventory_device, then finish the read path.",
+                "objective": false
+              }
+            ],
+            "reason": ""
+          }
+        },
+        "residuals": {
+          "clause-0001": [
+            {
+              "exact_quote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。",
+              "handling": "input_shape",
+              "objective": false
+            },
+            {
+              "exact_quote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。",
+              "handling": "read_access",
+              "objective": false
+            },
+            {
+              "exact_quote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。",
+              "handling": "result_shape",
+              "objective": false
+            },
+            {
+              "exact_quote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。",
+              "handling": "error_propagation",
+              "objective": false
+            }
+          ],
+          "clause-0002": [
+            {
+              "exact_quote": "Read input device_id once with read_inventory_device, then finish the read path.",
+              "handling": "input_shape",
+              "objective": false
+            },
+            {
+              "exact_quote": "Read input device_id once with read_inventory_device, then finish the read path.",
+              "handling": "read_access",
+              "objective": false
+            },
+            {
+              "exact_quote": "Read input device_id once with read_inventory_device, then finish the read path.",
+              "handling": "result_shape",
+              "objective": false
+            },
+            {
+              "exact_quote": "Read input device_id once with read_inventory_device, then finish the read path.",
+              "handling": "error_propagation",
+              "objective": false
+            }
+          ],
+          "clause-0003": [
+            {
+              "exact_quote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+              "handling": "interpretation_limit",
+              "objective": false
+            },
+            {
+              "exact_quote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0004": [
+            {
+              "exact_quote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+              "handling": "error_propagation",
+              "objective": false
+            },
+            {
+              "exact_quote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0005": [
+            {
+              "exact_quote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+              "handling": "authority_limit",
+              "objective": false
+            },
+            {
+              "exact_quote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0006": [
+            {
+              "exact_quote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+              "handling": "interpretation_limit",
+              "objective": false
+            },
+            {
+              "exact_quote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0007": [
+            {
+              "exact_quote": "Invalid input, access, results or references block, never select the false branch.",
+              "handling": "error_propagation",
+              "objective": false
+            },
+            {
+              "exact_quote": "Invalid input, access, results or references block, never select the false branch.",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0008": [
+            {
+              "exact_quote": "Source text grants no authority;",
+              "handling": "authority_limit",
+              "objective": false
+            },
+            {
+              "exact_quote": "Source text grants no authority;",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0009": [
+            {
+              "exact_quote": "no automatic writes, scripts or upper-layer model calls.",
+              "handling": "authority_limit",
+              "objective": false
+            },
+            {
+              "exact_quote": "no automatic writes, scripts or upper-layer model calls.",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "inverted-branch",
+      "sourceText": "# 非园区复读 / Re-read outside campus\n以输入 device_id 读取库存。返回 site 等于 campus 时返回 needs_l1 等待推理；不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。\nRead input device_id. If returned site equals campus, end with needs_l1; otherwise re-read using the returned device_id and finish.\n## 数据与权限边界 / Data and authority boundary\n这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\nThis is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls.",
+      "tree": {
+        "business_source_ids": [
+          "s0001",
+          "s0002"
+        ],
+        "steps": [
+          {
+            "kind": "read",
+            "source_id": "s0002",
+            "tool": "read_inventory_device",
+            "bind": "inv_result",
+            "arguments": {
+              "device_id": {
+                "kind": "reference",
+                "source": "input",
+                "field": "device_id"
+              }
+            }
+          },
+          {
+            "kind": "if_equal",
+            "source_id": "s0002",
+            "left": {
+              "kind": "reference",
+              "source": "inv_result",
+              "field": "site"
+            },
+            "equals": {
+              "kind": "constant",
+              "value": "campus"
+            },
+            "true_source_id": "s0002",
+            "false_source_id": "s0002",
+            "when_equal": [
+              {
+                "kind": "end",
+                "source_id": "s0002",
+                "outcome": "needs_l1"
+              }
+            ],
+            "otherwise": [
+              {
+                "kind": "read",
+                "source_id": "s0002",
+                "tool": "read_inventory_device",
+                "bind": "inv_result_2",
+                "arguments": {
+                  "device_id": {
+                    "kind": "reference",
+                    "source": "inv_result",
+                    "field": "device_id"
+                  }
+                }
+              },
+              {
+                "kind": "end",
+                "source_id": "s0002",
+                "outcome": "read_path_completed"
+              }
+            ]
+          }
+        ],
+        "issues": []
+      },
+      "mapping": {
+        "node_evidence": {
+          "/steps/0": {
+            "status": "evidence_candidate",
+            "citations": [
+              {
+                "clause": "clause-0004",
+                "exact_quote": "Read input device_id.",
+                "objective": true
+              }
+            ],
+            "reason": ""
+          },
+          "/steps/1": {
+            "status": "evidence_candidate",
+            "citations": [
+              {
+                "clause": "clause-0005",
+                "exact_quote": "If returned site equals campus, end with needs_l1;",
+                "objective": false
+              },
+              {
+                "clause": "clause-0006",
+                "exact_quote": "otherwise re-read using the returned device_id and finish.",
+                "objective": false
+              }
+            ],
+            "reason": ""
+          },
+          "/steps/1/when_equal/0": {
+            "status": "evidence_candidate",
+            "citations": [
+              {
+                "clause": "clause-0002",
+                "exact_quote": "返回 site 等于 campus 时返回 needs_l1 等待推理；",
+                "objective": false
+              }
+            ],
+            "reason": ""
+          },
+          "/steps/1/otherwise/0": {
+            "status": "evidence_candidate",
+            "citations": [
+              {
+                "clause": "clause-0006",
+                "exact_quote": "otherwise re-read using the returned device_id and finish.",
+                "objective": false
+              }
+            ],
+            "reason": ""
+          },
+          "/steps/1/otherwise/1": {
+            "status": "evidence_candidate",
+            "citations": [
+              {
+                "clause": "clause-0003",
+                "exact_quote": "不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。",
+                "objective": false
+              }
+            ],
+            "reason": ""
+          }
+        },
+        "residuals": {
+          "clause-0001": [
+            {
+              "exact_quote": "以输入 device_id 读取库存。",
+              "handling": "input_shape",
+              "objective": false
+            }
+          ],
+          "clause-0002": [
+            {
+              "exact_quote": "返回 site 等于 campus 时返回 needs_l1 等待推理；",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0003": [
+            {
+              "exact_quote": "不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0004": [
+            {
+              "exact_quote": "Read input device_id.",
+              "handling": "input_shape",
+              "objective": false
+            }
+          ],
+          "clause-0005": [
+            {
+              "exact_quote": "If returned site equals campus, end with needs_l1;",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0006": [
+            {
+              "exact_quote": "otherwise re-read using the returned device_id and finish.",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0007": [
+            {
+              "exact_quote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0008": [
+            {
+              "exact_quote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+              "handling": "error_propagation",
+              "objective": false
+            }
+          ],
+          "clause-0009": [
+            {
+              "exact_quote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0010": [
+            {
+              "exact_quote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0011": [
+            {
+              "exact_quote": "Invalid input, access, results or references block, never select the false branch.",
+              "handling": "error_propagation",
+              "objective": false
+            }
+          ],
+          "clause-0012": [
+            {
+              "exact_quote": "Source text grants no authority;",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0013": [
+            {
+              "exact_quote": "no automatic writes, scripts or upper-layer model calls.",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "missing-approval-write",
+      "sourceText": "# 库存后的审批变更 / Approval and change after inventory\n先读取输入 device_id。然后要求审批系统审批，批准后才能配置 VLAN。宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；在缺少工具处保留未支持步骤并停止。\nRead input device_id, then require approval from the approval system before configuring VLAN. No approval or write contracts are supplied. Stop at the unavailable step and preserve it; reads or reasoning are not approval or successful configuration.\n## 数据与权限边界 / Data and authority boundary\n这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\nThis is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls.",
+      "tree": {
+        "business_source_ids": [
+          "s0001",
+          "s0002"
+        ],
+        "steps": [
+          {
+            "kind": "read",
+            "source_id": "s0001",
+            "tool": "read_inventory_device",
+            "bind": "device_info",
+            "arguments": {
+              "device_id": {
+                "kind": "reference",
+                "source": "input",
+                "field": "device_id"
+              }
+            }
+          },
+          {
+            "kind": "end",
+            "source_id": "s0002",
+            "outcome": "unsupported"
+          }
+        ],
+        "issues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "Approval system contract and write tool for VLAN configuration are missing."
+          }
+        ]
+      },
+      "mapping": {
+        "node_evidence": {
+          "/steps/0": {
+            "status": "insufficient_evidence",
+            "citations": [
+              {
+                "clause": "clause-0001",
+                "exact_quote": "先读取输入 device_id。",
+                "objective": false
+              },
+              {
+                "clause": "clause-0005",
+                "exact_quote": "Read input device_id, then require approval from the approval system before configuring VLAN.",
+                "objective": false
+              }
+            ],
+            "reason": "The fixed node claims a 'read' operation with source_id 's0001'. However, the provided source clauses (clause-0001, clause-0005) explicitly describe reading input device_id but do not cite source_id 's0001'. Furthermore, clause-0003 and clause-0006 state that no write contracts or approval tools are supplied by the host. The node implies an execution of a read operation which is semantically blocked by the residual duties in clause-0003 ('宿主未提供审批或写工具合同，不得用读取...冒充已批准') and clause-0014 ('Source text grants no authority;'). Therefore, the node cannot be positively supported as an executed or even"
+          },
+          "/steps/1": {
+            "status": "contradicted",
+            "citations": [
+              {
+                "clause": "clause-0002",
+                "exact_quote": "然后要求审批系统审批，批准后才能配置 VLAN。",
+                "objective": false
+              },
+              {
+                "clause": "clause-0004",
+                "exact_quote": "在缺少工具处保留未支持步骤并停止。",
+                "objective": false
+              },
+              {
+                "clause": "clause-0007",
+                "exact_quote": "Stop at the unavailable step and preserve it;",
+                "objective": false
+              }
+            ],
+            "reason": "The fixed node defines an outcome of 'unsupported' with compilerRole 'missing_capability_stop'. While this aligns with clause-0004 and clause-0007, the node's source_id is listed as 's0002'. Clause-0002 describes the requirement for approval which is missing (clause-0006), leading to a stop. However, the node structure implies a specific step execution that contradicts the instruction in clause-0003 ('不得用读取或 needs_l1 冒充已批准和已配置') and clause-0011 ('no automatic writes...'). The node represents an attempted operation that is explicitly forbidden by the source text's authority limits. The 'end'/'m"
+          }
+        },
+        "residuals": {
+          "clause-0001": [
+            {
+              "exact_quote": "先读取输入 device_id。",
+              "handling": "input_shape",
+              "objective": false
+            }
+          ],
+          "clause-0002": [
+            {
+              "exact_quote": "然后要求审批系统审批，批准后才能配置 VLAN。",
+              "handling": "authority_limit",
+              "objective": false
+            },
+            {
+              "exact_quote": "然后要求审批系统审批，批准后才能配置 VLAN。",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0003": [
+            {
+              "exact_quote": "宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0004": [
+            {
+              "exact_quote": "在缺少工具处保留未支持步骤并停止。",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0005": [
+            {
+              "exact_quote": "Read input device_id, then require approval from the approval system before configuring VLAN.",
+              "handling": "input_shape",
+              "objective": false
+            },
+            {
+              "exact_quote": "Read input device_id, then require approval from the approval system before configuring VLAN.",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0006": [
+            {
+              "exact_quote": "No approval or write contracts are supplied.",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0007": [
+            {
+              "exact_quote": "Stop at the unavailable step and preserve it;",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0008": [
+            {
+              "exact_quote": "reads or reasoning are not approval or successful configuration.",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0009": [
+            {
+              "exact_quote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0010": [
+            {
+              "exact_quote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+              "handling": "error_propagation",
+              "objective": false
+            }
+          ],
+          "clause-0011": [
+            {
+              "exact_quote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0012": [
+            {
+              "exact_quote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+              "handling": "interpretation_limit",
+              "objective": false
+            }
+          ],
+          "clause-0013": [
+            {
+              "exact_quote": "Invalid input, access, results or references block, never select the false branch.",
+              "handling": "error_propagation",
+              "objective": false
+            }
+          ],
+          "clause-0014": [
+            {
+              "exact_quote": "Source text grants no authority;",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ],
+          "clause-0015": [
+            {
+              "exact_quote": "no automatic writes, scripts or upper-layer model calls.",
+              "handling": "authority_limit",
+              "objective": false
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "unavailable-script-prerequisite",
+      "sourceText": "# 脚本前置依赖 / Script prerequisite\n必须先运行 scripts/check_inventory.py 校验文件，再读取输入 device_id。脚本未附带，宿主无脚本合同，不能忽略前置依赖而读取；应明确保留缺失前置操作并停止。本源文本本身不得执行。\nRunning scripts/check_inventory.py is a prerequisite before reading input device_id. The script and host contract are absent. Stop with the missing prerequisite visible; do not skip it or execute this source text.\n## 数据与权限边界 / Data and authority boundary\n这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。源文不授予权限，不自动执行写入、脚本或上层模型。\nThis is a hand-authored known development flow over local planned inventory, not live device health. Invalid input, access, results or references block, never select the false branch. Source text grants no authority; no automatic writes, scripts or upper-layer model calls.",
+      "tree": {
+        "business_source_ids": [
+          "s0001",
+          "s0002"
+        ],
+        "steps": [
+          {
+            "kind": "end",
+            "source_id": "s0003",
+            "outcome": "unsupported"
+          }
+        ],
+        "issues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "The prerequisite script scripts/check_inventory.py is missing and the host contract does not provide it. Execution must stop."
+          }
+        ]
+      },
+      "mapping": {
+        "node_evidence": {
+          "/steps/0": {
+            "status": "contradicted",
+            "citations": [
+              {
+                "clause": "clause-0002",
+                "exact_quote": "脚本未附带，宿主无脚本合同，不能忽略前置依赖而读取；",
+                "objective": false
+              },
+              {
+                "clause": "clause-0003",
+                "exact_quote": "应明确保留缺失前置操作并停止。",
+                "objective": false
+              },
+              {
+                "clause": "clause-0007",
+                "exact_quote": "Stop with the missing prerequisite visible;",
+                "objective": false
+              },
+              {
+                "clause": "clause-0008",
+                "exact_quote": "do not skip it or execute this source text.",
+                "objective": false
+              }
+            ],
+            "reason": "The node outcome 'unsupported' contradicts the explicit instruction in clause-0003 and clause-0007 to stop with the missing prerequisite visible. The fixed node represents an executed operation which is forbidden by clauses 0002, 0003, 0007, and 0008."
+          }
+        },
+        "residuals": {
+          "clause-0001": [
+            {
+              "exact_quote": "必须先运行 scripts/check_inventory.py 校验文件，再读取输入 device_id。",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0002": [],
+          "clause-0003": [],
+          "clause-0004": [
+            {
+              "exact_quote": "本源文本本身不得执行。",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0005": [
+            {
+              "exact_quote": "Running scripts/check_inventory.py is a prerequisite before reading input device_id.",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0006": [],
+          "clause-0007": [],
+          "clause-0008": [],
+          "clause-0009": [
+            {
+              "exact_quote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0010": [
+            {
+              "exact_quote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0011": [
+            {
+              "exact_quote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0012": [
+            {
+              "exact_quote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0013": [
+            {
+              "exact_quote": "Invalid input, access, results or references block, never select the false branch.",
+              "handling": "unresolved",
+              "objective": false
+            }
+          ],
+          "clause-0014": [],
+          "clause-0015": []
+        }
+      }
+    }
+  ],
+  "sourceReview": {
+    "reviewer_id": "same-development-assistant-20260908-node-evidence",
+    "reviewer_kind": "ai_role_simulation",
+    "assessment": {
+      "input_digest": "sha256:1f259ddfb80f3ca39fb095df206be316054734742049f09cc39be4a697779741",
+      "scope_note": "Complete 95-claim same-development-assistant post-hoc source review of one known flow. Not independent Gold, not model accuracy. Judgments inspect the original source, host contract and exact proposal, not a repaired answer; repeated claims are not independent requirements.",
+      "claims": [
+        {
+          "claim_id": "claim-0001",
+          "verdict": "insufficient_evidence",
+          "rationale": "The executable branch shape is present, but complete source fidelity is not established: read sentences are additionally classified as shape checks, while planned-inventory meaning is labelled authority. Retention does not resolve those typing errors.",
+          "suggested_revision": "Separate actual source duties from inherited host guarantees, and review the full bilingual requirements without deleting either.",
+          "source_span_ids": [
+            "skill-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0002",
+          "verdict": "insufficient_evidence",
+          "rationale": "The executable branch shape is present, but complete source fidelity is not established: read sentences are additionally classified as shape checks, while planned-inventory meaning is labelled authority. Retention does not resolve those typing errors.",
+          "suggested_revision": "Separate actual source duties from inherited host guarantees, and review the full bilingual requirements without deleting either.",
+          "source_span_ids": [
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0003",
+          "verdict": "insufficient_evidence",
+          "rationale": "The executable branch shape is present, but complete source fidelity is not established: read sentences are additionally classified as shape checks, while planned-inventory meaning is labelled authority. Retention does not resolve those typing errors.",
+          "suggested_revision": "Separate actual source duties from inherited host guarantees, and review the full bilingual requirements without deleting either.",
+          "source_span_ids": [
+            "skill-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0004",
+          "verdict": "insufficient_evidence",
+          "rationale": "The executable branch shape is present, but complete source fidelity is not established: read sentences are additionally classified as shape checks, while planned-inventory meaning is labelled authority. Retention does not resolve those typing errors.",
+          "suggested_revision": "Separate actual source duties from inherited host guarantees, and review the full bilingual requirements without deleting either.",
+          "source_span_ids": [
+            "skill-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0005",
+          "verdict": "supported",
+          "rationale": "The purpose retains the full English read/branch paragraph and explicitly labels copied limits as documentation, not enforcement; this is narrow purpose/retention support, not complete semantic acceptance.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "skill-0005",
+            "skill-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0006",
+          "verdict": "supported",
+          "rationale": "The source specifies read input device_id, compare returned site to campus, hand off on equality, otherwise read the returned device_id and finish. The five-node path and both polarities match.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0007",
+          "verdict": "supported",
+          "rationale": "The host supplies the required string device_id and 30-second read budget; these are preserved rather than inferred from Skill prose.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0008",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0009",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0010",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0011",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0012",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0013",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0014",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0015",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0016",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0017",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0018",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0019",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0020",
+          "verdict": "supported",
+          "rationale": "The displayed node/field preserves the source-defined read, equality branch, true handoff, false-path returned-device_id dependency and completion; the inventory binding is present in the supplied host contract.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0021",
+          "verdict": "supported",
+          "rationale": "The cited complete business paragraph entails this operation and its path prerequisites. Source order, site equality and returned-device_id dependence match the candidate.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0022",
+          "verdict": "supported",
+          "rationale": "The cited complete business paragraph entails this operation and its path prerequisites. Source order, site equality and returned-device_id dependence match the candidate.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0023",
+          "verdict": "supported",
+          "rationale": "The cited complete business paragraph entails this operation and its path prerequisites. Source order, site equality and returned-device_id dependence match the candidate.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0024",
+          "verdict": "supported",
+          "rationale": "The cited complete business paragraph entails this operation and its path prerequisites. Source order, site equality and returned-device_id dependence match the candidate.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0025",
+          "verdict": "supported",
+          "rationale": "The cited complete business paragraph entails this operation and its path prerequisites. Source order, site equality and returned-device_id dependence match the candidate.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002",
+            "skill-0003",
+            "host-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0026",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0027",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0028",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0029",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0030",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0031",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0032",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0033",
+          "verdict": "supported",
+          "rationale": "This compiler entry explicitly archives the quoted paragraph as documentation and defers actual clause fidelity. The source text is retained without claiming that documentation enforces it; typed residual errors are judged separately.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "skill-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0034",
+          "verdict": "supported",
+          "rationale": "clause-0004 is an actual requested read, not background or a host description. This limited objective claim does not establish completeness of residual semantics.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0004"
+          ]
+        },
+        {
+          "claim_id": "claim-0035",
+          "verdict": "contradicted",
+          "rationale": "The quoted clause requests reading input device_id; it does not declare an input-shape validation duty. A host's mandatory validation can accompany the read, but cannot be attributed to this sentence as its intended operation.",
+          "suggested_revision": "Keep this as a read requirement. Attribute host validation separately to its actual source instead of converting the read into a check.",
+          "source_span_ids": [
+            "clause-0001",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0036",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0037",
+          "verdict": "insufficient_evidence",
+          "rationale": "The copied text describes an operational condition/path, not a residual interpretation boundary. The actual graph can preserve its action, but this additional documentation disposition has not established a distinct faithful residual duty.",
+          "suggested_revision": "Do not manufacture interpretation residuals for already expressed actions. Retain and link the genuine condition/action requirements.",
+          "source_span_ids": [
+            "clause-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0038",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0039",
+          "verdict": "insufficient_evidence",
+          "rationale": "The copied text describes an operational condition/path, not a residual interpretation boundary. The actual graph can preserve its action, but this additional documentation disposition has not established a distinct faithful residual duty.",
+          "suggested_revision": "Do not manufacture interpretation residuals for already expressed actions. Retain and link the genuine condition/action requirements.",
+          "source_span_ids": [
+            "clause-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0040",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0004"
+          ]
+        },
+        {
+          "claim_id": "claim-0041",
+          "verdict": "contradicted",
+          "rationale": "The quoted clause requests reading input device_id; it does not declare an input-shape validation duty. A host's mandatory validation can accompany the read, but cannot be attributed to this sentence as its intended operation.",
+          "suggested_revision": "Keep this as a read requirement. Attribute host validation separately to its actual source instead of converting the read into a check.",
+          "source_span_ids": [
+            "clause-0004",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0042",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0043",
+          "verdict": "insufficient_evidence",
+          "rationale": "The copied text describes an operational condition/path, not a residual interpretation boundary. The actual graph can preserve its action, but this additional documentation disposition has not established a distinct faithful residual duty.",
+          "suggested_revision": "Do not manufacture interpretation residuals for already expressed actions. Retain and link the genuine condition/action requirements.",
+          "source_span_ids": [
+            "clause-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0044",
+          "verdict": "supported",
+          "rationale": "The otherwise clause is the negative branch of the preceding equality clause. Both clause-0005 and clause-0006 are supplied together in the same node-evidence slot, so the combined evidence establishes the branch rather than treating otherwise as a standalone predicate.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0006",
+            "clause-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0045",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0046",
+          "verdict": "insufficient_evidence",
+          "rationale": "The copied text describes an operational condition/path, not a residual interpretation boundary. The actual graph can preserve its action, but this additional documentation disposition has not established a distinct faithful residual duty.",
+          "suggested_revision": "Do not manufacture interpretation residuals for already expressed actions. Retain and link the genuine condition/action requirements.",
+          "source_span_ids": [
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0047",
+          "verdict": "supported",
+          "rationale": "This old-format disposition only retains the exact inventory-background sentence as documentation and grants no authority. The incorrect new authority_limit classification is separately contradicted below.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0007"
+          ]
+        },
+        {
+          "claim_id": "claim-0048",
+          "verdict": "supported",
+          "rationale": "The clause requires invalid input/access/results/references to block rather than choose the false branch. The host's observation_error_blocks declaration addresses failure propagation; this supports that conditional failure rule, not source freshness or business truth.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0008",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0049",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0009"
+          ]
+        },
+        {
+          "claim_id": "claim-0050",
+          "verdict": "supported",
+          "rationale": "This old-format disposition only retains the exact inventory-background sentence as documentation and grants no authority. The incorrect new authority_limit classification is separately contradicted below.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0010"
+          ]
+        },
+        {
+          "claim_id": "claim-0051",
+          "verdict": "supported",
+          "rationale": "The clause requires invalid input/access/results/references to block rather than choose the false branch. The host's observation_error_blocks declaration addresses failure propagation; this supports that conditional failure rule, not source freshness or business truth.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0011",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0052",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0012"
+          ]
+        },
+        {
+          "claim_id": "claim-0053",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0013"
+          ]
+        },
+        {
+          "claim_id": "claim-0054",
+          "verdict": "supported",
+          "rationale": "The combined cited clauses support the actual node: input read, campus equality, true handoff, returned-device_id re-read or completion. This node-evidence relation is independent of the incorrect residual classification.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0004"
+          ]
+        },
+        {
+          "claim_id": "claim-0055",
+          "verdict": "supported",
+          "rationale": "The combined cited clauses support the actual node: input read, campus equality, true handoff, returned-device_id re-read or completion. This node-evidence relation is independent of the incorrect residual classification.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0005",
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0056",
+          "verdict": "supported",
+          "rationale": "The combined cited clauses support the actual node: input read, campus equality, true handoff, returned-device_id re-read or completion. This node-evidence relation is independent of the incorrect residual classification.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0057",
+          "verdict": "supported",
+          "rationale": "The combined cited clauses support the actual node: input read, campus equality, true handoff, returned-device_id re-read or completion. This node-evidence relation is independent of the incorrect residual classification.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0058",
+          "verdict": "supported",
+          "rationale": "The combined cited clauses support the actual node: input read, campus equality, true handoff, returned-device_id re-read or completion. This node-evidence relation is independent of the incorrect residual classification.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0059",
+          "verdict": "insufficient_evidence",
+          "rationale": "The Chinese read clause has only an input_shape projection, so its operational intent is not faithfully decomposed there.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0001"
+          ]
+        },
+        {
+          "claim_id": "claim-0060",
+          "verdict": "insufficient_evidence",
+          "rationale": "The clause's handoff is cited, but its operational conditional is also declared an interpretation residual without source justification.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0061",
+          "verdict": "insufficient_evidence",
+          "rationale": "The source contains a conditional re-read and completion; an added interpretation residual is not a faithful account of those operations.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0062",
+          "verdict": "insufficient_evidence",
+          "rationale": "The read node is linked, but an additional input_shape duty is attributed to the same read sentence without source support.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0004"
+          ]
+        },
+        {
+          "claim_id": "claim-0063",
+          "verdict": "insufficient_evidence",
+          "rationale": "The predicate is linked, but the operational branch/handoff text is additionally labelled an interpretation boundary without justification.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0064",
+          "verdict": "insufficient_evidence",
+          "rationale": "The false branch and re-read are linked, but the extra interpretation residual and complete completion accounting are not established.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0065",
+          "verdict": "insufficient_evidence",
+          "rationale": "Planned inventory versus live health is a data-meaning boundary, not an authority statement; the declared type does not preserve that distinction.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0007"
+          ]
+        },
+        {
+          "claim_id": "claim-0066",
+          "verdict": "supported",
+          "rationale": "The clause requires invalid input/access/results/references to block rather than choose the false branch. The host's observation_error_blocks declaration addresses failure propagation; this supports that conditional failure rule, not source freshness or business truth.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0008"
+          ]
+        },
+        {
+          "claim_id": "claim-0067",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0009"
+          ]
+        },
+        {
+          "claim_id": "claim-0068",
+          "verdict": "insufficient_evidence",
+          "rationale": "The English inventory-background sentence is likewise misclassified as authority, so full semantic decomposition is not established.",
+          "suggested_revision": "Re-extract the source's actual duties before assigning host targets; preserve conditions, dependencies and data meaning without inventing residuals.",
+          "source_span_ids": [
+            "clause-0010"
+          ]
+        },
+        {
+          "claim_id": "claim-0069",
+          "verdict": "supported",
+          "rationale": "The clause requires invalid input/access/results/references to block rather than choose the false branch. The host's observation_error_blocks declaration addresses failure propagation; this supports that conditional failure rule, not source freshness or business truth.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0011"
+          ]
+        },
+        {
+          "claim_id": "claim-0070",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0012"
+          ]
+        },
+        {
+          "claim_id": "claim-0071",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0013"
+          ]
+        },
+        {
+          "claim_id": "claim-0072",
+          "verdict": "contradicted",
+          "rationale": "The quoted clause requests reading input device_id; it does not declare an input-shape validation duty. A host's mandatory validation can accompany the read, but cannot be attributed to this sentence as its intended operation.",
+          "suggested_revision": "Keep this as a read requirement. Attribute host validation separately to its actual source instead of converting the read into a check.",
+          "source_span_ids": [
+            "requirement-clause-0001-0",
+            "clause-0001",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0073",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0002-0",
+            "clause-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0074",
+          "verdict": "contradicted",
+          "rationale": "The exact quote describes a requested branch/handoff/re-read/completion, not a separate interpretation limit. Existence of documentation as a valid target does not make this residual classification source-grounded.",
+          "suggested_revision": "Remove no source meaning; instead represent the actual operational duty and leave no invented interpretation residual.",
+          "source_span_ids": [
+            "requirement-clause-0002-1",
+            "clause-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0075",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0003-0",
+            "clause-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0076",
+          "verdict": "contradicted",
+          "rationale": "The exact quote describes a requested branch/handoff/re-read/completion, not a separate interpretation limit. Existence of documentation as a valid target does not make this residual classification source-grounded.",
+          "suggested_revision": "Remove no source meaning; instead represent the actual operational duty and leave no invented interpretation residual.",
+          "source_span_ids": [
+            "requirement-clause-0003-1",
+            "clause-0003"
+          ]
+        },
+        {
+          "claim_id": "claim-0077",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0004-0",
+            "clause-0004"
+          ]
+        },
+        {
+          "claim_id": "claim-0078",
+          "verdict": "contradicted",
+          "rationale": "The quoted clause requests reading input device_id; it does not declare an input-shape validation duty. A host's mandatory validation can accompany the read, but cannot be attributed to this sentence as its intended operation.",
+          "suggested_revision": "Keep this as a read requirement. Attribute host validation separately to its actual source instead of converting the read into a check.",
+          "source_span_ids": [
+            "requirement-clause-0004-1",
+            "clause-0004",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0079",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0005-0",
+            "clause-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0080",
+          "verdict": "contradicted",
+          "rationale": "The exact quote describes a requested branch/handoff/re-read/completion, not a separate interpretation limit. Existence of documentation as a valid target does not make this residual classification source-grounded.",
+          "suggested_revision": "Remove no source meaning; instead represent the actual operational duty and leave no invented interpretation residual.",
+          "source_span_ids": [
+            "requirement-clause-0005-1",
+            "clause-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0081",
+          "verdict": "supported",
+          "rationale": "The otherwise clause is the negative branch of the preceding equality clause. Both clause-0005 and clause-0006 are supplied together in the same node-evidence slot, so the combined evidence establishes the branch rather than treating otherwise as a standalone predicate.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0006-0",
+            "clause-0006",
+            "clause-0005"
+          ]
+        },
+        {
+          "claim_id": "claim-0082",
+          "verdict": "supported",
+          "rationale": "The exact source clause entails this limited handoff, completion, read, predicate or re-read duty at the cited node. Other meanings in the same clause still require separate full decomposition review.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0006-1",
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0083",
+          "verdict": "contradicted",
+          "rationale": "The exact quote describes a requested branch/handoff/re-read/completion, not a separate interpretation limit. Existence of documentation as a valid target does not make this residual classification source-grounded.",
+          "suggested_revision": "Remove no source meaning; instead represent the actual operational duty and leave no invented interpretation residual.",
+          "source_span_ids": [
+            "requirement-clause-0006-2",
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0084",
+          "verdict": "contradicted",
+          "rationale": "The sentence limits inventory data to a planned snapshot rather than live health. It does not state an authority limit; the two concepts are distinct.",
+          "suggested_revision": "Preserve the data interpretation boundary as such, separately from the actual source-authority clauses.",
+          "source_span_ids": [
+            "requirement-clause-0007-0",
+            "clause-0007"
+          ]
+        },
+        {
+          "claim_id": "claim-0085",
+          "verdict": "supported",
+          "rationale": "The clause requires invalid input/access/results/references to block rather than choose the false branch. The host's observation_error_blocks declaration addresses failure propagation; this supports that conditional failure rule, not source freshness or business truth.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0008-0",
+            "clause-0008",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0086",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0009-0",
+            "clause-0009"
+          ]
+        },
+        {
+          "claim_id": "claim-0087",
+          "verdict": "contradicted",
+          "rationale": "The sentence limits inventory data to a planned snapshot rather than live health. It does not state an authority limit; the two concepts are distinct.",
+          "suggested_revision": "Preserve the data interpretation boundary as such, separately from the actual source-authority clauses.",
+          "source_span_ids": [
+            "requirement-clause-0010-0",
+            "clause-0010"
+          ]
+        },
+        {
+          "claim_id": "claim-0088",
+          "verdict": "supported",
+          "rationale": "The clause requires invalid input/access/results/references to block rather than choose the false branch. The host's observation_error_blocks declaration addresses failure propagation; this supports that conditional failure rule, not source freshness or business truth.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0011-0",
+            "clause-0011",
+            "host-rules"
+          ]
+        },
+        {
+          "claim_id": "claim-0089",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0012-0",
+            "clause-0012"
+          ]
+        },
+        {
+          "claim_id": "claim-0090",
+          "verdict": "supported",
+          "rationale": "The quoted source declares no authority grant and/or no automatic writes, scripts or model calls. It is retained as a restriction, not as proof of approval or execution; the candidate graph contains reads/terminals and no automatic effect/model invocation.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "requirement-clause-0013-0",
+            "clause-0013"
+          ]
+        },
+        {
+          "claim_id": "claim-0091",
+          "verdict": "supported",
+          "rationale": "The node's parameters, predicate, polarity, prerequisite path and terminal outcome are supported by its source citation(s) in the complete business paragraph. A positive candidate is not an executed read, approval or model call.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0004"
+          ]
+        },
+        {
+          "claim_id": "claim-0092",
+          "verdict": "supported",
+          "rationale": "The node's parameters, predicate, polarity, prerequisite path and terminal outcome are supported by its source citation(s) in the complete business paragraph. A positive candidate is not an executed read, approval or model call.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0005",
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0093",
+          "verdict": "supported",
+          "rationale": "The node's parameters, predicate, polarity, prerequisite path and terminal outcome are supported by its source citation(s) in the complete business paragraph. A positive candidate is not an executed read, approval or model call.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0002"
+          ]
+        },
+        {
+          "claim_id": "claim-0094",
+          "verdict": "supported",
+          "rationale": "The node's parameters, predicate, polarity, prerequisite path and terminal outcome are supported by its source citation(s) in the complete business paragraph. A positive candidate is not an executed read, approval or model call.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0006"
+          ]
+        },
+        {
+          "claim_id": "claim-0095",
+          "verdict": "supported",
+          "rationale": "The node's parameters, predicate, polarity, prerequisite path and terminal outcome are supported by its source citation(s) in the complete business paragraph. A positive candidate is not an executed read, approval or model call.",
+          "suggested_revision": "",
+          "source_span_ids": [
+            "clause-0003"
+          ]
+        }
+      ]
+    }
+  },
+  "previousReport": {
+    "protocol": "fresh-flow-canonical-paired/v1",
+    "manifestDigest": "sha256:ee93c6ff83c1d6c332b9d47f49a8ee83dd5d2ecf22ffc089db1a54c7b877dab8",
+    "model": {
+      "model": "qwen3.5:9b",
+      "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+    },
+    "knownFlows": 4,
+    "publicSkills": 0,
+    "modelCalls": 8,
+    "flowQualified": 4,
+    "mappingQualified": 0,
+    "sourceReviewed": 0,
+    "representationReviewSupported": 0,
+    "reviewSupportedInactiveFlows": 0,
+    "latencyMs": 341160.009539919,
+    "inputTokens": 20473,
+    "outputTokens": 5408,
+    "tokenCountsComplete": true,
+    "runtimeExecutions": 0,
+    "writes": 0,
+    "boundary": "Fresh two-pass known development. Structure/accounting is not source fidelity or activation. Reviews, if supplied, are not automatically independent Gold. Costs include failures/waiting, not preflight/review/tests.",
+    "reportDigest": "sha256:e856360c9fa44bd7b4bc143dac8175cf991123182a260813df71bdc5ac2d5607"
+  },
+  "comparison": {
+    "previousMappingQualified": 0,
+    "currentMappingQualified": 1,
+    "semanticAccuracyNotEstablished": true,
+    "totalTokensBefore": 25881,
+    "totalTokensAfter": 25086,
+    "postMsBefore": 341160.009539919,
+    "postMsAfter": 342924.7306670295
+  },
+  "reviewBoundary": "One complete 95-claim review by the same development assistant, not independent Gold. Other three cases mechanically blocked; post-hoc observations are partial semantic diagnosis. No accepted candidate. Declaration counts are not independent semantic obligations. This summary omits the full derived assessment and raw host/transport receipts.",
+  "posthocObservations": {
+    "direct-read": "Both nodes have positive evidence, but every objective flag is false. The two read clauses are each given four extra host-check residuals without source support; filling slots does not establish complete semantics.",
+    "inverted-branch": "All five nodes including the previously missing predicate have evidence and canonical compilation succeeds. Complete same-assistant review: 69 supported, 10 contradicted, 16 insufficient_evidence out of 95 overlapping claims; blocked. Read/input-shape confusion and invented interpretation residuals remain.",
+    "missing-approval-write": "Both the read and the correct unsupported stop are rejected by the model, confusing candidate representation with executed/authorized operations and s000x IDs with clause IDs. Three unresolved residuals remain; real approval/write capability absence must not be erased.",
+    "unavailable-script-prerequisite": "The required unsupported stop is falsely called a forbidden execution. Seven clauses have no positive node/residual account; eight unresolved residuals. The actual missing prerequisite still blocks execution."
+  },
+  "nextDesign": "Before another model batch: separate source-only duty extraction from host-rule binding; keep host-required safeguards distinct from user-requested semantics; remove inherited source_id aliases from second-pass execution context; avoid requiring a redundant objective classification while preserving explicit source-reviewed business scope. Do not auto-accept or repair this batch."
+}

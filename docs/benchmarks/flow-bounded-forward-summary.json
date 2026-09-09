@@ -1,0 +1,278 @@
+{
+  "protocol": "host-bounded-tree/v1",
+  "manifestDigest": "sha256:5ce0633ee1aa9449cf875c11fcfd7fad26454385a14a11772cf6a59fa53d2308",
+  "parentManifestDigest": "sha256:78f95ddaabc771e4b54df3c2fbc2897daebeb01a87c6e29dd7faaa79578af02f",
+  "evidenceRole": "known_development_host_bounded_forward_not_holdout",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "rows": [
+    {
+      "case": "direct-read",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:cf07cea171b9b96fa57994a70da402f6c52cccf2a763e341e8089a93e500d89a",
+      "latencyMs": 33986.19787499774,
+      "inputTokens": 2715,
+      "outputTokens": 175,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:5990199d69986fecdf69b8a2a363dd50a3e641f0da65d1674fc691f2d0016567",
+        "request.json": "sha256:a877fc4e32fe215e4cec57641183b6c1f97dd26aba0f38151822148bc4c91864",
+        "response.json": "sha256:18094ec25612556b5f6f9432dfa0aa58feb64a150ab960c53e70eab8b1fd0259",
+        "review-input.json": "sha256:8b0076edb9b6dd8942d00e8577a3a35200df5559d5e2c6dcf209a825a1d35e65",
+        "sources.json": "sha256:fc173036148a6141b9ed757b56553a782613b6b24925fd84bdbdd5b5bc5019d5",
+        "status.json": "sha256:333a3f7a1ebbb6229d2ab0014ad831fe1a0b92cbbfebb461a05fca5d1dafcf99",
+        "tree.json": "sha256:e822b4807355751a040f0dbc2a7beedb4a1bdcd9c171b31ae4acd7963d46c83f"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:cf07cea171b9b96fa57994a70da402f6c52cccf2a763e341e8089a93e500d89a",
+        "reviewDigest": "sha256:67e79de05bc586a4fb94a7b5ce336df3376d7cd22c510195189755dcc562020c",
+        "reportDigest": "sha256:677f5ed8766c03823f224eee926cde7b0dc9d3daa75d2bdaa898707118a2e12d",
+        "reviewerId": "current-assistant-c3f-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 10,
+          "contradicted": 0,
+          "insufficient_evidence": 3
+        },
+        "scopeNote": "当前项目助手逐项审查已知开发源文与首次提案；非独立、非盲测。区分操作路径正确与数据限制缺少显式映射，不修图、不执行，不把声明比例当作准确率。",
+        "issues": [],
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "宿主仍检查参数和权限且没有写路径，但提案 purpose/节点引文均未保留计划库存非实时健康的限制，不能判定整段源要求已完整表达。",
+            "suggested_revision": "在新版本中显式绑定数据与权限限制及其源证据；不改本批首次输出，不以宿主执行门禁代替解释性覆盖。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "底层权限门禁仍有效，但英文源文中的数据解释限制未进入用途或节点说明；缺少显式未解决事项，故完整覆盖证据不足。",
+            "suggested_revision": "在新版本中显式绑定数据与权限限制及其源证据；不改本批首次输出，不以宿主执行门禁代替解释性覆盖。"
+          },
+          {
+            "claimId": "claim-0005",
+            "l05Pointer": "/purpose",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "purpose 只选业务标题和读取完成步骤，没有选择数据/权限限制；不是业务步骤错误，但不满足 purpose_and_limits 的完整性要求。",
+            "suggested_revision": "在新版本中显式绑定数据与权限限制及其源证据；不改本批首次输出，不以宿主执行门禁代替解释性覆盖。"
+          }
+        ]
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:7436cd671870849c736c5b1f53d28e8f0137b872a2d1b03305a23cfb83c86071",
+      "latencyMs": 57554.72979194019,
+      "inputTokens": 2754,
+      "outputTokens": 440,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:2559c87cd8e0f14187ba83e645595b77d3d131a08800f85ff3b1cf4c1275b5bd",
+        "request.json": "sha256:dba396d5c9a584403c003d792e76d6da78453841f1a708eb56e382281b1cdcf6",
+        "response.json": "sha256:97457b7b533e0d76b315c7d8201007139a7cb5ea6abfcffb924494c650fd27e6",
+        "review-input.json": "sha256:e843ec8dd784af0887ad1c76968161b8401a4146b71bfb13031230ca185a6ef3",
+        "sources.json": "sha256:af4c9bd758b3fa38e84fede89f5505f57bcccf0f6f3e39ae9ccbdf7662ef3bfe",
+        "status.json": "sha256:15137a157f7fb3215da9e0cbb1d685ef2b7f87e1bb93d7e93f8416f67adbe707",
+        "tree.json": "sha256:13d627386ffe0a0acc2b1650dfeb981fbc472623f9b1e9daed56501f7374957a"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:7436cd671870849c736c5b1f53d28e8f0137b872a2d1b03305a23cfb83c86071",
+        "reviewDigest": "sha256:db192bc6043d0c9daad5df68b8a457598358ecd2654a00f318f075650410b14d",
+        "reportDigest": "sha256:27c7ee0a3c2ed4e0e28434997c9b80e06883427c0050fbf2a1c0271aeb82ee66",
+        "reviewerId": "current-assistant-c3f-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 22,
+          "contradicted": 0,
+          "insufficient_evidence": 3
+        },
+        "scopeNote": "同一项目助手对已知反向条件开发源逐声明审查，非独立/非盲测。支持局部操作、引用与极性，但完整解释性数据限制仍不足；不修订输出、不执行流程，声明计数不是准确率。",
+        "issues": [],
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "宿主执行仍会校验输入和权限，但所有用途及节点引用只选业务步骤，没有显式保留计划库存非实时健康的数据限制。",
+            "suggested_revision": "下一版显式绑定源数据/权限限制；保持本批首次图不变，不将业务路径正确等同全部语义覆盖。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文数据限制没有用途/说明映射；运行时约束不能替代解释性覆盖，提案亦未标记这项缺口。",
+            "suggested_revision": "下一版显式绑定源数据/权限限制；保持本批首次图不变，不将业务路径正确等同全部语义覆盖。"
+          },
+          {
+            "claimId": "claim-0005",
+            "l05Pointer": "/purpose",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "用途为业务标题和操作段，业务意图正确，但未同时选择数据和权限限制，不满足完整 purpose_and_limits。",
+            "suggested_revision": "下一版显式绑定源数据/权限限制；保持本批首次图不变，不将业务路径正确等同全部语义覆盖。"
+          }
+        ]
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:2f5f24a5faca48f2324df4192e48617c091d1d0cc86fa07f5dd3fcf20caaaf7e",
+      "latencyMs": 37714.45970796049,
+      "inputTokens": 2780,
+      "outputTokens": 223,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:a130791501879d274cb2e865640fc181289cf7b60ff8172b2ff0bcbdb802c617",
+        "request.json": "sha256:0c772f7e6edb47a7f678f06f0385e87d1fb3263e7ad3c9d6d20e9bc55a18ce70",
+        "response.json": "sha256:8dac0db96faa9b085228efc15bd62fa242766c801ead9e61de8cec5e60cef15c",
+        "review-input.json": "sha256:9ac9ff06fa123b8459613fbe4fb2d1bf6411aa7c32a60a26e49826c471919a51",
+        "sources.json": "sha256:d348ace94ed84cf8f72c8d9aaf9ca876df42f72e5fe8f2c7a1eb1213f2394b3b",
+        "status.json": "sha256:6e0d748f818fc95c1a2ad11e7ea7f4ddf95fe436dde86af8dd3aca80c3aa07cc",
+        "tree.json": "sha256:84831fae78b1f83de417eebd4c15e977e725b5947361ce45231bff633fd7799b"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:2f5f24a5faca48f2324df4192e48617c091d1d0cc86fa07f5dd3fcf20caaaf7e",
+        "reviewDigest": "sha256:12ef26c62b0f39c20237124edbad67ee07cd96407dbb370499bc0b9a488b249a",
+        "reportDigest": "sha256:a641fd25456deb738cec55c461a230acbcc421a2b4a8163bd9d5b53bfbaf0d32",
+        "reviewerId": "current-assistant-c3f-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 10,
+          "contradicted": 0,
+          "insufficient_evidence": 4
+        },
+        "scopeNote": "当前助手对已知开发源的逐项非独立审查。区分正确保留缺能力停止、解释性约束遗漏和所选引文是否蕴含操作；不删除真实事项、不修订首次提案、不执行业务，声明计数不是准确率。",
+        "issues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "Approval system contract and write tool for VLAN configuration are missing."
+          }
+        ],
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "宿主仍约束读取权限，图中无写操作，但提案用途和说明没有保留计划库存非实时健康限制，整段覆盖证据不足。",
+            "suggested_revision": "新版本须显式绑定缺失限制或具体操作正文证据；保持本批首次提案不变，不删除事项或用宿主门禁替代语义映射。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文数据解释边界没有明确提案映射，审批缺失说明不能替代全部数据与权限限制。",
+            "suggested_revision": "新版本须显式绑定缺失限制或具体操作正文证据；保持本批首次提案不变，不删除事项或用宿主门禁替代语义映射。"
+          },
+          {
+            "claimId": "claim-0005",
+            "l05Pointer": "/purpose",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "purpose 保留审批前置要求与缺能力停止，但仍未选择共享数据/权限限制；并非审批操作路径错误。",
+            "suggested_revision": "新版本须显式绑定缺失限制或具体操作正文证据；保持本批首次提案不变，不删除事项或用宿主门禁替代语义映射。"
+          },
+          {
+            "claimId": "claim-0012",
+            "l05Pointer": "/steps/0",
+            "l0Pointer": "/nodes/0",
+            "verdict": "insufficient_evidence",
+            "rationale": "首读步骤选择的只是业务标题。正文可支持具体读取，但该所选标题自身不能证明工具、参数或完整前置关系。",
+            "suggested_revision": "新版本须显式绑定缺失限制或具体操作正文证据；保持本批首次提案不变，不删除事项或用宿主门禁替代语义映射。"
+          }
+        ]
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:6dddf5d006a5d2deae943dc834f3a46ed6de711751c98c2a82d86bd2258f002c",
+      "latencyMs": 27354.045542073436,
+      "inputTokens": 2767,
+      "outputTokens": 143,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:4251d57272d688d49d080023e318bf6b3fe75e9d30fe708f0fbc9cfe8973106a",
+        "request.json": "sha256:0358e039a03af1ccba4af4e80bbee604c7796743765001e3f89fd669d4553314",
+        "response.json": "sha256:13a32b825c0930ee6a177789f86fcf74316a8697b5fb1d098563e79d46c27817",
+        "review-input.json": "sha256:43cf3a78d465be8daa92497678bf897f298e5532d10a05f9351dde0c4e2db033",
+        "sources.json": "sha256:98272af372d47e4fb795b2eddda421b987f0e2239534a3acd82c95ad09bc682d",
+        "status.json": "sha256:69c2c32619283dbfb9adf8f78264e294b3c1e1e85ea86919035fc2687683bb2e",
+        "tree.json": "sha256:435b8ef55de32582b54224abe1dff9947994d6a19648d06db360d6eb5df4bb3d"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:6dddf5d006a5d2deae943dc834f3a46ed6de711751c98c2a82d86bd2258f002c",
+        "reviewDigest": "sha256:0f49bcd71c8b81f4928d9fd317d0346e3fa4fe0c6ad6ad0a65edeb48ce0dd06b",
+        "reportDigest": "sha256:9fe8e433a60541e025be593b8d92fce376cd0508ba532f1ae49e9f38b3a6cdaa",
+        "reviewerId": "current-assistant-c3f-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 7,
+          "contradicted": 0,
+          "insufficient_evidence": 3
+        },
+        "scopeNote": "当前助手对已知开发源的逐项非独立审查。区分正确保留缺能力停止、解释性约束遗漏和所选引文是否蕴含操作；不删除真实事项、不修订首次提案、不执行业务，声明计数不是准确率。",
+        "issues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "The prerequisite script scripts/check_inventory.py is missing and the host contract does not provide it. Execution must stop."
+          }
+        ],
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "全图没有业务调用所以不存在本次误读实时健康的问题，但计划库存等共享限制没有进入提案说明，不能声称完整解释性覆盖。",
+            "suggested_revision": "新版本须显式绑定缺失限制或具体操作正文证据；保持本批首次提案不变，不删除事项或用宿主门禁替代语义映射。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文数据及权限边界未显式映射；立即停止是正确行为，不足以证明这些源限制已经被完整转译保存。",
+            "suggested_revision": "新版本须显式绑定缺失限制或具体操作正文证据；保持本批首次提案不变，不删除事项或用宿主门禁替代语义映射。"
+          },
+          {
+            "claimId": "claim-0005",
+            "l05Pointer": "/purpose",
+            "l0Pointer": "/purpose",
+            "verdict": "insufficient_evidence",
+            "rationale": "用途保留脚本前置与缺能力停止，但遗漏共享数据/权限限制；此项为解释性不足，不是危险执行。",
+            "suggested_revision": "新版本须显式绑定缺失限制或具体操作正文证据；保持本批首次提案不变，不删除事项或用宿主门禁替代语义映射。"
+          }
+        ]
+      }
+    }
+  ],
+  "uniqueKnownFlows": 4,
+  "publicSkills": 0,
+  "structurallyQualified": 4,
+  "sourceReviewed": 4,
+  "reviewSupportedInactiveFlows": 0,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "independentHumanEvidence": false,
+  "boundary": "Answer-free first attempts on known development sources. Source reviews are same-assistant judgments, not independent Gold or calibrated accuracy. Qualified trees and safe missing-capability stops are not business completion or Runtime authority. POST cost includes waiting, excludes preflight/review/tests.",
+  "reportDigest": "sha256:d580d56caf2a66c507960f54f116addda23cd3158377289e635036994ef6e13d"
+}

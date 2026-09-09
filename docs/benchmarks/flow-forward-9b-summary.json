@@ -1,0 +1,165 @@
+{
+  "evidenceRole": "known_development_single_flow_protocol_iteration",
+  "sourceCount": 1,
+  "publicSkillCount": 0,
+  "modelCalls": 3,
+  "attempts": [
+    {
+      "attempt": "flow-forward-9b-20260907",
+      "model": {
+        "model": "qwen3.5:9b",
+        "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+      },
+      "latencyMs": 69607.60979203042,
+      "inputTokens": 704,
+      "outputTokens": 521,
+      "structuralIssues": [
+        {
+          "pointer": "/entry",
+          "code": "entry_not_node_id"
+        },
+        {
+          "pointer": "/nodes/0",
+          "code": "unknown_reference_source",
+          "source": "entry"
+        },
+        {
+          "pointer": "/nodes/3/binding_id",
+          "code": "unknown_host_effect_target"
+        },
+        {
+          "pointer": "/nodes/4",
+          "code": "self_loop",
+          "target": "end_read_path"
+        },
+        {
+          "pointer": "/nodes/4",
+          "code": "unknown_successor",
+          "target": "needs_l1"
+        },
+        {
+          "pointer": "/",
+          "code": "qualification_rejected",
+          "detail": "flow ids must be unique, nonreserved and include entry"
+        }
+      ],
+      "sourceDigest": "sha256:99f0923621f78e52d91b2534c005f39998de23113d2be9a3ff0af92a26d7e453",
+      "requestDigest": "sha256:047f2816c0aeed97187a469a96e7df58570887363d242a98cf36a45069f91493",
+      "responseDigest": "sha256:b5dc09f45d27f6e31c8fb21f0a763048e7d58678b9dc76363380296290d11bdc"
+    },
+    {
+      "attempt": "flow-forward-9b-20260907-protocol-v2",
+      "model": {
+        "model": "qwen3.5:9b",
+        "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+      },
+      "latencyMs": 45535.200290963985,
+      "inputTokens": 892,
+      "outputTokens": 457,
+      "structuralIssues": [
+        {
+          "pointer": "/entry",
+          "code": "entry_not_node_id"
+        },
+        {
+          "pointer": "/nodes/1",
+          "code": "unknown_successor",
+          "target": "n4"
+        },
+        {
+          "pointer": "/",
+          "code": "qualification_rejected",
+          "detail": "flow ids must be unique, nonreserved and include entry"
+        }
+      ],
+      "sourceDigest": "sha256:99f0923621f78e52d91b2534c005f39998de23113d2be9a3ff0af92a26d7e453",
+      "requestDigest": "sha256:5401cd683c82f42df25084ae2944e2e41eb59b5bab882d863602cbb872b57ca9",
+      "responseDigest": "sha256:f3f7faaf97554329cd6ef80975609befa49bbf9cd4b457169359b264cb07dc46"
+    },
+    {
+      "attempt": "flow-forward-9b-20260907-indexed-v1",
+      "model": {
+        "model": "qwen3.5:9b",
+        "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+      },
+      "latencyMs": 33655.92012507841,
+      "inputTokens": 939,
+      "outputTokens": 370,
+      "structuralIssues": [],
+      "sourceDigest": "sha256:99f0923621f78e52d91b2534c005f39998de23113d2be9a3ff0af92a26d7e453",
+      "requestDigest": "sha256:dc9caaee1f05dcf035f8a7ea4e864c9c28a501c52de62746c57e20e9159df50d",
+      "responseDigest": "sha256:5fa7c33d261e1c15f9bc79cbc2d512f23a1c3860beccec250ffbe8bf1579cd3f"
+    }
+  ],
+  "modelLatencyTotalMs": 148798.7302080728,
+  "inputTokensTotal": 2535,
+  "outputTokensTotal": 1348,
+  "rawOriginalSemanticStatus": "blocked",
+  "originalClaimVerdicts": {
+    "supported": 24,
+    "contradicted": 5,
+    "insufficient_evidence": 3
+  },
+  "assistedSemanticStatus": "review_supported_inactive_flow",
+  "assistedClaimVerdicts": {
+    "supported": 32,
+    "contradicted": 0,
+    "insufficient_evidence": 0
+  },
+  "assistantTextEdits": 2,
+  "graphAndArgumentsEdited": false,
+  "executions": [
+    {
+      "status": "read_path_completed",
+      "reportDigest": "sha256:f2ecc61133742105d83e4b09fe991cc3cbffb9bbf34c20e327741a26ade05281"
+    },
+    {
+      "status": "needs_l1",
+      "reportDigest": "sha256:ca59adf6d9136db7fe93b5138fc95d5c56341aab8b5608f2f19ab4254459d673"
+    }
+  ],
+  "actualLocalReads": 3,
+  "effectCalls": 0,
+  "dshAgentLoopExecuted": false,
+  "publicWholeSkillTranslationCompleted": false,
+  "independentHumanEvidence": false,
+  "artifacts": {
+    "flow-forward-9b-20260907": {
+      "diagnostics-after-review.json": "sha256:8c1ae8e8645b6eee6f2debfd0f8c5b64857b0ee8f18cf227ed1b5e4a0981e347",
+      "draft.json": "sha256:f78b653ce72ec2cf1e4b6635a58171d10fbd117d400632f2d20bc65112b3d710",
+      "request.json": "sha256:433e691f2dc7267d253ad277a6fe093674ba101d3ffaef57d181e4165baf8506",
+      "response.json": "sha256:7aa123219123becd1ea3cf466a2fa2fc92c82293bb8f6d2c2c66b2d2ced3ace5",
+      "sources.json": "sha256:5b4660d67b2cfa1b15a1903a306129497b552a1596710ba726a857b55036efa7",
+      "status.json": "sha256:2b41cdaf2921b94ac9b0e9126889a33de5d2f17ca89baeedce1dd8bf129515d9"
+    },
+    "flow-forward-9b-20260907-protocol-v2": {
+      "diagnostics.json": "sha256:cf964994b31d806632116435dc45920d420f9d3c30d75abbacf6274797eecdf7",
+      "draft.json": "sha256:5005cedb336d1eba17941e3d7f75c6108da9ef47227445ad60ecc282ae037377",
+      "request.json": "sha256:4413a5a71193bdca6b30afe7ad1468416d1aec84f3166f76bfea76edf39aa166",
+      "response.json": "sha256:79d582cf9307e54d8a86d920a07543a5efe324641cbe708fb20a99b4731c4aa5",
+      "sources.json": "sha256:5b4660d67b2cfa1b15a1903a306129497b552a1596710ba726a857b55036efa7",
+      "status.json": "sha256:492ddf58a50d3d3caddcc44073d503ad9f520b2dcfe61d97e034d7dc227bee00"
+    },
+    "flow-forward-9b-20260907-indexed-v1": {
+      "diagnostics.json": "sha256:37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+      "draft.json": "sha256:ff70dd33d3a6a0d806396789e2e51379ad4940ca137894149e50ef6b6b2ebbbc",
+      "report-original.json": "sha256:d548927272a75ffeafc46a30923589c996ca290e4aa5e6792cfd05a0b01b7cd9",
+      "report-revised.json": "sha256:0432b9797888d5f8a063e04f36bbc62e917c2ecf537e30392130a65a2a7a19f3",
+      "request.json": "sha256:5f1db77e8c39eba22fcd2136114cfb522155c798ef7d52972bef6ed92b3fe922",
+      "response.json": "sha256:fd81a18dee2b9c4cb6c17385263a3a70bc5cd51e05fc13529029aefb16aabaff",
+      "review-input-revised.json": "sha256:3edffd942de2b65caa6a107257d0367425f26cc5912e627c1685fc12711e1b8d",
+      "review-input.json": "sha256:ae12cf6684786c7a43116ebf0e62af8967f3a872f05a85b233c6ae0889d82ca0",
+      "review-original.json": "sha256:99960c7bdc5702e54d87e9c11c9632d8a8163dc166f6541bc4e5b1d150abdccf",
+      "review-revised.json": "sha256:70450f85c10e2d8f15691c8e2c0d06c7d96eac0bde4814228107704bb58be5d6",
+      "run-campus.json": "sha256:cf8f5b1d5a93db5096b8ac6fbe6c275a16a74ca126d89ac5b95e82f8e5d5829e",
+      "run-idc.json": "sha256:94c3a2a71443bec0d21ef8f8e386d505950bdb700f7936cb519f97aeb5abc438",
+      "sources.json": "sha256:5b4660d67b2cfa1b15a1903a306129497b552a1596710ba726a857b55036efa7",
+      "status.json": "sha256:283e7392c3905afb729899708717fdecd20b99959f23e7dfda042ca148925777",
+      "text-revision.json": "sha256:85ee8c0caa141815144e5c66f6cf243a2b57d1cef8a90a9079fe4a5bc58abbab"
+    }
+  },
+  "originalReportDigest": "sha256:692ec7844e362e88fb5341dc5659bbab912135ec59746fc9b8ef31d67ae64f14",
+  "revisedReportDigest": "sha256:22ca784a0577248a90df9d4b3a307458b559899d60ad405534a46a7c217280de",
+  "boundary": "Three different development protocols on one known fixture, not repeated independent trials. No calibrated accuracy, p50/p95, unseen generalization or autonomous success claim. Editor and reviewer are the same assistant.",
+  "reportDigest": "sha256:e75a01f8ca547a7d04495cac03177312c2cb70371ee2fb315221b9eea0fb4c90"
+}

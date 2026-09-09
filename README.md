@@ -2,7 +2,7 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-03。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-09。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -28,23 +28,17 @@ flowchart TB
 
 ### 当前研究门禁
 
-2026-09-07：正在推进[转译纠偏与闭环](docs/TRANSLATION-CORRECTION-PLAN.md)。已移除转译输入中的评测元数据，强化字段归属/冲突绑定，并支持无参、可选参数和缺参任务“不适用”；不再自动补造验证/回滚工具。这是基础修正，不是新的泛化成绩，完整 Skill 合同编译闭环仍在建设。
+**当前：真实 9B 已跑通“计划 → 独立填参 → 原编译器 → 合成宿主”的局部机制链；公开 Skill 语义转译仍未通过。** 生成的条件读取流程在 10/10 个本地路径检查中通过，包含权限拒绝与异常停止，不是生产成功率。公开 Netdata 候选仍被拦截。[能力、全部尝试与边界](docs/PLAN-FIRST-AUTHORING.md)。新库保存 **53 个 Skill／38 个仓库**，不是 53 个成功；默认 DSH 路由未变，下面是较早的小样本转译实测。
 
-B1 已提供[合同优先任务构造接口与本地样例](docs/CONTRACT-FIRST-TASKS.md)：先审查源工具 Schema，再由代码确定适用槽位，9B 只写请求文本。其输出仍须语义审查，不自动成为 Gold 或 L0。
+| 本轮转译证据 | 结果 | 能说明什么 |
+|---|---|---|
+| 新六份开发 Skill：构造阶段 | 2/6 案例、30/46 场景 | 原始生成结果；含一份结构失败 |
+| 同批：加源条件表达式后 | 5/6 案例、35/46 场景 | 四个可执行片段案例 + 一个正确停止案例；结构失败的 11 场景仍未运行 |
+| 完整源语义 / 未见 Skill 泛化 | 尚未证明 | 引用仍有语义错位；布尔结果正确不等于整 Skill 正确 |
 
-B2 已闭合单操作辅助读取；C 已盘点 12 个公开 Skill，尚未运行转译，不能计为准确率。环境依赖、整流程缺口与下一步范围见[异质 Skill 小批报告](docs/TRANSLATION-BOUNDARY-PILOT.md)。
+本批从 L1 用 9B 新生成，但 Skill/Oracle 仍由同一开发助手构造，不是独立 Gold 或公开未见集。10 次模型请求的 p50/p95 为 20.91/35.82 秒，是本地请求耗时，不是 Runtime 时延。[语义迁移报告](docs/FLOW-SEMANTIC-TRANSFER.md)保留负结果、修订、成本和源码回放入口；[实验索引](docs/FLOW-EXPERIMENTS.md)保留历史路线。
 
-[最小业务流程 C1/C2](docs/L0-BUSINESS-FLOW.md)已接通只读条件/数据依赖，以及分支证据绑定、写前重读和原单写事务验证/补偿；本地接线使用 mock 写入，整流程 9B 正向转译仍待完成。
-
-项目现在严格执行：`L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测`。如果转译只适配少量自建 Skill，后续 Runtime 高分只说明它能稳定执行这组人工合同，不能证明通用价值。
-
-当前静态开发库包含 100 个公开 Skill、72 个仓库、9 个领域：53 个 Runtime 包门禁通过，18 个是标准格式但引用上下文不完整的“仅转译”样本，29 个非标准格式只用于鲁棒性测试。主要转译语料为 71 个 Skill/7 个开发批次；它们已经可见，所以不冒充 unseen 证明。只有冻结 Translator 后，在至少 3 个互不重叠的未知 cohort 上累计达到 ≥50 Skill、≥15 仓库、≥8 领域、≥600 case，并同时通过安全、召回、macro-F1、参数和证据门槛，才允许大规模 Runtime A/B。完整口径、命令和指标见 [L1→L0 泛化门禁](docs/TRANSLATION-GENERALIZATION-GATE.md)。
-
-新的[转译用例构造链](docs/TRANSLATION-CASE-AUTHORING.md)已覆盖 71 个主要已知开发 Skill，但这只是测试候选构造，不是完整 Skill 转译。2026-09-04 审计发现旧复核暴露类别 ID 与固定组序，历史 48/48 因而降级为有提示风险的开发诊断。新版使用匿名单任务审阅，并停止自动补齐参数；构造检查 v3 在 16 个旧已接受 Skill 中拦下 7 个问题夹具。**机械通过不代表语义正确**：自然语言冲突和源 API/步骤保真仍需独立审查，Runtime 继续锁定。细节见[构造质量及限制](docs/TRANSLATION-CONSTRUCT-QUALITY.md)；历史数字保留在[实现摘要](docs/benchmarks/translation-authoring-development-06-07-summary.json)。
-
-参数、类型、必填性及验证/回滚步骤现在可以逐项追溯源文；方法、真实失败案例及剩余设计限制见[源证据对齐审查](docs/TRANSLATION-SOURCE-ALIGNMENT.md)。
-
-匿名化后，同一 4-Skill/12-task 开发批次的行为一致为 7/12、构造对齐为 10/12，暂不具备 Gold 排队资格；自报高置信度也未揭示全部矛盾。这是评测方法诊断，不是 Translator 准确率。见[纠偏结果](docs/benchmarks/translation-review-blinding-v2-summary.json)。
+项目的证据顺序是 **L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测**。原 100 个公开 Skill / 72 仓库 / 9 个搜索类别属于已知开发库，不是未见集；搜索类别尚不等于核实的业务领域。小批新验证及后续 ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 的完整门禁见[泛化要求](docs/TRANSLATION-GENERALIZATION-GATE.md)。未通过前不扩大 Runtime A/B。
 
 ### Skill 与系统怎样交互
 
@@ -245,21 +239,7 @@ The [authoritative prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes
 
 ### Design
 
-The [translation correction plan](docs/TRANSLATION-CORRECTION-PLAN.md), updated 2026-09-07, removes scoring metadata from translator inputs, enforces named parameter ownership/conflict checks, supports zero/optional inputs and explicit not-applicable slots, and stops synthesizing transaction tools. These are foundational corrections, not new generalization results; whole-Skill contract compilation remains in progress.
-
-B1 adds a [contract-first task-authoring interface and local example](docs/CONTRACT-FIRST-TASKS.md): source Schema review precedes deterministic applicability; 9B writes only task prose. Outputs still require semantic review and are not Gold or L0.
-
-B2 closes one assisted read; C has completed intake for 12 public Skills, not translation or accuracy measurement. See the [heterogeneous Skill pilot](docs/TRANSLATION-BOUNDARY-PILOT.md) for environment dependencies, whole-flow gaps and proposed next scope.
-
-[Business-flow C1/C2](docs/L0-BUSINESS-FLOW.md) runs read branches/data references, plan-bound evidence, pre-write rereads and the original single-Effect verification/recovery path. Local writes are mock; whole-flow 9B forward translation remains open.
-
-The design has three rules: separate probabilistic reasoning from deterministic execution; no evidence means no action; the LLM decides what to attempt while the Runtime decides what is allowed to happen.
-
-The case-authoring lane covers 71 known-development Skills, not whole-Skill translation. Legacy 48/48 review results are downgraded due to category-bearing IDs and fixed group order. Revised reviews use opaque single-task inputs; author normalization no longer fills missing parameters. Construct checks v3 blocked seven of 16 previously accepted fixtures. Mechanical passes do not prove semantic correctness: prose conflicts and source API/step fidelity still need review before isolated references and gold-blind Translator evaluation. Runtime remains locked. See [construct quality and limits](docs/TRANSLATION-CONSTRUCT-QUALITY.md).
-
-Parameters, types, requiredness and verification/compensation steps now have per-claim source-citation review. See [source evidence alignment](docs/TRANSLATION-SOURCE-ALIGNMENT.md) for the method, real failed probe and remaining author-format limitations.
-
-On the same four-Skill/twelve-task development inputs, the revised review reached 7/12 behavior agreement and 10/12 construct alignment; Gold-queue eligibility is false despite high self-reported confidence. This is a methodology diagnostic, not Translator accuracy. See the [correction results](docs/benchmarks/translation-review-blinding-v2-summary.json).
+Separate probabilistic reasoning from deterministic execution: the LLM proposes what to attempt, while the Runtime decides what is allowed. No evidence means no action.
 
 | Layer | Authority | Boundary |
 |---|---|---|
@@ -278,7 +258,11 @@ The Runtime mechanism and wiring prototype is complete, but the core project hyp
 
 ### Active research gate
 
-The enforced evidence order is now `L1-to-L0 generalization → deterministic L0 validation → Runtime evaluation`. The known development inventory contains 100 public Skills from 72 repositories and nine domains: 53 pass the strict Runtime package gate, 18 are conformant translation-only partial-context inputs, and 29 format variants are robustness-only. The 71 primary Skills form seven development batches and are not unseen evidence. Large Runtime A/B work remains locked until one frozen Translator passes at least three disjoint post-freeze cohorts totaling at least 50 Skills, 15 repositories, eight domains, and 600 cases, including strict safety, recall, macro-F1, exact-parameter, evidence, and construct-alignment gates. See the [L1-to-L0 generalization gate](docs/TRANSLATION-GENERALIZATION-GATE.md).
+**Current: real 9B now closes a partial plan → argument binding → original compiler → synthetic-host mechanism chain; public-Skill semantic translation has not passed.** Its generated conditional read region passes 10/10 local path checks, including denial and abnormal stops—not a production success probability. Public Netdata candidates remain blocked. See [capabilities, all attempts and boundaries](docs/PLAN-FIRST-AUTHORING.md). The inventory contains **53 Skills/38 repositories**, not successful translations. Default DSH routing is unchanged; the figures below are earlier small-sample results.
+
+The new six-package development batch improves from **2/6 cases, 30/46 scenarios** after construction to **5/6, 35/46** with source expressions: four executable-fragment cases and one safe stop. Eleven scenarios of a structurally invalid case remain unrun. These are fresh 9B generations on assistant-authored packages/oracles, not independent Gold or unseen public Skills. Ten model requests have local p50/p95 of **20.91/35.82 seconds**, not Runtime latency. Citation-role errors and complete-source semantics remain open. See [results, failures and revisions](docs/FLOW-SEMANTIC-TRANSFER.md).
+
+Evidence order remains **L1-to-L0 generalization → L0 validation → Runtime evaluation**. The original 100 public Skills from 72 repositories/nine discovery-query strata are known development data; query strata are not verified business domains. Large Runtime A/B remains gated by at least three disjoint unseen cohorts totaling 50 Skills, 15 repositories, eight domains and 600 cases, including the unchanged [quality thresholds](docs/TRANSLATION-GENERALIZATION-GATE.md).
 
 ### Capabilities and evidence
 

@@ -1,0 +1,238 @@
+{
+  "api_version": "netopyu.io/task-alignment/v1",
+  "bundle_digest": "sha256:47f06b89b0b5177fbcd91883e3d4e21335facea838c3fe512e971e5b32626516",
+  "task_id": "project-readme-generation",
+  "task": "评测请求：为隔离的 /fixture/project 小型 Python 库生成 README，保留已有文档结构，输出 /mnt/user-data/outputs/README.md 并呈现给用户。项目文件尚未提供；不得编造 API、依赖、版本或测试结果，缺项目内容时应明确索取。不得执行项目脚本或联网安装。",
+  "task_origin": "developer_authored_evaluation_request",
+  "task_basis": [
+    {
+      "path": "skills/public/code-documentation/SKILL.md",
+      "start": 2061,
+      "end": 2934,
+      "quote": "### Phase 1: Codebase Analysis\n\nBefore writing any documentation, thoroughly understand the codebase.\n\n#### Step 1.1: Project Discovery\n\nIdentify the project fundamentals:\n\n| Field | How to Determine |\n|-------|-----------------|\n| **Language(s)** | Check file extensions, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, etc. |\n| **Framework** | Look at dependencies for known frameworks (React, Django, Express, Spring, etc.) |\n| **Build System** | Check for `Makefile`, `CMakeLists.txt`, `webpack.config.js`, `build.gradle`, etc. |\n| **Package Manager** | npm/yarn/pnpm, pip/uv/poetry, cargo, go modules, etc. |\n| **Project Structure** | Map out the directory tree to understand the architecture |\n| **Entry Points** | Find main files, CLI entry points, exported modules |\n| **Existing Docs** | Check for existing README, docs/, wiki, or inline documentation |\n"
+    },
+    {
+      "path": "skills/public/code-documentation/SKILL.md",
+      "start": 13164,
+      "end": 13603,
+      "quote": "## Notes\n\n- Always analyze the actual code before writing documentation — never guess at API signatures or behavior\n- When existing documentation exists, preserve its structure unless the user explicitly asks for a rewrite\n- For large codebases, prioritize documenting the public API surface and key abstractions first\n- Documentation should be written in the same language as the project's existing docs; default to English if none exist\n"
+    }
+  ],
+  "documents": [
+    {
+      "path": "skills/public/code-documentation/SKILL.md",
+      "ranges": [
+        {
+          "start": 0,
+          "end": 13823
+        }
+      ],
+      "rationale": "开发助手对列明区间作任务范围源审查；不证明引用蕴含或全部传递义务已发现。"
+    }
+  ],
+  "obligations": [
+    {
+      "id": "o01",
+      "statement": "先分析真实项目代码和现有文档，不能猜 API。",
+      "disposition": "candidate_read",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 2061,
+          "end": 2934,
+          "quote": "### Phase 1: Codebase Analysis\n\nBefore writing any documentation, thoroughly understand the codebase.\n\n#### Step 1.1: Project Discovery\n\nIdentify the project fundamentals:\n\n| Field | How to Determine |\n|-------|-----------------|\n| **Language(s)** | Check file extensions, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, etc. |\n| **Framework** | Look at dependencies for known frameworks (React, Django, Express, Spring, etc.) |\n| **Build System** | Check for `Makefile`, `CMakeLists.txt`, `webpack.config.js`, `build.gradle`, etc. |\n| **Package Manager** | npm/yarn/pnpm, pip/uv/poetry, cargo, go modules, etc. |\n| **Project Structure** | Map out the directory tree to understand the architecture |\n| **Entry Points** | Find main files, CLI entry points, exported modules |\n| **Existing Docs** | Check for existing README, docs/, wiki, or inline documentation |\n"
+        },
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 13164,
+          "end": 13603,
+          "quote": "## Notes\n\n- Always analyze the actual code before writing documentation — never guess at API signatures or behavior\n- When existing documentation exists, preserve its structure unless the user explicitly asks for a rewrite\n- For large codebases, prioritize documenting the public API surface and key abstractions first\n- Documentation should be written in the same language as the project's existing docs; default to English if none exist\n"
+        }
+      ],
+      "rationale": "源明确要求代码依据；当前项目快照未提供，不能用 Skill 自身代码代替。",
+      "host_needs": [
+        "files"
+      ]
+    },
+    {
+      "id": "o02",
+      "statement": "文档范围、解释与内容组织属于 L1 生成。",
+      "disposition": "l1_reasoning",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 3466,
+          "end": 4032,
+          "quote": "#### Step 1.3: Identify Documentation Scope\n\nBased on analysis, determine what documentation to produce:\n\n| Project Size | Recommended Documentation |\n|-------------|--------------------------|\n| **Single file / script** | Inline comments + usage header |\n| **Small library** | README with API reference |\n| **Medium project** | README + API docs + examples |\n| **Large project** | README + Architecture + API + Contributing + Changelog |\n\n### Phase 2: Documentation Generation\n\n#### Step 2.1: README Generation\n\nEvery project needs a README. Follow this structure:\n"
+        }
+      ],
+      "rationale": "确定性文件读取不等于完成代码理解和文档质量。",
+      "host_needs": []
+    },
+    {
+      "id": "o03",
+      "statement": "把文档写入指定输出路径，保持多文件结构。",
+      "disposition": "candidate_effect",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 12798,
+          "end": 13035,
+          "quote": "## Output Handling\n\nAfter generation:\n\n- Save documentation files to `/mnt/user-data/outputs/`\n- For multi-file documentation, maintain the project directory structure\n- Present generated files to the user using the `present_files` tool\n"
+        }
+      ],
+      "rationale": "本任务没有执行许可，路径应绑定隔离宿主，不能直接保存到真实用户项目。",
+      "host_needs": [
+        "write"
+      ]
+    },
+    {
+      "id": "o04",
+      "statement": "使用 present_files 向用户呈现生成文件。",
+      "disposition": "candidate_effect",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 12837,
+          "end": 13163,
+          "quote": "- Save documentation files to `/mnt/user-data/outputs/`\n- For multi-file documentation, maintain the project directory structure\n- Present generated files to the user using the `present_files` tool\n- Offer to iterate on specific sections or adjust the level of detail\n- Suggest additional documentation that might be valuable\n"
+        }
+      ],
+      "rationale": "呈现是否有额外外部副作用由具体宿主声明，未知时不能假定纯只读。",
+      "host_needs": [
+        "present"
+      ]
+    },
+    {
+      "id": "o05",
+      "statement": "质量检查包括 API 签名、版本、路径和链接。",
+      "disposition": "constraint",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 11104,
+          "end": 11415,
+          "quote": "#### Step 3.3: Cross-reference Validation\n\nEnsure:\n- All mentioned file paths exist in the project\n- All referenced functions and classes exist in the code\n- All code examples use the correct function signatures\n- Version numbers match the project's actual version\n- All links (internal and external) are valid\n"
+        }
+      ],
+      "rationale": "结构/链接存在检查只是部分，代码语义仍需源证据与审阅。",
+      "host_needs": []
+    },
+    {
+      "id": "o06",
+      "statement": "README badge 的 link 是模板占位，不是运行所需附件。",
+      "disposition": "outside_task",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 3979,
+          "end": 4167,
+          "quote": "Every project needs a README. Follow this structure:\n\n```markdown\n# Project Name\n\n[One-line project description — what it does and why it matters]\n\n[![Badge](link)](#) [![Badge](link)](#)\n"
+        }
+      ],
+      "rationale": "纠正模板角色误读，不修改原始 executable-package 门禁。",
+      "host_needs": []
+    },
+    {
+      "id": "o07",
+      "statement": "不改写未请求的文档结构，不虚构代码可运行验证。",
+      "disposition": "constraint",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 10613,
+          "end": 11103,
+          "quote": "| Standard | Check |\n|----------|-------|\n| **Accuracy** | Every code example must actually work with the described API |\n| **Completeness** | No public API surface left undocumented |\n| **Consistency** | Same formatting and structure throughout |\n| **Freshness** | Documentation matches the current code, not an older version |\n| **Accessibility** | No jargon without explanation, acronyms defined on first use |\n| **Examples** | Every complex concept has at least one practical example |\n"
+        },
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 13174,
+          "end": 13603,
+          "quote": "- Always analyze the actual code before writing documentation — never guess at API signatures or behavior\n- When existing documentation exists, preserve its structure unless the user explicitly asks for a rewrite\n- For large codebases, prioritize documenting the public API surface and key abstractions first\n- Documentation should be written in the same language as the project's existing docs; default to English if none exist\n"
+        }
+      ],
+      "rationale": "这些是源中质量约束，不能由一次写文件成功代表。",
+      "host_needs": []
+    }
+  ],
+  "host_needs": [
+    {
+      "id": "files",
+      "operation": "project listing and source-file read",
+      "tool_name": null,
+      "rationale": "用户项目与宿主文件工具声明缺失；路径只是评测请求不是存在性证明。"
+    },
+    {
+      "id": "write",
+      "operation": "write documentation output",
+      "tool_name": null,
+      "rationale": "文件写入是 Effect，不能因内容是 Markdown 就绕过唯一写路径。"
+    },
+    {
+      "id": "present",
+      "operation": "present_files",
+      "tool_name": null,
+      "rationale": "源命名了该能力，但没有固定输入/输出 Schema 或当前宿主绑定。"
+    }
+  ],
+  "findings": [
+    {
+      "id": "f01",
+      "category": "missing_context",
+      "explanation": "没有 /fixture/project 的不可变源码内容或已声明文件工具，无法验证 README 内容正确性。",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 2093,
+          "end": 2934,
+          "quote": "Before writing any documentation, thoroughly understand the codebase.\n\n#### Step 1.1: Project Discovery\n\nIdentify the project fundamentals:\n\n| Field | How to Determine |\n|-------|-----------------|\n| **Language(s)** | Check file extensions, `package.json`, `pyproject.toml`, `go.mod`, `Cargo.toml`, etc. |\n| **Framework** | Look at dependencies for known frameworks (React, Django, Express, Spring, etc.) |\n| **Build System** | Check for `Makefile`, `CMakeLists.txt`, `webpack.config.js`, `build.gradle`, etc. |\n| **Package Manager** | npm/yarn/pnpm, pip/uv/poetry, cargo, go modules, etc. |\n| **Project Structure** | Map out the directory tree to understand the architecture |\n| **Entry Points** | Find main files, CLI entry points, exported modules |\n| **Existing Docs** | Check for existing README, docs/, wiki, or inline documentation |\n"
+        },
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 13174,
+          "end": 13603,
+          "quote": "- Always analyze the actual code before writing documentation — never guess at API signatures or behavior\n- When existing documentation exists, preserve its structure unless the user explicitly asks for a rewrite\n- For large codebases, prioritize documenting the public API surface and key abstractions first\n- Documentation should be written in the same language as the project's existing docs; default to English if none exist\n"
+        }
+      ],
+      "next_action": "提供隔离项目 fixture 和明确宿主目录工具；模型输出与源代码逐项核对。"
+    },
+    {
+      "id": "f02",
+      "category": "unsupported_representation",
+      "explanation": "任意代码理解和自然语言文档创作不是有限固定分支的确定性程序。",
+      "citations": [
+        {
+          "path": "skills/public/code-documentation/SKILL.md",
+          "start": 3466,
+          "end": 4032,
+          "quote": "#### Step 1.3: Identify Documentation Scope\n\nBased on analysis, determine what documentation to produce:\n\n| Project Size | Recommended Documentation |\n|-------------|--------------------------|\n| **Single file / script** | Inline comments + usage header |\n| **Small library** | README with API reference |\n| **Medium project** | README + API docs + examples |\n| **Large project** | README + Architecture + API + Contributing + Changelog |\n\n### Phase 2: Documentation Generation\n\n#### Step 2.1: README Generation\n\nEvery project needs a README. Follow this structure:\n"
+        }
+      ],
+      "next_action": "保留 L1 内容生成；只提取文件操作/校验片段，单独记录整 Skill 未覆盖。"
+    }
+  ],
+  "dependencies": [
+    {
+      "target": "skills/public/code-documentation/link",
+      "disposition": "template_example",
+      "citation": {
+        "path": "skills/public/code-documentation/SKILL.md",
+        "start": 3979,
+        "end": 4167,
+        "quote": "Every project needs a README. Follow this structure:\n\n```markdown\n# Project Name\n\n[One-line project description — what it does and why it matters]\n\n[![Badge](link)](#) [![Badge](link)](#)\n"
+      },
+      "rationale": "模板中的占位字面值不是待下载或执行的真实依赖。"
+    },
+    {
+      "target": "https://keepachangelog.com/",
+      "disposition": "outside_task",
+      "citation": {
+        "path": "skills/public/code-documentation/SKILL.md",
+        "start": 13603,
+        "end": 13696,
+        "quote": "- When generating changelogs, use the [Keep a Changelog](https://keepachangelog.com/) format\n"
+      },
+      "rationale": "当前请求只写 README，不写 changelog；不据此声称全部引用已审阅。"
+    }
+  ]
+}

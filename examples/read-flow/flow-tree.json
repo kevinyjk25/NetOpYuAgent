@@ -1,0 +1,34 @@
+{
+  "business_source_ids": ["s0001", "s0013"],
+  "steps": [
+    {
+      "kind": "read",
+      "source_id": "s0007",
+      "tool": "read_inventory_device",
+      "bind": "inventory",
+      "arguments": {"device_id": {"kind": "reference", "source": "input", "field": "device_id"}}
+    },
+    {
+      "kind": "if_equal",
+      "source_id": "s0008",
+      "left": {"kind": "reference", "source": "inventory", "field": "site"},
+      "equals": {"kind": "constant", "value": "campus"},
+      "true_source_id": "s0009",
+      "false_source_id": "s0010",
+      "when_equal": [
+        {
+          "kind": "read",
+          "source_id": "s0009",
+          "tool": "read_inventory_device",
+          "bind": "refresh",
+          "arguments": {"device_id": {"kind": "reference", "source": "inventory", "field": "device_id"}}
+        },
+        {"kind": "end", "source_id": "s0009", "outcome": "read_path_completed"}
+      ],
+      "otherwise": [
+        {"kind": "end", "source_id": "s0010", "outcome": "needs_l1"}
+      ]
+    }
+  ],
+  "issues": []
+}

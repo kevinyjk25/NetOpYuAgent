@@ -1,0 +1,126 @@
+{
+  "apiVersion": "netopyu.io/structured-binding-summary/v1",
+  "baseCommit": "14baa0a269fdffdac8443cb41ec7f22fbd2d44ad",
+  "branch": "dev",
+  "checks": [
+    {
+      "blocked": true,
+      "case": "out_of_catalog_enum",
+      "diagnostic": {
+        "code": "value_constraint",
+        "detail": "failed enum validation",
+        "pointer": "/target/selections/states/0"
+      }
+    },
+    {
+      "blocked": true,
+      "case": "empty_array_no_implicit_selection",
+      "diagnostic": {
+        "code": "missing_source_value",
+        "detail": "field or fixed array index is absent",
+        "pointer": "/sources/status/interfaces/0"
+      }
+    },
+    {
+      "blocked": true,
+      "case": "catalog_drift",
+      "diagnostic": {
+        "code": "host_binding_drift",
+        "detail": "host declaration, catalog or binding changed",
+        "pointer": ""
+      }
+    }
+  ],
+  "claimBoundary": "合成声明/fixture 的类型和数据绑定机制验证，不是公开 Skill 语义泛化或已认证宿主执行。 / Synthetic schema/fixture type-binding checks, not public-Skill semantic generalization or authenticated host execution.",
+  "date": "2026-09-09",
+  "defaultDshRuntimeBehaviorChanged": false,
+  "dependencyDeclarationChange": "Existing jsonschema version range moved from dev to core; no installation performed",
+  "evidence": {
+    "artifacts/translator-v2/structured-binding-20260909/demo/arguments.json": "sha256:b8131e237a494c78791ae92078bc524e60fcfa9fd29321e94de2860da8e0c74a",
+    "artifacts/translator-v2/structured-binding-20260909/demo/catalog.json": "sha256:a753566a025fdf278cf43f6e0c9824b2528761a5e959be7f577e50622cabb761",
+    "artifacts/translator-v2/structured-binding-20260909/demo/host-binding.json": "sha256:9a990fb6c8444e265713d87e456a600197e0a5d45df04856a484093481d492af",
+    "artifacts/translator-v2/structured-binding-20260909/demo/invalid-request-source.json": "sha256:1a61e3dd79d15dda86bc5854ba1c73f943a68235da08cb3f8d23b7938391a6b5",
+    "artifacts/translator-v2/structured-binding-20260909/demo/output-fixture.json": "sha256:78df6e097ff2c2c7aab84305456c565193b7627622d4c94476d75b42d3bc95a5",
+    "artifacts/translator-v2/structured-binding-20260909/demo/output-projection.json": "sha256:277638913d89ef2e92c31e3b7aa50239772e8bd963a82fa4585c8bc65ba64f16",
+    "artifacts/translator-v2/structured-binding-20260909/demo/projected-output.json": "sha256:ece4163e9083cb8615752926f1afdcd96316900cbdd9ea5ef1856782a44fff81",
+    "artifacts/translator-v2/structured-binding-20260909/demo/report.json": "sha256:3f0b1ff3bbe735d7061c643be99fc09cb621f7c7fee3f2f1599321591496ac21",
+    "artifacts/translator-v2/structured-binding-20260909/demo/request-source.json": "sha256:a37fff2ab76bb5031af419ba8ec5eb9f2b9075eb8779f006fb5ebf0b878c8e4f",
+    "artifacts/translator-v2/structured-binding-20260909/source-snapshot.tar.gz": "sha256:f64f53424462d4acefa302ceee61e389eb585cee1284f97a48ae38419f97f08f",
+    "evaluation/structured_binding_probe.py": "sha256:d46181ebc5ad1d4f0058ad3503c01673a22eb9985b810f7ba820130efa886865",
+    "examples/translation-intake/mcp-catalog.json": "sha256:9c9d78061d47b4c20bf7e9e4a1a8f441fdc21062eb43ce676f5f141bc45d8a4b",
+    "network_runtime/contracts.py": "sha256:4f946fa866463b4fe323d0f108a36dc746f26894083b02d591d43bda78abf8c7",
+    "network_runtime/l0/models.py": "sha256:91eac0067677a85eff5a6127d241ab6e020bc7e22525121750d9eae1a861e869",
+    "network_runtime/l0/read_contracts.py": "sha256:cd2e86adb869bcb8e2023acf4f5b1faa72f208032f6894b946f7bff8c09d3f79",
+    "network_runtime/l0/structured_bindings.py": "sha256:5555834d4d1d3aaba0d172144c147a671dd9c6bf58ad59d1240e4e50a937453d",
+    "network_runtime/l0/structured_schema.py": "sha256:44aad82f826c8f50aeda4ebe239cc92422168a546183ec8bec241c6dd32c4e30",
+    "requirements-core.txt": "sha256:69769085f6e3ce900ec6a5598d1577329c60f05185b50a66018b7da9d15c4460",
+    "requirements-dev.txt": "sha256:282fe3cd8f5e1b6240e993eab94ccb0aacb29f1f0ac96e216dacdf144d607238",
+    "tests/test_structured_binding_probe.py": "sha256:0e4a6cb2208cbfc7357026a32798ced2827698ecf2898dc9cb1f5c95b1365ba9",
+    "tests/test_structured_bindings.py": "sha256:900d24bc1815b740df1a8a3c4a44af0eecf0d26b90ec193a1ae0579debe9f76a"
+  },
+  "exampleSchemaCount": 2,
+  "finalChecks": {
+    "changedPythonFilesRuffPassed": 23,
+    "gitDiffCheckPassed": true,
+    "localDocumentLinksVerified": 390,
+    "newBoundEvidenceFilesVerified": 21,
+    "previousIntakeEvidenceFilesUnchanged": 40
+  },
+  "jsonschemaVersion": "4.26.0",
+  "legacyFlatSchemasAccepted": 0,
+  "legacyFlowWiringChanged": false,
+  "legacyReadSchemaChanged": false,
+  "newModelCalls": 0,
+  "offlineReplayByteIdentical": true,
+  "previousIntakeEvidenceUnchanged": true,
+  "providerCalls": 0,
+  "reportDigest": "sha256:59c375ad3ff836f5ceaa2ad86713f9690efbedd649b8e0af87ce728a49cbcd20",
+  "runtimeAuthorityGranted": false,
+  "runtimeLatencyMetrics": null,
+  "sourceOverlay": {
+    "archive": "artifacts/translator-v2/structured-binding-20260909/source-snapshot.tar.gz",
+    "paths": [
+      "network_runtime/l0/structured_schema.py",
+      "network_runtime/l0/structured_bindings.py",
+      "evaluation/structured_binding_probe.py",
+      "tests/test_structured_bindings.py",
+      "tests/test_structured_binding_probe.py",
+      "examples/translation-intake/mcp-catalog.json",
+      "requirements-core.txt",
+      "requirements-dev.txt"
+    ]
+  },
+  "stage": "C3m_structured_binding_primitives_implemented_flow_wiring_pending",
+  "structuredSchemasAccepted": 2,
+  "summaryDigest": "sha256:f16956850a1e91a07d504ba3bd88c62ac93aac6db858495f76bf85a0a12becac",
+  "thirdPartyExecutionAttempted": false,
+  "translationMetrics": null,
+  "validationObservations": [
+    {
+      "passed": 94,
+      "scope": "targeted structured+probe+intake",
+      "seconds": 0.34
+    },
+    {
+      "failed": 1,
+      "failure": "research_freeze preview binding drift while documentation was being edited",
+      "integrityValid": true,
+      "isolatedRepeatPassed": true,
+      "observedBindingDrift": [
+        "sourceState"
+      ],
+      "passed": 1906,
+      "scope": "initial full suite",
+      "seconds": 154.29,
+      "subtestsPassed": 81
+    },
+    {
+      "failed": 0,
+      "passed": 1908,
+      "scope": "final full suite with stationary worktree",
+      "seconds": 213.7,
+      "subtestsPassed": 81
+    }
+  ],
+  "wholeSkillTranslationProven": false
+}

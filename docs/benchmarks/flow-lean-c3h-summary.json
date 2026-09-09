@@ -1,0 +1,472 @@
+{
+  "protocol": "fresh-flow-lean-paired/v1",
+  "manifestDigest": "sha256:e123d10d95f40ec3e2e71d0e883fe4c05007066901855dfd6384001d6f428d55",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "knownFlows": 4,
+  "publicSkills": 0,
+  "modelCalls": 8,
+  "flowQualified": 4,
+  "mappingQualified": 3,
+  "sourceReviewed": 3,
+  "reviewSupportedInactiveFlows": 0,
+  "latencyMs": 577644.38737405,
+  "inputTokens": 36188,
+  "outputTokens": 3600,
+  "tokenCountsComplete": true,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "boundary": "Fresh two-pass known development. Structure/accounting is not source fidelity or activation. Reviews, if supplied, are not automatically independent Gold. Costs include failures/waiting, not preflight/review/tests.",
+  "summaryOfReportDigest": "sha256:ddea51485a46ffb4741dc4c98071f20d467c16f6424346fe0b9b38500f749ec6",
+  "rows": [
+    {
+      "case": "direct-read",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:cf07cea171b9b96fa57994a70da402f6c52cccf2a763e341e8089a93e500d89a",
+        "latencyMs": 29867.484332993627,
+        "inputTokens": 2715,
+        "outputTokens": 175,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:5990199d69986fecdf69b8a2a363dd50a3e641f0da65d1674fc691f2d0016567",
+        "request.json": "sha256:a877fc4e32fe215e4cec57641183b6c1f97dd26aba0f38151822148bc4c91864",
+        "response.json": "sha256:fc16206d37fb7883884e28a30f57f0c358891b37225b9f7cdef50fa552828a97",
+        "review-input.json": "sha256:8b0076edb9b6dd8942d00e8577a3a35200df5559d5e2c6dcf209a825a1d35e65",
+        "status.json": "sha256:75a17a212f54e590ca932977b197ea23d58975a4c9a138e7dfd51b6befca3b08",
+        "tree.json": "sha256:e822b4807355751a040f0dbc2a7beedb4a1bdcd9c171b31ae4acd7963d46c83f"
+      },
+      "mapping": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:a80ad7d19f376ad9402635a8bc6cffbf940e11702e2cb4d4cbe1921a0a867504",
+        "latencyMs": 65411.04933293536,
+        "inputTokens": 4222,
+        "outputTokens": 497,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "compilation.json": "sha256:1b9dc6d68a0161391fa4739138b32f9ad0b9be73338cc2fabf7defe242e77421",
+        "mapping.json": "sha256:c70450b9e9495573ca12e6c10bce1a1f901996fb8c02f60eb2e7331afb693424",
+        "request.json": "sha256:2fbbf32c255aa7523ae0f065f7b17c23060ed19a301fa0680ae2d46010379728",
+        "response.json": "sha256:6e708e1bc4f8ba5366931fe014e5cbef3f5a4e448be1495e795bd2b941714d3b",
+        "review-input.json": "sha256:10300e0a47bd1ce985ee18d811ad7d185776d58b3657fe4403f84c6edff10ab5",
+        "status.json": "sha256:b5285974e59dfa6cc9ff3bbfb0404d9873397bde4a85cb51e2ee288c6728f39f"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:a80ad7d19f376ad9402635a8bc6cffbf940e11702e2cb4d4cbe1921a0a867504",
+        "reviewDigest": "sha256:78c9f1a0098cdf685138387999cd2b5dabdee2b4a3ff4854be90b6d0a4e42e58",
+        "reportDigest": "sha256:6e0425675875fbe9a84adbc6cbaa6fa14f19577c3f7fea89d287b455c8d0a75a",
+        "reviewerId": "current-assistant-c3h-lean-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 29,
+          "contradicted": 0,
+          "insufficient_evidence": 7
+        },
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "源限制中的非法返回检查未被所选规则完整覆盖；段落保留不能代替实际限制映射。",
+            "suggested_revision": "提供实际返回检查证据，或把未覆盖部分标记未解决。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文数据限制误选为读操作/流程保障，且规则遗漏返回形状检查，完整源限制覆盖不足。",
+            "suggested_revision": "将数据性质作为解释限制保留，并为非法返回检查选择真实规则。"
+          },
+          {
+            "claimId": "claim-0022",
+            "l05Pointer": "/objective_clause_ids",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "objective 包含纯数据、校验和权限限制 clause-0003 至 0006，混淆业务目的与独立约束。",
+            "suggested_revision": "只选业务操作作为 objective，其余约束保留在独立 selections。"
+          },
+          {
+            "claimId": "claim-0028",
+            "l05Pointer": "/clause_dispositions/clause-0004/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "规则列表包含输入形状、访问与错误传播，但没有返回形状验证；传播非法结果错误不等于具备发现非法返回的检查。",
+            "suggested_revision": "将返回形状验证与错误传播分开，明确绑定 read_result_shape。"
+          },
+          {
+            "claimId": "claim-0030",
+            "l05Pointer": "/clause_dispositions/clause-0006/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文片段只说明数据性质和开发背景，不能独立蕴含所选读取操作。",
+            "suggested_revision": "将该数据解释片段归为 documentation，不把主题相关性当作操作来源。"
+          },
+          {
+            "claimId": "claim-0031",
+            "l05Pointer": "/clause_dispositions/clause-0006/1",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "库存性质说明不能由一个读取节点实施或验证，flow_reference 没有足够来源和实现依据。",
+            "suggested_revision": "不把库存性质绑定为读节点能实施的保障；真实需要验证时应提供对应工具/检查或未解决。"
+          },
+          {
+            "claimId": "claim-0032",
+            "l05Pointer": "/clause_dispositions/clause-0007/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文要求包含非法返回检测，所选规则依旧遗漏 read_result_shape，不能只靠错误传播覆盖。",
+            "suggested_revision": "明确返回形状检查来源和宿主规则，不能以错误传播替代。"
+          }
+        ]
+      },
+      "selectionDiagnostic": {
+        "clauses": 9,
+        "targets": 18,
+        "missingNodePointers": [],
+        "parentIssues": []
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:7436cd671870849c736c5b1f53d28e8f0137b872a2d1b03305a23cfb83c86071",
+        "latencyMs": 62374.51875000261,
+        "inputTokens": 2754,
+        "outputTokens": 440,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:2559c87cd8e0f14187ba83e645595b77d3d131a08800f85ff3b1cf4c1275b5bd",
+        "request.json": "sha256:dba396d5c9a584403c003d792e76d6da78453841f1a708eb56e382281b1cdcf6",
+        "response.json": "sha256:7c6538e2aef310a3871a669538de909da4bd2d47e26a10769adf4ec3f3b7c2e5",
+        "review-input.json": "sha256:e843ec8dd784af0887ad1c76968161b8401a4146b71bfb13031230ca185a6ef3",
+        "status.json": "sha256:684c517fe5f9485403d765c97bf2341297ede1712a371e3ba7f28f04c876fe01",
+        "tree.json": "sha256:13d627386ffe0a0acc2b1650dfeb981fbc472623f9b1e9daed56501f7374957a"
+      },
+      "mapping": {
+        "status": "blocked",
+        "errorType": "ValueError",
+        "error": "every existing flow node requires source mapping; no automatic guess",
+        "latencyMs": 121586.15154097788,
+        "inputTokens": 7716,
+        "outputTokens": 712,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "mapping.json": "sha256:c69c4e8e585791cfae0238a61624332ef43f0a0c26605632052209425b15e7df",
+        "request.json": "sha256:1243cbd79deea44f800ce114337230e0bc6401dc75a4b58f2d9381bbe81537bb",
+        "response.json": "sha256:03baca0240c53341b0e8b982901c2d827d6a63d0583780c113e1a20631704023",
+        "status.json": "sha256:210bcdd7b0197d8447eabd07285d8ebcb53ddf44fc477c585e9d736b0326c3bc"
+      },
+      "selectionDiagnostic": {
+        "clauses": 13,
+        "targets": 23,
+        "missingNodePointers": [
+          "/steps/1"
+        ],
+        "parentIssues": []
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:2f5f24a5faca48f2324df4192e48617c091d1d0cc86fa07f5dd3fcf20caaaf7e",
+        "latencyMs": 40259.22641705256,
+        "inputTokens": 2780,
+        "outputTokens": 223,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:a130791501879d274cb2e865640fc181289cf7b60ff8172b2ff0bcbdb802c617",
+        "request.json": "sha256:0c772f7e6edb47a7f678f06f0385e87d1fb3263e7ad3c9d6d20e9bc55a18ce70",
+        "response.json": "sha256:1cfc324c604a10c87799208808c25b231ece6f09f680aed350118477a788a49f",
+        "review-input.json": "sha256:9ac9ff06fa123b8459613fbe4fb2d1bf6411aa7c32a60a26e49826c471919a51",
+        "status.json": "sha256:111861694190ee2fc5c35acef143024fc49245e84cc9679b00ed826c0115220a",
+        "tree.json": "sha256:84831fae78b1f83de417eebd4c15e977e725b5947361ce45231bff633fd7799b"
+      },
+      "mapping": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:3c3a65795daaa51d9794496edae6d778a096ed65f98ed694ddf4eab8fda7fdb5",
+        "latencyMs": 117401.40145807527,
+        "inputTokens": 6833,
+        "outputTokens": 699,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "compilation.json": "sha256:357b39ecc74940056a77fd4190c8710e0dfdc504a6fcc213d3b653500db28c83",
+        "mapping.json": "sha256:cd05b3a20d35b36e505fc7273e2e836c8b01282f12ba7571714fde001193e228",
+        "request.json": "sha256:8cc409f91311e4a31e3e59ea5cf31304711133342173a354e305802e19a998b7",
+        "response.json": "sha256:541fb4977d0ba49eb44927cebc30dfed16281856f9c2b408fa9c657abb94d2df",
+        "review-input.json": "sha256:7396013c22f3f48ab422a9b0e161119f07c8440b8c40bed00bdd466ad3031c85",
+        "status.json": "sha256:433b84ae562bf738da0541286d324f91f1a3c204d4c3f3f64b0826eff3a0b9d5"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:3c3a65795daaa51d9794496edae6d778a096ed65f98ed694ddf4eab8fda7fdb5",
+        "reviewDigest": "sha256:36bc5269b30ab1f96dff3db3b4590a51aa85adc2cce3c167803b71d69b0cc449",
+        "reportDigest": "sha256:d7ffa55f8f67b8f7112791cd3fab411c7f476c9c10123cf53d4924c99ad3def4",
+        "reviewerId": "current-assistant-c3h-lean-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 38,
+          "contradicted": 0,
+          "insufficient_evidence": 9
+        },
+        "findings": [
+          {
+            "claimId": "claim-0002",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文复合要求的审批前置部分没有在片段 5 的读取选择中完整表示，片段 8 又误用读取访问规则表示审批/配置事实边界。",
+            "suggested_revision": "分开英文复合片段内的读、审批前置及配置要求；审批/配置事实不能映射到 read_access。"
+          },
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "中文非法输入/返回等检查只引用错误传播规则，源限制映射不足，原文保留并非校验。",
+            "suggested_revision": "为实际输入/访问/返回检查提供具体规则或未解决记录。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文非法输入/结果条件同样缺具体检查映射，不把错误传播当作全部合法性判断。",
+            "suggested_revision": "不能以错误传播替代检测非法条件的具体检查映射。"
+          },
+          {
+            "claimId": "claim-0028",
+            "l05Pointer": "/clause_dispositions/clause-0003/1",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "read_access 检查读身份/权限，不判断业务审批是否发生或 VLAN 配置成功；不能实现这个片段的事实边界。",
+            "suggested_revision": "按真实缺能力保留该边界，或绑定实际审批/执行事实机制；不要使用读取访问校验替代。"
+          },
+          {
+            "claimId": "claim-0031",
+            "l05Pointer": "/clause_dispositions/clause-0005/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文片段同时要求读后审批再配置；仅首读 operation 能支持读取子句，不能表示整个复合要求。",
+            "suggested_revision": "在同一复合片段保留尚未支持的审批/配置要求，不能只记录可执行的读取部分。"
+          },
+          {
+            "claimId": "claim-0032",
+            "l05Pointer": "/clause_dispositions/clause-0005/1",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "首读节点只能表示先读的顺序，不能单独体现该片段的审批前置约束，映射不完整。",
+            "suggested_revision": "显式表示审批前置的未解决部分，不让只读顺序映射覆盖整句。"
+          },
+          {
+            "claimId": "claim-0036",
+            "l05Pointer": "/clause_dispositions/clause-0008/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "读取权限校验不证明 reads/reasoning 不是业务审批或配置事实；该目标不负责这项语义边界。",
+            "suggested_revision": "为业务审批/配置事实提供适当来源和机制，或保留未解决；read_access 只负责读权限。"
+          },
+          {
+            "claimId": "claim-0038",
+            "l05Pointer": "/clause_dispositions/clause-0010/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "observation_error_blocks 只传播相关失败，不能独立提供输入、权限和返回合法性检查的完整证据。",
+            "suggested_revision": "拆分验证输入、读访问、返回形状和错误传播的职责。"
+          },
+          {
+            "claimId": "claim-0042",
+            "l05Pointer": "/clause_dispositions/clause-0013/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "仅错误传播无法代表英文要求的完整输入/访问/返回检查，具体规则选择不足。",
+            "suggested_revision": "引用完整的实际检查组合或明确缺口，而非只选错误传播。"
+          }
+        ]
+      },
+      "selectionDiagnostic": {
+        "clauses": 15,
+        "targets": 22,
+        "missingNodePointers": [],
+        "parentIssues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "Approval system contract and write tool for VLAN configuration are missing."
+          }
+        ]
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:6dddf5d006a5d2deae943dc834f3a46ed6de711751c98c2a82d86bd2258f002c",
+        "latencyMs": 31150.933042052202,
+        "inputTokens": 2767,
+        "outputTokens": 143,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:4251d57272d688d49d080023e318bf6b3fe75e9d30fe708f0fbc9cfe8973106a",
+        "request.json": "sha256:0358e039a03af1ccba4af4e80bbee604c7796743765001e3f89fd669d4553314",
+        "response.json": "sha256:093d57b468fa651b1b9e92f2665491baaaacd882048a59d4d18f763f3dacd1e1",
+        "review-input.json": "sha256:43cf3a78d465be8daa92497678bf897f298e5532d10a05f9351dde0c4e2db033",
+        "status.json": "sha256:fe54cc11c31139cde585f1dc83eff3f303ed052e4ada8e583ec7934486babba8",
+        "tree.json": "sha256:435b8ef55de32582b54224abe1dff9947994d6a19648d06db360d6eb5df4bb3d"
+      },
+      "mapping": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:a4b82c0da52e4af75def036fea6b49c8ca80d785f7e302b6a565d9d54b452b00",
+        "latencyMs": 109593.62249996047,
+        "inputTokens": 6401,
+        "outputTokens": 711,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "compilation.json": "sha256:7149d29f9cf624c4edc9fab083677b1971e844f7c9e086553c8692b51bb83c4b",
+        "mapping.json": "sha256:060f28709c0799fbcb62bf7cf11346afc164cb6477a6dbb93930696de985c86d",
+        "request.json": "sha256:f51db3926280a4828746ce86d177212e09dd5686415b59be1a5f5ee64d6e532a",
+        "response.json": "sha256:fd773a44e97c88f7f5fe281085a90df98a7344775181c40b3298c7bae2a3cd89",
+        "review-input.json": "sha256:ad7b77b1bf2bc1daccb8043cb60ef015ee96b5ff8211074b59fb5669dfda78d2",
+        "status.json": "sha256:93f77b5e2201e5adeff1d6b170b49757922c2069dd71729eb4ac718f2d187617"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:a4b82c0da52e4af75def036fea6b49c8ca80d785f7e302b6a565d9d54b452b00",
+        "reviewDigest": "sha256:ece8c7418e01ff4cef81cfe3986bfe64a90da21d26c29e296ff261b3203d7344",
+        "reportDigest": "sha256:aa459792c10df864b2958c60b4c27d3a74bf57d4aee0bcea7efda212941bdf71",
+        "reviewerId": "current-assistant-c3h-lean-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 36,
+          "contradicted": 0,
+          "insufficient_evidence": 9
+        },
+        "findings": [
+          {
+            "claimId": "claim-0003",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "中文库存/非实时健康解释被选为返回形状检查，二者不等价；即使同时未解决，错误规则选择仍不能算正确。",
+            "suggested_revision": "将数据解释和返回结构校验区分；保留解释，不使用形状规则证明来源真实性。"
+          },
+          {
+            "claimId": "claim-0004",
+            "l05Pointer": "/source",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文数据来源性质同样错选返回形状规则，完整限制的语义映射不足。",
+            "suggested_revision": "不得把形状验证当作库存来源或非实时性质保障。"
+          },
+          {
+            "claimId": "claim-0019",
+            "l05Pointer": "/objective_clause_ids",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "目的包含文本不得执行这一纯处理边界 clause-0004，混入业务目标字段；脚本/读取业务目标本身有来源。",
+            "suggested_revision": "只选脚本前置和读取/停止业务意图为目的，源文本处理边界留在约束。"
+          },
+          {
+            "claimId": "claim-0020",
+            "l05Pointer": "/clause_dispositions/clause-0001/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "read_access 负责读身份和访问权限，不实施运行校验脚本的业务前置依赖；不能将其选作该片段规则。",
+            "suggested_revision": "使用真实脚本前置能力或 unresolved，不用 read_access 代替业务前置校验。"
+          },
+          {
+            "claimId": "claim-0022",
+            "l05Pointer": "/clause_dispositions/clause-0002/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "读取访问规则不判断脚本是否附带或是否具备脚本合同，目标与源中的缺能力事实不匹配。",
+            "suggested_revision": "将缺脚本合同保留为未解决事实，移除无关读取权限规则。"
+          },
+          {
+            "claimId": "claim-0027",
+            "l05Pointer": "/clause_dispositions/clause-0005/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文脚本前置依赖不是读取权限校验，read_access 不能替代校验脚本。",
+            "suggested_revision": "准确保留脚本前置依赖；读取权限不是运行脚本的替代能力。"
+          },
+          {
+            "claimId": "claim-0029",
+            "l05Pointer": "/clause_dispositions/clause-0006/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "读取访问校验不提供脚本/合同缺失的业务事实判断，选择了错误种类的保障。",
+            "suggested_revision": "不要用读权限规则推断脚本/合同是否存在。"
+          },
+          {
+            "claimId": "claim-0034",
+            "l05Pointer": "/clause_dispositions/clause-0009/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "返回形状检查明确不证明数据来源、时效或业务真实性，不能验证本地库存/非实时健康解释。",
+            "suggested_revision": "数据性质应保留或引用真正来源证据，不能映射到 read_result_shape 证明。"
+          },
+          {
+            "claimId": "claim-0039",
+            "l05Pointer": "/clause_dispositions/clause-0012/0",
+            "l0Pointer": null,
+            "verdict": "insufficient_evidence",
+            "rationale": "英文开发库存/非实时健康属性不能由返回数据形状证明，选择此规则没有相应语义支持。",
+            "suggested_revision": "区分返回结构和业务事实/时效；选择相应证据或保留未解决。"
+          }
+        ]
+      },
+      "selectionDiagnostic": {
+        "clauses": 15,
+        "targets": 25,
+        "missingNodePointers": [],
+        "parentIssues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "The prerequisite script scripts/check_inventory.py is missing and the host contract does not provide it. Execution must stop."
+          }
+        ]
+      }
+    }
+  ],
+  "observedComparison": {
+    "previousReportDigest": "sha256:45a5bb15a62e7152372edc13fd0ef53ccd98b47d383d0b8cc85ef6fe54a15308",
+    "previousMapping": {
+      "latencyMs": 811202.5146239903,
+      "inputTokens": 19520,
+      "outputTokens": 9919
+    },
+    "currentMapping": {
+      "latencyMs": 413992.224831949,
+      "inputTokens": 25172,
+      "outputTokens": 2619
+    },
+    "previousWhole": {
+      "latencyMs": 932046.571956831,
+      "inputTokens": 30536,
+      "outputTokens": 10900
+    },
+    "currentWhole": {
+      "latencyMs": 577644.38737405,
+      "inputTokens": 36188,
+      "outputTokens": 3600
+    },
+    "boundary": "Same known sources, new real calls. Budgets, payloads and load differ; observed cost/qualification changes are not causal accuracy or generalization evidence. Input increases are retained."
+  },
+  "reportDigest": "sha256:a696b75ef3a0dab104548c8e4ff19e1251e987892adb074ed63eee581ca6f4c4"
+}

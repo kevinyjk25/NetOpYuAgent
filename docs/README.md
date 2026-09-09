@@ -31,6 +31,24 @@
 | 无参/可选参数的只读操作如何编译为未激活 L0 | [只读 L0 合同](L0-READ-CONTRACTS.md) |
 | 公开 Skill 小批缺什么，为什么不能直接套单次读取 | [异质 Skill 边界小批](TRANSLATION-BOUNDARY-PILOT.md) |
 | 条件分支与步骤输出引用如何实际执行，写路径还缺什么 | [最小业务流程](L0-BUSINESS-FLOW.md) |
+| 当前研究代码从哪里看，哪些是历史实验 | [代码导航](../evaluation/README.md) / [实验索引](FLOW-EXPERIMENTS.md) |
+| 参数/必要条件如何修复，33/33 为什么不等于泛化 | [转译行为闭环](FLOW-BEHAVIOR-REPAIR.md) |
+| 新一轮语义迁移的改善、负结果及范围在哪里 | [源审查与联合条件报告](FLOW-SEMANTIC-TRANSFER.md) / [12 份可读 Skill](../examples/semantic-transfer/README.md) |
+| 如何消除脚本样本偏差并准备公开 Skill 分批验证 | [公开批次准备](PUBLIC-TRANSLATION-BATCH.md) |
+| 长源文、包外引用和真实宿主 Schema 如何保真与定位缺口 | [转译输入保真与宿主诊断](TRANSLATION-INTAKE.md) |
+| 嵌套参数、数组输出和原字段名如何绑定，失败怎样定位 | [结构化参数与输出绑定](STRUCTURED-DATA-BINDING.md) |
+| 结构化参数如何接入共享执行器，分支、权限和时效如何保留 | [结构化流程接线与本地演示](STRUCTURED-FLOW-WIRING.md) |
+| 公开 Skill 的任务范围、源冲突、未决义务和宿主缺口在哪里 | [任务、源义务与宿主对齐](TASK-SOURCE-ALIGNMENT.md) |
+| Netdata 本地宿主怎样调用，动态列、部分结果和隐私如何处理 | [隔离宿主与列解码](NETDATA-ISOLATED-VALIDATION.md) |
+| 9B 如何按需读取引用页、生成结构化候选；首轮为何停止 | [渐进源文读取与首次结果](PROGRESSIVE-STRUCTURED-AUTHORING.md) |
+| 长 Skill 如何切换窗口、不抄写引文、复用重叠原文 | [源文依赖记录与块引用](SOURCE-LEDGER-AUTHORING.md) |
+| 原文已获取为何不等于审核通过，宿主如何映射，缺凭据为何不等于不能离线构造 | [检索、构造与执行边界及新 9B 失败](SOURCE-DECISION-AUTHORING.md) |
+| 当前为何还转译不准，前置审阅是否有益，参数和别名哪里出错 | [源义务、候选生成与逐参数失败定位](SOURCE-OBLIGATION-AUTHORING.md) |
+| 新的参数约束是否有效，为何 Schema 合格仍不能执行 | [宿主 Schema 引导构造、出处与操作模式缺口](CATALOG-DIRECTED-AUTHORING.md) |
+| 操作模式缺口怎样补齐，为什么参数合法后转译仍失败 | [宿主模式、行动来源与两次真实 9B 结果](HOST-OPERATION-MODES.md) |
+| 真实模型能否生成并运行流程，为什么公开 Skill 仍失败 | [先规划后填参、全部实验与局部执行边界](PLAN-FIRST-AUTHORING.md) |
+| 转译失败如何定位 | [分层诊断](FLOW-DIAGNOSTICS.md) / [四例可读报告](benchmarks/flow-diagnostics-c3h-report.md) |
+| 本次清理改了什么，历史证据怎样回放 | [收敛与复验](FLOW-CONSOLIDATION.md) / [阶段历史](PROJECT-HISTORY.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
 
 ### 按主题查找
@@ -89,7 +107,7 @@
 
 - `README.md` 只维护项目设计、能力、优势、性能、场景和入口，不记录完整阶段历史。
 - `SKILL-SYSTEM-INTERACTION.md` 是 Skill 层级、authoring/执行双生命周期、用户可见结果和解释路径的统一说明；其他设计文档引用而不另造口径。
-- `docs/PROJECT-STATUS.md` 是 Done、To-do 和阶段边界的唯一汇总来源。
+- `docs/PROJECT-STATUS.md` 是当前 Done、To-do 和阶段边界的唯一汇总；完整阶段记录移入 `PROJECT-HISTORY.md`，历史下一步不覆盖当前计划。
 - `ARCHITECTURE.md`、`HLD.md`、`LLD.md`、`SSD.md` 分别拥有架构、组件、实现和安全设计事实；同一细节不在 README 重复展开。
 - 自动生成的评测报告只由对应命令刷新，不能手工把固定集结果改写成生产概率。
 - `artifacts/` 是运行证据和本地报告，不是源码设计文档；`data/` 中的基线与测试数据不能作为清理临时文件处理。
@@ -98,6 +116,12 @@
 ---
 
 ## English
+
+Current authoring: [plan-first generation, all real-model attempts and synthetic execution](PLAN-FIRST-AUTHORING.md). A real 9B-generated read region passes 10 local path checks; public-source semantic translation remains blocked. [Host modes](HOST-OPERATION-MODES.md), [catalog-directed construction](CATALOG-DIRECTED-AUTHORING.md), [source obligations/task alignment](SOURCE-OBLIGATION-AUTHORING.md), [retrieval/host boundaries](SOURCE-DECISION-AUTHORING.md), [source-window results](SOURCE-LEDGER-AUTHORING.md) and the [earlier report](PROGRESSIVE-STRUCTURED-AUTHORING.md) remain historical evidence. The [isolated Netdata host](NETDATA-ISOLATED-VALIDATION.md) remains developer wiring, not model-generated whole-Skill translation.
+
+Current public-source stage: [53 acquired Skills, all 60 candidate outcomes, source/host diagnosis and next steps](PUBLIC-TRANSLATION-BATCH.md). Acquisition is not semantic success.
+
+Current research navigation: [code map](../evaluation/README.md), [source audit and joint-condition evidence](FLOW-SEMANTIC-TRANSFER.md), [12 readable Skill packages](../examples/semantic-transfer/README.md), [consolidation/replay](FLOW-CONSOLIDATION.md). Superseded experiments and next steps are collected in the [experiment index](FLOW-EXPERIMENTS.md) and [project history](PROJECT-HISTORY.md), not active instructions.
 
 ### Reading path
 
@@ -124,7 +148,12 @@
 | How does a source-backed contract constrain 9B task authoring? | [Contract-first task authoring](CONTRACT-FIRST-TASKS.md) |
 | How are zero/optional-input reads compiled into inactive L0 contracts? | [Read-only L0 contracts](L0-READ-CONTRACTS.md) |
 | What prevents heterogeneous public Skills from using a single-read path? | [Skill boundary pilot](TRANSLATION-BOUNDARY-PILOT.md) |
+| How are long sources, external-package references and host schemas retained and diagnosed? | [Lossless translation intake](TRANSLATION-INTAKE.md) |
+| How are nested parameters, array outputs and original keys bound and validated? | [Structured data binding](STRUCTURED-DATA-BINDING.md) |
+| How do structured arguments run through shared branches, access and age checks? | [Structured flow wiring and local demo](STRUCTURED-FLOW-WIRING.md) |
+| Where are task scope, source tensions, unresolved duties and missing hosts recorded? | [Task/source/host alignment](TASK-SOURCE-ALIGNMENT.md) |
 | How do branches and step-output references run, and what remains for writes? | [Minimal business flow](L0-BUSINESS-FLOW.md) |
+| What did 9B whole-flow generation achieve unaided versus with revision? | [Forward flow experiment](FLOW-FORWARD-TRANSLATION.md) |
 | How do I run a demo or integrate my systems? | [Usage and integration](getting-started-integration.md) |
 
 ### Topic index

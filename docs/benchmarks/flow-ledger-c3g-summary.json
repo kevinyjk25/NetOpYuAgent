@@ -1,0 +1,113 @@
+{
+  "protocol": "total-source-ledger-flow/v1",
+  "manifestDigest": "sha256:8645b2b5154f302fffd659aa5dbc84c76196effbb7f7d5adba4dbee1e42c01ce",
+  "parentManifestDigest": "sha256:c4f5a73d4005aed3cbcb9625a47fe864c93df64c0fce057a7c24981309d312ec",
+  "evidenceRole": "known_development_total_source_ledger_not_holdout",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "rows": [
+    {
+      "case": "direct-read",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "operation disposition requires exact existing tree nodes",
+      "latencyMs": 58777.98095799517,
+      "inputTokens": 4536,
+      "outputTokens": 468,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:6b0690a7b550ad89759abd6e0af049b581cae584951eabcd548cb695e6d59dc1",
+        "response.json": "sha256:3d4c9821a6638e53e1c6849c799e61386d884218f6d5e92ee0682fb5724011b7",
+        "sources.json": "sha256:fc173036148a6141b9ed757b56553a782613b6b24925fd84bdbdd5b5bc5019d5",
+        "status.json": "sha256:c007268b95e185c176f72c1f1a57da52995be4b8cca559ab74a0226b7a19ff3b",
+        "tree.json": "sha256:f07c3e61f8b2fcf536dc43a141ec2803f8e20b930b0c411d230b242160b7a2a2"
+      }
+    },
+    {
+      "case": "inverted-branch",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "operation disposition requires exact existing tree nodes",
+      "latencyMs": 74963.7595419772,
+      "inputTokens": 4575,
+      "outputTokens": 705,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:46ac965b662f90614476d7a10f467fffc06fa797cd4935abe1227ea01e22d69f",
+        "response.json": "sha256:4f10b2f6affd15cb8f408418d4ec56947fd1539d022f1dd7d26d136ff80455af",
+        "sources.json": "sha256:af4c9bd758b3fa38e84fede89f5505f57bcccf0f6f3e39ae9ccbdf7662ef3bfe",
+        "status.json": "sha256:8353bdeedf314090013733bfb00244c87d7e0a1db4fe97d8d0a399e18eb6e1ff",
+        "tree.json": "sha256:26dc0f4ad3fa7b5915aac716876c5015d291a4d543293fc9dda959db38c1e356"
+      }
+    },
+    {
+      "case": "missing-approval-write",
+      "status": "blocked",
+      "errorType": "ValueError",
+      "error": "operation disposition requires exact existing tree nodes",
+      "latencyMs": 58216.98487503454,
+      "inputTokens": 4601,
+      "outputTokens": 433,
+      "doneReason": "stop",
+      "files": {
+        "request.json": "sha256:fa48bd1a27d196db4640d3638200f0f5b81c2e33714dc97526b4c23d725578d8",
+        "response.json": "sha256:a7b028a3f6eaab01e724ce8e9c03c74e5324dacce3fa03bb9a99974301622e25",
+        "sources.json": "sha256:d348ace94ed84cf8f72c8d9aaf9ca876df42f72e5fe8f2c7a1eb1213f2394b3b",
+        "status.json": "sha256:e36f74f68b96f473344508b84d4315ebe7d5da6b1a510b79c33ae16fa5f9b300",
+        "tree.json": "sha256:266fe439c5dab03e91f9a4300405981a0be337b91c3e8832fd35cc4098e2fc9a"
+      }
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "status": "awaiting_source_review",
+      "inputDigest": "sha256:504b39fa9a1d6c2c6c146b4e7b3fdc1f54159885f8876e1a36b90b671a9e60f9",
+      "latencyMs": 59087.58720802143,
+      "inputTokens": 4588,
+      "outputTokens": 421,
+      "doneReason": "stop",
+      "files": {
+        "compilation.json": "sha256:536e646e5b6d1922fd489a2b6f120f7326da059cc47f610af9f42b7a930b9dd1",
+        "request.json": "sha256:1a1af2d20492a6c3eb99895dee8acf2410aef72b93f2a47ee675d6499b5fccb1",
+        "response.json": "sha256:95615628f6d68eadefa24705148cc487ebc030b170a36952d99aaf2484a7f215",
+        "review-input.json": "sha256:df4c2f43cb956705f36ca0b00b7fca83a3ffec7a862d4c83697418125764828d",
+        "sources.json": "sha256:98272af372d47e4fb795b2eddda421b987f0e2239534a3acd82c95ad09bc682d",
+        "status.json": "sha256:7972355392fc6a138b8b3138779e32827571af41d62c8f0c9bafc136d12916ee",
+        "tree.json": "sha256:118a8d18f03cfddb5dd81484c33e198e9abd25eec4e42c39dc4231d68a4159d6"
+      },
+      "review": {
+        "status": "blocked",
+        "inputDigest": "sha256:504b39fa9a1d6c2c6c146b4e7b3fdc1f54159885f8876e1a36b90b671a9e60f9",
+        "reviewDigest": "sha256:9e7dbea9ff40a36b31a4f0066323bc4a6ec471490711a784f04e3ef3e94b87dd",
+        "reportDigest": "sha256:f105a8b5b5759e4db97042709d4793e2836dc0ecd9c36c7967ecbe66d882180a",
+        "reviewerId": "current-assistant-c3g-development",
+        "reviewerKind": "ai_role_simulation",
+        "verdictCounts": {
+          "supported": 18,
+          "contradicted": 0,
+          "insufficient_evidence": 0
+        },
+        "scopeNote": "同一助手对已知缺脚本开发例完整审查，非独立/非盲测。18 项局部声明获支持，但真实缺能力与 unresolved 均保留，因此仍 blocked；正确文档记录与安全停止不是业务完成或执行证明。",
+        "issues": [
+          {
+            "kind": "missing_host_capability",
+            "source_id": "s0002",
+            "question": "Missing prerequisite script scripts/check_inventory.py required before reading input device_id."
+          }
+        ],
+        "findings": []
+      }
+    }
+  ],
+  "uniqueKnownFlows": 4,
+  "publicSkills": 0,
+  "structurallyQualified": 1,
+  "sourceReviewed": 1,
+  "reviewSupportedInactiveFlows": 0,
+  "runtimeExecutions": 0,
+  "writes": 0,
+  "independentHumanEvidence": false,
+  "boundary": "Answer-free first attempts on known development sources. Source reviews are same-assistant judgments, not independent Gold or calibrated accuracy. Qualified trees and safe missing-capability stops are not business completion or Runtime authority. POST cost includes waiting, excludes preflight/review/tests.",
+  "reportDigest": "sha256:8cc4123c4d46dd0b70d76a001a9acf9ed67115f8656aab39dd9a29fb350a3ca7"
+}

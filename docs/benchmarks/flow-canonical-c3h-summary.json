@@ -1,0 +1,904 @@
+{
+  "protocol": "canonical-paired-development-summary/v1",
+  "summaryOfReportDigest": "sha256:e856360c9fa44bd7b4bc143dac8175cf991123182a260813df71bdc5ac2d5607",
+  "manifestDigest": "sha256:ee93c6ff83c1d6c332b9d47f49a8ee83dd5d2ecf22ffc089db1a54c7b877dab8",
+  "model": {
+    "model": "qwen3.5:9b",
+    "modelArtifactDigest": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+  },
+  "scope": {
+    "knownFlows": 4,
+    "publicSkills": 0,
+    "modelCalls": 8,
+    "flowQualified": 4,
+    "mappingQualified": 0,
+    "sourceReviewed": 0,
+    "representationReviewSupported": 0,
+    "reviewSupportedInactiveFlows": 0,
+    "runtimeExecutions": 0,
+    "writes": 0
+  },
+  "implementation": {
+    "evaluation/flow_canonical_mapping.py": "sha256:a70a180601ff9573916570e1e3f4194f56940a233fd74f4067aa89ecb9b6b002",
+    "evaluation/flow_canonical_pilot.py": "sha256:736235614e9ec6cefa8f462fb8750eb80b2bcdc29c838d2aec1d4e18b75591c5",
+    "evaluation/flow_clause_mapping.py": "sha256:18bd1e1a18c967c60d8a93119bb9417e8ab9f4168b59944fa3c5c68a25993d1f",
+    "evaluation/flow_grounded_translation.py": "sha256:1d14ee529aa7d07f5c2f1a1f157135c63a15b68fb1dae42cd975746227c8face",
+    "evaluation/flow_lean_mapping.py": "sha256:6fb44bebdd503fc93c7f2c7c4d0d32aaa9f258e2d0e82f266254a47a89930e19",
+    "evaluation/flow_lean_pilot.py": "sha256:7b6bd84cb9fd2f581dc9d93783fef6489f11558e2ef84d1535d22c006d1b4a57",
+    "evaluation/flow_mapping.py": "sha256:a33a05d097e21e2fdbd3ee437d80ed996badab6598f088ded7ac54be6a5b4802",
+    "evaluation/flow_mapping_pilot.py": "sha256:cbbff2db0bfa695f84ef9a16f4d0a47c5fb1816b28e26b9d6a4827e92ad03b25",
+    "evaluation/flow_responsibility_mapping.py": "sha256:d34945d3a8c4d1a49d08c288a27cfe5748588562b0c7cdcd3ac335b4a7895ad3",
+    "evaluation/flow_responsibility_pilot.py": "sha256:91a84e664e3a1884439e907253707f9b4bb32e17db2a11a625f70fe9cfb3ddce",
+    "evaluation/flow_semantic_pilot.py": "sha256:8653c5240b532b969542d1b2476dba4a9aa99abed85a83eef5fc448333f96db0",
+    "evaluation/flow_semantics.py": "sha256:5cb8095795883abf9e24a403f41ed2154368d1bad309f974e38fe1cf63d2f832",
+    "evaluation/flow_source_ledger.py": "sha256:ab0fe6eef1552928087ea11c4b7cdbd79c3e7c2868d32053cf69566fd9e6643d",
+    "evaluation/flow_source_selection.py": "sha256:e85c290ec963158b159dc846b3d3daa937ec0b84f0b2fa42a91e5ef855bcb0c1",
+    "evaluation/flow_translation.py": "sha256:bb3115496229abdb51ed6e4323d835969f3e7817b1057a2bb0f2e45081b401ce",
+    "evaluation/flow_translation_batch.py": "sha256:801514fb929223e95383e822688ed5b2a717b207ade616d3dab0c0540820b166",
+    "evaluation/flow_tree.py": "sha256:0340ecf43ac7b552ef0f0b82a90dd66293f5e5e708373ae93cf43ea8bfbb4980",
+    "evaluation/flow_tree_authoring.py": "sha256:d1efe36dfd99480f9abc8d36263e711f65ef013b579e3c8ce4f1d6f2d3bad0fa",
+    "evaluation/flow_tree_bounded_pilot.py": "sha256:100cce28dcab911db21544c120d152ebab980f3e1c62e4183c07d9d03e750e19",
+    "evaluation/flow_tree_capabilities.py": "sha256:f519c4aff50963fba8fb035d4083683ae06a537c7e34ca4d6a9f39cbebc8ecdd",
+    "evaluation/flow_two_pass_pilot.py": "sha256:49e3e33635c9de5f4a3323efeed8978b032ce9942655a4af138837ee344260ef",
+    "evaluation/read_l05_review.py": "sha256:8c24d9b46ca221e608926adf846442c5202a6f82d6cf780170f08fab836d65f4",
+    "evaluation/translation_case_authoring.py": "sha256:aad93e6a146894d9574f71ec85ea26214e6b58bbfd4c7131de6fcd94576db4c0",
+    "evaluation/translation_source_alignment.py": "sha256:f84faac1c26c72f43359409486fa64c52fa0bbb0676753ed0db18faba8cd2b63",
+    "network_runtime/l0/compiler.py": "sha256:88ec0c83e20df543c6c4889df0ea2a271f9e93e9516f54670148e58a0c09f93f",
+    "network_runtime/l0/flow.py": "sha256:30cf9fc3ba773eb23b81a61833dd29202905f711033868b6fe66c7daacae8329",
+    "network_runtime/l0/models.py": "sha256:91eac0067677a85eff5a6127d241ab6e020bc7e22525121750d9eae1a861e869",
+    "network_runtime/l0/read_contracts.py": "sha256:cd2e86adb869bcb8e2023acf4f5b1faa72f208032f6894b946f7bff8c09d3f79",
+    "network_runtime/l0/read_execution.py": "sha256:a9aaef5c6124bcaaa44d57824678497e53d5be071bb3f0e59f21f1834fe5cee4"
+  },
+  "rows": [
+    {
+      "case": "direct-read",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:cf07cea171b9b96fa57994a70da402f6c52cccf2a763e341e8089a93e500d89a",
+        "latencyMs": 19095.874374965206,
+        "inputTokens": 2715,
+        "outputTokens": 175,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:5990199d69986fecdf69b8a2a363dd50a3e641f0da65d1674fc691f2d0016567",
+        "request.json": "sha256:a877fc4e32fe215e4cec57641183b6c1f97dd26aba0f38151822148bc4c91864",
+        "response.json": "sha256:1149e9d78406371daee702475b60c31983c7201112db542e09acd4c8def07536",
+        "review-input.json": "sha256:8b0076edb9b6dd8942d00e8577a3a35200df5559d5e2c6dcf209a825a1d35e65",
+        "status.json": "sha256:1bc7d6610e262ab443e8b867ca922752bf9fbab4e3b197f159dfd89d02f854a1",
+        "tree.json": "sha256:e822b4807355751a040f0dbc2a7beedb4a1bdcd9c171b31ae4acd7963d46c83f"
+      },
+      "mapping": {
+        "status": "blocked",
+        "errorType": "ValueError",
+        "error": "/objective: clause-0006 has no declared business intent, stop or handoff",
+        "latencyMs": 40787.37866599113,
+        "inputTokens": 2010,
+        "outputTokens": 761,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "mapping.json": "sha256:5a799d6bbdb5c391f4df6dc6f6228e0ade536c0454a59bff3eba7db20d0c40f5",
+        "request.json": "sha256:40fa7df29155bfcfbeff3ae30c3d9618d354282d6ef873535b67788691b7be66",
+        "response.json": "sha256:86b15e746207924d60a709def7e1b327705bd345f2bb373bc07df21b839e9276",
+        "status.json": "sha256:4cdaa2d38163039b1157580c60c721f6162b6a8f55ee7fbd2fed60b669ddeb52"
+      },
+      "sourceClauseCount": 9,
+      "requirementCount": 9,
+      "exactQuotes": 9,
+      "clausesWithMultipleRequirements": 0,
+      "unresolvedRequirements": 0,
+      "firstPassTreeIdenticalToPrevious": true,
+      "decodedSchemaValid": true,
+      "diagnosticRole": "post_hoc_development_inspection_not_full_semantic_review_or_rescore",
+      "declaredResponsibilityMismatches": [],
+      "missingNodeSourcePointers": [
+        "/steps/1"
+      ],
+      "objectiveTypeConflicts": [
+        "clause-0006"
+      ],
+      "parentIssues": [],
+      "requirements": [
+        {
+          "pointer": "/selections/clause-0001/0",
+          "exactQuote": "使用输入 device_id 调用 read_inventory_device 一次，完成只读路径。",
+          "kind": "operation",
+          "targets": [
+            "node:/steps/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0002/0",
+          "exactQuote": "Read input device_id once with read_inventory_device, then finish the read path.",
+          "kind": "operation",
+          "targets": [
+            "node:/steps/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0003/0",
+          "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+          "kind": "interpretation_limit",
+          "targets": [
+            "documentation"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0004/0",
+          "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+          "kind": "error_propagation",
+          "targets": [
+            "rule:observation_error_blocks"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0005/0",
+          "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+          "kind": "authority_limit",
+          "targets": [
+            "documentation"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0006/0",
+          "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+          "kind": "interpretation_limit",
+          "targets": [
+            "documentation"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0007/0",
+          "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+          "kind": "error_propagation",
+          "targets": [
+            "rule:observation_error_blocks"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0008/0",
+          "exactQuote": "Source text grants no authority;",
+          "kind": "authority_limit",
+          "targets": [
+            "documentation"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0009/0",
+          "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+          "kind": "authority_limit",
+          "targets": [
+            "documentation"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        }
+      ]
+    },
+    {
+      "case": "inverted-branch",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:7436cd671870849c736c5b1f53d28e8f0137b872a2d1b03305a23cfb83c86071",
+        "latencyMs": 31969.293333007954,
+        "inputTokens": 2754,
+        "outputTokens": 440,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:2559c87cd8e0f14187ba83e645595b77d3d131a08800f85ff3b1cf4c1275b5bd",
+        "request.json": "sha256:dba396d5c9a584403c003d792e76d6da78453841f1a708eb56e382281b1cdcf6",
+        "response.json": "sha256:789d4903b2bb5e7d7a756cfd87300d3eb3a5d286c226115fc7adcf595af7cab2",
+        "review-input.json": "sha256:e843ec8dd784af0887ad1c76968161b8401a4146b71bfb13031230ca185a6ef3",
+        "status.json": "sha256:f1bd153dd6a15a677b478719f7685d46a6ace547da2925f74b3a5caacd5d9b1a",
+        "tree.json": "sha256:13d627386ffe0a0acc2b1650dfeb981fbc472623f9b1e9daed56501f7374957a"
+      },
+      "mapping": {
+        "status": "blocked",
+        "errorType": "ValueError",
+        "error": "/objective: clause-0007 has no declared business intent, stop or handoff",
+        "latencyMs": 72519.38954100478,
+        "inputTokens": 2814,
+        "outputTokens": 1252,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "mapping.json": "sha256:e74f060ccab6cb8f41168edc8095295c1a5f76455b7d12dd143eda22459c3b1a",
+        "request.json": "sha256:06cdd9fd67fd2a5030c9d717ffac0eb84562b6ef8e0e9e627a553137f822dd52",
+        "response.json": "sha256:28cda2e86eadc733b7678a4e666172b03d43bf94eb1c7edbfb7786541141c795",
+        "status.json": "sha256:197aa0e99f963b54997814be80618f2d98d81699fc257f3a6530263c64ecba57"
+      },
+      "sourceClauseCount": 13,
+      "requirementCount": 15,
+      "exactQuotes": 15,
+      "clausesWithMultipleRequirements": 2,
+      "unresolvedRequirements": 7,
+      "firstPassTreeIdenticalToPrevious": true,
+      "decodedSchemaValid": true,
+      "diagnosticRole": "post_hoc_development_inspection_not_full_semantic_review_or_rescore",
+      "declaredResponsibilityMismatches": [],
+      "missingNodeSourcePointers": [
+        "/steps/1"
+      ],
+      "objectiveTypeConflicts": [
+        "clause-0007",
+        "clause-0008",
+        "clause-0010",
+        "clause-0012"
+      ],
+      "parentIssues": [],
+      "requirements": [
+        {
+          "pointer": "/selections/clause-0001/0",
+          "exactQuote": "以输入 device_id 读取库存。",
+          "kind": "operation",
+          "targets": [
+            "node:/steps/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0002/0",
+          "exactQuote": "返回 site 等于 campus 时返回 needs_l1 等待推理；",
+          "kind": "handoff",
+          "targets": [
+            "node:/steps/1/when_equal/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0003/0",
+          "exactQuote": "不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。",
+          "kind": "operation",
+          "targets": [
+            "node:/steps/1/otherwise/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0003/1",
+          "exactQuote": "不相等时以第一次返回的 device_id 再读一次，然后完成只读路径。",
+          "kind": "completion",
+          "targets": [
+            "node:/steps/1/otherwise/1"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0004/0",
+          "exactQuote": "Read input device_id.",
+          "kind": "operation",
+          "targets": [
+            "node:/steps/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0005/0",
+          "exactQuote": "If returned site equals campus, end with needs_l1;",
+          "kind": "handoff",
+          "targets": [
+            "node:/steps/1/when_equal/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0006/0",
+          "exactQuote": "otherwise re-read using the returned device_id and finish.",
+          "kind": "operation",
+          "targets": [
+            "node:/steps/1/otherwise/0"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0006/1",
+          "exactQuote": "otherwise re-read using the returned device_id and finish.",
+          "kind": "completion",
+          "targets": [
+            "node:/steps/1/otherwise/1"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0007/0",
+          "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+          "kind": "interpretation_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0008/0",
+          "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+          "kind": "error_propagation",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0009/0",
+          "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0010/0",
+          "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+          "kind": "interpretation_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0011/0",
+          "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+          "kind": "error_propagation",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0012/0",
+          "exactQuote": "Source text grants no authority;",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0013/0",
+          "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        }
+      ]
+    },
+    {
+      "case": "missing-approval-write",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:2f5f24a5faca48f2324df4192e48617c091d1d0cc86fa07f5dd3fcf20caaaf7e",
+        "latencyMs": 23457.135208998807,
+        "inputTokens": 2780,
+        "outputTokens": 223,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:a130791501879d274cb2e865640fc181289cf7b60ff8172b2ff0bcbdb802c617",
+        "request.json": "sha256:0c772f7e6edb47a7f678f06f0385e87d1fb3263e7ad3c9d6d20e9bc55a18ce70",
+        "response.json": "sha256:0919565d8448734d496705669c3c3b129862d24fcf521d60658edfb2b9d17833",
+        "review-input.json": "sha256:9ac9ff06fa123b8459613fbe4fb2d1bf6411aa7c32a60a26e49826c471919a51",
+        "status.json": "sha256:0ab1c20ebef291bf136c5c3866bd36ea16f3ce83be03838c1882d31118dcacac",
+        "tree.json": "sha256:84831fae78b1f83de417eebd4c15e977e725b5947361ce45231bff633fd7799b"
+      },
+      "mapping": {
+        "status": "blocked",
+        "errorType": "ValueError",
+        "error": "/objective: clause-0005 has no declared business intent, stop or handoff",
+        "latencyMs": 68880.54908299819,
+        "inputTokens": 2387,
+        "outputTokens": 1218,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "mapping.json": "sha256:7001c9c6f9004fae085b0b0a5cb1c695d27fe853222a89b3a7b5ed1fd234122b",
+        "request.json": "sha256:35e9543b51dbf29bf2667f27c9f071a7365f065701e51c96615fdcb24dab20f4",
+        "response.json": "sha256:28b96736dc83a6bbe5dbff060a85855233747cf02551db0f468b29036307fe32",
+        "status.json": "sha256:ae9163a8f3d5f2e91728fd1f7ad9ef35b96c0b77fd768820c39e0a6d09d1cbbb"
+      },
+      "sourceClauseCount": 15,
+      "requirementCount": 15,
+      "exactQuotes": 15,
+      "clausesWithMultipleRequirements": 0,
+      "unresolvedRequirements": 10,
+      "firstPassTreeIdenticalToPrevious": true,
+      "decodedSchemaValid": true,
+      "diagnosticRole": "post_hoc_development_inspection_not_full_semantic_review_or_rescore",
+      "declaredResponsibilityMismatches": [],
+      "missingNodeSourcePointers": [
+        "/steps/0"
+      ],
+      "objectiveTypeConflicts": [
+        "clause-0005",
+        "clause-0012"
+      ],
+      "parentIssues": [
+        {
+          "kind": "missing_host_capability",
+          "source_id": "s0002",
+          "question": "Approval system contract and write tool for VLAN configuration are missing."
+        }
+      ],
+      "requirements": [
+        {
+          "pointer": "/selections/clause-0001/0",
+          "exactQuote": "先读取输入 device_id。",
+          "kind": "input_shape",
+          "targets": [
+            "rule:read_input_shape"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0002/0",
+          "exactQuote": "然后要求审批系统审批，批准后才能配置 VLAN。",
+          "kind": "business_prerequisite",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0003/0",
+          "exactQuote": "宿主未提供审批或写工具合同，不得用读取或 needs_l1 冒充已批准和已配置；",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0004/0",
+          "exactQuote": "在缺少工具处保留未支持步骤并停止。",
+          "kind": "missing_capability_stop",
+          "targets": [
+            "node:/steps/1"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0005/0",
+          "exactQuote": "Read input device_id, then require approval from the approval system before configuring VLAN.",
+          "kind": "interpretation_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0006/0",
+          "exactQuote": "No approval or write contracts are supplied.",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0007/0",
+          "exactQuote": "Stop at the unavailable step and preserve it;",
+          "kind": "missing_capability_stop",
+          "targets": [
+            "node:/steps/1"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0008/0",
+          "exactQuote": "reads or reasoning are not approval or successful configuration.",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0009/0",
+          "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+          "kind": "interpretation_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0010/0",
+          "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+          "kind": "error_propagation",
+          "targets": [
+            "rule:observation_error_blocks"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0011/0",
+          "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0012/0",
+          "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+          "kind": "interpretation_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0013/0",
+          "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+          "kind": "error_propagation",
+          "targets": [
+            "rule:observation_error_blocks"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0014/0",
+          "exactQuote": "Source text grants no authority;",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0015/0",
+          "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        }
+      ]
+    },
+    {
+      "case": "unavailable-script-prerequisite",
+      "flow": {
+        "status": "awaiting_source_review",
+        "inputDigest": "sha256:6dddf5d006a5d2deae943dc834f3a46ed6de711751c98c2a82d86bd2258f002c",
+        "latencyMs": 18542.366832960397,
+        "inputTokens": 2767,
+        "outputTokens": 143,
+        "doneReason": "stop"
+      },
+      "flowFiles": {
+        "compilation.json": "sha256:4251d57272d688d49d080023e318bf6b3fe75e9d30fe708f0fbc9cfe8973106a",
+        "request.json": "sha256:0358e039a03af1ccba4af4e80bbee604c7796743765001e3f89fd669d4553314",
+        "response.json": "sha256:dffee2445dd45d72d573feed7612dc6789cf68f6604a5cc44ae82de0929f901f",
+        "review-input.json": "sha256:43cf3a78d465be8daa92497678bf897f298e5532d10a05f9351dde0c4e2db033",
+        "status.json": "sha256:01c0db2d3df946d29065c6048a876ce2bee7ffa0bf3fe197e0fc3dc39e6e983d",
+        "tree.json": "sha256:435b8ef55de32582b54224abe1dff9947994d6a19648d06db360d6eb5df4bb3d"
+      },
+      "mapping": {
+        "status": "blocked",
+        "errorType": "ValueError",
+        "error": "/objective: clause-0012 has no declared business intent, stop or handoff",
+        "latencyMs": 65908.02249999251,
+        "inputTokens": 2246,
+        "outputTokens": 1196,
+        "doneReason": "stop"
+      },
+      "mappingFiles": {
+        "mapping.json": "sha256:5a7407c687a43279c9641ee7d6f63c1ebe8ff7c72dfdd8e138ca41fdef0bf707",
+        "request.json": "sha256:0104f5442fec97d5e5759a6a377ba0ebb171808f99e542670b96d902538da08f",
+        "response.json": "sha256:924fe8fc9c51334924973536058b251a7f6a6b8eeba4ebebe5c465434dc963a8",
+        "status.json": "sha256:29456cd7d383bb512088968337cbeeadedc0a6a7e17a10556f4e958fe0a45eaf"
+      },
+      "sourceClauseCount": 15,
+      "requirementCount": 15,
+      "exactQuotes": 15,
+      "clausesWithMultipleRequirements": 0,
+      "unresolvedRequirements": 15,
+      "firstPassTreeIdenticalToPrevious": true,
+      "decodedSchemaValid": true,
+      "diagnosticRole": "post_hoc_development_inspection_not_full_semantic_review_or_rescore",
+      "declaredResponsibilityMismatches": [],
+      "missingNodeSourcePointers": [
+        "/steps/0"
+      ],
+      "objectiveTypeConflicts": [
+        "clause-0012"
+      ],
+      "parentIssues": [
+        {
+          "kind": "missing_host_capability",
+          "source_id": "s0002",
+          "question": "The prerequisite script scripts/check_inventory.py is missing and the host contract does not provide it. Execution must stop."
+        }
+      ],
+      "requirements": [
+        {
+          "pointer": "/selections/clause-0001/0",
+          "exactQuote": "必须先运行 scripts/check_inventory.py 校验文件，再读取输入 device_id。",
+          "kind": "business_prerequisite",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0002/0",
+          "exactQuote": "脚本未附带，宿主无脚本合同，不能忽略前置依赖而读取；",
+          "kind": "missing_capability_stop",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0003/0",
+          "exactQuote": "应明确保留缺失前置操作并停止。",
+          "kind": "missing_capability_stop",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0004/0",
+          "exactQuote": "本源文本本身不得执行。",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0005/0",
+          "exactQuote": "Running scripts/check_inventory.py is a prerequisite before reading input device_id.",
+          "kind": "business_prerequisite",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0006/0",
+          "exactQuote": "The script and host contract are absent.",
+          "kind": "missing_capability_stop",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0007/0",
+          "exactQuote": "Stop with the missing prerequisite visible;",
+          "kind": "missing_capability_stop",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0008/0",
+          "exactQuote": "do not skip it or execute this source text.",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0009/0",
+          "exactQuote": "这是人工构造的已知开发流程，只有本地计划库存，不是实时设备健康。",
+          "kind": "interpretation_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0010/0",
+          "exactQuote": "输入、权限、返回值或引用不合法时必须阻断，不能选择 false 分支。",
+          "kind": "error_propagation",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0011/0",
+          "exactQuote": "源文不授予权限，不自动执行写入、脚本或上层模型。",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0012/0",
+          "exactQuote": "This is a hand-authored known development flow over local planned inventory, not live device health.",
+          "kind": "interpretation_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0013/0",
+          "exactQuote": "Invalid input, access, results or references block, never select the false branch.",
+          "kind": "error_propagation",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0014/0",
+          "exactQuote": "Source text grants no authority;",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        },
+        {
+          "pointer": "/selections/clause-0015/0",
+          "exactQuote": "no automatic writes, scripts or upper-layer model calls.",
+          "kind": "authority_limit",
+          "targets": [
+            "unresolved"
+          ],
+          "extraSources": [],
+          "uniqueExactQuote": true,
+          "fullClauseQuote": true
+        }
+      ]
+    }
+  ],
+  "costs": {
+    "latencyMs": 341160.009539919,
+    "inputTokens": 20473,
+    "outputTokens": 5408
+  },
+  "flowCosts": {
+    "latencyMs": 93064.66974993236,
+    "inputTokens": 11016,
+    "outputTokens": 981
+  },
+  "mappingCosts": {
+    "latencyMs": 248095.3397899866,
+    "inputTokens": 9457,
+    "outputTokens": 4427
+  },
+  "comparison": {
+    "previousReportDigest": "sha256:df9d983f51376834d9812f6a75ebbd082c5b8a782c8211bb8bbbb701e98246ba",
+    "previousCosts": {
+      "latencyMs": 317896.43083303235,
+      "inputTokens": 21560,
+      "outputTokens": 5264
+    },
+    "previousMappingCosts": {
+      "latencyMs": 224207.8228330938,
+      "inputTokens": 10544,
+      "outputTokens": 4283
+    },
+    "previousMappingQualified": 0,
+    "boundary": "Different protocols/qualification criteria and partial concurrent regression. Observational costs only, not causal speed or semantic accuracy."
+  },
+  "boundary": "Four known development flows, same assistant post-hoc diagnosis, zero complete semantic reviews. Schema compliance/exact quotes/node accounting do not prove full fidelity. No answer edits/retries or production probability claims.",
+  "reportDigest": "sha256:c3edc4c186deea4bfc3170a3aef179fee724660e43f4f6e5bb13d8c39debe35b"
+}

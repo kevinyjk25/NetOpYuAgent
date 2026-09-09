@@ -1,0 +1,96 @@
+{
+  "apiVersion": "effect-runtime.io/public-source-preparation-summary/v2",
+  "batches": [
+    {
+      "acceptedCount": 17,
+      "allCandidatesProcessed": true,
+      "batchId": "public-01",
+      "discoveryDigest": "sha256:873bf7acecb1aae32bdd2ea954f0f4780ffed9adbf600981d189a28a337c1723",
+      "importerAcceptedTargetMet": false,
+      "libraryDigest": "sha256:f4b443a26f436183f6989295265ebd38bc0f3b9386a489bdb1eb80e9a5ed6198",
+      "processedCount": 19,
+      "selectedCount": 19,
+      "snapshotDigest": "sha256:d927702721164637393d526224eb60249451a37ca44a7040f21c652f8a97d98f"
+    },
+    {
+      "acceptedCount": 16,
+      "allCandidatesProcessed": true,
+      "batchId": "public-02",
+      "discoveryDigest": "sha256:5141499ee99a58b66ba2bef4520199e3c3bb55588c8b1cd9f8e01d494916a90b",
+      "importerAcceptedTargetMet": false,
+      "libraryDigest": "sha256:1f3b3923c627d4edbe9103f6271c2524d8d93cb32a45649cec901e102adff61d",
+      "processedCount": 19,
+      "selectedCount": 19,
+      "snapshotDigest": "sha256:26024eb842d89914cdd529b1facb01dc62cd6bf6aace9542cbeb38178281560e"
+    },
+    {
+      "acceptedCount": 19,
+      "allCandidatesProcessed": true,
+      "batchId": "public-03",
+      "discoveryDigest": "sha256:1744783c5aa88267d0f9b2d78ac5ff1b8557fa725470ed12979fcb50dc7fc2cf",
+      "importerAcceptedTargetMet": false,
+      "libraryDigest": "sha256:a8ee3352e10e28713c34a4fc48f158293dc0532728951770c5f3cc5e248081b7",
+      "processedCount": 20,
+      "selectedCount": 20,
+      "snapshotDigest": "sha256:51cf76e342e7ee2525ce9f1cbf1f51c9e8e04be996793abdf65aa31055f9184e"
+    },
+    {
+      "acceptedCount": 1,
+      "allCandidatesProcessed": true,
+      "batchId": "public-04",
+      "discoveryDigest": "sha256:dcd6da65a97d72840022f9805c774c1b8e0ac7ff868afa476a6068d3e89b06d1",
+      "importerAcceptedTargetMet": false,
+      "libraryDigest": "sha256:412d9df7a7625546d5adbb182b5fffbf95bc0846c31b8ecee71da2dbf384a756",
+      "processedCount": 2,
+      "selectedCount": 2,
+      "snapshotDigest": "sha256:c27ba142f194167cc86ff303584428b736137bf2e652f3428d0b0f77b1d02206"
+    }
+  ],
+  "claimBoundary": "入库与静态包检查不等于转译成功或执行许可。搜索类别不是核实领域。 / Acquisition and static package checks are not semantic success or execution authority; query labels are not verified domains.",
+  "evidence": {
+    "artifacts/translator-v2/public-source-20260908-round2/discovery.json": "sha256:75ccabc0bdf4558ba5a625aa6c9492b9b4a6983d55e8f2447cfdd26ed96b90be",
+    "artifacts/translator-v2/public-source-20260908-round2/report/report.json": "sha256:e35579180757731061fabc0084b262e9ed6266dbb5f3be8873d202c2ca1f14cc",
+    "artifacts/translator-v2/public-source-20260908-round2/report/skill-library.html": "sha256:c2aa205b9a8f453aca17dcd731477477dd6c1d2847a2c3ce3c49fb2a7b6379f8",
+    "artifacts/translator-v2/public-source-20260908-round2/sampling-v2/discovery.json": "sha256:027081ada5e98c18119a4f23297713c5773d241a42762ed1b67f967126ec2279",
+    "artifacts/translator-v2/public-source-20260908-round2/sampling-v2/sampling.json": "sha256:a22a4c53f3b6deadb6fef8c669b7169ef18ced7886e3dc04e675815af6676ee3",
+    "docs/benchmarks/public-source-alignment-review.json": "sha256:36cf3e31bf9fa844cd5f7fbe56c46d17652d94e08b9eef9020656e24cfcdce47",
+    "evaluation/flow_translation.py": "sha256:bb3115496229abdb51ed6e4323d835969f3e7817b1057a2bb0f2e45081b401ce",
+    "network_runtime/l0/flow.py": "sha256:30cf9fc3ba773eb23b81a61833dd29202905f711033868b6fe66c7daacae8329",
+    "network_runtime/l0/models.py": "sha256:91eac0067677a85eff5a6127d241ab6e020bc7e22525121750d9eae1a861e869"
+  },
+  "formalGateChanged": false,
+  "fullReferenceAuditsComplete": false,
+  "historicalEvidenceOverwritten": false,
+  "independentGold": false,
+  "newTranslationModelCalls": 0,
+  "reportDigest": "sha256:26fc9be62b477a9906ba6c171f4916645136e984086fe661cf30ef5ca94dc113",
+  "reviewedRootSkills": 4,
+  "runtimeAuthorityGranted": false,
+  "samplingDigest": "sha256:ad124ee3a80736eb90462e5aad570300ac47ee7f59297b01aa4ad0c616bfae60",
+  "stage": "C3k_source_acquired_alignment_pending",
+  "statistics": {
+    "acceptedRepositories": 38,
+    "acceptedSkills": 53,
+    "classificationCounts": {
+      "format_variant_robustness_only": 24,
+      "runtime_ready": 12,
+      "translation_only_partial_context": 17
+    },
+    "excludedCandidates": 7,
+    "exclusionReasons": {
+      "license_not_declared": 6,
+      "snapshot_error:ValueError:public Skill package does not contain root SKILL.md": 1
+    },
+    "formatQualified": 29,
+    "quarantinedSourceFiles": 38,
+    "queryStrata": 12,
+    "sampledCandidates": 60,
+    "sampledRepositories": 44,
+    "staticPackageGatePassed": 12,
+    "unprocessedCandidates": 0,
+    "verifiedDomains": null
+  },
+  "summaryDigest": "sha256:89f628a3982a3507a1f4b1fe5ed5ae167bf1780da696e6eba1729a118d628bd1",
+  "thirdPartyExecutionAttempted": false,
+  "translationMetrics": null
+}
