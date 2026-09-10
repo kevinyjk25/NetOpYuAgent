@@ -2,6 +2,8 @@
 
 ## 中文
 
+2026-09-10 增量：结构化 v2 Flow 的分支右侧现在也支持显式 `reference` / `array_length`，与左侧共同经过原绑定器的类型、依赖和时效检查。见[v65 修复及真实 9B 结果](STAGE-2-REPRESENTATION-REPAIR.md)。下文主演示及验收数字是当时冻结结果，不因这个新增表示而改分。
+
 2026-09-09，C3n。**嵌套参数与读取结果现在可以进入现有流程执行器**，不再只停留在离线绑定草案。新增的是版本化表示与编译接线，不是第二套执行引擎。默认 DSH 路由、合同激活与唯一 Effect 准入路径不变。
 
 这是一份人工构造的本地机制演示：真实执行 Python 只读回调，返回惰性 fixture；**没有 LLM、实际设备、网络请求或写操作**。它证明接线和约束行为，不证明公开 Skill 的语义转译准确率。
@@ -55,6 +57,8 @@
 接线 smoke 已闭合；**公开源文 → 任务/真实宿主 → 模型 Tree 候选 → 完整语义审核**尚未闭合。本轮不接通默认 DSH、不新增网络设备写能力、不运行规模 Runtime 性能测试。下一步完成四份固定开发源文的引用闭合、任务/宿主声明及源义务映射，记录表示范围外项；再冻结小批 9B 的首次构造和独立评分输入。不得用本合成宿主替代公开 Skill 的真实合同，也不得将机械测试通过数计入 Skill 准确率。
 
 ## English
+
+2026-09-10 extension: structured v2 Flow branches also accept an explicit reference/array_length RHS through the same binder, with type, dependency and freshness checks for both operands. See [v65 repairs and 9B evidence](STAGE-2-REPRESENTATION-REPAIR.md). The original demo and acceptance numbers below remain historical frozen results.
 
 C3n, September 9, 2026: nested parameters and read results now run through the **existing shared flow and read gateways**, using versioned data/graph contracts and a source-anchored Tree compiler. No second execution engine, default DSH route or new Effect authorization path is introduced.
 

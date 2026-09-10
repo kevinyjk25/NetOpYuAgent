@@ -118,7 +118,7 @@ def test_continuation_moves_keep_each_original_statement_and_duty_origin(packet)
 
 def test_predicate_provenance_is_adjacent_to_condition_not_child_action():
     schema = lines.schema({"tools": []}, evidence_ids=["b9", "b4:L1"])
-    predicates = [r for r in schema["$defs"]["ProgramStatement"]["oneOf"]
+    predicates = [r for r in schema["$defs"]["ProgramStatement"]["anyOf"]
                   if r["properties"]["op"]["const"] in lines.BRANCHES]
     for row in predicates:
         keys = list(row["properties"])

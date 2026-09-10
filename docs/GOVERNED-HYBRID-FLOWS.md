@@ -2,7 +2,7 @@
 
 ## 中文
 
-状态：2026-09-10，依据用户补充确认的架构原则。**这是下一步实现约束，不表示节点已经可执行。** 当前 `network_runtime/l0/flow.py` 只有 read、branch、effect_candidate 和 end；`needs_l1` 是终止交接，不是同一图内可恢复的 LLM 节点。本文不放宽[阶段 1 原有验收](STAGE-1-EXIT.md)，不解锁阶段 2 或规模 Runtime A/B。
+状态：2026-09-10，受控混合读取原型与阶段 2 小批开发验证已完成，见[实际结果和未完成问题](STAGE-2-HYBRID-RESULTS.md)及[验收边界](STAGE-2-HYBRID-VALIDATION.md)。`network_runtime/l0/hybrid.py` 定义组合图，`hybrid_execution.py` 调度原 `flow.py` 严格片段、有界 LLM、独立候选准入和 all-success 汇合。**未新增 Effect 执行器，不改变默认 DSH 路由；未证明跨 Skill 泛化。**
 
 ### 固定权力和流程，保留语义自由度
 
@@ -40,7 +40,7 @@ Runtime 管理可审查的混合任务图：确定性节点与受控推理任务
 
 当前空列表判断已能用原数组长度能力表达，失败发生在“原文/清单 → 程序”的遗漏；这项确定性验收不改变。历史模型候选、失败、未完成请求与费用全部保留。
 
-下一步实施顺序：
+实现与验收顺序：
 
 1. 定义混合图和候选/事实类型边界，接入串行读取—推理—准入，复用原合同/网关/事务。
 2. 补依赖调度、并发预算、确定性 join 和失败/迟到结果处理；不恢复生产工程建设。
@@ -49,9 +49,29 @@ Runtime 管理可审查的混合任务图：确定性节点与受控推理任务
 
 指标分别报告严格片段覆盖、混合任务完成、LLM 语义错误/调用数、非法候选阻断、错误停止、未经授权的 Effect、验证/补偿，以及纯 Runtime 和含 LLM 端到端 p50/p95。混合完成率不是静态 L0 转译率；零观测到越权不是生产零概率；符合图约束不证明诊断永远正确。
 
+### 已实现的接口与限制
+
+| 接口 | 输入/职责 | 输出与限制 |
+|---|---|---|
+| `qualify_hybrid` | 固定图、依赖、Schema、原 Read 合同 | 检查无环/来源可达/类型；不授语义许可 |
+| `HostHybridConsent` | graph/arguments/context 三摘要 | 只允许本次已审本地运行，不是生产身份 |
+| `HostReasoningBinding` | 宿主注册的固定模型/配置/调用回调 | `ReasoningReply`；不加载 Skill 脚本、不提供 Tool 句柄 |
+| `HostCandidateGate` | 独立校验回调、策略摘要、允许的严格片段摘要集合 | 必须返回真实布尔 True；不升级为事实或 Effect 权限 |
+| `run_hybrid` | 严格片段＋推理任务，最多 4 并行、8 模型节点 | `governed_graph_completed` 只代表图约束完成；保留原读取回执 |
+
+推理和纯汇合允许分析历史快照，记录进入节点时的观察年龄，不把它称为当前行动证据；后续严格操作或候选准入仍检查全部观察祖先的时效。这样长时间 LLM 分析不会凭空刷新事实，也不因只做解释就被当成写前检查。需要重新采集并替代旧证据的恢复流程尚未实现。
+
+当前 author surface 显式区分原文、未来调用者参数、宿主固定常量和模型解释；缺失实际调用参数不能被误报为编译缺口。它支持原子读取与开放推理的组合，尚不自动生成跨混合节点条件/循环、动态扩图或候选准入策略。原严格片段内部的分支继续由原 Flow 引擎执行。模型产物必须逐份审阅；绑定/结构通过不代表业务参数选择正确。
+
+当前 v6 自动构造入口进一步缩为 `read_prefix`：模型选择有依据的原子读取；固定转换规则将**原始业务任务、已提供的 Skill 原文、读取结果和边界**送入末端受控推理节点，不要求模型再改写一遍开放职责。`compilation.plan` 保留模型原提案，`loweredPlan` 展示该规则，`sourceTaskMappings` 标记原任务留存。它不是完整混合编排语言；通用图 API 的串并行与独立准入能力不受此入口限制。边界解释仍可能错误，须审查，不能自动当成权限或语义证明。
+
+v7 延续此入口，并将参考资料和实际观察分开送入模型，提供固定的事实来源与简洁输出要求；每个原始输入值仍保留。实际草稿仍会犯语义错误，见结果报告。因此它是可审阅的受控候选流程，不是依靠提示词提供准确性担保。
+
+取消只停止本次接纳：正在执行的可信回调可能继续返回，迟到结果不能重启图。宿主回调必须自行设置传输超时；线程不是隔离沙箱，不能承载不受信脚本。没有持久崩溃恢复、自动写入、生产审批或可回滚的模型调用。
+
 ## English
 
-Status: user-confirmed design principle on 2026-09-10, **not implemented capability**. Current read Flow has read, branch, effect_candidate and end; needs_l1 terminates rather than resuming an in-graph model task. Original Stage 1 criteria remain; Stage 2 and large Runtime A/B are not unlocked.
+Status: the narrow governed read/reason prototype and Stage 2's small development loop are complete on 2026-09-10; see [actual results and open defects](STAGE-2-HYBRID-RESULTS.md) under the [fixed criteria](STAGE-2-HYBRID-VALIDATION.md). The mixed scheduler composes the original read Flow with bounded model tasks, independent candidate admission and required joins. It adds no Effect executor and changes no default DSH route. Generalization and large Runtime A/B remain unproven/closed.
 
 The Runtime should govern a heterogeneous dependency graph of deterministic operations and bounded reasoning tasks, with sequential dependencies and declared parallelism. Reasoning remains a Reasoning Plane service. Scheduling it inside the workflow does not grant execution authority or collapse the three planes. Call the whole artifact a Governed Hybrid Skill: deterministic L0 regions and open-semantic L1 tasks retain distinct claims.
 
@@ -64,3 +84,9 @@ Translation retains strict regions, governed reasoning tasks and unresolved boun
 Implement narrow graph/authority types and serial read-reason-admission first; then bounded scheduling/joins/failure handling; source-to-hybrid-graph authoring; and negative tests for invalid arguments, scope escape, output injection, missing/stale facts, parallel failure, conflict and false success. Disclose simulations separately from real 9B runs. Production engineering stays deferred.
 
 Report strict-region coverage, mixed task completion, model errors/calls, rejected invalid candidates, over-stops, unauthorized effects, verify/compensate outcomes and separate Runtime/model-inclusive latency. Mixed completion is not static L0 translation rate; zero observed escapes is not a production zero probability or universal diagnostic correctness.
+
+Implemented APIs: qualify_hybrid, graph/arguments/context-bound HostHybridConsent, host-registered HostReasoningBinding/ReasoningReply, region-bound HostCandidateGate and run_hybrid. Analysis/joins can use historical snapshots with age metadata, while strict actions/admission recheck all observation ancestors. Candidates never become facts or Effect permission. The compact author surface initially emits atomic reads and open reasoning, not mixed conditions/loops, dynamic expansion or host admission policies; original strict regions still execute branches. Trusted callbacks require transport deadlines; worker threads are not a script sandbox, and cancellation does not prove external cancellation. Durable crash recovery, snapshot refresh/replacement and automatic effect integration remain out of scope.
+
+The v6 read_prefix author adapter is intentionally narrower than the general graph API. It retains the exact original business task, supplied source pages, read results and boundaries in a final bounded L1 node instead of paraphrasing open duties. The original model plan, loweredPlan and sourceTaskMappings expose this rule. It does not synthesize domain algorithms, prove semantics or disable general graph serial/parallel/admission support. Boundary annotations still require review.
+
+v7 retains that surface and separates reference material from actual observations without losing any input value. Fixed factuality and brevity guidance improves some drafts but does not guarantee semantic accuracy; the recorded failures remain open.

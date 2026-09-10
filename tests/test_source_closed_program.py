@@ -24,7 +24,7 @@ def program():
 def model_schema():
     return closed.schema({"tools": [{"name": "fetch"}]}, evidence_ids=["original-line"],
         observation_names=lines.OBSERVATION_SLOTS,
-        value_paths=[{"types": ["boolean"], "pointer": "/ready"}])
+        value_paths=[{"types": ["boolean"], "pointer": "/ready", "originKind": "tool_output", "origin": "fetch"}])
 
 
 def test_closed_tree_lowers_every_node_without_repair_or_inferred_success():
@@ -43,14 +43,14 @@ def test_closed_tree_lowers_every_node_without_repair_or_inferred_success():
 
 
 def test_read_origin_is_declared_before_adapter_and_continuation():
-    read = model_schema()["$defs"]["ProgramNode"]["oneOf"][0]
+    read = model_schema()["$defs"]["ProgramNode"]["anyOf"][0]
     keys = list(read["properties"])
     assert keys.index("source_id") < keys.index("tool") < keys.index("next")
     assert read["properties"]["source_id"] == {"$ref": "#/$defs/ProgramSourceId"}
 
 
 def test_all_node_origins_precede_operands_and_terminal_labels_cannot_claim_business_success():
-    for variant in model_schema()["$defs"]["ProgramNode"]["oneOf"]:
+    for variant in model_schema()["$defs"]["ProgramNode"]["anyOf"]:
         properties = variant["properties"]
         assert list(properties)[:2] == ["op", "source_id"]
         if properties["op"]["const"] in closed.TERMINAL_LABELS:

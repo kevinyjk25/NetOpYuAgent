@@ -1,0 +1,58 @@
+{
+  "stage": 2,
+  "protocol": "windowed-source-ledger/v63",
+  "skillCount": 10,
+  "repositoryCount": 10,
+  "domainCount": 9,
+  "toolBearingSkills": 9,
+  "initialRequestsWithinBudget": 7,
+  "modelAttemptedSkills": 7,
+  "structurallyCompiledSkills": 1,
+  "acceptedReadRegions": 0,
+  "modelCalls": 8,
+  "recordedInputTokens": 60558,
+  "recordedOutputTokens": 20746,
+  "summedRequestLatencyMs": 978653.2959578326,
+  "requestLatencyMs": {
+    "p50": 126093.467,
+    "p95": 167794.046
+  },
+  "runtimeLatencyMs": null,
+  "parameterOracleAccuracy": null,
+  "correctStopRate": null,
+  "overStopRate": null,
+  "dutyRetentionRate": null,
+  "wholeSkillAccuracy": null,
+  "reviewKind": "developer_ai_not_independent_gold",
+  "largeRuntimeABUnlocked": false,
+  "sourceScriptCalls": 0,
+  "providerCalls": 0,
+  "limitations": [
+    "Ten preselected known-development Skills with task-specific disclosed local adapter contracts, not authenticated vendor integrations or an unseen holdout.",
+    "v62 resource preflight and v63 resource revision use the same known development batch; improvement is initial budget admission only.",
+    "Eight real 9B calls across seven Skills; one compiled region fails semantic review. No population accuracy, runtime benefit or production probability follows.",
+    "Full transitive-source semantic review, parameter/behavior Oracles and quantitative duty coverage have not been established; those metrics remain null.",
+    "All first responses and failures are retained. No response-dependent prompt change, retry, candidate salvage or accepted-region Runtime test.",
+    "Model latency overlaps local regression; not an isolated performance measurement.",
+    "Source scripts, providers, effects and L1 output generation were never executed. These observations do not measure normal native DSH task completion."
+  ],
+  "evidenceReportDigest": "sha256:cd90787293a09149484e79094bb57b6af9bc9428f62f2548b064bcbce3bf291d",
+  "boundArtifactCount": 136,
+  "baselineCommit": "43a2b76",
+  "baselineProtocol": "windowed-source-ledger/v62",
+  "baselineInitialRequestsWithinBudget": 0,
+  "baselineModelCalls": 0,
+  "developerSemanticReviewAcceptedCompiledRegions": {
+    "accepted": 0,
+    "compiled": 1
+  },
+  "validation": {
+    "pytestPassed": 2543,
+    "subtestsPassed": 81,
+    "newTargetedPassed": 22,
+    "oldStage1ArtifactsUnchanged": 2919,
+    "zeroCallIdenticalReplays": 7,
+    "stageCodeRuff": "passed",
+    "wholeRepoRuff": "224 historical diagnostics not changed"
+  }
+}

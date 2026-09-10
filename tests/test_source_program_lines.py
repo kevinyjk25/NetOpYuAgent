@@ -102,7 +102,7 @@ def test_cardinality_statement_rejects_non_array_data_source():
     ("/nullable", "if_equal", "a value", True), ("/invented", "if_equal", False, False),
 ])
 def test_model_predicates_use_original_types_not_selected_business_answers(pointer, kind, constant, valid):
-    paths = [{"pointer": key, "types": types} for key, types in [
+    paths = [{"pointer": key, "types": types, "originKind": "tool_output", "origin": "observe"} for key, types in [
         ("/enabled", ["boolean"]), ("/backup/enabled", ["boolean"]), ("/count", ["integer"]),
         ("/items", ["array"]), ("/label", ["string"]), ("/nullable", ["null", "string"])]]
     schema = lines.schema(CATALOG, model_view=True, value_paths=paths)

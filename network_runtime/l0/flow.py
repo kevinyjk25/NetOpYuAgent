@@ -102,11 +102,17 @@ class StructuredReadNode(StrictModel):
     next: str
 
 
+class StructuredComparisonReference(StrictModel):
+    kind: Literal["reference", "array_length"]
+    source: str
+    pointer: str
+
+
 class StructuredBranchNode(StrictModel):
     kind: Literal["branch"]
     id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     left: dict[str, Any]  # One JSON Pointer reference; not executable code.
-    equals: Constant
+    equals: Annotated[Constant | StructuredComparisonReference, Field(discriminator="kind")]
     on_true: str
     on_false: str
 
@@ -276,21 +282,35 @@ def qualify_flow(
         if structured and not isinstance(node, EndNode):
             available = {name: _raw_schema(schema) for name, schema in schemas.items() if name == "input" or name in before}
             if isinstance(node, StructuredBranchNode):
-                reference = node.left
-                if set(reference) != {"kind", "source", "pointer"} or reference.get("kind") not in {"reference", "array_length"}:
-                    raise ValueError("structured branch requires one explicit source reference")
-                if not isinstance(reference["source"], str) or reference["source"] not in available:
-                    raise ValueError("branch source must dominate this node")
-                left_schema, _ = schema_location(checked_schema(available[reference["source"]]), reference["pointer"])
-                kinds = schema_types(left_schema)
-                if reference["kind"] == "array_length":
-                    if kinds != {"array"}:
-                        raise ValueError("array_length branch requires an exclusively array source")
-                    kinds = {"integer"}
-                right = _json_scalar_type(node.equals.value)
-                if kinds & {"object", "array"} or not any(_compatible(left, right) or _compatible(right, left) for left in kinds):
+                def operand_types(reference):
+                    if set(reference) != {"kind", "source", "pointer"} or reference.get("kind") not in {"reference", "array_length"}:
+                        raise ValueError("structured branch requires one explicit source reference")
+                    if not isinstance(reference["source"], str) or reference["source"] not in available:
+                        raise ValueError("branch source must dominate this node")
+                    schema, _ = schema_location(checked_schema(available[reference["source"]]), reference["pointer"])
+                    kinds = schema_types(schema)
+                    if reference["kind"] == "array_length":
+                        if kinds != {"array"}:
+                            raise ValueError("array_length branch requires an exclusively array source")
+                        kinds = {"integer"}
+                    if kinds & {"object", "array"}:
+                        raise ValueError("structured branch requires compatible JSON scalar types")
+                    return kinds
+                kinds = operand_types(node.left)
+                dynamic = isinstance(node.equals, StructuredComparisonReference)
+                right_expression = node.equals.model_dump(mode="json") if dynamic else None
+                right_kinds = operand_types(right_expression) if dynamic else {_json_scalar_type(node.equals.value)}
+                if not any(_compatible(left, right) or _compatible(right, left) for left in kinds for right in right_kinds):
                     raise ValueError("structured branch requires compatible JSON scalar types")
-                expression, target_schema = reference, {"type": sorted(kinds)}
+                expression, target_schema = node.left, {"type": sorted(kinds)}
+                if dynamic:
+                    # One existing binding plan binds BOTH operands, preserving
+                    # required sources, evidence freshness, schema checks and
+                    # digest rederivation. No second evaluation path or coercion.
+                    expression = {"kind": "object", "fields": {"left": node.left, "right": right_expression}}
+                    target_schema = {"type": "object", "properties": {
+                        "left": {"type": sorted(kinds)}, "right": {"type": sorted(right_kinds)}},
+                        "required": ["left", "right"], "additionalProperties": False}
             else:
                 target_schema = (read_schema(used_reads[node.contract_hash], "input") if isinstance(node, StructuredReadNode)
                                  else _raw_schema(used_effects[node.binding_id].input_schema))
@@ -414,7 +434,10 @@ def run_read_flow(
                 key = node.next
             elif isinstance(node, (BranchNode, StructuredBranchNode)):
                 bound = bound_arguments(key) if structured else None
-                left, right = (bound["arguments"], node.equals.value) if bound else (resolve(node.left), resolve(node.equals))
+                if bound and isinstance(node.equals, StructuredComparisonReference):
+                    left, right = bound["arguments"]["left"], bound["arguments"]["right"]
+                else:
+                    left, right = (bound["arguments"], node.equals.value) if bound else (resolve(node.left), resolve(node.equals))
                 matched = left == right
                 if structured:
                     matched = matched and (_compatible(_json_scalar_type(left), _json_scalar_type(right))
@@ -424,6 +447,8 @@ def run_read_flow(
                               "selected": node.on_true if matched else node.on_false})
                 if bound:
                     trace[-1]["argumentBinding"] = bound
+                    if isinstance(node.equals, StructuredComparisonReference):
+                        trace[-1]["comparisonSource"] = node.equals.model_dump(mode="json")
                 key = node.on_true if matched else node.on_false
             elif isinstance(node, (EffectCandidateNode, StructuredEffectNode)):
                 target = effects[node.binding_id]

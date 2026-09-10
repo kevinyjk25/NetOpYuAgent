@@ -4,6 +4,12 @@
 
 ## 中文
 
+### 受控混合图实现补充（2026-09-10）
+
+`GovernedHybridFlow` 固定原始 source/task 摘要、输入 Schema、节点依赖、输出与预算；`StrictRegion` 包含原 `StructuredFlowProposal`。`ReasoningTask` 绑定模型/配置、输入投影、输出 Schema、字节/token/时间预算；`CandidateAdmission` 绑定宿主独立策略；`RequiredJoin` 仅在所有必需依赖成功后汇合。代码见 [hybrid.py](network_runtime/l0/hybrid.py) 和 [hybrid_execution.py](network_runtime/l0/hybrid_execution.py)。
+
+`run_hybrid` 重新资格检查并验证 `HostHybridConsent(graph_digest, arguments_digest, context_digest)`，拒绝隐式身份。严格读取复用旧引擎；模型没有 Tool 回调。`model_candidate` 不得直接流向严格输入，独立准入也不把它升级为事实或写授权。超时关闭接纳，迟到回调不能复活图；宿主传输仍需自行有界。推理可分析带年龄元数据的历史快照，准入和后续严格步骤必须重新检查事实时效。`governed_graph_completed` 不是 `verified_success`。详见[接口边界](docs/GOVERNED-HYBRID-FLOWS.md)。
+
 ### 1. 实现范围
 
 本文只描述当前 EnsuredSkill 原型执行闭环。历史企业身份、Provider 供应链、治理、Hermes/A2A 和 canary 产品化实现属于冻结扩展，不是核心 Runtime 依赖。
@@ -292,6 +298,8 @@ Harness 获得的终态信封固定为：
 ---
 
 ## English
+
+2026-09-10 addendum: GovernedHybridFlow binds source/task digests, schemas, dependencies and budgets; StrictRegion wraps the original StructuredFlowProposal. ReasoningTask binds model/configuration, projections and output/time/token limits; CandidateAdmission is an independent host policy and RequiredJoin is all-success. run_hybrid requalifies everything and checks graph/arguments/context-bound host consent. Candidates cannot directly feed strict inputs or become facts/Effect authority. Late results cannot revive a closed graph. Historical-snapshot analysis is allowed, but subsequent strict use/admission must recheck observation age. governed_graph_completed is not verified_success. See [the detailed boundary](docs/GOVERNED-HYBRID-FLOWS.md).
 
 ### 1. Core model
 

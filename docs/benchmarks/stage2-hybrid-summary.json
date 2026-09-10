@@ -1,0 +1,507 @@
+{
+  "date": "2026-09-10",
+  "stage": "stage2_known_public_development",
+  "status": "complete_with_open_semantic_failures",
+  "statusCondition": "Predeclared minimum three useful limited read-plus-real-reason demonstrations; not three fully successful tasks. Final documentation/QA integrity publication is separate.",
+  "protocol": "source-task-governed-hybrid/v7",
+  "model": "qwen3.5:9b",
+  "gitHead": "43a2b76",
+  "gitState": "uncommitted_dev_changes",
+  "constructionDigest": "sha256:4d094fae11fe4caeb017dc32c289ac357dcc8bfa8e19ec2699fc67e40af317b2",
+  "executionDigest": "sha256:e49d3da051306f39c6ade03cb995f97dbc5993ec0b4571257729860975de40a4",
+  "counts": {
+    "skills": 10,
+    "repositories": 10,
+    "developerClassifiedDomains": 9,
+    "structurallyCompiled": 6,
+    "reviewedUsefulReadPrefixes": 5,
+    "wholeRequestedTaskPlansAccepted": 1,
+    "structurallyCompiledPureL1": 1,
+    "rejectedPureL1": 1,
+    "authorFailures": 4,
+    "liveSkills": 5,
+    "liveGraphCompleted": 5,
+    "reviewedUsefulMixedOutputs": 3,
+    "fulfilledRequestedTaskOutputs": 1,
+    "partialUsefulOutputs": 2,
+    "rejectedDrafts": 2,
+    "wholeOriginalSkillsAccepted": 0,
+    "publicCounterfactualPassed": 35,
+    "publicCounterfactualTotal": 35,
+    "checkedRealReadArgumentSets": 5
+  },
+  "authoring": {
+    "calls": 10,
+    "inputTokens": 67742,
+    "outputTokens": 3733,
+    "requestLatencyMs": {
+      "kind": "authoring_model_requests_not_runtime_latency",
+      "p50": 12640.25308348937,
+      "p95": 23296.205564565025,
+      "sum": 137804.7078331001
+    }
+  },
+  "live": {
+    "actualModelCalls": 5,
+    "inputTokens": 29320,
+    "outputTokens": 2113,
+    "runtimeWallLatencyMs": {
+      "SLOProven": false,
+      "includesRealModel": true,
+      "p50": 30789.117291918956,
+      "p95": 46364.423541445285,
+      "sampleCount": 5
+    }
+  },
+  "revisionHistory": [
+    {
+      "version": 1,
+      "calls": 10,
+      "compiledSkillCount": 4,
+      "reviewedUsefulPlanCount": 1,
+      "inputTokens": 53656,
+      "outputTokens": 6823
+    },
+    {
+      "version": 2,
+      "calls": 10,
+      "compiledSkillCount": 7,
+      "reviewedUsefulPlanCount": 2,
+      "inputTokens": 56346,
+      "outputTokens": 6176
+    },
+    {
+      "version": 3,
+      "calls": 10,
+      "compiledSkillCount": 2,
+      "reviewedUsefulPlanCount": 0,
+      "inputTokens": 69681,
+      "outputTokens": 12556
+    },
+    {
+      "version": 4,
+      "calls": 13,
+      "compiledSkillCount": 3,
+      "reviewedUsefulPlanCount": 2,
+      "inputTokens": 88355,
+      "outputTokens": 6480
+    },
+    {
+      "version": 5,
+      "calls": 10,
+      "compiledSkillCount": 3,
+      "reviewedUsefulPlanCount": 2,
+      "inputTokens": 72706,
+      "outputTokens": 6090
+    },
+    {
+      "version": 6,
+      "calls": 10,
+      "compiledSkillCount": 6,
+      "reviewedUsefulPlanCount": 5,
+      "inputTokens": 67742,
+      "outputTokens": 3733
+    },
+    {
+      "version": 7,
+      "calls": 10,
+      "compiledSkillCount": 6,
+      "reviewedUsefulPlanCount": 5,
+      "inputTokens": 67742,
+      "outputTokens": 3733
+    }
+  ],
+  "allHybridRevisionAndDiagnosticAndLiveCost": {
+    "actual9BCalls": 84,
+    "inputTokens": 537423,
+    "outputTokens": 52527,
+    "includes": "v1-v7 authoring, one failed schema-visibility diagnostic, v6/v7 live trials. Earlier v63/v65 separate."
+  },
+  "validation": {
+    "pytestPassed": 2630,
+    "subtestsPassed": 81,
+    "pytestSeconds": 247.75,
+    "changedPythonFilesLinted": 39,
+    "changedCodeRuffPassed": true,
+    "publicNegativeChecksUseModelDoubles": true
+  },
+  "unknown": {
+    "unseenSemanticAccuracy": null,
+    "wholeSkillConversionRate": null,
+    "populationCorrectStopRate": null,
+    "populationOverStopRate": null,
+    "dutyRetentionRate": null,
+    "productionSuccessProbability": null
+  },
+  "boundaries": [
+    "Developer-AI review is not independent human gold.",
+    "Known public development cohort; formal generalization gate closed.",
+    "3 useful outputs = 1 fulfilled scoped request + 2 partial analyses with explicit defects, not 3 complete successes.",
+    "All business providers are in-process synthetic fixtures; no public scripts, SQL, device configuration or Effect executed.",
+    "v6 had 1 useful output of 5; v7 keeps strict regions and author choices but changes generic reasoning instructions, input ordering and JSON decoding.",
+    "Some v7 authoring/live requests overlapped full pytest; cache/temperature/load not controlled, so latency changes are not causal speedup or SLO evidence.",
+    "No default DSH routing change, no new DSH-only versus Runtime A/B, no production engineering.",
+    "Original artifacts are ignored by Git; this compact summary does not publish or back up all raw evidence."
+  ],
+  "skills": [
+    {
+      "id": "snmp",
+      "repository": "netdata/netdata",
+      "commit": "b11b44dbdb620dfc9566081334c7488445b5f99f",
+      "sourcePath": "docs/netdata-ai/skills/query-snmp-traps",
+      "domain": "network_observability",
+      "construction": "construction_failed_no_retry",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "snmp",
+        "planKind": "not_accepted",
+        "rationale": "Invalid literal/host-const binding syntax, info rather than query, source/filter field confusion and relative-time synthesis remain; no execution. Parameter types/provenance are not relaxed.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": false,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "notion",
+      "repository": "openclaw/openclaw",
+      "commit": "aafe0878fd73123c5a5eecf076e05a48d86722bd",
+      "sourcePath": "skills/notion",
+      "domain": "knowledge_management",
+      "construction": "compiled_mixed_candidate_requires_review",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "notion",
+        "planKind": "strict_read_plus_reason",
+        "rationale": "Correct caller pageId binding to page_id; complete entry supplied; original read-only inspection task retained verbatim. Writes excluded. Scoped requested task, not full Notion Skill.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": true,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": true
+      }
+    },
+    {
+      "id": "handoff",
+      "repository": "wshobson/agents",
+      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6",
+      "sourcePath": "plugins/incident-response/skills/on-call-handoff-patterns",
+      "domain": "incident_operations",
+      "construction": "compiled_mixed_candidate_requires_review",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "handoff",
+        "planKind": "strict_read_plus_reason",
+        "rationale": "Correct caller notesPath read, complete entry and Template 2 retained. Admit only read plus candidate draft. Boundary prose wrongly says forbidden send/alert/completion should be handled by final LLM; outside_task category, original task and no-tool host take precedence. This annotation defect blocks whole-plan acceptance; inspect actual draft for false completion and missing duties.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": true,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "playwright",
+      "repository": "microsoft/playwright",
+      "commit": "a89041ef78727229ec9aa000d2d9787cd05abd6f",
+      "sourcePath": ".claude/skills/playwright-test-results",
+      "domain": "software_testing",
+      "construction": "construction_failed_no_retry",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "playwright",
+        "planKind": "not_accepted",
+        "rationale": "Synthesized SQL is a raw string outside exact-source binding schema. It references expected_status outside projected CTE and drops file from final grouping. No independent SQL validator/admission in this profile; no dispatch.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": false,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "simple-english",
+      "repository": "moeru-ai/airi",
+      "commit": "097202cd38ecb7ad06903988aba0c525c3074461",
+      "sourcePath": ".agents/skills/simple-english",
+      "domain": "language_editing",
+      "construction": "compiled_mixed_candidate_requires_review",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "simple-english",
+        "planKind": "pure_l1_rejected",
+        "rationale": "No reads, structurally valid pure L1 retention, not L0. Incorrect missing-host/future-input boundaries over-stop a possible rewrite; mechanical word checks also not assured. Reject whole/scoped proposal rather than inflate acceptance with a pure L1 fallback.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": false,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "documentation",
+      "repository": "bytedance/deer-flow",
+      "commit": "065f84f711453b289cac2bc3bd190767c095a6d9",
+      "sourcePath": "skills/public/code-documentation",
+      "domain": "developer_documentation",
+      "construction": "compiled_mixed_candidate_requires_review",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "documentation",
+        "planKind": "strict_read_plus_reason",
+        "rationale": "Useful initial directory discovery with correct projectPath. No fabricated path/selection. Full code analysis, file reads and accurate README remain incomplete. Boundary is misleadingly called missing_host: read_text_file exists; missing mechanism is selection/path/control in this narrow profile. Admit partial discovery/clarification draft only, no codebase-appropriate completed README claim.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": true,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "incident",
+      "repository": "langfuse/langfuse",
+      "commit": "9d08464e89fbf2e29b55638bda74bd605fc07c04",
+      "sourcePath": ".agents/skills/incident-alert-tickets",
+      "domain": "incident_operations",
+      "construction": "compiled_mixed_candidate_requires_review",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "incident",
+        "planKind": "strict_read_plus_reason",
+        "rationale": "List uses exact original incident-alert literal rather than unrelated environment or monitor identifiers. Useful initial knowledge read. Full match selection, matched detail/comments not performed. Boundary wrongly calls profile limitation a missing host filter. Admit partial comparison/clarification only; forbid known-cause/fix claims on partial recognition.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": true,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "phoenix",
+      "repository": "github/awesome-copilot",
+      "commit": "f95f1b4c3b153984e3da2744cef395c2355d0a44",
+      "sourcePath": "skills/phoenix-tracing",
+      "domain": "llm_observability",
+      "construction": "construction_failed_no_retry",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "phoenix",
+        "planKind": "not_accepted",
+        "rationale": "Literal path/value not present in cited quote; no source-complete, caller-bound manual tracing proposal. No instrument/install execution.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": false,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "warehouse",
+      "repository": "posthog/posthog",
+      "commit": "45ed1faec13373c512b653563474fa8c9d32852e",
+      "sourcePath": ".agents/skills/triaging-warehouse-sync-tickets",
+      "domain": "data_operations",
+      "construction": "compiled_mixed_candidate_requires_review",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "warehouse",
+        "planKind": "strict_read_plus_reason",
+        "rationale": "Correct ticketId binding; original task explicitly excludes DB and membership adapters. Full original entry and identity limitations retained; missing cookbook pages needed only for unavailable later queries are not required to read this ticket. Useful ticket analysis and precise escalation may proceed, not requester authentication or diagnosis. No database/write authority.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": true,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    },
+    {
+      "id": "tetragon",
+      "repository": "mukul975/anthropic-cybersecurity-skills",
+      "commit": "54a798831d2266a3ca61ce68a7acb80b81160d57",
+      "sourcePath": "skills/implementing-runtime-security-with-tetragon",
+      "domain": "runtime_security",
+      "construction": "construction_failed_no_retry",
+      "review": {
+        "actualDraftReviewed": false,
+        "id": "tetragon",
+        "planKind": "not_accepted",
+        "rationale": "Boundary cites unread script pages p018/p021; complete relevant Markdown had been supplied. Invalid evidence rejected. Planned kube namespace/selector literals need separate exact quote validation; no execution.",
+        "reviewKind": "developer_ai_not_independent_gold",
+        "scopedPlanAccepted": false,
+        "wholeOriginalSkillAccepted": false,
+        "wholeRequestedTaskPlanAccepted": false
+      }
+    }
+  ],
+  "executions": [
+    {
+      "case": "notion",
+      "compilationDigest": "sha256:562ea7ac4d0a4796074905bdb42b772c81b912f678e4d61980076db98a11ec63",
+      "executionDigest": "sha256:057e293b32956b558a55cef1b56f862c427dcfe20f668fabbd71bcc83d2e0c48",
+      "graphCompleted": true,
+      "actualModelCalls": 1,
+      "runtimeWallLatencyMs": 13817.268874961883,
+      "checkedArguments": [
+        {
+          "arguments": {
+            "page_id": "page-local-42"
+          },
+          "matchesFrozenFixture": true,
+          "tool": "notion_pages_get"
+        }
+      ],
+      "draftReview": {
+        "case": "notion",
+        "decision": "fulfilled_requested_task",
+        "executionDigest": "sha256:057e293b32956b558a55cef1b56f862c427dcfe20f668fabbd71bcc83d2e0c48",
+        "findings": [
+          "Returned the exact observed raw Markdown; draft/not-yet-approved status retained; no page modification or approval asserted."
+        ],
+        "limitations": [
+          "Unnecessary API-date/CLI/token uncertainty and followups remain; not full Notion Skill or production authentication evidence."
+        ],
+        "reportDigest": "sha256:0e39f724a956784548e12f01f202b7fc2b62b75a2e42fbd5e41219a1d2435a23",
+        "reviewKind": "developer_ai_not_independent_gold"
+      },
+      "counterfactualPassed": 7,
+      "counterfactualTotal": 7,
+      "draftExcerpt": "---\ntitle: Local review page\nstatus: draft\n---\n# Maintenance\nPlanned at 11:00 UTC; not yet approved.\n",
+      "excerptTruncated": false
+    },
+    {
+      "case": "handoff",
+      "compilationDigest": "sha256:664fc9dc6e6e346525cda485e8c8e6a22437a92ec2cf56f21d17712387e8e3ba",
+      "executionDigest": "sha256:3d23f1d8193e2e55b115d7cbbff3f9eac0bb0b6af445a91b6ea3754708e40945",
+      "graphCompleted": true,
+      "actualModelCalls": 1,
+      "runtimeWallLatencyMs": 30789.117291918956,
+      "checkedArguments": [
+        {
+          "arguments": {
+            "path": "/sandbox/shift.md"
+          },
+          "matchesFrozenFixture": true,
+          "tool": "read_text_file"
+        }
+      ],
+      "draftReview": {
+        "case": "handoff",
+        "decision": "not_accepted",
+        "executionDigest": "sha256:3d23f1d8193e2e55b115d7cbbff3f9eac0bb0b6af445a91b6ea3754708e40945",
+        "findings": [
+          "Now uses Quick Handoff and preserves active INC-42, separate investigation, pending Bob acknowledgement and unresolved alert verification.",
+          "Still invents yesterday for release and Alice Slack availability/shift-end contact. Drops INC-42 owner Alice and the explicit 15-minute escalation rule."
+        ],
+        "limitations": [
+          "Better format and no truncation do not make a reliable operational handoff; model language remains unverified."
+        ],
+        "reportDigest": "sha256:192a665d20aa1c6f69913ff42279116532bbbd5ac0c229b33c9af10ddb6aba8d",
+        "reviewKind": "developer_ai_not_independent_gold"
+      },
+      "counterfactualPassed": 7,
+      "counterfactualTotal": 7,
+      "draftExcerpt": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms since 08:10 UTC). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Owner: Chen. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Known Issue**: Dashboard data is stale; use raw metrics directly.\n- **Upcoming Event**: Maintenance window at 11:00 UTC (Owner: Dana).\n\n## Watch List\n1. Monitor API p95 latency closely until INC-42 resolves.\n2. Verify optical counters inspection results at 10:30 UTC.\n3. Ensure alerts are routing correctly to you before the maintenance window.\n\n## Recent\n- Deployed release 1.4 yesterday (07:50 UTC).\n\n## Coming Up\n- **11:00 UTC**: Infrastructure maintenance (Owner: Dana). Expect potential disruptions or read-only periods if applicable.\n\n## Questions?\nAlice is available on Slack until shift end for clarifying questions regarding INC-42 or the recent release. Please verify your PagerDuty and Slack notifications are active immediately.",
+      "excerptTruncated": false
+    },
+    {
+      "case": "documentation",
+      "compilationDigest": "sha256:77f2efcf13702ec18a61d9bfd7f6887c361447f9299030a946b0f0763084190c",
+      "executionDigest": "sha256:524e17c17f78e8ed7530ccd47a514ffb9f3111ed170cfb91f672635cd29326f0",
+      "graphCompleted": true,
+      "actualModelCalls": 1,
+      "runtimeWallLatencyMs": 35877.69287498668,
+      "checkedArguments": [
+        {
+          "arguments": {
+            "path": "/sandbox/project"
+          },
+          "matchesFrozenFixture": true,
+          "tool": "list_directory"
+        }
+      ],
+      "draftReview": {
+        "case": "documentation",
+        "decision": "not_accepted",
+        "executionDigest": "sha256:524e17c17f78e8ed7530ccd47a514ffb9f3111ed170cfb91f672635cd29326f0",
+        "findings": [
+          "Stops guessing a specific Python minimum and marks several sections pending.",
+          "Still emits unobserved editable-install/dev-extra/pytest commands as usable instructions despite listing them as unknown."
+        ],
+        "limitations": [
+          "Directory listing is not enough for codebase-appropriate README; uncertainties cannot repair conflicting concrete recommendations."
+        ],
+        "reportDigest": "sha256:8bec2bb92f7a1830973bced428829e2e83bf5abdae4e97659d5dd52c57df7b56",
+        "reviewKind": "developer_ai_not_independent_gold"
+      },
+      "counterfactualPassed": 7,
+      "counterfactualTotal": 7,
+      "draftExcerpt": "# Project Name\n\nA Python project located at `/sandbox/project`.\n\n## Features\n- [ ] **Core functionality** — Description pending analysis of `src/` contents.\n- [ ] **Dependencies** — Defined in `pyproject.toml`.\n\n## Quick Start\n\n### Prerequisites\n- Python 3.x (version to be determined from `pyproject.toml`).\n\n### Installation\n```bash\npip install -e .\n```\n\n## Documentation\n- [ ] **API Reference** — Pending analysis of public API in `src/`.\n- [ ] **Examples** — To be generated based on code usage.\n\n## Development\n\n### Setup\n```bash\npip install -e \".[dev]\"\n```\n\n### Testing\n```bash\npytest\n```\n\n## License\n[License information pending discovery in project files.]\n",
+      "excerptTruncated": false
+    },
+    {
+      "case": "incident",
+      "compilationDigest": "sha256:c7be6b4d41f2881ad76fe554dd603364257adb36947aa8b3edee59b6c2909cca",
+      "executionDigest": "sha256:613e392dd8f37d997f36d03466598266f3bc9097a819086137ca541422143d4d",
+      "graphCompleted": true,
+      "actualModelCalls": 1,
+      "runtimeWallLatencyMs": 23189.572750008665,
+      "checkedArguments": [
+        {
+          "arguments": {
+            "label": "incident-alert"
+          },
+          "matchesFrozenFixture": true,
+          "tool": "linear_list_issues"
+        }
+      ],
+      "draftReview": {
+        "case": "incident",
+        "decision": "useful_partial",
+        "executionDigest": "sha256:613e392dd8f37d997f36d03466598266f3bc9097a819086137ca541422143d4d",
+        "findings": [
+          "Correctly distinguishes monitor-42/prod from the other issue; preserves p95 > 800ms AND locks; current no-lock-evidence does not establish known cause.",
+          "Does not recommend applying the unsupported lock-owner fix and states no ticket write occurred. This is useful partial knowledge comparison only."
+        ],
+        "limitations": [
+          "Phrase lookup complete overstates source procedure: matched detail/comments were not fetched. A dated-section description is not attested. Needs explicit partial wording before user-facing activation.",
+          "Append/approval suggestion remains future candidate text, not an allowed action. No whole-task or verified correctness acceptance."
+        ],
+        "reportDigest": "sha256:4ed953a70dbf01481d55ad0e04d9e1eed3e9f0f9bcbcc81447dbe31c0f4d207a",
+        "reviewKind": "developer_ai_not_independent_gold"
+      },
+      "counterfactualPassed": 7,
+      "counterfactualTotal": 7,
+      "draftExcerpt": "Lookup complete. Found Linear issue `issue-2` for `[prod] API latency` (Monitor ID: monitor-42). The existing ticket contains a dated section recognizing `p95 > 800ms AND database locks`. \n\n**Comparison:**\nThe caller's evidence shows `p95 latency 900ms`, which matches the threshold condition. However, the current investigation reports **no database lock evidence**. The existing ticket's recognition signals require both conditions (latency + locks). Since the lock signal is absent in the current run, this does not constitute a confirmed match to the known cause section.\n\n**Classification:**\nThis represents a **partial match** or potentially a **new cause variant** where high latency occurs without database locks. Per skill policy, partial matches are treated as new causes, not known ones. A new dated section should be proposed for this specific scenario (High Latency w/o DB Locks) to prevent future false positives on the existing ticket.\n\n**Action:**\nNo write-back was performed as per the read-only constraint of this request. The finding indicates a need to update the root cause documentation to distinguish between lock-induced latency and other causes.",
+      "excerptTruncated": false
+    },
+    {
+      "case": "warehouse",
+      "compilationDigest": "sha256:cb5f67f7ff03a228f7873598fb07fee179f5db5f9eab89de7db64b0ba185ee94",
+      "executionDigest": "sha256:e524e9f4d22094fd64a1b5000a6e6aa802794cada45546d03844bd2df37b55ef",
+      "graphCompleted": true,
+      "actualModelCalls": 1,
+      "runtimeWallLatencyMs": 48986.10620805994,
+      "checkedArguments": [
+        {
+          "arguments": {
+            "ticket_id": "ticket-local-42"
+          },
+          "matchesFrozenFixture": true,
+          "tool": "conversations-tickets-retrieve"
+        }
+      ],
+      "draftReview": {
+        "case": "warehouse",
+        "decision": "useful_partial",
+        "executionDigest": "sha256:e524e9f4d22094fd64a1b5000a6e6aa802794cada45546d03844bd2df37b55ef",
+        "findings": [
+          "Correct ticket/requester values; EU/team123 remain claims, not membership proof; no database diagnosis or unauthorized query claimed.",
+          "Main recommendation routes verification to a qualified support/data-platform owner, preserving missing identity/membership/DB prerequisites."
+        ],
+        "limitations": [
+          "Verbose followups and irrelevant hypothetical uncertainties remain, including a source-example date under uncertainty. Region verification wording overstates database necessity.",
+          "Only local ticket triage/escalation is useful; root cause and a fully resolved one-action operational diagnosis remain unavailable."
+        ],
+        "reportDigest": "sha256:176997a1d63ba9ef4cfc51501c331c85fc52a678f17d4f68b82e91f5602bb875",
+        "reviewKind": "developer_ai_not_independent_gold"
+      },
+      "counterfactualPassed": 7,
+      "counterfactualTotal": 7,
+      "draftExcerpt": "Ticket ID ticket-local-42 reports a sync stop for EU team 123. The ticket text claims the issue but provides no authenticated membership or database evidence.\n\n**Current State:**\n- **Region:** Claimed EU (requires verification).\n- **Team:** Claimed 123 (requires verification).\n- **Requester:** alice@example.invalid (unverified membership).\n- **Database Access:** Not available. Direct-connect adapters for Postgres/ClickHouse are missing.\n\n**Diagnosis:**\nUnable to proceed with database triage because the required database and membership adapters are not supplied. The skill mandates verifying requester authorization against the team before querying production, which is impossible without the specific tools. Additionally, region detection requires cross-checking project URLs or tokens against live databases, which cannot be executed.\n\n**Recommendation:**\nEscalate to the data platform team or a support agent with database access to verify the ticket's claims and authorize the investigation. Do not attempt to query production databases without explicit adapter availability and verified requester membership.",
+      "excerptTruncated": false
+    }
+  ],
+  "reportDigest": "sha256:f806993cfff3d54f3661af4d332d196535f60b72fd1b0ed6dabec033000fe953"
+}

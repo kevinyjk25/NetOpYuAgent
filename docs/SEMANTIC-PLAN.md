@@ -2,11 +2,11 @@
 
 ## 中文
 
-本前端处理 **L1 原文 → 原文核对/清单 → 携带原文 ID 的闭合控制树 → 机械保留来源 → 分步填参 → L0 读取图**。它是阶段 1 的可选研究路径，不改变 DSH 默认路由，不自动激活合同。当前验收以[阶段 1 退出条件](STAGE-1-EXIT.md)及[项目进展](PROJECT-STATUS.md)为准。下文保留历史开发诊断；当前 v62 使用闭合控制树 v2 与内联来源，不再使用第二轮模型重新绑定程序出处。
+本前端处理 **L1 原文 → 原文核对/清单 → 携带原文 ID 的闭合控制树 → 机械保留来源 → 分步填参 → L0 读取图**。它是可选研究路径，不改变 DSH 默认路由，不自动激活合同。阶段 1 的 v62 已提交；阶段 2 保留 [v63 首批负结果](STAGE-2-PUBLIC-TRANSFER.md)，当前 [v65 修订](STAGE-2-REPRESENTATION-REPAIR.md)支持动态右值比较、input/observation 路径分区、完整行优先分页和缺失诊断触发的惰性来源检索。完整源文与预算保留；闭合控制树现为 v3，不另用模型重新绑定出处。见[当前进展](PROJECT-STATUS.md)；下文各旧版本是历史诊断，不代表当前能力或新的成功率。
 
 ### 为什么调整
 
-阶段 1 已完成并停在阶段 2 前：同版 v62 / 9B 的 6/6 只读区域通过原文/参数审阅，50/50 本地路径通过。详见[完整结果与边界](STAGE-1-RESULTS.md)；三种已知开发流程不是公开泛化证据。
+阶段 1 的历史验收：同版 v62 / 9B 的 6/6 只读区域通过原文/参数审阅，50/50 本地路径通过。详见[完整结果与边界](STAGE-1-RESULTS.md)；三种已知开发流程不是公开泛化证据。阶段 2 已启动，不把预算预检通过或 Schema 合法计作语义通过。
 
 原来的后置义务对账能够指出错误，但不能替模型构造正确的程序。新的前端把模型需要同时处理的问题拆开：
 
@@ -132,9 +132,11 @@ python -m evaluation.source_ledger run /tmp/my-semantic-run \
 
 ## English
 
-Stage 1 passed and stopped before Stage 2: frozen v62/9B yields 6/6 source/argument-reviewed read regions and 50/50 local paths. See [results and limits](STAGE-1-RESULTS.md); three known developer procedures are not public generalization evidence.
+Current implementation is v65 / closed syntax v3. See the [representation and navigation repair](STAGE-2-REPRESENTATION-REPAIR.md) for dynamic RHS references, caller/output path partitioning, lossless line-first paging and provisional-gap retrieval. The following v62/v63 descriptions retain historical experimental context, not the current version or a new success claim.
 
-This opt-in frontend generates an original-source scan, business outline and closed control tree with per-node source IDs, mechanically preserves those origins, fills arguments and compiles through the existing Flow engine. Provenance preservation cannot prove entailment. Default DSH routing and activation are unchanged. See [Stage 1 exit criteria](STAGE-1-EXIT.md). Historical trials remain below; current v62 uses closed syntax v2 and inline provenance without a second model call to reconstruct sources.
+Stage 1's historical v62/9B baseline yields six reviewed read regions and 50 local paths, now committed at 43a2b76. [Stage 2](STAGE-2-PUBLIC-TRANSFER.md) uses a separately frozen v63 revision with shared fragment schemas and 2,048-byte pages; full originals, unread pages and unchanged budgets remain. See [results and limits](STAGE-1-RESULTS.md); three known developer procedures are not public generalization evidence.
+
+This opt-in frontend generates an original-source scan, business outline and closed control tree with per-node source IDs, mechanically preserves those origins, fills arguments and compiles through the existing Flow engine. Provenance preservation cannot prove entailment. Default DSH routing and activation are unchanged. See [Stage 1 exit criteria](STAGE-1-EXIT.md). Historical trials remain below; closed syntax v2 and inline provenance still avoid a second model call to reconstruct sources. Budget admission and schema validity are not semantic acceptance.
 
 An ordered, source-anchored `procedure` interpretation precedes graph construction, separating source misunderstanding from outline-to-graph loss during review. It is not independent Gold or an automatic completeness proof. Named observations replace model-authored nested Tree addresses during planning. The compiler resolves names and enforces uniqueness, lexical scope and dominance. Typed schema navigation supplies exact JSON Pointers but neither runtime values nor correct semantic mappings. `array_length` accepts only schema-valid arrays and runs through the existing binding/flow implementation; its binding artifact is versioned v2 while legacy expressions retain v1.
 

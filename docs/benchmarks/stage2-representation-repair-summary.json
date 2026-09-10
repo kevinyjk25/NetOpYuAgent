@@ -1,0 +1,83 @@
+{
+  "protocol": "windowed-source-ledger/v65",
+  "evidenceRole": "known_failure_development_probe_not_full_batch_or_holdout",
+  "batchSkillCount": 10,
+  "toolBearingSkills": 9,
+  "initialRequestsWithinBudget": 6,
+  "oldInitialRequestsWithinBudget": 7,
+  "probeSkillCount": 3,
+  "modelCalls": 6,
+  "structurallyCompiledSkills": 1,
+  "acceptedReadRegions": 0,
+  "recordedInputTokens": 46397,
+  "recordedOutputTokens": 15309,
+  "summedRequestLatencyMs": 920593.9937101211,
+  "requestLatencyMs": {
+    "p50": 164261.362,
+    "p95": 231006.262
+  },
+  "reviewKind": "developer_ai_not_independent_gold",
+  "wholeSkillAccuracy": null,
+  "parameterOracleAccuracy": null,
+  "dutyRetentionRate": null,
+  "correctStopRate": null,
+  "overStopRate": null,
+  "runtimeBehaviorTests": false,
+  "providerCalls": 0,
+  "sourceScriptCalls": 0,
+  "largeRuntimeABUnlocked": false,
+  "unseenGeneralizationProven": false,
+  "validation": {
+    "fullTestsPassed": 2566,
+    "publicationAndRepairChecksPassed": 35,
+    "subtestsPassed": 81,
+    "targetedTestsPassed": 261
+  },
+  "limitations": [
+    "same developer created tasks and reviewed; not independent Gold",
+    "targeted three known failures, not a new/full ten-Skill batch",
+    "public scripts and business providers inert; synthetic Runtime unit checks are separate",
+    "query-label, predicate and duty semantic defects remain; no accepted region",
+    "initial resource admission regressed; budgets unchanged",
+    "per-request latency overlaps local regression; not isolated Runtime performance"
+  ],
+  "sourceEvidenceDigest": "sha256:01627602f596850f4491da3deccf15162900e5557468dd3d9c9db7399113b1af",
+  "sourceEvidencePath": "artifacts/translator-v2/stage2-20260910/evidence-v65/report.json",
+  "boundArtifactCount": 122,
+  "rows": [
+    {
+      "acceptedRegion": false,
+      "candidateProduced": false,
+      "disposition": "incomplete_output_no_candidate",
+      "id": "handoff",
+      "modelCalls": 2,
+      "replayIdentical": true,
+      "reportDigest": "sha256:43a0e97987d7c871ad6016a438511d7c8568ce2d8f4e1714c367f410d3eb7d93",
+      "semanticVerdict": null,
+      "status": "no_candidate"
+    },
+    {
+      "acceptedRegion": false,
+      "candidateProduced": false,
+      "disposition": "unresolved_plan_not_compiled",
+      "id": "playwright",
+      "modelCalls": 2,
+      "replayIdentical": true,
+      "reportDigest": "sha256:e14816697751616cf11f4af24cf1141dee8c34a6acf893d89bc33a330a708d78",
+      "semanticVerdict": null,
+      "status": "operation_plan_has_unresolved_issues"
+    },
+    {
+      "acceptedRegion": false,
+      "candidateProduced": true,
+      "disposition": "compiled_but_semantically_rejected",
+      "id": "incident",
+      "modelCalls": 2,
+      "replayIdentical": true,
+      "reportDigest": "sha256:f78ede97219407da59fbfb7a3ef4b85440427032d09e453a81650baea906dc6b",
+      "semanticVerdict": "rejected",
+      "status": "compiled_region_requires_semantic_review"
+    }
+  ],
+  "reportDigest": "sha256:a857162aaf2fbd73bb91387cdea7b8d40683ad2aa2b3b6c85a98aa534f2bc263"
+}

@@ -4,6 +4,12 @@
 
 ## 中文
 
+### 2026-09-10：受控混合流程补充
+
+Runtime 现在可以按固定依赖调用宿主注册的 LLM 服务：严格 L0 片段 → 开放 L1 推理候选 → 独立准入 → 后续严格片段，也支持有界并行和必需分支汇合。推理服务仍属于 Reasoning Plane，调度它不等于赋予其执行权。实现位于 `network_runtime/l0/hybrid.py` 和 `hybrid_execution.py`；严格读取继续进入原 `flow.py` / `execute_host_read`。
+
+整图称为 Governed Hybrid Skill，不是完全确定性的 L0。新路径只覆盖受审的本地读取/推理接线，不自动调用原 Effect 事务、激活合同或修改 DSH 默认路由。[精确接口与未实现范围](docs/GOVERNED-HYBRID-FLOWS.md)、[阶段 2 验收](docs/STAGE-2-HYBRID-VALIDATION.md)。
+
 ### 1. 权威架构
 
 NetOpYuAgent 当前只以 **EnsuredSkill 网络可靠执行研究原型**为目标。本文依据[原型权威准则](docs/ENSUREDSKILL-PROTOTYPE.md)描述当前架构；历史 P1/P2 产品化设计不再是当前架构的一部分。
@@ -200,6 +206,8 @@ Evaluation → all public test surfaces
 ---
 
 ## English
+
+2026-09-10 addendum: the Runtime now composes original deterministic L0 read regions with host-bound LLM reasoning, independent candidate admission and bounded dependency/parallel scheduling. Reasoning remains a separate authority domain; candidates are not facts or permission. The whole artifact is a Governed Hybrid Skill, not deterministic L0. This opt-in local prototype neither adds an Effect executor nor changes default DSH routing. See [interfaces and limitations](docs/GOVERNED-HYBRID-FLOWS.md) and [Stage 2 criteria](docs/STAGE-2-HYBRID-VALIDATION.md).
 
 C3o's `evaluation.task_alignment` is pre-compilation research review: task/source ranges, candidate/L1/conditional obligations, source tensions and host gaps. Future model inputs exclude developer review decisions. Binding checks grant no semantic acceptance, activation or new control-plane authority. Live devices are not required to prepare it, but isolated hosts and source API mappings must be explicit. See [task alignment](docs/TASK-SOURCE-ALIGNMENT.md).
 

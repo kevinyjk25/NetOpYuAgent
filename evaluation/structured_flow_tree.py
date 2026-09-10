@@ -141,7 +141,8 @@ def compile_structured_tree(bundle: dict, tree: StructuredFlowTree, reads: dict,
                 exits = [(node, "next")]
             elif isinstance(statement, StructuredTreeIf):
                 node.update(kind="branch", left=expression(statement.left, environment),
-                            equals={"kind": "constant", "value": statement.equals}, on_true=None, on_false=None)
+                            equals=(expression(statement.equals, environment) if isinstance(statement.equals, dict)
+                                    else {"kind": "constant", "value": statement.equals}), on_true=None, on_false=None)
                 exits = []
                 for field, edge in (("when_equal", "on_true"), ("otherwise", "on_false")):
                     child, tails = block(getattr(statement, field), environment, at + "/" + field, depth + 1)

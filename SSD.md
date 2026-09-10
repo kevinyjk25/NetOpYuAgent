@@ -4,6 +4,14 @@
 
 ## 中文
 
+### 双驱动安全补充（2026-09-10）
+
+- 固定图与宿主授权先于任何模型/读取回调；模型不得新增边、跳过必需依赖或扩大输入范围。
+- 输出 Schema、模型/配置、预算与独立候选准入分开校验；模型置信度或自报批准不能替代宿主策略。
+- LLM 可处理历史快照，但必须保持候选身份；后续严格操作不得使用已过期的控制/数据证据。
+- 并行必需分支失败、超时、非法数据均停止后续接纳；不能把取消请求当作外部操作已取消的证明。
+- 新混合原型不执行 Effect，也不执行第三方 Skill 脚本；原有审批、验证、补偿安全要求不变。测试依据见[阶段 2 验收](docs/STAGE-2-HYBRID-VALIDATION.md)，接口边界见[混合流程](docs/GOVERNED-HYBRID-FLOWS.md)。
+
 ### 1. 规格地位
 
 本文定义 EnsuredSkill 网络可靠执行原型的功能、安全和验收要求。它不构成生产安全认证；绝对安全、100% 准确率和 100% 可用率都不是当前可证明结论。权威研究边界见[原型准则](docs/ENSUREDSKILL-PROTOTYPE.md)。
@@ -169,6 +177,8 @@ Control 只在隔离本地仿真中运行。Treatment 的转换未达阈值时�
 ---
 
 ## English
+
+2026-09-10 addendum: bind graph and host consent before callbacks; models may not add edges, skip required dependencies or widen projections. Check output shape, model/configuration and budget separately from independent candidate admission. Historical analysis does not refresh action evidence. Required-branch failure and timeout close downstream admission; cancellation is not proof of external cancellation. The mixed prototype executes no Effects or third-party Skill scripts, and changes no existing approval/verification/compensation requirements. See [Stage 2 criteria](docs/STAGE-2-HYBRID-VALIDATION.md).
 
 ### 1. Scope and trust
 

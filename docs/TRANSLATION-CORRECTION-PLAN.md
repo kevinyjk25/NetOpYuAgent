@@ -2,7 +2,9 @@
 
 ## 中文
 
-更新：2026-09-10。用户授权完成阶段 1，具备进入阶段 2 条件后停止。有效顺序：**源审查 → 新输入小批 → 机制纠偏与诊断 → 跨 Skill 泛化验证 → Runtime 对照**。不从授权推断合入状态。见[进展](PROJECT-STATUS.md)、[旧计划](TRANSLATION-CORRECTION-HISTORY.md)。
+当前更新：阶段 2 首批负结果已保留，进入 [v65 表示与导航修复](STAGE-2-REPRESENTATION-REPAIR.md)。动态右值与数据来源校验已有代码；下一优先级是分权的规则出处、开放 L1 职责和来源/输出预算。下文 v62/v63 是已有阶段记录，不是当前作者版本。
+
+更新：2026-09-10。阶段 1 已提交到本地 dev（43a2b76）；用户授权先清理、再进入阶段 2，现已开始[公开开发迁移验证](STAGE-2-PUBLIC-TRANSFER.md)。有效顺序：**源审查 → 新输入小批 → 机制纠偏与诊断 → 跨 Skill 泛化验证 → Runtime 对照**。未推送或合入 master。见[进展](PROJECT-STATUS.md)、[旧计划](TRANSLATION-CORRECTION-HISTORY.md)。
 
 ### 不变原则
 
@@ -22,7 +24,7 @@
 
 ### 接下来评估什么
 
-**阶段 1 已完成并停止：**[验收报告](STAGE-1-RESULTS.md)记录同版 v62 / 9B 三类已知流程各两次首构，6/6 受审只读区域、50/50 本地路径。下一步才按[固定交接范围](STAGE-1-EXIT.md)预选 10 个公开开发 Skill；当前未执行，不扩大 Runtime A/B。[语义前端](SEMANTIC-PLAN.md)分离原文核对、业务步骤、未来宿主要求、闭合树、来源和填参；[逐项义务对账](SOURCE-DUTY-ACCOUNTING.md)及 C3 阶段保留为历史诊断。已知开发集经过反复调试，这个结果不是完整 Skill 或总体语义准确率。
+**阶段 1 已完成，阶段 2 正在执行：**[验收报告](STAGE-1-RESULTS.md)保留同版 v62 / 9B 三类已知流程各两次首构，6/6 受审只读区域、50/50 本地路径。[阶段 2](STAGE-2-PUBLIC-TRANSFER.md)按固定交接范围预选 10 个公开开发 Skill，先保存 v62 预算失败，再另建 v63 的首次构造；不扩大 Runtime A/B。[语义前端](SEMANTIC-PLAN.md)分离原文核对、业务步骤、未来宿主要求、闭合树、来源和填参；[逐项义务对账](SOURCE-DUTY-ACCOUNTING.md)及 C3 阶段保留为历史诊断。已知开发集经过反复调试，这些结果不是完整 Skill 或总体语义准确率。
 
 C3p 已实现[隔离宿主与动态列解码](NETDATA-ISOLATED-VALIDATION.md)，两次原网关读取后仅输出合成本页计数。接下来将明确的可编译段、L1 职责、未支持的分页/完整性区分开，把当前开发者接线映射成可审查候选并接入小批 9B 首次构造；不能继续只增加脚本检查，也不能把手写 demo 算作模型转译通过。原始 Skill 不裁剪，适配和发布策略变化显式保留。完整任务/语义门禁未通过前，不解锁规模 Runtime 比较。
 
@@ -39,7 +41,9 @@ C3o 的[四份任务对齐档案](TASK-SOURCE-ALIGNMENT.md)保留 35 项开发�
 
 ## English
 
-Stage 1 passed and stopped: the [report](STAGE-1-RESULTS.md) records frozen v62/9B, 6/6 reviewed read regions across three known procedures repeated twice and 50/50 local paths. Stage 2's preselected ten public development Skills have not run; follow the [handoff](STAGE-1-EXIT.md), not large Runtime A/B. The [semantic frontend](SEMANTIC-PLAN.md) separates source review, business outline, future requirements, closed control syntax, provenance and arguments. Earlier C3 accounting remains historical diagnosis. Repeated development-set tuning is not whole-Skill or population accuracy.
+Current work is the [v65 representation/navigation repair](STAGE-2-REPRESENTATION-REPAIR.md) after the preserved negative first batch. Dynamic RHS and source typing are implemented; authority-aware rule origins, open L1 duties and source/output budgets remain priorities. v62/v63 below are historical stage records.
+
+Stage 1 is committed locally at 43a2b76; its [report](STAGE-1-RESULTS.md) retains frozen v62/9B, six reviewed regions and 50 local paths. [Stage 2](STAGE-2-PUBLIC-TRANSFER.md) now runs the preselected ten known public development Skills, preserving v62 preflight failures and separate v63 construction. Follow the [handoff](STAGE-1-EXIT.md), not large Runtime A/B. The [semantic frontend](SEMANTIC-PLAN.md) separates source review, business outline, future requirements, closed control syntax, provenance and arguments. Earlier C3 accounting remains historical diagnosis. Repeated development-set tuning is not whole-Skill or population accuracy.
 
 C3p now implements an [isolated host and column decoding](NETDATA-ISOLATED-VALIDATION.md), producing synthetic page-only counts through two original-gateway reads. Next separate compilable regions, L1 duties and unsupported pagination/completeness, map developer wiring into reviewable candidates, and connect small 9B first construction. More script checks alone are not the goal; the handwritten demo cannot count as translation success. Keep full Skills and explicit adaptation/publication changes. Large Runtime evaluation remains locked.
 

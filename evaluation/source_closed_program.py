@@ -11,7 +11,7 @@ import copy
 from evaluation import source_program_lines as lines
 from evaluation import structured_authoring as prior
 
-PROFILE = "inactive-read-plan/closed-control-tree/v2"
+PROFILE = "inactive-read-plan/closed-control-tree/v3"
 TERMINAL_LABELS = {
     "complete": "Source-linked read-only path completed; no broader business outcome is asserted.",
     "handoff": "Source-linked read boundary reached; declared remaining duties have not been executed.",
@@ -21,7 +21,7 @@ TERMINAL_LABELS = {
 def schema(catalog, modes=(), bindings=(), **kwargs):
     original = lines.schema(catalog, modes, bindings, model_view=True, **kwargs)
     definitions = copy.deepcopy(original["$defs"])
-    variants = definitions.pop("ProgramStatement")["oneOf"]
+    variants = definitions.pop("ProgramStatement")["anyOf"]
     node = {"$ref": "#/$defs/ProgramNode"}
     for variant in variants:
         properties = variant["properties"]
@@ -42,7 +42,7 @@ def schema(catalog, modes=(), bindings=(), **kwargs):
             # Actual source-required output work remains in handoff duties.
             properties.pop("explanation")
         variant["required"] = list(properties)
-    definitions["ProgramNode"] = {"oneOf": variants}
+    definitions["ProgramNode"] = {"anyOf": variants}
     return {**node, "$defs": definitions}
 
 

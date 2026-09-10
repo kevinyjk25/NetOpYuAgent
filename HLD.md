@@ -4,6 +4,10 @@
 
 ## 中文
 
+### 受控双驱动补充（2026-09-10）
+
+新增受控混合图：宿主先绑定完整图、调用参数和权限上下文摘要，再调度原严格读取与有界 LLM。模型只接收声明的数据投影，输出候选；只有独立宿主准入才可供指定的后续严格片段使用。并发上限、调用预算、all-success 汇合与失败停止由 Runtime 固定。开放式内容质量和严格执行安全分别验证，不能合成一个虚假的成功率。详见[混合流程](docs/GOVERNED-HYBRID-FLOWS.md)。
+
 ### 1. 目标
 
 本阶段只回答一个问题：**概率性 Agent 如何在没有直接写权限的前提下，借助可执行合同、事实证据和近似事务安全地操作网络。**
@@ -199,6 +203,8 @@ Hermes、A2A、企业 OIDC/PDP/Change Authority、Provider 签名供应链、Cat
 ---
 
 ## English
+
+2026-09-10 addendum: the mixed scheduler binds graph, arguments and host context, then composes original strict reads with bounded reasoning services. Model outputs remain candidates, requiring independent region-bound admission before later strict operations. The Runtime fixes dependency, concurrency, call budget and required-join/failure rules. Language quality and execution controls are evaluated separately; see [governed hybrid flows](docs/GOVERNED-HYBRID-FLOWS.md).
 
 ### 1. Goal and non-goals
 

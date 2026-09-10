@@ -35,7 +35,7 @@ from evaluation.source_retrieval import decision_phase, delivery_index, is_repea
 from network_runtime.l0.read_contracts import _source_object
 from network_runtime.l0.structured_schema import snapshot_json
 
-PROTOCOL = "windowed-source-ledger/v62"
+PROTOCOL = "windowed-source-ledger/v65"
 MAX_ROUNDS = 6
 MAX_NOTES = 32
 CONTEXT_TOKENS = 49152
@@ -43,7 +43,9 @@ OUTPUT_TOKENS = 4096
 REASONING_OUTPUT_TOKENS = 8192
 TEMPLATE_RESERVE = 4096
 MAX_WIRE_BYTES = 131072
-MAX_PAGE_BYTES = 12000
+# Full originals remain in the bundle. Small bounded pages also bound the
+# per-fragment mandatory response, rather than fitting raw text alone.
+MAX_PAGE_BYTES = 2048
 
 
 def policy():
@@ -59,12 +61,15 @@ def policy():
             "semanticScanView": "shared-parent-location-exact-fragment-text/v1",
             "semanticInitialReferences": "two-direct-inert-prose-references-within-whole-page-budget/v1",
             "maxWireBytes": MAX_WIRE_BYTES, "maxPageUtf8Bytes": MAX_PAGE_BYTES,
+            "pageBoundaries": "line-first-whitespace-fallback-exact-intervals/v1",
+            "semanticComparisons": "typed-reference-rhs-caller-observation-paths/v1",
             "budgetMethod": "utf8-byte-proxy-not-tokenizer-attestation", "citations": "request-bound-source-blocks/v1",
             "rehydration": "exact-source-interval-union/v1",
             "retrieval": "delivery-separate-from-review/v1", "repeatPolicy": "joint-window-decision-or-gap",
             "hostBindings": "explicit-digest-bound-declarations/v1", "authoringBoundary": "inactive-vs-execution/v1",
             "obligationInspection": "task-isolated-multiphase-source-classification/v2",
-            "gapSearch": "task-prioritized-gap-literals/v2", "bindingGrammar": "explicit-before-generation/v1",
+            "gapSearch": "task-prioritized-gap-literals-and-paths/v3", "bindingGrammar": "explicit-before-generation/v1",
+            "semanticGapNavigation": "provisional-business-gaps-before-program-admission/v1",
             "maxAuthoringBlockSteps": MAX_BLOCK_STEPS, "schemaAnnotations": "titles-omitted-literals-retained/v1",
             "catalogAuthoring": catalog_authoring.PROFILE, "operationModes": source_modes.PROFILE,
             "planAuthoring": source_plan.PROFILE, "maxPlannedReads": source_plan.MAX_READS,
@@ -72,17 +77,34 @@ def policy():
 
 
 def pages_for(packet):
-    """Preserve character offsets but split pages on a UTF-8 byte budget as well."""
+    """Lossless, bounded, line-first paging; oversized lines use word/UTF-8 cuts.
+
+    Rejoin adjacent upstream chunks first so their old character cuts cannot
+    become accidental sentence boundaries. No source text is summarized away.
+    """
     result = []
-    for original in prior.pages_for(packet).values():
-        text, cuts, start, size = original["text"], [], 0, 0
-        for i, char in enumerate(text):
-            width = len(char.encode("utf-8"))
-            if size + width > MAX_PAGE_BYTES:
-                cuts.append((start, i))
-                start, size = i, 0
-            size += width
-        cuts.append((start, len(text)))
+    originals = []
+    for page in prior.pages_for(packet).values():
+        if (originals and all(originals[-1][key] == page[key] for key in ("path", "sourceDigest"))
+                and originals[-1]["end"] == page["start"]):
+            originals[-1] = {**originals[-1], "end": page["end"], "text": originals[-1]["text"] + page["text"]}
+        else:
+            originals.append(dict(page))
+    for original in originals:
+        text, cuts, start = original["text"], [], 0
+        while start < len(text):
+            end, size = start, 0
+            while end < len(text) and size + len(text[end].encode("utf-8")) <= MAX_PAGE_BYTES:
+                size += len(text[end].encode("utf-8"))
+                end += 1
+            if end < len(text):
+                line_end = text.rfind("\n", start, end) + 1
+                word_end = max((i + 1 for i in range(start, end) if text[i].isspace()), default=start)
+                end = line_end if line_end > start else word_end if word_end > start else end
+            cuts.append((start, end))
+            start = end
+        if not cuts:
+            cuts.append((0, 0))
         for start, end in cuts:
             page = {**original, "start": original["start"] + start, "end": original["start"] + end,
                     "text": text[start:end], "startLine": original["startLine"] + text[:start].count("\n"),
@@ -440,7 +462,7 @@ def make_request(packet, state, bindings=()):
                     "unreadEntryPages", "sourcePages", "sourceBlocks", "ledgerNavigation", "dependencyRequests",
                     "hostBindings", "remainingNoteSlots", "unavailableTextPaths", "hostOperationModes",
                     "planningValuePaths", "sourceScanFragments", "programEvidenceChoices", "authoringPhase",
-                    "currentTask", "futureScenario", "requiredOutputSchema"}
+                    "currentTask", "futureScenario", "requiredOutputSchema", "gapSourceSearch"}
             content = {k: v for k, v in content.items() if k in keep}
             content["programLanguage"] = {
                 "language": closed_program.PROFILE,
@@ -453,7 +475,7 @@ def make_request(packet, state, bindings=()):
                     "unreadEntryPages", "sourcePages", "sourceBlocks", "ledgerNavigation", "dependencyRequests",
                     "hostBindings", "remainingNoteSlots", "unavailableTextPaths", "hostOperationModes",
                     "currentTask", "futureScenario", "requiredOutputSchema", "frozenProgram", "frozenPlan",
-                    "availableBindingSources", "argumentSourceNames", "parameterSlots", "authoringPhase"}
+                    "availableBindingSources", "argumentSourceNames", "parameterSlots", "authoringPhase", "gapSourceSearch"}
             if planned["phase"] == "program_sources":
                 keep -= {"inputSchema", "hostCatalog"}
             content = {k: v for k, v in content.items() if k in keep}
@@ -485,8 +507,36 @@ def derive(packet, state, wire, envelope):
         files["choice.json"] = choice
         current = frame(packet, state)
         blocks = citation_blocks(current)
+        def retrieve_missing(gaps):
+            if (not (state.get("obligationReview") or state.get("semanticPlan"))
+                    or decision_phase(state, MAX_ROUNDS) == "last_round_requires_candidate_or_gap"):
+                return False
+            search = search_gaps(gaps, pages_for(packet), state, task=packet["task"])
+            files["gap-source-search.json"] = search
+            if not search["selectedPages"]:
+                return False
+            next_state = copy.deepcopy(state)
+            next_state["submitted"] = sorted(set(state["submitted"]) | set(state["window"]))
+            next_state["requests"].append({"fromPages": state["window"], "requestedPages": search["selectedPages"],
+                "reason": "Local literal/path search for a provisional model gap; not proof of absence or resolution.",
+                "semanticDependencyResolved": False,
+                "deliveryRound": len(state["requests"]) + state.get("inspectionCalls", 0) + 1})
+            next_state["window"] = search["selectedPages"]
+            next_state["gapSourceSearch"] = {"terms": search["terms"], "selectedPages": search["selectedPages"],
+                                             "semanticResolutionProven": False}
+            files["next-state.json"] = next_state
+            return True
+
         if choice["mode"] == "operation_plan":
             if state.get("semanticPlan"):
+                if choice["business_gaps"]:
+                    gaps = [{"source": row["source"], "missing": row["explanation"]} for row in choice["business_gaps"]]
+                    files["provisional-plan-gaps.json"] = {"gaps": [
+                        {**g, "source": source_span(g["source"], blocks)} for g in gaps],
+                        "draftAdmitted": False, "semanticResolutionProven": False}
+                    if retrieve_missing(gaps):
+                        return files, {**cost, "candidateStatus": "source_window_requested",
+                                       "retrievalOrigin": files["gap-source-search.json"]["strategy"]}
                 anchored, combined, frozen, audit = inline_program.prepare(choice, packet, blocks, modes=state.get("operationModes", []),
                     bindings=json.loads(wire["messages"][1]["content"])["hostBindings"])
                 files["program-draft.json"] = frozen
@@ -590,21 +640,9 @@ def derive(packet, state, wire, envelope):
                                         "translationSucceeded": False, "runtimeAuthorityGranted": False}
             # A valid diagnosis is provisional while bounded local source search
             # can add unread originals. Never retry malformed/transport failures.
-            if state.get("obligationReview") and decision_phase(state, MAX_ROUNDS) != "last_round_requires_candidate_or_gap":
-                search = search_gaps(choice["gaps"], pages_for(packet), state, task=packet["task"])
-                files["gap-source-search.json"] = search
-                if search["selectedPages"]:
-                    next_state = copy.deepcopy(state)
-                    next_state["submitted"] = sorted(set(state["submitted"]) | set(state["window"]))
-                    next_state["requests"].append({"fromPages": state["window"], "requestedPages": search["selectedPages"],
-                        "reason": "Local literal search for a provisional model gap; not proof of absence or resolution.",
-                        "semanticDependencyResolved": False,
-                        "deliveryRound": len(state["requests"]) + state.get("inspectionCalls", 0) + 1})
-                    next_state["window"] = search["selectedPages"]
-                    next_state["gapSourceSearch"] = {"terms": search["terms"], "selectedPages": search["selectedPages"],
-                                                     "semanticResolutionProven": False}
-                    files["next-state.json"] = next_state
-                    return files, {**cost, "candidateStatus": "source_window_requested", "retrievalOrigin": search["strategy"]}
+            if retrieve_missing(choice["gaps"]):
+                return files, {**cost, "candidateStatus": "source_window_requested",
+                               "retrievalOrigin": files["gap-source-search.json"]["strategy"]}
             return files, {**cost, "candidateStatus": "source_grounded_gap_requires_review"}
         if choice["mode"] == "candidate":
             raw = copy.deepcopy(choice["tree"])

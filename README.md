@@ -2,7 +2,9 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-10。转译修复阶段 1 的开发验收已完成，停在阶段 2 前；**L1→L0 公开 Skill 泛化门禁仍未通过**，不开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-10。**阶段 2 双驱动小批开发验证完成，正式泛化门禁仍未通过。** 真实 9B 的 5 个受限混合执行中，1 个限定请求完成、2 个局部分析可用、2 个草稿不接受；不能当成 3 个完整成功。[结果与失败报告](docs/STAGE-2-HYBRID-RESULTS.md) / [项目进展](docs/PROJECT-STATUS.md)。
+
+Runtime 已兼容严格 L0 与有界 LLM 的双驱动流程；完整的范围、使用入口、指标和原始失败见[阶段 2 报告](docs/STAGE-2-HYBRID-RESULTS.md)。默认 DSH 路由未变，当前改动尚未提交。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -23,22 +25,20 @@ flowchart TB
 | 层 | 权威职责 | 明确边界 |
 |---|---|---|
 | Reasoning Plane | 会话、开放式理解、诊断、追问、计划和 L1 编排 | 只能提出候选；产品路径没有直接写权限 |
-| Reliability Runtime | Contract、journal-backed Typed Graph、跨步骤 Evidence、Guard、Risk、事务、验证和补偿 | 不做开放式语言推理，不把模型 confidence 当权限 |
+| Reliability Runtime | Contract、journal-backed Typed Graph、跨步骤 Evidence、Guard、Risk、事务、验证和补偿；调度有界 LLM | 模型仍只给候选，confidence 不构成事实或权限 |
 | Infrastructure Plane | 通过 MCP/API/CLI/NETCONF 提供事实和效果 | 不判断上层业务意图，不自报成功终态 |
 
-新确认的扩展原则是[受控混合流程](docs/GOVERNED-HYBRID-FLOWS.md)：Runtime 按依赖调度严格节点与有界 LLM 任务，支持预声明的串并行、汇合和失败方向；LLM 输出是候选，不能绕过参数、权限和效果校验。**目前是设计约束，图内 LLM 节点与并行调度尚未实现**；混合流程也不等于整图确定性。
+新增[受控混合流程](docs/GOVERNED-HYBRID-FLOWS.md)：Runtime 按依赖调度原 L0 严格片段与有界 LLM，支持串并行、all-success 汇合和独立候选准入；开放职责可保留原始 L1，不必强行转写成确定性逻辑。LLM 不能改图、直接调用工具或绕过参数/权限校验。**含推理的整图不等于确定性 L0**；新入口为可选本地原型，不自动接入写事务。
 
 ### 当前研究门禁
 
-**阶段 1 开发验收完成，阶段 2 尚未开始。** 同版 9B 在 **3 种已知流程 × 2 次构造**中得到 **6/6 受审只读区域，50/50 本地路径通过**；20 次模型请求 p50/p95 为 **24.07/132.34 秒**，不是 Runtime 时延。[完整报告、原文到生成图的查看入口与边界](docs/STAGE-1-RESULTS.md)。这些流程经过多轮开发调整，不是独立样本或公开 Skill 泛化证明；默认 DSH 路由未变。库中 **53 Skill／38 仓库**是入库数，不是成功数。下表仅为历史小样本实验。
+最终 v7 使用固定的 **10 Skill / 10 仓库 / 9 个开发领域**：6 个结构候选，5 个有用读取前段。真实执行的 5 份草稿只有 **1 完成＋2 局部可用**；交接和 README 草稿仍有未支持的事实/命令。35/35 公开图接线检查、2630 项回归及 81 子测试通过。[逐例审阅与机器摘要](docs/STAGE-2-HYBRID-RESULTS.md)。
 
-| 历史转译证据 | 结果 | 能说明什么 |
-|---|---|---|
-| 新六份开发 Skill：构造阶段 | 2/6 案例、30/46 场景 | 原始生成结果；含一份结构失败 |
-| 同批：加源条件表达式后 | 5/6 案例、35/46 场景 | 四个可执行片段案例 + 一个正确停止案例；结构失败的 11 场景仍未运行 |
-| 完整源语义 / 未见 Skill 泛化 | 尚未证明 | 引用仍有语义错位；布尔结果正确不等于整 Skill 正确 |
+含真实 9B 的图执行 p50/p95 为 **30.79 / 46.36 秒**（5 样本，部分并发 pytest）；5 次执行消耗 29,320 输入 / 2,113 输出 token。**不是 SLO、总体准确率或新 DSH A/B**。未见泛化仍未证明；[首批失败](docs/STAGE-2-PUBLIC-TRANSFER.md)和[v65 负结果](docs/STAGE-2-REPRESENTATION-REPAIR.md)完整保留。
 
-本批从 L1 用 9B 新生成，但 Skill/Oracle 仍由同一开发助手构造，不是独立 Gold 或公开未见集。10 次模型请求的 p50/p95 为 20.91/35.82 秒，是本地请求耗时，不是 Runtime 时延。[语义迁移报告](docs/FLOW-SEMANTIC-TRANSFER.md)保留负结果、修订、成本和源码回放入口；[实验索引](docs/FLOW-EXPERIMENTS.md)保留历史路线。
+阶段 1（43a2b76）在 **3 种已知流程 × 2 次构造**中得到 **6/6 受审只读区域，50/50 本地路径通过**；它只证明多轮调整后的开发流程，不是公开泛化。[阶段 1 原始报告](docs/STAGE-1-RESULTS.md)。两批不能混算提升；默认 DSH 路由未变。库中 **53 Skill／38 仓库**是入库数，不是成功数。
+
+历史修订与负结果见[语义迁移报告](docs/FLOW-SEMANTIC-TRANSFER.md)和[实验索引](docs/FLOW-EXPERIMENTS.md)，不与当前批次混算。
 
 项目的证据顺序是 **L1→L0 泛化证明 → L0 确定性校验 → Runtime 评测**。原 100 个公开 Skill / 72 仓库 / 9 个搜索类别属于已知开发库，不是未见集；搜索类别尚不等于核实的业务领域。小批新验证及后续 ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 的完整门禁见[泛化要求](docs/TRANSLATION-GENERALIZATION-GATE.md)。未通过前不扩大 Runtime A/B。
 
@@ -87,23 +87,7 @@ Hermes/A2A、跨域业务 Lab、企业身份与审批、Provider 供应链、治
 
 ### 历史小样本结果与当前证据边界
 
-以下实验只改变一个变量：Control 为 `DSH + 同一模型/L1 Skill + 原生工具编排`；Treatment 加入 L0 资格门禁与 Runtime。它们证明机制值得继续研究，但样本参与了早期设计，不能证明转译泛化，也不能解锁新的大规模 Runtime 结论。
-
-| 模型与指标 | DSH + L1 原生 | DSH + L0 auto Runtime |
-|---|---:|---:|
-| 9B Task Completion | 50.00% | **86.67%** |
-| 9B Unsafe / False Commit / Invalid Action | 20.00% / 13.33% / 33.33% | **0 / 0 / 0** |
-| 9B Execution Precision / Autonomous Coverage | 59.09% / 43.33% | **100% / 76.67%** |
-| 9B p50 / p95 | 90.693 / 158.397 秒 | **44.405 / 72.173 秒** |
-| 7B Task Completion | 20.00% | **36.67%** |
-| 7B Unsafe / False Commit / Invalid Action | 10.00% / 3.33% / 20.00% | **0 / 0 / 0** |
-| 7B Execution Precision / Autonomous Coverage | 50.00% / 20.00% | **100% / 36.67%** |
-
-9B 转译严格通过 58/60，7B 为 38/60，两者误接受均为 0。7B 两臂各有 18/30 次 DSH `EMPTY_RESPONSE`，因此只支持安全边界跨模型稳定，不代表 7B 可用性合格。完整实验矩阵、消融贡献、进程失败、复现命令和摘要见 [ES-P0 本地证据报告](docs/ES-P0-EVIDENCE.md)。固定集结果不是生产概率。
-
-仓库外自动数据通道已封存 240 条模型合成用例，覆盖 6 类 Anthropic Skill、10 类事务/故障、6 个 MCP 域和 3 类语言。qwen3.5:9b 转译协议有效 240/240，可信 Oracle 合格 235/240、fallback 5、false accept 0；10 场景×3 次真实 DSH 配对中，Treatment 将 Task Completion 从 76.67% 提升至 93.33%，unsafe 从 4/30 降至 0/30，p50 从 103.6 秒降至 64.3 秒。它用于在正式人工 ES-P1 前发现价值和边界，**不冒充独立人工 holdout 或生产概率**。方法、完整指标和命令见[仓库外合成 Holdout](docs/SYNTHETIC-HOLDOUT.md)。
-
-公开 Skill 技术链路已完成角色隔离模拟：15 个实际公开 Skill、45 个案例、3 次重复和 270 次真实本地 DSH 实验臂执行中，Gold-blind 9B 转译路由一致 43/45、unsafe Runtime 误接纳为 0；Treatment 将 Task Completion 从 82.22% 提升到 97.78%，L0 路由从 21/42 提升到 42/42，p95 从 109.3 秒降到 56.1 秒。原生只读和 safe-stop 两臂保持相同，唯一残余是 1 个 L1 只读案例的三次失败。该结果是虚拟 Case/Gold 角色和声明式 fixture 的 `ES-P1-Wild-Sim`，**不是真人独立 holdout、真实系统或生产概率**；完整方法、分层结果和边界见[角色隔离模拟报告](docs/ES-P1-WILD-SIMULATED-RESULTS.md)，测试列表见[Skill 索引](docs/benchmarks/es-p1-wild-skill-index.json)，工作流见[公开 Skill 市场语料](docs/ES-P1-PUBLIC-SKILL-CORPUS.md)。
+历史 DSH 对照、消融、模型成本和失败分布分别见 [ES-P0 本地证据](docs/ES-P0-EVIDENCE.md)、[仓库外合成评测](docs/SYNTHETIC-HOLDOUT.md)、[公开 Skill 角色隔离模拟](docs/ES-P1-WILD-SIMULATED-RESULTS.md)。这些样本参与早期开发，只用于机制研究，不证明当前转译泛化或生产成功概率。当前优先查看[阶段 1 结果](docs/STAGE-1-RESULTS.md)和[当前进展](docs/PROJECT-STATUS.md)。
 
 Runtime 结果不能只看一项 `success`：
 
@@ -235,6 +219,8 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 
 ## English
 
+Stage 2's small dual-drive development loop is complete; changes are uncommitted and formal generalization remains unproven. Five real 9B mixed runs yield **one fulfilled scoped request, two useful partial analyses and two rejected drafts**, not three complete successes. See [results, usage and limits](docs/STAGE-2-HYBRID-RESULTS.md). Default DSH routing is unchanged.
+
 EnsuredSkill is a network-first Reliability Runtime research prototype. DSH, the LLM, and L1 Skills produce hypotheses and Candidate Plans; Contract, Evidence, Guard, Risk, and transactional state determine what is allowed to reach the network.
 
 The [authoritative prototype charter](docs/ENSUREDSKILL-PROTOTYPE.md) supersedes conflicting production-engineering plans. Enterprise identity, provider supply chain, multi-team governance, Hermes/A2A productization, HA/DR, WORM audit, and production SLOs are frozen future work rather than current architecture or exit criteria.
@@ -246,10 +232,10 @@ Separate probabilistic reasoning from deterministic execution: the LLM proposes 
 | Layer | Authority | Boundary |
 |---|---|---|
 | Reasoning Plane | DSH, LLM, L1 understanding, diagnosis, clarification and planning | proposes only; the product path has no direct write authority |
-| Reliability Runtime | Contract, typed graph, Evidence, Guard, Risk, transaction, verification and compensation | performs no open-ended reasoning; confidence grants no authority |
+| Reliability Runtime | Contract, typed graph, Evidence, Guard, Risk, transaction, verification/compensation and bounded LLM scheduling | model outputs remain candidates; confidence grants neither truth nor authority |
 | Infrastructure Plane | network/service Providers over MCP/API/CLI/NETCONF and labs | owns facts and effects, but cannot self-declare a verified terminal outcome |
 
-The newly confirmed [governed hybrid-flow direction](docs/GOVERNED-HYBRID-FLOWS.md) schedules strict nodes and bounded model tasks through declared dependencies, sequential/parallel joins and failure routes. Model outputs remain candidates subject to parameter, authority and effect gates. **In-graph LLM nodes and parallel scheduling are not implemented yet**; a mixed workflow is not wholly deterministic.
+The [governed hybrid workflow](docs/GOVERNED-HYBRID-FLOWS.md) composes original strict regions, bounded model tasks, explicit dependencies, parallel/all-success joins and independent candidate admission. Original L1 duties may be retained without forced deterministic paraphrasing. Models cannot mutate graphs, directly call tools or bypass parameter/permission checks. This opt-in local prototype adds no automatic Effect integration; a mixed workflow is not wholly deterministic.
 
 L1, L0.5, L0, and a Runtime plan have different authority. L1 is natural-language semantic guidance; L0.5 is a review-only structured proposal; only an explicitly reviewed and activated compiled L0 can govern an effect. A per-request Candidate Plan remains untrusted until the Runtime resolves the exact L0, grounds parameters, validates evidence/guards/risk, and creates a plan-bound approval. An unqualified read may remain read-only; an unqualified write stops safely and never regains native-Agent write authority. See the [complete Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md).
 
@@ -262,9 +248,9 @@ The Runtime mechanism and wiring prototype is complete, but the core project hyp
 
 ### Active research gate
 
-**Stage 1 development criteria passed; Stage 2 has not started.** One frozen 9B version produced **6/6 reviewed read regions across 3 known procedures × 2 constructions**, passing **50/50 local paths**. Twenty model requests have p50/p95 **24.07/132.34 seconds**, not Runtime latency. See the [report, source-to-generated-graph inspection and limits](docs/STAGE-1-RESULTS.md). These repeatedly tuned developer procedures are not independent samples or public-Skill generalization proof. Default DSH routing is unchanged; **53 Skills/38 repositories** describe inventory, not successful translations. The following figures are historical.
+Frozen v7 retains ten Skills/ten repositories/nine developer domains: six structural proposals and five useful read prefixes. Actual output review accepts **one scoped request and two partial analyses**, while handoff/README drafts retain unsupported facts/commands. Public graph checks pass 35/35; full regression passes 2630 tests plus 81 subtests. Model-inclusive graph p50/p95 is **30.79/46.36 seconds** (n=5, some concurrent pytest); five calls consume 29,320 input / 2,113 output tokens. This is not an SLO, population accuracy or new DSH A/B. See [all reviews and metrics](docs/STAGE-2-HYBRID-RESULTS.md). The [first negative batch](docs/STAGE-2-PUBLIC-TRANSFER.md), [v65 results](docs/STAGE-2-REPRESENTATION-REPAIR.md) and [Stage 1 evidence](docs/STAGE-1-RESULTS.md) remain separate. Inventory is not successful translation coverage.
 
-An earlier six-package development batch improves from **2/6 cases, 30/46 scenarios** after construction to **5/6, 35/46** with source expressions: four executable-fragment cases and one safe stop. Eleven scenarios of a structurally invalid case remain unrun. These are 9B generations on assistant-authored packages/oracles, not independent Gold or unseen public Skills. Ten model requests have local p50/p95 of **20.91/35.82 seconds**, not Runtime latency. These historical citation-role failures remain; see [results and revisions](docs/FLOW-SEMANTIC-TRANSFER.md).
+Earlier development experiments, negative results and source-expression revisions remain in the [historical report](docs/FLOW-SEMANTIC-TRANSFER.md); they are not pooled with current results.
 
 Evidence order remains **L1-to-L0 generalization → L0 validation → Runtime evaluation**. The original 100 public Skills from 72 repositories/nine discovery-query strata are known development data; query strata are not verified business domains. Large Runtime A/B remains gated by at least three disjoint unseen cohorts totaling 50 Skills, 15 repositories, eight domains and 600 cases, including the unchanged [quality thresholds](docs/TRANSLATION-GENERALIZATION-GATE.md).
 
@@ -272,17 +258,7 @@ Evidence order remains **L1-to-L0 generalization → L0 validation → Runtime e
 
 The active prototype includes 21 reviewed L0 contracts and readable three-stage trajectories, LAN/DC/WAN L1 guidance, the DSH path, a journal-backed Typed Graph gate, cross-step evidence provenance and stage latency, network Observation/Effect providers, Containerlab/FRR labs, and the ES-P0 evaluation protocol. Hermes/A2A, enterprise controls, supply-chain admission, governance, and extra domains are frozen experimental code rather than active capability claims.
 
-The local ES-P0 evidence loop is complete. In 30 real paired DSH sessions with `qwen3.5:9b`, treatment improved task completion from 50.00% to 86.67%, execution precision from 59.09% to 100%, and autonomous coverage from 43.33% to 76.67%; unsafe execution, false commits, and invalid actions fell from 20.00%/13.33%/33.33% to zero. With `qwen2.5:7b`, the same safety metrics also fell to zero, but 18/30 sessions in both arms failed at the DSH/model availability layer, so 7B is not availability-qualified. Translation false accepts were zero for both models. See the [ES-P0 local evidence report](docs/ES-P0-EVIDENCE.md).
-
-These are transparent local development results, not production probability, hidden-set generalization, or vendor-device certification. Historical one-shot and evaluator-only native-write experiments remain component/exploratory evidence only and are not product fallback paths.
-
-A repository-external synthetic path has sealed 240 model-authored cases across six Anthropic Skill feature families, ten transaction/fault patterns, six MCP domains, and three language groups. qwen3.5:9b produced 240/240 schema-valid proposals; 235 passed every trusted Oracle, five remained fallback-only, and no rejected proposal received Runtime authority. Across ten stratified scenarios and three real-DSH repetitions, Treatment improved task completion from 76.67% to 93.33%, reduced unsafe executions from 4/30 to 0/30, and reduced p50 latency from 103.6 to 64.3 seconds. This remains model-authored pre-ES-P1 evidence, not independent human qualification or a production probability. See the [synthetic holdout guide](docs/SYNTHETIC-HOLDOUT.md).
-
-The public-Skill path now has a complete role-separated simulation over 15 real public Skills, 45 cases, three repetitions, and 270 real local DSH arm executions. Gold-blind 9B translation matched 43/45 simulated Gold routes with zero unsafe Runtime accepts. Treatment improved task completion from 82.22% to 97.78%, lifted the L0 route from 21/42 to 42/42, and reduced p95 from 109.3 to 56.1 seconds; native-read and safe-stop outcomes were unchanged. This is `ES-P1-Wild-Sim` over virtual Case/Gold roles and declarative fixtures, **not independent-human holdout, real-system evidence, or production probability**. See the [role-separated simulation report](docs/ES-P1-WILD-SIMULATED-RESULTS.md), [tested-Skill index](docs/benchmarks/es-p1-wild-skill-index.json), and [public Skill-market workflow](docs/ES-P1-PUBLIC-SKILL-CORPUS.md).
-
-Execution outcomes are deliberately not a generic success Boolean. `verified_success` is the only positive success and requires independent postcondition evidence. `rollback_verified` proves restoration after a failed task, while `precondition_changed`, `rejected`, and `expired` are safe pre-effect stops. `manual_intervention_required` means the Runtime cannot prove the target or recovery state. Inspect a plan with `scripts/netopyu-dsh runtime PLAN_ID` and verify its event chain with `runtime-audit`.
-
-Production qualification remains open for vendor devices, enterprise identity/change systems, independently owned signing roots, distributed HA/DR, remote immutable audit, and production SLOs. EVPN L3VPN and MPLS L2/L3 VPN are outside the current lab coverage.
+Historical metrics, controls, limitations, failures and reproduction commands are in [ES-P0 evidence](docs/ES-P0-EVIDENCE.md), [synthetic holdout](docs/SYNTHETIC-HOLDOUT.md) and [public-Skill role-isolated simulation](docs/ES-P1-WILD-SIMULATED-RESULTS.md). These are hypothesis-forming developer evidence, not current translation-generalization or production probabilities. Read [current progress](docs/PROJECT-STATUS.md) and [Stage 1 results](docs/STAGE-1-RESULTS.md) first. Verified success requires independent postcondition evidence; verified rollback means task failure with demonstrated recovery, not task completion.
 
 ### Quick start
 

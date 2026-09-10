@@ -393,6 +393,8 @@ def lower(tree, packet, blocks, modes=()):
                 environment[at] = (name, tool["outputSchema"])
             elif step["kind"] == "if_equal":
                 expr(step["left"], environment, {}, at + "/left")
+                if isinstance(step["equals"], dict):
+                    expr(step["equals"], environment, {}, at + "/equals")
                 yes = block(step["when_equal"], environment, at + "/when_equal")
                 no = block(step["otherwise"], environment, at + "/otherwise")
                 falls_through = falls_through and (yes or no)

@@ -27,14 +27,18 @@ def search_gaps(gaps, pages, state, *, task=""):
             if match:
                 matches.append({"term": term, "start": page["start"] + match.start(),
                                 "end": page["start"] + match.end(), "text": match.group()})
-        if matches:
+        path_terms = [term for term in selected if "/" in term and
+                      (page["path"] == term or page["path"].endswith("/" + term))]
+        if matches or path_terms:
             hits.append({"pageId": key, "path": page["path"], "matchedTerms": matches,
-                         "taskMatchedTermCount": sum(m["term"].casefold() in task.casefold() for m in matches),
-                         "score": len(matches)})
+                         "matchedPathTerms": path_terms,
+                         "taskMatchedTermCount": sum(term.casefold() in task.casefold()
+                                                     for term in {m["term"] for m in matches} | set(path_terms)),
+                         "score": len(matches) + len(path_terms)})
     # A model's speculative alternatives should not outrank explicit task terms
     # merely by being more numerous. Neither kind of literal is a truth claim.
     hits.sort(key=lambda h: (-h["taskMatchedTermCount"], -h["score"], h["pageId"]))
-    return {"strategy": "task-prioritized-gap-literals/v2", "terms": selected,
+    return {"strategy": "task-prioritized-gap-literals-and-paths/v3", "terms": selected,
             "omittedTermCount": max(0, len(terms) - MAX_TERMS), "excludedPages": sorted(excluded),
             "matches": hits[:5], "selectedPages": [hits[0]["pageId"]] if hits else [],
             "semanticResolutionProven": False, "sourceCoverageProven": False,

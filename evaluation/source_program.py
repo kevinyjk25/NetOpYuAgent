@@ -12,7 +12,7 @@ import re
 
 from network_runtime.l0.structured_schema import pointer_parts, schema_location, schema_types
 
-LANGUAGE = "inactive-read-plan/python-shaped-v2"
+LANGUAGE = "inactive-read-plan/python-shaped-v3"
 NAME = r"[a-zA-Z][a-zA-Z0-9_]{0,39}"
 
 
@@ -125,7 +125,17 @@ def parse(program, *, input_schema=None, catalog=None):
                     expression, source = copy.deepcopy(environment[test.left.id])
                 else:
                     expression, source = reference(test.left, environment)
-                right = _scalar(test.comparators[0])
+                comparator = test.comparators[0]
+                if isinstance(comparator, ast.Call):
+                    right, right_source = reference(comparator, environment)
+                    if right_source != source:
+                        raise ValueError("both predicate operands require the same predicate witness")
+                elif isinstance(comparator, ast.Name) and comparator.id in environment:
+                    right, right_source = copy.deepcopy(environment[comparator.id])
+                    if right_source is None:
+                        raise ValueError("predicate RHS requires an explicit scalar field")
+                else:
+                    right = _scalar(comparator)
                 yes, yes_open = block(statement.body, environment, depth + 1)
                 no, no_open = block(statement.orelse, environment, depth + 1)
                 steps.append({"kind": "if_equal", "source": source, "left": expression,

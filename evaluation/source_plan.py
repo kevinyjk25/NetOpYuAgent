@@ -64,7 +64,10 @@ Then express that SAME business procedure as program, a CLOSED control tree. Fou
   Preserve the source's explicit comparison value and branch order; do not invert a test just to rearrange steps.
   when_equal and otherwise each contain one child NODE.
   Keep dependent steps inside the branch obtaining their data. Both paths must be complete trees; no empty arm.
-  For collection cardinality, value.kind=length selects the FULL array pointer; equals is a nonnegative integer.
+  equals is either a source-specified scalar literal or another typed field/length operand with source+pointer.
+  Compare future values by reference, never by quoting an input field's name as a string value.
+  Input paths belong only to input; observation paths must exist on the selected read's actual output schema.
+  For collection cardinality, value.kind=length selects the FULL array pointer; literal counts are nonnegative integers.
   Empty means length equals zero, NOT comparison to string "[]", null or an implicit missing-field failure.
 - complete: the source-defined read region is finished on this path, with no remaining duty.
   There is no free-text explanation: code labels control status, not health, repair or business success.
@@ -273,11 +276,14 @@ def planning_schema(blocks, catalog, modes, request, gap, bindings=(), *, semant
                                       value_paths=planning_sources(catalog, input_schema), evidence_ids=evidence_choices(blocks),
                                       observation_names=OBSERVATION_SLOTS)
         definitions = program_schema.pop("$defs")
+        # The same required fragment assessment is reused, not expanded once
+        # per source line. Keep every key, role, bound and required field.
+        definitions["SourceScanFragment"] = prior._obj({
+            "roles": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"enum": [
+                "observation", "decision", "remaining_work", "restriction", "execution_requirement", "background", "unresolved"]}},
+            "meaning": text})
         plan = prior._obj({"mode": {"const": "operation_plan"}, "purpose": text,
-            "source_scan": prior._obj({key: prior._obj({
-                "roles": {"type": "array", "minItems": 1, "maxItems": 4, "items": {"enum": [
-                    "observation", "decision", "remaining_work", "restriction", "execution_requirement", "background", "unresolved"]}},
-                "meaning": text}) for key in scan_fragments(blocks)}),
+            "source_scan": prior._obj({key: {"$ref": "#/$defs/SourceScanFragment"} for key in scan_fragments(blocks)}),
             "procedure": {"type": "array", "minItems": 1, "maxItems": 24,
                           "items": prior._obj({"source": source, "statement": text})},
             "business_gaps": {"type": "array", "maxItems": 16, "items": prior._obj({"source": source, "explanation": text})},
@@ -368,19 +374,22 @@ def prepare(choice, packet, blocks, *, modes=(), scenario=None, semantic=False):
                         raise ValueError("planned operation occurrence missing from source witness")
                     reads[-1]["sourceOperation"] = item.pop("sourceOperation")
             else:
-                ref = item["left"]
-                if semantic:
-                    if ref["source"] not in observation_paths:
-                        raise ValueError("unknown or future observation reference")
-                    ref["source"] = observation_paths[ref["source"]]
-                if ref["source"] not in env:
-                    raise ValueError("planned branch reference does not dominate its use")
-                actual, _ = schema_location(env[ref["source"]], ref["pointer"])
-                if ref["kind"] == "array_length":
-                    if not semantic or schema_types(actual) != {"array"}:
-                        raise ValueError("array_length requires semantic plan mode and an array source")
-                elif ref["kind"] != "reference" or not schema_types(actual) <= {"string", "number", "integer", "boolean", "null"}:
-                    raise ValueError("planned branch must compare a scalar reference")
+                operands = [item["left"]]
+                if isinstance(item["equals"], dict):
+                    operands.append(item["equals"])
+                for ref in operands:
+                    if semantic:
+                        if ref["source"] not in observation_paths:
+                            raise ValueError("unknown or future observation reference")
+                        ref["source"] = observation_paths[ref["source"]]
+                    if ref["source"] not in env:
+                        raise ValueError("planned branch reference does not dominate its use")
+                    actual, _ = schema_location(env[ref["source"]], ref["pointer"])
+                    if ref["kind"] == "array_length":
+                        if not semantic or schema_types(actual) != {"array"}:
+                            raise ValueError("array_length requires semantic plan mode and an array source")
+                    elif ref["kind"] != "reference" or not schema_types(actual) <= {"string", "number", "integer", "boolean", "null"}:
+                        raise ValueError("planned branch must compare a scalar reference")
                 yes, yes_open = block(step["when_equal"], env, at + "/when_equal", depth + 1)
                 no, no_open = block(step["otherwise"], env, at + "/otherwise", depth + 1)
                 item["when_equal"], item["otherwise"] = yes, no

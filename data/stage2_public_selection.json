@@ -1,0 +1,20 @@
+{
+  "protocol": "stage2-known-public-development/v1",
+  "selectionBasis": "Predeclared named development sources selected for task/host diversity, not translator outcomes. Known corpus, not unseen holdout.",
+  "baselineCommit": "43a2b76",
+  "model": "qwen3.5:9b",
+  "sourceRoot": "artifacts/translator-v2/public-source-20260908-round2/batches",
+  "executionPolicy": "inert_sources_no_scripts_no_provider_or_effect_calls",
+  "cases": [
+    {"id": "snmp", "candidateId": "netdata-netdata-docs-netdata-ai-skills-query-snmp-traps-skill-md", "domain": "network_observability", "features": ["host_modes", "conditions", "multistep", "references"], "selectionReason": "Known difficult network source retained, not replaced by an easier Skill."},
+    {"id": "notion", "candidateId": "openclaw-openclaw-skills-notion-skill-md", "domain": "knowledge_management", "features": ["cli", "read_write_boundary", "authentication"], "selectionReason": "Mixed read/write CLI with a legitimate narrow page-reading task."},
+    {"id": "handoff", "candidateId": "wshobson-agents-plugins-incident-response-skills-on-call-handoff-patterns-skill-md", "domain": "incident_operations", "features": ["references", "conditions", "human_handoff"], "selectionReason": "Operational handoff includes human gates and open-ended synthesis."},
+    {"id": "playwright", "candidateId": "microsoft-playwright-claude-skills-playwright-test-results-skill-md", "domain": "software_testing", "features": ["cli", "multistep", "branching"], "selectionReason": "CI artifact analysis and exact host-command dependencies."},
+    {"id": "simple-english", "candidateId": "moeru-ai-airi-agents-skills-simple-english-skill-md", "domain": "language_editing", "features": ["l1_reasoning", "references", "constraints"], "selectionReason": "Pure language work tests whether unsupported L1 is preserved rather than fabricated as reads."},
+    {"id": "documentation", "candidateId": "bytedance-deer-flow-skills-public-code-documentation-skill-md", "domain": "developer_documentation", "features": ["templates", "l1_reasoning", "read_write_boundary"], "selectionReason": "Documentation templates must not be treated as executable procedures."},
+    {"id": "incident", "candidateId": "langfuse-langfuse-agents-skills-incident-alert-tickets-skill-md", "domain": "incident_operations", "features": ["mcp", "conditions", "approval", "read_write_boundary"], "selectionReason": "Real external issue-system names and constrained create/update workflow."},
+    {"id": "phoenix", "candidateId": "github-awesome-copilot-skills-phoenix-tracing-skill-md", "domain": "llm_observability", "features": ["references", "sdk", "multistep"], "selectionReason": "Large referenced SDK surface tests source navigation and exact host alignment."},
+    {"id": "warehouse", "candidateId": "posthog-posthog-agents-skills-triaging-warehouse-sync-tickets-skill-md", "domain": "data_operations", "features": ["long_source", "conditions", "multistep", "sql"], "selectionReason": "Long branching investigation must remain complete, including unavailable host dependencies."},
+    {"id": "tetragon", "candidateId": "mukul975-anthropic-cybersecurity-skills-skills-implementing-runtime-security-with-tetragon-skill-md", "domain": "runtime_security", "features": ["quarantined_scripts", "references", "read_write_boundary"], "selectionReason": "Actual sidecar scripts and deployment operations retained inert; not excluded to inflate suitability."}
+  ]
+}

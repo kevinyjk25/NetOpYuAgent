@@ -9,7 +9,7 @@ from jsonschema import Draft202012Validator
 from evaluation import structured_authoring as prior
 from evaluation.source_program import NAME
 
-PROFILE = "inactive-read-plan/typed-statements-v7"
+PROFILE = "inactive-read-plan/typed-statements-v8"
 BRANCHES = {"if_equal", "if_length_equal"}
 OBSERVATION_SLOTS = tuple(f"obs{i}" for i in range(8))
 
@@ -57,31 +57,46 @@ def schema(catalog, modes=(), bindings=(), *, model_view=False, value_paths=None
         "oneOf": [value, prior._obj({"kind": {"const": "alias"}, "name": name})]}
     predicates = [
         row("if_equal", {"value": compare,
-                         "equals": {"type": ["string", "number", "boolean", "null"]},
+                         "equals": {"anyOf": [{"type": ["string", "number", "boolean", "null"]}, compare]},
                          "when_equal": {**block, "minItems": 1}, "otherwise": block}),
         row("if_length_equal", {"source": observation, "pointer": {"type": "string", "maxLength": 300},
                          "equals": {"type": "integer", "minimum": 0},
                          "when_equal": {**block, "minItems": 1}, "otherwise": block}),
     ]
+    operand_defs = {}
     if model_view and value_paths is not None:
-        # All original type-compatible paths remain selectable. The source
-        # observation, comparison value, polarity and branch bodies are NOT
-        # chosen here. The original compiler checks the selected source/type.
+        # Couple caller paths to input and tool-output paths to observations.
+        # The exact tool behind a model-selected observation is only known after
+        # the graph is authored; the lexical parser still checks that pairing.
         predicates = []
+        def operands(kind, paths):
+            alternatives = []
+            for origin_kind in ("caller_input", "tool_output"):
+                pointers = sorted({p["pointer"] for p in paths if p["originKind"] == origin_kind})
+                if pointers:
+                    source = {"const": "input"} if origin_kind == "caller_input" else read_name
+                    alternatives.append(prior._obj({"kind": {"const": kind}, "source": source,
+                                                   "pointer": {"enum": pointers}}))
+            return alternatives
         for scalar_type in ("boolean", "number", "string", "null"):
             kinds = {"integer", "number"} if scalar_type == "number" else {scalar_type}
-            paths = sorted({p["pointer"] for p in value_paths if set(p["types"]) & kinds
-                            and set(p["types"]) <= {"string", "number", "integer", "boolean", "null"}})
-            if paths:
-                operand = prior._obj({"kind": {"const": "field"}, "source": observation, "pointer": {"enum": paths}})
-                predicates.append(row("if_equal", {"value": operand, "equals": {"type": scalar_type},
-                    "when_equal": {**block, "minItems": 1}, "otherwise": block}))
-        arrays = sorted({p["pointer"] for p in value_paths if p["types"] == ["array"]})
-        if arrays:
-            operand = prior._obj({"kind": {"const": "length"}, "source": observation, "pointer": {"enum": arrays}})
-            predicates.append(row("if_equal", {"value": operand,
-                "equals": {"type": "integer", "minimum": 0},
-                "when_equal": {**block, "minItems": 1}, "otherwise": block}))
+            paths = [p for p in value_paths if set(p["types"]) & kinds
+                     and set(p["types"]) <= {"string", "number", "integer", "boolean", "null"}]
+            fields = operands("field", paths)
+            lengths = operands("length", [p for p in value_paths if p["types"] == ["array"]]) if scalar_type == "number" else []
+            alternatives = fields + lengths
+            if alternatives:
+                key = "ProgramOperand" + scalar_type.title()
+                operand_defs[key] = {"anyOf": alternatives}
+                operand = {"$ref": "#/$defs/" + key}
+                if fields:
+                    predicates.append(row("if_equal", {"value": {"anyOf": fields} if lengths else operand,
+                        "equals": {"anyOf": [{"type": scalar_type}, operand]},
+                        "when_equal": {**block, "minItems": 1}, "otherwise": block}))
+                if lengths:
+                    predicates.append(row("if_equal", {"value": {"anyOf": lengths},
+                        "equals": {"anyOf": [{"type": "integer", "minimum": 0}, operand]},
+                        "when_equal": {**block, "minItems": 1}, "otherwise": block}))
     variants = reads + predicates + [
         row("complete", {"explanation": text}),
         row("handoff", {**handoff, **({"restrictions": restrictions} if model_view else {})}),
@@ -97,7 +112,7 @@ def schema(catalog, modes=(), bindings=(), *, model_view=False, value_paths=None
         row("end", {"outcome": {"enum": ["needs_l1", "unsupported"]}, "explanation": text,
                     "duties": {"type": "array", "minItems": 1, "maxItems": 8, "items": duty}}),
         ]
-    return {**block, "minItems": 1, "$defs": {"ProgramStatement": {"oneOf": variants},
+    return {**block, "minItems": 1, "$defs": {"ProgramStatement": {"anyOf": variants}, **operand_defs,
         **({"ProgramSourceId": {"enum": list(evidence_ids)},
             "ProgramPredicateSourceId": {"$ref": "#/$defs/ProgramSourceId",
                 "description": "Original text defining this predicate and comparison; not a branch action or reference link."}}
@@ -228,7 +243,8 @@ def render(rows, catalog, modes=(), bindings=(), *, evidence_ids=None):
             text = row["name"] + " = " + value(row["value"], source_id)
         elif op in BRANCHES:
             scalar = row["equals"]
-            literal = {"true": "True", "false": "False", "null": "None"}.get(quote(scalar), quote(scalar))
+            literal = (value(scalar, source_id) if isinstance(scalar, dict) else
+                       {"true": "True", "false": "False", "null": "None"}.get(quote(scalar), quote(scalar)))
             operand = row["value"] if op == "if_equal" else {"kind": "length", "source": row["source"], "pointer": row["pointer"]}
             text = "if " + value(operand, source_id) + " == " + literal + ":"
             lines.append("    " * level + text)
