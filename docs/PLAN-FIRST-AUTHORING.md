@@ -2,6 +2,8 @@
 
 ## 中文
 
+后续状态：本阶段内容已本地提交 dev `cd278c3`，未推送；下文保留当时的结果。后续实验有[源义务与交接对账](SOURCE-DUTY-ACCOUNTING.md)和[语义规划前端](SEMANTIC-PLAN.md)，不回填本阶段成绩。
+
 更新：2026-09-09，C3w。**本阶段已闭合“真实 9B → 冻结计划 → 分槽参数 → 原编译器 → 合成宿主验证”的机制链。公开 Skill 的语义转译阶段尚未完成。** 默认仍为 `direct`，新 `plan_first` 是研究入口，不改变 DSH 路由、Runtime 执行器或授权机制。
 
 ### 这次具体解决了什么
@@ -84,6 +86,8 @@
 最终验收：[验证报告](../artifacts/translator-v2/source-plan-20260909/validation-summary/report.json)。新增 49 项机械测试；309 项定向通过（25.14 秒），全量 **2292 passed + 81 subtests passed（179.83 秒）**；21 个相关 Python 文件 Ruff、文档链接与空白检查通过。前一轮 2290 项全量结果也保留。修改保留在 dev，未提交、未推送；测试数量不是语义准确率。
 
 ## English
+
+Subsequent status: this stage was locally committed as `cd278c3`, without a push. The text below retains its historical results. Optional [source-duty/handoff accounting](SOURCE-DUTY-ACCOUNTING.md) and the [semantic planning frontend](SEMANTIC-PLAN.md) are later experiments, not revisions of these scores.
 
 C3w closes one mechanism milestone: real 9B planning → immutable plan → separate argument slots → original compiler → reviewed synthetic-host execution. **Public-Skill semantic translation is still open.** `plan_first` is opt-in; default `direct`, DSH routing, Runtime execution and authorization are unchanged.
 

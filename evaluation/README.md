@@ -6,6 +6,10 @@
 
 | 模块 | 职责与边界 |
 |---|---|
+| [source_plan](source_plan.py) 的 `--semantic-plan` | 带出处的步骤清单、结果名称与精确字段路径、类型化数组长度、路径交接职责及未来执行要求分离；原编译器/读取引擎不变。[设计、使用和边界](../docs/SEMANTIC-PLAN.md) |
+| [source_closed_program](source_closed_program.py) / [source_inline_program](source_inline_program.py) | 闭合控制树限定 read 后继、双分支与无后继终点；每个节点/职责保留原文 ID 和新旧位置。只做无损语法转换，不修复或认证模型语义。 |
+| [stage1_cases](stage1_cases.py) / [stage1_validation](stage1_validation.py) | 已知合成开发输入与原共享引擎的行为检查；模型输入没有手写 L0/Oracle。显式受审摘要、重新编译、记录精确调用；不是公开 Skill 或大规模 Runtime 证据。[验收标准](../docs/STAGE-1-EXIT.md) |
+| [source_duty_accounting](source_duty_accounting.py) | 可选 `plan_first --account-duties`：逐项源义务与冻结计划对账、前置分支路径检查、准确 L1 交接。已提取行覆盖不等于完整源覆盖；真实 9B 仍失败。[结果与定位](../docs/SOURCE-DUTY-ACCOUNTING.md) |
 | [netdata_fixture](netdata_fixture.py) / [netdata_task_demo](netdata_task_demo.py) | 一个合成进程内 Function 宿主，经原读取网关执行 info/query；解码与页级计数在工具外进行，不是 9B 转译或真实 Netdata。见[演示和边界](../docs/NETDATA-ISOLATED-VALIDATION.md) |
 | [structured_authoring](structured_authoring.py) | 冻结原源包/任务/宿主和显式 9B 预算，按需请求原文页，再进入现有 Tree 编译；不执行候选，首轮上下文停止保留。见[真实首次结果](../docs/PROGRESSIVE-STRUCTURED-AUTHORING.md) |
 | [source_ledger](source_ledger.py) / [source_blocks](source_blocks.py) | 当前窗口 + 来源锚定 notes + 原文块 ID + 精确区间并集；保留历史失败，不将引用存在/编译通过计作语义成功。[范围和验证](../docs/SOURCE-LEDGER-AUTHORING.md) |
@@ -69,6 +73,12 @@
 原始失败、协议和成本见[实验索引](../docs/FLOW-EXPERIMENTS.md)。旧指纹在新代码下拒绝回放是预期行为，不得改 manifest 绕过。本轮回放以 Git 基线 `14baa0a` 为底，再覆盖该轮 source-snapshot.tar.gz，其他未改依赖由基线提供；位置及复验见[报告](../docs/FLOW-SEMANTIC-TRANSFER.md)。清理前历史快照仍为 c2ebd78。
 
 ## English
+
+Current opt-in [semantic planning](../docs/SEMANTIC-PLAN.md) retains a source outline, resolves named observations, supports typed array length, and separates terminal duties from unsatisfied future execution requirements. `stage1_cases` supplies only known synthetic source/task/contracts; `stage1_validation` checks explicitly reviewed generated Trees using the existing engine. These do not constitute public-Skill generalization or large Runtime A/B.
+
+`source_closed_program` constrains read successors, both decision paths and successor-free terminals. `source_inline_program` carries each node/duty's original source ID and original/compiled positions. These are lossless syntactic transformations, not semantic repair or certification.
+
+`source_duty_accounting` adds opt-in pre-argument inventory/plan accounting and precise handoff artifacts. It reuses the original source inspector/compiler; structural path checks are not semantic entailment or authority. See [real 9B failures and scope](../docs/SOURCE-DUTY-ACCOUNTING.md).
 
 `netdata_fixture` provides one synthetic in-process Function-call primitive. `netdata_task_demo` uses the original read gateway, bounded column binding and explicit page/domain/egress checks. It is developer wiring, not model translation or live Netdata; see [scope and reproduction](../docs/NETDATA-ISOLATED-VALIDATION.md).
 

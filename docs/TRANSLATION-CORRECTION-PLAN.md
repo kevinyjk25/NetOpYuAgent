@@ -2,7 +2,7 @@
 
 ## 中文
 
-更新：2026-09-09。用户授权推进至批量验证决策点。有效顺序：**源审查 → 新输入小批 → 机制纠偏与诊断 → 跨 Skill 泛化验证 → Runtime 对照**。不从授权推断合入状态。见[进展](PROJECT-STATUS.md)、[旧计划](TRANSLATION-CORRECTION-HISTORY.md)。
+更新：2026-09-10。用户授权完成阶段 1，具备进入阶段 2 条件后停止。有效顺序：**源审查 → 新输入小批 → 机制纠偏与诊断 → 跨 Skill 泛化验证 → Runtime 对照**。不从授权推断合入状态。见[进展](PROJECT-STATUS.md)、[旧计划](TRANSLATION-CORRECTION-HISTORY.md)。
 
 ### 不变原则
 
@@ -22,6 +22,8 @@
 
 ### 接下来评估什么
 
+**阶段 1 已完成并停止：**[验收报告](STAGE-1-RESULTS.md)记录同版 v62 / 9B 三类已知流程各两次首构，6/6 受审只读区域、50/50 本地路径。下一步才按[固定交接范围](STAGE-1-EXIT.md)预选 10 个公开开发 Skill；当前未执行，不扩大 Runtime A/B。[语义前端](SEMANTIC-PLAN.md)分离原文核对、业务步骤、未来宿主要求、闭合树、来源和填参；[逐项义务对账](SOURCE-DUTY-ACCOUNTING.md)及 C3 阶段保留为历史诊断。已知开发集经过反复调试，这个结果不是完整 Skill 或总体语义准确率。
+
 C3p 已实现[隔离宿主与动态列解码](NETDATA-ISOLATED-VALIDATION.md)，两次原网关读取后仅输出合成本页计数。接下来将明确的可编译段、L1 职责、未支持的分页/完整性区分开，把当前开发者接线映射成可审查候选并接入小批 9B 首次构造；不能继续只增加脚本检查，也不能把手写 demo 算作模型转译通过。原始 Skill 不裁剪，适配和发布策略变化显式保留。完整任务/语义门禁未通过前，不解锁规模 Runtime 比较。
 
 C3o 的[四份任务对齐档案](TASK-SOURCE-ALIGNMENT.md)保留 35 项开发者声明义务、11 个问题与当时 12 条未绑定宿主需求。C3p 针对其中 Netdata 的一部分建立隔离宿主、列解码和单位/页级输出检查，不回填 C3o 成绩，也未解决全部隐私张力及完整任务语义。明确声明的本地评测 adapter 不需真实设备；但不得冒充原厂合同、运行来源脚本或把聚合/推理隐藏成一个工具。源审阅与编译结果始终分开。
@@ -36,6 +38,8 @@ C3o 的[四份任务对齐档案](TASK-SOURCE-ALIGNMENT.md)保留 35 项开发�
 - 正式门禁仍为 ≥3 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case 及既有质量阈值；通过前不扩大 Runtime A/B。
 
 ## English
+
+Stage 1 passed and stopped: the [report](STAGE-1-RESULTS.md) records frozen v62/9B, 6/6 reviewed read regions across three known procedures repeated twice and 50/50 local paths. Stage 2's preselected ten public development Skills have not run; follow the [handoff](STAGE-1-EXIT.md), not large Runtime A/B. The [semantic frontend](SEMANTIC-PLAN.md) separates source review, business outline, future requirements, closed control syntax, provenance and arguments. Earlier C3 accounting remains historical diagnosis. Repeated development-set tuning is not whole-Skill or population accuracy.
 
 C3p now implements an [isolated host and column decoding](NETDATA-ISOLATED-VALIDATION.md), producing synthetic page-only counts through two original-gateway reads. Next separate compilable regions, L1 duties and unsupported pagination/completeness, map developer wiring into reviewable candidates, and connect small 9B first construction. More script checks alone are not the goal; the handwritten demo cannot count as translation success. Keep full Skills and explicit adaptation/publication changes. Large Runtime evaluation remains locked.
 

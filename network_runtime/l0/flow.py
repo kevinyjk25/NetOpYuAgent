@@ -161,7 +161,7 @@ def _binding_sources(expression):
             raise ValueError("structured expression exceeds node budget")
         if not isinstance(expr, dict):
             continue  # The binding compiler reports the malformed expression.
-        if expr.get("kind") in ("reference", "column_rows") and isinstance(expr.get("source"), str):
+        if expr.get("kind") in ("reference", "column_rows", "array_length") and isinstance(expr.get("source"), str):
             names.add(expr["source"])
         elif expr.get("kind") == "object" and isinstance(expr.get("fields"), dict):
             pending.extend(expr["fields"].values())
@@ -277,12 +277,16 @@ def qualify_flow(
             available = {name: _raw_schema(schema) for name, schema in schemas.items() if name == "input" or name in before}
             if isinstance(node, StructuredBranchNode):
                 reference = node.left
-                if set(reference) != {"kind", "source", "pointer"} or reference.get("kind") != "reference":
+                if set(reference) != {"kind", "source", "pointer"} or reference.get("kind") not in {"reference", "array_length"}:
                     raise ValueError("structured branch requires one explicit source reference")
                 if not isinstance(reference["source"], str) or reference["source"] not in available:
                     raise ValueError("branch source must dominate this node")
                 left_schema, _ = schema_location(checked_schema(available[reference["source"]]), reference["pointer"])
                 kinds = schema_types(left_schema)
+                if reference["kind"] == "array_length":
+                    if kinds != {"array"}:
+                        raise ValueError("array_length branch requires an exclusively array source")
+                    kinds = {"integer"}
                 right = _json_scalar_type(node.equals.value)
                 if kinds & {"object", "array"} or not any(_compatible(left, right) or _compatible(right, left) for left in kinds):
                     raise ValueError("structured branch requires compatible JSON scalar types")

@@ -2,10 +2,17 @@
 
 ## 中文
 
-更新：2026-09-09。**C3w：真实 9B 的独立规划／分槽填参／原编译器／合成局部执行机制链已闭合；公开源语义转译仍未通过。** C3i–C3p 已本地提交 dev `f0499ec`；C3q–C3w 尚未提交。本轮未推送或合入 master；下方各阶段“未提交”是当时的历史状态。默认 DSH 路由未改变，研究候选未自动激活。
+更新：2026-09-10。**阶段 1 开发验收已完成，已停在阶段 2 前；公开 Skill 泛化门禁仍未通过。** 同版 v62 / 9B 的三种已知流程各两份首次构造，6/6 源文/参数审阅通过，50/50 原 Runtime 合成本地路径通过。[验收报告与查看入口](STAGE-1-RESULTS.md)、[固定退出条件](STAGE-1-EXIT.md)。当前代码未提交，本地 HEAD 仍是 `cd278c3`；未推送或合入 master，默认 DSH 路由未变，研究候选未自动激活。下方 C3 内容保留为历史事实，不是当前执行计划。
+
+用户新确认的[受控混合流程](GOVERNED-HYBRID-FLOWS.md)原则已记录：按依赖串并行调度严格节点和 LLM 任务，保留候选/事实、权限、汇合与效果边界。目前尚未实现图内 LLM 和并行调度，不用此方向豁免阶段 1 已可精确表达的条件。
 
 ### Done
 
+- 阶段 1：[语义前端](SEMANTIC-PLAN.md)补齐观察命名空间、原 Schema 参数槽、数组长度、闭合控制树、来源前置及固定终点状态；L1 职责不被标签替代。6 份首构共 20 次真实 9B 调用；512 定向、2524 全量 + 81 子测试通过。26 个阶段 Python 文件 Ruff 通过；原全仓 224 条 lint 技术债保留，不宣称全仓 clean。
+- [冻结证据](../artifacts/translator-v2/stage1-20260909/evidence-summary/report.json)绑定 2919 个制品，86 份原版报告零调用回放逐字节一致。109 个历史运行、245 次有结果调用、23 个无回执请求均保留；只证明已知开发区域，不能估计总体转译准确率。下一步是预选 10 个公开开发 Skill 的迁移检验，尚未执行。
+- C3x 可选 `--account-duties` 复用独立源义务提取，冻结计划后逐项对账，检查准确节点、每条依赖路径上的前置分支及具体 L1 职责；填参之前可停止，编译前再次核对对账摘要。不是新执行器、语义 Oracle 或激活许可。[设计、实际失败与定位](SOURCE-DUTY-ACCOUNTING.md)。
+- C3x **3 次真实 9B 调用／169.421 秒／14,224 输入与 2,433 输出 token**，7 行义务（5 种不同文字）与 2 个计划读取；错误映射和交接遗漏阻止填参，0 编译、0 Provider/脚本调用。v22 记录 7 条问题；v23 修复重复声明 guard 的冗余要求，原回复另行零调用重分析为 6 条，未修改旧记录或计作模型成功。源义务复合分类、覆盖与条件语义仍待解决，不扩大 Runtime A/B。
+- C3x 最终新增 30 项机械测试；**202 项定向通过（13.38 秒），全量 2322 passed + 81 subtests passed（183.33 秒）**，Ruff、文档与空白检查通过。原版失败报告在本地及源码隔离回放一致；此前 127 份绑定证据不变。[摘要与逐条审阅](../artifacts/translator-v2/source-accounting-20260909/evidence-summary/report.json)。v22 的 2320 项全量结果保留；测试数量不代表转译准确率。
 - C3w 可选 `plan_first`：先冻结源锚定操作骨架与分支，再逐槽构造参数；动态来源导航、原词法作用域及每槽来源校验阻止编造输入。无可达路径的冗余终止可留痕消除，不删调用、不补成功；原执行器及授权机制不变。[设计、使用、全部结果](PLAN-FIRST-AUTHORING.md)。
 - C3w **8 次实验／12 次真实 9B 调用**。同一已知 Netdata 的 5 次仍未编译，thinking／可读 Schema 没有解决源义务和操作混淆。另用原有合成接线说明隔离验证：v18 被不可达结束拒绝；v19 计划通过但编造参数；v20 正确使用输入／前序结果引用，3 次调用、42.549 秒、10,465/853 token，生成 2 个读取与条件。三版首次规划请求相同，没有预写 L0 输入。
 - C3w 经绑定摘要的开发者助手审阅后，生成的局部读取流程在原 Runtime 上 **10/10 本地路径检查通过**；仅合成读取，无网络／脚本／写操作。`errors == 0` 决策及变更候选未转译，剩余职责列表不完整，不接受整 Skill 成功。新增公开 Skill 数为 0，不扩大 Runtime A/B。
@@ -67,6 +74,8 @@
 
 | 顺序 | 下一步 | 验收 / 限制 |
 |---|---|---|
+| 阶段 1 已完成 | 冻结 v62，停止在阶段 2 前 | 三种已知流程 × 两份，6/6 受审只读区域、50/50 本地路径；不是总体准确率 |
+| 阶段 2 未开始 | 预选 10 Skill／≥6 仓库／≥3 类领域 | 模型前固定源、任务、宿主与审查要求；保留引用、分支、脚本惰性与不适配，不按可表达性筛选 |
 | 已收口 | 回归、源引用缺口、可回放报告 | 修改文件 Ruff / diff 检查通过；全仓仍有原先 224 项 lint，不混入本轮清理 |
 | 入库完成 | 60 个冻结候选、旧脚本补充库 | 新库 53/60 保存；失败保留，采集限流已解除；搜索类别/静态包检查不能证明领域独立性/语义成功 |
 | 入口完成 | 源文、分页、显式引用补取、宿主诊断 | 原文可完整拼回，旧证据不覆盖；不是跨页语义编译或完整引用闭合 |
@@ -74,18 +83,18 @@
 | 任务档案完成 | 四份固定材料的具体任务、义务/问题与宿主需求 | 有源锚定开发审阅，不是独立 Gold 或全部源义务闭合；未读附件保留 |
 | 局部实现完成 | 本地 Netdata 隔离适配器、info/query fixture、有界列解码 | 本页计数与异常检查已跑通；无原厂互操作、全窗口/保留期证明，不把枚举输出当生产隐私证明 |
 | 已接入、首次停止 | 渐进 9B 源文请求与结构化 Tree 构造入口 | 2 次真实调用停于上下文预算，未生成候选；不能标记转译通过或直接进入 Runtime |
-| 已修复输入组织 | 区分字节/token 指标；UTF-8 分页、源块选择、依赖记录、原文回填和精确去重 | 资源代理不是 tokenizer 认证；不会抄错引文不等于选对语义依据。四源仅静态分页，最新模型仍只验证一个已知 Skill |
+| 已修复输入组织 | 区分字节/token 指标；UTF-8 分页、源块选择、依赖记录、原文回填和精确去重 | 资源代理不是 tokenizer 认证；不会抄错引文不等于选对语义。C3r 当时四源仅静态分页、模型仅测一个已知 Skill；当前三流程验收另报 |
 | 边界机制完成 | 分开文本交付/语义审核、源操作/宿主声明、离线构造/执行门禁；联合窗口候选或缺口报告 | 真实 9B 新两版仍首轮拒绝，未实测触发联合回读恢复；更早停止不是可用性提升 |
 | 诊断/语法机制完成 | 可选源义务审阅、输入隔离、字面缺口检索、表达式生成 Schema、独立任务对齐 | 前置审阅收益未证实；不默认启用；完整候选有参数/别名缺陷，仍不可执行 |
 | 参数/定位机制完成 | 宿主 Schema 引导参数 + 显式值来源 + 代码分配稳定别名 + 独立错误定位 | 一个已知源的形状/别名错误消除；模型仍重复调用、来源与操作模式错误，不是语义成功 |
 | 模式机制完成 | 显式宿主互斥键合同 + 逐叶参数来源 + 源块行动轨迹 | 只证明已声明组合约束；动态对象不隐式放行；新增宿主信息必须独立标识，模型整 Skill 仍失败 |
 | 规划／绑定机制完成 | 不可变计划、分槽参数来源、动态引用导航、冗余不可达终止规范化 | 真实 9B 合成局部流程通过 10 个执行路径检查；不是公开 Skill 或整 Skill 成功 |
-| 下一步语义收敛 | 逐项义务覆盖、截断边界与 L1 交接定位；公开源操作／前置条件／宿主替代范围 | 当前 remaining 仍遗漏职责；Netdata 不得执行；保留失败，不能靠删除未决项或叠加提示语宣称通过 |
+| 公开源语义仍待验证 | 检验条件／动作／输出／授权角色及准确交接在公开 Skill 上的迁移；核实宿主替代范围 | 阶段 1 不覆盖旧 Netdata 未决问题，不能因此执行其候选；保留全部失败，不靠删除未决项通过 |
 | 对齐完成后 | 冻结任务/私有 Oracle，先小批后批量转译 | 9B；固定主候选路径、无自动重试；不把同批调参称泛化 |
 | 正式转译门禁 | ≥3 不重叠 cohort、≥50 Skill、≥15 仓库、≥8 领域、≥600 case | 数量只是必要条件，质量阈值不下调 |
 | 门禁通过后 | 大规模 L0→Runtime / DSH 配对 | **仍未解锁**，有限布尔区域通过不代表整 Skill 高准确转译 |
 
-源引用仍有角色错位，完整源审查未完成。两批 12 份 Skill 均由同一开发助手构造，不是公开未见集或真人 Gold。现有 100-Skill 开发库也不能改称未见集。见[代码边界](../evaluation/README.md)、[纠偏计划](TRANSLATION-CORRECTION-PLAN.md)。
+上述历史实验仍有引用角色错位和未完成源审查，不因阶段 1 的三例通过而回填成绩。两批 12 份 Skill 均由同一开发助手构造，不是公开未见集或真人 Gold；现有 100-Skill 开发库也不能改称未见集。见[代码边界](../evaluation/README.md)、[纠偏计划](TRANSLATION-CORRECTION-PLAN.md)。
 
 ### 保留但不推进
 
@@ -93,7 +102,13 @@ ES-P1-Private-Human = skipped_retained_open；GPT 对照暂缓，使用 qwen3.5:
 
 ## English
 
-Updated 2026-09-09. **C3w closes the real-9B plan/fill/original-compiler/synthetic-execution mechanism; public-source semantic translation remains open.** C3i–C3p were locally committed as `f0499ec`; C3q–C3w are uncommitted. No push/master merge or default routing/activation changes.
+Updated 2026-09-10. **Stage 1 development criteria passed; stopped before Stage 2. Public-Skill generalization remains unproven.** Frozen v62/9B produced 6/6 reviewed read regions across three known procedures repeated twice, passing 50/50 original-engine synthetic paths. See the [report](STAGE-1-RESULTS.md) and [fixed criteria](STAGE-1-EXIT.md). Twenty real model calls; 512 targeted, 2524 full tests plus 81 subtests pass. All 26 stage Python files pass Ruff; 224 baseline-wide diagnostics remain. Bound evidence retains 2919 artifacts, 86 byte-identical original-code replays, 109 runs, 245 receipted calls and 23 unreceipted requests. This is developer-set acceptance, not population accuracy. Current work is uncommitted at prior HEAD cd278c3; no push/master merge, route change or activation. Earlier C3 facts remain history. Stage 2's preselected ten public development Skills (at least six repositories/three domains) has not run.
+
+The user-confirmed [governed hybrid-flow principle](GOVERNED-HYBRID-FLOWS.md) is recorded: schedule strict nodes and model tasks through declared sequential/parallel dependencies while preserving candidate/evidence, authority, join and effect boundaries. In-graph model execution and parallel scheduling remain unimplemented, and do not waive Stage 1's expressible deterministic checks.
+
+C3x reuses the source inspector, then accounts for each duty against a frozen plan before argument construction. Three real 9B calls take 169.421 seconds (14,224 input/2,433 output tokens): seven rows/five distinct requirement strings and two planned reads, but misbindings and omitted handoff duties block arguments and compilation. There are zero provider/script calls. The original seven findings remain recorded; removing one redundant duplicate-guard requirement gives six findings in a separate zero-call checker reanalysis, not a new model success. Compound-duty classification, source completeness and predicate meaning remain open. See [design and exact failures](SOURCE-DUTY-ACCOUNTING.md).
+
+C3x validation: **30 new mechanical tests; 202 targeted passes (13.38 seconds), 2322 full-suite passes plus 81 subtests (183.33 seconds)**, Ruff, links and whitespace checks. Original-version local/isolated replays are byte-identical; 127 prior bound artifacts remain unchanged. The earlier 2320-test v22 run is preserved. [Bound evidence](../artifacts/translator-v2/source-accounting-20260909/evidence-summary/report.json) does not turn test counts into semantic accuracy.
 
 C3w preserves all eight experiments/twelve real 9B calls. Five known-Netdata attempts remain blocked; thinking and readable schemas do not solve source-duty/action confusion. The pre-existing synthetic wiring control progresses from redundant-terminal rejection, through invented-argument rejection, to a two-read conditional compiled from three model calls (42.549 seconds, 10,465 input/853 output tokens). Its initial planning request is identical across three versions. Dynamic-reference guidance, early origin checks and recorded dead-terminal normalization do not alter Runtime authorization. After a digest-bound developer-agent review, ten local branch/denial/abnormal-stop checks pass with zero network/script/effect calls. Counter-result decisions are delegated to L1, and remaining-duty accounting is incomplete; this is not whole-Skill acceptance or a public-Skill accuracy score. Final validation adds 49 mechanical tests: **309 targeted passes (25.14 seconds), 2292 full-suite passes plus 81 subtests (179.83 seconds)**, lint on 21 related files, links and whitespace checks. The earlier 2290-test run is preserved; equal-constant origin caching is fixed without changing the three recorded wiring requests or derived outputs. All eight original-version isolated replays are byte-identical; 127 new files are bound and 275 prior files remain unchanged. Next improve source-duty accounting and precise partial-region handoffs before public-source generalization or broad Runtime A/B. See [current design and complete results](PLAN-FIRST-AUTHORING.md).
 
