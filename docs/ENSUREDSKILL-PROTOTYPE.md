@@ -18,6 +18,8 @@ No evidence, no action.
 
 项目必须将概率性推理和确定性执行分离。LLM、DSH 和 L1 Skill 只能产生诊断假设、任务意图和 Candidate Plan；它们不能获得基础设施直接写权限。
 
+2026-09-10 补充：分离的是执行权与确定性边界，不要求所有自然语言语义静态化。Runtime 可以按声明依赖调度受控 LLM 任务，支持串行与受限并行；输出仍是候选，须经确定性准入。含 LLM 的整图不得宣称确定性 L0。[受控混合流程原则](GOVERNED-HYBRID-FLOWS.md)是实施方向，不表示节点已实现。
+
 ### 3. 三平面架构
 
 ```text
@@ -183,6 +185,8 @@ The current objective is a network-first EnsuredSkill reliability prototype. Ent
 ### 2. Thesis and architecture
 
 Reasoning correctness does not imply execution safety. The LLM decides what to attempt; the Runtime decides what is allowed to happen. No evidence means no action.
+
+Added 2026-09-10: authority and determinism boundaries are separated without requiring all natural-language semantics to become static. The Runtime may schedule bounded LLM tasks under declared sequential/parallel dependencies; outputs remain candidates subject to deterministic admission. The whole mixed graph is not deterministic L0. [Governed hybrid flows](GOVERNED-HYBRID-FLOWS.md) records the direction, not implemented capability.
 
 The authoritative architecture has three planes: a Reasoning Plane that proposes candidate plans, a Reliability Runtime that enforces contracts and transactions, and an Infrastructure Plane that owns observations and effects. Every existing component must map into one of these planes.
 

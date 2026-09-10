@@ -319,7 +319,7 @@ def lower(tree, packet, blocks, modes=()):
         if kind == "literal":
             origin_check(item["origin"], item["value"], tool, path)
             item.pop("origin")
-        elif kind in {"reference", "column_rows"}:
+        elif kind in {"reference", "column_rows", "array_length"}:
             source = item["source"]
             if source not in environment:
                 issue("reference_scope", path, "reference must name input or a preceding dominating read path")

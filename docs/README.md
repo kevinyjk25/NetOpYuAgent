@@ -13,6 +13,10 @@
 | 项目是什么、有什么能力、如何开始 | [README](../README.md) |
 | L1、L0.5、L0、Runtime 怎样交互，结果怎样解释和定位 | [Skill 与系统交互全景](SKILL-SYSTEM-INTERACTION.md) |
 | 当前做到哪一步、还缺什么 | [项目进展与路线图](PROJECT-STATUS.md) |
+| 本轮阶段 1 怎样验收、何时可以进入阶段 2 | [退出条件与下一阶段交接范围](STAGE-1-EXIT.md) |
+| 阶段 1 修复完成了吗、真实 9B 结果与原文到图的轨迹在哪 | [阶段 1 验收报告](STAGE-1-RESULTS.md) / [便携指标摘要](benchmarks/stage1-translation-summary.json) |
+| 自然语言推理与严格流程如何按依赖串行、并行 | [受控混合流程：确认的原则与待实施边界](GOVERNED-HYBRID-FLOWS.md) |
+| 怎样保留步骤清单、分支职责并避免节点路径猜错 | [语义规划前端及查错入口](SEMANTIC-PLAN.md) |
 | ES-P0 后遵循什么研究原则、按什么顺序推进 | [后续研究与研发指导 v1.1](research/EnsuredSkill_Research_Instruction_v1.1_2026-09-01.md) |
 | 当前论文如何陈述系统与证据 | [中文论文 v0.4](research/EnsuredSkill_Paper_Draft_CN_v0.4_2026-09-01.md) / [English paper v0.4](research/EnsuredSkill_Paper_Draft_v0.4_2026-09-01.md) |
 | 分层、依赖规则和架构决策 | [ARCHITECTURE](../ARCHITECTURE.md) |
@@ -47,6 +51,7 @@
 | 新的参数约束是否有效，为何 Schema 合格仍不能执行 | [宿主 Schema 引导构造、出处与操作模式缺口](CATALOG-DIRECTED-AUTHORING.md) |
 | 操作模式缺口怎样补齐，为什么参数合法后转译仍失败 | [宿主模式、行动来源与两次真实 9B 结果](HOST-OPERATION-MODES.md) |
 | 真实模型能否生成并运行流程，为什么公开 Skill 仍失败 | [先规划后填参、全部实验与局部执行边界](PLAN-FIRST-AUTHORING.md) |
+| 怎样定位遗漏条件、错误前置分支和不清晰的 L1 交接 | [逐项源义务对账、真实 9B 失败与位置诊断](SOURCE-DUTY-ACCOUNTING.md) |
 | 转译失败如何定位 | [分层诊断](FLOW-DIAGNOSTICS.md) / [四例可读报告](benchmarks/flow-diagnostics-c3h-report.md) |
 | 本次清理改了什么，历史证据怎样回放 | [收敛与复验](FLOW-CONSOLIDATION.md) / [阶段历史](PROJECT-HISTORY.md) |
 | 如何本地演示或接入自己的系统 | [使用与系统接入](getting-started-integration.md) |
@@ -117,7 +122,9 @@
 
 ## English
 
-Current authoring: [plan-first generation, all real-model attempts and synthetic execution](PLAN-FIRST-AUTHORING.md). A real 9B-generated read region passes 10 local path checks; public-source semantic translation remains blocked. [Host modes](HOST-OPERATION-MODES.md), [catalog-directed construction](CATALOG-DIRECTED-AUTHORING.md), [source obligations/task alignment](SOURCE-OBLIGATION-AUTHORING.md), [retrieval/host boundaries](SOURCE-DECISION-AUTHORING.md), [source-window results](SOURCE-LEDGER-AUTHORING.md) and the [earlier report](PROGRESSIVE-STRUCTURED-AUTHORING.md) remain historical evidence. The [isolated Netdata host](NETDATA-ISOLATED-VALIDATION.md) remains developer wiring, not model-generated whole-Skill translation.
+Current development: [Stage 1 passed, real 9B results and source-to-graph inspection](STAGE-1-RESULTS.md), [portable metrics](benchmarks/stage1-translation-summary.json), [semantic frontend](SEMANTIC-PLAN.md) and [Stage 2 handoff](STAGE-1-EXIT.md). Stopped before Stage 2; three known developer procedures do not establish generalization. Earlier [source-duty accounting](SOURCE-DUTY-ACCOUNTING.md) remains a preserved experiment.
+
+Earlier authoring: [plan-first generation, all real-model attempts and synthetic execution](PLAN-FIRST-AUTHORING.md). Its generated read region passed 10 local path checks, separate from Stage 1. [Host modes](HOST-OPERATION-MODES.md), [catalog-directed construction](CATALOG-DIRECTED-AUTHORING.md), [source obligations/task alignment](SOURCE-OBLIGATION-AUTHORING.md), [retrieval/host boundaries](SOURCE-DECISION-AUTHORING.md), [source-window results](SOURCE-LEDGER-AUTHORING.md) and the [earlier report](PROGRESSIVE-STRUCTURED-AUTHORING.md) remain historical evidence. The [isolated Netdata host](NETDATA-ISOLATED-VALIDATION.md) remains developer wiring, not model-generated whole-Skill translation.
 
 Current public-source stage: [53 acquired Skills, all 60 candidate outcomes, source/host diagnosis and next steps](PUBLIC-TRANSLATION-BATCH.md). Acquisition is not semantic success.
 

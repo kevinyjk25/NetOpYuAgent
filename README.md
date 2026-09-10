@@ -2,7 +2,7 @@
 
 EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
 
-> 文档状态：2026-09-09。Runtime 机械原型与历史小样本实验已完成，但当前主阶段已前移到 **L1→L0 泛化证明**；该门禁通过前，不再开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 文档状态：2026-09-10。转译修复阶段 1 的开发验收已完成，停在阶段 2 前；**L1→L0 公开 Skill 泛化门禁仍未通过**，不开展或宣称大规模 L0→Runtime 效果证明。阶段事实以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 > 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
 >
@@ -26,11 +26,13 @@ flowchart TB
 | Reliability Runtime | Contract、journal-backed Typed Graph、跨步骤 Evidence、Guard、Risk、事务、验证和补偿 | 不做开放式语言推理，不把模型 confidence 当权限 |
 | Infrastructure Plane | 通过 MCP/API/CLI/NETCONF 提供事实和效果 | 不判断上层业务意图，不自报成功终态 |
 
+新确认的扩展原则是[受控混合流程](docs/GOVERNED-HYBRID-FLOWS.md)：Runtime 按依赖调度严格节点与有界 LLM 任务，支持预声明的串并行、汇合和失败方向；LLM 输出是候选，不能绕过参数、权限和效果校验。**目前是设计约束，图内 LLM 节点与并行调度尚未实现**；混合流程也不等于整图确定性。
+
 ### 当前研究门禁
 
-**当前：真实 9B 已跑通“计划 → 独立填参 → 原编译器 → 合成宿主”的局部机制链；公开 Skill 语义转译仍未通过。** 生成的条件读取流程在 10/10 个本地路径检查中通过，包含权限拒绝与异常停止，不是生产成功率。公开 Netdata 候选仍被拦截。[能力、全部尝试与边界](docs/PLAN-FIRST-AUTHORING.md)。新库保存 **53 个 Skill／38 个仓库**，不是 53 个成功；默认 DSH 路由未变，下面是较早的小样本转译实测。
+**阶段 1 开发验收完成，阶段 2 尚未开始。** 同版 9B 在 **3 种已知流程 × 2 次构造**中得到 **6/6 受审只读区域，50/50 本地路径通过**；20 次模型请求 p50/p95 为 **24.07/132.34 秒**，不是 Runtime 时延。[完整报告、原文到生成图的查看入口与边界](docs/STAGE-1-RESULTS.md)。这些流程经过多轮开发调整，不是独立样本或公开 Skill 泛化证明；默认 DSH 路由未变。库中 **53 Skill／38 仓库**是入库数，不是成功数。下表仅为历史小样本实验。
 
-| 本轮转译证据 | 结果 | 能说明什么 |
+| 历史转译证据 | 结果 | 能说明什么 |
 |---|---|---|
 | 新六份开发 Skill：构造阶段 | 2/6 案例、30/46 场景 | 原始生成结果；含一份结构失败 |
 | 同批：加源条件表达式后 | 5/6 案例、35/46 场景 | 四个可执行片段案例 + 一个正确停止案例；结构失败的 11 场景仍未运行 |
@@ -247,6 +249,8 @@ Separate probabilistic reasoning from deterministic execution: the LLM proposes 
 | Reliability Runtime | Contract, typed graph, Evidence, Guard, Risk, transaction, verification and compensation | performs no open-ended reasoning; confidence grants no authority |
 | Infrastructure Plane | network/service Providers over MCP/API/CLI/NETCONF and labs | owns facts and effects, but cannot self-declare a verified terminal outcome |
 
+The newly confirmed [governed hybrid-flow direction](docs/GOVERNED-HYBRID-FLOWS.md) schedules strict nodes and bounded model tasks through declared dependencies, sequential/parallel joins and failure routes. Model outputs remain candidates subject to parameter, authority and effect gates. **In-graph LLM nodes and parallel scheduling are not implemented yet**; a mixed workflow is not wholly deterministic.
+
 L1, L0.5, L0, and a Runtime plan have different authority. L1 is natural-language semantic guidance; L0.5 is a review-only structured proposal; only an explicitly reviewed and activated compiled L0 can govern an effect. A per-request Candidate Plan remains untrusted until the Runtime resolves the exact L0, grounds parameters, validates evidence/guards/risk, and creates a plan-bound approval. An unqualified read may remain read-only; an unqualified write stops safely and never regains native-Agent write authority. See the [complete Skill-to-system interaction guide](docs/SKILL-SYSTEM-INTERACTION.md).
 
 The two core capabilities are:
@@ -258,9 +262,9 @@ The Runtime mechanism and wiring prototype is complete, but the core project hyp
 
 ### Active research gate
 
-**Current: real 9B now closes a partial plan → argument binding → original compiler → synthetic-host mechanism chain; public-Skill semantic translation has not passed.** Its generated conditional read region passes 10/10 local path checks, including denial and abnormal stops—not a production success probability. Public Netdata candidates remain blocked. See [capabilities, all attempts and boundaries](docs/PLAN-FIRST-AUTHORING.md). The inventory contains **53 Skills/38 repositories**, not successful translations. Default DSH routing is unchanged; the figures below are earlier small-sample results.
+**Stage 1 development criteria passed; Stage 2 has not started.** One frozen 9B version produced **6/6 reviewed read regions across 3 known procedures × 2 constructions**, passing **50/50 local paths**. Twenty model requests have p50/p95 **24.07/132.34 seconds**, not Runtime latency. See the [report, source-to-generated-graph inspection and limits](docs/STAGE-1-RESULTS.md). These repeatedly tuned developer procedures are not independent samples or public-Skill generalization proof. Default DSH routing is unchanged; **53 Skills/38 repositories** describe inventory, not successful translations. The following figures are historical.
 
-The new six-package development batch improves from **2/6 cases, 30/46 scenarios** after construction to **5/6, 35/46** with source expressions: four executable-fragment cases and one safe stop. Eleven scenarios of a structurally invalid case remain unrun. These are fresh 9B generations on assistant-authored packages/oracles, not independent Gold or unseen public Skills. Ten model requests have local p50/p95 of **20.91/35.82 seconds**, not Runtime latency. Citation-role errors and complete-source semantics remain open. See [results, failures and revisions](docs/FLOW-SEMANTIC-TRANSFER.md).
+An earlier six-package development batch improves from **2/6 cases, 30/46 scenarios** after construction to **5/6, 35/46** with source expressions: four executable-fragment cases and one safe stop. Eleven scenarios of a structurally invalid case remain unrun. These are 9B generations on assistant-authored packages/oracles, not independent Gold or unseen public Skills. Ten model requests have local p50/p95 of **20.91/35.82 seconds**, not Runtime latency. These historical citation-role failures remain; see [results and revisions](docs/FLOW-SEMANTIC-TRANSFER.md).
 
 Evidence order remains **L1-to-L0 generalization → L0 validation → Runtime evaluation**. The original 100 public Skills from 72 repositories/nine discovery-query strata are known development data; query strata are not verified business domains. Large Runtime A/B remains gated by at least three disjoint unseen cohorts totaling 50 Skills, 15 repositories, eight domains and 600 cases, including the unchanged [quality thresholds](docs/TRANSLATION-GENERALIZATION-GATE.md).
 

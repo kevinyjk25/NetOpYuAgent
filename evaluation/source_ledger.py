@@ -19,6 +19,11 @@ from evaluation import source_obligations as obligations
 from evaluation import source_catalog as catalog_authoring
 from evaluation import source_modes
 from evaluation import source_plan
+from evaluation import source_program_anchors as program_anchors
+from evaluation import source_inline_program as inline_program
+from evaluation import source_closed_program as closed_program
+from evaluation import source_argument_slots as argument_slots
+from evaluation import source_duty_accounting as duty_accounting
 from evaluation.flow_checkpoint import author_once, environment, implementation
 from evaluation.flow_model_transport import QWEN_MODEL, decode
 from evaluation.structured_binding_probe import read_json, write_artifacts
@@ -30,7 +35,7 @@ from evaluation.source_retrieval import decision_phase, delivery_index, is_repea
 from network_runtime.l0.read_contracts import _source_object
 from network_runtime.l0.structured_schema import snapshot_json
 
-PROTOCOL = "windowed-source-ledger/v21"
+PROTOCOL = "windowed-source-ledger/v62"
 MAX_ROUNDS = 6
 MAX_NOTES = 32
 CONTEXT_TOKENS = 49152
@@ -45,6 +50,14 @@ def policy():
     return {"maxRounds": MAX_ROUNDS, "maxNotes": MAX_NOTES, "contextTokens": CONTEXT_TOKENS,
             "outputTokens": OUTPUT_TOKENS, "reasoningOutputTokens": REASONING_OUTPUT_TOKENS,
             "defaultReasoning": False, "templateReserve": TEMPLATE_RESERVE,
+            "optionalArgumentReasoning": "semantic-plan-binding-only/v1",
+            "semanticParameterSlots": argument_slots.PROFILE,
+            "semanticStructuredDecoding": {"nonReasoning": {"presence_penalty": 0, "repeat_penalty": 1},
+                                           "reasoning": {"presence_penalty": 1.5, "repeat_penalty": 1}},
+            "semanticSourceAnchors": inline_program.PROFILE,
+            "semanticControlSyntax": closed_program.PROFILE,
+            "semanticScanView": "shared-parent-location-exact-fragment-text/v1",
+            "semanticInitialReferences": "two-direct-inert-prose-references-within-whole-page-budget/v1",
             "maxWireBytes": MAX_WIRE_BYTES, "maxPageUtf8Bytes": MAX_PAGE_BYTES,
             "budgetMethod": "utf8-byte-proxy-not-tokenizer-attestation", "citations": "request-bound-source-blocks/v1",
             "rehydration": "exact-source-interval-union/v1",
@@ -54,7 +67,8 @@ def policy():
             "gapSearch": "task-prioritized-gap-literals/v2", "bindingGrammar": "explicit-before-generation/v1",
             "maxAuthoringBlockSteps": MAX_BLOCK_STEPS, "schemaAnnotations": "titles-omitted-literals-retained/v1",
             "catalogAuthoring": catalog_authoring.PROFILE, "operationModes": source_modes.PROFILE,
-            "planAuthoring": source_plan.PROFILE, "maxPlannedReads": source_plan.MAX_READS}
+            "planAuthoring": source_plan.PROFILE, "maxPlannedReads": source_plan.MAX_READS,
+            "optionalDutyAccounting": duty_accounting.PROFILE}
 
 
 def pages_for(packet):
@@ -87,7 +101,9 @@ def fingerprint():
                           "evaluation/structured_binding_probe.py", "evaluation/source_blocks.py",
                           "evaluation/source_retrieval.py", "evaluation/source_host_binding.py", "evaluation/source_obligations.py",
                           "evaluation/source_gap_search.py", "evaluation/source_candidate_schema.py", "evaluation/source_catalog.py",
-                          "evaluation/source_modes.py", "evaluation/source_plan.py")
+                          "evaluation/source_modes.py", "evaluation/source_plan.py", "evaluation/source_program.py",
+                          "evaluation/source_program_anchors.py", "evaluation/source_inline_program.py", "evaluation/source_closed_program.py", "evaluation/source_program_lines.py", "evaluation/source_argument_slots.py",
+                          "evaluation/source_duty_accounting.py")
 
 
 def budget(wire):
@@ -106,7 +122,14 @@ def budget(wire):
             "meaning": "Conservative byte-based scheduling proxy, not an exact or certified token bound."}
 
 
-def initial_state(packet, profile="direct", operations=(), scenario=None, reasoning=False):
+def initial_state(packet, profile="direct", operations=(), scenario=None, reasoning=False, account_duties=False, semantic_plan=False,
+                  argument_reasoning=False):
+    if type(argument_reasoning) is not bool or (argument_reasoning and (not semantic_plan or reasoning)):
+        raise ValueError("argument reasoning requires semantic plan and is separate from all-phase reasoning")
+    if type(semantic_plan) is not bool or (semantic_plan and (profile != "plan_first" or account_duties)):
+        raise ValueError("semantic plan requires plan_first and replaces post-hoc duty accounting")
+    if type(account_duties) is not bool or (account_duties and profile != "plan_first"):
+        raise ValueError("source duty accounting requires explicit plan_first opt-in")
     if type(reasoning) is not bool or (reasoning and profile != "plan_first"):
         raise ValueError("explicit boolean reasoning switch requires plan_first")
     if profile not in {"direct", "obligation_first", "catalog_bound", "mode_bound", "plan_first"}:
@@ -119,8 +142,10 @@ def initial_state(packet, profile="direct", operations=(), scenario=None, reason
         raise ValueError("entry has no inert source text")
     # Long entry documents are explicitly paged too, never silently cropped.
     state = {"window": roots[:1], "submitted": [], "notes": [], "requests": []}
-    if profile == "obligation_first":
+    if profile == "obligation_first" or account_duties:
         state["obligationReview"] = {"status": "pending"}
+    if account_duties:
+        state["accountSourceDuties"] = True
     if profile in {"catalog_bound", "mode_bound", "plan_first"}:
         state["catalogAuthoring"] = catalog_authoring.PROFILE
     if profile == "mode_bound" or (profile == "plan_first" and operations):
@@ -128,10 +153,33 @@ def initial_state(packet, profile="direct", operations=(), scenario=None, reason
     if profile == "plan_first":
         state["planAuthoring"] = {"phase": "planning", "arguments": []}
         state["modelReasoning"] = reasoning
+        if semantic_plan:
+            state["semanticPlan"] = True
+            state["modelArgumentReasoning"] = argument_reasoning
     if scenario is not None:
         if profile != "plan_first":
             raise ValueError("authoring scenario requires plan_first")
         state["futureScenario"] = source_plan.validate_scenario(packet, scenario)
+    if semantic_plan:
+        state["seededReferences"] = []
+        entry = pages[roots[0]]
+        for ref in packet["bundle"]["references"]:
+            target = ref.get("targetPath")
+            if (len(state["seededReferences"]) >= 2 or ref["sourcePath"] != entry["path"]
+                    or not entry["start"] <= ref["start"] < entry["end"]
+                    or ref.get("contextRole") != "prose_reference_candidate"
+                    or ref.get("availability") != "inert_text_present"
+                    or ref.get("presentCandidatePaths") != [target]):
+                continue
+            included = [key for key, page in pages.items() if page["path"] == target]
+            if len(included) != 1 or included[0] in state["window"]:
+                continue  # large/ambiguous/missing/script references remain explicit navigation
+            trial = copy.deepcopy(state)
+            trial["window"].extend(included)
+            if make_request(packet, trial)[1]["accepted"]:
+                state["window"] = trial["window"]
+                state["seededReferences"].append({"referenceId": ref["referenceId"], "pages": included,
+                                                   "semanticReviewPerformed": False})
     return state
 
 
@@ -303,23 +351,59 @@ def make_request(packet, state, bindings=()):
                    "unreadEntryPages", "sourcePages", "sourceBlocks", "unavailableTextPaths", "hostExecutionGates")}
         content["authoringPhase"] = "source_obligation_inspection_only"
     schema = omit_schema_titles(schema)
-    if state.get("catalogAuthoring"):
+    if state.get("catalogAuthoring") and not pending:
         schema = catalog_authoring.prune_definitions(schema)
-    if state.get("operationModes"):
+    if state.get("operationModes") and not pending:
         schema = catalog_authoring.compact_definition_ids(schema)
     system = obligations.SYSTEM if pending else SYSTEM
-    if state.get("catalogAuthoring"):
+    if state.get("catalogAuthoring") and not pending:
         system = catalog_authoring.SYSTEM
-    if state.get("operationModes"):
+    if state.get("operationModes") and not pending:
         system += source_modes.INSTRUCTIONS
     planned = state.get("planAuthoring")
-    if planned:
+    if planned and not pending:
         if planned["phase"] == "planning":
-            schema = source_plan.planning_schema(blocks, packet["catalog"], state.get("operationModes", []), request, gap, bindings)
+            schema = source_plan.planning_schema(blocks, packet["catalog"], state.get("operationModes", []), request, gap, bindings,
+                                                 semantic=state.get("semanticPlan", False), input_schema=packet["inputSchema"])
             if phase:
                 schema["oneOf"].remove(request)
-            system = source_plan.SYSTEM
+            system = source_plan.SEMANTIC_SYSTEM if state.get("semanticPlan") else source_plan.SYSTEM
             content["authoringPhase"] = "operation_plan_without_arguments"
+            if state.get("semanticPlan"):
+                content["planningValuePaths"] = source_plan.planning_sources(packet["catalog"], packet["inputSchema"])
+                # Original parent locations remain in sourceBlocks. Repeating
+                # path/page/offset metadata for every line consumes budget but
+                # adds no source information; exact audit offsets stay local.
+                content["sourceScanFragments"] = [{"id": key, "block_id": value["block_id"], "text": value["block"]["text"]}
+                    for key, value in program_anchors.scan_fragments(blocks).items()]
+                # Full blocks already occur in sourceBlocks; exact original
+                # lines already occur in sourceScanFragments. Share those IDs
+                # without repeating every source text a third time.
+                content["programEvidenceChoices"] = {"ids": list(program_anchors.evidence_choices(blocks)),
+                    "locations": "Full block IDs refer to sourceBlocks; line IDs refer to sourceScanFragments. All original text remains in these fields."}
+        elif planned["phase"] == "program_sources":
+            frozen = planned["draft"]
+            schema = program_anchors.schema(frozen, blocks, request, gap)
+            if phase:
+                schema["oneOf"].remove(request)
+            system = program_anchors.SYSTEM
+            content["authoringPhase"] = "source_bindings_for_immutable_program"
+            content["frozenProgram"] = {"draftDigest": frozen["reportDigest"], "program": frozen["renderedProgram"],
+                "evidenceChoices": [{"id": key, **value["block"]}
+                    for key, value in program_anchors.evidence_choices(blocks).items()],
+                "sourceSlots": frozen["slots"], "runtimeAuthorityGranted": False,
+                "priorUnverifiedSourceChecklist": [{"statement": row["statement"],
+                    "source": source_span(row["source"], frozen["planningBlocks"])} for row in frozen["choice"]["procedure"]]}
+        elif planned["phase"] == "accounting":
+            plan = planned["plan"]
+            schema = duty_accounting.schema(packet, planned["sourceInventory"], plan)
+            system = duty_accounting.SYSTEM
+            content["authoringPhase"] = "account_frozen_source_duties_before_arguments"
+            content["sourceInventory"] = planned["sourceInventory"]
+            content["frozenPlan"] = {"planDigest": plan["reportDigest"], "tree": plan["tree"],
+                "originalChoice": plan["choice"], "sourceBlocks": plan["blocks"],
+                "semanticEntailmentProven": False, "runtimeAuthorityGranted": False}
+            content["hostExecutionGates"] = obligations.host_gates(packet)
         else:
             plan = planned["plan"]
             slot = plan["reads"][len(planned["arguments"])]
@@ -330,6 +414,13 @@ def make_request(packet, state, bindings=()):
                 "currentRead": slot, "argumentsAlreadyRecorded": len(planned["arguments"]),
                 "semanticEntailmentProven": False, "runtimeAuthorityGranted": False}
             content["availableBindingSources"] = source_plan.binding_sources(packet, plan, slot)
+            if state.get("semanticPlan"):
+                content["argumentSourceNames"] = source_plan.binding_aliases(plan, slot)
+                system += "\nThis semantic frontend uses the frozen observation NAMES in argumentSourceNames, not Tree paths. Select source by name and pointer by the exact listed JSON Pointer. Code lowers the name to its frozen read path. NEVER use template/interpolation strings for dynamic values; they are not executable bindings.\n"
+                slots = source_plan.argument_slots(packet, plan, slot, state.get("operationModes", []))
+                if slots is not None:
+                    content["parameterSlots"] = argument_slots.view(slots)
+                    system = argument_slots.SYSTEM
         # Keep the active request distinct and last, after inert source/host prose.
         # No task text is summarized, filtered, or inferred from adapter limitations.
         content["currentTask"] = {"text": content.pop("task"), "origin": content.pop("taskOrigin"),
@@ -341,11 +432,44 @@ def make_request(packet, state, bindings=()):
         # actual output language. Share the exact schema; do not maintain a
         # potentially divergent prose/schema copy or silently enlarge budgets.
         content["requiredOutputSchema"] = schema
+        if state.get("semanticPlan") and planned["phase"] == "planning":
+            # Authoring evidence/status is retained outside the model request.
+            # Present original source and type facts, not report-only uncertainty
+            # flags that can be mistaken for unsatisfied business prerequisites.
+            keep = {"inputSchema", "hostCatalog", "sourceIndex", "sourceDocumentPaths", "currentFullPages",
+                    "unreadEntryPages", "sourcePages", "sourceBlocks", "ledgerNavigation", "dependencyRequests",
+                    "hostBindings", "remainingNoteSlots", "unavailableTextPaths", "hostOperationModes",
+                    "planningValuePaths", "sourceScanFragments", "programEvidenceChoices", "authoringPhase",
+                    "currentTask", "futureScenario", "requiredOutputSchema"}
+            content = {k: v for k, v in content.items() if k in keep}
+            content["programLanguage"] = {
+                "language": closed_program.PROFILE,
+                "sourceBlockIds": [k for k, b in blocks.items() if len(b["text"]) >= 8],
+                "sourceBinding": "EVERY program statement/duty/restriction carries source_id from programEvidenceChoices. Select the defining original text, not its link or a different duty. Code carries the selected origin without a second model mapping pass. Procedure/requirements keep source.block_id.",
+                "representation": "Closed control tree. Every node anchors source_id BEFORE operands/action. read has name/tool/next, no parameters. if_equal has two child nodes, no next. complete/handoff have NO successor or free-text explanation: code labels control status only, not business success. Handoff retains positive duties and restrictions. No arrays, empty branches, aliases or implicit completion.",
+                "requirements": "Do not pass tool parameters to read; do retain source_id on its statement. Do not assign another read to select an existing result field. All paths must end. Future permission is not a missing fact for authoring or an outside-task duty: preserve it ONLY in execution_requirements, NOT business_gaps/outside_task_duties."}
+        elif state.get("semanticPlan"):
+            keep = {"inputSchema", "hostCatalog", "sourceIndex", "sourceDocumentPaths", "currentFullPages",
+                    "unreadEntryPages", "sourcePages", "sourceBlocks", "ledgerNavigation", "dependencyRequests",
+                    "hostBindings", "remainingNoteSlots", "unavailableTextPaths", "hostOperationModes",
+                    "currentTask", "futureScenario", "requiredOutputSchema", "frozenProgram", "frozenPlan",
+                    "availableBindingSources", "argumentSourceNames", "parameterSlots", "authoringPhase"}
+            if planned["phase"] == "program_sources":
+                keep -= {"inputSchema", "hostCatalog"}
+            content = {k: v for k, v in content.items() if k in keep}
+    if pending and state.get("accountSourceDuties"):
+        # Inspection precedes planning, does not inherit the plan/task, and uses
+        # the existing source classifier. Its omissions are explicitly possible.
+        content["requiredOutputSchema"] = schema
+    reasoning = state.get("modelReasoning", False) or bool(
+        state.get("modelArgumentReasoning") and planned and planned["phase"] == "binding")
     wire = {"model": QWEN_MODEL, "messages": [{"role": "system", "content": system},
              {"role": "user", "content": json.dumps(content, ensure_ascii=False, separators=(",", ":"))}],
-            "format": schema, "think": state.get("modelReasoning", False), "stream": False,
+            "format": schema, "think": reasoning, "stream": False,
             "options": {"temperature": 0, "seed": 20260909, "num_ctx": CONTEXT_TOKENS,
-                        "num_predict": REASONING_OUTPUT_TOKENS if state.get("modelReasoning") else OUTPUT_TOKENS}}
+                        **({"presence_penalty": 1.5 if reasoning else 0,
+                            "repeat_penalty": 1} if state.get("semanticPlan") else {}),
+                        "num_predict": REASONING_OUTPUT_TOKENS if reasoning else OUTPUT_TOKENS}}
     return wire, budget(wire)
 
 
@@ -362,20 +486,80 @@ def derive(packet, state, wire, envelope):
         current = frame(packet, state)
         blocks = citation_blocks(current)
         if choice["mode"] == "operation_plan":
+            if state.get("semanticPlan"):
+                anchored, combined, frozen, audit = inline_program.prepare(choice, packet, blocks, modes=state.get("operationModes", []),
+                    bindings=json.loads(wire["messages"][1]["content"])["hostBindings"])
+                files["program-draft.json"] = frozen
+                if choice["business_gaps"]:
+                    return files, {**cost, "candidateStatus": "operation_plan_has_unresolved_issues"}
+                prepared = source_plan.prepare(anchored, packet, combined, modes=state.get("operationModes", []),
+                    scenario=state.get("futureScenario"), semantic=True)
+                files.update({"program-source-bindings.json": audit, "prepared-plan.json": prepared})
+                if not prepared["reads"]:
+                    return files, {**cost, "candidateStatus": "operation_plan_defers_without_reads"}
+                next_state = copy.deepcopy(state)
+                next_state["planAuthoring"] = {"phase": "binding", "plan": prepared, "arguments": [],
+                    "sourceBindingDigest": audit["reportDigest"]}
+                files["next-state.json"] = next_state
+                return files, {**cost, "candidateStatus": "operation_plan_recorded"}
             prepared = source_plan.prepare(choice, packet, blocks, modes=state.get("operationModes", []),
-                                           scenario=state.get("futureScenario"))
+                                           scenario=state.get("futureScenario"), semantic=state.get("semanticPlan", False))
             files["prepared-plan.json"] = prepared
-            if choice["issues"]:
+            if prepared["tree"]["unresolved"]:
                 return files, {**cost, "candidateStatus": "operation_plan_has_unresolved_issues"}
             if not prepared["reads"]:
                 return files, {**cost, "candidateStatus": "operation_plan_defers_without_reads"}
             next_state = copy.deepcopy(state)
             next_state["planAuthoring"] = {"phase": "binding", "plan": prepared, "arguments": []}
+            if state.get("accountSourceDuties"):
+                source_inventory = duty_accounting.inventory(packet, state)
+                next_state["planAuthoring"].update(phase="accounting", sourceInventory=source_inventory)
+                files["source-inventory.json"] = source_inventory
             files["next-state.json"] = next_state
             return files, {**cost, "candidateStatus": "operation_plan_recorded"}
-        if choice["mode"] == "planned_arguments":
+        if choice["mode"] == "program_sources":
+            frozen = state["planAuthoring"]["draft"]
+            anchored, combined, audit = program_anchors.bind(frozen, choice, packet, blocks)
+            prepared = source_plan.prepare(anchored, packet, combined, modes=state.get("operationModes", []),
+                                           scenario=state.get("futureScenario"), semantic=True)
+            files.update({"program-source-bindings.json": audit, "prepared-plan.json": prepared})
+            if not prepared["reads"]:
+                return files, {**cost, "candidateStatus": "operation_plan_defers_without_reads"}
+            next_state = copy.deepcopy(state)
+            next_state["planAuthoring"] = {"phase": "binding", "plan": prepared, "arguments": [],
+                                           "sourceBindingDigest": audit["reportDigest"]}
+            files["next-state.json"] = next_state
+            return files, {**cost, "candidateStatus": "operation_plan_recorded"}
+        if choice["mode"] == "account_source_duties":
             planned = copy.deepcopy(state["planAuthoring"])
-            planned["arguments"].append({**{k: v for k, v in choice.items() if k != "mode"}, "blocks": blocks})
+            report = duty_accounting.check(packet, planned["sourceInventory"], planned["plan"], choice)
+            files["source-accounting.json"] = report
+            if not report["structuralAccountingPassed"]:
+                return files, {**cost, "candidateStatus": "source_duty_accounting_blocked",
+                               "accountingIssueCount": len(report["issues"])}
+            planned.update(phase="binding", sourceAccounting=report)
+            next_state = copy.deepcopy(state)
+            next_state["planAuthoring"] = planned
+            files["next-state.json"] = next_state
+            return files, {**cost, "candidateStatus": "source_duties_accounted_requires_semantic_review"}
+        if choice["mode"] in {"planned_arguments", "slot_arguments"}:
+            planned = copy.deepcopy(state["planAuthoring"])
+            row = {**{k: v for k, v in choice.items() if k != "mode"}, "blocks": blocks}
+            if choice["mode"] == "slot_arguments":
+                slot = planned["plan"]["reads"][len(planned["arguments"])]
+                slots = source_plan.argument_slots(packet, planned["plan"], slot, state.get("operationModes", []))
+                if slots is None:
+                    raise ValueError("this shape requires the original generic argument author")
+                args, audit = argument_slots.lower(slots, choice)
+                row = {"planDigest": choice["planDigest"], "readPointer": choice["readPointer"],
+                       "arguments": args, "blocks": blocks}
+                files["parameter-slot-packet.json"] = slots
+                files["parameter-slot-lowering.json"] = audit
+            if state.get("semanticPlan"):
+                slot = planned["plan"]["reads"][len(planned["arguments"])]
+                row["arguments"], audit = source_plan.lower_argument_names(planned["plan"], slot, row["arguments"])
+                files["argument-reference-lowering.json"] = audit
+            planned["arguments"].append(row)
             files["planned-arguments.json"] = planned["arguments"][-1]
             slot = planned["plan"]["reads"][len(planned["arguments"]) - 1]
             origin_check = source_plan.check_slot_origins(packet, slot, planned["arguments"][-1])
@@ -385,6 +569,8 @@ def derive(packet, state, wire, envelope):
                                "argumentSlotsCompleted": len(planned["arguments"])}
             if len(planned["arguments"]) == len(planned["plan"]["reads"]):
                 more, status = source_plan.compile_plan(packet, planned["plan"], planned["arguments"], state.get("operationModes", []))
+                if state.get("accountSourceDuties") and "tree.json" in more:
+                    more = duty_accounting.attach(packet, planned["plan"], planned["sourceAccounting"], more)
                 files.update(more)
                 return files, {**cost, "candidateStatus": status, "argumentSlotsCompleted": len(planned["arguments"])}
             next_state = copy.deepcopy(state)
@@ -481,12 +667,13 @@ def derive(packet, state, wire, envelope):
                        "errorType": type(error).__name__, "diagnostic": str(error)[:1800]}
 
 
-def freeze(packet, output, *, bindings=(), profile="direct", operations=(), scenario=None, reasoning=False):
+def freeze(packet, output, *, bindings=(), profile="direct", operations=(), scenario=None, reasoning=False, account_duties=False,
+           semantic_plan=False, argument_reasoning=False):
     if Path(output).exists():
         raise FileExistsError("preserve existing source ledger experiment")
     packet = prior.validate_inputs(packet)
     bindings = validate_bindings(packet, list(bindings))
-    state = initial_state(packet, profile, operations, scenario, reasoning)
+    state = initial_state(packet, profile, operations, scenario, reasoning, account_duties, semantic_plan, argument_reasoning)
     _, measured = make_request(packet, state, bindings)
     if not measured["accepted"]:
         raise ValueError("initial source window exceeds frozen resource policy")
@@ -507,7 +694,9 @@ def load_manifest(root):
     packet = prior.validate_inputs(m["inputs"])
     validate_bindings(packet, m["hostBindings"])
     if m["initialState"] != initial_state(packet, m["profile"], m["initialState"].get("operationModes", []),
-                                         m["initialState"].get("futureScenario"), m["initialState"].get("modelReasoning", False)):
+                                         m["initialState"].get("futureScenario"), m["initialState"].get("modelReasoning", False),
+                                         m["initialState"].get("accountSourceDuties", False), m["initialState"].get("semanticPlan", False),
+                                         m["initialState"].get("modelArgumentReasoning", False)):
         raise ValueError("frozen initial window drift")
     return m
 
@@ -518,6 +707,7 @@ def run(root, *, max_new_calls=0):
     root = Path(root)
     m = load_manifest(root)
     max_calls = MAX_ROUNDS + source_plan.MAX_READS if m["profile"] == "plan_first" else MAX_ROUNDS
+    max_calls += 2 * int(m["initialState"].get("accountSourceDuties", False))
     packet, state = m["inputs"], m["initialState"]
     rows, remaining, last, failure_budget = [], max_new_calls, {}, None
     status = "not_run"
@@ -547,8 +737,8 @@ def run(root, *, max_new_calls=0):
                      "decisionReason": decision_phase(state, MAX_ROUNDS),
                      "budget": measured, **last["result"]})
         status = last["result"]["candidateStatus"]
-        if status not in {"source_window_requested", "source_obligations_reviewed_not_verified",
-                          "operation_plan_recorded", "planned_arguments_recorded"}:
+        if status not in {"source_window_requested", "source_obligations_reviewed_not_verified", "program_draft_recorded",
+                          "operation_plan_recorded", "planned_arguments_recorded", "source_duties_accounted_requires_semantic_review"}:
             break
         state = last["next-state.json"]
     else:
@@ -570,8 +760,12 @@ def run(root, *, max_new_calls=0):
               "hostBindingCount": len(m["hostBindings"]), "semanticReviewStatus": "not_performed",
               "explicitFutureScenario": bool(m["initialState"].get("futureScenario")),
               "modelReasoningRequested": m["initialState"].get("modelReasoning", False),
+              "argumentReasoningRequested": m["initialState"].get("modelArgumentReasoning", False),
               "sourceObligationCount": len(state.get("obligationReview", {}).get("obligations", [])),
               "obligationInspectionVerified": False,
+              "sourceDutyAccountingRequested": m["initialState"].get("accountSourceDuties", False),
+              "inlineSemanticPlanRequested": m["initialState"].get("semanticPlan", False),
+              "sourceDutyAccounting": last.get("source-accounting.json", state.get("planAuthoring", {}).get("sourceAccounting")),
               "planProduced": bool(state.get("planAuthoring", {}).get("plan")) or "prepared-plan.json" in last,
               "plannedReadCount": len(state.get("planAuthoring", {}).get("plan", last.get("prepared-plan.json", {})).get("reads", [])),
               "argumentSlotsCompleted": last.get("result", {}).get("argumentSlotsCompleted",
@@ -595,6 +789,9 @@ def main():
     parser.add_argument("--operations", help="versioned closed-key host operation declarations; not permissions or Gold")
     parser.add_argument("--scenario", help="task-bound caller-supplied future business goal, distinct from authoring work")
     parser.add_argument("--reasoning", action="store_true", help="opt-in 9B thinking with an explicitly larger 8192 output budget")
+    parser.add_argument("--argument-reasoning", action="store_true", help="semantic-plan only: use 9B thinking for parameter binding, not planning/source anchors")
+    parser.add_argument("--account-duties", action="store_true", help="plan_first: inspect source duties, then account each against the frozen plan before filling arguments")
+    parser.add_argument("--semantic-plan", action="store_true", help="plan_first: typed array-length decisions, inline terminal duties and separate future execution requirements")
     parser.add_argument("--profile", choices=["direct", "obligation_first", "catalog_bound", "mode_bound", "plan_first"], default="direct",
                         help="direct preserves the existing path; other profiles are opt-in research variants")
     parser.add_argument("--max-new-calls", type=int, default=0)
@@ -607,7 +804,8 @@ def main():
         operations = source_modes.packet_declarations(read_json(args.operations)) if args.operations else []
         scenario = read_json(args.scenario) if args.scenario else None
         print(freeze(read_json(args.inputs), args.root, bindings=bindings, profile=args.profile, operations=operations,
-                     scenario=scenario, reasoning=args.reasoning)["reportDigest"])
+                     scenario=scenario, reasoning=args.reasoning, account_duties=args.account_duties,
+                     semantic_plan=args.semantic_plan, argument_reasoning=args.argument_reasoning)["reportDigest"])
     else:
         if args.report_dir and Path(args.report_dir).exists():
             parser.error("report directory must not exist")

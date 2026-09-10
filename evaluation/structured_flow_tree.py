@@ -100,7 +100,7 @@ def compile_structured_tree(bundle: dict, tree: StructuredFlowTree, reads: dict,
                 raise ValueError("binding expression exceeds node budget")
             if not isinstance(item, dict):
                 continue
-            if item.get("kind") in ("reference", "column_rows"):
+            if item.get("kind") in ("reference", "column_rows", "array_length"):
                 name = item.get("source")
                 if not isinstance(name, str) or (name != "input" and name not in environment):
                     raise ValueError("source alias is not available in lexical scope")

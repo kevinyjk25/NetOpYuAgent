@@ -19,6 +19,7 @@ from .structured_schema import (
 )
 
 API_VERSION = "netopyu.io/l0-data-binding/v1"
+ARRAY_LENGTH_API_VERSION = "netopyu.io/l0-data-binding/v2"
 
 
 def _seal(body: dict, field: str) -> dict:
@@ -61,6 +62,7 @@ def compile_binding(
         if not isinstance(expr, dict):
             raise DataBindingError("invalid_binding", expression_path, "explicit binding expression required")
         shapes = {"literal": {"kind", "value"}, "reference": {"kind", "source", "pointer"},
+                  "array_length": {"kind", "source", "pointer"},
                   "object": {"kind", "fields"}, "array": {"kind", "items"},
                   "column_rows": {"kind", "source", "pointer", "fields", "max_rows", "max_columns"}}
         kind = expr.get("kind")
@@ -72,11 +74,16 @@ def compile_binding(
         if kind == "literal":
             validate_data(expected, expr["value"], root=target)
             mappings.append({**base, "literalDigest": sha256_json(expr["value"])})
-        elif kind == "reference":
+        elif kind in {"reference", "array_length"}:
             if not isinstance(expr["source"], str) or expr["source"] not in sources:
                 raise DataBindingError("unknown_binding_source", expression_path, "source schema is not declared")
             actual, guaranteed = schema_location(sources[expr["source"]], expr["pointer"])
-            if not _overlap(schema_types(actual), kinds):
+            actual_kinds = schema_types(actual)
+            if kind == "array_length":
+                if actual_kinds != {"array"}:
+                    raise DataBindingError("binding_type_mismatch", expression_path, "array_length requires an exclusively array source")
+                actual_kinds = {"integer"}
+            if not _overlap(actual_kinds, kinds):
                 raise DataBindingError("binding_type_mismatch", expression_path, "source and target types do not overlap")
             mappings.append({**base, "source": expr["source"], "sourcePointer": expr["pointer"],
                              "sourcePathGuaranteedPresent": guaranteed, "valueValidationRequired": True,
@@ -109,10 +116,11 @@ def compile_binding(
 
     walk(expression, "", "", 0)
     body = {
-        "apiVersion": API_VERSION, "schemaProfile": PROFILE,
+        "apiVersion": ARRAY_LENGTH_API_VERSION if any(m["kind"] == "array_length" for m in mappings) else API_VERSION,
+        "schemaProfile": PROFILE,
         "sourceSchemas": sources, "targetSchema": target, "expression": expression,
         "sourceBundleDigest": source_bundle_digest, "mappings": mappings,
-        "requiredSources": sorted({m["source"] for m in mappings if m["kind"] in {"reference", "column_rows"}}),
+        "requiredSources": sorted({m["source"] for m in mappings if m["kind"] in {"reference", "column_rows", "array_length"}}),
         "status": "typed_data_binding_not_authorized", "requiresPerInstanceValidation": True,
         "semanticAlignmentProven": False, "sourceAuthenticityVerified": False, "runtimeAuthorityGranted": False,
     }
@@ -121,7 +129,7 @@ def compile_binding(
 
 def verify_binding(plan: dict) -> dict:
     plan = snapshot_json(plan)
-    if not isinstance(plan, dict) or plan.get("apiVersion") != API_VERSION:
+    if not isinstance(plan, dict) or plan.get("apiVersion") not in {API_VERSION, ARRAY_LENGTH_API_VERSION}:
         raise DataBindingError("invalid_binding_plan", "", "unknown data binding version")
     required = {"sourceSchemas", "targetSchema", "expression", "sourceBundleDigest"}
     if not required <= plan.keys():
@@ -149,11 +157,15 @@ def materialize_binding(plan: dict, source_values: dict) -> dict:
     def resolve(expr):
         if expr["kind"] == "literal":
             return expr["value"]
-        if expr["kind"] in {"reference", "column_rows"}:
+        if expr["kind"] in {"reference", "column_rows", "array_length"}:
             try:
                 source = pointer_value(values[expr["source"]], expr["pointer"])
                 if expr["kind"] == "reference":
                     return source
+                if expr["kind"] == "array_length":
+                    if type(source) is not list:
+                        raise DataBindingError("binding_type_mismatch", expr["pointer"], "array_length requires an actual array")
+                    return len(source)
                 try:
                     return decode_column_rows(source, expr["fields"], max_rows=expr["max_rows"], max_columns=expr["max_columns"])
                 except DataBindingError as error:
