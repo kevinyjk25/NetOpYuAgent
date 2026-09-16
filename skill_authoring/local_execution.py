@@ -15,6 +15,7 @@ import httpx
 from . import compiler as author, reasoning_transport, delivery
 from .artifacts import write_artifacts
 from .contracts import budget, seal
+from .model_endpoint import resolve_model_endpoint
 from network_runtime.access import ObservationAccessContext
 from network_runtime.capabilities import CapabilityContract
 from network_runtime.contracts import sha256_json
@@ -69,20 +70,22 @@ def invoke_local(request, folder, costs):
         "messages": reasoning_transport.messages(request)}
     if not budget(wire)["accepted"]:
         raise ValueError("complete reasoning request exceeds context budget; no truncation")
+    endpoint = resolve_model_endpoint("runtime", model=author.MODEL, default_endpoint=ENDPOINT)
     # Only the operator's localhost model endpoint, never a URL from an L1 Skill.
     with httpx.Client(timeout=360, trust_env=False) as client:
-        tags = client.get(ENDPOINT + "/api/tags")
+        tags = client.get(endpoint.base_url + "/api/tags")
         tags.raise_for_status()
         models = [m for m in tags.json()["models"] if m["name"] == author.MODEL]
         if len(models) != 1 or not models[0].get("digest"):
             raise ValueError("exact local 9B artifact unavailable")
+        endpoint.check_model_digest(models[0]["digest"])
         write_artifacts(folder, {"request.json": {"wireRequest": wire, "governedRequest": request,
                                                    "modelArtifact": models[0]["digest"]}})
         began = time.monotonic()
         cost = {"node": request["nodeId"], "inputTokens": None, "outputTokens": None, "status": "unknown",
                 "decoderConstraint": "host_output_schema_independent_validation_still_required"}
         try:
-            response = client.post(ENDPOINT + "/api/chat", json=wire)
+            response = client.post(endpoint.base_url + "/api/chat", json=wire)
             response.raise_for_status()
             envelope = response.json()
             write_artifacts(folder / "response", {"envelope.json": envelope})

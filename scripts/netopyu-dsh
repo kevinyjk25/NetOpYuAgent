@@ -1164,7 +1164,7 @@ run_e2e() {
   runtime_env
   cd "$PROJECT_ROOT" || return 1
   printf '1/7 Python full suite\n'
-  "$PYTHON_BIN" -m pytest -q || return 1
+  "$PYTHON_BIN" -m pytest -q --test-suite=all || return 1
   printf '2/7 Static audits\n'
   "$PYTHON_BIN" scripts/audit_harness_boundary.py || return 1
   NETOPYU_BACKEND=mock "$PYTHON_BIN" -m l1_runtime.catalog_gate check >/dev/null || return 1

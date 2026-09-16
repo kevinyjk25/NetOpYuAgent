@@ -13,6 +13,7 @@ from jsonschema import Draft202012Validator, ValidationError
 from . import compiler, delivery
 from .artifacts import write_artifacts
 from .contracts import budget, seal
+from .model_endpoint import resolve_model_endpoint
 
 ENDPOINT = "http://127.0.0.1:11434"
 
@@ -39,15 +40,17 @@ def invoke(packet, visible, folder):
             "status": "not_called", "semanticApproval": False}
     began = time.monotonic()
     try:
+        endpoint = resolve_model_endpoint("compile", model=compiler.MODEL, default_endpoint=ENDPOINT)
         with httpx.Client(timeout=180, trust_env=False) as client:
-            tags = client.get(ENDPOINT + "/api/tags")
+            tags = client.get(endpoint.base_url + "/api/tags")
             tags.raise_for_status()
             models = [m for m in tags.json()["models"] if m["name"] == compiler.MODEL]
             if len(models) != 1 or not models[0].get("digest"):
                 raise ValueError("exact local compiler model unavailable")
+            endpoint.check_model_digest(models[0]["digest"])
             write_artifacts(folder / "identity", {"model.json": {"name": compiler.MODEL, "digest": models[0]["digest"]}})
             cost.update(physicalCallAttempted=True, status="outcome_unknown")
-            response = client.post(ENDPOINT + "/api/chat", json=wire)
+            response = client.post(endpoint.base_url + "/api/chat", json=wire)
             response.raise_for_status()
             envelope = response.json()
             write_artifacts(folder / "response", {"envelope.json": envelope})

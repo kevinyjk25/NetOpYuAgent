@@ -1,51 +1,64 @@
-# 转译研究代码导航 / Translation Research Code Map
+# 评测代码导航 / Evaluation Code Map
 
 ## 中文
 
-当前（2026-09-16）：已获授权实施[新考核与有限收敛方案](../docs/EVALUATION-RESET-20260916.md)，处于 **R0 测量基础设施部分完成**。零模型入口：`python -m evaluation.bounded_probe NEW_OUTPUT`（24 评分正反例、预算和现有 mock 网关）；`python -m evaluation.bounded_pilot --help`（仅 check/prepare/inspect/score，无 run）。`bounded_scoring` 分开任务／转译／安全／成本，`bounded_budget` 固化不可重放账本，`bounded_execution` 只提供脚本回调计量。真实 DSH 计量、可信预先 token 计数、物理 Provider 重置、预封存样本标签和实跑回执尚未接通。新结果不是 Agent 成绩，不解锁正式门禁。下文早期研究命令供历史查阅，**不是继续模型试跑的安排**。
+当前研究协议唯一入口是[考核重置与有限收敛设计](../docs/EVALUATION-RESET-20260916.md)。**R0 测量部分完成；未进入 R1；没有真实模型 run 命令。** 旧研究代码仍可用于追溯和回归，但不再是当前试跑计划。清理与测试分类见[清理记录](../docs/CLEANUP-20260916.md)。
 
-阶段 1 基线：Git `43a2b76` / v62。阶段 2 双驱动 v7 小批开发验证已完成，尚未提交，模型仍为 9B。先看[最终结果与实际使用](../docs/STAGE-2-HYBRID-RESULTS.md)；[首批负结果](../docs/STAGE-2-PUBLIC-TRANSFER.md)和[v65 严格表示修复](../docs/STAGE-2-REPRESENTATION-REPAIR.md)保留。不改变默认 DSH 路由，不将混合/局部结果称为完整 L0 转换。
+### 当前 R0 测量链
 
-### 当前主路径
+| 模块 | 职责与边界 |
+|---|---|
+| [bounded_pilot](bounded_pilot.py) | check、prepare、inspect、score；固定协议、预算和判据，不执行真实模型 |
+| [bounded_scoring](bounded_scoring.py) / [bounded_probe](bounded_probe.py) | 分开任务／转译／安全／成本，合成正反例检查不能冒充 Agent 成绩 |
+| [bounded_budget](bounded_budget.py) / [bounded_execution](bounded_execution.py) | 持久预算总账、未知调用留存；现阶段回调只做 fixture 计量 |
+| [bounded_transport](bounded_transport.py) / [chat_codec](chat_codec.py) | 角色绑定的 scripted-only HTTP broker；协议编码不充当 token／事实可信来源 |
+| [bounded_provider](bounded_provider.py) | 每 arm 独立 SQLite 模拟 Provider 与真实读回执；不获得产品写权限 |
+| [bounded_dsh_probe](bounded_dsh_probe.py) / [bounded_dsh_tools](bounded_dsh_tools.mjs) | 实际 DSH 的原生、编译后 Runtime 读取和拒绝后 fallback 接线；无真实 LLM |
+| [dsh_support](dsh_support.py) / [local_read_fixture](local_read_fixture.py) | 独立 DSH 配置／路径助手和只读 fixture，不依赖旧 ledger/reviewer 实验链 |
 
-| 环节 | 文件 | 权威边界 |
-|---|---|---|
-| 完整源包 | [translation_intake](translation_intake.py)、[task_alignment](task_alignment.py) | 保留原文/引用/脚本惰性文本，冻结具体任务及原始/披露的本地宿主合同 |
-| 冻结、窗口与检查点 | [source_ledger](source_ledger.py) | 显式选择 plan_first + semantic-plan；原始回复、预算、指纹和失败保留 |
-| 语义规划 | [source_plan](source_plan.py)、[source_closed_program](source_closed_program.py) | 源义务、闭合控制树与观察命名空间；结构不证明语义 |
-| 来源与参数 | [source_inline_program](source_inline_program.py)、[source_argument_slots](source_argument_slots.py) | 原文位置、完整 Schema 参数槽及数据来源；类型兼容不等于业务正确 |
-| 惰性表示与编译 | [source_program](source_program.py)、[structured_flow_tree](structured_flow_tree.py) | 白名单解析，无 eval/exec；复用原 Runtime，不执行源脚本 |
-| 证据与路径检查 | [stage1_validation](stage1_validation.py)、[stage1_evidence](stage1_evidence.py) | 开发者审阅和合成执行单列，不自动授予权限或称整 Skill 成功 |
-| 双驱动前段构造 | [hybrid_authoring](hybrid_authoring.py)、[hybrid_prefix](hybrid_prefix.py)、[hybrid_parameters](hybrid_parameters.py) | 原始任务保留为受控 L1；只读前段编译到原 L0，边界注释不授语义权威 |
-| 双驱动冻结与实际执行 | [hybrid_transfer](hybrid_transfer.py)、[hybrid_live_demo](hybrid_live_demo.py)、[hybrid_reasoning_transport](hybrid_reasoning_transport.py) | 新版本/检查点不可覆盖；真实 9B 与合成只读宿主，源脚本不执行 |
-| 分开计量与审阅 | [hybrid_evidence](hybrid_evidence.py)、[hybrid_execution_evidence](hybrid_execution_evidence.py)、[hybrid_public_checks](hybrid_public_checks.py) | 结构、局部/完整结果、真实模型成本与模型替身机制测试分列 |
-
-### 最小使用
-
-输入文件必须包含原始 bundle、task、taskOrigin、inputSchema、catalog 和 reads，不能放审阅答案。详见[语义前端](../docs/SEMANTIC-PLAN.md)。
+零真实模型检查（输出目录必须全新，不能覆盖已有证据）：
 
 ```bash
-.venv/bin/python -m evaluation.source_ledger freeze NEW_RUN_DIR --inputs inputs.json --profile plan_first --semantic-plan
-.venv/bin/python -m evaluation.source_ledger run NEW_RUN_DIR --max-new-calls 1 --report-dir NEW_REPORT_DIR
-# 零新调用回放；运行目录和报告目录不能覆盖。
-.venv/bin/python -m evaluation.source_ledger run NEW_RUN_DIR --max-new-calls 0
+.venv/bin/python -m evaluation.bounded_pilot --help
+.venv/bin/python -m evaluation.bounded_probe /tmp/ensuredskill-r0-new-output
+.venv/bin/python -m evaluation.bounded_dsh_probe --help
 ```
 
-max-new-calls 是本次允许的调用数，不是许可自动重试失败。一个流程可能需要源窗口请求、一次规划和逐读取填参。已有未回执请求保持未知；不能删检查点再跑。完整首次构造通过不代表可以跳过源文审核或激活。
+实际 DSH 接线结果见[接线摘要](../docs/benchmarks/bounded-pilot-r0-integration-summary.json)。脚本化返回和 token 数是 fixture；它不证明 9B 语义准确率、真实性能或 36 项 Runtime 门槛。可信同后端 tokenizer／调用前预授权、完整控制器／依赖冻结、6 Skill／12 Task 与独立标签仍待完成。
 
-### 生命周期分类
+### 产品实现与研究代码分开
 
-- **当前可选路径**：严格表达使用上述 source_ledger plan_first/semantic-plan；混合任务使用 hybrid 构造/审阅/本地执行入口。Runtime 权限边界不变。
-- **依赖/兼容保留**：source_catalog、source_modes、source_program_lines、source_program_anchors、source_duty_accounting 等仍被编译、测试或历史回放引用，不因名称旧而删除。
-- **历史研究路径**：flow_contract_authoring、flow_read_region、flow_condition_expression、flow_semantic_probe 等见[历史导航](HISTORY-README-20260910.md)及[实验索引](../docs/FLOW-EXPERIMENTS.md)。保留 CLI/API 和原始结果，不自动与当前结果混算。
-- **阶段 2 双驱动路径**：公开验证已完成最小开发闭环，不代表泛化通过；`hybrid_live_demo` 仅对明确受审候选执行原严格读取＋真实 9B。`hybrid_public_checks` 是合成接线检查，不是实际 LLM 成功率。见[双驱动边界](../docs/GOVERNED-HYBRID-FLOWS.md)。
+产品编译与执行适配位于 [skill_authoring](../skill_authoring/)，Runtime 位于 [network_runtime/l0](../network_runtime/l0/)，宿主位于 [dsh_adapter](../dsh_adapter/)。`evaluation.hybrid_*` 中的兼容入口不构成另一套产品编译器。当前可选会话及双驱动边界见[受控会话](../docs/GOVERNED-SESSION.md)、[双驱动流程](../docs/GOVERNED-HYBRID-FLOWS.md)。混合图不等于整 Skill 都已确定性转译；模型候选不能授予权限。
 
-清理本身未改执行引擎；v65 功能修订在同一个数据绑定/流程引擎中扩充双侧比较检查，不另建执行器。所有版本单独冻结，不改写 v62/v63 记录。语法可表达不等于语义可信。
+### 测试选择
+
+```bash
+.venv/bin/python -m pytest -q                         # current，默认回归
+.venv/bin/python -m pytest -q --test-suite=historical # 历史探索性回归
+.venv/bin/python -m pytest -q --test-suite=all        # 提交／发布完整回归
+```
+
+分类由 [suite_policy.json](../tests/suite_policy.json) 的显式文件名单控制，不按 `flow_*` 等前缀批量排除。Runtime 安全、现用编译器、正式门禁、权限、未知效果与恢复检查仍属 current；新增测试默认 current。CI／retirement 使用 all。测试数变化只说明分类或代码变化，不说明语义能力提高。
+
+### 历史与保留依赖
+
+- `source_ledger`、`source_plan`、`source_program`、flow/duty/reviewer 试验属于此前研究路径；不因已有 CLI 自动重启模型调用。
+- 部分旧模块仍被兼容入口、历史重放或当前安全检查引用，不能按文件年龄删除。原 API 保留；新 R0 不再导入旧 semantic-closure、source-ledger、DSH-shadow 或 reviewer 链来取得通用助手。
+- `task_delivery_ablation` 单快照双臂诊断及其专用测试已退役。旧结果和冻结源码保留，可从清理前 Git 或本地备份恢复；不再提供该旧 CLI。
+- 历史阶段 1/2 的正负结果、Oracle、源码摘要和原始响应均保留。开发中已暴露 Skill 不会因归档变成 unseen。
+
+历史入口：[旧代码导航](HISTORY-README-20260910.md)、[实验索引](../docs/FLOW-EXPERIMENTS.md)、[阶段 1 结果](../docs/STAGE-1-RESULTS.md)、[阶段 2 结果](../docs/STAGE-2-HYBRID-RESULTS.md)。其中“当前／下一步”是当时快照，不替代新协议。
 
 ## English
 
-Current (September 16): authorized [bounded evaluation reset](../docs/EVALUATION-RESET-20260916.md), **R0 measurement partially implemented**. `evaluation.bounded_probe NEW_OUTPUT` runs 24 synthetic scorer controls/counterexamples, budget checks and the existing mock gateway with zero model calls. `evaluation.bounded_pilot` offers check/prepare/inspect/score only, no run. Scoring separates fulfillment/translation/safety/cost; the persistent ledger prevents replay; the callback meter is fixture-only. Trusted live DSH accounting/token preflight, physical Provider resets, predeclared aligned labels and real receipt collection remain open. These are not Agent results or research qualification. Earlier commands below are historical references, not instructions to resume model runs.
+The [bounded evaluation reset](../docs/EVALUATION-RESET-20260916.md) is the current research protocol. **R0 measurement remains partial; R1 has not started; no real-model run command exists.** Historical experiments are retained for traceability and regression, not as the active run plan. See the [cleanup record](../docs/CLEANUP-20260916.md).
 
-Stage 1 baseline: 43a2b76/v62. Stage 2's mixed v7 development loop is complete and uncommitted; see [results and actual use](../docs/STAGE-2-HYBRID-RESULTS.md). Preserve the [original negative batch](../docs/STAGE-2-PUBLIC-TRANSFER.md) and [v65 representation repair](../docs/STAGE-2-REPRESENTATION-REPAIR.md). source_ledger remains the opt-in strict authoring path; hybrid_authoring/prefix/parameters retain the original L1 task after a grounded read prefix. hybrid_transfer freezes all source/task/host inputs; hybrid_live_demo and role-separated reasoning transport invoke actual local 9B only after explicit review. Evidence collectors separate structural, partial/full semantic, actual-model and synthetic-mechanism results. Zero-call replay is distinct from retry; inputs never contain reviewer answers.
+The active measurement chain is `bounded_pilot/scoring/budget/execution`, the scripted-only `bounded_transport`, isolated SQLite `bounded_provider`, and the installed-DSH `bounded_dsh_probe`. Shared DSH helpers, protocol codecs and read fixtures now live independently in `dsh_support`, `chat_codec` and `local_read_fixture`. They do not require old semantic-closure, source-ledger, DSH-shadow or reviewer experiment chains. Historical callers retain compatible exports.
 
-Keep dependent helpers and historical authoring paths for imports, regression and original-version replay. Their commands and results remain in the [historical navigation](HISTORY-README-20260910.md); do not mix them into current scores. New hybrid_authoring/parameters/transfer/live_demo modules implement an opt-in, reviewed read/reason path; synthetic public checks are not live LLM accuracy. See the [hybrid boundary](../docs/GOVERNED-HYBRID-FLOWS.md). Functional revisions retain separate freezes and negative evidence; Stage 1 development evidence, Stage 2 transfer and formal generalization remain distinct.
+Use the zero-real-model commands above with a fresh output directory. Scripted responses and token counts are fixtures, not 9B accuracy/performance or the 36-probe gate. Trusted same-backend tokenizer/preauthorization, full controller/dependency freeze and the six-Skill/twelve-task independently labeled sample remain unfinished. [Original integration evidence](../docs/benchmarks/bounded-pilot-r0-integration-summary.json) retains its original fingerprint.
+
+Product authoring lives in `skill_authoring`, execution in `network_runtime/l0`, and host integration in `dsh_adapter`. Compatibility exports under evaluation do not create another compiler. A governed mixed workflow is not a fully deterministic Skill; model proposals never grant authority.
+
+Pytest defaults to `current`; `--test-suite=historical` runs the explicit research subset and `--test-suite=all` runs both. CI and retirement use all. The exact [manifest](../tests/suite_policy.json) preserves core/formal-gate checks in current; future tests default to current. Counts are engineering inventory, not semantic evidence.
+
+Retain historical API dependencies, source snapshots, failures, labels and reports. The no-consumer `task_delivery_ablation` CLI and its dedicated tests are retired and recoverable from the pre-cleanup commit/local backup. Exposed development Skills remain exposed after archiving. [Historical code map](HISTORY-README-20260910.md) and [experiment index](../docs/FLOW-EXPERIMENTS.md) remain accessible; their old next-step instructions do not authorize another model run.

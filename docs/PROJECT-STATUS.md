@@ -2,13 +2,25 @@
 
 ## 中文
 
-### 2026-09-16 当前：已授权实施，R0 测量部分完成，0 模型调用
+### 2026-09-16 清理：当前路径与历史研究分离
 
-用户已授权实施[考核重置与有限收敛方案](EVALUATION-RESET-20260916.md)，当前为 **R0 measurement partial implemented**。`bounded_budget/scoring/pilot/execution/probe`已提供持久预算、独立评分、输入准备、脚本式计量和本地探针；仍分开转译保真、Runtime 约束和真实 Agent 整体收益。旧公开 A/B 的预转译与漏计尾部成本不能作为冷启动收益证据；旧数值不改，原语义阶段仍为 `paused_unmet`。
+[清理说明](CLEANUP-20260916.md)：旧探索性测试按显式文件清单分到 historical，默认 current 保留 Runtime 安全、现用编译器、宿主和正式门禁，CI／retirement 仍跑 all。R0 通用助手从旧实验链解耦、兼容导出保留；退役单快照 `task_delivery_ablation` 及专用测试。源码和 artifacts 已先归档逐内容核验，历史负结果、Oracle、数据库及无关用户文件不动。验证结果见[清理摘要](benchmarks/cleanup-20260916-summary.json)。
 
-153 项定向测试通过；[可入 Git 测量摘要](benchmarks/bounded-pilot-r0-summary.json)记录 12 类／24 个评分 fixtures、10 项预算检查、3 项既有模拟网关机制检查，模型调用为 0。评分回执／语义判断／用量为合成 fixtures；模拟网关检查复用既有机制。这不是完整 36 项机制门槛、自动 Effect 桥接、真实 DSH 冷启动实验或 Agent 收益证明。全量首轮 3,434 通过＋81 子测试，另有 18 项受本地 socket／Docker 访问权限影响；授权环境复核这 18 项全部通过，原报告保留，不冒充单次全量全绿。新增 9 个 Python 文件 Ruff 与 diff 检查通过。
+用户要求清理后只做本地提交，**等待用户推送后再继续**。R0 仍部分完成，未进入 R1，未调用真实模型；旧阶段不改判为通过。下文接线和回归数字是清理前那一轮的独立结果。
 
-剩余 R0：真实 DSH 全调用计量与可信预先 token 计数、物理 Provider 重置／隔离接入、预封存独立标签及 12 任务样本、真实 trace 采集。CLI 仅 `check/prepare/inspect/score`，没有 `run` 命令；R0 未完成，不进入 R1／R2。保留 9B、双驱动、总预算、正式泛化门禁和写边界；无模型调用、提交或推送。下文“下一步”均为历史记录，不自动续开修复包。
+本次最终全量 **3,697 项＋81 子测试通过**，清理定向 96 项通过，23 个变更 Python 文件 Ruff 通过。新 DSH 脚本化接线 3/3 通过；首次文档标题失败及全库既有 lint 问题均在摘要中保留，不冒充全部历史代码零问题。
+
+### 2026-09-16 当前：R0 接线推进，仍为部分完成，0 真实模型调用
+
+用户已授权实施[考核重置与有限收敛方案](EVALUATION-RESET-20260916.md)，当前仍为 **R0 measurement partial implemented**。本轮新增宿主角色绑定的 HTTP 计量入口、每 arm 独立 SQLite 模拟状态／收据、上下文冻结的编译／Runtime 模型路由，以及安装的 DSH＋脚本化模型＋既有只读 Runtime 接线探针。预算总账和原准入机制复用；仍分开转译保真、Runtime 约束和真实 Agent 整体收益。旧数值不改，原语义阶段仍为 `paused_unmet`。
+
+[前轮测量摘要](benchmarks/bounded-pilot-r0-summary.json)及原始失败全部保留；[本轮接线摘要](benchmarks/bounded-pilot-r0-integration-summary.json)单独记录实际 DSH 接线及回归。模型返回和 token 数都是明确的 fixture，但 Provider 数据确实读自 SQLite，Runtime 确实在 DSH 的工具回合内运行，第二次 DSH 请求还需证明结果及 call ID 正确递送。它不是语义准确率、9B 性能、36 项机制门槛或自动 Effect 桥接证明。
+
+原生／编译后 Runtime 读取／编译拒绝后 fallback 三条实际 DSH 接线均已通过；8 次脚本化请求、3 次真实 SQLite 读取、0 次真实模型调用；初态一致、数据库隔离、结果递送和关停都通过检查。前两次 wire 格式拒绝保留为失败记录，不覆盖。290 项定向检查通过，涵盖共享计量、未知停止、超时留档、重复请求和迟到调用隔离。
+
+最终全量 **3,608 项＋81 子测试通过**（254.37 秒），11 个 Python 文件 Ruff、Node 语法及 diff 检查通过。首轮唯一失败是新摘要尚未生成时的文档链接检查；文件完成后文档 3 项复核及最终全量均通过，首轮报告保留。工程回归不替代真实模型评测。
+
+剩余 R0：同后端可信 renderer／tokenizer 的调用前计量及硬 deadline、完整控制器接入／依赖冻结、预封存独立标签及 6 Skill／12 Task。当前 DSH 字符估算与字节代理不满足 token 预授权；不会用事后 usage 替代。CLI 仍只有 `check/prepare/inspect/score`，没有真实模型 `run` 命令；R0 未完成，不进入 R1／R2。保留 9B、双驱动、总预算、正式泛化门禁和写边界；本轮无真实模型调用、提交、推送或 UI 重启。下文“下一步”均为历史记录，不自动续开修复包。
 
 ### 历史：结构机制完成，任务验收退步，停止同例模型试跑
 
@@ -214,11 +226,23 @@
 
 ## English
 
-Current September 16: implementation of the [evaluation reset](EVALUATION-RESET-20260916.md) is authorized; **R0 measurement is partially implemented** in the bounded budget/scoring/pilot/execution/probe modules. They provide persistent budgets, isolated scoring, input preparation, scripted metering and local probes. Translation, enforcement and real-agent benefit remain distinct; old pretranslated/partial-latency A/B cannot establish cold-start benefit. The old semantic stage remains `paused_unmet`.
+September 16 cleanup separates active code/tests from historical research. An explicit historical manifest preserves core Runtime/compiler/host/formal gates in current; CI/retirement still run all. R0 helpers no longer load old experiment chains, with legacy exports retained. The no-consumer snapshot `task_delivery_ablation` CLI and dedicated tests are retired and recoverable. Pre-edit source/artifact archives were content-verified; failures, labels, databases and unrelated user files remain untouched. See [cleanup details](CLEANUP-20260916.md) and [QA summary](benchmarks/cleanup-20260916-summary.json).
 
-153 targeted tests pass. The [portable measurement summary](benchmarks/bounded-pilot-r0-summary.json) records 24 scorer fixtures across twelve families, ten budget checks and three existing simulated-gateway mechanism checks, with zero model calls. Scorer receipts, semantic judgments and usage are synthetic; gateway checks reuse existing mechanisms. This establishes neither the full 36-probe gate, automatic Effect bridging, a live DSH cold-start experiment nor agent benefit. The first full suite had 3,434 passes plus 81 subtests, with eighteen failures/errors caused by blocked local sockets/Docker access. All eighteen passed an approved environment recheck; the first report remains, and no single all-pass full run is claimed. Ruff on nine new Python files and diff checks pass.
+The user requested a local commit followed by a stop until they push. R0 remains partial; no R1 or real-model calls. Integration/regression numbers below belong to the separate pre-cleanup increment and are not relabeled as current results.
 
-Remaining R0 work: live DSH full-call accounting and trusted advance token counts, physical Provider reset/isolation, frozen independent reference labels and twelve tasks, and real trace capture. The CLI has only `check/prepare/inspect/score`, no `run`; R0 is incomplete, so R1/R2 have not begun. Retain 9B, dual-drive execution, finite budgets, formal gates and product authority. No model calls, commit or push. All next-step wording below is historical, not an automatic new repair cycle.
+This cleanup's final regression passes **3,697 tests plus 81 subtests**, with 96 targeted passes, Ruff on all 23 changed Python files and three successful installed-DSH scripted paths. The initial documentation-heading failure and existing legacy lint findings remain disclosed; no repository-wide lint-clean claim is made.
+
+Current September 16: **R0 measurement remains partial** under the [evaluation reset](EVALUATION-RESET-20260916.md). This increment adds host-role-bound HTTP metering, per-arm SQLite simulators/receipts, context-local immutable compiler/Runtime model routes and an installed-DSH/scripted-model/original-Runtime integration probe. It reuses existing budgets/admission rather than another execution plane. Translation, enforcement and real-agent benefit remain distinct; historical results and `paused_unmet` remain unchanged.
+
+The [prior measurement summary](benchmarks/bounded-pilot-r0-summary.json) retains its scorer/budget/gateway fixtures and all historical QA, including the initial environment-blocked run and its approved recheck. Those results are not relabeled as this increment's full-suite result.
+
+The [new integration summary](benchmarks/bounded-pilot-r0-integration-summary.json) is separate from the retained prior probe and failures. Responses/token counts are fixtures; reads genuinely come from SQLite and Runtime executes inside DSH's tool turn. The next DSH request must also contain the correct delivered result and call identity. This is not semantic accuracy, 9B performance, the 36-probe gate or automatic Effect bridging.
+
+All three installed-DSH paths passed: native, compiled Runtime read, and rejected-compilation fallback. Eight scripted requests, three genuine SQLite reads, zero real-model calls; matching initial states, isolated databases, result delivery and drained shutdown were checked. Both earlier wire-format rejection attempts remain retained. There are 290 targeted passes covering shared accounting, unknown-state stops, timeout retention, duplicate attempts and late-call isolation.
+
+Final full regression: **3,608 passes plus 81 subtests**, 254.37 seconds; Ruff on eleven Python files, Node syntax and diff checks pass. The first run's sole failure was a link to the not-yet-written summary; after documentation completion, all three documentation checks and the final full run passed. The first report remains. Engineering regression does not substitute for real-model evaluation.
+
+Remaining R0: trusted same-backend renderer/tokenizer preflight and hard deadlines; complete controller/dependency freeze; independently aligned six-Skill/twelve-task references. DSH's character estimates and byte proxies are insufficient, and post-response usage cannot replace preauthorization. The CLI has only `check/prepare/inspect/score`, no real-model `run`; R1/R2 have not begun. Retain 9B, dual-drive execution, finite budgets, formal gates and product authority. No real-model calls, commit, push or UI restart in this increment. All next-step wording below is historical, not a renewed repair cycle.
 
 Historical [schema/artifact implementation](SCHEMA-ARTIFACT-CONVERGENCE.md) passes engineering verification but regresses actual tasks. On the same threeDSH/9B cases:compiler admission2/3→3/3,query inventory acquisition2/2→1/2,complete tasks1/3→0/3. The single native code patch is unchanged,one query skips inventory,andMesh fabricates a next source.15 model calls,116,059/3,444 tokens,p50/p95=176.19/278.83s;5 authorized reads,no observed effects/replay.148 targeted,8 docs/authority checks,Ruff124 files and full3,324 tests plus81 subtests pass. [Bound evidence](benchmarks/schema-artifact-summary.json). Execution source/model remain frozen;no reruns or changed expectations.
 

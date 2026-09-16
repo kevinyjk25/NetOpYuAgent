@@ -41,9 +41,10 @@ jobs:
           .venv/bin/python -m pip install --upgrade pip
           .venv/bin/python -m pip install -r requirements-dev.txt
 
-      - name: Run the complete local DSH-only gate
+      - name: Run the complete local DSH-only gate (current and historical)
         env:
           NETOPYU_DSH_BACKEND: mock
+          PYTEST_ADDOPTS: --test-suite=all
         run: scripts/netopyu-dsh retirement
 
   pragmatic-dependencies:

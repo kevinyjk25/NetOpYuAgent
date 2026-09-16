@@ -4,7 +4,7 @@
 
 ## 中文
 
-2026-09-16：[新考核／重构](docs/EVALUATION-RESET-20260916.md)已获授权实施，R0 的输入准备、预算总账、独立评分和脚本式计量已部分落地。目标仍分为转译保真、Runtime 约束、同一真实 Agent 的冷启动端到端收益；开放 L1 与严格 L0 并存，开发候选和确认总预算不变。153 项定向测试和 0 模型的本地测量探针不能代替业务完成，也未通过 36 项机制门槛。真实 DSH／Provider／trace 接线和预封存样本标签仍待完成，尚无 `run` 命令；旧语义阶段仍为 `paused_unmet`，正式门禁不变。
+2026-09-16：[新考核／重构](docs/EVALUATION-RESET-20260916.md)的 R0 测量仍为部分实现。角色绑定入口只计量 scripted 模型，模拟 Provider 的 SQLite 状态按 arm 独立，context-local 路由覆盖编译器／Runtime；实际 DSH 脚本化接线探针已增加，三条路径已通过，本轮真实模型调用为 0。转译保真、Runtime 约束、同一真实 Agent 的冷启动收益仍是独立目标；开放 L1、严格 L0 和有界 fallback 保留，接线不等于任务收益或 36 项门槛通过。可信 tokenizer／调用前计量、6 Skill／12 Task 样本与独立标签、完整依赖冻结仍待完成；DSH 字符估算不能用于预算预授权。旧 `paused_unmet`、正式门禁、权限和默认 UI 不变。
 
 当前补充见[结构与工件收敛](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)：将结构合法性、局部工件验证、完整任务验收分开。可选宿主策略只给明确失败的代码块一次文本修订预算；不是新的执行支路或通用语义自审。未知函数/复杂语言保持未验证，检查通过不授予操作权。
 
@@ -220,7 +220,7 @@ Hermes、A2A、企业 OIDC/PDP/Change Authority、Provider 签名供应链、Cat
 
 ## English
 
-September 16: implementation of the [reset](docs/EVALUATION-RESET-20260916.md) is authorized, with R0 input preparation, persistent budgets, isolated scoring and scripted metering partially implemented. Translation fidelity, Runtime enforcement and the same real agent's cold-start benefit remain separate claims, retaining open L1, strict L0 and finite development/confirmation budgets. The 153 targeted tests and zero-model local probes do not establish task fulfillment or the 36-probe gate. Live DSH/Provider/trace integration and frozen cases/labels remain outstanding; no `run` command exists. The old semantic stage remains `paused_unmet`; formal gates are unchanged.
+September 16: R0 measurement under the [reset](docs/EVALUATION-RESET-20260916.md) remains partial. The role-bound endpoint meters scripted models only, simulated Provider SQLite state is isolated per arm, and context-local routes cover the compiler/Runtime. An installed-DSH scripted wiring probe has been added; all three paths passed, with zero real-model calls in this work. Translation fidelity, Runtime enforcement and the same real agent's cold-start benefit remain separate goals; open L1, strict L0 and bounded fallback are retained. Wiring establishes neither task benefit nor the 36-probe gate. Trusted tokenizer/preflight counting, the six-Skill/twelve-task sample, independent labels and complete dependency freezing remain unfinished; DSH character estimates cannot authorize token budgets. The old `paused_unmet` status, formal gates, authority and default UI are unchanged.
 
 The [schema/artifact package](docs/SCHEMA-ARTIFACT-CONVERGENCE.md) separates structural validity, partial artifact checks and complete task acceptance. Optional host policy allows one text-only correction of definitely failing code regions, not another execution branch or general semantic reviewer. Unsupported semantics remain unknown; passing checks grants no authority.
 

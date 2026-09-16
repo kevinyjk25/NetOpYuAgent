@@ -18,6 +18,7 @@ PROJECT_DOCUMENTS = tuple(
         [ROOT / name for name in CANONICAL_DOCUMENTS]
         + list((ROOT / "docs").rglob("*.md"))
         + list((ROOT / "labs").glob("*/README.md"))
+        + [ROOT / "evaluation/README.md"]
         + [ROOT / "network_runtime/l0/production_trajectories/INDEX.md"]
     )
 )

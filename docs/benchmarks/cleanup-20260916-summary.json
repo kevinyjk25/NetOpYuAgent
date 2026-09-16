@@ -1,0 +1,162 @@
+{
+  "schema": "ensuredskill.io/research-cleanup-summary/v1",
+  "date": "2026-09-16",
+  "baseCommit": "15769b709ed5ec4f357bc5ab7091358e9c8f5102",
+  "evidenceRole": "engineering_cleanup_not_semantic_evaluation",
+  "status": "verified_ready_for_local_commit",
+  "currentResearchStatus": "r0_measurement_partial",
+  "actualModelCalls": 0,
+  "pilotQualified": false,
+  "researchEvidenceEligible": false,
+  "deleted": [
+    "evaluation/task_delivery_ablation.py",
+    "tests/test_task_delivery_ablation.py"
+  ],
+  "removedDedicatedTestCases": 4,
+  "deletionReason": "Completed single-known-snapshot diagnostic with no consumers outside its dedicated tests; historical results and source backup retained.",
+  "localBackup": {
+    "directory": "/Users/steven/Documents/Codex/2026-08-26/wo/ensuredskill-cleanup-20260916.qCxBAu",
+    "trackedArchive": {
+      "file": "tracked-working-tree.tar.gz",
+      "sha256": "f44a348e95c9bb1f82c1d8cb0e6c3174074f11a758dfac29c8e700e137ae91f3",
+      "regularFiles": 1280,
+      "compressedBytes": 3377878,
+      "contentMismatches": 0
+    },
+    "evidenceArchive": {
+      "file": "r0-uncommitted-and-evidence.tar.gz",
+      "sha256": "688d46e6e1365ba6d1b8821e6a62d6a80620e82c7891005444e4ffbb4b9ae8c9",
+      "regularFiles": 14571,
+      "compressedBytes": 266670649,
+      "contentMismatches": 0
+    },
+    "verification": "Each archived regular file compared to pre-cleanup disk bytes by SHA-256. AppleDouble metadata excluded from source counts. Local backups are not published by Git."
+  },
+  "preserved": [
+    "historical failures, labels, baselines and original implementation fingerprints",
+    "all existing artifacts in place",
+    "core Runtime, permission, recovery and formal-gate tests",
+    "legacy helper API compatibility",
+    "virtual environment and databases",
+    "unrelated untracked MLP files"
+  ],
+  "testPolicy": {
+    "manifest": "tests/suite_policy.json",
+    "default": "current",
+    "historicalFileCount": 24,
+    "ciAndRetirement": "all",
+    "futureFiles": "current",
+    "classificationIsSemanticEvidence": false,
+    "currentCollected": 3447,
+    "historicalCollected": 250,
+    "allCollected": 3697,
+    "protectedCurrentFiles": 25
+  },
+  "qa": {
+    "initialFullSuite": {
+      "passed": 3696,
+      "failed": 1,
+      "subtestsPassed": 81,
+      "seconds": 260.81,
+      "localJUnit": "artifacts/cleanup-20260916-qa/full-pytest.xml",
+      "failure": "Navigation cleanup omitted the exact frozen-reference heading required by the existing authority test. Restored the heading without weakening assertions; initial failure retained."
+    },
+    "targetedCleanup": {
+      "passed": 96,
+      "failed": 0,
+      "localJUnit": "artifacts/cleanup-20260916-qa/targeted-cleanup-final.xml"
+    },
+    "documentationAndPolicyRecheck": {
+      "passed": 51,
+      "failed": 0,
+      "localJUnit": "artifacts/cleanup-20260916-qa/documentation-boundary-final.xml"
+    },
+    "fullSuite": {
+      "status": "passed_final_after_documentation_boundary_restore",
+      "passed": 3697,
+      "failed": 0,
+      "subtestsPassed": 81,
+      "seconds": 254.33,
+      "localJUnit": "artifacts/cleanup-20260916-qa/full-pytest-final.xml"
+    },
+    "changedPythonRuff": {
+      "files": 23,
+      "passed": true
+    },
+    "broaderLintInspection": {
+      "issue_count": 31,
+      "codes": {
+        "F401": 15,
+        "F841": 1,
+        "E701": 3,
+        "F821": 1,
+        "E731": 1,
+        "E401": 4,
+        "E702": 6
+      },
+      "files": [
+        "evaluation/cli.py",
+        "evaluation/dsh_guarded_tool.py",
+        "evaluation/dsh_schema_compiler.py",
+        "evaluation/dsh_shadow_tool.py",
+        "evaluation/ensured_skill_runner.py",
+        "evaluation/external_synthetic_author.py",
+        "evaluation/l1_guard_policy.py",
+        "evaluation/l1_schema_gateway.py",
+        "evaluation/public_skill_simulation.py",
+        "evaluation/retrieval_bench.py",
+        "evaluation/runtime_comparison.py",
+        "evaluation/runtime_core72.py",
+        "tests/test_agentized_use_cases.py",
+        "tests/test_p19_plan_binding.py",
+        "tests/test_profiles.py",
+        "tests/test_retrieval_layer.py"
+      ],
+      "all_files_unchanged_from_base": true,
+      "status": "existing_unmodified_legacy_findings_not_fixed_in_this_scoped_cleanup"
+    },
+    "nodeSyntaxPassed": true,
+    "shellSyntaxPassed": true,
+    "harnessBoundaryAuditPassed": true,
+    "diffCheckPassed": true,
+    "review": "Independent read-only review confirmed matching extracted helper ASTs, retained core gates and valid historical report digests. Its broken README module link was corrected; evaluation/README.md is now covered by documentation tests.",
+    "testPolicyCorrection": "A nonexistent prospective protected test path was replaced by the actual isolated-compiler test path; policy regression now asserts all protected paths exist. Final targeted checks pass."
+  },
+  "scriptedDSHRecheck": {
+    "localReport": "artifacts/bounded-pilot-20260916-r0-cleanup-dsh/report.json",
+    "digest": "sha256:8e0fd8d163990e919c3a1e922c3c31340ebeb0152ce3e686eadf399fab879211",
+    "implementationDigest": "sha256:753d1f0ef715fc4d1aacc4d2479d7f80b7eff8db15dc5055e0da3ec30c0719e1",
+    "allPassed": true,
+    "passedCases": 3,
+    "scriptedRequests": 8,
+    "providerReads": 3,
+    "actualModelCalls": 0,
+    "cases": [
+      {
+        "case": "native",
+        "route": "native",
+        "passed": true
+      },
+      {
+        "case": "compiled",
+        "route": "runtime_read_prefix",
+        "passed": true
+      },
+      {
+        "case": "fallback",
+        "route": "fallback",
+        "passed": true
+      }
+    ],
+    "versions": {
+      "dsh": "0.1.1-rc.2",
+      "node": "v24.19.0"
+    },
+    "sameOriginalFixtureAndCommonInput": true,
+    "implementationUnchangedDuringProbe": true,
+    "researchEvidenceEligible": false,
+    "automaticEffectBridge": "not_tested",
+    "scope": "Fresh installed-DSH scripted wiring after cleanup. Not 9B accuracy/performance, a new study version, an R1 batch or a 36-probe qualification."
+  },
+  "stopCondition": "Local commit only; do not push or continue R0/R1 work until the user confirms their push."
+}

@@ -1,0 +1,29 @@
+{
+  "schema": "netopyu.test-suites/v1",
+  "historical_tests": [
+    {"path": "tests/test_semantic_duty_probe.py", "reason": "Paused known-case duty extraction/review/edit diagnostic; not current product admission."},
+    {"path": "tests/test_semantic_duty_resume.py", "reason": "Historical independent-sibling recovery diagnostic; preserve failed-node quarantine and old receipts."},
+    {"path": "tests/test_semantic_typed_duty_probe.py", "reason": "Paused typed-duty semantic repair experiment; not a current product execution layer."},
+    {"path": "tests/test_flow_semantic_pilot.py", "reason": "Historical frozen semantic-translation pilot; retain first failures and replay regression in full suite."},
+    {"path": "tests/test_flow_tree_bounded_pilot.py", "reason": "Historical host-constrained tree batch, distinct from current Runtime and bounded R0 orchestration."},
+    {"path": "tests/test_flow_ledger_pilot.py", "reason": "Historical source-ledger translation batch and its preserved evidence protocol."},
+    {"path": "tests/test_flow_mapping_pilot.py", "reason": "Historical source-to-tree mapping batch; does not implement product Flow admission."},
+    {"path": "tests/test_flow_two_pass_pilot.py", "reason": "Historical two-stage translation strategy and one-attempt batch accounting."},
+    {"path": "tests/test_flow_lean_pilot.py", "reason": "Historical compact mapping strategy comparison; retained as research regression."},
+    {"path": "tests/test_flow_responsibility_pilot.py", "reason": "Historical responsibility-mapping batch and original failures, not the current author profile."},
+    {"path": "tests/test_flow_canonical_pilot.py", "reason": "Historical canonical-node mapping batch, not current product execution qualification."},
+    {"path": "tests/test_flow_node_evidence_pilot.py", "reason": "Historical node-evidence mapping batch with source-review and cost records."},
+    {"path": "tests/test_flow_source_duty_pilot.py", "reason": "Historical source-duty extraction batch; no default product quality promotion was established."},
+    {"path": "tests/test_flow_source_guard_pilot.py", "reason": "Historical source-guard extraction batch; preserve its failed and unknown outcomes."},
+    {"path": "tests/test_flow_tree_canary.py", "reason": "Historical tree-authoring protocol canary, not the active Runtime safety canary."},
+    {"path": "tests/test_flow_canonical_canary.py", "reason": "Historical canonical-mapping protocol canary and fixed request/response evidence."},
+    {"path": "tests/test_flow_model_comparison.py", "reason": "Historical mapping-only/end-to-end model-comparison experiment; no new model runs authorized."},
+    {"path": "tests/test_flow_translation_batch.py", "reason": "Historical frozen FlowSources translation batch and checkpoint replay."},
+    {"path": "tests/test_flow_batch_evidence.py", "reason": "Historical Flow batch evidence aggregation; retained for old negative-result accounting."},
+    {"path": "tests/test_flow_diagnostics.py", "reason": "Historical mapping diagnostics and source-review interpretation; not Runtime authority."},
+    {"path": "tests/test_flow_diagnostic_report.py", "reason": "Historical Flow diagnostic report rendering; source evidence and old outcomes remain intact."},
+    {"path": "tests/test_hybrid_review_views.py", "reason": "Optional research reviewer/editor worksheets, not a mandatory product layer; fixture imports stay valid."},
+    {"path": "tests/test_hybrid_review_roles.py", "reason": "Fallible research review-role interfaces, not semantic proof; shared fixture module remains in place."},
+    {"path": "tests/test_hybrid_review_context.py", "reason": "Historical candidate-review context projection and provenance, not the current product read gateway."}
+  ]
+}

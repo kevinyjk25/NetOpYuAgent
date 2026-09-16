@@ -6,7 +6,6 @@ the author, writer, reviewer or Runtime. First failures are never retried here.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import re
 import tarfile
@@ -20,13 +19,13 @@ from evaluation.hybrid_live_demo import run as run_initial
 from evaluation.hybrid_snapshot_review import run as review_draft
 from evaluation.hybrid_repair_cells import run as repair_cells
 from evaluation.hybrid_transfer import derive
+from evaluation.local_read_fixture import packet_for as packet_for
 from evaluation.source_ledger import budget
 from evaluation.structured_authoring import seal
 from evaluation.structured_binding_probe import read_json, write_artifacts
 from evaluation.translation_case_authoring import OllamaAnchoredAuthorAdapter
 from evaluation.translation_intake import bundle_from_snapshot
 from network_runtime.contracts import sha256_json
-from network_runtime.l0.structured_reads import StructuredReadManifest, compile_structured_read
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -78,34 +77,6 @@ def case_folder(root, case):
     if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", case):
         raise ValueError("one confined case identifier required")
     return Path(root) / "cases" / case
-
-
-def packet_for(bundle, specification):
-    """Declare primitive adapter contracts, not a graph or expected response."""
-    text = next(d["content"] for d in bundle["documents"] if d["path"] == bundle["entryPath"])
-    reads = {}
-    for index, tool in enumerate(specification["tools"]):
-        name = tool["name"]
-        if name in reads or tool.get("annotations", {}).get("readOnlyHint") is not True:
-            raise ValueError("unique explicitly read-only local tools required")
-        adapter = {"tool": name, "capability": f"semantic-transfer.read{index}", "effect": "read_only",
-                   "resourceScopes": {}, "access": {"requiredScopes": ["stage2:read"], "dataClassification": "internal"},
-                   "limitations": "Disclosed synthetic host; finite resource ACL separately enforced before provider invocation."}
-        sources = [{"role": role, "origin": "local-transfer-declaration:" + role, "text": source,
-                    "sha256": "sha256:" + hashlib.sha256(source.encode()).hexdigest()}
-                   for role, source in (("skill", text), ("tool", json.dumps(tool)), ("adapter", json.dumps(adapter)))]
-        contract = StructuredReadManifest.model_validate({"apiVersion": "netopyu.io/l0-structured-read/v1", "kind": "StructuredRead",
-            "metadata": {"id": f"semantic-transfer.read{index}", "version": "1.0.0", "owner": "local-development-review"},
-            "spec": {**{k: adapter[k] for k in ("tool", "capability", "effect", "resourceScopes", "access")},
-                     "inputSchema": tool["inputSchema"], "outputSchema": tool["outputSchema"], "sources": sources}})
-        reads[name] = compile_structured_read(contract).model_dump(mode="json", by_alias=True)
-    packet = {"bundle": bundle, "task": specification["task"], "taskOrigin": "developer_authored_evaluation_request",
-              "inputSchema": specification["inputSchema"], "catalog": {"tools": specification["tools"],
-              "origin": "disclosed_local_synthetic_host_not_vendor_capture"}, "reads": reads}
-    if "taskScope" in specification:
-        packet["taskScope"] = specification["taskScope"]
-    author.validate_packet(packet)
-    return packet
 
 
 def prepare(root, case, specification):

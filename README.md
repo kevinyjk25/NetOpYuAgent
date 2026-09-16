@@ -6,7 +6,9 @@ EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和
 
 ## 中文
 
-**当前：已获授权实施，R0 测量部分已实现，真实模型尚未运行。** [新考核与有限收敛方案](docs/EVALUATION-RESET-20260916.md)已落地预算总账、评分器、输入准备、脚本式计量和本地探针；153 项定向测试通过。已运行的[测量探针](artifacts/bounded-pilot-20260916-r0/report.json)覆盖 12 类／24 个评分 fixtures、10 项预算检查、3 项既有模拟网关机制，模型调用为 0；不代表真实 Agent 收益、自动 Effect 桥接或 36 项机制门槛通过。真实 DSH 全调用计量、可信预先 token 计数、物理 Provider 重置／隔离、预封存标签与 12 任务样本、真实 trace 采集仍待接入，尚无 `run` 命令。旧语义阶段仍为 `paused_unmet`，默认 UI、权限和正式研究门禁不变。
+开发测试已分为 `current`（默认）、`historical` 和 `all`；CI／提交验证使用完整 `all`。旧失败和原始证据保留，废弃诊断可恢复。详见[清理与测试指南](docs/CLEANUP-20260916.md)。
+
+**当前：R0 测量仍为部分实现，本轮真实模型调用为 0。** 已增加角色绑定计量入口（scripted-only）、arm 独立 SQLite 模拟 Provider、context-local 编译／Runtime 路由和实际 DSH 脚本化接线探针；三条接线路径已通过。可信 tokenizer／调用前 token 计量、6 Skill／12 Task 样本与独立标签、完整依赖冻结仍未完成；DSH 字符估算不足以预授权。见[有限收敛方案](docs/EVALUATION-RESET-20260916.md)与[接线摘要](docs/benchmarks/bounded-pilot-r0-integration-summary.json)。旧 `paused_unmet`、正式门禁、权限和默认 UI 不变；不是 Agent 收益或 36 项门槛通过。
 
 最近一次已知小样本仍为 **2 Skill／3 Task，结构准入3/3、完整任务0/3**。不能用编译率或安全停止冒充业务成功。[原始负结果与成本](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)、[当前实现与使用](docs/GOVERNED-SESSION.md)、[进展及历史](docs/PROJECT-STATUS.md)。
 
@@ -217,7 +219,9 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 
 ## English
 
-**Current: implementation authorized; R0 measurement partially implemented, with no real-model run.** The [bounded protocol](docs/EVALUATION-RESET-20260916.md) now has a persistent budget ledger, scorer, input preparation, scripted metering and local probes; 153 targeted tests pass. The executed [measurement probe](artifacts/bounded-pilot-20260916-r0/report.json) covers 24 scorer fixtures across 12 families, ten budget checks and three existing simulated-gateway mechanisms, with zero model calls. It establishes neither real-agent benefit, an automatic Effect bridge nor the 36-probe gate. Live DSH metering, trusted advance token counts, physical Provider reset/isolation, frozen reference labels and twelve tasks, and real trace capture remain outstanding; there is no `run` command. The old semantic stage remains `paused_unmet`; default UI, authority and formal gates are unchanged.
+Development tests are split into default `current`, `historical` and full `all`; CI/pre-commit verification uses all. Historical failures and raw evidence remain intact; retired diagnostics are recoverable. See [cleanup and testing](docs/CLEANUP-20260916.md).
+
+**Current: R0 measurement remains partial, with zero real-model calls in this work.** Added: role-bound scripted-only metering, arm-isolated SQLite simulated Providers, context-local compiler/Runtime routes and an installed-DSH scripted wiring probe; all three wiring paths passed. Trusted tokenizer/preflight counting, the six-Skill/twelve-task sample, independent labels and complete dependency freezing remain unfinished; DSH character estimates cannot authorize token budgets. See the [bounded protocol](docs/EVALUATION-RESET-20260916.md) and [integration summary](docs/benchmarks/bounded-pilot-r0-integration-summary.json). The old `paused_unmet` status, formal gates, authority and default UI remain unchanged; this establishes neither agent benefit nor the 36-probe gate.
 
 The latest known sample remains **two Skills/three tasks: 3/3 structural admissions, 0/3 complete tasks**. Compilation and safe stopping are not business success. See [negative evidence and costs](docs/SCHEMA-ARTIFACT-CONVERGENCE.md), [implemented workflow](docs/GOVERNED-SESSION.md) and [status/history](docs/PROJECT-STATUS.md).
 

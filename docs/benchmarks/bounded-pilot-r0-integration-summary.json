@@ -1,0 +1,109 @@
+{
+  "schema": "ensuredskill.io/bounded-r0-integration-summary/v1",
+  "date": "2026-09-16",
+  "status": "r0_measurement_partial",
+  "baseCommit": "15769b7",
+  "evidenceRole": "scripted_real_DSH_plumbing_not_pilot",
+  "actualModelCalls": 0,
+  "pilotQualified": false,
+  "liveAdapterReady": false,
+  "researchEvidenceEligible": false,
+  "runtimeLargeEvaluationAllowed": false,
+  "automaticEffectBridge": "not_tested",
+  "runtime36ProbeGate": "not_assessed",
+  "trustedTokenPreflight": false,
+  "attempts": [
+    {
+      "localReport": "artifacts/bounded-pilot-20260916-r0-dsh/report.json",
+      "digest": "sha256:7a987ef62ac9f74c9d652492829b5260d067cddf8ed73fde803fa4fee8503b3c",
+      "allPassed": false,
+      "scriptedRequests": 0,
+      "reason": "Native DSH request rejected before scripted backend dispatch; initial diagnostics only retained ValueError. No provider call or model inference. Preserved, not overwritten."
+    },
+    {
+      "localReport": "artifacts/bounded-pilot-20260916-r0-dsh-v2/report.json",
+      "digest": "sha256:2e1c66d881fc426befc56ed529fa34ddf7513e40e28d3b9d2a84dcccf5b4b812",
+      "allPassed": false,
+      "scriptedRequests": 0,
+      "reason": "Detailed rejection identified installed pi-ai's store=false request field. Local source inspection also established text-part request format. Support was added losslessly, retaining raw requests; store=true and non-text parts still rejected. Preserved, not overwritten."
+    },
+    {
+      "localReport": "artifacts/bounded-pilot-20260916-r0-dsh-v3/report.json",
+      "digest": "sha256:57bb2e98675648d8757b196b34f290d82fc37e495a4519e25cbefa3c8604e68a",
+      "allPassed": true,
+      "scriptedRequests": 8,
+      "providerReads": 3,
+      "cases": [
+        {"case": "native", "stages": ["agent", "agent"], "route": "native", "passed": true},
+        {"case": "compiled", "stages": ["agent", "compiler", "agent"], "route": "runtime_read_prefix", "passed": true},
+        {"case": "fallback", "stages": ["agent", "compiler", "fallback"], "route": "fallback", "passed": true}
+      ],
+      "installedVersions": {"dsh": "0.1.1-rc.2", "node": "v24.19.0"},
+      "implementationDigest": "sha256:b8ddeb9d23b115af73c577194082518432a7d8537997f58eb91f10bd2fc58268",
+      "implementationUnchangedThroughAllCases": true,
+      "sameSourceTaskCatalogArguments": true,
+      "commonInputDigest": "sha256:6f8a021a50316cc2ece1f5b69a8478dc9ec6cdb745965a784e44980bf631fb6e",
+      "providerFixtureDigest": "sha256:f87f6f2249ef0f7cdd476460b0922dd42ced8856259273ef01dfb32daf441e00",
+      "databaseInitialStateDigest": "sha256:49e613940e89e3960e250a4d0a7dc449ef31700ae1043787ee69b7c2fa6d06b3",
+      "distinctDatabaseIsolationIds": 3,
+      "actualToolResultDeliveredToDSH": 3,
+      "allHostsDrained": true,
+      "providerStateUnchanged": true,
+      "declaredFixtureTokens": {"input": 512, "output": 128, "notQwenTokenization": true},
+      "runtimeReasonerInThisProbe": "not_invoked_native_DSH_retains_L1",
+      "completeDependencySnapshot": false
+    }
+  ],
+  "nestedModelRouteCheck": {
+    "test": "tests/test_model_endpoint.py::test_actual_compiler_and_runtime_http_share_one_scripted_broker_arm",
+    "actualHTTP": true,
+    "callSites": ["isolated_compiler.invoke", "local_execution.invoke_local"],
+    "sameLedgerArm": true,
+    "roles": ["compiler", "runtime"],
+    "scriptedRequestsPerInvocation": 2,
+    "actualModelCalls": 0,
+    "configModes": ["explicit_environment", "immutable_context_local"],
+    "notice": "Separate transport test; not a Runtime LLM node execution in the three DSH probe cases."
+  },
+  "qa": {
+    "targetedCorePassed": 266,
+    "probeHostPassed": 21,
+    "runnerFailureFixturesPassed": 3,
+    "targetedTotalDistinctPassed": 290,
+    "targetedCoreJUnit": "artifacts/bounded-pilot-20260916-r0-integration-qa/targeted-core-v2.xml",
+    "initialFullSuite": {
+      "passed": 3607, "failed": 1, "subtestsPassed": 81, "seconds": 257.71,
+      "localJUnit": "artifacts/bounded-pilot-20260916-r0-integration-qa/full-pytest.xml",
+      "failure": "test_local_document_links_resolve: the new summary file was not yet written when documentation tests ran. No source-code failure. Report retained."
+    },
+    "documentationRecheck": {
+      "passed": 3, "failed": 0,
+      "localJUnit": "artifacts/bounded-pilot-20260916-r0-integration-qa/documentation-finalized.xml"
+    },
+    "fullSuite": {
+      "status": "passed_final_after_documentation_completion",
+      "passed": 3608, "failed": 0, "subtestsPassed": 81, "seconds": 254.37,
+      "localJUnit": "artifacts/bounded-pilot-20260916-r0-integration-qa/full-pytest-final.xml"
+    },
+    "ruffPythonFiles": 11,
+    "ruffPassed": true,
+    "nodeSyntaxCheckPassed": true,
+    "scope": "Engineering regressions and deliberately scripted responses; not model accuracy, throughput, or population benefit."
+  },
+  "remainingR0": [
+    "trusted_same_backend_renderer_tokenizer_preflight_and_live_deadline_enforcement",
+    "complete_pilot_controller_using_shared_meter_and_isolated_provider_receipts",
+    "independently_aligned_frozen_six_skill_twelve_task_references",
+    "complete_execution_dependency_snapshot_and_full_controller_no_model_acceptance"
+  ],
+  "boundaries": [
+    "One authored synthetic preloaded Skill; no Skill retrieval or translation generalization assessment.",
+    "Runtime read prefix runs inside the actual DSH tool turn; no evaluator action after DSH completes.",
+    "Model identity is explicitly scripted; actual counts are declared fixture values, not estimates of 9B tokens.",
+    "Independent SQLite state and capability-scoped tools are not an adversarial OS sandbox.",
+    "Provider write/approval unit tests grant no product Effect authority; automatic bridge remains untested.",
+    "Fresh engineering-probe directories never reset the real research study's version/model budgets.",
+    "Historical negative results, formal generalization gates, default UI and permissions remain unchanged.",
+    "No real model run, UI restart, commit or push was performed in this increment."
+  ]
+}

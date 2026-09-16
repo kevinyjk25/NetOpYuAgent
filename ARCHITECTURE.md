@@ -4,7 +4,7 @@
 
 ## 中文
 
-2026-09-16 状态：[考核重置](docs/EVALUATION-RESET-20260916.md)已获授权实施，当前仅为 **R0 测量部分实现**：`evaluation/bounded_budget.py`、`bounded_scoring.py`、`bounded_pilot.py`、`bounded_execution.py`、`bounded_probe.py`提供持久预算、独立评分、输入准备和脚本式测量。它们不构成新执行平面；现有混合图仍不直接承载 Effect，自动接入独立事务网关尚未实现。本地探针实际运行且 0 模型调用，不证明真实 Agent 收益或 36 项机制门槛通过。真实 DSH 计量、物理 Provider 隔离和真实 trace 等 R0 接线仍未完成；旧语义阶段 `paused_unmet`、权限及正式门禁不变，详见[当前状态](docs/PROJECT-STATUS.md)。
+2026-09-16 状态：[考核重置](docs/EVALUATION-RESET-20260916.md)仍为 **R0 测量部分实现**。在持久预算、独立评分和输入准备之上，新增角色绑定的 scripted-only 计量入口、每个 arm 独立的 SQLite 模拟 Provider、context-local 编译／Runtime 路由及实际 DSH 脚本化接线探针；三条接线路径已通过，本轮真实模型调用为 0。它们不是新执行平面，也不是物理设备隔离或自动 Effect 桥接。可信 tokenizer／调用前计量仍缺失，DSH 字符估算不足以预授权；6 Skill／12 Task 样本、独立标签和完整依赖冻结仍待完成。真实 Agent 收益和 36 项机制门槛未获证明；旧 `paused_unmet`、权限、默认 UI 和正式门禁不变，详见[当前状态](docs/PROJECT-STATUS.md)。
 
 当前[结构约束与有界工件修订](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)补齐两个独立边界：隔离编译使用完整author Schema约束解码及独立准入；v4宿主可选`artifactRepair=true`，仅在静态检查明确失败时允许一次原生Agent代码体修订。原始证据、任务、正文和未选代码块不变；没有新读取/写权/Runtime生成。修订前后分别留档，最终仍是未验证候选，不能替代任务验收或完整语义证明。
 
@@ -223,7 +223,7 @@ Evaluation → all public test surfaces
 
 ## English
 
-September 16: the [reset](docs/EVALUATION-RESET-20260916.md) is authorized for implementation; **R0 measurement is partially implemented** through the bounded budget, scoring, pilot, execution and probe modules. These provide accounting, isolated scoring, input preparation and scripted measurement, not another execution plane. Mixed graphs still do not carry Effects, and automatic integration with the separate transactional gateway is unimplemented. Executed local probes used zero model calls; they establish neither real-agent benefit nor the 36-probe gate. Live DSH metering, physical Provider isolation and real trace capture remain outstanding. The old semantic stage remains `paused_unmet`, with unchanged authority and formal gates; see [current status](docs/PROJECT-STATUS.md).
+September 16: the [reset](docs/EVALUATION-RESET-20260916.md) remains **R0 measurement partially implemented**. Persistent budgets, isolated scoring and input preparation now have role-bound scripted-only metering, per-arm SQLite simulated Providers, context-local compiler/Runtime routes and an installed-DSH scripted wiring probe. All three wiring paths passed; this work has used zero real-model calls. These are neither another execution plane, physical-device isolation nor an automatic Effect bridge. Trusted tokenizer/preflight counting remains missing, and DSH character estimates cannot authorize token budgets. The six-Skill/twelve-task sample, independent labels and complete dependency freezing remain unfinished. Neither real-agent benefit nor the 36-probe gate is established; the old `paused_unmet` status, authority, default UI and formal gates are unchanged. See [current status](docs/PROJECT-STATUS.md).
 
 The current [schema/artifact package](docs/SCHEMA-ARTIFACT-CONVERGENCE.md) constrains isolated author decoding and independently validates the same schema. Optional v4 artifactRepair allows one native code-body edit after a definite static failure, preserving evidence, task, prose and other artifacts. No new reads, write authority or Runtime regeneration. Initial/final evidence is separate; a candidate remains unverified and task acceptance remains external.
 
