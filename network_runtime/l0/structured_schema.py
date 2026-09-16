@@ -237,6 +237,12 @@ def validate_data(schema: dict, value: Any, *, root: dict | None = None) -> Any:
         path = ""
         for key in error.absolute_path:
             path = join_pointer(path, key)
+        if error.validator == "required" and isinstance(error.instance, dict):
+            # Name only the absent schema field, never echo a rejected value.
+            # A default annotation still cannot fill it or make the data valid.
+            missing = next(key for key in error.validator_value if key not in error.instance)
+            raise DataBindingError("value_constraint", join_pointer(path, missing),
+                                   "required field is missing; no default inserted")
         raise DataBindingError("value_constraint", path, f"failed {error.validator} validation")
     return copied
 

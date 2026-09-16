@@ -181,12 +181,15 @@ source_fingerprint() {
   # so `start` cannot silently keep serving a stale Skill registry.
   (
     cd "$PROJECT_ROOT" || exit 1
-    find dsh-plugin-netopyu/src dsh_adapter skills profiles network_runtime \
+    find dsh-plugin-netopyu/src dsh_adapter skill_authoring skills profiles network_runtime \
       -type f \( -name '*.js' -o -name '*.mjs' -o -name '*.py' \
       -o -name '*.md' -o -name '*.yaml' -o -name '*.yml' -o -name '*.json' \) \
       -print | LC_ALL=C sort | while IFS= read -r source_file; do
         shasum -a 256 "$source_file"
       done
+    if [[ -n "${NETOPYU_HYBRID_HOST_PROFILE:-}" && -f "$NETOPYU_HYBRID_HOST_PROFILE" ]]; then
+      shasum -a 256 "$NETOPYU_HYBRID_HOST_PROFILE"
+    fi
   ) | shasum -a 256 | awk '{print $1}'
 }
 

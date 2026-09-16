@@ -21,6 +21,7 @@ data/local_dc_peer.sqlite
 data/service_layer.sqlite
 data/agentized_service_layer.sqlite
 data/l0-proposals/
+data/hybrid-sessions/
 
 # Generated local test/runtime artifacts
 artifacts/

@@ -6,6 +6,7 @@ strict region. This module neither invokes models nor adds an Effect executor.
 """
 from __future__ import annotations
 
+import json
 from typing import Annotated, Any, Literal, Mapping
 
 from pydantic import Field
@@ -47,6 +48,19 @@ class ReasoningTask(NodeBase):
     max_output_tokens: int = Field(ge=32, le=8192, strict=True)
 
 
+class ReasoningCondition(StrictModel):
+    """Typed equality controls invocation, never grants action authority."""
+    left: dict[str, Any]
+    value_schema: dict[str, Any]
+    equals: Any
+
+
+class ConditionalReasoningTask(ReasoningTask):
+    kind: Literal["reason_if"]
+    condition: ReasoningCondition
+    otherwise: dict[str, Any]
+
+
 class CandidateAdmission(NodeBase):
     kind: Literal["admit_candidate"]
     candidate: str = Field(pattern=ID)
@@ -61,7 +75,7 @@ class RequiredJoin(NodeBase):
     input_schema: dict[str, Any]
 
 
-HybridNode = Annotated[StrictRegion | ReasoningTask | CandidateAdmission | RequiredJoin, Field(discriminator="kind")]
+HybridNode = Annotated[StrictRegion | ReasoningTask | ConditionalReasoningTask | CandidateAdmission | RequiredJoin, Field(discriminator="kind")]
 
 
 class GovernedHybridFlow(StrictModel):
@@ -95,7 +109,10 @@ def _sources(expression):
 
 
 def qualify_hybrid(proposal: GovernedHybridFlow, reads: Mapping) -> dict:
-    proposal = GovernedHybridFlow.model_validate(snapshot_json(proposal.model_dump(mode="json")))
+    # JSON object order is not executable semantics. Canonicalize before the
+    # binder builds ordered diagnostic mappings; retain array/step/text order.
+    raw = snapshot_json(proposal.model_dump(mode="json"))
+    proposal = GovernedHybridFlow.model_validate(json.loads(json.dumps(raw, sort_keys=True, ensure_ascii=False)))
     checked_schema(proposal.input_schema)
     nodes = {n.id: n for n in proposal.nodes}
     if len(nodes) != len(proposal.nodes) or "input" in nodes:
@@ -124,6 +141,7 @@ def qualify_hybrid(proposal: GovernedHybridFlow, reads: Mapping) -> dict:
         raise ValueError("graph exceeds its model-call budget")
 
     schemas, roles, bindings, regions = {"input": proposal.input_schema}, {"input": "caller_input"}, {}, {}
+    conditional_bindings = {}
     for key in order:
         node = nodes[key]
         available = {name: schema for name, schema in schemas.items() if name == "input" or name in ancestors[key]}
@@ -149,6 +167,22 @@ def qualify_hybrid(proposal: GovernedHybridFlow, reads: Mapping) -> dict:
         elif isinstance(node, ReasoningTask):
             schemas[key] = checked_schema(node.output_schema)
             roles[key], target = "model_candidate", node.input_schema
+            if isinstance(node, ConditionalReasoningTask):
+                from .structured_schema import validate_data
+                condition = node.condition
+                checked_schema(condition.value_schema)
+                if condition.value_schema.get("type") not in {"string", "boolean", "integer", "number", "null"}:
+                    raise ValueError("reasoning condition requires an explicitly typed scalar")
+                validate_data(condition.value_schema, condition.equals)
+                conditional_bindings[key] = {}
+                for label, expression, expected in (("condition", condition.left, condition.value_schema),
+                                                     ("otherwise", node.otherwise, node.output_schema)):
+                    dependencies = _sources(expression)
+                    if dependencies - available.keys():
+                        raise ValueError("conditional reasoning requires an explicit completed dependency")
+                    conditional_bindings[key][label] = compile_binding(
+                        {s: available[s] for s in sorted(dependencies)}, expected, expression,
+                        source_bundle_digest=proposal.source_digest)
         elif isinstance(node, CandidateAdmission):
             if node.candidate not in ancestors[key] or roles.get(node.candidate) != "model_candidate":
                 raise ValueError("admission needs a declared model-candidate dependency")
@@ -170,4 +204,6 @@ def qualify_hybrid(proposal: GovernedHybridFlow, reads: Mapping) -> dict:
         "outputSchemas": schemas, "inputBindings": bindings, "regions": regions,
         "status": "structurally_qualified_not_semantically_proven", "runtimeAuthorityGranted": False,
         "wholeGraphDeterministic": not any(isinstance(n, ReasoningTask) for n in nodes.values())}
+    if conditional_bindings:
+        body["conditionalBindings"] = conditional_bindings
     return {**body, "graphDigest": sha256_json(body)}

@@ -9,6 +9,7 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 
 from evaluation import hybrid_authoring as author
+from evaluation.hybrid_prefix_projection import project as project_read_prefix
 from evaluation.flow_checkpoint import author_once, implementation
 from evaluation.flow_model_transport import decode
 from evaluation.source_ledger import budget
@@ -118,6 +119,20 @@ def derive(packet, visible, envelope):
         compiled = author.compile_proposal(packet, visible, choice)
         return {**files, "compilation.json": compiled}, {**cost, "status": "compiled_mixed_candidate_requires_review"}
     except (ValueError, KeyError, TypeError, ValidationError) as error:
+        # A bad non-authoritative annotation or later read must not silently
+        # erase a separately valid prefix. Preserve the original rejection and
+        # require the SAME explicit source/graph admission for the new candidate.
+        # No literal, binding, action or missing observation is invented here.
+        try:
+            projected = project_read_prefix(packet, visible, json.loads(text))
+        except (ValueError, KeyError, TypeError, ValidationError):
+            projected = None
+        if projected is not None:
+            return {"raw-choice.json": {"text": text}, "prefix-projection.json": projected,
+                    "compilation.json": projected["compilation"]}, {
+                **cost, "status": "projected_read_prefix_requires_review", "originalAuthoringFailed": True,
+                "diagnostic": str(error)[:1800], "additionalModelCalls": 0,
+                "projectionDigest": projected["reportDigest"]}
         return {"raw-choice.json": {"text": text}}, {**cost, "status": "construction_failed_no_retry", "diagnostic": str(error)[:1800]}
 
 

@@ -7,6 +7,8 @@ possible even when every page was submitted. Reuses the original compiler.
 
 from __future__ import annotations
 
+from skill_authoring.contracts import pages_for as shared_pages, budget as shared_budget
+
 import argparse
 import copy
 import json
@@ -48,6 +50,15 @@ MAX_WIRE_BYTES = 131072
 MAX_PAGE_BYTES = 2048
 
 
+def budget(wire):
+    return shared_budget(wire, context_tokens=CONTEXT_TOKENS, output_tokens=OUTPUT_TOKENS,
+                         template_reserve=TEMPLATE_RESERVE, max_wire_bytes=MAX_WIRE_BYTES)
+
+
+def pages_for(packet):
+    return shared_pages(packet, upstream=prior.pages_for(packet))
+
+
 def policy():
     return {"maxRounds": MAX_ROUNDS, "maxNotes": MAX_NOTES, "contextTokens": CONTEXT_TOKENS,
             "outputTokens": OUTPUT_TOKENS, "reasoningOutputTokens": REASONING_OUTPUT_TOKENS,
@@ -76,45 +87,6 @@ def policy():
             "optionalDutyAccounting": duty_accounting.PROFILE}
 
 
-def pages_for(packet):
-    """Lossless, bounded, line-first paging; oversized lines use word/UTF-8 cuts.
-
-    Rejoin adjacent upstream chunks first so their old character cuts cannot
-    become accidental sentence boundaries. No source text is summarized away.
-    """
-    result = []
-    originals = []
-    for page in prior.pages_for(packet).values():
-        if (originals and all(originals[-1][key] == page[key] for key in ("path", "sourceDigest"))
-                and originals[-1]["end"] == page["start"]):
-            originals[-1] = {**originals[-1], "end": page["end"], "text": originals[-1]["text"] + page["text"]}
-        else:
-            originals.append(dict(page))
-    for original in originals:
-        text, cuts, start = original["text"], [], 0
-        while start < len(text):
-            end, size = start, 0
-            while end < len(text) and size + len(text[end].encode("utf-8")) <= MAX_PAGE_BYTES:
-                size += len(text[end].encode("utf-8"))
-                end += 1
-            if end < len(text):
-                line_end = text.rfind("\n", start, end) + 1
-                word_end = max((i + 1 for i in range(start, end) if text[i].isspace()), default=start)
-                end = line_end if line_end > start else word_end if word_end > start else end
-            cuts.append((start, end))
-            start = end
-        if not cuts:
-            cuts.append((0, 0))
-        for start, end in cuts:
-            page = {**original, "start": original["start"] + start, "end": original["start"] + end,
-                    "text": text[start:end], "startLine": original["startLine"] + text[:start].count("\n"),
-                    "endLine": original["startLine"] + text[:end].count("\n")}
-            page["referenceIds"] = [r["referenceId"] for r in packet["bundle"]["references"]
-                                    if r["sourcePath"] == page["path"] and page["start"] <= r["start"] < page["end"]]
-            page["pageId"] = prior.sha256_json({"path": page["path"], "sourceDigest": page["sourceDigest"],
-                                               "start": page["start"], "end": page["end"]})
-            result.append(page)
-    return {f"p{i:03d}": page for i, page in enumerate(result)}
 
 
 def fingerprint():
@@ -128,20 +100,6 @@ def fingerprint():
                           "evaluation/source_duty_accounting.py")
 
 
-def budget(wire):
-    """Distinct units, no empirical tokens/byte ratio used as a safety guarantee."""
-    message_bytes = sum(len(m["content"].encode("utf-8")) for m in wire["messages"])
-    schema_bytes = len(json.dumps(wire["format"], ensure_ascii=False).encode("utf-8"))
-    wire_bytes = len(json.dumps(wire, ensure_ascii=False).encode("utf-8"))
-    output_tokens = wire.get("options", {}).get("num_predict", OUTPUT_TOKENS)
-    limit = CONTEXT_TOKENS - output_tokens - TEMPLATE_RESERVE
-    return {"messageUtf8Bytes": message_bytes, "formatUtf8Bytes": schema_bytes, "wireBytes": wire_bytes,
-            "inputByteProxy": message_bytes + schema_bytes, "proxyLimit": limit,
-            "accepted": message_bytes + schema_bytes <= limit and wire_bytes <= MAX_WIRE_BYTES,
-            "actualInputTokens": None, "modelContextTokens": CONTEXT_TOKENS,
-            "outputTokenReserve": output_tokens, "templateTokenReserve": TEMPLATE_RESERVE,
-            "tokenizerAttested": False,
-            "meaning": "Conservative byte-based scheduling proxy, not an exact or certified token bound."}
 
 
 def initial_state(packet, profile="direct", operations=(), scenario=None, reasoning=False, account_duties=False, semantic_plan=False,

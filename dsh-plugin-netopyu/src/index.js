@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { a2aToolDefinitions, NetOpYuA2AProvider } from './a2a.js'
 import { callBridge, resolvePython } from './bridge.js'
 import { createHitlStore, NetOpYuToolGuard } from './hitl-store.js'
+import { createTerminalGate, executeHybrid, parseTerminal } from './hybrid-terminal.js'
 
 // HMR contract marker: reload the plugin when the Python topology/path surface changes.
 export const networkLabContractVersion = 'p075-b1-topology-path-v1'
@@ -767,6 +768,62 @@ function agentizedAuthoringDefinitions(bridge) {
   return [template, capture, submit, trace]
 }
 
+export function governedHybridDefinitions(bridge, hostSchema, { terminalDelivery: terminalEnabled = false } = {}) {
+  const terminalGate = createTerminalGate()
+  const isolated = hostSchema.compilerMode === 'isolated'
+  const definitions = [
+    ['prepare', 'Capture the exact user task and arguments under the operator-configured read-only Skill host. Returns original Skill, tool contracts and translation schema. Use those to produce read_prefix; no self-approval, scripts or writes.',
+      { task: { type: 'string' }, arguments: hostSchema.inputSchema }],
+    ['submit', hostSchema.deliverySchema?.type === 'null'
+      ? 'Submit a read_prefix plan with delivery=null. The host binds the complete original task; do not select output kinds or replace its requirements. In pre-execution fallback use plan=null as well. Only a persisted pre-execution rejection permits one correction. At most one prefix executes; gather evidence before draft. No semantic approval or retry of unknown execution.'
+      : 'Submit both a read_prefix plan and source-anchored delivery requirements (artifact/analysis/decision/next_steps). Use source_ref IDs when the host supplies deliverySourceReferences; follow its exact schema, never invent a quote. Fix output shape before evidence collection. In source overflow/native fallback use plan=null to bind delivery only, never to execute a prefix. Only a persisted pre-execution rejection permits one correction. At most one prefix executes; gather evidence before draft. References do not prove semantic coverage. Never retry unknown execution.',
+      { session_id: { type: 'string' }, plan: hostSchema.planSchema, delivery: hostSchema.deliverySchema }],
+    ['inspect', 'Inspect the existing hybrid session without re-executing. Runtime status, translation status and unverified task result are separate. Fallback never permits direct writes.',
+      { session_id: { type: 'string' } }],
+    ['read', 'EXECUTION CALL, not compilation: after submission and BEFORE drafting, request further isolated observations. arguments holds concrete values matching the real host tool schema, NOT caller/literal binding expressions from plan.reads. Available in native fallback too. At most two host read attempts; host rejections consume budget. Same Runtime access/schema/resource gate; no writes or semantic approval.',
+      { session_id: { type: 'string' }, tool: { type: 'string' }, arguments: { type: 'object' } }],
+    ['draft', hostSchema.canCloseIncomplete
+      ? 'Normal generation is RUNTIME PATH ONLY with session_id. Host-declared requiredReads must be observed before generation. A needs_required_evidence result makes NO model call; use its concrete nextReads within the original budget. On either runtime or native fallback, close_incomplete=true explicitly closes WITHOUT an admitted answer or generation; it never bypasses missing evidence. Native normal answers use deliver. No replay, late reads, writes or semantic approval.'
+      : 'RUNTIME PATH ONLY: after collecting_evidence, freeze observations and generate one typed candidate. Pass ONLY session_id; do not compose or submit a response. Native fallback uses the separate deliver tool. Deliver task.delivery.rendered faithfully, not a summary. Shape checks do not prove semantics. No read replay, late reads, writes, self-approval or retries.',
+      { session_id: { type: 'string' } }],
+    ['deliver', 'NATIVE FALLBACK ONLY: after permitted reads, encode the candidate object matching deliveryResponseSchema as JSON text in response_json. The host decodes exactly once, rejects duplicate keys/non-object roots, then applies the SAME strict schema and renderer. No fences, double encoding, type coercion or Runtime model calls. On an admitted Runtime path use draft(session_id) instead. Null-plan resubmission cannot switch paths. Deliver task.delivery.rendered faithfully, not a completion claim. No semantic approval or artifact execution.',
+      { session_id: { type: 'string' }, response_json: { type: 'string', minLength: 2, maxLength: 131072, description: 'JSON text encoding one candidate object matching deliveryResponseSchema. Serialize once; no Markdown fence, no double encoding. Never evidence or permission.' } }],
+  ]
+  if (isolated) {
+    definitions[0][1] = 'Start one operator-bound read-only session using the exact original task and supplied arguments. The host runs one isolated compiler request, validates its proposal and may execute an authorized read prefix. Returns original Skill context and observations, never an authoring schema. Follow deliveryAction; collect missing permitted observations before normal draft/deliver. No replacement sessions, scripts, writes or self-approval.'
+    definitions[3][1] = 'After prepare and BEFORE normal draft/deliver, request further observations with concrete values matching the host tool schema. Available in native fallback too. At most two host read attempts; rejections consume budget. Source paths are not automatically authorized. No writes, late reads or semantic approval.'
+  }
+  if (hostSchema.artifactRepair) {
+    definitions[5][1] += ' EXCEPTION: when the host explicitly returns revisionAllowed=true, ONE code-body correction on either route is available through this tool. Encode revisionSchema replacements (location and code), NOT answer. The host preserves all other text, rechecks once and grants no execution or semantic approval. Otherwise no correction is allowed.'
+  }
+  return definitions.filter(([action]) => !isolated || action !== 'submit').map(([action, description, properties]) => ({
+    name: `netopyu_hybrid_${action}`, description,
+    parameters: action === 'read' && hostSchema.readRequestSchema
+      ? hostSchema.readRequestSchema
+      : { type: 'object', properties: action === 'draft' && hostSchema.canCloseIncomplete
+          ? { ...properties, close_incomplete: { const: true, description: 'Optional explicit non-completion, no model call or admitted candidate on either route.' } }
+          : properties,
+        required: Object.keys(properties), additionalProperties: false },
+    output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value }],
+      presentationMeta: (args, value) => {
+        const terminal = terminalEnabled ? parseTerminal(action, args, value) : undefined
+        return terminal ? { profile: terminal.profile, sessionId: terminal.sessionId,
+          hostReportDigest: terminal.hostReportDigest, state: terminal.state } : null
+      } },
+    presentCall: args => ({ card: 'generic', title: `Governed hybrid ${action}`, kind: 'read', rawInput: JSON.stringify(args) }),
+    presentResult: (args, result) => {
+      const terminal = terminalEnabled && !result.isError && result.content.length === 1
+        ? parseTerminal(action, args, result.content[0].text) : undefined
+      return terminal ? { card: 'generic', title: `Host delivery — ${terminal.state}`,
+        content: [{ type: 'text', text: terminal.text }] } : undefined
+    },
+    async execute(args, execution) {
+      return executeHybrid(() => callBridge({ ...bridge, command: `hybrid-${action}`, args,
+        signal: execution.signal, correlationId: execution.callId }), action, args, execution, terminalEnabled, terminalGate)
+    },
+  }))
+}
+
 export async function apply(ctx, config = {}) {
   const projectRoot = resolve(config.projectRoot ?? process.env.NETOPYU_ROOT ?? inferredProjectRoot)
   const profile = config.profile ?? process.env.NETOPYU_PROFILE ?? 'lan'
@@ -882,6 +939,10 @@ export async function apply(ctx, config = {}) {
   for (const tool of hitlTools) ctx.tools.register(tool)
   ctx.tools.register(trajectoryDefinition(hitlStore))
   for (const tool of agentizedAuthoringDefinitions(bridge)) ctx.tools.register(tool)
+  if (process.env.NETOPYU_HYBRID_HOST_PROFILE) {
+    const hostSchema = await callBridge({ ...bridge, command: 'hybrid-describe' })
+    for (const tool of governedHybridDefinitions(bridge, hostSchema)) ctx.tools.register(tool)
+  }
 
   ctx.on('session/event', (session, event) => {
     hitlStore.recordTrajectory(session.id, `session:${String(event.type)}`, {

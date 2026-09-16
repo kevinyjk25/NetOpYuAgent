@@ -1,0 +1,99 @@
+{
+  "schema": "netopyu.io/host-terminal-mechanical-evidence/v1",
+  "date": "2026-09-15",
+  "scope": "opt_in_real_installed_DSH_scripted_model_native_fallback",
+  "installedDSHVersion": "0.1.1-rc.2",
+  "mechanicalPackageComplete": true,
+  "semanticStageComplete": false,
+  "semanticSuccessClaimed": false,
+  "formalStageExit": false,
+  "realModelCalls": 0,
+  "totalScriptedRunsIncludingFailures": 4,
+  "totalScriptedProtocolRequestsIncludingFailures": 24,
+  "totalActualReadsIncludingFailures": 4,
+  "modelTokenUsage": null,
+  "modelLatencyP50Ms": null,
+  "modelLatencyP95Ms": null,
+  "actualUIVisualVerification": false,
+  "installedDSHModified": false,
+  "defaultPathChanged": false,
+  "attempts": [
+    {
+      "name": "initial_frontend_wiring_failure",
+      "path": "artifacts/governed-session-20260915-host-terminal-probe",
+      "reportDigest": "sha256:9db2a0938d01dea2f522c531f6b56ec7610f62085b93afa0c4410d81aafb5464",
+      "freezeDigest": "sha256:69988e46e1cdf64b101fe0774335594c6fff113f3272d7b46573ce8fe4364036",
+      "cases": 2,
+      "mechanicalPassed": 0,
+      "scriptedRequestsPerCase": [6, 6],
+      "actualReadsPerCase": [1, 1],
+      "laterModelStepsPerCase": [0, 0],
+      "exactHostStdoutPerCase": [false, false],
+      "reason": "Official headless runner was not replaced by overlay and printed only a newline. Original evidence is preserved.",
+      "verifiedArtifactDigests": 66,
+      "verifiedArchivedSources": 76,
+      "currentSourceDifferences": ["evaluation/hybrid_terminal_probe.py"]
+    },
+    {
+      "name": "explicit_disable_and_insert_frontend",
+      "path": "artifacts/governed-session-20260915-host-terminal-probe-wired",
+      "reportDigest": "sha256:cb208a3901b38ec3099d6405225eff8ab4c8df4c89ecd57397d8c7a0dd473422",
+      "freezeDigest": "sha256:4ddb25d24d8f8cd784fbfc6ddf69e601db3816becc28d81e52d8f3286bffdec5",
+      "cases": 2,
+      "mechanicalPassed": 2,
+      "scriptedRequestsPerCase": [6, 6],
+      "actualReadsPerCase": [1, 1],
+      "laterModelStepsPerCase": [0, 0],
+      "exactHostStdoutPerCase": [true, true],
+      "hostStates": ["candidate_unverified", "rejected"],
+      "taskSuccessPerCase": [null, null],
+      "verifiedArtifactDigests": 66,
+      "verifiedArchivedSources": 76,
+      "currentSourceDifferences": []
+    }
+  ],
+  "closedMechanisms": [
+    "successful_host_terminal_concludes_DSH_turn",
+    "same_turn_later_hybrid_operations_blocked_before_bridge_except_inspect",
+    "headless_prints_bound_final_host_receipt_without_model_rewrite"
+  ],
+  "boundaryClarificationNotSemanticFix": {
+    "semanticCoverage": "not_assessed",
+    "selectedKinds": "model_proposed_presentation",
+    "originalTaskRemainsAuthoritative": true
+  },
+  "openProblems": [
+    "semantic_source_kind_misinterpretation",
+    "required_business_conclusion_or_next_evidence_omission",
+    "IRQL_executable_query_gap_not_retested"
+  ],
+  "latestRealModelEvidenceUnchanged": {
+    "path": "docs/benchmarks/delivery-single-choice-summary.json",
+    "model": "qwen3.5:9b",
+    "structuralAdmissions": {"met": 2, "total": 2},
+    "originalBusinessCriteria": {"met": 4, "total": 6},
+    "completeTasks": {"met": 0, "total": 2},
+    "p50Ms": 241799.48487493675,
+    "p95Ms": 366684.2049874016,
+    "causalPerformanceComparison": false
+  },
+  "qa": {
+    "nodeTests": 24,
+    "targetedPythonTests": 178,
+    "changedNewProjectPythonRuffFiles": 111,
+    "fullSuiteStatus": "passed",
+    "fullSuiteTests": 3229,
+    "fullSuiteSubtests": 81,
+    "fullSuiteSeconds": 231.28,
+    "documentationTests": 3,
+    "updatedBilingualDocumentsLinksChecked": 7,
+    "gitDiffCheck": "passed"
+  },
+  "limits": [
+    "Synthetic fixture and scripted protocol responses are not Skill translation accuracy or real LLM task evidence.",
+    "Actual DSH probe covers native fallback; Runtime draft, cancellation, steering and UI cards have unit coverage only in this package.",
+    "No source scripts, writes, effects, real device access or fresh-source evaluation were performed.",
+    "In-memory frontend gate does not replace durable host replay protection.",
+    "Local artifacts are ignored by Git and are not automatically published or backed up."
+  ]
+}

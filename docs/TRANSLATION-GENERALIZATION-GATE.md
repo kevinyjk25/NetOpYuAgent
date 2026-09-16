@@ -2,6 +2,8 @@
 
 ## 中文
 
+2026-09-16 状态说明：[考核重置](EVALUATION-RESET-20260916.md)已获授权实施，当前仅 R0 测量部分实现；153 项定向通过，本地评分／预算／既有模拟网关探针为 0 模型，不是 36 项机制验收或真实 Agent 收益。真实 DSH 计量、Provider 隔离、冻结样本标签及 trace 尚未接通，CLI 没有 `run`。本文件正式门槛和代码准入不变，不能绕过 >1×1 限制、签发研究资格或改写旧成绩；旧语义阶段仍 `paused_unmet`。下方“当前下一步”是历史计划。
+
 ### 为什么它必须先于 Runtime 评测
 
 EnsuredSkill 的因果链不是“Runtime 测试通过，所以系统有效”，而是：
@@ -124,6 +126,8 @@ python -m evaluation.translation_study runtime-admission \
 历史 ES-P0 和 15-Skill `ES-P1-Wild-Sim` 仍可作为机械接线与假设形成证据，但不再被表述为 L1→L0 高泛化证明，也不能单独解锁 Runtime 研究。
 
 ## English
+
+September 16 status: the [evaluation reset](EVALUATION-RESET-20260916.md) is authorized for implementation, with R0 measurement partially implemented. The 153 targeted passes and zero-model local scorer/budget/existing-gateway probes establish neither the 36-probe gate nor real-agent benefit. Live DSH metering, Provider isolation, frozen cases/labels and traces remain incomplete; no `run` command exists. Formal thresholds and code admission are unchanged: no bypass of >1×1, research eligibility or regrading. The old semantic stage remains `paused_unmet`; next steps below are historical.
 
 ### Why translation must be proven first
 

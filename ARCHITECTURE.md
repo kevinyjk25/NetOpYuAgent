@@ -1,14 +1,30 @@
 # NetOpYuAgent 架构 / Architecture
 
-> 架构基线 / Architecture baseline: 2026-09-09。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
+> 架构基线 / Architecture baseline: 2026-09-10。本文描述已实现的研究原型；阶段完成度以[项目进展](docs/PROJECT-STATUS.md)为准。
 
 ## 中文
+
+2026-09-16 状态：[考核重置](docs/EVALUATION-RESET-20260916.md)已获授权实施，当前仅为 **R0 测量部分实现**：`evaluation/bounded_budget.py`、`bounded_scoring.py`、`bounded_pilot.py`、`bounded_execution.py`、`bounded_probe.py`提供持久预算、独立评分、输入准备和脚本式测量。它们不构成新执行平面；现有混合图仍不直接承载 Effect，自动接入独立事务网关尚未实现。本地探针实际运行且 0 模型调用，不证明真实 Agent 收益或 36 项机制门槛通过。真实 DSH 计量、物理 Provider 隔离和真实 trace 等 R0 接线仍未完成；旧语义阶段 `paused_unmet`、权限及正式门禁不变，详见[当前状态](docs/PROJECT-STATUS.md)。
+
+当前[结构约束与有界工件修订](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)补齐两个独立边界：隔离编译使用完整author Schema约束解码及独立准入；v4宿主可选`artifactRepair=true`，仅在静态检查明确失败时允许一次原生Agent代码体修订。原始证据、任务、正文和未选代码块不变；没有新读取/写权/Runtime生成。修订前后分别留档，最终仍是未验证候选，不能替代任务验收或完整语义证明。
+
+2026-09-16 新增可选[编译/执行上下文隔离](docs/ISOLATED-COMPILER.md)：宿主单独调用无工具的编译模型，原编译器校验后才执行只读前段；运行Agent不再提交AST，只负责实际观察与交付。既有六工具模式保留，隔离模式为五工具。模型提案、执行授权与业务正确性仍独立，不增加写权；真实模型结果以专题报告为准。
+
+交付合同补充（2026-09-15）：共享 `skill_authoring/delivery.py` 在执行前绑定 L1 从真实任务/可见 Skill 提出的 artifact、analysis、decision、next_steps 要求；原生 fallback 与 Runtime 生成共用类型化响应和确定性渲染。原文引用、结构完备、语义正确及最终交付一致性是不同维度；合同不授予事实、执行权或任务成功。接口和已知失败见[主链](docs/GOVERNED-SESSION.md)。
+
+2026-09-15 收敛更新：当前可选本地主链为 DSH → `skill_authoring` 共享转译 → 原 Runtime 前置读取 → DSH/L1 受限补读 → 冻结证据 → 单次有界推理与窄范围工件检查。评测代码不进入产品依赖；通用语义自审不作为执行权限来源。转译保真、执行约束、任务质量独立验收。宿主配置的六工具和限制见[主链接入说明](docs/GOVERNED-SESSION.md)。原有写事务边界不变，本入口不授权写入。下列早期语义审阅设计是保留的研究历史，不是当前产品必经链路。
+
+语义闭环 v1 的[冻结迁移未通过](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md)。后续设计把“回答/推理”和“支持观察”分成独立输出通道；保留未解决职责，避免精确摘录吞掉 L1 的分析和追问。原严格 L0 仍负责执行安全，LLM 负责开放语义；审阅意见与工程通过都不能代替任务验收。
 
 ### 2026-09-10：受控混合流程补充
 
 Runtime 现在可以按固定依赖调用宿主注册的 LLM 服务：严格 L0 片段 → 开放 L1 推理候选 → 独立准入 → 后续严格片段，也支持有界并行和必需分支汇合。推理服务仍属于 Reasoning Plane，调度它不等于赋予其执行权。实现位于 `network_runtime/l0/hybrid.py` 和 `hybrid_execution.py`；严格读取继续进入原 `flow.py` / `execute_host_read`。
 
 整图称为 Governed Hybrid Skill，不是完全确定性的 L0。新路径只覆盖受审的本地读取/推理接线，不自动调用原 Effect 事务、激活合同或修改 DSH 默认路由。[精确接口与未实现范围](docs/GOVERNED-HYBRID-FLOWS.md)、[阶段 2 验收](docs/STAGE-2-HYBRID-VALIDATION.md)。
+
+后续新增可选[结果合同](docs/SEMANTIC-RESULT-CONTRACT.md)：同一调度器分别返回图状态与职责检查，实际观察投影、未验证草稿和开放职责不再混合。结果合同由宿主摘要绑定，模型不能生成批准状态；它不是新的控制平面或自然语言事实裁判，严格片段与有界 L1 双驱动不变。
+
+[草稿审查的历史实验](docs/BOUNDED-DRAFT-REVIEW.md)之后，新增可选的[语义闭环研究入口](docs/SEMANTIC-CLOSURE-RUNBOOK.md)：原 Skill/任务/工具合同自动构造读取前段并保留 L1，独立准入后经原 Runtime 执行；有界补读、来源审查、章节编辑和终审由通用宿主接线。来源引用由宿主精确渲染，自由说明仍为 LLM 候选。它不是任意 Skill 全语义的自动确定化，也未改变默认 DSH 路由；[冻结验收](docs/SEMANTIC-CLOSURE-EXIT.md)完成前不宣称新样本泛化通过。
 
 ### 1. 权威架构
 
@@ -206,6 +222,22 @@ Evaluation → all public test surfaces
 ---
 
 ## English
+
+September 16: the [reset](docs/EVALUATION-RESET-20260916.md) is authorized for implementation; **R0 measurement is partially implemented** through the bounded budget, scoring, pilot, execution and probe modules. These provide accounting, isolated scoring, input preparation and scripted measurement, not another execution plane. Mixed graphs still do not carry Effects, and automatic integration with the separate transactional gateway is unimplemented. Executed local probes used zero model calls; they establish neither real-agent benefit nor the 36-probe gate. Live DSH metering, physical Provider isolation and real trace capture remain outstanding. The old semantic stage remains `paused_unmet`, with unchanged authority and formal gates; see [current status](docs/PROJECT-STATUS.md).
+
+The current [schema/artifact package](docs/SCHEMA-ARTIFACT-CONVERGENCE.md) constrains isolated author decoding and independently validates the same schema. Optional v4 artifactRepair allows one native code-body edit after a definite static failure, preserving evidence, task, prose and other artifacts. No new reads, write authority or Runtime regeneration. Initial/final evidence is separate; a candidate remains unverified and task acceptance remains external.
+
+September16 adds optional [compiler/executor context isolation](docs/ISOLATED-COMPILER.md): a host-owned tool-free author request precedes original compiler/read admission; the execution Agent handles observations/delivery without submitting AST. Legacy six-tool mode remains;isolated mode has five tools. Proposal,authority and semantic correctness remain separate,with no new writes. See the report for actual model results.
+
+Delivery-contract addendum (September 15): shared skill_authoring/delivery.py binds task/visible-Skill-quoted artifact, analysis, decision and next_steps requirements before operations. Native fallback and Runtime generation share typed responses and deterministic rendering. Source membership, declared shape completeness, semantic correctness and final-answer fidelity remain separate; no facts, action authority or task success are granted. See the [canonical path](docs/GOVERNED-SESSION.md).
+
+September 15 convergence: the opt-in path is DSH → shared skill_authoring → original Runtime prefix reads → bounded L1 evidence collection → evidence freeze → one reasoning call and narrow static artifact checks. Product code imports no evaluator. Six tools share one implementation; no reads are replayed during drafting. Freezing proves collection closure, not evidence completeness. Translation fidelity, execution constraints and task quality are assessed independently. See the [canonical session](docs/GOVERNED-SESSION.md). Existing Effect boundaries remain unchanged; this entry grants no writes. Earlier semantic review designs below are historical research, not required delivery layers.
+
+The first [semantic-closure transfer failed](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md). The successor separates answer/reasoning from supporting observations and retains open duties: exact quotations must not erase L1 analysis or questions. Strict L0 retains execution control; open semantics remain model work, independently assessed rather than inferred from graph completion or AI review.
+
+The optional [result contract](docs/SEMANTIC-RESULT-CONTRACT.md) separates graph conformance, exact observation projection, unverified drafts and open duties in the same scheduler. Host consent binds the contract; candidate prose cannot grant success or action authority. It is neither a new control plane nor a natural-language truth verifier.
+
+After the [historical bounded-review experiments](docs/BOUNDED-DRAFT-REVIEW.md), an opt-in [semantic-closure research entry](docs/SEMANTIC-CLOSURE-RUNBOOK.md) connects automatically authored read prefixes plus retained L1 tasks to independent admission, original Runtime execution, bounded further reads, source review, section repair and final review. Exact source rendering is host-owned; free prose remains an LLM candidate. The generic orchestration is not arbitrary whole-Skill semantic compilation and does not change default DSH routing. Frozen transfer acceptance remains a separate gate.
 
 2026-09-10 addendum: the Runtime now composes original deterministic L0 read regions with host-bound LLM reasoning, independent candidate admission and bounded dependency/parallel scheduling. Reasoning remains a separate authority domain; candidates are not facts or permission. The whole artifact is a Governed Hybrid Skill, not deterministic L0. This opt-in local prototype neither adds an Effect executor nor changes default DSH routing. See [interfaces and limitations](docs/GOVERNED-HYBRID-FLOWS.md) and [Stage 2 criteria](docs/STAGE-2-HYBRID-VALIDATION.md).
 

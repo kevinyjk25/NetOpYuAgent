@@ -13,6 +13,9 @@ import time
 from pathlib import Path
 
 from evaluation import hybrid_authoring as author, hybrid_reasoning_transport
+from evaluation.hybrid_result_review import prepare_binding
+from evaluation.hybrid_continuation import guarded_bindings
+from evaluation.hybrid_continuation_run import fixture_policy
 from evaluation.flow_checkpoint import author_once
 from evaluation.flow_model_transport import decode
 from evaluation.source_ledger import budget
@@ -26,7 +29,8 @@ from network_runtime.l0.hybrid_execution import HostHybridConsent, HostReasoning
 from network_runtime.l0.structured_schema import validate_data
 
 
-def run(packet_path, compilation_path, review_path, output, *, case, max_model_calls=0):
+def run(packet_path, compilation_path, review_path, output, *, case, max_model_calls=0,
+        result_contract_path=None, result_mapping_path=None, fixture_path=None):
     output = Path(output)
     if output.exists():
         raise FileExistsError("preserve prior execution; late/failed/incomplete requests are never retried")
@@ -41,20 +45,41 @@ def run(packet_path, compilation_path, review_path, output, *, case, max_model_c
     if compilation != rebuilt:
         raise ValueError("compiled graph/source/task/host drift")
     flow = GovernedHybridFlow.model_validate(compilation["flow"])
+    result_contract, result_qualification, result_mapping = None, None, None
+    if (result_contract_path is None) != (result_mapping_path is None):
+        raise ValueError("result contract and reviewed source mapping must be supplied together")
+    if result_contract_path is not None:
+        result_mapping = read_json(result_mapping_path)
+        flow, result_contract, result_qualification = prepare_binding(
+            packet, compilation, read_json(result_contract_path), result_mapping)
+    if review.get("resultContractDigest") != (result_qualification["contractDigest"] if result_qualification else None):
+        raise ValueError("review must bind the exact revised result contract; no silent add/remove")
     required = sum(n.kind == "reason" for n in flow.nodes)
     if type(max_model_calls) is not int or not required <= max_model_calls <= 8:
         raise ValueError("explicit bounded actual model-call budget required")
-    arguments, fixtures = scenario(case)
-    freeze = {"case": case, "compilationDigest": compilation["reportDigest"], "review": review,
+    if fixture_path is None:
+        arguments, fixtures = scenario(case)
+    else:
+        fixture = read_json(fixture_path)
+        if set(fixture) != {"arguments", "resources"}:
+            raise ValueError("explicit local fixture requires only arguments and resources")
+        arguments, fixtures = validate_data(packet["inputSchema"], fixture["arguments"]), fixture["resources"]
+    freeze = {"case": case, "packet": packet, "compilation": compilation,
+        "compilationDigest": compilation["reportDigest"], "review": review,
         "fixtureVersion": FIXTURE_VERSION, "arguments": arguments, "fixture": fixtures,
         "implementation": {name: digest(Path(__file__).parents[1] / name) for name in (
             "evaluation/hybrid_live_demo.py", "evaluation/hybrid_behavior.py", "evaluation/hybrid_authoring.py",
             "evaluation/hybrid_reasoning_transport.py",
+            "evaluation/hybrid_result_review.py", "network_runtime/l0/result_contract.py",
             "network_runtime/l0/hybrid.py", "network_runtime/l0/hybrid_execution.py")},
+        "resultContract": result_qualification, "resultSourceMapping": result_mapping,
+        "resultMappingIsHostAuthoredNotAutomaticTranslation": result_contract is not None,
         "maxActualModelCalls": max_model_calls, "fixtureIsInProcessNotRealNetwork": True}
     write_artifacts(output / "freeze", {"inputs.json": seal(freeze)})
     calls, model_costs, lock = [], [], threading.Lock()
     reads, bindings = bindings_for(packet, fixtures, calls)
+    if fixture_path is not None:
+        bindings = guarded_bindings(packet, bindings, fixture_policy(fixtures), arguments)
     def invoke(request):
         wire = {"model": author.MODEL, "stream": False, "think": False, "format": "json",
             "options": {k: v for k, v in author.MODEL_CONFIG.items() if k != "think"},
@@ -86,7 +111,9 @@ def run(packet_path, compilation_path, review_path, output, *, case, max_model_c
     began = time.monotonic()
     outcome = run_hybrid(flow, arguments, reads=reads, read_bindings=bindings,
         reasoners={"local-9b": HostReasoningBinding(author.MODEL, author.CONFIG_DIGEST, invoke)}, gates={}, context=ctx,
-        consent=HostHybridConsent(qualification["graphDigest"], sha256_json(arguments), context_digest(ctx)))
+        consent=HostHybridConsent(qualification["graphDigest"], sha256_json(arguments), context_digest(ctx),
+                                  result_qualification["contractDigest"] if result_qualification else None),
+        result_contract=result_contract)
     wall_ms = (time.monotonic() - began) * 1000
     with lock:
         observed_costs = copy.deepcopy(model_costs)
@@ -105,8 +132,12 @@ def main():
         parser.add_argument(key)
     parser.add_argument("--case", required=True)
     parser.add_argument("--max-model-calls", type=int, default=0)
+    parser.add_argument("--result-contract")
+    parser.add_argument("--result-mapping")
+    parser.add_argument("--fixture", help="Explicit in-process resource inventory, never interpreted or executed")
     a = parser.parse_args()
-    report = run(a.packet, a.compilation, a.review, a.output, case=a.case, max_model_calls=a.max_model_calls)
+    report = run(a.packet, a.compilation, a.review, a.output, case=a.case, max_model_calls=a.max_model_calls,
+                 result_contract_path=a.result_contract, result_mapping_path=a.result_mapping, fixture_path=a.fixture)
     print(report["reportDigest"], report["execution"]["status"])
 
 

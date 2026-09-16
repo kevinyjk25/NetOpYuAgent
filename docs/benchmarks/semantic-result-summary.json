@@ -1,0 +1,721 @@
+{
+  "apiVersion": "netopyu.io/semantic-result-development-summary/v1",
+  "date": "2026-09-10",
+  "stage2Checkpoint": "25b08c0",
+  "scope": "result-boundary substage, not complete semantic-loop repair",
+  "hostAuthoredResultMappings": true,
+  "knownDevelopmentSkills": 3,
+  "automaticTranslationCalls": 0,
+  "actualModelCalls": 6,
+  "sourceScriptCalls": 0,
+  "effectCalls": 0,
+  "model": "qwen3.5:9b",
+  "automaticTranslationAccuracy": null,
+  "wholeSkillAccuracy": null,
+  "semanticDraftAccuracy": null,
+  "preflightFailures": [
+    {
+      "revision": 1,
+      "calls": 0,
+      "cause": "embedded JSON text object-order drift"
+    },
+    {
+      "revision": 2,
+      "calls": 0,
+      "cause": "binding diagnostic traversal object-order drift"
+    }
+  ],
+  "revisions": [
+    {
+      "revision": 3,
+      "reportDigest": "sha256:3c4ff8e0f7453b45be7c55c188373c5b50fc7e282fd47e21252977cbc800174a",
+      "manifestDigest": "sha256:5cb70cf329d9f08d0b85edccffa82fcf47b2128a261aa846b44a417a6ec98c98",
+      "rows": [
+        {
+          "case": "notion",
+          "reportDigest": "sha256:3d9a9413a124a4d36b83a351fc5c2bbdf98ff5bf4dd2386b557e5d5c3f37ebff",
+          "graphStatus": "governed_graph_completed",
+          "resultAssessment": {
+            "apiVersion": "netopyu.io/hybrid-result-assessment/v1",
+            "candidateDigest": "sha256:f85ee602aa2547461912e2bbd2effb91520863947655e108cf933318245e42b4",
+            "claimBoundary": "Only declared read receipts and exact observation projections checked; open prose and upstream assertions remain unverified.",
+            "completeAnswerApproved": false,
+            "contractDigest": "sha256:4da722d86f1811e8f5551580cdfb224cb07de2bc471aebf21d32ecb645ceaadb",
+            "declaredDutyCount": 2,
+            "declaredObligationsSatisfied": true,
+            "effectAuthorized": false,
+            "freshActionEvidence": false,
+            "graphDigest": "sha256:f7b24af4c904f33fed042efb81018a1c44482fa6be6ebf64d17d7d9177f55848",
+            "mappingDigest": "sha256:5a9286e949864a50edeceb21b3202ccdfef6a249669a96e785864b18098dc913",
+            "modelNotesVerified": false,
+            "observedFields": [
+              {
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/markdown",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "field": "observed-page",
+                "label": "Return the observed page Markdown without inventing content.",
+                "role": "observed_snapshot_value_not_independent_truth",
+                "value": "---\ntitle: Local review page\nstatus: draft\n---\n# Maintenance\nPlanned at 11:00 UTC; not yet approved.\n"
+              }
+            ],
+            "reportDigest": "sha256:27f62d9fed60db9302dd9e1741e3d9f7ebcc58c8b0dd2207519a7318e2b27297",
+            "rows": [
+              {
+                "code": "read_receipt_present",
+                "contractPointer": "/duties/0",
+                "dutyId": "read-source",
+                "evidenceLocation": {
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "read_completed",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Read the caller-selected source through its declared host tool.",
+                "status": "satisfied"
+              },
+              {
+                "candidatePointer": "/values/observed-page",
+                "code": "exact_observed_value",
+                "contractPointer": "/duties/1",
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/markdown",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "observed_value",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Return the observed page Markdown without inventing content.",
+                "status": "satisfied"
+              }
+            ],
+            "runtimeAuthorityGranted": false,
+            "satisfiedDutyCount": 2,
+            "sourceEntailmentProven": false,
+            "status": "declared_contract_satisfied",
+            "unverifiedCandidateNotes": [
+              "Page read completed successfully.",
+              "Content indicates a maintenance event planned for 11:00 UTC.",
+              "Status is currently 'draft' and explicitly noted as not yet approved.",
+              "No creation, update, or deletion actions were performed.",
+              "Observation source is the caller-selected page n0.",
+              "Markdown content matches exactly the read region."
+            ],
+            "wholeSkillCorrectnessProven": false,
+            "wholeTaskDutyCoverageProven": false
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 2762,
+              "latencyMs": 15847.364957910031,
+              "node": "n7",
+              "outputTokens": 147,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "schema_valid_candidate_not_semantic_proof"
+            }
+          ],
+          "latencyMs": 15965.72733297944
+        },
+        {
+          "case": "handoff",
+          "reportDigest": "sha256:2d9b7e08dcec7f69e9936b86f02db9f6304912f62634b0acc1e1dbd275722ed0",
+          "graphStatus": "governed_graph_completed",
+          "resultAssessment": {
+            "apiVersion": "netopyu.io/hybrid-result-assessment/v1",
+            "candidateDigest": "sha256:36a7393a20aa485ccd0fa94f47f0a7ea58b9ada2b3953e033c0753559090a9e5",
+            "claimBoundary": "Only declared read receipts and exact observation projections checked; open prose and upstream assertions remain unverified.",
+            "completeAnswerApproved": false,
+            "contractDigest": "sha256:319e7ac0262c7f47c0fd98db081ed56faba5ab91515a082196a76b6a79f85c0f",
+            "declaredDutyCount": 3,
+            "declaredObligationsSatisfied": false,
+            "effectAuthorized": false,
+            "freshActionEvidence": false,
+            "graphDigest": "sha256:d9996590c2013cb6ae383ae86c913347fe52ba0f384c52b13f8a7e0c8f5ee361",
+            "mappingDigest": "sha256:b5b7249009c52161289fc86f703e9e0407e2a303cb37a9936981ed2ac92a8bd5",
+            "modelNotesVerified": false,
+            "observedFields": [
+              {
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/text",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "field": "observed-notes",
+                "label": "Preserve the outgoing notes as observed, not as independently attested facts.",
+                "role": "observed_snapshot_value_not_independent_truth",
+                "value": "Outgoing: Alice; incoming: Bob, not yet acknowledged. Active: INC-42 API p95 900ms since 08:10 UTC; owner Alice; mitigation lowered batch size, not resolved. Investigation: packet loss on uplink B, owner Chen, next inspect optical counters at 10:30 UTC. Recent change: release 1.4 at 07:50 UTC. Known issue: dashboard stale; use raw metrics. Upcoming maintenance 11:00 UTC, owner Dana. Alerts have NOT been verified by Bob. Escalation: primary oncall, then incident commander after 15 minutes. Dashboard: https://example.invalid/inc42."
+              }
+            ],
+            "reportDigest": "sha256:3a95ddacd65d2ef215c8599a2871b3d49db11253cfe4ddc56c4b3fb7c498f679",
+            "rows": [
+              {
+                "code": "read_receipt_present",
+                "contractPointer": "/duties/0",
+                "dutyId": "read-source",
+                "evidenceLocation": {
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "read_completed",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Read the caller-selected source through its declared host tool.",
+                "status": "satisfied"
+              },
+              {
+                "candidatePointer": "/values/observed-notes",
+                "code": "exact_observed_value",
+                "contractPointer": "/duties/1",
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/text",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "observed_value",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Preserve the outgoing notes as observed, not as independently attested facts.",
+                "status": "satisfied"
+              },
+              {
+                "code": "unverified_reasoning",
+                "contractPointer": "/duties/2",
+                "dutyId": "handoff-draft",
+                "kind": "open_semantics",
+                "repairTarget": "reasoning_or_authoring",
+                "semanticReviewRequired": true,
+                "sourceRef": "task",
+                "statement": "Prepare a source-supported asynchronous handoff draft without fabricated facts or missing duties.",
+                "status": "unresolved"
+              }
+            ],
+            "runtimeAuthorityGranted": false,
+            "satisfiedDutyCount": 2,
+            "sourceEntailmentProven": false,
+            "status": "partial",
+            "unverifiedCandidateNotes": [
+              "Incoming engineer Bob has not yet acknowledged receipt of the handoff notes.",
+              "Alert routing verification for Bob is explicitly pending and must be confirmed before shift transition concludes.",
+              "Active incident INC-42 remains unresolved despite mitigation; requires continued monitoring by incoming responder.",
+              "Investigation on uplink B packet loss is ongoing with a specific next step scheduled for 10:30 UTC.",
+              "Dashboard reliability is compromised due to known staleness; raw metrics should be used for decision-making.",
+              "Upcoming maintenance at 11:00 UTC requires attention from owner Dana and potential traffic impact planning."
+            ],
+            "wholeSkillCorrectnessProven": false,
+            "wholeTaskDutyCoverageProven": false
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 6338,
+              "latencyMs": 32937.86937510595,
+              "node": "n7",
+              "outputTokens": 312,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "schema_valid_candidate_not_semantic_proof"
+            }
+          ],
+          "latencyMs": 33027.55449991673
+        },
+        {
+          "case": "documentation",
+          "reportDigest": "sha256:5500e952282f56e51747688cd5afd63e9986aae6c07a9768204e7674237f8740",
+          "graphStatus": "governed_graph_completed",
+          "resultAssessment": {
+            "apiVersion": "netopyu.io/hybrid-result-assessment/v1",
+            "candidateDigest": "sha256:267a471a634f93e85c877bee81799f4dcba32ff3cee7a268c12346e0369967cc",
+            "claimBoundary": "Only declared read receipts and exact observation projections checked; open prose and upstream assertions remain unverified.",
+            "completeAnswerApproved": false,
+            "contractDigest": "sha256:d0c2ab3409a6e4451bc9f100def0f9a87011c3249c08728a4d9c350f3b5fbda8",
+            "declaredDutyCount": 4,
+            "declaredObligationsSatisfied": false,
+            "effectAuthorized": false,
+            "freshActionEvidence": false,
+            "graphDigest": "sha256:14f8a5018b370e5208ea4ab1e34ff7a568d97ff38565a9fb625f63c0d8812493",
+            "mappingDigest": "sha256:22b685fa1e8c4752b329d9388b76cb6b74d3c7ed2226cd47541c42beeed80171",
+            "modelNotesVerified": false,
+            "observedFields": [
+              {
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/entries",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "field": "observed-entries",
+                "label": "Preserve the observed directory entries without inferring configuration.",
+                "role": "observed_snapshot_value_not_independent_truth",
+                "value": [
+                  {
+                    "kind": "file",
+                    "name": "pyproject.toml"
+                  },
+                  {
+                    "kind": "directory",
+                    "name": "src"
+                  }
+                ]
+              }
+            ],
+            "reportDigest": "sha256:84c98034d2c1523927778acb976bfd7b00e138e214783c6cca4113d379c04116",
+            "rows": [
+              {
+                "code": "read_receipt_present",
+                "contractPointer": "/duties/0",
+                "dutyId": "read-source",
+                "evidenceLocation": {
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "read_completed",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Read the caller-selected source through its declared host tool.",
+                "status": "satisfied"
+              },
+              {
+                "candidatePointer": "/values/observed-entries",
+                "code": "exact_observed_value",
+                "contractPointer": "/duties/1",
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/entries",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "observed_value",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Preserve the observed directory entries without inferring configuration.",
+                "status": "satisfied"
+              },
+              {
+                "code": "missing_observation",
+                "contractPointer": "/duties/2",
+                "dutyId": "inspect-code",
+                "kind": "open_semantics",
+                "repairTarget": "reasoning_or_authoring",
+                "semanticReviewRequired": true,
+                "sourceRef": "task",
+                "statement": "Inspect configuration and code before claiming project-specific installation or test commands.",
+                "status": "unresolved"
+              },
+              {
+                "code": "unverified_reasoning",
+                "contractPointer": "/duties/3",
+                "dutyId": "readme-draft",
+                "kind": "open_semantics",
+                "repairTarget": "reasoning_or_authoring",
+                "semanticReviewRequired": true,
+                "sourceRef": "task",
+                "statement": "Prepare an appropriate README supported by actual codebase observations.",
+                "status": "unresolved"
+              }
+            ],
+            "runtimeAuthorityGranted": false,
+            "satisfiedDutyCount": 2,
+            "sourceEntailmentProven": false,
+            "status": "partial",
+            "unverifiedCandidateNotes": [
+              "The project path is /sandbox/project.",
+              "A pyproject.toml file exists, indicating a Python project.",
+              "A src directory exists, suggesting a standard Python package structure.",
+              "No other files or directories were listed in the initial read.",
+              "Specific contents of pyproject.toml (dependencies, version) are unknown without reading.",
+              "Contents of the src directory are unknown without listing it."
+            ],
+            "wholeSkillCorrectnessProven": false,
+            "wholeTaskDutyCoverageProven": false
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 6621,
+              "latencyMs": 29032.775875064544,
+              "node": "n7",
+              "outputTokens": 172,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "schema_valid_candidate_not_semantic_proof"
+            }
+          ],
+          "latencyMs": 29155.19254200626
+        }
+      ]
+    },
+    {
+      "revision": 4,
+      "reportDigest": "sha256:e428c101e6f1abc24e4f31e4cf65a5996a4780f5c7bc9c957f35a62829a04e17",
+      "manifestDigest": "sha256:b1c90a1eaf23d7407a3ec6fc0ff15f46038358709ec4521a5d63de0a10dc9110",
+      "rows": [
+        {
+          "case": "notion",
+          "reportDigest": "sha256:9dd6821ea26d94fd63a27c58fa6a3d15f8f9551643460ef0cdf99784721fb776",
+          "graphStatus": "governed_graph_completed",
+          "resultAssessment": {
+            "apiVersion": "netopyu.io/hybrid-result-assessment/v1",
+            "candidateDigest": "sha256:9b117202baef632194c8ff71e9fd56ebae8c1c73adbdcf4f7bf3237d99820c4e",
+            "claimBoundary": "Only declared read receipts and exact observation projections checked; open prose and upstream assertions remain unverified.",
+            "completeAnswerApproved": false,
+            "contractDigest": "sha256:3ddae20f673ecf5273494b641ae3b94bed5dd3a6581d0cdbe30bdc2368816967",
+            "declaredDutyCount": 2,
+            "declaredObligationsSatisfied": true,
+            "effectAuthorized": false,
+            "freshActionEvidence": false,
+            "graphDigest": "sha256:c3fa5235334a711bb766052fd1180849aa259859af6b9ca17c663bcc4d533ed6",
+            "mappingDigest": "sha256:5a9286e949864a50edeceb21b3202ccdfef6a249669a96e785864b18098dc913",
+            "modelDraftVerified": false,
+            "modelNotesVerified": false,
+            "observedFields": [
+              {
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/markdown",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "field": "observed-page",
+                "label": "Return the observed page Markdown without inventing content.",
+                "role": "observed_snapshot_value_not_independent_truth",
+                "value": "---\ntitle: Local review page\nstatus: draft\n---\n# Maintenance\nPlanned at 11:00 UTC; not yet approved.\n"
+              }
+            ],
+            "reportDigest": "sha256:3c18419aca7f995f58cb2d4b46a248247dc83931a0781a93216aa345badb2e04",
+            "rows": [
+              {
+                "code": "read_receipt_present",
+                "contractPointer": "/duties/0",
+                "dutyId": "read-source",
+                "evidenceLocation": {
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "read_completed",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Read the caller-selected source through its declared host tool.",
+                "status": "satisfied"
+              },
+              {
+                "candidatePointer": "/values/observed-page",
+                "code": "exact_observed_value",
+                "contractPointer": "/duties/1",
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/markdown",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "observed_value",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Return the observed page Markdown without inventing content.",
+                "status": "satisfied"
+              }
+            ],
+            "runtimeAuthorityGranted": false,
+            "satisfiedDutyCount": 2,
+            "sourceEntailmentProven": false,
+            "status": "declared_contract_satisfied",
+            "unverifiedCandidateDraft": "Page read successfully. Content indicates a maintenance event planned for 11:00 UTC with current status 'draft'. No modifications were made.",
+            "unverifiedCandidateNotes": [
+              "Maintenance plan is marked as draft and not yet approved.",
+              "No page creation, update, or deletion actions were performed."
+            ],
+            "wholeSkillCorrectnessProven": false,
+            "wholeTaskDutyCoverageProven": false
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 2825,
+              "latencyMs": 12590.186542016454,
+              "node": "n7",
+              "outputTokens": 129,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "schema_valid_candidate_not_semantic_proof"
+            }
+          ],
+          "latencyMs": 12703.262457973324
+        },
+        {
+          "case": "handoff",
+          "reportDigest": "sha256:e29e3f2ffd29c888e3dc5eb74e6bcae9a203419f32a934fa6bb8346309d8750e",
+          "graphStatus": "governed_graph_completed",
+          "resultAssessment": {
+            "apiVersion": "netopyu.io/hybrid-result-assessment/v1",
+            "candidateDigest": "sha256:33aaa5987a563e99504556c3af374ef48e0ce1e0c2773f39c518d88515f7e60e",
+            "claimBoundary": "Only declared read receipts and exact observation projections checked; open prose and upstream assertions remain unverified.",
+            "completeAnswerApproved": false,
+            "contractDigest": "sha256:8a8d6fdf160d0a6d914f8bb11896e9518bc0a0026ac3d1a81afdc8aa1bf942e7",
+            "declaredDutyCount": 3,
+            "declaredObligationsSatisfied": false,
+            "effectAuthorized": false,
+            "freshActionEvidence": false,
+            "graphDigest": "sha256:db157187272b132171e63b9773b6d08832e9439f9e6ea6f0119ccbb91062d33c",
+            "mappingDigest": "sha256:b5b7249009c52161289fc86f703e9e0407e2a303cb37a9936981ed2ac92a8bd5",
+            "modelDraftVerified": false,
+            "modelNotesVerified": false,
+            "observedFields": [
+              {
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/text",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "field": "observed-notes",
+                "label": "Preserve the outgoing notes as observed, not as independently attested facts.",
+                "role": "observed_snapshot_value_not_independent_truth",
+                "value": "Outgoing: Alice; incoming: Bob, not yet acknowledged. Active: INC-42 API p95 900ms since 08:10 UTC; owner Alice; mitigation lowered batch size, not resolved. Investigation: packet loss on uplink B, owner Chen, next inspect optical counters at 10:30 UTC. Recent change: release 1.4 at 07:50 UTC. Known issue: dashboard stale; use raw metrics. Upcoming maintenance 11:00 UTC, owner Dana. Alerts have NOT been verified by Bob. Escalation: primary oncall, then incident commander after 15 minutes. Dashboard: https://example.invalid/inc42."
+              }
+            ],
+            "reportDigest": "sha256:24ebde146aa436168134acb3cfd87bfb168f5809a6565f8d650aaf81b6813db0",
+            "rows": [
+              {
+                "code": "read_receipt_present",
+                "contractPointer": "/duties/0",
+                "dutyId": "read-source",
+                "evidenceLocation": {
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "read_completed",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Read the caller-selected source through its declared host tool.",
+                "status": "satisfied"
+              },
+              {
+                "candidatePointer": "/values/observed-notes",
+                "code": "exact_observed_value",
+                "contractPointer": "/duties/1",
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/text",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "observed_value",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Preserve the outgoing notes as observed, not as independently attested facts.",
+                "status": "satisfied"
+              },
+              {
+                "code": "unverified_reasoning",
+                "contractPointer": "/duties/2",
+                "dutyId": "handoff-draft",
+                "kind": "open_semantics",
+                "repairTarget": "reasoning_or_authoring",
+                "semanticReviewRequired": true,
+                "sourceRef": "task",
+                "statement": "Prepare a source-supported asynchronous handoff draft without fabricated facts or missing duties.",
+                "status": "unresolved"
+              }
+            ],
+            "runtimeAuthorityGranted": false,
+            "satisfiedDutyCount": 2,
+            "sourceEntailmentProven": false,
+            "status": "partial",
+            "unverifiedCandidateDraft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.\n",
+            "unverifiedCandidateNotes": [
+              "Alerts verification status for incoming engineer (Bob) is unresolved; requires manual check.",
+              "Handoff document generated based on read observations; no messages sent or alerts fired.",
+              "Uplink B investigation timeline confirmed at 10:30 UTC.",
+              "Dashboard staleness workaround explicitly noted to prevent misinterpretation of UI data.",
+              "Maintenance window owner (Dana) and time (11:00 UTC) captured for incoming shift awareness.",
+              "Escalation path defined per protocol: primary oncall -> incident commander after 15 minutes."
+            ],
+            "wholeSkillCorrectnessProven": false,
+            "wholeTaskDutyCoverageProven": false
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 6400,
+              "latencyMs": 47011.09187491238,
+              "node": "n7",
+              "outputTokens": 631,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "schema_valid_candidate_not_semantic_proof"
+            }
+          ],
+          "latencyMs": 47105.36799998954
+        },
+        {
+          "case": "documentation",
+          "reportDigest": "sha256:6598d46f80f58838ec134afb8c8d3e3e56acff0d320a1a387a4884e393885c41",
+          "graphStatus": "governed_graph_completed",
+          "resultAssessment": {
+            "apiVersion": "netopyu.io/hybrid-result-assessment/v1",
+            "candidateDigest": "sha256:0204159809dd4d16d3b78ca1521edbef08141e166e42ca43ac301e4fe3a922d8",
+            "claimBoundary": "Only declared read receipts and exact observation projections checked; open prose and upstream assertions remain unverified.",
+            "completeAnswerApproved": false,
+            "contractDigest": "sha256:af163567494cd2d32056c2389ff49052b0ef93343765cd333718a98412717e26",
+            "declaredDutyCount": 4,
+            "declaredObligationsSatisfied": false,
+            "effectAuthorized": false,
+            "freshActionEvidence": false,
+            "graphDigest": "sha256:b7602049186b8a1e70a58447226b4371d836e0973f0668e3cd809081d2003cf0",
+            "mappingDigest": "sha256:22b685fa1e8c4752b329d9388b76cb6b74d3c7ed2226cd47541c42beeed80171",
+            "modelDraftVerified": false,
+            "modelNotesVerified": false,
+            "observedFields": [
+              {
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/entries",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "field": "observed-entries",
+                "label": "Preserve the observed directory entries without inferring configuration.",
+                "role": "observed_snapshot_value_not_independent_truth",
+                "value": [
+                  {
+                    "kind": "file",
+                    "name": "pyproject.toml"
+                  },
+                  {
+                    "kind": "directory",
+                    "name": "src"
+                  }
+                ]
+              }
+            ],
+            "reportDigest": "sha256:6a4410b2e2f6b4ed22ce0b6ea323f64e3a19a1d13a15ca466f87828b5e03c142",
+            "rows": [
+              {
+                "code": "read_receipt_present",
+                "contractPointer": "/duties/0",
+                "dutyId": "read-source",
+                "evidenceLocation": {
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "read_completed",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Read the caller-selected source through its declared host tool.",
+                "status": "satisfied"
+              },
+              {
+                "candidatePointer": "/values/observed-entries",
+                "code": "exact_observed_value",
+                "contractPointer": "/duties/1",
+                "dutyId": "preserve-observation",
+                "evidenceLocation": {
+                  "pointer": "/entries",
+                  "readNode": "read",
+                  "region": "n0"
+                },
+                "kind": "observed_value",
+                "repairTarget": null,
+                "sourceRef": "task",
+                "statement": "Preserve the observed directory entries without inferring configuration.",
+                "status": "satisfied"
+              },
+              {
+                "code": "missing_observation",
+                "contractPointer": "/duties/2",
+                "dutyId": "inspect-code",
+                "kind": "open_semantics",
+                "repairTarget": "reasoning_or_authoring",
+                "semanticReviewRequired": true,
+                "sourceRef": "task",
+                "statement": "Inspect configuration and code before claiming project-specific installation or test commands.",
+                "status": "unresolved"
+              },
+              {
+                "code": "unverified_reasoning",
+                "contractPointer": "/duties/3",
+                "dutyId": "readme-draft",
+                "kind": "open_semantics",
+                "repairTarget": "reasoning_or_authoring",
+                "semanticReviewRequired": true,
+                "sourceRef": "task",
+                "statement": "Prepare an appropriate README supported by actual codebase observations.",
+                "status": "unresolved"
+              }
+            ],
+            "runtimeAuthorityGranted": false,
+            "satisfiedDutyCount": 2,
+            "sourceEntailmentProven": false,
+            "status": "partial",
+            "unverifiedCandidateDraft": "# Project Name\n\nA Python project located at `/sandbox/project`.\n\n## Features\n\n- [Key feature 1 — brief description]\n- [Key feature 2 — brief description]\n- [Key feature 3 — brief description]\n\n## Quick Start\n\n### Prerequisites\n\n- Python 3.x\n\n### Installation\n\n```bash\ncd /sandbox/project\npip install -e .\n```\n\n### Basic Usage\n\n```python\nfrom my_module import main_function\nresult = main_function()\nprint(result)\n```\n\n## Documentation\n\n- [Link to full API reference if separate]\n- [Link to architecture docs if separate]\n\n## Configuration\n\n[Environment variables, config files, or runtime options]\n\n## Examples\n\n[2-3 practical examples covering common use cases]\n\n## Development\n\n### Setup\n\n```bash\npip install -e .\n```\n\n### Testing\n\n```bash\npytest\n```\n\n### Building\n\n[How to build the project]\n\n## Contributing\n\n[Contribution guidelines or link to CONTRIBUTING.md]\n\n## License\n\n[License information]",
+            "unverifiedCandidateNotes": [
+              "Cannot read specific configuration files (package.json, pyproject.toml, etc.) or source code without first listing the directory contents to confirm their existence and paths.",
+              "The `pyproject.toml` file exists but its contents are not yet read; project name, version, dependencies, and entry points cannot be determined until `read_file` is executed.",
+              "The `src` directory exists but its internal structure (modules, packages, public API) is unknown without further exploration.",
+              "No existing README or documentation files were observed in the initial listing; a new README must be generated from scratch.",
+              "The project language is inferred as Python based on `pyproject.toml`, but this should be confirmed by reading the file to ensure no mixed-language setup exists.",
+              "Build system and package manager details (e.g., setuptools, poetry, pip) are not yet known and will affect the installation instructions."
+            ],
+            "wholeSkillCorrectnessProven": false,
+            "wholeTaskDutyCoverageProven": false
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 6682,
+              "latencyMs": 36834.87437502481,
+              "node": "n7",
+              "outputTokens": 538,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "schema_valid_candidate_not_semantic_proof"
+            }
+          ],
+          "latencyMs": 36953.839457943104
+        }
+      ]
+    }
+  ],
+  "developerDraftReview": {
+    "reviewKind": "developer_ai_not_independent_gold",
+    "v3": "No standalone draft field; observation-oriented output is not full task completion.",
+    "v4": {
+      "notion": "Observed Markdown preserved exactly. Scoped read can be inspected; draft does not independently attest approval.",
+      "handoff": "Requires revision: preserves active incident and 15-minute escalation but omits Alice/Chen ownership in draft; routing product suggestions are not current observations.",
+      "documentation": "Rejected draft: unobserved pip install, my_module/main_function and pytest examples persist despite uncertainty notes."
+    }
+  },
+  "claimBoundary": "Exact projection, host-declared gaps and immutable replay improved. Open prose correctness and source-to-duty generalization remain unproven.",
+  "validation": {
+    "status": "passed",
+    "targetedTestsPassed": 81,
+    "ruffChangedCodePassed": true,
+    "fullTestsPassed": 2664,
+    "subtestsPassed": 81,
+    "fullFailures": 0,
+    "fullSkipped": 0,
+    "fullXmlElapsedSeconds": 188.518,
+    "artifactChecksPassed": 200,
+    "actualModelReceiptsVerified": 6,
+    "currentCodeMatchesFrozenV4": true,
+    "changedPythonFilesRuffPassed": 10,
+    "gitDiffCheckPassed": true,
+    "initialRegression": {
+      "passed": 2663,
+      "failed": 1,
+      "cause": "documentation link checked before portable summary existed; repaired, no assertion relaxed"
+    },
+    "fullXmlDigest": "sha256:620abc876bc48a7c3133892d447134b41c67de573d8ab91f8b3db91f52b43a21",
+    "initialXmlDigest": "sha256:e7e3d23542ef5e8ed15b2b19bb69bd9706263e53abcb90e4f55dcf1a27a5199d"
+  },
+  "reportDigest": "sha256:abacc4af6928756a9b4895469139eab4e132fc669e68d3453cdc44f267392718"
+}

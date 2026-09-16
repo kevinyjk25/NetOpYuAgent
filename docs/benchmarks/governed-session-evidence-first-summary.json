@@ -1,0 +1,221 @@
+{
+  "schema": "governed-session-evidence-first-summary/v1",
+  "knownDevelopmentOnly": true,
+  "skills": 3,
+  "repositories": 3,
+  "productionSuccessProbability": null,
+  "runs": [
+    {
+      "model": "qwen3.5:9b",
+      "modelCalls": 17,
+      "knownInputTokens": 146784,
+      "knownOutputTokens": 3442,
+      "callsWithUnknownUsage": 0,
+      "taskPassed": 1,
+      "taskTotal": 3,
+      "p50EndToEndMs": 120110.89633393567,
+      "p95EndToEndMs": 127507.93464620365,
+      "reviewKind": "developer_ai_content_review_not_independent_gold",
+      "formalStageExit": false,
+      "pairedAB": false,
+      "run": "governed-session-20260915-evidence-first",
+      "boundEvidenceReportDigest": "sha256:21609be222903bb223897d2020c2cd65c68e828594ed3f52d795f13cc22d5243",
+      "criteriaPassed": 6,
+      "criteriaTotal": 9,
+      "compiledSkills": 1,
+      "actualReadCalls": 5,
+      "cases": [
+        {
+          "case": "capa-status",
+          "taskPassed": false,
+          "compiledSessions": 0,
+          "taskAndArgumentsRetained": 1,
+          "criteria": {
+            "c1": {
+              "met": true,
+              "reason": "Implementation fix and 25/25 checks are separated from the 5-of-30-day monitoring period, with Nora/Omar and dates retained."
+            },
+            "c2": {
+              "met": false,
+              "reason": "Pia has NOT approved is correct, but the answer again lacks an explicit open/not-ready-for-closure status. Same conservative explicit-status criterion as the preceding known run; it does not falsely say closed."
+            },
+            "c3": {
+              "met": true,
+              "reason": "Names outstanding formal approval, without invented approval or completed monitoring. Only a partial next-evidence recommendation; incomplete monitoring remains visible."
+            }
+          },
+          "stdoutDigest": "sha256:bcfd538950b69b52c846c13c20c51b092e3049f85820f0b780b0e97f839757d6",
+          "endToEndMs": 37343.46245799679,
+          "allRequestsInHostInventory": true,
+          "drafts": []
+        },
+        {
+          "case": "irql-draft",
+          "taskPassed": false,
+          "compiledSessions": 0,
+          "taskAndArgumentsRetained": 1,
+          "criteria": {
+            "c1": {
+              "met": false,
+              "reason": "Both actual exports were read, including inventory and window. However no query draft was delivered, so the required selector/invoke and half-open query predicate are absent."
+            },
+            "c2": {
+              "met": false,
+              "reason": "Narrative restates the intended counts/top ten but supplies no usable query. After compilation rejection, the model conflated unavailable Runtime draft TOOL with unavailable native textual drafting."
+            },
+            "c3": {
+              "met": true,
+              "reason": "Explicitly says no query execution/results. No shell, application, deployment or query tool was called."
+            }
+          },
+          "stdoutDigest": "sha256:afbb70022c1b650d5d8615e91e4a5bc7f9ca5a5ba111e6b1c20964bcfcf98bfc",
+          "endToEndMs": 120110.89633393567,
+          "allRequestsInHostInventory": true,
+          "drafts": []
+        },
+        {
+          "case": "mesh-incident",
+          "taskPassed": true,
+          "compiledSessions": 1,
+          "taskAndArgumentsRetained": 1,
+          "criteria": {
+            "c1": {
+              "met": true,
+              "reason": "Actual index and window were read before the bounded draft; north 10/2000=0.5% and 100/2000=5%, p99 400 to 900ms, south 0.5%/~390ms are correct."
+            },
+            "c2": {
+              "met": true,
+              "reason": "Describes deployment timing as correlation and explicitly keeps the cause unknown; no recovery or causal proof is fabricated."
+            },
+            "c3": {
+              "met": true,
+              "reason": "Recommends north-window request logs/trace evidence rather than asking again for the already-read aggregate window. No unsupported executed investigation is claimed."
+            }
+          },
+          "stdoutDigest": "sha256:f09e1aef0dd261381e53a59aaf950e9fa840e47ff116ce6e0cb444aa65d1face",
+          "endToEndMs": 128329.8277920112,
+          "allRequestsInHostInventory": true,
+          "drafts": [
+            {
+              "route": "governed_hybrid_candidate",
+              "followupReadsBeforeDraft": 1,
+              "staticChecksStatus": "no_supported_artifact"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "model": "qwen3.5:9b",
+      "modelCalls": 16,
+      "knownInputTokens": 136754,
+      "knownOutputTokens": 3982,
+      "callsWithUnknownUsage": 0,
+      "taskPassed": 1,
+      "taskTotal": 3,
+      "p50EndToEndMs": 138671.2782079121,
+      "p95EndToEndMs": 172440.8571086009,
+      "reviewKind": "developer_ai_content_review_not_independent_gold",
+      "formalStageExit": false,
+      "pairedAB": false,
+      "run": "governed-session-20260915-evidence-first-v2",
+      "boundEvidenceReportDigest": "sha256:1ef062de1557d68596079c2b356d2cfe8cd3aeff05505ea2a2298b38eb6d59ad",
+      "criteriaPassed": 5,
+      "criteriaTotal": 9,
+      "compiledSkills": 2,
+      "actualReadCalls": 5,
+      "cases": [
+        {
+          "case": "capa-status",
+          "taskPassed": false,
+          "compiledSessions": 0,
+          "taskAndArgumentsRetained": 1,
+          "criteria": {
+            "c1": {
+              "met": true,
+              "reason": "Correctly separates 25/25 implementation checks from only 5 of 30 monitoring days. No completed effectiveness is inferred."
+            },
+            "c2": {
+              "met": false,
+              "reason": "Nora, Omar, monitoring through October 4 and Pia's nonapproval are preserved, but explicit open/not-ready status is still absent. Same conservative status criterion; the answer does not assert closure."
+            },
+            "c3": {
+              "met": false,
+              "reason": "Unlike the preceding answer, this final note does not identify the requested next outstanding evidence or closure action. No certification or completed approval is fabricated."
+            }
+          },
+          "stdoutDigest": "sha256:937ec7d9a80724c263c7bf2dece4d1072b5e4d60a2ffb0c6b388a82c850557be",
+          "endToEndMs": 31300.587208010256,
+          "allRequestsInHostInventory": true,
+          "drafts": []
+        },
+        {
+          "case": "irql-draft",
+          "taskPassed": false,
+          "compiledSessions": 1,
+          "taskAndArgumentsRetained": 1,
+          "criteria": {
+            "c1": {
+              "met": false,
+              "reason": "After one rejected literal proposal and one correct caller binding, actual inventory is read before drafting. Names, failure label and interval are present, but there is no executable half-open time predicate on EnvTime; delivery is a pipeline outline, not a complete query draft."
+            },
+            "c2": {
+              "met": false,
+              "reason": "Count/by Username, invoke, projection and ordering/top-ten fragments are correct, but no complete usable query is delivered. Conservatively fails the conjunctive useful-query-draft requirement; partial usefulness is acknowledged."
+            },
+            "c3": {
+              "met": true,
+              "reason": "Both candidate and final explicitly say no query execution or file operation; actual trace contains only authorized reads and text generation."
+            }
+          },
+          "stdoutDigest": "sha256:25b5701d47a48c0d624b29ca03921b850b73dda0eec2916416ae28396775b9df",
+          "endToEndMs": 176193.03254201077,
+          "allRequestsInHostInventory": true,
+          "drafts": [
+            {
+              "route": "governed_hybrid_candidate",
+              "followupReadsBeforeDraft": 1,
+              "staticChecksStatus": "no_supported_artifact"
+            }
+          ]
+        },
+        {
+          "case": "mesh-incident",
+          "taskPassed": true,
+          "compiledSessions": 1,
+          "taskAndArgumentsRetained": 1,
+          "criteria": {
+            "c1": {
+              "met": true,
+              "reason": "Actual window read precedes draft. Correct north 0.5% to 5%, p99 400 to 900ms; south 0.5%/~390ms retained."
+            },
+            "c2": {
+              "met": true,
+              "reason": "Deployment rev8 timing is correlation, cause remains unknown and no recovery is asserted."
+            },
+            "c3": {
+              "met": true,
+              "reason": "Requests detailed north-window logs to investigate upstream/downstream failures; no write or unperformed check is claimed."
+            }
+          },
+          "stdoutDigest": "sha256:8fc583d58528d16e2b9899e4ad139011ede8fe8b4d09a851983e9ab4249acf12",
+          "endToEndMs": 138671.2782079121,
+          "allRequestsInHostInventory": true,
+          "drafts": [
+            {
+              "route": "governed_hybrid_candidate",
+              "followupReadsBeforeDraft": 1,
+              "staticChecksStatus": "no_supported_artifact"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "limitations": [
+    "Developer AI review, not independent Gold; conservative explicit-status and complete-query criteria are disclosed.",
+    "No scripts, queries, writes or real devices executed; read payloads are synthetic, model calls are real native DSH and qwen3.5:9b.",
+    "Sequential known-case development runs, not paired A/B, causal latency evidence or unseen generalization.",
+    "Current run fixes one rejected caller binding before execution and gathers before drafting; no full-task gain demonstrated."
+  ]
+}

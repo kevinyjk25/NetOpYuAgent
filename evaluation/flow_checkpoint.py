@@ -26,6 +26,9 @@ CORE_FILES = (
     "flow_translation.py", "flow_tree.py", "flow_tree_authoring.py",
     "flow_tree_capabilities.py", "read_l05_review.py",
     "translation_case_authoring.py", "translation_source_alignment.py",
+    "review_wire_codec.py", "hybrid_prefix_projection.py", "hybrid_authoring.py", "hybrid_reasoning_transport.py",
+    "hybrid_review_views.py", "hybrid_review_roles.py", "hybrid_historical_candidate.py", "hybrid_edit_scope.py", "hybrid_repair_plan.py",
+    "hybrid_task_context.py", "hybrid_review_context.py", "hybrid_note_cells.py",
 )
 
 
@@ -36,6 +39,7 @@ def environment() -> dict:
 def implementation(*extra_paths: str) -> dict:
     paths = {"evaluation/" + name for name in CORE_FILES} | set(extra_paths)
     paths.update(str(p.relative_to(ROOT)) for p in (ROOT / "network_runtime").rglob("*.py"))
+    paths.update(str(p.relative_to(ROOT)) for p in (ROOT / "skill_authoring").rglob("*.py"))
     return {path: digest_file(ROOT / path) for path in sorted(paths)}
 
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from skill_authoring.artifacts import read_json, write_artifacts
+
 import argparse
 import json
 from pathlib import Path
@@ -10,25 +12,14 @@ from pydantic import ValidationError
 
 from network_runtime.contracts import sha256_json
 from network_runtime.l0.models import ReadObjectSchema
-from network_runtime.l0.read_contracts import _source_object
 from network_runtime.l0.structured_bindings import (
     compile_binding, compile_tool_binding, materialize_binding, materialize_tool_binding,
 )
-from network_runtime.l0.structured_schema import MAX_BYTES, DataBindingError, checked_schema
+from network_runtime.l0.structured_schema import DataBindingError, checked_schema
 
 
-def read_json(path: str | Path) -> dict:
-    path = Path(path)
-    if path.stat().st_size > MAX_BYTES:
-        raise ValueError("input JSON exceeds byte budget")
-    return _source_object(path.read_text(encoding="utf-8"))
 
 
-def write_artifacts(output: str | Path, files: dict) -> None:
-    root = Path(output)
-    root.mkdir(parents=True, exist_ok=False)
-    for name, value in files.items():
-        (root / name).write_text(json.dumps(value, ensure_ascii=False, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
 def demo(catalog: dict, output: str | Path) -> dict:

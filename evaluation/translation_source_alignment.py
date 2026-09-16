@@ -124,6 +124,7 @@ def build_source_input(blind_payload: dict[str, Any]) -> dict[str, Any]:
 
 def evaluate_source_assessment(
     payload: dict[str, Any], assessment: SourceAssessment,
+    *, require_actionable_revision: bool = True,
 ) -> dict[str, Any]:
     """Fail closed on missing rows/citations; never promote AI entailment into proof."""
 
@@ -149,7 +150,7 @@ def evaluate_source_assessment(
         kinds = {citation["kind"] for citation in citations}
         if item.verdict != "insufficient_evidence" and not set(claim["requiredEvidenceKinds"]) <= kinds:
             raise ValueError("supported/contradicted claim lacks required source evidence")
-        if item.verdict != "supported" and not item.suggested_revision.strip():
+        if require_actionable_revision and item.verdict != "supported" and not item.suggested_revision.strip():
             raise ValueError("non-supported claim requires actionable revision")
         rows.append({**claim, **item.model_dump(mode="json"), "resolvedCitations": citations})
     rows.sort(key=lambda item: item["claimId"])

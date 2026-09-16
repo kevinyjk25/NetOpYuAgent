@@ -68,11 +68,14 @@ def bindings_for(packet, fixtures, calls, *, fault=None):
         def observe(arguments, name=name):
             if name not in fixtures:
                 raise PermissionError("no declared isolated resource")
-            expected, payload = fixtures[name]
+            resource = fixtures[name]
+            entries = resource["resources"] if isinstance(resource, dict) and set(resource) == {"resources"} else [resource]
+            matched = [(expected, payload) for expected, payload in entries if arguments == expected]
             # Explicit sandbox resource/data predicate, NOT a hidden business
             # classifier or a task result disguised as a low-level observation.
-            if arguments != expected:
+            if len(matched) != 1:
                 raise PermissionError("outside the predeclared isolated fixture request")
+            _, payload = matched[0]
             calls.append({"tool": name, "arguments": copy.deepcopy(arguments)})
             if fault == "provider_error":
                 raise RuntimeError("synthetic provider failure")

@@ -72,3 +72,21 @@ def test_prefix_cannot_invent_tool_or_reserved_reason_node():
         "reads": [{"id": "n7", "after": [], "evidence": ["task"], "tool": "shell", "arguments": {}}], "boundaries": []}
     with pytest.raises(ValueError, match="schema mismatch"):
         compile_proposal(packet, list(pages_for(packet)), choice)
+
+
+def test_lossless_task_roles_survive_automatic_compile_without_removing_constraints():
+    packet, _ = inputs()
+    a, b = packet["task"].split(";", 1)
+    packet["taskScope"] = [{"role": "business_request", "text": a}, {"role": "execution_constraint", "text": ";" + b}]
+    visible = list(pages_for(packet))
+    choice = {"mode": "read_prefix", "intent_summary": "Retain the original scoped task and every operation restriction while generating the mixed candidate.",
+              "reads": [], "boundaries": []}
+    compiled = compile_proposal(packet, visible, choice)
+    node = compiled["flow"]["nodes"][0]
+    assert node["inputs"]["fields"]["original_task"]["value"] == packet["task"]
+    assert json.loads(node["inputs"]["fields"]["task_scope"]["value"]) == packet["taskScope"]
+    wire = json.loads(make_request(packet, visible)["messages"][-1]["content"])
+    assert wire["taskScope"]["constraintsRemoved"] is False
+    packet["taskScope"].pop()
+    with pytest.raises(ValueError, match="complete task"):
+        make_request(packet, visible)

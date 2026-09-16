@@ -1,0 +1,80 @@
+{
+  "scope": "known_development_native_DSH_not_unseen_or_paired_AB",
+  "model": "qwen3.5:9b",
+  "reviewKind": "developer_ai_content_review_not_independent_gold",
+  "historicalScoresReplaced": false,
+  "formalStageExit": false,
+  "productionSuccessProbability": null,
+  "runs": [
+    {
+      "id": "delivery-contract-local",
+      "sourceDirectory": "artifacts/governed-session-20260915-delivery-contract-local",
+      "boundEvidenceReportDigest": "sha256:b6fded1b53dc6ec5ebfc66457698a693a7c29d482e7a8092cd76835d20db0988",
+      "cases": 3,
+      "tasksCompleted": 0,
+      "criteriaMet": 3,
+      "criteriaTotal": 9,
+      "compiledGraphs": 1,
+      "authorizedProviderReads": 5,
+      "completedNativeDeliveryCandidates": 2,
+      "completedRuntimeDrafts": 0,
+      "declaredShapeCompleteCandidates": 0,
+      "candidateFinalTrimmedExactMatches": 0,
+      "candidateFinalComparisonDenominator": 2,
+      "candidateFinalComparisonMeaning": "Text identity only, not a semantic-equivalence score; final rewriting is outside the checked candidate digest.",
+      "cost": {
+        "completedModelRepliesWithUsage": 26,
+        "knownInputTokens": 347906,
+        "knownOutputTokens": 9509,
+        "startedHarnessStepsWithoutCompletedReply": 1,
+        "completeUsageKnown": false,
+        "limitation": "The bound assessment's callsWithUnknownUsage=0 concerns completed replies only. A thirteenth Mesh step started at timeout; its model usage is not captured. These totals are lower bounds."
+      },
+      "latency": {
+        "p50EndToEndMs": 287957.4007920455,
+        "p95EndToEndMs": 406826.6524169827,
+        "includesTimedOutCase": true,
+        "timeoutMs": 420000,
+        "causalPerformanceClaim": false
+      },
+      "caseResults": [
+        {"case": "capa-status", "criteriaMet": 2, "criteriaTotal": 3, "path": "native_fallback", "kinds": ["artifact", "analysis"], "mainGap": "No explicit record-remains-open conclusion under the unchanged conservative criterion; next evidence is restored. Uncovered incorrectly stores a pre-read gap."},
+        {"case": "irql-draft", "criteriaMet": 1, "criteriaTotal": 3, "path": "native_fallback", "kinds": ["analysis", "next_steps"], "mainGap": "Both mixed caller/literal proposals rejected; actual inventory read, but model misclassifies requested query as analysis and delivers no query. Unsupported no-events assertion is retained as a defect."},
+        {"case": "mesh-incident", "criteriaMet": 0, "criteriaTotal": 3, "path": "admitted_prefix_then_timeout", "kinds": ["analysis", "next_steps"], "mainGap": "Seven fallback-only draft calls on the admitted Runtime path were rejected; null-plan resubmission did not switch routes. No accepted draft or useful final answer before 420-second timeout."}
+      ]
+    },
+    {
+      "id": "delivery-split-selected-repair",
+      "sourceDirectory": "artifacts/governed-session-20260915-delivery-split",
+      "boundEvidenceReportDigest": "sha256:18a89771f3e27b18e065d697c70d76ef646125a62da2ddfb0294514ce55556f2",
+      "selectedCases": ["mesh-incident", "capa-status"],
+      "cases": 2,
+      "tasksMeetingAllPredeclaredContentCriteria": 1,
+      "criteriaMet": 5,
+      "criteriaTotal": 6,
+      "allTaskRequirementsProven": false,
+      "compiledGraphs": 1,
+      "authorizedProviderReads": 3,
+      "completedRuntimeDrafts": 1,
+      "acceptedNativeDeliveryCandidates": 0,
+      "nativeCandidatesRejectedAsWrongType": 1,
+      "declaredShapeCompleteCandidates": 0,
+      "candidateFinalTrimmedExactMatches": 0,
+      "candidateFinalComparisonDenominator": 1,
+      "cost": {"completedModelRepliesWithUsage": 13, "outerDSHReplies": 12, "innerRuntimeReplies": 1, "knownInputTokens": 130104, "knownOutputTokens": 3563, "startedHarnessStepsWithoutCompletedReply": 0, "completeUsageKnown": true},
+      "latency": {"p50EndToEndMs": 138008.38116649538, "p95EndToEndMs": 190662.16356630903, "includesTimedOutCase": false, "causalPerformanceClaim": false},
+      "caseResults": [
+        {"case": "mesh-incident", "criteriaMet": 3, "criteriaTotal": 3, "endToEndMs": 196512.583832955, "repairObserved": "One admitted Runtime draft, no wrong-mode loop or timeout. A later native deliver call returns the existing candidate without replacement or a new model call.", "remainingGaps": "Candidate still has already-read next actions, stale pre-read uncovered items and an unsupported certificate-alert suggestion. Final is rewritten and uses four subsections, exceeding the requested three-section limit; content-criterion completion is not full semantic proof."},
+        {"case": "capa-status", "criteriaMet": 2, "criteriaTotal": 3, "endToEndMs": 79504.17850003578, "repairObserved": "Native fallback invokes the distinct deliver tool with zero Runtime model calls.", "remainingGaps": "JSON-encoded string submitted instead of required response object; DataBindingError, no validated rendering. Separate final native prose retains facts/next steps but no explicit open status."}
+      ],
+      "notPooledWithPriorBatch": true,
+      "irqlRetested": false
+    }
+  ],
+  "diagnosticBoundaries": [
+    "Exact source membership does not prove kind interpretation or requirement coverage.",
+    "Transient pre-read gaps may be incorrectly frozen as uncovered requirements; no automatic semantic clearing is claimed.",
+    "Candidate structure and partial artifact checks do not certify candidate meaning or rewritten final text.",
+    "The selected split-tool probe repairs the Mesh loop; native CAPA candidate validation still fails. Do not pool it with the three-case regression or claim a full stage pass."
+  ]
+}

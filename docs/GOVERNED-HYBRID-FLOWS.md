@@ -2,6 +2,10 @@
 
 ## 中文
 
+后续可选[结果合同](SEMANTIC-RESULT-CONTRACT.md)仍复用同一调度器：分别检查实际读取、精确观察字段和开放职责，保留未验证 L1 草稿；结果检查不授予候选准入、新鲜行动证据或写权限。
+
+[草稿审查/一次修订](BOUNDED-DRAFT-REVIEW.md)是该调度器上的宿主固定图适配器，不是新的模型权威：审查者与作者都属于有界 L1，原严格片段、合同和准入不变。
+
 状态：2026-09-10，受控混合读取原型与阶段 2 小批开发验证已完成，见[实际结果和未完成问题](STAGE-2-HYBRID-RESULTS.md)及[验收边界](STAGE-2-HYBRID-VALIDATION.md)。`network_runtime/l0/hybrid.py` 定义组合图，`hybrid_execution.py` 调度原 `flow.py` 严格片段、有界 LLM、独立候选准入和 all-success 汇合。**未新增 Effect 执行器，不改变默认 DSH 路由；未证明跨 Skill 泛化。**
 
 ### 固定权力和流程，保留语义自由度
@@ -57,11 +61,14 @@ Runtime 管理可审查的混合任务图：确定性节点与受控推理任务
 | `HostHybridConsent` | graph/arguments/context 三摘要 | 只允许本次已审本地运行，不是生产身份 |
 | `HostReasoningBinding` | 宿主注册的固定模型/配置/调用回调 | `ReasoningReply`；不加载 Skill 脚本、不提供 Tool 句柄 |
 | `HostCandidateGate` | 独立校验回调、策略摘要、允许的严格片段摘要集合 | 必须返回真实布尔 True；不升级为事实或 Effect 权限 |
+| `reason_if` | 固定类型化条件＋`otherwise` 数据绑定，均检查声明依赖 | 条件为真才调用有界 LLM；否则保留候选，零模型调用、不升级为事实 |
 | `run_hybrid` | 严格片段＋推理任务，最多 4 并行、8 模型节点 | `governed_graph_completed` 只代表图约束完成；保留原读取回执 |
 
 推理和纯汇合允许分析历史快照，记录进入节点时的观察年龄，不把它称为当前行动证据；后续严格操作或候选准入仍检查全部观察祖先的时效。这样长时间 LLM 分析不会凭空刷新事实，也不因只做解释就被当成写前检查。需要重新采集并替代旧证据的恢复流程尚未实现。
 
 当前 author surface 显式区分原文、未来调用者参数、宿主固定常量和模型解释；缺失实际调用参数不能被误报为编译缺口。它支持原子读取与开放推理的组合，尚不自动生成跨混合节点条件/循环、动态扩图或候选准入策略。原严格片段内部的分支继续由原 Flow 引擎执行。模型产物必须逐份审阅；绑定/结构通过不代表业务参数选择正确。
+
+2026-09-11 增补：通用图 API 已支持 `reason_if`；有限补读适配器将它接为“实际补读完成才生成新稿，否则原样保留前轮候选、另存追问”。这不是模型自动生成任意条件图，也不是动态扩图。旧 `reason` 序列化不变，新增类型的条件/保留值绑定进入图摘要；保留分支仍需宿主模型注册、输出类型和字节限额，不能绕过后续准入。真实保留事件没有模型回执，历史候选及未解决职责仍可复查。
 
 当前 v6 自动构造入口进一步缩为 `read_prefix`：模型选择有依据的原子读取；固定转换规则将**原始业务任务、已提供的 Skill 原文、读取结果和边界**送入末端受控推理节点，不要求模型再改写一遍开放职责。`compilation.plan` 保留模型原提案，`loweredPlan` 展示该规则，`sourceTaskMappings` 标记原任务留存。它不是完整混合编排语言；通用图 API 的串并行与独立准入能力不受此入口限制。边界解释仍可能错误，须审查，不能自动当成权限或语义证明。
 
@@ -70,6 +77,12 @@ v7 延续此入口，并将参考资料和实际观察分开送入模型，提�
 取消只停止本次接纳：正在执行的可信回调可能继续返回，迟到结果不能重启图。宿主回调必须自行设置传输超时；线程不是隔离沙箱，不能承载不受信脚本。没有持久崩溃恢复、自动写入、生产审批或可回滚的模型调用。
 
 ## English
+
+September 11 addendum: reason_if adds typed, declared-dependency conditions and an otherwise binding to the general graph API. The finite-continuation adapter invokes a writer only after an actual new read; otherwise it retains the exact prior candidate with a separate unverified question. This is not arbitrary model-authored condition synthesis or dynamic expansion. Ordinary reason serialization is unchanged. Conditional bindings enter the graph digest; skipped invocation still requires host registration, output schema/byte checks and downstream admission. Retention creates no model receipt and grants no factual authority or discharged duty.
+
+The subsequent [result-contract extension](SEMANTIC-RESULT-CONTRACT.md) is optional on this same scheduler. Host-bound observed-field and read-receipt checks produce a separate assessment; free-form drafts and open duties remain unverified. It does not grant candidate admission, fresh evidence or Effect authority.
+
+[Draft review and one revision](BOUNDED-DRAFT-REVIEW.md) use a host-built fixed graph on this scheduler. Reviewer and writer are bounded L1 candidates; original strict regions, contracts and admission remain unchanged.
 
 Status: the narrow governed read/reason prototype and Stage 2's small development loop are complete on 2026-09-10; see [actual results and open defects](STAGE-2-HYBRID-RESULTS.md) under the [fixed criteria](STAGE-2-HYBRID-VALIDATION.md). The mixed scheduler composes the original read Flow with bounded model tasks, independent candidate admission and required joins. It adds no Effect executor and changes no default DSH route. Generalization and large Runtime A/B remain unproven/closed.
 

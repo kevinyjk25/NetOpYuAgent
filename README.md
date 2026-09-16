@@ -1,16 +1,14 @@
 # NetOpYuAgent
 
-EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出 Candidate Plan；Runtime 依据 Contract、Evidence、Guard、Risk 和事务状态决定哪些操作真正允许作用于网络。
+EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和 L1 Skill 负责理解、诊断与提出候选；Runtime 控制哪些操作允许执行。
 
-> 文档状态：2026-09-10。**阶段 2 双驱动小批开发验证完成，正式泛化门禁仍未通过。** 真实 9B 的 5 个受限混合执行中，1 个限定请求完成、2 个局部分析可用、2 个草稿不接受；不能当成 3 个完整成功。[结果与失败报告](docs/STAGE-2-HYBRID-RESULTS.md) / [项目进展](docs/PROJECT-STATUS.md)。
-
-Runtime 已兼容严格 L0 与有界 LLM 的双驱动流程；完整的范围、使用入口、指标和原始失败见[阶段 2 报告](docs/STAGE-2-HYBRID-RESULTS.md)。默认 DSH 路由未变，当前改动尚未提交。
-
-> 当前是本地参考实现和仿真验证环境，不是生产网络认证。固定测试集的 100% 仅表示对应 Oracle 全部通过，不是生产成功概率。
->
-> **当前权威范围已经重置为研究原型。** 企业身份、Provider 供应链、多人治理、Hermes/A2A、HA/DR、WORM 和生产 SLO 均为冻结的未来工程，不是当前架构主线或完成条件。详见 [EnsuredSkill 原型权威准则](docs/ENSUREDSKILL-PROTOTYPE.md)。
+项目当前聚焦**概率推理与确定执行分离**的研究原型，生产身份、HA/DR、厂商认证等后置。测试通过不等于生产成功概率；语义失败和历史负结果完整保留。见[原型准则](docs/ENSUREDSKILL-PROTOTYPE.md)。
 
 ## 中文
+
+**当前：已获授权实施，R0 测量部分已实现，真实模型尚未运行。** [新考核与有限收敛方案](docs/EVALUATION-RESET-20260916.md)已落地预算总账、评分器、输入准备、脚本式计量和本地探针；153 项定向测试通过。已运行的[测量探针](artifacts/bounded-pilot-20260916-r0/report.json)覆盖 12 类／24 个评分 fixtures、10 项预算检查、3 项既有模拟网关机制，模型调用为 0；不代表真实 Agent 收益、自动 Effect 桥接或 36 项机制门槛通过。真实 DSH 全调用计量、可信预先 token 计数、物理 Provider 重置／隔离、预封存标签与 12 任务样本、真实 trace 采集仍待接入，尚无 `run` 命令。旧语义阶段仍为 `paused_unmet`，默认 UI、权限和正式研究门禁不变。
+
+最近一次已知小样本仍为 **2 Skill／3 Task，结构准入3/3、完整任务0/3**。不能用编译率或安全停止冒充业务成功。[原始负结果与成本](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)、[当前实现与使用](docs/GOVERNED-SESSION.md)、[进展及历史](docs/PROJECT-STATUS.md)。
 
 ### 项目设计
 
@@ -30,9 +28,9 @@ flowchart TB
 
 新增[受控混合流程](docs/GOVERNED-HYBRID-FLOWS.md)：Runtime 按依赖调度原 L0 严格片段与有界 LLM，支持串并行、all-success 汇合和独立候选准入；开放职责可保留原始 L1，不必强行转写成确定性逻辑。LLM 不能改图、直接调用工具或绕过参数/权限校验。**含推理的整图不等于确定性 L0**；新入口为可选本地原型，不自动接入写事务。
 
-### 当前研究门禁
+### 研究门禁与保留基线
 
-最终 v7 使用固定的 **10 Skill / 10 仓库 / 9 个开发领域**：6 个结构候选，5 个有用读取前段。真实执行的 5 份草稿只有 **1 完成＋2 局部可用**；交接和 README 草稿仍有未支持的事实/命令。35/35 公开图接线检查、2630 项回归及 81 子测试通过。[逐例审阅与机器摘要](docs/STAGE-2-HYBRID-RESULTS.md)。
+较早的阶段2最终 v7 使用固定的 **10 Skill / 10 仓库 / 9 个开发领域**：6 个结构候选，5 个有用读取前段。真实执行的 5 份草稿只有 **1 完成＋2 局部可用**；交接和 README 草稿仍有未支持的事实/命令。35/35 公开图接线检查、2630 项回归及 81 子测试通过。[逐例审阅与机器摘要](docs/STAGE-2-HYBRID-RESULTS.md)。
 
 含真实 9B 的图执行 p50/p95 为 **30.79 / 46.36 秒**（5 样本，部分并发 pytest）；5 次执行消耗 29,320 输入 / 2,113 输出 token。**不是 SLO、总体准确率或新 DSH A/B**。未见泛化仍未证明；[首批失败](docs/STAGE-2-PUBLIC-TRANSFER.md)和[v65 负结果](docs/STAGE-2-REPRESENTATION-REPAIR.md)完整保留。
 
@@ -219,7 +217,9 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 
 ## English
 
-Stage 2's small dual-drive development loop is complete; changes are uncommitted and formal generalization remains unproven. Five real 9B mixed runs yield **one fulfilled scoped request, two useful partial analyses and two rejected drafts**, not three complete successes. See [results, usage and limits](docs/STAGE-2-HYBRID-RESULTS.md). Default DSH routing is unchanged.
+**Current: implementation authorized; R0 measurement partially implemented, with no real-model run.** The [bounded protocol](docs/EVALUATION-RESET-20260916.md) now has a persistent budget ledger, scorer, input preparation, scripted metering and local probes; 153 targeted tests pass. The executed [measurement probe](artifacts/bounded-pilot-20260916-r0/report.json) covers 24 scorer fixtures across 12 families, ten budget checks and three existing simulated-gateway mechanisms, with zero model calls. It establishes neither real-agent benefit, an automatic Effect bridge nor the 36-probe gate. Live DSH metering, trusted advance token counts, physical Provider reset/isolation, frozen reference labels and twelve tasks, and real trace capture remain outstanding; there is no `run` command. The old semantic stage remains `paused_unmet`; default UI, authority and formal gates are unchanged.
+
+The latest known sample remains **two Skills/three tasks: 3/3 structural admissions, 0/3 complete tasks**. Compilation and safe stopping are not business success. See [negative evidence and costs](docs/SCHEMA-ARTIFACT-CONVERGENCE.md), [implemented workflow](docs/GOVERNED-SESSION.md) and [status/history](docs/PROJECT-STATUS.md).
 
 EnsuredSkill is a network-first Reliability Runtime research prototype. DSH, the LLM, and L1 Skills produce hypotheses and Candidate Plans; Contract, Evidence, Guard, Risk, and transactional state determine what is allowed to reach the network.
 

@@ -4,6 +4,18 @@
 
 ## 中文
 
+交付安全补充（2026-09-15）：合同在任何读取/生成前绑定实际任务/可见原文及会话；模型不能提交审批或扩大资源范围。确定性渲染与静态检查不运行工件，原生 fallback 的文本入口不能替换已接纳的 Runtime 草稿。逐字引用不保证类型正确或要求覆盖；DSH 自行改写的最终文字不受候选摘要校验保护。必须单独评价最终答复，不能把结构通过计为语义通过。[实现边界](docs/GOVERNED-SESSION.md)。
+
+2026-09-15 收敛更新：当前可选本地主链为 DSH → `skill_authoring` 共享转译 → 原 Runtime 前置读取 → DSH/L1 受限补读 → 冻结证据 → 单次有界推理与窄范围工件检查。评测代码不进入产品依赖；通用语义自审不作为执行权限来源。转译保真、执行约束、任务质量独立验收。宿主配置的六工具和限制见[主链接入说明](docs/GOVERNED-SESSION.md)。原有写事务边界不变，本入口不授权写入。下列早期语义审阅设计是保留的研究历史，不是当前产品必经链路。
+
+语义修复安全边界：来源引用仅支持展示，不给模型工具权限；有效前段投影在首个坏读取处停止并拒绝整个后缀，绝不猜参数或跳过坏依赖。无损审阅编码可精确还原原文，惰性文本不执行。无修改建议的负面意见仍未解决；独立归档审计允许较大的冻结元数据，不增加 Runtime/LLM 输入上限。[首次负结果](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md)。
+
+2026-09-10 后续边界：[结果合同](docs/SEMANTIC-RESULT-CONTRACT.md)由宿主安装并摘要绑定；模型不能删除职责、改事实来源或自报已批准。检查只证明指定观察投影和读取发生，不证明来源陈述为真、自然语言蕴含、职责完整性或写权限。自由草稿仍须单独审阅。
+
+[模型互审与锚定修订](docs/BOUNDED-DRAFT-REVIEW.md)无外部工具权限；补丁只修改内存中的候选草稿，不能修改文件、事实来源或合同。合法引用/精确应用不代表语义蕴含，AI 的全部 supported 不清除开放职责。
+
+后续[语义闭环](docs/SEMANTIC-CLOSURE-RUNBOOK.md)的补读仍由独立宿主资源清单准入并经过原 L0；历史快照不能续期为行动证据。章节编辑没有业务工具；来源引用检查精确父来源/偏移，拒绝代码示例的引用替换，未选中的载荷不应用。窄范围未确立值暂缓是有误报风险的显示策略，不是真值判定或权限批准。
+
 ### 双驱动安全补充（2026-09-10）
 
 - 固定图与宿主授权先于任何模型/读取回调；模型不得新增边、跳过必需依赖或扩大输入范围。
@@ -177,6 +189,18 @@ Control 只在隔离本地仿真中运行。Treatment 的转换未达阈值时�
 ---
 
 ## English
+
+Delivery-safety addendum (September 15): contracts bind actual task/visible source and session before reads/generation. Models cannot provide approvals or expand resources. Rendering/static checks execute no artifact; native text fallback cannot replace an admitted Runtime draft. Quote membership proves neither interpretation nor coverage. A candidate digest does not protect final text rewritten by DSH; assess the final answer separately, never equate shape checks with semantic success. See the [boundary](docs/GOVERNED-SESSION.md).
+
+September 15 convergence: the opt-in path is DSH → shared skill_authoring → original Runtime prefix reads → bounded L1 evidence collection → evidence freeze → one reasoning call and narrow static artifact checks. Product code imports no evaluator. Six tools share one implementation; no reads are replayed during drafting. Freezing proves collection closure, not evidence completeness. Translation fidelity, execution constraints and task quality are assessed independently. See the [canonical session](docs/GOVERNED-SESSION.md). Existing Effect boundaries remain unchanged; this entry grants no writes. Earlier semantic review designs below are historical research, not required delivery layers.
+
+Repair support references grant no tool authority. Valid-prefix projection stops at the first invalid read and rejects the entire suffix; it never invents arguments or skips bad dependencies. Reversible review transport keeps source content inert. Negative findings without suggestions stay unresolved. The bounded audit-artifact reader permits larger frozen metadata without increasing Runtime/model input limits. [First negative transfer](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md).
+
+The [result contract](docs/SEMANTIC-RESULT-CONTRACT.md) is host-installed and digest-bound. A model cannot remove duties or approve its own result. Exact observation projection proves neither upstream truth, semantic entailment, complete duty coverage nor action authority; free-form drafts remain separately reviewable candidates.
+
+[Model review and anchored revision](docs/BOUNDED-DRAFT-REVIEW.md) have no external tool authority. Patches only change an in-memory draft, not files, evidence or contracts. Valid citations and exact application do not prove entailment or clear open duties.
+
+The subsequent [semantic-closure entry](docs/SEMANTIC-CLOSURE-RUNBOOK.md) admits further reads through independent resource policy and the original L0. Historical snapshots cannot renew action evidence. Editors have no business tools; exact source parents/offsets are validated, source-copy replacement of code examples is disallowed, and inactive payloads are not applied. Narrow unresolved-value withholding is a fallible display policy, not truth or authority.
 
 2026-09-10 addendum: bind graph and host consent before callbacks; models may not add edges, skip required dependencies or widen projections. Check output shape, model/configuration and budget separately from independent candidate admission. Historical analysis does not refresh action evidence. Required-branch failure and timeout close downstream admission; cancellation is not proof of external cancellation. The mixed prototype executes no Effects or third-party Skill scripts, and changes no existing approval/verification/compensation requirements. See [Stage 2 criteria](docs/STAGE-2-HYBRID-VALIDATION.md).
 

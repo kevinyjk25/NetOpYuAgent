@@ -1,0 +1,87 @@
+{
+  "profile": "netopyu.io/task-first-diagnostic-summary/v1",
+  "date": "2026-09-15",
+  "hostProfile": "netopyu.io/local-hybrid-host/v4",
+  "deliveryProfile": "task-bound-delivery/v1",
+  "implementationComplete": true,
+  "semanticStageComplete": false,
+  "formalStageExit": false,
+  "freshSkills": 0,
+  "latestDSHCompleteTasksUnchanged": {"met": 0, "total": 2},
+  "realModelDiagnostic": {
+    "kind": "known_frozen_snapshot_output_mediation_pair",
+    "path": "artifacts/governed-session-20260915-task-direct-pair",
+    "freezeDigest": "sha256:275e594b3cf4035089a268cff0f607c332eff59462ab744ffd53c4b1d77825d4",
+    "reportDigest": "sha256:3ba72a124005a098f045c8cc6e2106a59fd5f4e765d7f569705adeaa60a766b2",
+    "model": "qwen3.5:9b",
+    "calls": 2,
+    "order": ["choice", "task"],
+    "retries": 0,
+    "sameTaskSourceObservationsAndModelConfiguration": true,
+    "controlRawReplyMatchesHistory": true,
+    "runtimeExecuted": false,
+    "dshExecuted": false,
+    "toolCalls": 0,
+    "inputTokens": 14107,
+    "outputTokens": 668,
+    "reviewKind": "developer_AI_not_independent_human_gold",
+    "taskSuccess": null,
+    "originalCriteriaRegraded": false,
+    "arms": {
+      "choice": {
+        "inputTokens": 7250,
+        "outputTokens": 408,
+        "latencyMs": 40755.795209202915,
+        "deliveryDigest": "sha256:170b646a21b11e95051be53ce8153976692e049f9d26936b90e1a6ca7d34a61c",
+        "review": {
+          "facts_and_scope": {"status": "partial", "reason": "Regional error and p99 values retained; checkout-to-payments flow not fully named."},
+          "uncertainty_not_root_cause": {"status": "supported", "reason": "Correlated deployment explicitly not proven cause; recovery not claimed."},
+          "useful_new_evidence": {"status": "not_met", "reason": "Missing traces/logs/saturation mentioned only as caveats, not specifically requested."},
+          "no_redundant_reads": {"status": "not_met", "reason": "Recommends already-read window and index; index misdescribed as change logs."},
+          "requested_format": {"status": "supported", "reason": "This Mesh output remains within three sections despite host-added headings; no format-score improvement is claimed."}
+        }
+      },
+      "task": {
+        "inputTokens": 6857,
+        "outputTokens": 260,
+        "latencyMs": 33809.07037504949,
+        "deliveryDigest": "sha256:2b06d381696ce346c992377ca850c78076027249d0f4f8b7a8fdb19844876c82",
+        "review": {
+          "facts_and_scope": {"status": "partial", "reason": "Regional error and p99 values retained; checkout-to-payments flow not fully named."},
+          "uncertainty_not_root_cause": {"status": "supported", "reason": "Missing evidence prevents distinguishing candidate causes; no recovery claim."},
+          "useful_new_evidence": {"status": "supported", "reason": "Specifically requests trace spans for north services during 09:05-09:10."},
+          "no_redundant_reads": {"status": "not_met", "reason": "First recommendation still rereads the same window file without evidence of a new snapshot."},
+          "requested_format": {"status": "supported", "reason": "Three numbered sections; host does not add headings."}
+        }
+      }
+    },
+    "verifiedArtifacts": 10,
+    "verifiedArchivedAndCurrentSources": 71,
+    "limitations": [
+      "One known snapshot; no independent generalization or task-completion estimate.",
+      "Contract, generation suffix and schema vary together as the output mediation mechanism.",
+      "Fixed order, caching and concurrent small mechanical tests confound latency; no performance claim.",
+      "The required actual read was not rerun; output review is not an end-to-end Oracle pass.",
+      "CAPA and IRQL were not retested."
+    ]
+  },
+  "actualDSHScriptedModelProbe": {
+    "path": "artifacts/governed-session-20260915-task-direct-terminal",
+    "freezeDigest": "sha256:47ee68cb37b4ab6d0c0afbbedfa3db7ca82b2a3387020c1ccaee10da6f99b67b",
+    "reportDigest": "sha256:17c5ba738c552a4f4c1eb7320d6f5f4b1112fbd3898f6a6c106a34df7b8e4243",
+    "cases": 2,
+    "mechanicalPassed": 2,
+    "scriptedProtocolRequests": 12,
+    "actualReads": 2,
+    "realModelCalls": 0,
+    "verifiedArtifacts": 66,
+    "verifiedArchivedAndCurrentSources": 76
+  },
+  "qa": {"newTests": 25, "targetedIncludingDocumentation": 206,
+    "changedNewProjectPythonRuffFiles": 114, "fullSuiteStatus": "passed",
+    "fullSuiteTests": 3254, "fullSuiteSubtests": 81, "fullSuiteSeconds": 245.49,
+    "gitDiffCheck": "passed"},
+  "authority": {"writesGranted": false, "sourceScriptsExecuted": false, "defaultUIChanged": false,
+    "semanticApproval": false, "answerIsExecutableL0": false},
+  "conclusion": "local_improvement_in_useful_evidence_request_but_redundant_reads_and_semantic_stage_remain_open"
+}

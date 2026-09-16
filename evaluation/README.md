@@ -2,6 +2,8 @@
 
 ## 中文
 
+当前（2026-09-16）：已获授权实施[新考核与有限收敛方案](../docs/EVALUATION-RESET-20260916.md)，处于 **R0 测量基础设施部分完成**。零模型入口：`python -m evaluation.bounded_probe NEW_OUTPUT`（24 评分正反例、预算和现有 mock 网关）；`python -m evaluation.bounded_pilot --help`（仅 check/prepare/inspect/score，无 run）。`bounded_scoring` 分开任务／转译／安全／成本，`bounded_budget` 固化不可重放账本，`bounded_execution` 只提供脚本回调计量。真实 DSH 计量、可信预先 token 计数、物理 Provider 重置、预封存样本标签和实跑回执尚未接通。新结果不是 Agent 成绩，不解锁正式门禁。下文早期研究命令供历史查阅，**不是继续模型试跑的安排**。
+
 阶段 1 基线：Git `43a2b76` / v62。阶段 2 双驱动 v7 小批开发验证已完成，尚未提交，模型仍为 9B。先看[最终结果与实际使用](../docs/STAGE-2-HYBRID-RESULTS.md)；[首批负结果](../docs/STAGE-2-PUBLIC-TRANSFER.md)和[v65 严格表示修复](../docs/STAGE-2-REPRESENTATION-REPAIR.md)保留。不改变默认 DSH 路由，不将混合/局部结果称为完整 L0 转换。
 
 ### 当前主路径
@@ -41,6 +43,8 @@ max-new-calls 是本次允许的调用数，不是许可自动重试失败。一
 清理本身未改执行引擎；v65 功能修订在同一个数据绑定/流程引擎中扩充双侧比较检查，不另建执行器。所有版本单独冻结，不改写 v62/v63 记录。语法可表达不等于语义可信。
 
 ## English
+
+Current (September 16): authorized [bounded evaluation reset](../docs/EVALUATION-RESET-20260916.md), **R0 measurement partially implemented**. `evaluation.bounded_probe NEW_OUTPUT` runs 24 synthetic scorer controls/counterexamples, budget checks and the existing mock gateway with zero model calls. `evaluation.bounded_pilot` offers check/prepare/inspect/score only, no run. Scoring separates fulfillment/translation/safety/cost; the persistent ledger prevents replay; the callback meter is fixture-only. Trusted live DSH accounting/token preflight, physical Provider resets, predeclared aligned labels and real receipt collection remain open. These are not Agent results or research qualification. Earlier commands below are historical references, not instructions to resume model runs.
 
 Stage 1 baseline: 43a2b76/v62. Stage 2's mixed v7 development loop is complete and uncommitted; see [results and actual use](../docs/STAGE-2-HYBRID-RESULTS.md). Preserve the [original negative batch](../docs/STAGE-2-PUBLIC-TRANSFER.md) and [v65 representation repair](../docs/STAGE-2-REPRESENTATION-REPAIR.md). source_ledger remains the opt-in strict authoring path; hybrid_authoring/prefix/parameters retain the original L1 task after a grounded read prefix. hybrid_transfer freezes all source/task/host inputs; hybrid_live_demo and role-separated reasoning transport invoke actual local 9B only after explicit review. Evidence collectors separate structural, partial/full semantic, actual-model and synthetic-mechanism results. Zero-call replay is distinct from retry; inputs never contain reviewer answers.
 

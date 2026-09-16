@@ -146,6 +146,15 @@ async def dispatch(request: dict[str, Any]) -> Any:
         return build_skill_manifest(profile, resolve_backend_mode())
     if command == "agent-authoring-template":
         return authoring_template()
+    if command == "hybrid-describe":
+        from .hybrid_session import describe
+        return await asyncio.to_thread(describe)
+    if command in {"hybrid-prepare", "hybrid-submit", "hybrid-inspect", "hybrid-read", "hybrid-draft", "hybrid-deliver"}:
+        from . import hybrid_session
+        handler = {"hybrid-prepare": hybrid_session.prepare, "hybrid-submit": hybrid_session.submit,
+                   "hybrid-inspect": hybrid_session.inspect, "hybrid-read": hybrid_session.read,
+                   "hybrid-draft": hybrid_session.draft, "hybrid-deliver": hybrid_session.deliver}[command]
+        return await asyncio.to_thread(handler, arguments)
     if command == "agent-authoring-capture":
         return capture_authoring(arguments)
     if command == "agent-authoring-submit":

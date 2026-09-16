@@ -1,0 +1,86 @@
+{
+  "scope": "two_known_skills_development_repairs_not_unseen_or_paired_AB",
+  "model": "qwen3.5:9b",
+  "reviewKind": "developer_ai_content_review_not_independent_gold",
+  "uniqueSkills": 2,
+  "historicalScoresReplaced": false,
+  "formalStageExit": false,
+  "productionSuccessProbability": null,
+  "engineeringChecks": {
+    "targetedPassed": 151,
+    "fullTestsPassed": 3202,
+    "subtestsPassed": 81,
+    "fullTestSeconds": 241.52,
+    "changedNewPythonFilesRuffPassed": 106,
+    "documentationTestsPassed": 3,
+    "fullSuiteConcurrentWithLiveModelRun": false,
+    "repositoryWideLintCleanClaimed": false,
+    "semanticSuccessInferredFromTests": false
+  },
+  "metadataRepair": {
+    "case": "capa-status",
+    "sourceReferences": 1475,
+    "oldAdvertisedDeliverySchemaUTF8Bytes": 37132,
+    "newAdvertisedDeliverySchemaUTF8Bytes": 802,
+    "membershipAdmissionRelaxed": false,
+    "truncationProven": false,
+    "causalTaskOrLatencyImprovementProven": false
+  },
+  "runs": [
+    {
+      "id": "reference-content",
+      "sourceDirectory": "artifacts/governed-session-20260915-reference-content",
+      "boundEvidenceReportDigest": "sha256:f69d2506165082db7174596513ce9048ec4f211f9c42d30115e90410704bab45",
+      "freezeDigest": "sha256:0f4026c56ab54d70de1d93203c4a2af273996a67fea9767e69794346cc92d426",
+      "tasksCompleted": 0,
+      "taskTotal": 2,
+      "criteriaMet": 0,
+      "criteriaTotal": 6,
+      "compiledGraphs": 1,
+      "authorizedProviderReads": 2,
+      "acceptedNativeCandidates": 0,
+      "runtimeModelReplies": 1,
+      "runtimeCandidatesPassingBaseSchema": 0,
+      "acceptedRuntimeDeliveries": 0,
+      "cost": {"completedRepliesWithUsage": 17, "knownInputTokens": 280724, "knownOutputTokens": 5224, "startedHarnessStepsWithoutCompleteReply": 1, "completeUsageKnown": false},
+      "latency": {"p50EndToEndMs": 411874.97391644865, "p95EndToEndMs": 419227.2736791987, "includesTimeout": true, "causalPerformanceClaim": false},
+      "caseResults": [
+        {"case": "capa-status", "criteriaMet": 0, "endToEndMs": 420044.1958750598, "failure": "Nine completed prepare attempts without a valid session; 1475 source IDs were enumerated in initial tool metadata; timeout has one unaccounted model step. Large metadata is a diagnosed risk, not a proven sole cause or proof of truncation."},
+        {"case": "mesh-incident", "criteriaMet": 0, "endToEndMs": 403705.7519578375, "failure": "One admitted read prefix, index/window read, one Runtime generation. Empty unresolved strings fail base schema. Final diagnostic prose does not deliver the requested analysis; invented paths in rejected inner output are not counted."}
+      ],
+      "verifiedArtifacts": 51,
+      "verifiedArchivedSourceFiles": 75
+    },
+    {
+      "id": "reference-content-bounded",
+      "sourceDirectory": "artifacts/governed-session-20260915-reference-content-bounded",
+      "boundEvidenceReportDigest": "sha256:24c29717948d00deec4cf2f20347b0b4dfe7da0495fd053700a6a41ce221a6f4",
+      "freezeDigest": "sha256:a41531cc1008f5a64f960a49a11246156aadaba4ab3bf07c32db274bc17abfc1",
+      "tasksCompleted": 0,
+      "taskTotal": 2,
+      "criteriaMet": 3,
+      "criteriaTotal": 6,
+      "compiledGraphs": 1,
+      "authorizedProviderReads": 3,
+      "acceptedNativeCandidates": 1,
+      "runtimeModelReplies": 1,
+      "runtimeCandidatesPassingBaseSchema": 1,
+      "acceptedRuntimeDeliveries": 0,
+      "runtimeCandidatesRejectedByCrossFieldValidation": 1,
+      "cost": {"completedRepliesWithUsage": 13, "outerDSHReplies": 12, "innerRuntimeReplies": 1, "knownInputTokens": 154176, "knownOutputTokens": 3690, "startedHarnessStepsWithoutCompleteReply": 0, "completeUsageKnown": true},
+      "latency": {"p50EndToEndMs": 166263.82281305268, "p95EndToEndMs": 250651.07021925505, "includesTimeout": false, "causalPerformanceClaim": false},
+      "caseResults": [
+        {"case": "capa-status", "criteriaMet": 1, "endToEndMs": 72500.21458393894, "nativeCandidateAdmitted": true, "artifactBodyPreservedInFinal": true, "candidateFinalTrimmedExactMatch": false, "remaining": "No explicit open conclusion or next-evidence note. Artifact type anchors the read instruction, not a proven output requirement. Structural admission is not task fulfillment."},
+        {"case": "mesh-incident", "criteriaMet": 2, "endToEndMs": 260027.43104216643, "runtimeBaseSchemaValid": true, "runtimeDeliveryAdmitted": false, "diagnostic": {"code": "conflicting_unresolved_reason", "pointer": "/unresolved/d0"}, "falseCompletionClaimInNativeFinal": true, "networkEffectOrCommitOccurred": false, "remaining": "Provided content also has unresolved values of the literal string None. No conversion of that string to null/absence. Final omits south metrics, recommends an already-read export and an invented path, and incorrectly claims delivery/task completion despite the rejected host result."}
+      ],
+      "verifiedArtifacts": 64,
+      "verifiedArchivedSourceFiles": 75
+    }
+  ],
+  "interpretation": "Reference addressing, metadata size and one native delivery recover mechanically. Inner constrained decoding passes base schema but not cross-field consistency. Overall semantic stage remains incomplete; the two frozen batches are not pooled, and known development improvements are not generalization or production probabilities.",
+  "nextScope": [
+    "Encode provided content versus unresolved reason as a single mutually exclusive choice, instead of relying on the model to synchronize two fields.",
+    "Fix output-kind/source interpretation and missing user-requested conclusions/evidence notes without injecting case answers.",
+    "Distinguish host delivery status from native final prose; never equate a repeated-call guard with successful completion."
+  ]
+}

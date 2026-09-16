@@ -10,6 +10,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 PRODUCT_ROOTS = (
+    ROOT / "skill_authoring",
     ROOT / "effect_runtime",
     ROOT / "network_runtime",
     ROOT / "dsh_adapter",

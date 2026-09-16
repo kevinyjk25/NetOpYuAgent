@@ -4,9 +4,37 @@
 
 ## 中文
 
+2026-09-16：[考核重置](docs/EVALUATION-RESET-20260916.md)已获授权实施，当前为 **R0 measurement partial implemented**。`bounded_budget` 使用 SQLite 原子预留、持久调用身份、未知状态停机和跨进程累计；`bounded_scoring`独立评分；`bounded_pilot`只提供 `check/prepare/inspect/score`；`bounded_execution`提供脚本式计量；`bounded_probe`产生本地测量证据。真实 DSH 全调用计量与可信预先 token 计数、物理 Provider 重置／隔离、预封存标签和 12 任务样本、真实 trace 采集未完成；自动 Effect 桥接也未实现。153 项定向通过和 0 模型探针不构成 36 项机制验收或真实 Agent 收益。旧语义阶段仍为 `paused_unmet`，正式门禁与旧失败不变；没有 `run` 命令。
+
+当前[结构与工件实现](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)：`isolated_compiler.make_request`将原Schema传入format；`kql_checks`只验证声明子集；`artifact_repair`从宿主实际交付定位失败围栏，接受一次`replacements(location,code)`。`hybrid_session`冻结`artifactRepair`策略，保留draft原件，revision先claim再解析，另存终态；未知结果禁止重试。DSH只对`revisionAllowed=true`暂停终态结束，最终仍展示宿主回执。默认策略不变。
+
+2026-09-16 新入口细节见[隔离编译](docs/ISOLATED-COMPILER.md)：v4宿主`compilerMode=isolated`使prepare在会话锁内记录单次claim并调用`skill_authoring/isolated_compiler.py`；不向编译请求传实参/观察，运行Agent的Schema中移除submit且后端拒绝AST注入。编译成本持久化并进入评测总账；未知调用不重试，旧模式默认行为不变。
+
+快照读取补充：v4本地宿主提供`observationModel`（宿主摘要、工具＋精确JSON参数身份、liveRefreshSupported=false）。`read()`在原状态/次数/Schema门禁后检查已完成且绑定的前段或补读记录；重复返回`read_not_reexecuted`和原观察引用，不触发Provider、不伪造新receipt、不增加completedReads，但仍消耗尝试额度。不同资源正常授权读取；严格图内部调度和实时Provider不变。[具体范围与验证](docs/SNAPSHOT-READ-SEMANTICS.md)。
+
+任务直达补充：显式宿主v4使用`task-bound-delivery/v1`。`compile_task(null, origins)`绑定完整任务和来源摘要，拒绝模型提交替换职责；`response_schema`只定义非空answer信封，`render`逐字保留，不加章节。原生deliver与Runtime draft复用原权限/证据/静态检查/终态路径。覆盖率未知，输出不成为L0或获得操作权。[设计、对照诊断和边界](docs/TASK-FIRST-DELIVERY.md)。
+
+宿主终态补充：显式`NETOPYU_HYBRID_TERMINAL_DELIVERY=1`启用会话/摘要绑定的终态适配器。工具体通过DSH公开`concludeTurn()`结束轮次，同轮后续混合操作（inspect除外）在bridge前阻止；新轮次独立。UI工具卡和可选headless前端显示最后有效宿主回执，不伪造assistant事件。取消、错误、后续步骤不能追认旧终态；新报告增加sessionId，旧报告不改。`semanticCoverage=not_assessed`说明结构/引用不等于语义完备。默认路由不变。[接入、实现和实际DSH机制测试](docs/HOST-TERMINAL-DELIVERY.md)。
+
+单选协议补充：显式宿主v3使用交付合同v4，每个ID只接受类型化内容对象或未解决原因字符串，不再跨字段同步内容/状态；字符串None也保持未解决。旧v2/v3合同不自动迁移。独立`hostResult`记录拒绝、待修订或候选未验证，不能被Agent的最终文字改写；这不证明业务语义正确。[本包边界与结果](docs/DELIVERY-SINGLE-CHOICE.md)。
+
+紧凑协议补充：显式宿主v2使用交付合同v3。`prepare`提供可逐字重建的source_ref；`submit`由宿主解析原文/偏移/摘要。候选直接填写每项类型化内容，无法提供则显式null＋同ID的unresolved说明；内部state/content/gap由已声明的编码规则生成，不修复旧请求。传输对象与规范化对象分别摘要绑定。未知引用、遗漏ID、孤立缺口和错类型仍拒绝；含义正确性不由结构证明。[协议、版本与边界](docs/DELIVERY-REFERENCE-CONTENT.md)。
+
+交付接口补充（2026-09-15）：`submit(session_id,plan,delivery)` 将逐字来源要求编译为最多四个宿主 ID 和固定响应 Schema，并绑定会话摘要。正常 `draft(session_id)` 冻结证据、调用一次有界模型；仅执行前 fallback 使用 `submit(plan=null,delivery=...)` 和 `deliver(session_id,response_json)`，后者只检查/渲染原生 L1 文本。缺内容或显式未满足项不能计为结构完整；`semanticApproval=false`、`taskSuccess=null`。[字段语义与状态](docs/GOVERNED-SESSION.md)。
+
+2026-09-15 收敛更新：当前可选本地主链为 DSH → `skill_authoring` 共享转译 → 原 Runtime 前置读取 → DSH/L1 受限补读 → 冻结证据 → 单次有界推理与窄范围工件检查。评测代码不进入产品依赖；通用语义自审不作为执行权限来源。转译保真、执行约束、任务质量独立验收。宿主配置的六工具和限制见[主链接入说明](docs/GOVERNED-SESSION.md)。原有写事务边界不变，本入口不授权写入。下列早期语义审阅设计是保留的研究历史，不是当前产品必经链路。
+
+2026-09-10 后续接口：`run_hybrid(..., result_contract=...)` 可接收 `ResultContract`；`HostHybridConsent.result_contract_digest` 同时绑定任务图、参数、上下文和结果合同。`resultAssessment` 使用调度器本次节点值核验读取/字段，开放职责与草稿保留未验证。实现与错误定位见[结果合同](docs/SEMANTIC-RESULT-CONTRACT.md)。
+
+当前可选入口是 `evaluation.semantic_closure_transfer`：构造、显式准入、原引擎读取、`hybrid_continuation_run` 有界补读、`hybrid_snapshot_review` 来源审查、`hybrid_repair_cells` 章节编辑与终审。新 `grounded_patch` 分开 `keep/write_prose` 答复编辑与独立 `source_units` 支持引用；后者在 `delivery.json` 单列，不能覆盖答复或抵消错误。原 notes 和宿主开放职责保留出处。每段最多一个范围，总计最多 8 单元；生成字段顺序按 `required` 恢复。旧 `source_patch` 留作失败诊断。有效读取前段投影保留首个坏节点及之后全部拒绝记录，不改参数、不授准入；当前可读审阅视图保留全部原文，重复导航元数据留在审计中，旧可逆文本池仅供历史诊断。详见[接口与验收](docs/SEMANTIC-CLOSURE-RUNBOOK.md)和[首批负结果](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md)。
+
 ### 受控混合图实现补充（2026-09-10）
 
-`GovernedHybridFlow` 固定原始 source/task 摘要、输入 Schema、节点依赖、输出与预算；`StrictRegion` 包含原 `StructuredFlowProposal`。`ReasoningTask` 绑定模型/配置、输入投影、输出 Schema、字节/token/时间预算；`CandidateAdmission` 绑定宿主独立策略；`RequiredJoin` 仅在所有必需依赖成功后汇合。代码见 [hybrid.py](network_runtime/l0/hybrid.py) 和 [hybrid_execution.py](network_runtime/l0/hybrid_execution.py)。
+`GovernedHybridFlow` 固定原始 source/task 摘要、输入 Schema、节点依赖、输出与预算；`StrictRegion` 包含原 `StructuredFlowProposal`。`ReasoningTask` 绑定模型/配置、输入投影、输出 Schema、字节/token/时间预算；`ConditionalReasoningTask(kind=reason_if)` 增加类型化标量条件和 `otherwise` 绑定，必须来自声明依赖。条件不符时校验并保留绑定候选，记录零模型调用，不提升为观察；原 `reason` 的序列化结构不变。`CandidateAdmission` 绑定宿主独立策略；`RequiredJoin` 仅在所有必需依赖成功后汇合。代码见 [hybrid.py](network_runtime/l0/hybrid.py) 和 [hybrid_execution.py](network_runtime/l0/hybrid_execution.py)。
+
+语义闭环编辑默认由已定位的负面意见触发；唯一一个单元确实覆盖整稿时也可承接未定位问题，但不编造语义位置。其余未定位遗漏留在 `repairPlan`，不广播编辑；只读/未调度单元用 `reason_if` 保留未批准的原稿。编辑器只看当前正文与其他章节索引，完整任务/Skill/观察不删，父稿在冻结请求及终审中。实际观察匹配的引用只读，保证字节保留而非语义真值。
+
+来源选择先保证完整入口，再按预算加入完整参考文档。补读的 `previousCandidate` 仅作待更新稿，旧待办在参考区；`readStatusIndex` 由宿主工具/参数/回执绑定生成，指向实际结果，不授予新权限。审阅传输用 `host_keyed_check_cells/v1`：宿主固定每组检查 ID 为对象键，三种单元结构通过本地 `$defs/$ref` 共享；原内部 `REVIEW_SCHEMA` 不变。重复 JSON 键、缺项、错组和非法来源仍拒绝；无位置的正面覆盖意见保守降为未证实并留诊断。详见[闭环运行手册](docs/SEMANTIC-CLOSURE-RUNBOOK.md)及[第二批负结果](docs/SEMANTIC-CLOSURE-TRANSFER-V2.md)。
 
 `run_hybrid` 重新资格检查并验证 `HostHybridConsent(graph_digest, arguments_digest, context_digest)`，拒绝隐式身份。严格读取复用旧引擎；模型没有 Tool 回调。`model_candidate` 不得直接流向严格输入，独立准入也不把它升级为事实或写授权。超时关闭接纳，迟到回调不能复活图；宿主传输仍需自行有界。推理可分析带年龄元数据的历史快照，准入和后续严格步骤必须重新检查事实时效。`governed_graph_completed` 不是 `verified_success`。详见[接口边界](docs/GOVERNED-HYBRID-FLOWS.md)。
 
@@ -298,6 +326,38 @@ Harness 获得的终态信封固定为：
 ---
 
 ## English
+
+September 16: implementation of the [reset protocol](docs/EVALUATION-RESET-20260916.md) is authorized; status is **R0 measurement partial implemented**. `bounded_budget` provides transactional SQLite reservations, persistent request identities, unknown-state stops and accounting across processes; `bounded_scoring` isolates evaluation; `bounded_pilot` exposes only `check/prepare/inspect/score`; `bounded_execution` provides scripted metering; `bounded_probe` records local measurement evidence. Live DSH accounting and trusted advance token counts, physical Provider reset/isolation, frozen labels and twelve tasks, and real trace capture remain incomplete; automatic Effect bridging is also unimplemented. The 153 targeted passes and zero-model probes establish neither the 36-probe gate nor real-agent benefit. The old stage remains `paused_unmet`, with unchanged formal gates and failures; no `run` command exists.
+
+Current [implementation](docs/SCHEMA-ARTIFACT-CONVERGENCE.md): isolated_compiler passes the original schema as format; kql_checks verifies a bounded subset; artifact_repair accepts host-addressed code replacements only. hybrid_session freezes artifactRepair policy, retains the initial draft, claims revision before decoding and stores a separate result; unknown attempts never replay. DSH defers termination only for revisionAllowed=true, then renders the final host receipt. Defaults remain unchanged.
+
+In the optional [isolated mode](docs/ISOLATED-COMPILER.md),v4 compilerMode=isolated makes prepare claim one host-locked request to skill_authoring/isolated_compiler.py,without invocation values or observations. Submit is absent from execution tools and AST injection is rejected server-side. Compiler costs are persisted and included in evaluation;unknown calls never retry. Legacy defaults remain unchanged.
+
+Snapshot-read addendum: the local v4 host declares a bound immutable observationModel. After existing state, attempt and schema gates, read() matches completed bound prefix/follow-up records by tool and exact JSON arguments. Duplicates return read_not_reexecuted and the original observation reference, without Provider invocation, new receipt or completedReads increment; the attempt still counts. Distinct resources, internal strict-graph scheduling and live Providers are unchanged. [Scope and evidence](docs/SNAPSHOT-READ-SEMANTICS.md).
+
+Task-first addendum: opt-in host v4 binds complete task/source digests through compile_task(null, origins), rejecting model-selected replacement duties. The response schema defines a nonblank answer envelope; rendering preserves text exactly. Native deliver and Runtime draft retain existing authority, evidence, static-artifact and terminal gates. Semantic coverage remains unknown; text does not become executable L0. [Design and bounded diagnostic](docs/TASK-FIRST-DELIVERY.md).
+
+Host-terminal addendum: explicit NETOPYU_HYBRID_TERMINAL_DELIVERY=1 enables session/digest-bound receipts. Tool bodies call public DSH concludeTurn; subsequent same-turn hybrid operations except inspect are blocked before the bridge. New turns remain independent. UI tool cards and an optional headless frontend display the last valid host receipt without fabricating assistant events. Cancellation, errors and later steps invalidate old terminal projections. New reports bind sessionId; old evidence and default routing remain unchanged. semanticCoverage=not_assessed distinguishes structure/source membership from semantic completeness. [Implementation, integration and actual-DSH mechanical checks](docs/HOST-TERMINAL-DELIVERY.md).
+
+Single-choice addendum: explicit host v3 uses delivery contract v4. Each ID holds a typed content object or an unresolved-reason string, with no duplicate state fields. Even the string None remains unresolved. Legacy contracts are not upgraded automatically. Independent hostResult distinguishes rejection, revision needs and unverified candidates; native prose cannot override it. This does not establish semantic correctness. [Bounded package](docs/DELIVERY-SINGLE-CHOICE.md).
+
+Compact-protocol addendum: explicit host v2 uses delivery contract v3. Prepare exposes lossless source_ref addresses; submit resolves original text/offset/digest on the host. Candidates directly supply typed content or explicit null plus a same-ID unresolved explanation. Internal state/content/gap follows declared encoding, never legacy-input repair. Wire/canonical objects have separate digests. Unknown references, missing IDs, orphan gaps and wrong types remain rejected; structural validity does not prove meaning. [Protocol and boundaries](docs/DELIVERY-REFERENCE-CONTENT.md).
+
+Delivery-interface addendum (September 15): submit(session_id,plan,delivery) compiles exact source quotes into up to four host IDs and a fixed response schema bound to the session. Normal draft(session_id) freezes evidence and calls one bounded model. Only pre-execution fallback uses a null plan and deliver(session_id,response_json), which checks/renders native text without a Runtime model. Missing/unresolved content is not shape-complete; semanticApproval stays false and taskSuccess null. See the [protocol](docs/GOVERNED-SESSION.md).
+
+September 15 convergence: the opt-in path is DSH → shared skill_authoring → original Runtime prefix reads → bounded L1 evidence collection → evidence freeze → one reasoning call and narrow static artifact checks. Product code imports no evaluator. Six tools share one implementation; no reads are replayed during drafting. Freezing proves collection closure, not evidence completeness. Translation fidelity, execution constraints and task quality are assessed independently. See the [canonical session](docs/GOVERNED-SESSION.md). Existing Effect boundaries remain unchanged; this entry grants no writes. Earlier semantic review designs below are historical research, not required delivery layers.
+
+ConditionalReasoningTask (reason_if) adds a typed scalar condition and otherwise binding from declared dependencies. A false condition validates/retains the bound candidate without a model callback or invented receipt; its role stays model_candidate. Host registration, schema/byte limits and downstream admission remain required. Ordinary reason serialization stays unchanged. Readable review/editor worksheets preserve original prose; duplicated navigation metadata remains in the audit, not in a model-facing reversible pool.
+
+Semantic repair requires a located negative, except that a sole whole-draft owner may inspect an unlocated finding without inventing semantic location. Other unlocated findings remain open; unscheduled/read-only cells retain the unapproved candidate through reason_if. Editors see only their candidate body and other-section index with complete task/Skill/observations; the full parent stays frozen and finally reviewed. Exact quotations are protected bytes, not truth.
+
+Entry-first budgeting preserves the full entry before fitting whole references. Post-read previousCandidate is a draft to update, old work notes are reference-only, and the host readStatusIndex points to exact results without new authority. host_keyed_check_cells/v1 fixes review IDs as object keys and shares three cell shapes through local $defs/$ref. Internal REVIEW_SCHEMA remains unchanged; duplicate JSON keys, missing/wrong-group checks and foreign sources still fail. A locationless positive coverage opinion is withheld as insufficient evidence with explicit diagnostics, not accepted as support.
+
+The active experimental repair profile is grounded_patch: answer edits (keep/write_prose) and exact supporting source_units are independent. delivery.json retains the answer, separate references, prior unverified notes and host duties; correct support cannot excuse incorrect prose. Host-owned limits remain eight cells/ranges. Prefix projection retains only a valid contiguous read prefix, rejecting the first bad read and all successors without changing arguments or granting admission. Readable review views retain all original prose and leave duplicated navigation metadata in the audit. Blank suggestions remain unresolved findings, never support. Legacy source_patch and reversible text pools remain historical diagnostics. [First transfer result](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md).
+
+`run_hybrid(..., result_contract=...)` optionally binds a `ResultContract` through `HostHybridConsent.result_contract_digest`. `resultAssessment` checks scheduler-owned observations and retains unverified open duties/drafts. See [interface, diagnostics and limits](docs/SEMANTIC-RESULT-CONTRACT.md).
+
+`evaluation.semantic_closure_transfer` connects authoring, explicit admission, original-engine reads, bounded continuations, snapshot source review and section repair. `hybrid_repair_cells` validates `keep/copy_source/write_prose` and materializes only the active payload. Generation order follows `required`, while canonical hashing is unchanged. A single pass has at most eight one-range cells. Raw proposals, materialized drafts, inactive payloads and narrowly quarantined values remain distinct audit artifacts, never verified business success. See the [runbook](docs/SEMANTIC-CLOSURE-RUNBOOK.md); the older draft-loop experiments remain historical evidence.
 
 2026-09-10 addendum: GovernedHybridFlow binds source/task digests, schemas, dependencies and budgets; StrictRegion wraps the original StructuredFlowProposal. ReasoningTask binds model/configuration, projections and output/time/token limits; CandidateAdmission is an independent host policy and RequiredJoin is all-success. run_hybrid requalifies everything and checks graph/arguments/context-bound host consent. Candidates cannot directly feed strict inputs or become facts/Effect authority. Late results cannot revive a closed graph. Historical-snapshot analysis is allowed, but subsequent strict use/admission must recheck observation age. governed_graph_completed is not verified_success. See [the detailed boundary](docs/GOVERNED-HYBRID-FLOWS.md).
 

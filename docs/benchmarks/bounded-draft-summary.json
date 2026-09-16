@@ -1,0 +1,651 @@
+{
+  "apiVersion": "netopyu.io/bounded-draft-development-summary/v1",
+  "date": "2026-09-10",
+  "stage2Checkpoint": "25b08c0",
+  "model": "qwen3.5:9b",
+  "distinctKnownDevelopmentSkills": 2,
+  "originalDraftGenerationsThisSubstage": 0,
+  "automaticTranslationCalls": 0,
+  "automaticTranslationAccuracy": null,
+  "semanticDraftAccuracy": null,
+  "modelHTTPAttempts": 18,
+  "responsesWithTokenUsage": 17,
+  "responsesWithoutTokenUsage": 1,
+  "knownInputTokens": 153495,
+  "knownOutputTokens": 32073,
+  "sourceScriptCalls": 0,
+  "effectCalls": 0,
+  "hostBuiltLoop": true,
+  "independentExternalReview": false,
+  "completeAnswerApproved": false,
+  "largeRuntimeABUnlocked": false,
+  "integrity": {
+    "archives": 4,
+    "archivedSourceFiles": 316,
+    "sealedReports": 40,
+    "modelReceipts": 18,
+    "receiptBoundFiles": 103,
+    "exactReviewReDerivations": 11,
+    "exactPatchReDerivations": 1,
+    "caseReports": 8
+  },
+  "revisions": [
+    {
+      "version": 1,
+      "reportDigest": "sha256:b798144d6d980932c6852aa6af5b3f20396b67538e8a407c4caeb1a085fdb3ba",
+      "manifestDigest": "sha256:c1eaa832b8eaa5384e50ac01f904da063cd57aa152753e0414f96ebcdb23f570",
+      "localRoot": "artifacts/translator-v2/draft-loop-20260910-live-v1",
+      "rows": [
+        {
+          "case": "handoff",
+          "reportDigest": "sha256:9bee216a8172cc56c5124c2f2e8cf9fd64d4e38828d4d7ff6d0b9495efcbf521",
+          "graphStatus": "governed_graph_completed",
+          "resultStatus": "partial",
+          "originalDraft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.\n",
+          "revisedCandidate": {
+            "draft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.\n",
+            "notes": [
+              "Alerts verification status for incoming engineer (Bob) is unresolved; requires manual check.",
+              "Handoff document generated based on read observations; no messages sent or alerts fired.",
+              "Uplink B investigation timeline confirmed at 10:30 UTC.",
+              "Dashboard staleness workaround explicitly noted to prevent misinterpretation of UI data.",
+              "Maintenance window owner (Dana) and time (11:00 UTC) captured for incoming shift awareness.",
+              "Escalation path defined per protocol: primary oncall -> incident commander after 15 minutes."
+            ],
+            "values": {
+              "observed-notes": "Outgoing: Alice; incoming: Bob, not yet acknowledged. Active: INC-42 API p95 900ms since 08:10 UTC; owner Alice; mitigation lowered batch size, not resolved. Investigation: packet loss on uplink B, owner Chen, next inspect optical counters at 10:30 UTC. Recent change: release 1.4 at 07:50 UTC. Known issue: dashboard stale; use raw metrics. Upcoming maintenance 11:00 UTC, owner Dana. Alerts have NOT been verified by Bob. Escalation: primary oncall, then incident commander after 15 minutes. Dashboard: https://example.invalid/inc42."
+            }
+          },
+          "candidateUnchanged": true,
+          "draftUnchanged": true,
+          "draftChangeOnlyTrailingWhitespace": false,
+          "reviews": {
+            "review-after": {
+              "verdictCounts": {
+                "contradicted": 0,
+                "insufficient_evidence": 0,
+                "supported": 18
+              },
+              "reportDigest": "sha256:8ef2630b14ba4b118a17551438bba251ba4229b50b77b0a069e9deafa7ffd9a2"
+            },
+            "review-before": {
+              "verdictCounts": {
+                "contradicted": 0,
+                "insufficient_evidence": 0,
+                "supported": 18
+              },
+              "reportDigest": "sha256:8ef2630b14ba4b118a17551438bba251ba4229b50b77b0a069e9deafa7ffd9a2"
+            }
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 7114,
+              "latencyMs": 124553.15716692712,
+              "node": "review-before",
+              "outputTokens": 1664,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 8834,
+              "latencyMs": 66838.94758392125,
+              "node": "revise-draft",
+              "outputTokens": 631,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "unverified_revised_draft"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 7114,
+              "latencyMs": 95137.44929200038,
+              "node": "review-after",
+              "outputTokens": 1664,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            }
+          ],
+          "latencyMs": 287018.2811670238,
+          "unresolvedHostDuties": [
+            "handoff-draft"
+          ],
+          "satisfiedDutyCount": 2,
+          "declaredDutyCount": 3,
+          "blocked": null,
+          "completeAnswerApproved": false
+        },
+        {
+          "case": "documentation",
+          "reportDigest": "sha256:77669ba1f9e86761cd5f77149f3b13089eb8249a2cff7f926fd7df8fe784caa8",
+          "graphStatus": "blocked",
+          "resultStatus": "blocked",
+          "originalDraft": "# Project Name\n\nA Python project located at `/sandbox/project`.\n\n## Features\n\n- [Key feature 1 — brief description]\n- [Key feature 2 — brief description]\n- [Key feature 3 — brief description]\n\n## Quick Start\n\n### Prerequisites\n\n- Python 3.x\n\n### Installation\n\n```bash\ncd /sandbox/project\npip install -e .\n```\n\n### Basic Usage\n\n```python\nfrom my_module import main_function\nresult = main_function()\nprint(result)\n```\n\n## Documentation\n\n- [Link to full API reference if separate]\n- [Link to architecture docs if separate]\n\n## Configuration\n\n[Environment variables, config files, or runtime options]\n\n## Examples\n\n[2-3 practical examples covering common use cases]\n\n## Development\n\n### Setup\n\n```bash\npip install -e .\n```\n\n### Testing\n\n```bash\npytest\n```\n\n### Building\n\n[How to build the project]\n\n## Contributing\n\n[Contribution guidelines or link to CONTRIBUTING.md]\n\n## License\n\n[License information]",
+          "revisedCandidate": null,
+          "candidateUnchanged": null,
+          "draftUnchanged": null,
+          "draftChangeOnlyTrailingWhitespace": null,
+          "reviews": {},
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 8804,
+              "latencyMs": 205745.96279195976,
+              "node": "review-before",
+              "outputTokens": 3060,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "invalid_schema_or_review_binding"
+            }
+          ],
+          "latencyMs": 206061.4308329532,
+          "unresolvedHostDuties": [
+            "inspect-code",
+            "readme-draft"
+          ],
+          "satisfiedDutyCount": 1,
+          "declaredDutyCount": 4,
+          "blocked": {
+            "code": "ValueError",
+            "detail": "Host/model/binding check failed; provider details redacted.",
+            "node": "review-before",
+            "pointer": null
+          },
+          "completeAnswerApproved": false
+        }
+      ]
+    },
+    {
+      "version": 2,
+      "reportDigest": "sha256:db80343fc1c1f072ed51346bd7e0f8a5df49fd0e66a05a7ca1a8e82c9a35f096",
+      "manifestDigest": "sha256:b65a58613ca1d26255d8bebb93316d374c7d9e4fba444abc7638546ac7e59321",
+      "localRoot": "artifacts/translator-v2/draft-loop-20260910-live-v2",
+      "rows": [
+        {
+          "case": "handoff",
+          "reportDigest": "sha256:9b4f2b10cc884c89695d549f4fe804f39ab725bc7abbe0919223679213659a5c",
+          "graphStatus": "blocked",
+          "resultStatus": "blocked",
+          "originalDraft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.\n",
+          "revisedCandidate": null,
+          "candidateUnchanged": null,
+          "draftUnchanged": null,
+          "draftChangeOnlyTrailingWhitespace": null,
+          "reviews": {
+            "review-before": {
+              "verdictCounts": {
+                "contradicted": 1,
+                "insufficient_evidence": 0,
+                "supported": 26
+              },
+              "reportDigest": "sha256:ed5af18bb019f172dc71241195946a8a3b9eab54636571faa4027328395e2bcb"
+            }
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 8569,
+              "latencyMs": 139375.7797080325,
+              "node": "review-before",
+              "outputTokens": 1836,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            },
+            {
+              "httpStatus": 400,
+              "inputTokens": null,
+              "latencyMs": 137.13749998714775,
+              "node": "revise-draft",
+              "outputTokens": null,
+              "reasoningTokens": null,
+              "status": "transport_error"
+            }
+          ],
+          "latencyMs": 139904.924958013,
+          "unresolvedHostDuties": [
+            "handoff-draft"
+          ],
+          "satisfiedDutyCount": 1,
+          "declaredDutyCount": 3,
+          "blocked": {
+            "code": "ValueError",
+            "detail": "Host/model/binding check failed; provider details redacted.",
+            "node": "revise-draft",
+            "pointer": null
+          },
+          "completeAnswerApproved": false
+        },
+        {
+          "case": "documentation",
+          "reportDigest": "sha256:1b6e944b13649158de5309b5a4da931dce85f91d15456acfaeba05e776b0ee72",
+          "graphStatus": "blocked",
+          "resultStatus": "blocked",
+          "originalDraft": "# Project Name\n\nA Python project located at `/sandbox/project`.\n\n## Features\n\n- [Key feature 1 — brief description]\n- [Key feature 2 — brief description]\n- [Key feature 3 — brief description]\n\n## Quick Start\n\n### Prerequisites\n\n- Python 3.x\n\n### Installation\n\n```bash\ncd /sandbox/project\npip install -e .\n```\n\n### Basic Usage\n\n```python\nfrom my_module import main_function\nresult = main_function()\nprint(result)\n```\n\n## Documentation\n\n- [Link to full API reference if separate]\n- [Link to architecture docs if separate]\n\n## Configuration\n\n[Environment variables, config files, or runtime options]\n\n## Examples\n\n[2-3 practical examples covering common use cases]\n\n## Development\n\n### Setup\n\n```bash\npip install -e .\n```\n\n### Testing\n\n```bash\npytest\n```\n\n### Building\n\n[How to build the project]\n\n## Contributing\n\n[Contribution guidelines or link to CONTRIBUTING.md]\n\n## License\n\n[License information]",
+          "revisedCandidate": null,
+          "candidateUnchanged": null,
+          "draftUnchanged": null,
+          "draftChangeOnlyTrailingWhitespace": null,
+          "reviews": {
+            "review-before": {
+              "verdictCounts": {
+                "contradicted": 0,
+                "insufficient_evidence": 17,
+                "supported": 24
+              },
+              "reportDigest": "sha256:e95408fad585608a9b45f81efae4828cf7112114296b2a44a530ed8398af102c"
+            }
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 9844,
+              "latencyMs": 243347.2448750399,
+              "node": "review-before",
+              "outputTokens": 3262,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            }
+          ],
+          "latencyMs": 243746.84525001794,
+          "unresolvedHostDuties": [
+            "inspect-code",
+            "readme-draft"
+          ],
+          "satisfiedDutyCount": 1,
+          "declaredDutyCount": 4,
+          "blocked": {
+            "code": "ValueError",
+            "detail": "Host/model/binding check failed; provider details redacted.",
+            "node": "revise-draft",
+            "pointer": null
+          },
+          "completeAnswerApproved": false
+        }
+      ]
+    },
+    {
+      "version": 3,
+      "reportDigest": "sha256:ed3f9b3f1db63d1870202c38257f8eb59a012ca3e62ea7402c6e19aae841cd29",
+      "manifestDigest": "sha256:4f37f2e1786d5ea762b0515e9c2af09b2ecfeb9006db06151f591ef8e0fc506e",
+      "localRoot": "artifacts/translator-v2/draft-loop-20260910-live-v3",
+      "rows": [
+        {
+          "case": "handoff",
+          "reportDigest": "sha256:a05f386251f67cc36f28f17f00cf71fc67acb3114fe770b85bd800db8b498238",
+          "graphStatus": "governed_graph_completed",
+          "resultStatus": "partial",
+          "originalDraft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.\n",
+          "revisedCandidate": {
+            "draft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.",
+            "notes": [
+              "Alerts verification status for incoming engineer (Bob) is unresolved; requires manual check.",
+              "Handoff document generated based on read observations; no messages sent or alerts fired.",
+              "Uplink B investigation timeline confirmed at 10:30 UTC.",
+              "Dashboard staleness workaround explicitly noted to prevent misinterpretation of UI data.",
+              "Maintenance window owner (Dana) and time (11:00 UTC) captured for incoming shift awareness.",
+              "Escalation path defined per protocol: primary oncall -> incident commander after 15 minutes."
+            ],
+            "values": {
+              "observed-notes": "Outgoing: Alice; incoming: Bob, not yet acknowledged. Active: INC-42 API p95 900ms since 08:10 UTC; owner Alice; mitigation lowered batch size, not resolved. Investigation: packet loss on uplink B, owner Chen, next inspect optical counters at 10:30 UTC. Recent change: release 1.4 at 07:50 UTC. Known issue: dashboard stale; use raw metrics. Upcoming maintenance 11:00 UTC, owner Dana. Alerts have NOT been verified by Bob. Escalation: primary oncall, then incident commander after 15 minutes. Dashboard: https://example.invalid/inc42."
+            }
+          },
+          "candidateUnchanged": false,
+          "draftUnchanged": false,
+          "draftChangeOnlyTrailingWhitespace": true,
+          "reviews": {
+            "review-after": {
+              "verdictCounts": {
+                "contradicted": 1,
+                "insufficient_evidence": 0,
+                "supported": 26
+              },
+              "reportDigest": "sha256:a6b9d71780db159eae8c23fc7d1f7b51c15086175bf41b2c90b5efbbddeba749"
+            },
+            "review-before": {
+              "verdictCounts": {
+                "contradicted": 1,
+                "insufficient_evidence": 0,
+                "supported": 26
+              },
+              "reportDigest": "sha256:ed5af18bb019f172dc71241195946a8a3b9eab54636571faa4027328395e2bcb"
+            }
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 8569,
+              "latencyMs": 108275.45933390502,
+              "node": "review-before",
+              "outputTokens": 1836,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 8796,
+              "latencyMs": 71408.88166695368,
+              "node": "revise-draft",
+              "outputTokens": 629,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "unverified_revised_draft"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 8565,
+              "latencyMs": 144944.44070803002,
+              "node": "review-after",
+              "outputTokens": 1844,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            }
+          ],
+          "latencyMs": 325162.1517499443,
+          "unresolvedHostDuties": [
+            "handoff-draft"
+          ],
+          "satisfiedDutyCount": 2,
+          "declaredDutyCount": 3,
+          "blocked": null,
+          "completeAnswerApproved": false
+        },
+        {
+          "case": "documentation",
+          "reportDigest": "sha256:ed38ae361c026751489abadbeb83a1c2c193509468b62db90c2d752e80ca23d6",
+          "graphStatus": "governed_graph_completed",
+          "resultStatus": "partial",
+          "originalDraft": "# Project Name\n\nA Python project located at `/sandbox/project`.\n\n## Features\n\n- [Key feature 1 — brief description]\n- [Key feature 2 — brief description]\n- [Key feature 3 — brief description]\n\n## Quick Start\n\n### Prerequisites\n\n- Python 3.x\n\n### Installation\n\n```bash\ncd /sandbox/project\npip install -e .\n```\n\n### Basic Usage\n\n```python\nfrom my_module import main_function\nresult = main_function()\nprint(result)\n```\n\n## Documentation\n\n- [Link to full API reference if separate]\n- [Link to architecture docs if separate]\n\n## Configuration\n\n[Environment variables, config files, or runtime options]\n\n## Examples\n\n[2-3 practical examples covering common use cases]\n\n## Development\n\n### Setup\n\n```bash\npip install -e .\n```\n\n### Testing\n\n```bash\npytest\n```\n\n### Building\n\n[How to build the project]\n\n## Contributing\n\n[Contribution guidelines or link to CONTRIBUTING.md]\n\n## License\n\n[License information]",
+          "revisedCandidate": {
+            "draft": "# Project Name\n\nA Python project located at `/sandbox/project`.\n\n## Features\n\n- [Key feature 1 — brief description]\n- [Key feature 2 — brief description]\n- [Key feature 3 — brief description]\n\n## Quick Start\n\n### Prerequisites\n\n- Python 3.x\n\n### Installation\n\n```bash\ncd /sandbox/project\npip install -e .\n```\n\n### Basic Usage\n\n```python\nfrom my_module import main_function\nresult = main_function()\nprint(result)\n```\n\n## Documentation\n\n- [Link to full API reference if separate]\n- [Link to architecture docs if separate]\n\n## Configuration\n\n[Environment variables, config files, or runtime options]\n\n## Examples\n\n[2-3 practical examples covering common use cases]\n\n## Development\n\n### Setup\n\n```bash\npip install -e .\n```\n\n### Testing\n\n```bash\npytest\n```\n\n### Building\n\n[How to build the project]\n\n## Contributing\n\n[Contribution guidelines or link to CONTRIBUTING.md]\n\n## License\n\n[License information]",
+            "notes": [
+              "Cannot read specific configuration files (package.json, pyproject.toml, etc.) or source code without first listing the directory contents to confirm their existence and paths.",
+              "The `pyproject.toml` file exists but its contents are not yet read; project name, version, dependencies, and entry points cannot be determined until `read_file` is executed.",
+              "The `src` directory exists but its internal structure (modules, packages, public API) is unknown without further exploration.",
+              "No existing README or documentation files were observed in the initial listing; a new README must be generated from scratch.",
+              "The project language is inferred as Python based on `pyproject.toml`, but this should be confirmed by reading the file to ensure no mixed-language setup exists.",
+              "Build system and package manager details (e.g., setuptools, poetry, pip) are not yet known and will affect the installation instructions."
+            ],
+            "values": {
+              "observed-entries": [
+                {
+                  "kind": "file",
+                  "name": "pyproject.toml"
+                },
+                {
+                  "kind": "directory",
+                  "name": "src"
+                }
+              ]
+            }
+          },
+          "candidateUnchanged": true,
+          "draftUnchanged": true,
+          "draftChangeOnlyTrailingWhitespace": false,
+          "reviews": {
+            "review-after": {
+              "verdictCounts": {
+                "contradicted": 0,
+                "insufficient_evidence": 17,
+                "supported": 24
+              },
+              "reportDigest": "sha256:e95408fad585608a9b45f81efae4828cf7112114296b2a44a530ed8398af102c"
+            },
+            "review-before": {
+              "verdictCounts": {
+                "contradicted": 0,
+                "insufficient_evidence": 17,
+                "supported": 24
+              },
+              "reportDigest": "sha256:e95408fad585608a9b45f81efae4828cf7112114296b2a44a530ed8398af102c"
+            }
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 9844,
+              "latencyMs": 199530.92008305248,
+              "node": "review-before",
+              "outputTokens": 3262,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 11228,
+              "latencyMs": 77565.06608298514,
+              "node": "revise-draft",
+              "outputTokens": 538,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "unverified_revised_draft"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 9844,
+              "latencyMs": 231898.36187497713,
+              "node": "review-after",
+              "outputTokens": 3262,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            }
+          ],
+          "latencyMs": 509547.2622090019,
+          "unresolvedHostDuties": [
+            "inspect-code",
+            "readme-draft"
+          ],
+          "satisfiedDutyCount": 2,
+          "declaredDutyCount": 4,
+          "blocked": null,
+          "completeAnswerApproved": false
+        }
+      ]
+    },
+    {
+      "version": 4,
+      "reportDigest": "sha256:2e25e1ac5a33faffc85d18c101aa833166601f7141f5b309de327918a3741a3c",
+      "manifestDigest": "sha256:ae842cdb254f285af2bd0f037687477cd42e1d9af3f002a10d4e0a7ffa0f983b",
+      "localRoot": "artifacts/translator-v2/draft-loop-20260910-live-v4",
+      "rows": [
+        {
+          "case": "handoff",
+          "reportDigest": "sha256:447d83537a553e0a70afffb670e72324cf91b90f775be909f1d0b9bcb6360467",
+          "graphStatus": "governed_graph_completed",
+          "resultStatus": "partial",
+          "originalDraft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B. Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.\n",
+          "revisedCandidate": {
+            "draft": "# Quick Handoff: Alice → Bob\n\n## TL;DR\n- **Active Incident**: INC-42 (API p95 latency 900ms). Mitigation active (lowered batch size), not resolved.\n- **Investigation**: Packet loss on uplink B (owner Chen). Next step: inspect optical counters at 10:30 UTC.\n- **Recent Change**: Release 1.4 deployed at 07:50 UTC.\n- **Upcoming**: Maintenance window at 11:00 UTC (owner Dana).\n\n## Watch List\n1. API latency trending high; monitor for degradation post-mitigation.\n2. Uplink B packet loss investigation pending optical counter check.\n3. Dashboard data may be stale; rely on raw metrics.\n\n## Recent Changes\n- Deployed release 1.4 at 07:50 UTC.\n\n## Known Issues & Workarounds\n- **Dashboard Stale**: Do not trust dashboard UI for real-time status. Use raw metrics endpoints directly.\n\n## Upcoming Events\n- **11:00 UTC**: Scheduled maintenance window (owner Dana).\n\n## Escalation Path\n1. Primary On-Call Engineer\n2. Incident Commander (if unresolved after 15 minutes)\n\n## Important Links\n- Dashboard: https://example.invalid/inc42\n\n---\n**Note**: Alerts have NOT been verified by Bob yet. Please verify PagerDuty routing and Slack notifications before logging off.\n",
+            "notes": [
+              "Alerts verification status for incoming engineer (Bob) is unresolved; requires manual check.",
+              "Handoff document generated based on read observations; no messages sent or alerts fired.",
+              "Uplink B investigation timeline confirmed at 10:30 UTC.",
+              "Dashboard staleness workaround explicitly noted to prevent misinterpretation of UI data.",
+              "Maintenance window owner (Dana) and time (11:00 UTC) captured for incoming shift awareness.",
+              "Escalation path defined per protocol: primary oncall -> incident commander after 15 minutes."
+            ],
+            "values": {
+              "observed-notes": "Outgoing: Alice; incoming: Bob, not yet acknowledged. Active: INC-42 API p95 900ms since 08:10 UTC; owner Alice; mitigation lowered batch size, not resolved. Investigation: packet loss on uplink B, owner Chen, next inspect optical counters at 10:30 UTC. Recent change: release 1.4 at 07:50 UTC. Known issue: dashboard stale; use raw metrics. Upcoming maintenance 11:00 UTC, owner Dana. Alerts have NOT been verified by Bob. Escalation: primary oncall, then incident commander after 15 minutes. Dashboard: https://example.invalid/inc42."
+            }
+          },
+          "candidateUnchanged": false,
+          "draftUnchanged": false,
+          "draftChangeOnlyTrailingWhitespace": false,
+          "reviews": {
+            "review-after": {
+              "verdictCounts": {
+                "contradicted": 0,
+                "insufficient_evidence": 0,
+                "supported": 27
+              },
+              "reportDigest": "sha256:a186e63616674ff648511643a6f6ddc9a190a8ef875f87809b257f7cb29b53d5"
+            },
+            "review-before": {
+              "verdictCounts": {
+                "contradicted": 1,
+                "insufficient_evidence": 0,
+                "supported": 26
+              },
+              "reportDigest": "sha256:ed5af18bb019f172dc71241195946a8a3b9eab54636571faa4027328395e2bcb"
+            }
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 8569,
+              "latencyMs": 146352.89224993903,
+              "node": "review-before",
+              "outputTokens": 1836,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 8428,
+              "latencyMs": 73433.9257919928,
+              "node": "revise-draft",
+              "outputTokens": 436,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "unverified_materialized_revision"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 8568,
+              "latencyMs": 144675.60475005303,
+              "node": "review-after",
+              "outputTokens": 1834,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            }
+          ],
+          "latencyMs": 364985.35941704176,
+          "unresolvedHostDuties": [
+            "handoff-draft"
+          ],
+          "satisfiedDutyCount": 2,
+          "declaredDutyCount": 3,
+          "blocked": null,
+          "completeAnswerApproved": false
+        },
+        {
+          "case": "documentation",
+          "reportDigest": "sha256:92472077a980209f1d8698ed2c4475ab68967966febeafc262107d6aab76d7c3",
+          "graphStatus": "blocked",
+          "resultStatus": "blocked",
+          "originalDraft": "# Project Name\n\nA Python project located at `/sandbox/project`.\n\n## Features\n\n- [Key feature 1 — brief description]\n- [Key feature 2 — brief description]\n- [Key feature 3 — brief description]\n\n## Quick Start\n\n### Prerequisites\n\n- Python 3.x\n\n### Installation\n\n```bash\ncd /sandbox/project\npip install -e .\n```\n\n### Basic Usage\n\n```python\nfrom my_module import main_function\nresult = main_function()\nprint(result)\n```\n\n## Documentation\n\n- [Link to full API reference if separate]\n- [Link to architecture docs if separate]\n\n## Configuration\n\n[Environment variables, config files, or runtime options]\n\n## Examples\n\n[2-3 practical examples covering common use cases]\n\n## Development\n\n### Setup\n\n```bash\npip install -e .\n```\n\n### Testing\n\n```bash\npytest\n```\n\n### Building\n\n[How to build the project]\n\n## Contributing\n\n[Contribution guidelines or link to CONTRIBUTING.md]\n\n## License\n\n[License information]",
+          "revisedCandidate": null,
+          "candidateUnchanged": null,
+          "draftUnchanged": null,
+          "draftChangeOnlyTrailingWhitespace": null,
+          "reviews": {
+            "review-before": {
+              "verdictCounts": {
+                "contradicted": 0,
+                "insufficient_evidence": 17,
+                "supported": 24
+              },
+              "reportDigest": "sha256:e95408fad585608a9b45f81efae4828cf7112114296b2a44a530ed8398af102c"
+            }
+          },
+          "modelCalls": [
+            {
+              "doneReason": "stop",
+              "inputTokens": 9844,
+              "latencyMs": 199631.2356669223,
+              "node": "review-before",
+              "outputTokens": 3262,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "located_ai_review_not_truth"
+            },
+            {
+              "doneReason": "stop",
+              "inputTokens": 10961,
+              "latencyMs": 135932.8767498955,
+              "node": "revise-draft",
+              "outputTokens": 1217,
+              "reasoningTokens": null,
+              "reportedModel": "qwen3.5:9b",
+              "status": "invalid_schema_or_review_binding"
+            }
+          ],
+          "latencyMs": 336135.34937496297,
+          "unresolvedHostDuties": [
+            "inspect-code",
+            "readme-draft"
+          ],
+          "satisfiedDutyCount": 1,
+          "declaredDutyCount": 4,
+          "blocked": {
+            "code": "ValueError",
+            "detail": "Host/model/binding check failed; provider details redacted.",
+            "node": "revise-draft",
+            "pointer": null
+          },
+          "completeAnswerApproved": false
+        }
+      ]
+    }
+  ],
+  "developerReview": {
+    "role": "primary_assistant_developer_ai_not_independent_gold",
+    "exhaustiveSemanticAudit": false,
+    "v1": "Handoff all 18 supported but owners omitted and candidate unchanged; documentation unknown source citations blocked revision.",
+    "v2": "Handoff identified Chen omission but missed Alice; revision hit Ollama grammar HTTP 400. Documentation review had 17 findings; revision exceeded original input budget before a chat call.",
+    "v3": "Handoff removed only its final newline, without a semantic correction. Documentation candidate unchanged. No task-quality improvement from full regeneration.",
+    "v4": {
+      "handoff": {
+        "classification": "one_local_repair_remaining_partial",
+        "appliedEdits": 1,
+        "addressed": "Uplink B owner Chen is now in the delivered draft.",
+        "remaining": [
+          "INC-42 owner Alice is not explicitly preserved in the draft.",
+          "Incident start time 08:10 UTC is not preserved in the draft."
+        ],
+        "reviewerFailure": "9B final 27/27 supported is not semantic truth.",
+        "runtimeBoundary": "Runtime keeps the declared open duty unresolved; it did not automatically discover these omissions."
+      },
+      "documentation": {
+        "classification": "invalid_patch_not_applied",
+        "proposedEdits": 10,
+        "maximumEdits": 8,
+        "finalReviewCalled": false,
+        "acceptedRevisedDraft": false,
+        "additionalUnscoredFinding": "The rejected proposal also leaves a Python code fence unclosed; no claim of validated formatting.",
+        "missingObservationBoundary": "Only directory entries were observed; a correct complete project README requires further controlled reads."
+      }
+    }
+  },
+  "qa": {
+    "targeted.xml": {
+      "path": "artifacts/translator-v2/draft-loop-20260910-qa/targeted.xml",
+      "sha256": "sha256:8d0b91bb310a78abad671bd1c81a30fd587d926f4e24c789850f4244251e3d43",
+      "junitCasesIncludingSubtests": 136,
+      "failures": 0,
+      "errors": 0,
+      "latencySeconds": 27.707
+    },
+    "full.xml": {
+      "path": "artifacts/translator-v2/draft-loop-20260910-qa/full.xml",
+      "sha256": "sha256:67420f15f9bedee0e069ed47d763bc9a7837b916db42954a7f5cbd347c4e88fe",
+      "junitCasesIncludingSubtests": 2780,
+      "failures": 0,
+      "errors": 0,
+      "latencySeconds": 478.831
+    }
+  },
+  "latencyBoundary": "Local development observations, partially concurrent with pytest; not isolated performance, SLO or causal speedup.",
+  "scopeBoundary": "Two known development Skills, four retained implementation attempts; no independent Skill sample expansion or native DSH comparison.",
+  "reportDigest": "sha256:fe1e1c5d9585361419c805e14fa86e379355a97866c11fad1eb211c46503f095"
+}

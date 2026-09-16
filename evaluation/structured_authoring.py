@@ -7,6 +7,8 @@ judgment nor a compiled region establishes whole-Skill acceptance.
 
 from __future__ import annotations
 
+from skill_authoring.contracts import seal, validate_inputs
+
 import argparse
 import copy
 import json
@@ -19,11 +21,11 @@ from evaluation.flow_model_transport import QWEN_MODEL, decode
 from evaluation.structured_binding_probe import read_json, write_artifacts
 from evaluation.structured_flow_tree import SourceSpan, StructuredFlowTree, compile_structured_tree
 from evaluation.translation_case_authoring import OllamaAnchoredAuthorAdapter
-from evaluation.translation_intake import review_pages, validate_bundle
-from network_runtime.contracts import sha256_json
+from evaluation.translation_intake import review_pages, validate_bundle as validate_bundle
+from network_runtime.contracts import sha256_json as sha256_json
 from network_runtime.l0.read_contracts import _source_object
-from network_runtime.l0.structured_reads import parse_read_contract, read_schema, verify_read_contract
-from network_runtime.l0.structured_schema import checked_schema, snapshot_json
+from network_runtime.l0.structured_reads import parse_read_contract, read_schema as read_schema, verify_read_contract as verify_read_contract
+from network_runtime.l0.structured_schema import checked_schema as checked_schema, snapshot_json
 
 PROTOCOL = "progressive-structured-authoring/v1"
 MAX_WIRE_BYTES = 36000
@@ -35,35 +37,8 @@ def fingerprint():
                           "evaluation/translation_intake.py", "evaluation/structured_binding_probe.py")
 
 
-def seal(body):
-    return {**body, "reportDigest": sha256_json(body)}
 
 
-def validate_inputs(packet):
-    packet = snapshot_json(packet)
-    if not isinstance(packet, dict) or set(packet) != {"bundle", "task", "taskOrigin", "inputSchema", "catalog", "reads"}:
-        raise ValueError("only original source/task/schema/catalog/read declarations allowed; no reviewer answers")
-    validate_bundle(packet["bundle"])
-    if (not isinstance(packet["task"], str) or not 12 <= len(packet["task"]) <= 4000
-            or packet["taskOrigin"] != "developer_authored_evaluation_request"):
-        raise ValueError("explicit bounded development task required")
-    checked_schema(packet["inputSchema"])
-    catalog = packet["catalog"]
-    tools = catalog.get("tools") if isinstance(catalog, dict) else None
-    if not isinstance(tools, list) or not 1 <= len(tools) <= 32:
-        raise ValueError("bounded explicit original catalog required")
-    names = [t.get("name") if isinstance(t, dict) else None for t in tools]
-    if any(not isinstance(n, str) or not n.strip() for n in names) or len(set(names)) != len(names):
-        raise ValueError("unique host tool names required")
-    if not isinstance(packet["reads"], dict) or set(packet["reads"]) != set(names):
-        raise ValueError("this read-only research profile requires an exact contract for each declared tool")
-    for tool in tools:
-        c = verify_read_contract(parse_read_contract(packet["reads"][tool["name"]]))
-        if (c.spec.tool != tool["name"] or read_schema(c, "input") != tool["inputSchema"]
-                or read_schema(c, "output") != tool["outputSchema"]
-                or _source_object(next(s.text for s in c.spec.sources if s.role == "tool")) != tool):
-            raise ValueError("read contract differs from original host declaration")
-    return packet
 
 
 def pages_for(packet):

@@ -1,0 +1,142 @@
+{
+  "callsWithUnknownUsage": 0,
+  "cases": [
+    {
+      "allRequestsInHostInventory": true,
+      "case": "capa-status",
+      "compiledSessions": 0,
+      "criteria": {
+        "c1": {
+          "met": true,
+          "reason": "明确分开25/25实施检查与5/30天监测，未把已观察零复发写成整周期有效性已完成。"
+        },
+        "c2": {
+          "met": false,
+          "reason": "Nora、Omar、October 4和Pia未批准均保留；但最终没有明确给出记录保持开放、关闭条件未满足的状态。按预设判据的保守显式状态口径记为未完全满足，不代表其已声称关闭。"
+        },
+        "c3": {
+          "met": true,
+          "reason": "指出尚需Pia正式审批，未声称审批已完成或给出监管认证；建议还应补明监测周期尚未完成，以免把审批理解为唯一缺口。"
+        }
+      },
+      "endToEndMs": 36795.74004106689,
+      "limitations": [
+        "这是开发者AI对原始答复的审阅，不是独立Gold。",
+        "任务有用但显式开放状态不足，完整通过不予计数。",
+        "走L1 fallback而非L0自动转译；完整Skill因上下文预算未提供给模型，不能作为转译成功。"
+      ],
+      "preparedSessions": 1,
+      "providerCalls": [
+        {
+          "arguments": {
+            "path": "/exports/capa.txt"
+          },
+          "tool": "read_export"
+        }
+      ],
+      "stdoutDigest": "sha256:761f8a4e5a49e1553ebe1d0c05064b0ce4f14564f788932af05b81b97ad51715",
+      "taskAndArgumentsRetained": 1,
+      "taskPassed": false
+    },
+    {
+      "allRequestsInHostInventory": true,
+      "case": "irql-draft",
+      "compiledSessions": 1,
+      "criteria": {
+        "c1": {
+          "met": false,
+          "reason": "只读索引，未补读已许可的函数清单；最终缺固定半开时间窗，失败标签和函数可用性尚无该次观察支持。"
+        },
+        "c2": {
+          "met": false,
+          "reason": "虽然含按Username计数、enricher和top10，但加入未经请求或观察支持的FailedCount>5过滤条件；不是正确的限定查询。"
+        },
+        "c3": {
+          "met": true,
+          "reason": "没有查询执行、函数部署、应用启动或实际命中数量声明；仍是草稿。"
+        }
+      },
+      "endToEndMs": 178859.3099169666,
+      "limitations": [
+        "编译与Runtime读取成功不抵消查询错误。",
+        "DSH直接复述未验证中间稿，没有使用已提供的有限补读入口。",
+        "没有执行KQL、设备命令或写操作。"
+      ],
+      "preparedSessions": 1,
+      "providerCalls": [
+        {
+          "arguments": {
+            "path": "/exports/irql-index.txt"
+          },
+          "tool": "read_export"
+        }
+      ],
+      "stdoutDigest": "sha256:712eb49c414e3e6f91e18467144c29a801457215e0a771b2ae729799ae156c9f",
+      "taskAndArgumentsRetained": 1,
+      "taskPassed": false
+    },
+    {
+      "allRequestsInHostInventory": true,
+      "case": "mesh-incident",
+      "compiledSessions": 1,
+      "criteria": {
+        "c1": {
+          "met": true,
+          "reason": "实际读索引后经同一网关补读窗口，正确给出北区0.5%到5%、p99 400到900ms，以及南区0.5%和390ms。"
+        },
+        "c2": {
+          "met": true,
+          "reason": "将rev8部署描述为与症状相关，并明确没有足够证据确认根因、没有恢复证据；未将相关性宣布为已证实原因。"
+        },
+        "c3": {
+          "met": true,
+          "reason": "下一证据来源列明trace、饱和度和访问日志；未声称这些检查已执行。唯一称completed的窗口读取有实际回执。"
+        }
+      },
+      "endToEndMs": 119514.02337499894,
+      "limitations": [
+        "完成的是限定快照分析，不是整个运维Skill或现场根因确认。",
+        "Root cause indicator措辞可更审慎；后续证据建议可更具体，但没有构成既定关键判据失败。",
+        "已知开发样例，不是新来源泛化或DSH-only因果对照。"
+      ],
+      "preparedSessions": 1,
+      "providerCalls": [
+        {
+          "arguments": {
+            "path": "/exports/mesh-index.txt"
+          },
+          "tool": "read_export"
+        },
+        {
+          "arguments": {
+            "path": "/exports/mesh-window.txt"
+          },
+          "tool": "read_export"
+        }
+      ],
+      "stdoutDigest": "sha256:83deddfcb455ec79183440225dbf0798e0f68b1d8f6895891d940ff4a790cbf5",
+      "taskAndArgumentsRetained": 1,
+      "taskPassed": true
+    }
+  ],
+  "formalStageExit": false,
+  "freezeDigest": "sha256:a3ad60cd4003cec56581cd388ac2bd941ca13daed459e0107b25b69f21fc96f9",
+  "historicalScoresReplaced": false,
+  "knownInputTokens": 80505,
+  "knownOutputTokens": 3502,
+  "model": "qwen3.5:9b",
+  "modelCalls": 12,
+  "nativeDSH": true,
+  "p50EndToEndMs": 119514.02337499894,
+  "p95EndToEndMs": 172924.78126276983,
+  "pairedAB": false,
+  "productionSafetyProbability": null,
+  "reviewKind": "developer_ai_content_review_not_independent_gold",
+  "semanticFidelityAutomaticallyProven": false,
+  "taskPassed": 1,
+  "taskTotal": 3,
+  "boundEvidenceReportDigest": "sha256:d615e99421c20960010d37c87e1d3907ea0c428b2fab630c8314240249b60113",
+  "evidenceScope": "3 known Skills / 3 repositories / 3 tasks; synthetic providers, actual native DSH + 9B; developer AI review; not fresh-source or A/B evidence",
+  "qa": "3101 tests and 81 subtests passed; engineering results do not establish semantic accuracy",
+  "timingLimitations": "Some CPU test work overlapped model runs; timings are observed end-to-end, not SLO or causal speedup"
+}

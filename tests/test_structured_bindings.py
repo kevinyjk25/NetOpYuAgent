@@ -32,6 +32,20 @@ def object_expr(**fields):
     return {"kind": "object", "fields": fields}
 
 
+@pytest.mark.parametrize("key", ["gap", "state", "nested/key~name", "说明"])
+def test_missing_required_field_diagnostic_names_schema_field_without_coercion(key):
+    schema = obj({"rows": {"type": "array", "items": obj({
+        key: {"type": "string", "default": "not inserted"}, "present": {"type": "string"}})}})
+    value = {"rows": [{"present": "private payload never echoed"}]}
+    before = copy.deepcopy(value)
+    with pytest.raises(DataBindingError) as caught:
+        validate_data(schema, value)
+    assert caught.value.code == "value_constraint"
+    assert caught.value.pointer == join_pointer("/rows/0", key)
+    assert caught.value.detail == "required field is missing; no default inserted"
+    assert "private payload" not in str(caught.value) and value == before
+
+
 def test_previous_catalog_preserved_and_nested_arguments_materialized():
     catalog = json.loads(Path("examples/translation-intake/mcp-catalog.json").read_text())
     before = copy.deepcopy(catalog)
@@ -108,7 +122,11 @@ def test_absent_optional_or_empty_array_never_becomes_default_success(source):
 def test_constraints_reject_without_coercion_or_payload_leak(schema, value, keyword):
     with pytest.raises(DataBindingError) as caught:
         validate_data(schema, value)
-    assert caught.value.detail == f"failed {keyword} validation"
+    if keyword == "required":
+        assert caught.value.pointer == "/x"
+        assert caught.value.detail == "required field is missing; no default inserted"
+    else:
+        assert caught.value.detail == f"failed {keyword} validation"
 
 
 @pytest.mark.parametrize("schema,code", [

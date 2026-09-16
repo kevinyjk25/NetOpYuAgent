@@ -1,0 +1,64 @@
+{
+  "schema": "ensuredskill.io/bounded-r0-implementation-summary/v1",
+  "date": "2026-09-16",
+  "status": "r0_measurement_partial",
+  "evidenceRole": "synthetic_measurement_probe_not_agent_benchmark",
+  "actualModelCalls": 0,
+  "pilotQualified": false,
+  "liveAdapterReady": false,
+  "researchEvidenceEligible": false,
+  "runtimeLargeEvaluationAllowed": false,
+  "automaticEffectBridge": "not_tested",
+  "runtime36ProbeGate": "not_assessed",
+  "probe": {
+    "localReport": "artifacts/bounded-pilot-20260916-r0/report.json",
+    "reportDigest": "sha256:45413dfd709f53c5520588d9c1f5adb1523d82b6d9ec9f0321374e9ab85d7dff",
+    "scorerFamilies": 12,
+    "scorerFixtures": 24,
+    "budgetChecks": 10,
+    "gatewayStates": ["verified_success", "precondition_changed", "rollback_verified"],
+    "allExpectedDecisions": true,
+    "notice": "Scorer receipts, semantic reviews and model usage are invented fixtures. Gateway paths run existing code against isolated local mock state. Neither is an Agent success estimate.",
+    "sourceDigests": {
+      "bounded_budget.py": "sha256:767248220403a3a5e952d9a5c298e9000db4d007ef11641655f1701046907ab8",
+      "bounded_scoring.py": "sha256:510b5f97de6b704873e99290a54f8d17192ff3d22423a1dae55ff23638aae297",
+      "bounded_probe.py": "sha256:ed8044030a4b7f925547466508f2c9063b477d6fb99da51c5281c2ccaea087d7"
+    }
+  },
+  "qa": {
+    "targetedPassed": 153,
+    "newBoundedTestsPassed": 128,
+    "initialFullSuite": {
+      "passed": 3434,
+      "failed": 5,
+      "errors": 13,
+      "subtestsPassed": 81,
+      "seconds": 236.63,
+      "localJUnit": "artifacts/bounded-pilot-20260916-r0-qa/full-pytest.xml"
+    },
+    "environmentRecheck": {
+      "passed": 18,
+      "failed": 0,
+      "seconds": 7.11,
+      "changedAssertions": false,
+      "reason": "Initial failures were blocked loopback/Unix socket binds and read-only Docker access. Reran exactly the affected tests with approved sandbox escalation, retaining the initial report.",
+      "localJUnit": "artifacts/bounded-pilot-20260916-r0-qa/environment-recheck.xml"
+    },
+    "ruffNewPythonFiles": 9,
+    "ruffPassed": true,
+    "scope": "Engineering regression, not live model or research performance. No single all-pass full-suite rerun is claimed."
+  },
+  "remainingR0": [
+    "trusted_live_DSH_all_call_metering_and_input_token_preflight",
+    "physical_provider_reset_isolation_and_real_receipt_collection",
+    "frozen_independently_aligned_six_skill_twelve_task_references",
+    "complete_execution_dependency_freeze_and_no_model_adapter_integration"
+  ],
+  "unchanged": [
+    "historical_failure_reports_and_scores",
+    "formal_translation_generalization_gate",
+    "product_write_authority",
+    "source_scripts_inert",
+    "default_DSH_UI_and_model_configuration"
+  ]
+}

@@ -128,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
     skill_manifest.add_argument("--profile", default="lan")
 
     agent_authoring_template = subparsers.add_parser("agent-authoring-template")
+    for command in ("hybrid-prepare", "hybrid-submit", "hybrid-inspect", "hybrid-read", "hybrid-draft", "hybrid-deliver", "hybrid-describe"):
+        subparsers.add_parser(command).add_argument("--profile", default="lan")
     agent_authoring_template.add_argument("--profile", default="lan")
     agent_authoring_capture = subparsers.add_parser("agent-authoring-capture")
     agent_authoring_capture.add_argument("--profile", default="lan")
@@ -290,6 +292,15 @@ def main(argv: list[str] | None = None) -> int:
             payload = decision_metrics(limit=int(request.get("limit", 500)))
         elif args.command == "agent-authoring-template":
             payload = authoring_template()
+        elif args.command == "hybrid-describe":
+            from .hybrid_session import describe
+            payload = describe()
+        elif args.command in {"hybrid-prepare", "hybrid-submit", "hybrid-inspect", "hybrid-read", "hybrid-draft", "hybrid-deliver"}:
+            from . import hybrid_session
+            handler = {"hybrid-prepare": hybrid_session.prepare, "hybrid-submit": hybrid_session.submit,
+                       "hybrid-inspect": hybrid_session.inspect, "hybrid-read": hybrid_session.read,
+                       "hybrid-draft": hybrid_session.draft, "hybrid-deliver": hybrid_session.deliver}[args.command]
+            payload = handler(_read_arguments())
         elif args.command == "agent-authoring-capture":
             payload = capture_authoring(_read_arguments())
         elif args.command == "agent-authoring-submit":

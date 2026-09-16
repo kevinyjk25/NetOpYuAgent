@@ -1,0 +1,100 @@
+{
+  "scope": "known_development_native_DSH_not_unseen_or_paired_AB",
+  "model": "qwen3.5:9b",
+  "sourceDirectory": "artifacts/governed-session-20260915-wire-state",
+  "assessmentDirectory": "artifacts/governed-session-20260915-wire-state-assessment",
+  "boundEvidenceReportDigest": "sha256:c0d71c8536eb5e7ea2550af8076deca80241207ae802ee14db66066242499aac",
+  "freezeDigest": "sha256:e3ed55795dfbf228304d9c8f2c2c4dbae18ef95384d0535602abd12abac42a25",
+  "reviewKind": "developer_ai_content_review_not_independent_gold",
+  "cases": 2,
+  "tasksMeetingAllPredeclaredContentCriteria": 0,
+  "criteriaMet": 2,
+  "criteriaTotal": 6,
+  "allTaskRequirementsProven": false,
+  "compiledGraphs": 0,
+  "authorizedProviderReads": 3,
+  "nativeFirstCandidateJSONParsedWithoutRepair": 2,
+  "nativeFirstCandidateAttempts": 2,
+  "acceptedNativeDeliveryCandidates": 0,
+  "runtimeDrafts": 0,
+  "candidateFinalComparisonDenominator": 0,
+  "cost": {
+    "completedModelRepliesWithUsage": 19,
+    "outerDSHReplies": 19,
+    "innerRuntimeReplies": 0,
+    "knownInputTokens": 249800,
+    "knownOutputTokens": 8249,
+    "startedHarnessStepsWithoutCompletedReply": 1,
+    "completeUsageKnown": false,
+    "limitation": "The assessment counts usage on complete replies only. Mesh starts eleven steps but has ten complete replies. Known tokens and complete-reply counts are lower bounds; a timed-out step has unknown usage."
+  },
+  "latency": {
+    "p50EndToEndMs": 311201.48408354726,
+    "p95EndToEndMs": 409151.39790860703,
+    "includesTimedOutCase": true,
+    "timeoutMs": 420000,
+    "causalPerformanceClaim": false
+  },
+  "caseResults": [
+    {
+      "case": "capa-status",
+      "criteriaMet": 2,
+      "criteriaTotal": 3,
+      "endToEndMs": 202368.2465001475,
+      "route": "source_budget_native_fallback",
+      "completedReads": 1,
+      "jsonParsed": true,
+      "candidateAdmitted": false,
+      "firstCandidateProblem": "Missing /delivery/d1/gap. Two later deliver calls do not replace the frozen first candidate.",
+      "fixedRequirementState": "A real three-section format requirement is anchored as unrepresented; reading cannot clear it.",
+      "remainingSemanticProblems": "No explicit stays-open conclusion under unchanged prior scoring; process commentary wrongly calls the candidate structure correct and blames a system constraint. A read instruction is selected as next_steps evidence."
+    },
+    {
+      "case": "mesh-incident",
+      "criteriaMet": 0,
+      "criteriaTotal": 3,
+      "endToEndMs": 420034.721666947,
+      "route": "compile_rejected_native_fallback_then_timeout",
+      "completedReads": 2,
+      "jsonParsed": true,
+      "candidateAdmitted": false,
+      "firstCandidateProblem": "Missing /delivery/d1/state, misplaced at /delivery/state. Later deliver cannot replace it. No completed user answer before timeout.",
+      "fixedRequirementState": "Two initial unrepresented quotes fail exact membership. Fallback eventually binds an exact quote but still interprets missing template data as an output-contract gap.",
+      "remainingSemanticProblems": "Rejected text proposes a rollback experiment despite the no-change task; no experiment or write actually executes. Candidate text is not credited as final delivery."
+    }
+  ],
+  "postRunRepair": {
+    "modelRetested": false,
+    "modelCalls": 0,
+    "changes": [
+      "Required-field diagnostics now point to the missing schema field, without inserting defaults, moving fields, coercing data or echoing rejected values.",
+      "Draft/deliver explicitly return retryAllowed=false and distinguish retained rejected candidates from validated renderings; existing no-replay policy is unchanged."
+    ],
+    "zeroCallOriginalCandidateChecks": [
+      {"case": "capa-status", "oldPointer": "/delivery/d1", "newPointer": "/delivery/d1/gap", "stillRejected": true},
+      {"case": "mesh-incident", "oldPointer": "/delivery/d1", "newPointer": "/delivery/d1/state", "stillRejected": true}
+    ]
+  },
+  "verifiedRunArtifacts": 63,
+  "verifiedArchivedSourceFiles": 75,
+  "engineeringChecks": {
+    "targetedPassed": 174,
+    "fullTestsPassed": 3166,
+    "subtestsPassed": 81,
+    "fullTestSeconds": 243.02,
+    "changedNewPythonFilesRuffPassed": 105,
+    "documentationTestsPassed": 3,
+    "exportedSixToolSchemaPassed": true,
+    "gitDiffCheckPassed": true,
+    "fullSuiteConcurrentWithLiveModelRun": false,
+    "repositoryWideLintCleanClaimed": false,
+    "initialRequiredDiagnosticAssertionUpdateDisclosed": true,
+    "semanticSuccessInferredFromTests": false
+  },
+  "historicalScoresReplaced": false,
+  "notPooledWithPriorBatch": true,
+  "irqlRetested": false,
+  "formalStageExit": false,
+  "productionSuccessProbability": null,
+  "overallImprovementProven": false
+}

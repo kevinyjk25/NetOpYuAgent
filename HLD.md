@@ -4,6 +4,22 @@
 
 ## 中文
 
+2026-09-16：[新考核／重构](docs/EVALUATION-RESET-20260916.md)已获授权实施，R0 的输入准备、预算总账、独立评分和脚本式计量已部分落地。目标仍分为转译保真、Runtime 约束、同一真实 Agent 的冷启动端到端收益；开放 L1 与严格 L0 并存，开发候选和确认总预算不变。153 项定向测试和 0 模型的本地测量探针不能代替业务完成，也未通过 36 项机制门槛。真实 DSH／Provider／trace 接线和预封存样本标签仍待完成，尚无 `run` 命令；旧语义阶段仍为 `paused_unmet`，正式门禁不变。
+
+当前补充见[结构与工件收敛](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)：将结构合法性、局部工件验证、完整任务验收分开。可选宿主策略只给明确失败的代码块一次文本修订预算；不是新的执行支路或通用语义自审。未知函数/复杂语言保持未验证，检查通过不授予操作权。
+
+2026-09-16 可选[隔离编译模式](docs/ISOLATED-COMPILER.md)将符号绑定生成移出运行Agent对话，复用原编译/权限校验；一次编译请求确定拒绝时可转原生只读fallback，未知结果停止。运行Agent只看到具体调用和观察，不承担AST纠错。原证据门禁、补读预算和终态不变；不表示语义已经验证正确。
+
+交付合同补充（2026-09-15）：执行前由原生 L1 声明有原文依据的交付类型，执行后由共享组件检查/渲染内容；代码工件不再与分析、结论、后续项共用一个自由文本槽。类型仍由模型解释，结构完备不是任务完成；fallback 也保留同样边界。[主链协议与限制](docs/GOVERNED-SESSION.md)。
+
+2026-09-15 收敛更新：当前可选本地主链为 DSH → `skill_authoring` 共享转译 → 原 Runtime 前置读取 → DSH/L1 受限补读 → 冻结证据 → 单次有界推理与窄范围工件检查。评测代码不进入产品依赖；通用语义自审不作为执行权限来源。转译保真、执行约束、任务质量独立验收。宿主配置的六工具和限制见[主链接入说明](docs/GOVERNED-SESSION.md)。原有写事务边界不变，本入口不授权写入。下列早期语义审阅设计是保留的研究历史，不是当前产品必经链路。
+
+最新修复以[首次负结果](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md)为依据：答复修订与精确支持观察分开；有效读取前段与非权威注释分开；审阅输入无损压缩传输，缺建议的负面意见保持未解决。均不改变原严格执行引擎、权限、写入口或正式泛化门禁。新机制正在已知开发验证，不代表阶段完成。
+
+2026-09-10 后续补充：[结果合同](docs/SEMANTIC-RESULT-CONTRACT.md)把图状态、宿主声明职责满足情况、观察字段与未验证草稿分开。仍是同一 Reliability Runtime 的可选能力，不新增权威平面，不把声明职责满足当成整任务语义证明。
+
+后续[语义闭环研究入口](docs/SEMANTIC-CLOSURE-RUNBOOK.md)将自动读取前段、有限补读、双向审查和章节修订接入同一 Runtime。事实引用与自然语言生成分权；一次修订 pass 最多 8 个编辑调用，成本单列。无损引用、窄范围风险暂缓和模型终审都不能清除未满足职责或授予权限；历史[审查失败](docs/BOUNDED-DRAFT-REVIEW.md)保留。
+
 ### 受控双驱动补充（2026-09-10）
 
 新增受控混合图：宿主先绑定完整图、调用参数和权限上下文摘要，再调度原严格读取与有界 LLM。模型只接收声明的数据投影，输出候选；只有独立宿主准入才可供指定的后续严格片段使用。并发上限、调用预算、all-success 汇合与失败停止由 Runtime 固定。开放式内容质量和严格执行安全分别验证，不能合成一个虚假的成功率。详见[混合流程](docs/GOVERNED-HYBRID-FLOWS.md)。
@@ -203,6 +219,22 @@ Hermes、A2A、企业 OIDC/PDP/Change Authority、Provider 签名供应链、Cat
 ---
 
 ## English
+
+September 16: implementation of the [reset](docs/EVALUATION-RESET-20260916.md) is authorized, with R0 input preparation, persistent budgets, isolated scoring and scripted metering partially implemented. Translation fidelity, Runtime enforcement and the same real agent's cold-start benefit remain separate claims, retaining open L1, strict L0 and finite development/confirmation budgets. The 153 targeted tests and zero-model local probes do not establish task fulfillment or the 36-probe gate. Live DSH/Provider/trace integration and frozen cases/labels remain outstanding; no `run` command exists. The old semantic stage remains `paused_unmet`; formal gates are unchanged.
+
+The [schema/artifact package](docs/SCHEMA-ARTIFACT-CONVERGENCE.md) separates structural validity, partial artifact checks and complete task acceptance. Optional host policy allows one text-only correction of definitely failing code regions, not another execution branch or general semantic reviewer. Unsupported semantics remain unknown; passing checks grants no authority.
+
+Optional [isolated compilation](docs/ISOLATED-COMPILER.md) moves symbolic authoring out of the execution conversation while reusing compiler/access checks. One known rejected author response may fall back read-only;unknown outcomes stop. Execution sees concrete calls/observations,no AST repair. Evidence gates,read budget and terminal semantics remain;business correctness is not implied.
+
+Delivery-contract addendum (September 15): native L1 proposes source-anchored output kinds before execution; shared checks/rendering keep artifacts, analysis, decisions and next actions in distinct slots. Type interpretation remains model-proposed; filled slots do not establish task completion. Native fallback follows the same boundary. See the [protocol and limitations](docs/GOVERNED-SESSION.md).
+
+September 15 convergence: the opt-in path is DSH → shared skill_authoring → original Runtime prefix reads → bounded L1 evidence collection → evidence freeze → one reasoning call and narrow static artifact checks. Product code imports no evaluator. Six tools share one implementation; no reads are replayed during drafting. Freezing proves collection closure, not evidence completeness. Translation fidelity, execution constraints and task quality are assessed independently. See the [canonical session](docs/GOVERNED-SESSION.md). Existing Effect boundaries remain unchanged; this entry grants no writes. Earlier semantic review designs below are historical research, not required delivery layers.
+
+Following the [first negative transfer](docs/SEMANTIC-CLOSURE-TRANSFER-V1.md), answer edits and exact support are independent, valid read prefixes are isolated from non-authoritative annotations, and review text uses reversible transport. Negative findings without edit suggestions remain unresolved. Strict execution, authority, write admission and formal generalization gates are unchanged; known-development verification is not stage completion.
+
+The optional [result contract](docs/SEMANTIC-RESULT-CONTRACT.md) separates graph conformance, declared duty checks, observed fields and unverified drafts within the same Reliability Runtime. It adds no authority plane or whole-task semantic proof.
+
+The opt-in [semantic-closure research entry](docs/SEMANTIC-CLOSURE-RUNBOOK.md) joins automatic read prefixes, finite further reads, bidirectional review and one pass of up to eight section-editing calls on the same Runtime. Source rendering and free generation stay distinct, with all costs retained. Neither exact copying, narrowly scoped withholding nor AI final review clears open duties or grants authority. Historical review failures remain evidence.
 
 2026-09-10 addendum: the mixed scheduler binds graph, arguments and host context, then composes original strict reads with bounded reasoning services. Model outputs remain candidates, requiring independent region-bound admission before later strict operations. The Runtime fixes dependency, concurrency, call budget and required-join/failure rules. Language quality and execution controls are evaluated separately; see [governed hybrid flows](docs/GOVERNED-HYBRID-FLOWS.md).
 

@@ -18,8 +18,9 @@ from network_runtime.access import ObservationAccessContext, ObservationPolicy
 from network_runtime.contracts import sha256_json
 
 from .flow import HostFlowConsent, parse_flow, run_read_flow
-from .hybrid import CandidateAdmission, GovernedHybridFlow, ReasoningTask, StrictRegion, qualify_hybrid
+from .hybrid import CandidateAdmission, ConditionalReasoningTask, GovernedHybridFlow, ReasoningTask, StrictRegion, qualify_hybrid
 from .read_execution import HostReadBinding
+from .result_contract import ResultContract, assess_result, qualify_result_contract
 from .structured_bindings import materialize_binding
 from .structured_schema import DataBindingError, snapshot_json, validate_data
 
@@ -54,6 +55,7 @@ class HostHybridConsent:
     graph_digest: str
     arguments_digest: str
     context_digest: str
+    result_contract_digest: str | None = None
 
 
 def context_digest(context):
@@ -64,16 +66,19 @@ def context_digest(context):
 
 def run_hybrid(proposal: GovernedHybridFlow, arguments: dict, *, reads: Mapping, read_bindings: Mapping,
                reasoners: Mapping[str, HostReasoningBinding], gates: Mapping[str, HostCandidateGate],
-               context: ObservationAccessContext, consent: HostHybridConsent) -> dict:
+               context: ObservationAccessContext, consent: HostHybridConsent,
+               result_contract: ResultContract | None = None) -> dict:
     packet = qualify_hybrid(proposal, reads)
     proposal = GovernedHybridFlow.model_validate(packet["proposal"])
     arguments = validate_data(proposal.input_schema, arguments)
+    result_packet = qualify_result_contract(result_contract, packet, reads) if result_contract is not None else None
     if (not isinstance(context, ObservationAccessContext) or context.authenticated is not True or context.implicit_local_context is not False
             or not context.subject_id.strip() or not context.purpose.strip()):
         raise PermissionError("mixed flow requires an explicit authenticated host context")
     context = replace(context, roles=frozenset(context.roles), scopes=frozenset(context.scopes))
-    if consent != HostHybridConsent(packet["graphDigest"], sha256_json(arguments), context_digest(context)):
-        raise PermissionError("host consent must bind graph, arguments and context")
+    if consent != HostHybridConsent(packet["graphDigest"], sha256_json(arguments), context_digest(context),
+                                    result_packet["contractDigest"] if result_packet else None):
+        raise PermissionError("host consent must bind graph, arguments, context and any result contract")
     nodes = {n.id: n for n in proposal.nodes}
     reads, read_bindings, reasoners, gates = dict(reads), dict(read_bindings), dict(reasoners), dict(gates)
 
@@ -193,6 +198,8 @@ def run_hybrid(proposal: GovernedHybridFlow, arguments: dict, *, reads: Mapping,
         if status == "governed_graph_completed":
             body["outputs"] = {k: {"role": packet["roles"][k], "value": values[k]} for k in proposal.outputs}
             body["claimBoundary"] = "Graph conformance only; model outputs remain candidates, not verified business success."
+        if result_packet is not None:
+            body["resultAssessment"] = assess_result(result_packet, values, graph_status=status)
         return {**body, "reportDigest": sha256_json(body)}
 
     try:
@@ -211,7 +218,7 @@ def run_hybrid(proposal: GovernedHybridFlow, arguments: dict, *, reads: Mapping,
                 # Analysis and joins may describe old snapshots, never upgrade
                 # them to fresh action evidence. Strict operations/admission
                 # still check every source/control observation ancestor.
-                if node.kind not in {"reason", "join"}:
+                if node.kind not in {"reason", "reason_if", "join"}:
                     fresh(key)
                 if isinstance(node, StrictRegion):
                     pending = [p for p in packet["ancestors"][key] if isinstance(nodes[p], StrictRegion)
@@ -224,6 +231,25 @@ def run_hybrid(proposal: GovernedHybridFlow, arguments: dict, *, reads: Mapping,
                             return finish("blocked", {"code": "unresolved_region_handoff", "node": key, "sourceRegion": parent})
                 plan = packet["inputBindings"][key]
                 supplied = materialize_binding(plan, {s: values[s] for s in plan["requiredSources"]})["arguments"]
+                if isinstance(node, ConditionalReasoningTask):
+                    conditional = packet["conditionalBindings"][key]
+                    check = conditional["condition"]
+                    actual = materialize_binding(check, {s: values[s] for s in check["requiredSources"]})["arguments"]
+                    if actual != node.condition.equals:
+                        reuse = conditional["otherwise"]
+                        retained = materialize_binding(reuse, {s: values[s] for s in reuse["requiredSources"]})["arguments"]
+                        retained = validate_data(node.output_schema, retained)
+                        if len(json.dumps(retained, ensure_ascii=False).encode()) > node.max_output_bytes:
+                            raise ValueError("retained candidate output byte budget exceeded")
+                        values[key] = snapshot_json(retained)
+                        completed.add(key)
+                        trace.append({"node": key, "event": "finished", "kind": node.kind, "status": "succeeded",
+                            "role": "model_candidate", "modelInvoked": False, "modelCallsReserved": 0,
+                            "inputsDigest": sha256_json(supplied), "conditionValue": actual,
+                            "retainedCandidateDigest": sha256_json(retained),
+                            "origin": "host_bound_retained_candidate_not_new_model_output_or_observation",
+                            "semanticCorrectnessProven": False, "effectAuthorized": False})
+                        continue
                 if isinstance(node, ReasoningTask):
                     model_calls += 1
                     if model_calls > proposal.max_model_calls:
@@ -236,6 +262,8 @@ def run_hybrid(proposal: GovernedHybridFlow, arguments: dict, *, reads: Mapping,
                 running[future] = (key, started, until)
                 trace.append({"node": key, "event": "started", "inputsDigest": sha256_json(supplied)})
             if not running:
+                if len(completed) == len(nodes):
+                    return finish("governed_graph_completed")
                 return finish("blocked", {"code": "no_runnable_node"})
             wait(running, timeout=max(0, min(info[2] for info in running.values()) - time.monotonic()), return_when=FIRST_COMPLETED)
             now = time.monotonic()

@@ -1,0 +1,18 @@
+{
+  "disclosure": "Synthetic in-process project files, not the user's repository. Original Skill scripts and all observed code remain inert. No execution or filesystem access is performed by these tool fixtures.",
+  "arguments": {"projectPath": "/sandbox/project"},
+  "resources": {
+    "list_directory": {
+      "resources": [
+        [{"path": "/sandbox/project"}, {"entries": [{"name": "pyproject.toml", "kind": "file"}, {"name": "src", "kind": "directory"}]}],
+        [{"path": "/sandbox/project/src"}, {"entries": [{"name": "example_project.py", "kind": "file"}]}]
+      ]
+    },
+    "read_text_file": {
+      "resources": [
+        [{"path": "/sandbox/project/pyproject.toml"}, {"text": "[build-system]\nrequires = ['setuptools>=68']\nbuild-backend = 'setuptools.build_meta'\n\n[project]\nname = 'example-project'\nversion = '0.1.0'\nrequires-python = '>=3.11'\ndescription = 'A small in-memory latency summary utility'\ndependencies = []\n\n[tool.setuptools]\npackage-dir = {'' = 'src'}\npy-modules = ['example_project']\n"}],
+        [{"path": "/sandbox/project/src/example_project.py"}, {"text": "\"\"\"Summarize latency samples in memory. No network, storage, retries or CLI.\"\"\"\n\ndef summarize_ms(samples: list[float]) -> dict[str, float]:\n    \"\"\"Return count, minimum and maximum milliseconds; reject empty samples.\"\"\"\n    if not samples:\n        raise ValueError('samples must not be empty')\n    return {'count': len(samples), 'min_ms': min(samples), 'max_ms': max(samples)}\n"}]
+      ]
+    }
+  }
+}

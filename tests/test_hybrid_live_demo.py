@@ -60,6 +60,33 @@ def test_structural_compilation_alone_never_grants_demo_admission(tmp_path):
         demo.run(files / "p.json", files / "c.json", files / "r.json", tmp_path / "run", case="synthetic", max_model_calls=1)
 
 
+def test_generic_fixture_and_review_reuse_exact_automatic_graph(tmp_path, monkeypatch):
+    from evaluation.flow_tree_authoring import receipt
+    from evaluation.hybrid_snapshot_review import prepare
+    from evaluation.hybrid_behavior import context as local_context
+    packet, compilation, _ = packet_and_compilation()
+    review = {"case": "new-task", "compilationDigest": compilation["reportDigest"], "decision": "admit_local_read_reason_only",
+        "reviewKind": "developer_ai_not_independent_gold", "rationale": "Bounded declared read only; no semantic approval."}
+    fixtures = {"arguments": {"device": {"id": "lab-sw1"}}, "resources": {
+        "get_interfaces": [{"device": {"id": "lab-sw1"}}, {"interfaces": [{"name": "eth0", "adminUp": False}]}]}}
+    write_artifacts(tmp_path / "inputs", {"packet.json": packet, "compilation.json": compilation, "review.json": review, "fixture.json": fixtures})
+    monkeypatch.setattr(demo, "context", lambda: replace(local_context(), scopes=local_context().scopes | {"network:read", "device_id:lab-sw1", "interface_name:eth0"}))
+    def once(folder, payload, derive, **kwargs):
+        candidate = {"draft": "eth0 is administratively down; no change executed.", "uncertainties": [], "remaining_actions": []}
+        write_artifacts(folder, {"request.json": payload, "candidate.json": candidate})
+        (folder / "receipt.json").write_text(json.dumps(receipt(folder)))
+        return {"candidate.json": candidate, "result": {"inputTokens": 10, "outputTokens": 10}}
+    monkeypatch.setattr(demo, "author_once", once)
+    root = tmp_path / "inputs"
+    report = demo.run(root / "packet.json", root / "compilation.json", root / "review.json", tmp_path / "run",
+                      case="new-task", max_model_calls=1, fixture_path=root / "fixture.json")
+    assert report["execution"]["status"] == "governed_graph_completed"
+    recorded, previous, supplied, _ = prepare(tmp_path / "run")
+    assert recorded == packet and previous == report
+    assert supplied["candidate"]["draft"].startswith("eth0")
+    assert supplied["observations"] and supplied["original_task"] == packet["task"]
+
+
 def test_prefix_read_uses_original_engine_and_keeps_original_task_unmodified():
     packet, original, _ = packet_and_compilation()
     read = {k: v for k, v in original["plan"]["steps"][0].items() if k != "kind"}
@@ -69,3 +96,13 @@ def test_prefix_read_uses_original_engine_and_keeps_original_task_unmodified():
     assert compiled["flow"]["nodes"][-1]["depends_on"] == ["n0"]
     assert compiled["flow"]["nodes"][-1]["inputs"]["fields"]["original_task"]["value"] == packet["task"]
     assert author.compile_proposal(packet, compiled["suppliedPages"], compiled["plan"]) == compiled
+
+
+def test_compilation_roundtrip_does_not_depend_on_json_object_order():
+    packet, compiled, _ = packet_and_compilation()
+    raw = copy.deepcopy(compiled["plan"])
+    raw["boundaries"] = [{"evidence": ["task"], "kind": "uncertain_semantics", "explanation": "Open diagnostic duty needs independent semantic review."}]
+    first = author.compile_proposal(packet, compiled["suppliedPages"], raw)
+    saved_packet = json.loads(json.dumps(packet, sort_keys=True))
+    saved = json.loads(json.dumps(first, sort_keys=True))
+    assert author.compile_proposal(saved_packet, saved["suppliedPages"], saved["plan"]) == first
