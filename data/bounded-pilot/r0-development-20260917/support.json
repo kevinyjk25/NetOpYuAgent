@@ -1,0 +1,17 @@
+{
+  "effect_gateway": "existing_active_contracts_local_simulator",
+  "primitives": [
+    "evidence_dependency",
+    "resource_binding",
+    "bounded_predicate"
+  ],
+  "source_scripts": "inert",
+  "unsupported": [
+    "whole Kubernetes YAML/additive policy semantics",
+    "whole arbitrary KQL semantics",
+    "automatic proof of arbitrary free-form semantic extraction",
+    "causal inference",
+    "semantic redaction and architectural inference",
+    "source scripts and vendor execution"
+  ]
+}

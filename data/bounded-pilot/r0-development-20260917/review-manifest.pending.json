@@ -1,0 +1,25 @@
+{
+  "annotations": {
+    "a": "sha256:e547f88d210fe7ab908d74dd8bfb3c9493e45f93f0a92159d9926c28a5437374",
+    "b": "sha256:8db9ae99741ebd30cb3bac2a71cca12e71d655f33020f1f7b3df32f85569d4d8"
+  },
+  "digest": "sha256:dcc8c0be6d4512c77487ca27c7633f2f734ebaa7a89c9544f5ffa79f202a527f",
+  "extra_files": {
+    "adjudication.json": "sha256:0923e4b0df5e6bbba80d0733d4ab4e599db5c78ee264e66423323edfa93d1ca3",
+    "annotation-amendment-v4.json": "sha256:4514b173ae26a9abf28e138d5a3d2d72c050d35c42bd6702f43aade3e14a97d7",
+    "metadata.json": "sha256:2c8a7ce78a6856c7816a0416c6fb1f4df82d127de77f8b1d98db11de5004220f",
+    "sources.json": "sha256:2669cb5f5db6f80b143a81aa8b4b202494072bd172c95c37578c9c4a21224cee"
+  },
+  "files": {
+    "cases.json": "sha256:0fdeb9e6a8d657cde887aaa5bfb600987d92e967a75bd3b8c69e427ddbd70a95",
+    "dialogues.json": "sha256:92df9b3ab7f186f8acf2cae98e254030db8341404976f974c4fdd31936b06615",
+    "references.json": "sha256:1a0beaf7eb998da76b9bf6b3cfbc7bff879db685de7e6241f0dd2ade9a0a1569",
+    "support.json": "sha256:209072a19664b92a05e89ecef4cef02089acb671b8023f67e2f121f50e4b9442"
+  },
+  "role": "AI_assisted_developer_evaluation_not_human_Gold",
+  "schema": "netopyu.io/bounded-material-review/v1",
+  "status": "pending_root_adjudication",
+  "unresolved_blockers": [
+    "root_final_review_pending"
+  ]
+}

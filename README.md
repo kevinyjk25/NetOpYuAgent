@@ -8,9 +8,11 @@ EnsuredSkill 是一个网络优先的可靠执行 Runtime 原型。DSH、LLM 和
 
 开发测试已分为 `current`（默认）、`historical` 和 `all`；CI／提交验证使用完整 `all`。旧失败和原始证据保留，废弃诊断可恢复。详见[清理与测试指南](docs/CLEANUP-20260916.md)。
 
-**当前：R0 测量仍为部分实现，本轮真实模型调用为 0。** 已增加角色绑定计量入口（scripted-only）、arm 独立 SQLite 模拟 Provider、context-local 编译／Runtime 路由和实际 DSH 脚本化接线探针；三条接线路径已通过。可信 tokenizer／调用前 token 计量、6 Skill／12 Task 样本与独立标签、完整依赖冻结仍未完成；DSH 字符估算不足以预授权。见[有限收敛方案](docs/EVALUATION-RESET-20260916.md)与[接线摘要](docs/benchmarks/bounded-pilot-r0-integration-summary.json)。旧 `paused_unmet`、正式门禁、权限和默认 UI 不变；不是 Agent 收益或 36 项门槛通过。
+**当前：R0 工程验收完成，尚未进入 R1。** 同一封存的 6 Skill／12 Task，经一次明确授权的关联重验，**24/24 臂机械通过、54 次本地 Provider 读取、0 次真实推理**；预算结算、结果递送、资源排空和依赖不变性均通过。原失败批次完整保留，不改判。详见 [R0 验收报告](docs/R0-COMPLETION.md)、[机器摘要](docs/benchmarks/r0-reacceptance-20260918-summary.json)与[独立材料包](data/bounded-pilot/r0-development-20260917/README.md)。
 
-最近一次已知小样本仍为 **2 Skill／3 Task，结构准入3/3、完整任务0/3**。不能用编译率或安全停止冒充业务成功。[原始负结果与成本](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)、[当前实现与使用](docs/GOVERNED-SESSION.md)、[进展及历史](docs/PROJECT-STATUS.md)。
+最近一次真实 9B 已知小样本仍为 **2 Skill／3 Task，结构准入3/3、完整任务0/3**。不能用编译率或安全停止冒充业务成功。[原始负结果与成本](docs/SCHEMA-ARTIFACT-CONVERGENCE.md)、[当前实现与使用](docs/GOVERNED-SESSION.md)、[进展及历史](docs/PROJECT-STATUS.md)。
+
+R0 只验证测量机制，不是 9B 业务成绩或生产安全概率。真实生成仍关闭；历史[Token 预检](docs/R0-TOKEN-PREFLIGHT.md)和[生命周期检查](docs/R0-MEASUREMENT-LIFECYCLE.md)单独保留。
 
 ### 项目设计
 
@@ -221,9 +223,11 @@ Containerlab 实验、审批卡、回滚证据和 Provider 接入的完整操作
 
 Development tests are split into default `current`, `historical` and full `all`; CI/pre-commit verification uses all. Historical failures and raw evidence remain intact; retired diagnostics are recoverable. See [cleanup and testing](docs/CLEANUP-20260916.md).
 
-**Current: R0 measurement remains partial, with zero real-model calls in this work.** Added: role-bound scripted-only metering, arm-isolated SQLite simulated Providers, context-local compiler/Runtime routes and an installed-DSH scripted wiring probe; all three wiring paths passed. Trusted tokenizer/preflight counting, the six-Skill/twelve-task sample, independent labels and complete dependency freezing remain unfinished; DSH character estimates cannot authorize token budgets. See the [bounded protocol](docs/EVALUATION-RESET-20260916.md) and [integration summary](docs/benchmarks/bounded-pilot-r0-integration-summary.json). The old `paused_unmet` status, formal gates, authority and default UI remain unchanged; this establishes neither agent benefit nor the 36-probe gate.
+**Current: R0 engineering acceptance is complete; R1 has not started.** One explicitly authorized linked reacceptance of the same six Skills/twelve tasks passes **24/24 mechanical arms, 54 local Provider reads and zero real inference calls**, including settlement, delivery, drainage and dependency integrity. The original failed batch remains unchanged. See [R0 acceptance](docs/R0-COMPLETION.md), the [machine summary](docs/benchmarks/r0-reacceptance-20260918-summary.json) and [standalone material](data/bounded-pilot/r0-development-20260917/README.md).
 
-The latest known sample remains **two Skills/three tasks: 3/3 structural admissions, 0/3 complete tasks**. Compilation and safe stopping are not business success. See [negative evidence and costs](docs/SCHEMA-ARTIFACT-CONVERGENCE.md), [implemented workflow](docs/GOVERNED-SESSION.md) and [status/history](docs/PROJECT-STATUS.md).
+The latest real-9B known sample remains **two Skills/three tasks: 3/3 structural admissions, 0/3 complete tasks**. Compilation and safe stopping are not business success. See [negative evidence and costs](docs/SCHEMA-ARTIFACT-CONVERGENCE.md), [implemented workflow](docs/GOVERNED-SESSION.md) and [status/history](docs/PROJECT-STATUS.md).
+
+R0 checks measurement mechanisms, not 9B business performance or production safety probability. Live generation remains disabled; historical [token preflight](docs/R0-TOKEN-PREFLIGHT.md) and [lifecycle checks](docs/R0-MEASUREMENT-LIFECYCLE.md) retain their separate scope.
 
 EnsuredSkill is a network-first Reliability Runtime research prototype. DSH, the LLM, and L1 Skills produce hypotheses and Candidate Plans; Contract, Evidence, Guard, Risk, and transactional state determine what is allowed to reach the network.
 

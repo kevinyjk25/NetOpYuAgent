@@ -2,7 +2,7 @@
 
 ## 中文
 
-**当前研究入口是 [R0–R3 有限收敛方案](EVALUATION-RESET-20260916.md)。** R0 仍为测量部分实现；实际 DSH 三条脚本化接线已通过，真实模型调用为 0。可信同后端 tokenizer／调用前计量、完整控制器／依赖冻结、6 Skill／12 Task 与独立标签仍待完成；不进入 R1，不以工程测试冒充语义能力。
+**当前研究入口是 [R0–R3 有限收敛方案](EVALUATION-RESET-20260916.md)。** R0 工程阶段已完成：一次获批关联重验通过 24/24 臂、54 次本地读取、0 真实推理；原失败保留。未进入 R1，不将机械结果当作 9B 成绩。详见 [R0 验收报告](R0-COMPLETION.md)和[完成机器摘要](benchmarks/r0-reacceptance-20260918-summary.json)，来源、双审与裁决见[独立材料包](../data/bounded-pilot/r0-development-20260917/README.md)。
 
 本次[清理与测试分层](CLEANUP-20260916.md)区分当前回归、历史探索和完整回归。旧文档中的“当前／下一步”是历史快照，不是继续试跑安排；与[原型准则](ENSUREDSKILL-PROTOTYPE.md)冲突的生产工程计划不生效。
 
@@ -13,7 +13,9 @@
 | 项目设计、能力、优势、性能、场景与使用 | [项目 README](../README.md) |
 | 当前完成项、待办与停止点 | [项目进展](PROJECT-STATUS.md) |
 | 新考核方案、三份成绩单、R0–R3 总预算与硬停止 | [考核重置](EVALUATION-RESET-20260916.md) |
+| 当前 R0 完成清单、保留失败与独立封存输入 | [R0 验收报告](R0-COMPLETION.md) / [材料与逐案裁决](../data/bounded-pilot/r0-development-20260917/README.md) / [第三方归属](R0-THIRD-PARTY-NOTICES.md) |
 | 测量与实际 DSH 接线证据，不是真实模型成绩 | [R0 测量摘要](benchmarks/bounded-pilot-r0-summary.json) / [接线摘要](benchmarks/bounded-pilot-r0-integration-summary.json) |
+| 历史生命周期证据与当前离线 Token 预检 | [生命周期修复](R0-MEASUREMENT-LIFECYCLE.md) / [Token 预检现况](R0-TOKEN-PREFLIGHT.md) / [本轮摘要](benchmarks/token-preflight-20260917-summary.json) |
 | 清理了什么、如何恢复、怎样选择测试 | [清理说明](CLEANUP-20260916.md) / [清理摘要](benchmarks/cleanup-20260916-summary.json) |
 | 评测代码从哪里看，哪些是历史依赖 | [评测代码导航](../evaluation/README.md) |
 | 架构、总体、详细与系统设计 | [ARCHITECTURE](../ARCHITECTURE.md) / [HLD](../HLD.md) / [LLD](../LLD.md) / [SSD](../SSD.md) |
@@ -44,7 +46,9 @@
 
 ## English
 
-The active research entry is the [bounded R0–R3 protocol](EVALUATION-RESET-20260916.md). R0 measurement is partial. Three installed-DSH/scripted-model wiring paths passed with zero real-model calls; trusted tokenizer/preflight metering, the full controller/dependency freeze and six-Skill/twelve-task independent references remain open. R1 has not started. Engineering checks are not semantic evidence.
+The active entry is the [bounded R0–R3 protocol](EVALUATION-RESET-20260916.md). R0 engineering is complete: one authorized linked reacceptance passes 24/24 arms and 54 local reads with zero real inference; the original failed batch remains unchanged. R1 has not started and these are not 9B results. See [R0 acceptance](R0-COMPLETION.md), the [completion summary](benchmarks/r0-reacceptance-20260918-summary.json), [standalone sources/reviews/adjudication](../data/bounded-pilot/r0-development-20260917/README.md) and [third-party attribution](R0-THIRD-PARTY-NOTICES.md).
+
+The historical [lifecycle repair](R0-MEASUREMENT-LIFECYCLE.md) covers metering, close and late delivery. [Token preflight status](R0-TOKEN-PREFLIGHT.md) and the [current summary](benchmarks/token-preflight-20260917-summary.json) describe the authorized offline implementation and remaining boundaries, not an enabled real-model path.
 
 Start with the [project README](../README.md), [current status](PROJECT-STATUS.md), [architecture](../ARCHITECTURE.md), [Skill/system interaction](SKILL-SYSTEM-INTERACTION.md), [governed session](GOVERNED-SESSION.md) and [hybrid boundary](GOVERNED-HYBRID-FLOWS.md). The [evaluation code map](../evaluation/README.md) separates the active measurement path from legacy dependencies. [Cleanup and test suites](CLEANUP-20260916.md) explains current/historical/all selection, recovery and the [cleanup evidence](benchmarks/cleanup-20260916-summary.json).
 

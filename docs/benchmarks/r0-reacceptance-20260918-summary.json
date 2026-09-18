@@ -1,0 +1,767 @@
+{
+  "authority": {
+    "liveGenerationEnabled": false,
+    "productionAuthorityChanged": false,
+    "pushPerformed": false,
+    "r1Started": false,
+    "researchEvidenceEligible": false,
+    "runtimeLargeEvaluationAllowed": false,
+    "semanticPerformance": "not_measured"
+  },
+  "authorization": {
+    "approved_at": "2026-09-18T02:46:30Z",
+    "scope": "one_zero_inference_engineering_reacceptance",
+    "source": "current_thread:user_continue_after_explicit_reacceptance_request; approved_at_is_host_recorded_time",
+    "statement": "继续"
+  },
+  "checks": {
+    "all_accounted_and_bounded": true,
+    "all_resources_drained": true,
+    "declared_dependencies_unchanged": true,
+    "explicit_one_time_link": true,
+    "final_documentation_review": true,
+    "full_mechanical_batch": true,
+    "full_regression": true,
+    "same_material_and_protocol": true,
+    "zero_real_generation": true
+  },
+  "date": "2026-09-18",
+  "decision_role": "host_review_of_bounded_zero_inference_engineering_evidence_not_semantic_qualification",
+  "dependency_digest": "sha256:09d6a639f11beac2428f32c62abbd07beb39133b3737f54a5932c22642da5b15",
+  "digest": "sha256:909a3d0047fbf03734bea30cbc5459a22b3d8b3f6050627ecde2ae00d265b9ae",
+  "evidence": {
+    "amendment": {
+      "internal_digest": "sha256:0fac1712e68b1b274084e9fff77a35d2b1d1834b1cee4f927001d033ee317227",
+      "path": "data/bounded-pilot/r0-reacceptance-20260918.json",
+      "raw_sha256": "sha256:16f7b53235ffe34b7640667df29b4a9b2edf7515a5402de68204d3102bd9d867"
+    },
+    "controller": {
+      "internal_digest": "sha256:cb1e2464f2d2fb5ccf46ff80f12c3df914a465b8ffc0ec8918c64d535f7c7673",
+      "path": "artifacts/r0-reacceptance-20260918/paired-acceptance/controller/report.json",
+      "raw_sha256": "sha256:ed3197babf16373adf7798b2e5e55e620834a64212b18bfc8fe0994314a137ab"
+    },
+    "earlier_failure_summary": {
+      "internal_digest": "sha256:b06d29cdfc631ea44e21fd4ccf5673e9659cf95356782765e394afcae3dce445",
+      "path": "docs/benchmarks/r0-closure-20260917-summary.json",
+      "raw_sha256": "sha256:4cdea6fd4a0a1beaab8cdbafa38d4bc9807640366f638b988f8c40445f307f5a"
+    },
+    "outer": {
+      "internal_digest": "sha256:022d97e56fd661dcfdfcbe7ff9eb878e27ca3bf081665edc875562292c6ecc76",
+      "path": "artifacts/r0-reacceptance-20260918/paired-acceptance/report.json",
+      "raw_sha256": "sha256:1682413f8d4a6cf10bcc28faedfb3465ef603bae5a74367b846fc1c6552e6ca2"
+    }
+  },
+  "limitations": [
+    "predeclared mechanical dialogues, not autonomous L1 tool choice or model performance",
+    "real offline input tokens; synthetic output usage; timing includes repeated asset hashing",
+    "original failed run remains 1 measurement-invalid plus 23 unrun; not regraded",
+    "old exact-send smoke arm was active: binding evidence only, not lifecycle evidence",
+    "declared execution dependencies plus OS/kernel trust boundary, not complete-machine attestation",
+    "original two-working-day historical labor compliance unprovable; one approved exception, no window reset",
+    "current optional semantic reviewer is not blinded; R1 must project blind review inputs",
+    "automatic Effect bridge, 36 Runtime probes and live generation parity remain untested in this batch"
+  ],
+  "lineage": {
+    "amendment_digest": "sha256:0fac1712e68b1b274084e9fff77a35d2b1d1834b1cee4f927001d033ee317227",
+    "child_assigned_arms": 24,
+    "child_started_arms": 24,
+    "child_study_id": "r0-controller-engineering-v1-reacceptance-1",
+    "claim_digest": "sha256:378b842dcc9059e806b410a3c5ade9ae7fef1720028583d92359e191171defa6",
+    "max_total_started_arms": 25,
+    "original_r0_window_restarted": false,
+    "parent_assigned_arms": 24,
+    "parent_measurement_invalid_arms": 1,
+    "parent_preserved": true,
+    "parent_started_arms": 1,
+    "parent_study_id": "r0-controller-engineering-v1",
+    "research_permission_changed": false,
+    "total_assigned_arms": 48,
+    "total_started_arms": 25
+  },
+  "material": {
+    "boundary": 4,
+    "positive": 8,
+    "repositories": 6,
+    "review_digest": "sha256:8d7d66ac5f07049f4e84bf65f7d5397a48f4a55eb2ddd805b11a85e6a69af079",
+    "role": "AI_assisted_developer_evaluation_not_human_Gold",
+    "skills": 6,
+    "tasks": 12
+  },
+  "new_batch": {
+    "arm_wall_ms": 1233089.5509719849,
+    "assigned_arms": 24,
+    "completed_arms": 24,
+    "per_arm": [
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "mesh-incident",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 74256.66785240173,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "runtime",
+          "runtime",
+          "fallback"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 33504,
+          "charged_output_tokens": 6,
+          "known_input_tokens": 33504,
+          "known_output_tokens": 6,
+          "model_requests": 6,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "mesh-incident",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 48060.203075408936,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "native",
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 22241,
+          "charged_output_tokens": 4,
+          "known_input_tokens": 22241,
+          "known_output_tokens": 4,
+          "model_requests": 4,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "notion-resolve-then-query",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 37186.74612045288,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 8705,
+          "charged_output_tokens": 3,
+          "known_input_tokens": 8705,
+          "known_output_tokens": 3,
+          "model_requests": 3,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "notion-resolve-then-query",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 60189.14079666138,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "runtime",
+          "runtime"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 15766,
+          "charged_output_tokens": 5,
+          "known_input_tokens": 15766,
+          "known_output_tokens": 5,
+          "model_requests": 5,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "network-policy-unresolved-target",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 36144.67406272888,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 5786,
+          "charged_output_tokens": 3,
+          "known_input_tokens": 5786,
+          "known_output_tokens": 3,
+          "model_requests": 3,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "network-policy-unresolved-target",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 61848.92010688782,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "runtime",
+          "runtime"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 10455,
+          "charged_output_tokens": 5,
+          "known_input_tokens": 10455,
+          "known_output_tokens": 5,
+          "model_requests": 5,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "irql-missing-enricher",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 60516.60394668579,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "runtime",
+          "runtime"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 32591,
+          "charged_output_tokens": 5,
+          "known_input_tokens": 32591,
+          "known_output_tokens": 5,
+          "model_requests": 5,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "irql-missing-enricher",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 38096.07791900635,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 18220,
+          "charged_output_tokens": 3,
+          "known_input_tokens": 18220,
+          "known_output_tokens": 3,
+          "model_requests": 3,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "network-audit-public-metadata",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 38104.13479804993,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 5076,
+          "charged_output_tokens": 3,
+          "known_input_tokens": 5076,
+          "known_output_tokens": 3,
+          "model_requests": 3,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "network-audit-public-metadata",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 61653.77163887024,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "runtime",
+          "runtime"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 9214,
+          "charged_output_tokens": 5,
+          "known_input_tokens": 9214,
+          "known_output_tokens": 5,
+          "model_requests": 5,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "mesh-complete-evidence-analysis",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 74040.00091552734,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "runtime",
+          "runtime",
+          "fallback"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 33510,
+          "charged_output_tokens": 6,
+          "known_input_tokens": 33510,
+          "known_output_tokens": 6,
+          "model_requests": 6,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "mesh-complete-evidence-analysis",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 49604.43210601807,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "native",
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 22247,
+          "charged_output_tokens": 4,
+          "known_input_tokens": 22247,
+          "known_output_tokens": 4,
+          "model_requests": 4,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "network-policy-least-privilege-audit",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 74122.72477149963,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "runtime",
+          "runtime",
+          "fallback"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 18973,
+          "charged_output_tokens": 6,
+          "known_input_tokens": 18973,
+          "known_output_tokens": 6,
+          "model_requests": 6,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "network-policy-least-privilege-audit",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 50008.70132446289,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "native",
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 13456,
+          "charged_output_tokens": 4,
+          "known_input_tokens": 13456,
+          "known_output_tokens": 4,
+          "model_requests": 4,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "incident-new-ticket-without-go-ahead",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 74526.50594711304,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "runtime",
+          "runtime",
+          "fallback"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 21219,
+          "charged_output_tokens": 6,
+          "known_input_tokens": 21219,
+          "known_output_tokens": 6,
+          "model_requests": 6,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "incident-new-ticket-without-go-ahead",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 48958.89687538147,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "native",
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 13836,
+          "charged_output_tokens": 4,
+          "known_input_tokens": 13836,
+          "known_output_tokens": 4,
+          "model_requests": 4,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "irql-draft",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 36340.07787704468,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 18487,
+          "charged_output_tokens": 3,
+          "known_input_tokens": 18487,
+          "known_output_tokens": 3,
+          "model_requests": 3,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "irql-draft",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 62106.6107749939,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 2,
+        "routes": [
+          "runtime",
+          "runtime"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 32911,
+          "charged_output_tokens": 5,
+          "known_input_tokens": 32911,
+          "known_output_tokens": 5,
+          "model_requests": 5,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "network-audit-authentication-without-approval",
+        "compiler_requests": 1,
+        "delivery_matched": true,
+        "elapsed_ms": 37538.78617286682,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 1,
+        "routes": [
+          "runtime"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 4207,
+          "charged_output_tokens": 3,
+          "known_input_tokens": 4207,
+          "known_output_tokens": 3,
+          "model_requests": 3,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "network-audit-authentication-without-approval",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 25187.65687942505,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 1,
+        "routes": [
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 2191,
+          "charged_output_tokens": 2,
+          "known_input_tokens": 2191,
+          "known_output_tokens": 2,
+          "model_requests": 2,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "incident-known-cause-lookup",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 48751.72019004822,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "native",
+          "native",
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 14415,
+          "charged_output_tokens": 4,
+          "known_input_tokens": 14415,
+          "known_output_tokens": 4,
+          "model_requests": 4,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "incident-known-cause-lookup",
+        "compiler_requests": 2,
+        "delivery_matched": true,
+        "elapsed_ms": 73030.46894073486,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 3,
+        "routes": [
+          "runtime",
+          "runtime",
+          "fallback"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 21818,
+          "charged_output_tokens": 6,
+          "known_input_tokens": 21818,
+          "known_output_tokens": 6,
+          "model_requests": 6,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "control",
+        "broker_drained": true,
+        "case_id": "notion-ambiguous-data-source",
+        "compiler_requests": 0,
+        "delivery_matched": true,
+        "elapsed_ms": 25614.83383178711,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 1,
+        "routes": [
+          "native"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 4472,
+          "charged_output_tokens": 2,
+          "known_input_tokens": 4472,
+          "known_output_tokens": 2,
+          "model_requests": 2,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      },
+      {
+        "arm": "treatment",
+        "broker_drained": true,
+        "case_id": "notion-ambiguous-data-source",
+        "compiler_requests": 1,
+        "delivery_matched": true,
+        "elapsed_ms": 37201.19404792786,
+        "host_drained": true,
+        "known_author_input_rejections": [],
+        "mechanics_passed": true,
+        "provider_receipts": 1,
+        "routes": [
+          "runtime"
+        ],
+        "status": "completed",
+        "usage": {
+          "charged_input_tokens": 7653,
+          "charged_output_tokens": 3,
+          "known_input_tokens": 7653,
+          "known_output_tokens": 3,
+          "model_requests": 3,
+          "unknown_requests": 0,
+          "usage_complete": true
+        }
+      }
+    ],
+    "provider_receipts": 54,
+    "real_experimental_model_calls": 0,
+    "transport_requests": 100,
+    "unrun_arms": 0,
+    "usage": {
+      "charged_input_tokens": 390953,
+      "charged_output_tokens": 100,
+      "known_input_tokens": 390953,
+      "known_output_tokens": 100,
+      "model_requests": 100,
+      "unknown_requests": 0,
+      "usage_complete": true
+    }
+  },
+  "next": "R1 bounded implementation and development screening, not started by this review",
+  "protocol_digest": "sha256:1b0ed97119b831739d12b2598f32120cb3218cf29bd8b954be151756fcbe906e",
+  "qa": [
+    {
+      "counting": "JUnit entries include subtests, not agent tasks",
+      "errors": 0,
+      "failures": 0,
+      "path": "artifacts/r0-reacceptance-20260918/qa/all-suite.xml",
+      "raw_sha256": "sha256:2d3a9a71197820592059bc6eefde241c000d431037ce38419e5b97765283cc73",
+      "seconds": 281.262,
+      "skipped": 0,
+      "tests": 4111
+    },
+    {
+      "counting": "JUnit entries include subtests, not agent tasks",
+      "errors": 0,
+      "failures": 0,
+      "path": "artifacts/r0-reacceptance-20260918/qa/final-docs-authority.xml",
+      "raw_sha256": "sha256:cf226b692b40de01473077951a9c60c5c0787848c283ee1730c203b328c121d4",
+      "seconds": 0.769,
+      "skipped": 0,
+      "tests": 8
+    }
+  ],
+  "r0Complete": true,
+  "schema": "ensuredskill.io/r0-completion-review/v1",
+  "status": "r0_engineering_complete"
+}

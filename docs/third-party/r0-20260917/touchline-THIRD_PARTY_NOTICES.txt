@@ -1,0 +1,9 @@
+# Third-party notices
+
+Touchline core is original MIT-licensed work. `sources.lock.json` records research inputs and precise repository snapshots. No upstream source files are currently copied into the core.
+
+Dembrandt is invoked as a separately installed MIT CLI when present. OpenViking and `xai-org/grok-prompts` are AGPL-3.0 and remain reference-only or separately installed services; they are not linked, bundled, or incorporated. Repositories with no detected license are never incorporated.
+
+Quantitative image comparison uses `pixelmatch` (ISC) and `pngjs` (MIT) as declared runtime dependencies. Their source is not copied into this repository; package managers install them under their published licenses.
+
+The player names are configurable role aliases. Portraits are original generated pixel artwork with generic kit palettes and no crests, sponsors, league marks, or endorsement claims. Touchline is unofficial, unrelated, and not endorsed by any named player, team, league, or by the unrelated coaching product using the same name.

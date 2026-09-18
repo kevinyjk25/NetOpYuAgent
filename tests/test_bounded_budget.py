@@ -1,5 +1,7 @@
 """Budget mechanisms only: no model calls or task-quality claims."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+import sqlite3
 import threading
 
 import pytest
@@ -365,3 +367,144 @@ def test_full_protocol_caps_accumulate_across_versions_and_phases(ledger):
     assert snapshot["usage"]["model_requests"] == CAPS["study_model_requests"] == 1200
     with pytest.raises(BudgetError, match="case budget"):
         start(value, candidate, case="fresh-directory-cannot-reset")
+
+
+def test_exact_reserved_call_guard_allows_only_its_own_pending_claim(ledger):
+    value, clock, candidate = ledger
+    arm = start(value, candidate)
+    reserved = value.reserve_model_call(arm, "physical", "compiler", 20, 30)
+    clock.now += 5
+    guarded = value.guard_reserved_call(arm, "physical")
+    assert guarded == {"arm_id": arm, "request_id": "physical", "call_id": reserved["call_id"],
+                       "deadline": 1420, "remaining_seconds": 415, "authority_granted": False}
+    assert value.guard_reserved_call(arm, "physical") == guarded  # Check, not a new claim.
+    with pytest.raises(BudgetError, match="unsettled"):
+        value.check_arm(arm)
+    for wrong_arm, wrong_request in ((arm, "different"), ("different-arm", "physical")):
+        with pytest.raises(BudgetError, match="unknown call_id"):
+            value.guard_reserved_call(wrong_arm, wrong_request)
+    assert value.inspect_arm(arm)["calls"] == [reserved]
+    value.settle_call(arm, "physical", 10, 10)
+    with pytest.raises(BudgetError, match="not reserved"):
+        value.guard_reserved_call(arm, "physical")
+
+
+def test_reserved_call_guard_never_ignores_a_second_pending_request(ledger):
+    value, clock, candidate = ledger
+    arm = start(value, candidate)
+    value.reserve_model_call(arm, "own", "agent", 10, 20)
+    # Fault fixture only: public reservation APIs forbid this conflicting row.
+    with value._transaction() as db:
+        value._reserve(db, "conflicting-claim", "study", candidate, arm, "case", "other", "arm", "agent",
+                       1, 1, clock.now, clock.now + CAPS["arm_seconds"])
+    with pytest.raises(BudgetError, match="unsettled"):
+        value.guard_reserved_call(arm, "own")
+    assert len(value.inspect_arm(arm)["calls"]) == 2
+
+
+@pytest.mark.parametrize("operation", ["pause", "finish"])
+def test_reserved_dispatch_rejected_after_pause_or_finish_but_usage_can_settle(ledger, operation):
+    value, _, candidate = ledger
+    arm = start(value, candidate)
+    value.reserve_model_call(arm, "r", "agent", 10, 20)
+    if operation == "pause":
+        value.pause_study("study", "operator_stop")
+    else:
+        assert value.finish_arm(arm, "completed")["status"] == "outcome_unknown"
+    with pytest.raises(BudgetError, match="halted"):
+        value.guard_reserved_call(arm, "r")
+    assert value.settle_call(arm, "r", 5, 6)["status"] == "settled"
+    snapshot = value.inspect_arm(arm)
+    assert snapshot["study_status"] == "halted"
+    if operation == "finish":
+        assert snapshot["arm"]["status"] == "outcome_unknown"
+    with pytest.raises(BudgetError):
+        value.guard_reserved_call(arm, "r")
+
+
+def test_reserved_guard_rejects_clock_rollback_and_preserves_deadline(ledger):
+    value, clock, candidate = ledger
+    arm = start(value, candidate)
+    value.reserve_model_call(arm, "r", "agent", 10, 20)
+    clock.now += 2
+    assert value.guard_reserved_call(arm, "r")["remaining_seconds"] == 418
+    clock.now -= 1
+    with pytest.raises(BudgetError, match="clock rollback"):
+        value.guard_reserved_call(arm, "r")
+    assert value.inspect_arm(arm)["calls"][0]["deadline"] == 1420
+
+
+@pytest.mark.parametrize("operation", ["guard", "settle", "offline_settle", "finish", "reported_finish"])
+def test_deadline_is_exclusive_for_dispatch_settlement_and_finish(ledger, operation):
+    value, clock, candidate = ledger
+    if operation == "offline_settle":
+        claim = value.reserve_offline_call("study", candidate, "case", "r", 10, 20)
+        clock.now = claim["deadline"]
+        result = value.settle_offline_call(candidate, "case", "r", 5, 5)
+        assert result["status"] == "budget_exceeded" and result["charged_output"] == 20
+        return
+    arm = start(value, candidate)
+    if operation in {"guard", "settle"}:
+        value.reserve_model_call(arm, "r", "agent", 10, 20)
+    if operation != "reported_finish":
+        clock.now += CAPS["arm_seconds"]
+    if operation == "guard":
+        with pytest.raises(BudgetError, match="wall-clock"):
+            value.guard_reserved_call(arm, "r")
+        assert value.inspect_arm(arm)["calls"][0]["status"] == "reserved"
+    elif operation == "settle":
+        result = value.settle_call(arm, "r", 5, 5)
+        assert result["status"] == "budget_exceeded" and result["charged_output"] == 20
+    else:
+        result = value.finish_arm(arm, "completed", elapsed_ms=CAPS["arm_seconds"] * 1000)
+        assert result["status"] == "timeout"
+
+
+@pytest.mark.parametrize("operation", ["reserve", "reserved_guard", "check", "effect", "settle", "finish"])
+def test_sqlite_lock_wait_cannot_authorize_using_a_prelock_clock(ledger, monkeypatch, operation):
+    value, clock, candidate = ledger
+    arm = start(value, candidate)
+    if operation in {"reserved_guard", "settle"}:
+        value.reserve_model_call(arm, "r", "agent", 10, 20)
+    methods = {
+        "reserve": lambda: value.reserve_model_call(arm, "r", "agent", 10, 20),
+        "reserved_guard": lambda: value.guard_reserved_call(arm, "r"),
+        "check": lambda: value.check_arm(arm),
+        "effect": lambda: value.guard_effect(arm),
+        "settle": lambda: value.settle_call(arm, "r", 5, 5),
+        "finish": lambda: value.finish_arm(arm, "completed"),
+    }
+    attempting_lock = threading.Event()
+    connection = value._connection
+
+    @contextmanager
+    def traced_connection():
+        with connection() as db:
+            db.set_trace_callback(lambda sql: attempting_lock.set() if sql == "BEGIN IMMEDIATE" else None)
+            yield db
+
+    monkeypatch.setattr(value, "_connection", traced_connection)
+    blocker = sqlite3.connect(value.path, isolation_level=None)
+    blocker.execute("BEGIN IMMEDIATE")
+    try:
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(methods[operation])
+            try:
+                assert attempting_lock.wait(2), "worker must reach real SQLite transaction acquisition"
+                assert not future.done()
+                clock.now += CAPS["arm_seconds"]
+            finally:
+                blocker.commit()
+            if operation in {"settle", "finish"}:
+                result = future.result(timeout=3)
+                assert result["status"] == ("budget_exceeded" if operation == "settle" else "timeout")
+            else:
+                with pytest.raises(BudgetError, match="wall-clock"):
+                    future.result(timeout=3)
+    finally:
+        blocker.close()
+    snapshot = value.inspect_arm(arm)
+    if operation in {"reserve", "check", "effect"}:
+        assert snapshot["calls"] == []
+    elif operation == "reserved_guard":
+        assert snapshot["calls"][0]["status"] == "reserved"

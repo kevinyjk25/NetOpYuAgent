@@ -1,0 +1,82 @@
+{
+  "authorization": {
+    "approved_at": "2026-09-18T02:46:30Z",
+    "scope": "one_zero_inference_engineering_reacceptance",
+    "source": "current_thread:user_continue_after_explicit_reacceptance_request; approved_at_is_host_recorded_time",
+    "statement": "继续"
+  },
+  "child_study_id": "r0-controller-engineering-v1-reacceptance-1",
+  "dialogues_digest": "sha256:a91407a9d92a3036c92158aa65059b485c856e614f30da3dc40925b6c0510a4e",
+  "digest": "sha256:0fac1712e68b1b274084e9fff77a35d2b1d1834b1cee4f927001d033ee317227",
+  "limits": {
+    "actual_model_calls": 0,
+    "child_assigned_arms": 24,
+    "max_total_started_arms": 25,
+    "original_r0_window_restarted": false,
+    "research_permission_changed": false,
+    "total_assigned_arms": 48
+  },
+  "parent_directory": "/Users/steven/NetOpYuAgent-dev/NetOpYuAgent/artifacts/r0-closure-20260917/paired-acceptance",
+  "parent_files": {
+    "controller/freeze.json": "sha256:1fe5366bd831dfa725c5da15e4ea49ff262f796bdf6d25cdb76c697998d10811",
+    "controller/report.json": "sha256:7c47c749a4cfb558472c1e9452cf91a3ef9b89c80490f16403da3da8e1f3bc14",
+    "dependencies.json": "sha256:85763360781ccf6dd2908f3d2218df6d43b15dec873440fd8c55f6a72a58c54a",
+    "pre-run.json": "sha256:9c59651268a0a1de138b25992669b8b3867bfa7b89ea312d3540007fb44eea02",
+    "protocol.json": "sha256:fd296639971ef5412cc46fda9b3a40658186cd87eeed4d2ff14eb70aad273f73",
+    "reference-freeze.json": "sha256:2404370aec5d911e45625af2a53c0191b18f262727862f69234d3c8b8e7717e3",
+    "report.json": "sha256:c6ff9e3368e6eff3898c9a5d3e01f0d062bb7bf855043e1112efb37c426431dd"
+  },
+  "parent_ledger_snapshot": {
+    "arms": [
+      {
+        "arm": "B",
+        "arm_id": "38d323defff3484abae58f06f0f1f6fb7bc1114c7242c24bc3ba201fb882947a",
+        "candidate_id": "2d53826c400704c433581c3da9d247b7000f587ff99ae9066291e0a85b0b03b0",
+        "case_id": "mesh-incident",
+        "context_digest": "sha256:e0e7a5a61a7eb62f3512bd1276e2bd2d50cf3c2ca662448870b9a45aed0a655f",
+        "deadline": 1789588444.512894,
+        "elapsed_ms": 1579.4241428375244,
+        "finished_at": 1789588026.092318,
+        "reason": null,
+        "repetition": 1,
+        "started_at": 1789588024.512894,
+        "status": "measurement_invalid",
+        "study_id": "r0-controller-engineering-v1"
+      }
+    ],
+    "calls": [],
+    "candidates": [
+      {
+        "candidate_digest": "sha256:c9bc34f07fce0584e6a32082732430af4823ccc5cc283b684c2683cc3a1a37c4",
+        "candidate_id": "2d53826c400704c433581c3da9d247b7000f587ff99ae9066291e0a85b0b03b0",
+        "created_at": 1789588024.510966,
+        "ordinal": 1,
+        "phase": "development",
+        "study_id": "r0-controller-engineering-v1"
+      }
+    ],
+    "development_cases": [
+      {
+        "case_id": "mesh-incident",
+        "context_digest": "sha256:e0e7a5a61a7eb62f3512bd1276e2bd2d50cf3c2ca662448870b9a45aed0a655f",
+        "study_id": "r0-controller-engineering-v1"
+      }
+    ],
+    "studies": [
+      {
+        "created_at": 1789588024.510365,
+        "last_clock": 1789588026.092318,
+        "protocol_digest": "sha256:fc27b86c3ab67eb0dd86a287020d70568c40ac66e27d46938e415a03e2891150",
+        "reason": "controller_failure_or_unknown",
+        "status": "halted",
+        "study_id": "r0-controller-engineering-v1"
+      }
+    ]
+  },
+  "parent_report_digest": "sha256:034ba526205c93ef0913e54fa8d8033bb77109bc8ccbb598bd239c205f43bc0d",
+  "parent_study_id": "r0-controller-engineering-v1",
+  "protocol_digest": "sha256:1b0ed97119b831739d12b2598f32120cb3218cf29bd8b954be151756fcbe906e",
+  "registry_path": "/Users/steven/NetOpYuAgent-dev/NetOpYuAgent/artifacts/bounded-r0-engineering/budget.sqlite3",
+  "review_digest": "sha256:8d7d66ac5f07049f4e84bf65f7d5397a48f4a55eb2ddd805b11a85e6a69af079",
+  "schema": "ensuredskill.io/r0-engineering-reacceptance/v1"
+}

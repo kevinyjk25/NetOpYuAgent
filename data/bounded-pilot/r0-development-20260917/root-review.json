@@ -1,0 +1,13 @@
+{
+  "adjudication_sha256": "sha256:0923e4b0df5e6bbba80d0733d4ab4e599db5c78ee264e66423323edfa93d1ca3",
+  "candidate_results_inspected": false,
+  "date": "2026-09-17",
+  "decision": "approved_for_bounded_development",
+  "note": "Root reviewed all twelve final criteria/duty sets and per-case corrections against the two isolated originals/addenda, final v4 tasks and pre-run synthetic observations. Approve only the fixed read-only/inert-draft/clarification development scope. Six different repository origins and materially distinct source topics were inspected; this is known development provenance, not an independent supply-chain or unseen audit. The requested incident is DD-42 Worker queue age while the no-match index contains DD-99 Worker CPU; the earlier root summary confusing these was checked against original facts and rejected, with no fact or label mutation. No verified cause/Fix may be borrowed from another case. IRQL uses actual FailedLogin, TrainingAuth and captured cluster; exact half-open interval is eligible but full KQL remains semantic. NetworkPolicy finite resource/flow predicates do not prove additive YAML semantics. Automatic extraction errors/omissions stay in the original fixed denominator, not excluded as unsupported. Source-save/write-policy/conditional query branches not triggered by these tasks remain recorded rather than becoming artificial failures. Original Netdata exclusion and negatives are preserved. This review permits material freeze only: no model generation, production authority, semantic success or R0 completion is granted by it.",
+  "pending_manifest_sha256": "sha256:ea2f69a6035d3d2bc8ad4780cdf331d299b5578f8c89f99b0822047096aa43ec",
+  "real_human": false,
+  "references_sha256": "sha256:1a0beaf7eb998da76b9bf6b3cfbc7bff879db685de7e6241f0dd2ade9a0a1569",
+  "reviewer": "root",
+  "role": "AI_assisted_developer_evaluation_not_human_Gold",
+  "unresolved_material_blockers": []
+}

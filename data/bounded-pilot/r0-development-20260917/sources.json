@@ -1,0 +1,400 @@
+{
+  "manifest": [
+    {
+      "commit": "a987e0da609977e1f04e240fc49d93372004360c",
+      "container_sha256": "sha256:1798f79470689a0406107dd4303731ae352f4e3bb49995d78cd59221a2807625",
+      "documents": [
+        {
+          "bytes": 966,
+          "executionAllowed": false,
+          "path": "agents/argus/skills/security-network-policies/SKILL.md",
+          "projection": "root",
+          "sha256": "sha256:1798f79470689a0406107dd4303731ae352f4e3bb49995d78cd59221a2807625"
+        }
+      ],
+      "known_failure_note": "Known local development source; no specific historical scored failure asserted.",
+      "known_failure_sources": [],
+      "provenance_path": "artifacts/translator-v2/market-snapshot-100/packages/nlamirault-agentheon-agents-argus-skills-security-network-policies-skill-d2704274fd/SKILL.md",
+      "repository": "nlamirault/agentheon",
+      "skill_id": "security-network-policies"
+    },
+    {
+      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6",
+      "container_sha256": "sha256:f1766798ccd74cd7b6bc7144fb0a700867a5b7245ebb73a673c82960b252f426",
+      "documents": [
+        {
+          "bytes": 2833,
+          "executionAllowed": false,
+          "path": "plugins/cloud-infrastructure/skills/service-mesh-observability/SKILL.md",
+          "projection": "root",
+          "sha256": "sha256:0aaa93e88b7f9fbdedbd6f881eb662e63b5a82ee942c02eb3ae0b7f7c806b042"
+        },
+        {
+          "bytes": 7715,
+          "executionAllowed": false,
+          "path": "plugins/cloud-infrastructure/skills/service-mesh-observability/references/details.md",
+          "projection": "initial_reference",
+          "sha256": "sha256:71c404bbfbc491e3e23124fbf4416f327f61d3a7495c6e09bb6871c5feaebd54"
+        }
+      ],
+      "known_failure_note": "Latest mesh-incident failed because its sole proposed next source and alleged contents were invented. Earlier passing sentinel and subsequent regression must both remain visible; no retrospective regrading.",
+      "known_failure_sources": [
+        "docs/benchmarks/isolated-compiler-summary.json",
+        "docs/benchmarks/schema-artifact-summary.json"
+      ],
+      "provenance_path": "artifacts/governed-session-20260916-schema-artifact-9b/mesh-incident/sessions/6f024ef5266c4f31bad109237c694054/prepared/packet.json",
+      "repository": "wshobson/agents",
+      "skill_id": "service-mesh-observability"
+    },
+    {
+      "commit": "06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1",
+      "container_sha256": "sha256:36d274503057fa27e58ab5169dd0e8469e7320c180b5816f6d65d4939c0d3cbc",
+      "documents": [
+        {
+          "bytes": 759,
+          "executionAllowed": false,
+          "path": "skills/network-architecture-audit/SKILL.md",
+          "projection": "root",
+          "sha256": "sha256:36d274503057fa27e58ab5169dd0e8469e7320c180b5816f6d65d4939c0d3cbc"
+        }
+      ],
+      "known_failure_note": "No specific scored failure was asserted for this Skill in this audit; it is already a known local development source, not unseen material.",
+      "known_failure_sources": [],
+      "provenance_path": "artifacts/translator-v2/market-snapshot-100/packages/edenbuilds-touchline-skills-network-architecture-audit-skill-md-894c0829ce/SKILL.md",
+      "repository": "edenbuilds/touchline",
+      "skill_id": "network-architecture-audit"
+    },
+    {
+      "commit": "02e0b2f852b39ea00c43283f999b83fc12079273",
+      "container_sha256": "sha256:babceb870ed2c5f1da51f21ff493811153cc3cc1e5e21b02a86ff6902ce911cb",
+      "documents": [
+        {
+          "bytes": 10489,
+          "executionAllowed": false,
+          "path": ".github/plugins/azure-kusto-graph-skills/skills/azure-kusto-irql/SKILL.md",
+          "projection": "root",
+          "sha256": "sha256:3708f24ab3a0754dbd862efbd94740e01f619590567c9ff45243435ac8394e96"
+        },
+        {
+          "bytes": 2284,
+          "executionAllowed": false,
+          "path": ".github/plugins/azure-kusto-graph-skills/skills/azure-kusto-irql/references/EXAMPLES.md",
+          "projection": "initial_reference",
+          "sha256": "sha256:983c17001ae1f222b621fa44a41bd1644324dd1289302313ca30f7f62db2cc1f"
+        },
+        {
+          "bytes": 2659,
+          "executionAllowed": false,
+          "path": ".github/plugins/azure-kusto-graph-skills/skills/azure-kusto-irql/references/KUSTO_EXPLORER_LAUNCH.md",
+          "projection": "initial_reference",
+          "sha256": "sha256:e3702ebf9255d91279a85e4076c878c4178d8afe305c2ee13604f94b735b70eb"
+        }
+      ],
+      "known_failure_note": "Preserve inclusive-endpoint and removed-column errors, skipped linked inventory, unchanged failed repair, and both failed complete-task results. No query or external cluster is executed by this nomination.",
+      "known_failure_sources": [
+        "docs/benchmarks/isolated-compiler-summary.json",
+        "docs/benchmarks/schema-artifact-summary.json"
+      ],
+      "provenance_path": "artifacts/governed-session-20260916-schema-artifact-9b/irql-draft/sessions/737c607b5d5a4b0ca3d8c6ec7a9227d4/prepared/packet.json",
+      "repository": "microsoft/skills",
+      "skill_id": "azure-kusto-irql"
+    },
+    {
+      "commit": "9d08464e89fbf2e29b55638bda74bd605fc07c04",
+      "container_sha256": "sha256:27a39ab718fcbc42cc36fa89fea3babc5ff98c8f57c97bb6ec6f79908d3e4987",
+      "documents": [
+        {
+          "bytes": 6199,
+          "executionAllowed": false,
+          "path": ".agents/skills/incident-alert-tickets/SKILL.md",
+          "projection": "root",
+          "sha256": "sha256:27a39ab718fcbc42cc36fa89fea3babc5ff98c8f57c97bb6ec6f79908d3e4987"
+        }
+      ],
+      "known_failure_note": "Known development cohort membership and aggregate historical failures are recorded; no individual task score is inferred from the aggregate summary.",
+      "known_failure_sources": [
+        "data/stage2_public_selection.json",
+        "docs/benchmarks/stage2-public-transfer-summary.json"
+      ],
+      "provenance_path": "artifacts/translator-v2/public-source-20260908-round2/batches/public-02/snapshot/packages/langfuse-langfuse-agents-skills-incident-alert-tickets-skill-md-073eb6972c/SKILL.md",
+      "repository": "langfuse/langfuse",
+      "skill_id": "incident-alert-tickets"
+    },
+    {
+      "commit": "aafe0878fd73123c5a5eecf076e05a48d86722bd",
+      "container_sha256": "sha256:d45e2c1270d58c7878c13467ab27780530de2af89fb8b307c662b5d4859dc555",
+      "documents": [
+        {
+          "bytes": 3867,
+          "executionAllowed": false,
+          "path": "skills/notion/SKILL.md",
+          "projection": "root",
+          "sha256": "sha256:d45e2c1270d58c7878c13467ab27780530de2af89fb8b307c662b5d4859dc555"
+        }
+      ],
+      "known_failure_note": "Known development cohort membership and aggregate historical failures are recorded; no individual task score is inferred from the aggregate summary.",
+      "known_failure_sources": [
+        "data/stage2_public_selection.json",
+        "docs/benchmarks/stage2-public-transfer-summary.json"
+      ],
+      "provenance_path": "artifacts/translator-v2/public-source-20260908-round2/batches/public-01/snapshot/packages/openclaw-openclaw-skills-notion-skill-md-0b77c93900/SKILL.md",
+      "repository": "openclaw/openclaw",
+      "skill_id": "notion"
+    }
+  ],
+  "schema": "netopyu.io/bounded-source-archive/v1",
+  "sources": {
+    "incident-tickets": {
+      "commit": "9d08464e89fbf2e29b55638bda74bd605fc07c04",
+      "documents": {
+        ".agents/skills/incident-alert-tickets/SKILL.md": "---\nname: incident-alert-tickets\ndescription: |\n  Read and record root causes in the Linear `incident-alert` knowledge base. Use\n  before and after investigating a named Datadog monitor, incident.io alert or\n  incident, or on-call page to find or record root causes.\n---\n\n# Incident Alert Tickets\n\nIncident-alert tickets turn on-call debugging into searchable knowledge: one\nLinear ticket per production alert/monitor, one dated section per distinct\nroot cause. This skill owns lookup, comparison, and the human-gated\nwrite-back; calling skills own the investigation itself. The team SOP is the\nLinear document titled \"Incident Alert Tickets\".\n\n## When to Apply\n\nApply whenever the task is anchored to an **alert identity**:\n\n- a Datadog monitor ID or title,\n- an incident.io alert or INC reference,\n- an on-call page (\"we got paged for X\").\n\nDo not try to detect \"incident mode\" — the presence of a named alert is the\ncondition, because the monitor is the ticket key. When an alert identity is\npresent, the lookup is mandatory; recording is offered after the investigation\nand gated on human approval. A customer report or code question with no alert\nidentity skips this skill.\n\nWhen multiple alerts fire together (a cascade), run lookup, compare, and\nclassify for **each** alert identity — every monitor has its own ticket. If\none root cause explains several alerts, write the full cause section on the\nmonitor closest to the cause and propose a short dated section on the other\nmonitors' tickets that links to it.\n\n## Ticket Contract\n\n- One ticket per monitor (per env when monitors are per-env), titled\n  `[ENV] <Monitor title>`, in the Engineering (LFE) team, carrying the\n  `incident-alert` label. The label set is the knowledge base.\n- Regional twins of one monitor (same metric and threshold per env) may share\n  a single ticket titled `[ENV1/ENV2] <Monitor title>` when the causes are\n  region-independent; list each env's monitor ID in the alert header.\n- The description opens with an alert header: monitor ID, trigger condition,\n  and how it surfaces (incident.io urgency, auto-resolve behavior).\n- One dated section per distinct root cause, separated by `---`:\n\n  ```markdown\n  ## YYYY-MM-DD — <short cause name>\n\n  **Recognize it:** <signals that identify this cause: log patterns, span\n  filters, metric shapes, affected routes>\n\n  **How urgent?** <impact, auto-recovery behavior, escalation threshold>\n\n  **Fix:** <positive actions only — every \"do not X\" needs a working\n  alternative; verified levers, not speculation>\n  ```\n\n- Cause sections are append-only: never rewrite or delete an existing section;\n  new knowledge gets a new dated block.\n- The description ends with a `## Your cause is not listed?` trailer: it\n  records firings that were never root-caused and tells the next engineer to\n  insert new dated sections above it, in the same format.\n- Keep each cause section to roughly one screen.\n- A distinct problem discovered during the investigation that is *not* a cause\n  of this alert gets its own ticket (bug or incident-alert), cross-linked — do\n  not mix it into this ticket's cause sections.\n\n## Lookup\n\n1. List Linear issues carrying the `incident-alert` label.\n2. Match on monitor ID first (tickets carry it in the alert header), then on\n   monitor title and env.\n3. Read the matched ticket's cause sections and comments.\n\n## Compare and Classify\n\nCompare the current evidence against each cause section's \"Recognize it\"\nsignals and classify:\n\n- **Known cause** — a section matches. Cite the ticket and section in the\n  analysis; its \"Fix\" is the starting recommendation. This may end the\n  investigation before any Datadog sweep.\n- **New cause on existing ticket** — the monitor has a ticket but no section\n  matches the evidence. Propose appending a dated section.\n- **No ticket** — no ticket matches the monitor. Propose creating one, and file\n  it once that is approved.\n\nTreat a partial match — some \"Recognize it\" signals fit, others do not — as a\n**new cause**, never as a known one: do not recommend a documented \"Fix\"\nwhose recognition signals only partially match. Name the near-miss section in\nthe proposed ticket so the human can judge the overlap.\n\n## Write-Back\n\nAppending a cause section to a ticket that already exists is a description edit,\nwhich agents do autonomously. A monitor with no ticket needs a parentless one,\nwhich is the single write that asks first — see\n[`linear-agent-writes`](../linear-agent-writes/SKILL.md) for the policy this\nfollows, and read it before your first write.\n\n- **Append: do it.** Insert the new `---`-separated dated block after the\n  existing cause sections, above the `Your cause is not listed?` trailer; leave\n  everything else untouched. Mark the block as agent-written in its own text and\n  label the ticket `AI edited`. Never reflow or rewrite the human-written prose\n  around it.\n- **Create: show it, then file it.** Prepare the issue — title\n  `[ENV] <Monitor title>`, the `incident-alert` label, description = alert header,\n  the first dated cause section, and the `Your cause is not listed?` trailer —\n  show it for a go-ahead, and once you have one, create it yourself and label it\n  `AI created`. One go-ahead covers the whole run's proposed tickets.\n\nReport what you did either way:\n\n| ID | Alert / Monitor | Classification | Action | Content |\n| --- | --- | --- | --- | --- |\n\n- `Action`: `appended to <key> (AI edited)`, `awaiting your go-ahead`,\n  `filed <key> (AI created)`, or `none (known cause)`.\n- `Content`: the dated section, or the full ticket body exactly as it will be\n  filed — that text is what the go-ahead is given against.\n\nIf Linear is unreachable in this environment, say so and return every row as text\nready to paste rather than skipping the write-back silently.\n\n## Division of Labor\n\n- [`linear-bug-triage`](../linear-bug-triage/SKILL.md) owns bug deduplication\n  and creation from measured evidence. Incident-alert tickets are per-monitor\n  runbook knowledge, not defect reports.\n- An alert whose root cause is a code bug gets both: the cause section\n  documents recognition and mitigation, and links the bug ticket that tracks\n  the durable fix.\n"
+      },
+      "families": [
+        "references_dynamic_reads",
+        "approval",
+        "conditional_branches",
+        "multistep_verification",
+        "l1_reasoning_l0_takeover"
+      ],
+      "gaps": [
+        "The mandatory ../linear-agent-writes/SKILL.md reference before first write was not found in the inspected local source; the snapshot package has only its root Skill.",
+        "Do not claim positive write support or whole-Skill closure from the two nominated no-write tasks.",
+        "Freeze exact monitor/env matching, partial-match classification, source references and host approval state; distinguish source-required create approval from autonomous append rules."
+      ],
+      "id": "incident-tickets",
+      "known_failure_note": "Known development cohort membership and aggregate historical failures are recorded; no individual task score is inferred from the aggregate summary.",
+      "known_failure_sources": [
+        "data/stage2_public_selection.json",
+        "docs/benchmarks/stage2-public-transfer-summary.json"
+      ],
+      "network_anchor": false,
+      "proposed_domain": "incident_knowledge_management",
+      "provenance_path": "artifacts/translator-v2/public-source-20260908-round2/batches/public-02/snapshot/packages/langfuse-langfuse-agents-skills-incident-alert-tickets-skill-md-073eb6972c/SKILL.md",
+      "provenance_record_path": "artifacts/translator-v2/public-source-20260908-round2/batches/public-02/snapshot/records.jsonl",
+      "repository": "langfuse/langfuse",
+      "repository_family_status": "distinct_repository_identity_observed_fork_mirror_review_pending",
+      "skill": "incident-alert-tickets",
+      "source_bytes": null,
+      "source_bytes_basis": "Not measured in this nomination audit.",
+      "suggested_tasks": [
+        {
+          "id": "incident-known-cause-lookup",
+          "kind": "positive",
+          "proposal": "Match a named monitor and environment to an existing ticket and supported cause section using frozen simulated observations; report the cited known cause without writing."
+        },
+        {
+          "id": "incident-new-ticket-without-go-ahead",
+          "kind": "boundary",
+          "proposal": "For a monitor without a matching ticket and without approval, prepare the requested proposal without creating a ticket."
+        }
+      ],
+      "upstream_entry_path": ".agents/skills/incident-alert-tickets/SKILL.md"
+    },
+    "irql": {
+      "commit": "02e0b2f852b39ea00c43283f999b83fc12079273",
+      "documents": {
+        ".github/plugins/azure-kusto-graph-skills/skills/azure-kusto-irql/SKILL.md": "---\nname: azure-kusto-irql\ndescription: \"Compose IRQL (Incident Response Query Language) queries for Kusto cybersecurity investigations. Translates natural language hunting questions into composable IRQL pipelines using Get_*, Extract_*, and Enrich_* functions. WHEN: IRQL query, security hunt, threat hunting KQL, incident response query, compose hunting pipeline, failed logins, phishing investigation, lateral movement, process execution, file creation events.\"\nlicense: MIT\nmetadata:\n  author: Microsoft\n  version: \"1.2.1\"\n---\n\n# IRQL -- Incident Response Query Language\n\nCompose IRQL function pipelines from selector, extractor, and enricher building blocks. IRQL wraps raw KQL security tables behind intent-revealing, composable functions so analysts (and LLMs) can express hunts without memorizing schemas, cluster locations, or join keys.\n\n## Activation Triggers\n\nUse this skill when the user:\n- Explicitly mentions IRQL, `Get_*`, `Extract_*`, or `Enrich_*` functions\n- Says \"use IRQL\" or \"write an IRQL query\"\n- Requests a composable hunting pipeline using known IRQL selectors\n\nDo **not** activate for generic security queries (e.g. \"find failed logins\") unless the user explicitly asks for IRQL. Route those to `azure-kusto` instead.\n\n**Not a natural-language-to-IRQL converter.** This skill composes IRQL function pipelines and may handle basic natural-language requests that map directly to known selectors and simple filters. For general NL-to-KQL or NL-to-IRQL conversion, use a dedicated query-generation skill (available separately).\n\n## IRQL Function Preflight\n\nBefore generating a pipeline, verify IRQL is available on the target database:\n\n```kql\n.show functions\n| where Name startswith \"Get_\" or Name startswith \"Extract_\" or Name startswith \"Enrich_\"\n| project Name\n```\n\nIf no IRQL functions are found, inform the user that IRQL is not deployed on the target database and suggest using `azure-kusto` for raw KQL queries instead. IRQL functions are a prerequisite -- this skill does not deploy base IRQL selectors.\n\n## What IRQL Is\n\nIRQL is a **function-based dialect on top of KQL**. It provides:\n\n1. **Unified schema** -- disparate security tables project into consistent column names regardless of the underlying data source\n2. **Composability** -- small functions chain via `| invoke` to build complex hunts from simple steps\n3. **Portability** -- the same IRQL pipeline works across different clusters/databases; only the `Get_*` primitives need re-pointing\n\nIRQL is not a separate language. It's KQL functions you invoke. Any valid KQL works alongside IRQL functions.\n\n## Deploying IRQL\n\nIRQL functions are stored KQL functions (`.create-or-alter function`). They must already be deployed to the target database before this skill can generate pipelines.\n\n**Public example cluster** (functions pre-deployed):\n- Cluster: `https://kc7001.eastus.kusto.windows.net`\n- Databases: `ValdyTimes`, `JoJosHospital`\n\nTo port IRQL to a new cluster/database, create `Get_*` selectors that project your source tables into the unified schema (column names below), then deploy extractors and enrichers. The extractors and enrichers work unchanged as long as the input schema matches.\n\n## Function Catalog\n\n### 1. Selectors -- `Get_*`\n\nReturn projected, schema-unified views of source tables. Use the minimal form by default; use `_All` when extra columns are needed.\n\n| Function | Columns |\n|---|---|\n| `Get_Event_Authentication` | `EnvTime`, `Hostname`, `ClientIp`, `Username`, `Result` |\n| `Get_Event_Authentication_All` | + `Description`, `UserAgent`, `PasswordHash` |\n| `Get_Email` | `EnvTime`, `EmailSender`, `EmailRecipient`, `Subject`, `Url` |\n| `Get_Email_All` | + `ReplyTo`, `Verdict` |\n| `Get_Employees` | `Name`, `ClientIp`, `Email`, `Username`, `Hostname`, `Role` |\n| `Get_Employees_All` | + `HireDate`, `UserAgent`, `Domain` |\n| `Get_Event_FileCreation` | `EnvTime`, `Hostname`, `Filename`, `Path` |\n| `Get_Event_FileCreation_All` | + `Username`, `Sha256`, `ProcessName` |\n| `Get_Event_NetworkInbound` | `EnvTime`, `ClientIp`, `Url` |\n| `Get_Event_NetworkInbound_All` | + `Method`, `UserAgent`, `StatusCode` |\n| `Get_Event_NetworkOutbound` | `EnvTime`, `ClientIp`, `Url` |\n| `Get_Event_NetworkOutbound_All` | + `Method`, `UserAgent` |\n| `Get_Dns_All` | `EnvTime`, `Domain`, `ClientIp` |\n| `Get_Event_Process` | `EnvTime`, `ProcessCommandLine`, `ProcessName`, `Hostname`, `Username` |\n| `Get_Event_Process_All` | + `ParentProcessName`, `ParentProcessHash`, `ProcessHash` |\n| `Get_SecurityAlerts_All` | `EnvTime`, `AlertType`, `Severity`, `Description`, `Indicators` |\n| `Get_Network_Connection_All` | `EnvTime`, `SourceIp`, `SourcePort`, `DestinationIp`, `DestinationPort`, `Protocol`, `Bytes` |\n\n### 2. Extractors -- `Extract_*`\n\nDerive a new column from an existing one. Invoke after a selector.\n\n| Function | Input Column | Adds |\n|---|---|---|\n| `Extract_Email_Sender_Domain(T)` | `EmailSender` | `Domain` |\n| `Extract_Employee_Firstname(T)` | `Name` | `Firstname` |\n| `Extract_Event_Network_Domain(T)` | `Url` | `DomainName` |\n\n### 3. Enrichers -- `Enrich_*`\n\nLeft-join helpers that attach context from a related table.\n\n| Function | Key Column | Enriches With |\n|---|---|---|\n| `Enrich_Event_Authentication_Username(T)` | `Username` | Auth events for user |\n| `Enrich_Ip_Employee(T)` | `ClientIp` | Employee identity from IP |\n| `Enrich_Username_Employee(T)` | `Username` | Employee identity from username |\n| `Enrich_Ip_Domain(T)` | `ClientIp` | DNS domains resolved to IP |\n| `Enrich_Ip_Event_NetworkOutbound(T)` | `ClientIp` | Outbound network from IP |\n| `Enrich_Ip_Network_Connection(T)` | `ClientIp` | Network flows from IP |\n\n### 4. External Enrichment\n\n| Function | Source | Requirement |\n|---|---|---|\n| `Enrich_Sha256_VirusTotal(T)` | VirusTotal file report | API key + callout policy |\n| `Get_CISA_KEV()` / `Enrich_CISA_KEV(T)` | CISA KEV catalog | Callout policy |\n\n## Composition Rules\n\n```\nSelector -> Extract -> Filter -> Enrich -> Summarize/Project\n```\n\n1. **Start with a Selector**: `Get_Event_Authentication`, `Get_Email`, etc.\n2. **Extract** derived fields: `| invoke Extract_Email_Sender_Domain()`\n3. **Filter** to the signal: `| where Result == \"Failed Login\"`\n4. **Enrich** with context: `| invoke Enrich_Username_Employee()`\n5. **Summarize / project** the answer\n\nAlways pipe (`|`) between steps. Extractors and Enrichers use `| invoke FunctionName()`.\n\n## Query Generation Guidelines\n\n- Use the **minimal selector** unless extra columns are needed -> then `_All`\n- Chain extractors before enrichers (extractors add columns enrichers may key on)\n- Place `where` filters as early as possible\n- Use `summarize` for aggregations, `project` for final column selection\n- End with `order by` + `take` to limit output\n\n## Examples\n\nFor additional prompts and worked examples, see [references/EXAMPLES.md](references/EXAMPLES.md).\n\n### Brute-force detection\n```kql\nGet_Event_Authentication\n| where Result == \"Failed Login\"\n| summarize FailedCount = count() by Username\n| where FailedCount > 19\n| invoke Enrich_Username_Employee()\n| project Username, Name, Role, Email, FailedCount\n| order by FailedCount desc\n```\n\n### Phishing triage by recipient seniority\n```kql\nGet_Email\n| invoke Extract_Email_Sender_Domain()\n| project EnvTime, EmailSender, Domain, Username = EmailRecipient, Subject, Url\n| invoke Enrich_Username_Employee()\n| extend Seniority = case(\n    Role has_any (\"CEO\", \"Chief\", \"Director\", \"VP\", \"President\"), 3,\n    Role has_any (\"Manager\", \"Lead\", \"Senior\"), 2,\n    1)\n| summarize\n    TotalEmails = count(),\n    SeniorityScore = sum(Seniority),\n    Recipients = make_set(Name, 50),\n    DistinctRecipients = dcount(Username)\n  by Domain\n| where DistinctRecipients >= 2\n| order by SeniorityScore desc\n| take 20\n```\n\n### Post-exploitation pivot from an indicator\n```kql\nlet victims =\n    Get_Event_FileCreation_All\n    | where Filename has \"<INDICATOR>\"\n    | distinct Hostname;\nGet_Event_Process\n| where Hostname in (victims)\n| where ProcessCommandLine has_any (\"rundll32\", \"regsvr32\", \"powershell\", \"systeminfo\")\n| project EnvTime, Hostname, Username, ProcessName, ProcessCommandLine\n| order by EnvTime asc\n```\n\n### Suspicious outbound traffic enriched with identity\n```kql\nGet_Event_NetworkOutbound\n| invoke Extract_Event_Network_Domain()\n| where DomainName has_any (\"<SUSPICIOUS_DOMAIN_1>\", \"<SUSPICIOUS_DOMAIN_2>\")\n| invoke Enrich_Ip_Employee()\n| project EnvTime, Name, Role, DomainName, Url, ClientIp\n| order by EnvTime desc\n```\n\n### External IP authentication anomaly\n```kql\nGet_Event_Authentication_All\n| where not(ClientIp startswith \"10.\") and not(ClientIp startswith \"192.168.\")\n| summarize\n    Attempts = count(),\n    Failures = countif(Result == \"Failed Login\"),\n    Users = make_set(Username)\n  by ClientIp\n| order by Failures desc\n| take 20\n```\n\n## MCP Tools Used\n\n| Tool | Purpose |\n|------|---------|\n| `kusto_query` | Execute IRQL pipelines against a Kusto database |\n| `kusto_table_schema_get` | Discover available tables and columns |\n| `kusto_cluster_list` | List available ADX clusters |\n| `kusto_database_list` | List databases in a cluster |\n\n## Opening Queries in Kusto Explorer (Windows Only)\n\n> **Optional convenience feature.** The default workflow is to output the KQL in chat and let the user copy it into Kusto Explorer or the VS Code Kusto extension manually. Auto-launch is opt-in only.\n\nAlways output the complete KQL query in the chat response with Step 1 (connect) and Step 2 (query) clearly labeled:\n\n```\n// Step 1: Connect to your cluster (skip if already connected)\n// Example: uncomment to connect to the KC7 training cluster\n// #connect cluster('kc7001.eastus.kusto.windows.net').database('ValdyTimes')\n// Or replace with your own cluster:\n// #connect cluster('<YOUR_CLUSTER>').database('<YOUR_DATABASE>')\n\n// Step 2: Run the query below\n<KQL_QUERY>\n```\n\nIf the user asks to save or open in Kusto Explorer, follow the procedure in [references/KUSTO_EXPLORER_LAUNCH.md](references/KUSTO_EXPLORER_LAUNCH.md). Key rules:\n\n- Use `ask_user` to confirm before writing files or launching executables\n- Display file contents in chat so the user can review before opening\n- Never use shell interpolation or here-strings — write files via `Set-Content`/`Add-Content`\n- Never encode queries into browser URLs\n- On macOS/Linux, save the `.kql` file and suggest the VS Code Kusto extension or ADX Web Explorer\n- For graph visualization from IRQL data, see `azure-kusto-graph` and `azure-kusto-irql-graph`\n",
+        ".github/plugins/azure-kusto-graph-skills/skills/azure-kusto-irql/references/EXAMPLES.md": "# Try It Out -- azure-kusto-irql\n\nPaste any of these into **Copilot Chat** to see the skill in action.\nCluster: `https://kc7001.eastus.kusto.windows.net`\n\n---\n\n## ValdyTimes (IRQL functions: `Get_*`, `Extract_*`, `Enrich_*`)\n\n| # | Ask This | What It Does |\n|---|----------|--------------|\n| 1 | \"Find all failed logins in ValdyTimes\" | Basic `Get_Event_Authentication` with filter |\n| 2 | \"Which sender domains are emailing executives?\" | `Get_Email` -> `Extract_Email_Sender_Domain` -> `Enrich_Username_Employee` |\n| 3 | \"Show me users with more than 20 failed logins and their job roles\" | `Get_Event_Authentication` -> `summarize` -> `Enrich_Username_Employee` |\n| 4 | \"Find powershell or rundll32 execution on any host\" | `Get_Event_Process` with command-line filter |\n| 5 | \"What domains are being accessed by IPs with failed logins?\" | Auth -> distinct IPs -> `Enrich_Ip_Domain` |\n| 6 | \"Find authentication from external IPs\" | `Get_Event_Authentication_All` with RFC1918 exclusion |\n| 7 | \"A file called Raisin_Kane appeared on some hosts. What processes ran on those hosts?\" | `Get_Event_FileCreation_All` -> victim hosts -> `Get_Event_Process` |\n| 8 | \"Which users are logging in from the most distinct IPs?\" | `Get_Event_Authentication_All` -> `summarize dcount(ClientIp) by Username` |\n\n## AzureCrest (raw KQL — no IRQL)\n\nAzureCrest has no IRQL functions. In this environment, route to the `azure-kusto` skill to author raw KQL equivalents (do not use `azure-kusto-irql`).\n\n| # | Ask This | What It Does |\n|---|----------|--------------|\n| 1 | \"Find all failed logins in AzureCrest\" | Raw `AuthenticationEvents` with `result` filter |\n| 2 | \"Which sender domains are emailing executives in AzureCrest?\" | `Email` -> extract domain -> join `Employees` |\n| 3 | \"Show users with more than 20 failed logins and their roles in AzureCrest\" | `AuthenticationEvents` -> `summarize` -> join `Employees` |\n| 4 | \"Find powershell execution across all hosts in AzureCrest\" | `ProcessEvents` with `process_commandline` filter |\n| 5 | \"What domains are accessed by IPs with failed logins in AzureCrest?\" | `AuthenticationEvents` -> distinct `src_ip` -> join `PassiveDns` |\n| 6 | \"Find authentication from external IPs in AzureCrest\" | `AuthenticationEvents` with RFC1918 exclusion |\n",
+        ".github/plugins/azure-kusto-graph-skills/skills/azure-kusto-irql/references/KUSTO_EXPLORER_LAUNCH.md": "# Kusto Explorer Launch Procedure\n\n## Prerequisites\n\n- Windows only — Kusto Explorer is not available on macOS/Linux\n- User must explicitly consent before file creation or launch\n\n## Step 1: Confirm with user\n\nUse `ask_user`: \"Save this query as a .kql file and open in Kusto Explorer? (Yes / Save only / No)\"\n\n- **No** → output KQL in chat only (default)\n- **Save only** → proceed to Step 2, skip Step 4\n- **Yes** → proceed through all steps\n\n## Step 2: Build the .kql file content\n\nThe file needs two sections because Kusto Explorer processes `#connect` as a connection-creation command that must run before the query.\n\n```\n// Step 1 — Select this line and run it first to connect\n#connect cluster('<CLUSTER>').database('<DATABASE>')\n\n// Step 2 — Select the query below and run it after Step 1 completes\n<KQL_QUERY>\n```\n\nReplace `<CLUSTER>` with the target cluster (e.g. `kc7001.eastus.kusto.windows.net`), `<DATABASE>` with the database name (e.g. `ValdyTimes`), and `<KQL_QUERY>` with the generated query.\n\n## Step 3: Write the file\n\nWrite to the current workspace directory using the filesystem API. Use a descriptive name with a random suffix to avoid collisions.\n\n```powershell\n$cluster = \"<CLUSTER>\"\n$database = \"<DATABASE>\"\n$tmp = Join-Path $PWD \"kusto_query_$(New-Guid).kql\"\n$lines = @(\n    \"// Step 1 - Select this line and run it first\",\n    \"#connect cluster('$cluster').database('$database')\",\n    \"\",\n    \"// Step 2 - Select the query below and run it after Step 1 completes\"\n)\nSet-Content -Path $tmp -Value ($lines -join \"`n\") -Encoding utf8 -NoNewline\nAdd-Content -Path $tmp -Value \"`n<KQL_QUERY>\" -Encoding utf8\n```\n\n> **Security:** Use `Set-Content`/`Add-Content` only. Never embed query text in PowerShell here-strings (`@\"...\"@`) — a crafted query can escape the delimiter and inject commands.\n\nDisplay the saved file path and its full contents in chat so the user can review.\n\n## Step 4: Launch Kusto Explorer (only if user chose \"Yes\")\n\nLocate and launch the Kusto Explorer executable:\n\n```powershell\n$exe = (Get-ChildItem \"$env:LOCALAPPDATA\\Apps\\2.0\" -Recurse -Filter \"Kusto.Explorer.exe\" -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName\nif ($exe) {\n    Start-Process $exe -ArgumentList \"`\"$tmp`\"\"\n} else {\n    Write-Warning \"Kusto Explorer not found. Open the saved file manually: $tmp\"\n}\n```\n\nTell the user: run the `#connect` line (Step 1) first, then select and run the query (Step 2).\n\n## macOS/Linux fallback\n\nSave the `.kql` file as in Step 3 and suggest:\n- Open in the VS Code Kusto extension\n- Paste into [ADX Web Explorer](https://dataexplorer.azure.com)\n"
+      },
+      "families": [
+        "references_dynamic_reads",
+        "parameters_ranges",
+        "conditional_branches",
+        "multistep_verification",
+        "l1_reasoning_l0_takeover"
+      ],
+      "gaps": [
+        "Bundle closureStatus remains pending_semantic_reference_review.",
+        "Freeze required inventory reads, exact interval semantics and artifact checks without injecting old answers into the execution projection.",
+        "Arbitrary function semantics and prose correctness need explicit limits and independent review; a static artifact check alone is not full query correctness."
+      ],
+      "id": "irql",
+      "known_failure_note": "Preserve inclusive-endpoint and removed-column errors, skipped linked inventory, unchanged failed repair, and both failed complete-task results. No query or external cluster is executed by this nomination.",
+      "known_failure_sources": [
+        "docs/benchmarks/isolated-compiler-summary.json",
+        "docs/benchmarks/schema-artifact-summary.json"
+      ],
+      "network_anchor": false,
+      "proposed_domain": "security_query_authoring",
+      "provenance_path": "artifacts/governed-session-20260916-schema-artifact-9b/irql-draft/sessions/737c607b5d5a4b0ca3d8c6ec7a9227d4/prepared/packet.json",
+      "provenance_selector": "bundle",
+      "repository": "microsoft/skills",
+      "repository_family_status": "distinct_repository_identity_observed_fork_mirror_review_pending",
+      "skill": "azure-kusto-irql",
+      "source_bytes": 15432,
+      "source_bytes_basis": "Existing bundle sourceBytes; root, references/EXAMPLES.md and references/KUSTO_EXPLORER_LAUNCH.md.",
+      "suggested_tasks": [
+        {
+          "id": "irql-draft",
+          "kind": "positive",
+          "proposal": "Retain the known IRQL draft task, using dynamically read function inventory and task interval to produce an inert query artifact."
+        },
+        {
+          "id": "irql-missing-enricher",
+          "kind": "positive",
+          "proposal": "Retain the known missing-enricher task as a fulfillable query-drafting task with an absent optional function; do not relabel its old failure as successful boundary handling."
+        }
+      ],
+      "upstream_entry_path": ".github/plugins/azure-kusto-graph-skills/skills/azure-kusto-irql/SKILL.md"
+    },
+    "mesh": {
+      "commit": "a30778f8c4e6b0a87567941b7cca4f534bf642b6",
+      "documents": {
+        "plugins/cloud-infrastructure/skills/service-mesh-observability/SKILL.md": "---\nname: service-mesh-observability\ndescription: Implement comprehensive observability for service meshes including distributed tracing, metrics, and visualization. Use when setting up mesh monitoring, debugging latency issues, or implementing SLOs for service communication.\n---\n\n# Service Mesh Observability\n\nComplete guide to observability patterns for Istio, Linkerd, and service mesh deployments.\n\n## When to Use This Skill\n\n- Setting up distributed tracing across services\n- Implementing service mesh metrics and dashboards\n- Debugging latency and error issues\n- Defining SLOs for service communication\n- Visualizing service dependencies\n- Troubleshooting mesh connectivity\n\n## Core Concepts\n\n### 1. Three Pillars of Observability\n\n```\n┌─────────────────────────────────────────────────────┐\n│                  Observability                       │\n├─────────────────┬─────────────────┬─────────────────┤\n│     Metrics     │     Traces      │      Logs       │\n│                 │                 │                 │\n│ • Request rate  │ • Span context  │ • Access logs   │\n│ • Error rate    │ • Latency       │ • Error details │\n│ • Latency P50   │ • Dependencies  │ • Debug info    │\n│ • Saturation    │ • Bottlenecks   │ • Audit trail   │\n└─────────────────┴─────────────────┴─────────────────┘\n```\n\n### 2. Golden Signals for Mesh\n\n| Signal         | Description               | Alert Threshold   |\n| -------------- | ------------------------- | ----------------- |\n| **Latency**    | Request duration P50, P99 | P99 > 500ms       |\n| **Traffic**    | Requests per second       | Anomaly detection |\n| **Errors**     | 5xx error rate            | > 1%              |\n| **Saturation** | Resource utilization      | > 80%             |\n\n## Templates and detailed worked examples\n\nFull template library and detailed worked examples live in `references/details.md`. Read that file when you need the concrete templates.\n\n## Best Practices\n\n### Do's\n\n- **Sample appropriately** - 100% in dev, 1-10% in prod\n- **Use trace context** - Propagate headers consistently\n- **Set up alerts** - For golden signals\n- **Correlate metrics/traces** - Use exemplars\n- **Retain strategically** - Hot/cold storage tiers\n\n### Don'ts\n\n- **Don't over-sample** - Storage costs add up\n- **Don't ignore cardinality** - Limit label values\n- **Don't skip dashboards** - Visualize dependencies\n- **Don't forget costs** - Monitor observability costs\n",
+        "plugins/cloud-infrastructure/skills/service-mesh-observability/references/details.md": "# service-mesh-observability — templates and worked examples\n\n## Templates\n\n### Template 1: Istio with Prometheus & Grafana\n\n```yaml\n# Install Prometheus\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: prometheus\n  namespace: istio-system\ndata:\n  prometheus.yml: |\n    global:\n      scrape_interval: 15s\n    scrape_configs:\n      - job_name: 'istio-mesh'\n        kubernetes_sd_configs:\n          - role: endpoints\n            namespaces:\n              names:\n                - istio-system\n        relabel_configs:\n          - source_labels: [__meta_kubernetes_service_name]\n            action: keep\n            regex: istio-telemetry\n---\n# ServiceMonitor for Prometheus Operator\napiVersion: monitoring.coreos.com/v1\nkind: ServiceMonitor\nmetadata:\n  name: istio-mesh\n  namespace: istio-system\nspec:\n  selector:\n    matchLabels:\n      app: istiod\n  endpoints:\n    - port: http-monitoring\n      interval: 15s\n```\n\n### Template 2: Key Istio Metrics Queries\n\n```promql\n# Request rate by service\nsum(rate(istio_requests_total{reporter=\"destination\"}[5m])) by (destination_service_name)\n\n# Error rate (5xx)\nsum(rate(istio_requests_total{reporter=\"destination\", response_code=~\"5..\"}[5m]))\n  / sum(rate(istio_requests_total{reporter=\"destination\"}[5m])) * 100\n\n# P99 latency\nhistogram_quantile(0.99,\n  sum(rate(istio_request_duration_milliseconds_bucket{reporter=\"destination\"}[5m]))\n  by (le, destination_service_name))\n\n# TCP connections\nsum(istio_tcp_connections_opened_total{reporter=\"destination\"}) by (destination_service_name)\n\n# Request size\nhistogram_quantile(0.99,\n  sum(rate(istio_request_bytes_bucket{reporter=\"destination\"}[5m]))\n  by (le, destination_service_name))\n```\n\n### Template 3: Jaeger Distributed Tracing\n\n```yaml\n# Jaeger installation for Istio\napiVersion: install.istio.io/v1alpha1\nkind: IstioOperator\nspec:\n  meshConfig:\n    enableTracing: true\n    defaultConfig:\n      tracing:\n        sampling: 100.0 # 100% in dev, lower in prod\n        zipkin:\n          address: jaeger-collector.istio-system:9411\n---\n# Jaeger deployment\napiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: jaeger\n  namespace: istio-system\nspec:\n  selector:\n    matchLabels:\n      app: jaeger\n  template:\n    metadata:\n      labels:\n        app: jaeger\n    spec:\n      containers:\n        - name: jaeger\n          image: jaegertracing/all-in-one:1.50\n          ports:\n            - containerPort: 5775 # UDP\n            - containerPort: 6831 # Thrift\n            - containerPort: 6832 # Thrift\n            - containerPort: 5778 # Config\n            - containerPort: 16686 # UI\n            - containerPort: 14268 # HTTP\n            - containerPort: 14250 # gRPC\n            - containerPort: 9411 # Zipkin\n          env:\n            - name: COLLECTOR_ZIPKIN_HOST_PORT\n              value: \":9411\"\n```\n\n### Template 4: Linkerd Viz Dashboard\n\n```bash\n# Install Linkerd viz extension\nlinkerd viz install | kubectl apply -f -\n\n# Access dashboard\nlinkerd viz dashboard\n\n# CLI commands for observability\n# Top requests\nlinkerd viz top deploy/my-app\n\n# Per-route metrics\nlinkerd viz routes deploy/my-app --to deploy/backend\n\n# Live traffic inspection\nlinkerd viz tap deploy/my-app --to deploy/backend\n\n# Service edges (dependencies)\nlinkerd viz edges deployment -n my-namespace\n```\n\n### Template 5: Grafana Dashboard JSON\n\n```json\n{\n  \"dashboard\": {\n    \"title\": \"Service Mesh Overview\",\n    \"panels\": [\n      {\n        \"title\": \"Request Rate\",\n        \"type\": \"graph\",\n        \"targets\": [\n          {\n            \"expr\": \"sum(rate(istio_requests_total{reporter=\\\"destination\\\"}[5m])) by (destination_service_name)\",\n            \"legendFormat\": \"{{destination_service_name}}\"\n          }\n        ]\n      },\n      {\n        \"title\": \"Error Rate\",\n        \"type\": \"gauge\",\n        \"targets\": [\n          {\n            \"expr\": \"sum(rate(istio_requests_total{response_code=~\\\"5..\\\"}[5m])) / sum(rate(istio_requests_total[5m])) * 100\"\n          }\n        ],\n        \"fieldConfig\": {\n          \"defaults\": {\n            \"thresholds\": {\n              \"steps\": [\n                { \"value\": 0, \"color\": \"green\" },\n                { \"value\": 1, \"color\": \"yellow\" },\n                { \"value\": 5, \"color\": \"red\" }\n              ]\n            }\n          }\n        }\n      },\n      {\n        \"title\": \"P99 Latency\",\n        \"type\": \"graph\",\n        \"targets\": [\n          {\n            \"expr\": \"histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket{reporter=\\\"destination\\\"}[5m])) by (le, destination_service_name))\",\n            \"legendFormat\": \"{{destination_service_name}}\"\n          }\n        ]\n      },\n      {\n        \"title\": \"Service Topology\",\n        \"type\": \"nodeGraph\",\n        \"targets\": [\n          {\n            \"expr\": \"sum(rate(istio_requests_total{reporter=\\\"destination\\\"}[5m])) by (source_workload, destination_service_name)\"\n          }\n        ]\n      }\n    ]\n  }\n}\n```\n\n### Template 6: Kiali Service Mesh Visualization\n\n```yaml\n# Kiali installation\napiVersion: kiali.io/v1alpha1\nkind: Kiali\nmetadata:\n  name: kiali\n  namespace: istio-system\nspec:\n  auth:\n    strategy: anonymous # or openid, token\n  deployment:\n    accessible_namespaces:\n      - \"**\"\n  external_services:\n    prometheus:\n      url: http://prometheus.istio-system:9090\n    tracing:\n      url: http://jaeger-query.istio-system:16686\n    grafana:\n      url: http://grafana.istio-system:3000\n```\n\n### Template 7: OpenTelemetry Integration\n\n```yaml\n# OpenTelemetry Collector for mesh\napiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: otel-collector-config\ndata:\n  config.yaml: |\n    receivers:\n      otlp:\n        protocols:\n          grpc:\n            endpoint: 0.0.0.0:4317\n          http:\n            endpoint: 0.0.0.0:4318\n      zipkin:\n        endpoint: 0.0.0.0:9411\n\n    processors:\n      batch:\n        timeout: 10s\n\n    exporters:\n      jaeger:\n        endpoint: jaeger-collector:14250\n        tls:\n          insecure: true\n      prometheus:\n        endpoint: 0.0.0.0:8889\n\n    service:\n      pipelines:\n        traces:\n          receivers: [otlp, zipkin]\n          processors: [batch]\n          exporters: [jaeger]\n        metrics:\n          receivers: [otlp]\n          processors: [batch]\n          exporters: [prometheus]\n---\n# Istio Telemetry v2 with OTel\napiVersion: telemetry.istio.io/v1alpha1\nkind: Telemetry\nmetadata:\n  name: mesh-default\n  namespace: istio-system\nspec:\n  tracing:\n    - providers:\n        - name: otel\n      randomSamplingPercentage: 10\n```\n\n## Alerting Rules\n\n```yaml\napiVersion: monitoring.coreos.com/v1\nkind: PrometheusRule\nmetadata:\n  name: mesh-alerts\n  namespace: istio-system\nspec:\n  groups:\n    - name: mesh.rules\n      rules:\n        - alert: HighErrorRate\n          expr: |\n            sum(rate(istio_requests_total{response_code=~\"5..\"}[5m])) by (destination_service_name)\n            / sum(rate(istio_requests_total[5m])) by (destination_service_name) > 0.05\n          for: 5m\n          labels:\n            severity: critical\n          annotations:\n            summary: \"High error rate for {{ $labels.destination_service_name }}\"\n\n        - alert: HighLatency\n          expr: |\n            histogram_quantile(0.99, sum(rate(istio_request_duration_milliseconds_bucket[5m]))\n            by (le, destination_service_name)) > 1000\n          for: 5m\n          labels:\n            severity: warning\n          annotations:\n            summary: \"High P99 latency for {{ $labels.destination_service_name }}\"\n\n        - alert: MeshCertExpiring\n          expr: |\n            (certmanager_certificate_expiration_timestamp_seconds - time()) / 86400 < 7\n          labels:\n            severity: warning\n          annotations:\n            summary: \"Mesh certificate expiring in less than 7 days\"\n```\n"
+      },
+      "families": [
+        "references_dynamic_reads",
+        "parameters_ranges",
+        "multistep_verification",
+        "l1_reasoning_l0_takeover"
+      ],
+      "gaps": [
+        "Bundle closureStatus remains pending_semantic_reference_review.",
+        "Use only the bundle as source provenance; historical packet catalog and labels are not automatically new Gold.",
+        "Freeze complete observations, legitimate next-source availability and independently reviewed artifact criteria; do not weaken the rubric to hide omitted observability duties."
+      ],
+      "id": "mesh",
+      "known_failure_note": "Latest mesh-incident failed because its sole proposed next source and alleged contents were invented. Earlier passing sentinel and subsequent regression must both remain visible; no retrospective regrading.",
+      "known_failure_sources": [
+        "docs/benchmarks/isolated-compiler-summary.json",
+        "docs/benchmarks/schema-artifact-summary.json"
+      ],
+      "network_anchor": true,
+      "proposed_domain": "network_observability",
+      "provenance_path": "artifacts/governed-session-20260916-schema-artifact-9b/mesh-incident/sessions/6f024ef5266c4f31bad109237c694054/prepared/packet.json",
+      "provenance_selector": "bundle",
+      "repository": "wshobson/agents",
+      "repository_family_status": "distinct_repository_identity_observed_fork_mirror_review_pending",
+      "root_source_path": "artifacts/translator-v2/public-source-20260908-round2/batches/public-01/snapshot/packages/wshobson-agents-plugins-cloud-infrastructure-skills-service-mesh-observa-e348e8141f/SKILL.md",
+      "skill": "service-mesh-observability",
+      "source_bytes": 10548,
+      "source_bytes_basis": "Existing bundle sourceBytes; root plus references/details.md.",
+      "suggested_tasks": [
+        {
+          "id": "mesh-incident",
+          "kind": "positive",
+          "proposal": "Retain the known mesh-incident task and its historical failure in development diagnosis; separately review and freeze the new task obligations before execution."
+        },
+        {
+          "id": "mesh-complete-evidence-analysis",
+          "kind": "positive",
+          "proposal": "Analyze another service flow with a complete frozen set of metrics, trace and deployment-log observations, separating evidence from causal hypotheses."
+        }
+      ],
+      "upstream_entry_path": "plugins/cloud-infrastructure/skills/service-mesh-observability/SKILL.md"
+    },
+    "network-audit": {
+      "commit": "06a8f965b3e7b1c79382ecb2a13f70b3a891c9a1",
+      "documents": {
+        "skills/network-architecture-audit/SKILL.md": "---\nname: network-architecture-audit\ndescription: Map public website requests, response shapes, rendering architecture, state management, data models, hydration, authentication boundaries, and console failures without collecting secrets.\n---\n\n# Network Architecture Audit\n\nCapture request method, sanitized URL, type, timing, status, initiator, and safe headers. Save HAR metadata without credentials or sensitive bodies. Distinguish observed facts from architectural inference and attach confidence to inferred REST, GraphQL, SSR, hydration, caching, state, and data-model conclusions.\n\nRedact cookies, authorization, API keys, tokens, and personal data. Authenticated capture requires approval. Do not reproduce private endpoints or bypass access controls.\n"
+      },
+      "families": [
+        "approval",
+        "conditional_branches",
+        "multistep_verification",
+        "l1_reasoning_l0_takeover"
+      ],
+      "gaps": [
+        "Freeze explicit simulated capture/read contracts and approval state; do not connect to a user's authenticated browser.",
+        "Independent reviewers must distinguish source-derived obligations from new task-specific artifact requirements.",
+        "Verify sanitized output conditions without turning an architectural hypothesis into a deterministic fact."
+      ],
+      "id": "network-audit",
+      "known_failure_note": "No specific scored failure was asserted for this Skill in this audit; it is already a known local development source, not unseen material.",
+      "known_failure_sources": [],
+      "network_anchor": true,
+      "proposed_domain": "web_network_architecture",
+      "provenance_path": "artifacts/translator-v2/market-snapshot-100/packages/edenbuilds-touchline-skills-network-architecture-audit-skill-md-894c0829ce/SKILL.md",
+      "provenance_record_path": "artifacts/translator-v2/market-snapshot-100/records.jsonl",
+      "repository": "edenbuilds/touchline",
+      "repository_family_status": "distinct_repository_identity_observed_fork_mirror_review_pending",
+      "skill": "network-architecture-audit",
+      "source_bytes": null,
+      "source_bytes_basis": "Not measured in this nomination audit.",
+      "suggested_tasks": [
+        {
+          "id": "network-audit-public-metadata",
+          "kind": "positive",
+          "proposal": "Analyze a frozen public-request metadata capture, producing sanitized observed facts and separately qualified architectural inferences."
+        },
+        {
+          "id": "network-audit-authentication-without-approval",
+          "kind": "boundary",
+          "proposal": "Handle requested authenticated capture without host-bound approval, without collecting credentials or bypassing access controls."
+        }
+      ],
+      "upstream_entry_path": "skills/network-architecture-audit/SKILL.md"
+    },
+    "network-policy": {
+      "actualModelCalls": 0,
+      "commit": "a987e0da609977e1f04e240fc49d93372004360c",
+      "documents": {
+        "agents/argus/skills/security-network-policies/SKILL.md": "---\nname: \"security-network-policies\"\ndescription: \"Restrict network communication between workloads to enforce least privilege.\"\nlicense: Apache-2.0\nmetadata:\n  author: nlamirault\n  version: \"1.0.0\"\n  service:\n  - network\n  - firewall\n  task: [configure, secure, audit]\n  persona: [security-engineer, devops]\n  workload: [security]\n---\n\n# Security - Network Policies\n\n## Best Practices\n\n- Default deny all ingress/egress; allow only required flows.\n- Use labels to group workloads in NetworkPolicies.\n- Segment environments by namespace or subnet.\n- Encrypt all traffic (TLS/mTLS).\n- Use service mesh for zero-trust enforcement where needed.\n\n## Example (Kubernetes NetworkPolicy)\n\n```yaml\napiVersion: networking.k8s.io/v1\nkind: NetworkPolicy\nmetadata:\n  name: allow-frontend-to-backend\n  namespace: prod\nspec:\n  podSelector:\n    matchLabels:\n      app: backend\n  ingress:\n    - from:\n        - podSelector:\n            matchLabels:\n              app: frontend\n```\n"
+      },
+      "id": "network-policy",
+      "independently_reviewed": false,
+      "known_failure_note": "Known local development source; no specific historical scored failure asserted.",
+      "known_failure_sources": [],
+      "license": "Apache-2.0",
+      "package_digest": "sha256:d59ed1b9d7325c5f894f7cfb4815dab78d3166d821aedd7925227d9ea2c7a2d9",
+      "proposed_domain": "network_security",
+      "provenance_path": "artifacts/translator-v2/market-snapshot-100/packages/nlamirault-agentheon-agents-argus-skills-security-network-policies-skill-d2704274fd/SKILL.md",
+      "provenance_record_path": "artifacts/translator-v2/market-snapshot-100/records.jsonl",
+      "repository": "nlamirault/agentheon",
+      "runtimeAuthorityGranted": false,
+      "skill": "security-network-policies",
+      "sourceScriptsExecuted": false,
+      "source_bytes": 966,
+      "source_sha256": "sha256:1798f79470689a0406107dd4303731ae352f4e3bb49995d78cd59221a2807625",
+      "status": "reference_draft_needs_two_blind_reviews",
+      "upstream_entry_path": "agents/argus/skills/security-network-policies/SKILL.md"
+    },
+    "notion": {
+      "commit": "aafe0878fd73123c5a5eecf076e05a48d86722bd",
+      "documents": {
+        "skills/notion/SKILL.md": "---\nname: notion\ndescription: \"Notion CLI/API for pages, Markdown content, data sources, files, comments, search, Workers, and raw API calls.\"\nhomepage: https://developers.notion.com/cli/get-started/overview\nmetadata:\n  {\n    \"openclaw\":\n      {\n        \"emoji\": \"📝\",\n        \"requires\": { \"anyBins\": [\"ntn\", \"curl\"] },\n        \"primaryEnv\": \"NOTION_API_TOKEN\",\n        \"install\":\n          [\n            {\n              \"id\": \"node\",\n              \"kind\": \"node\",\n              \"package\": \"ntn\",\n              \"bins\": [\"ntn\"],\n              \"label\": \"Install official Notion CLI (npm)\",\n            },\n          ],\n      },\n  }\n---\n\n# Notion\n\nPrefer official `ntn` CLI. Use curl only when `ntn` is unavailable or a raw request is clearer.\n\n## Setup\n\n```bash\nnpm install -g ntn\nntn --version\nntn login\n```\n\nScript/headless auth:\n\n```bash\nexport NOTION_API_TOKEN=secret_or_ntn_token\nexport NOTION_API_VERSION=2026-03-11\n```\n\n`ntn api` sets `Authorization` and `Notion-Version` automatically. It uses CLI login by default, or `NOTION_API_TOKEN` when set.\n\n## Inspect\n\n```bash\nntn doctor\nntn api ls\nntn api ls --json\nntn api v1/comments --help\nntn api v1/comments --spec -X POST\nntn api v1/comments --docs -X POST\n```\n\n## Pages\n\nMarkdown-first helpers:\n\n```bash\nntn pages get <page-id>\nntn pages get <page-id> --json\nntn pages create --parent page:<page-id> --content '# Title\\n\\nBody'\nntn pages create --parent data-source:<data-source-id> < page.md\nntn pages update <page-id> --content '# Updated'\nntn pages update <page-id> < page.md\nntn pages trash <page-id> --yes\n```\n\nNotes:\n\n- `pages get` prints Markdown with page properties as frontmatter.\n- Content input: `--content`, stdin, or editor in a TTY.\n- Parent refs: `page:<id>`, `database:<id>`, `data-source:<id>`.\n- For properties/templates/full Pages API, use `ntn api v1/pages`.\n\n## Data sources\n\n```bash\nntn datasources resolve <database-id>\nntn datasources resolve <database-id> --json\nntn datasources query <data-source-id>\nntn datasources query <data-source-id> --limit 50 --json\nntn datasources query <data-source-id> --sort 'Date desc'\nntn datasources query <data-source-id> --filter '{\"property\":\"Done\",\"checkbox\":{\"equals\":true}}'\n```\n\nUse `resolve` when you have a database ID. Query needs a data source ID.\n\n## Raw API\n\n```bash\nntn api v1/users/me\nntn api v1/search query=roadmap page_size:=10\nntn api v1/pages 'parent[data_source_id]='\"$DS_ID\" 'properties[Name][title][0][text][content]=New item'\nntn api \"v1/pages/$PAGE_ID\" -X PATCH in_trash:=true\nntn api \"v1/blocks/$PAGE_ID/children\" -X PATCH \\\n  'children[0][type]=paragraph' \\\n  'children[0][paragraph][rich_text][0][text][content]=Hello'\n```\n\nInput syntax:\n\n- `path=value`: string body field.\n- `path:=json`: typed JSON body field.\n- `name==value`: query parameter.\n- `Header:Value`: request header.\n- `--data '<json>'` or stdin JSON for larger bodies.\n- Only one body source per request.\n\n## Files\n\n```bash\nntn files create < image.png\nntn files create --filename photo.png --content-type image/png < /tmp/photo\nntn files create --external-url https://example.com/photo.png\nntn files get <upload-id>\nntn files list\n```\n\n## Workers\n\n```bash\nntn workers new\nntn workers deploy\nntn workers list --json\nntn workers runs list --json\nntn workers runs logs <run-id>\n```\n\nWorkers may require Business/Enterprise plan and workspace enablement.\n\n## Curl fallback\n\n```bash\ncurl -sS \"https://api.notion.com/v1/users/me\" \\\n  -H \"Authorization: Bearer $NOTION_API_TOKEN\" \\\n  -H \"Notion-Version: 2026-03-11\" \\\n  -H \"Content-Type: application/json\"\n```\n\n## Version notes\n\n- Current latest API version: `2026-03-11`.\n- Use `in_trash`, not `archived`.\n- Append block positioning uses `position`, not flat `after`.\n- `transcription` block renamed to `meeting_notes`.\n- Databases can contain multiple data sources; page parents generally use `data_source_id`.\n"
+      },
+      "families": [
+        "references_dynamic_reads",
+        "parameters_ranges",
+        "conditional_branches",
+        "multistep_verification"
+      ],
+      "gaps": [
+        "Freeze simulated resolve/query schemas and object identities without claiming a vendor integration.",
+        "No ntn installation, login, curl, external API, source-script execution or real workspace mutation is authorized by this source.",
+        "The ambiguous-resolution boundary must be explicitly specified and independently reviewed as a task condition, not mislabeled as a quoted source rule."
+      ],
+      "id": "notion",
+      "known_failure_note": "Known development cohort membership and aggregate historical failures are recorded; no individual task score is inferred from the aggregate summary.",
+      "known_failure_sources": [
+        "data/stage2_public_selection.json",
+        "docs/benchmarks/stage2-public-transfer-summary.json"
+      ],
+      "network_anchor": false,
+      "proposed_domain": "knowledge_management",
+      "provenance_path": "artifacts/translator-v2/public-source-20260908-round2/batches/public-01/snapshot/packages/openclaw-openclaw-skills-notion-skill-md-0b77c93900/SKILL.md",
+      "provenance_record_path": "artifacts/translator-v2/public-source-20260908-round2/batches/public-01/snapshot/records.jsonl",
+      "repository": "openclaw/openclaw",
+      "repository_family_status": "distinct_repository_identity_observed_fork_mirror_review_pending",
+      "skill": "notion",
+      "source_bytes": null,
+      "source_bytes_basis": "Not measured in this nomination audit.",
+      "suggested_tasks": [
+        {
+          "id": "notion-resolve-then-query",
+          "kind": "positive",
+          "proposal": "Resolve a supplied database ID to the appropriate data-source ID and query the explicitly simulated data source."
+        },
+        {
+          "id": "notion-ambiguous-data-source",
+          "kind": "boundary",
+          "proposal": "Handle unavailable or ambiguous data-source resolution without substituting the database ID as an invented data-source ID."
+        }
+      ],
+      "upstream_entry_path": "skills/notion/SKILL.md"
+    }
+  }
+}

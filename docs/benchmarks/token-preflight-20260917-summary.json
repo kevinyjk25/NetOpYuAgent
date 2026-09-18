@@ -1,0 +1,412 @@
+{
+  "schema": "ensuredskill.io/offline-preflight-summary/v1",
+  "date": "2026-09-17",
+  "status": "offline_preparation_verified_r0_still_partial",
+  "actualModelCalls": 0,
+  "generationEnabled": false,
+  "liveAdapterReady": false,
+  "pilotQualified": false,
+  "researchEvidenceEligible": false,
+  "installedBackendParity": "not_established",
+  "generationTokenParity": "not_tested",
+  "completeDependencySnapshot": false,
+  "evidenceRole": "six_request_shapes_not_six_skills_or_semantic_accuracy",
+  "report": {
+    "path": "artifacts/preflight-20260917-offline/report.json",
+    "digest": "sha256:d975da54857711e85d8df2a03ccdcda690c697f3d72316d0555b2f3c522fb87f",
+    "sourceDigest": "sha256:426aec0c281c054643e48a1be7dcc8d3b13a7be2040d66f7f7ed6d1dc65a8ddd",
+    "assetsDigest": "sha256:e0250d3494781e7e12de65ce67efbb24c2071d0879218f06d2a1ab6ddecb5201",
+    "implementationUnchanged": true,
+    "allPassed": true
+  },
+  "profile": {
+    "execution_authority": false,
+    "full_model_sha256_verified": true,
+    "generation_enabled": false,
+    "generation_token_parity": "not_tested",
+    "go_version": "go1.26.8 darwin/arm64",
+    "host_context": 49152,
+    "installed_backend_equivalence": "not_established",
+    "llama_headers_revision": "d222767c7a6516559a3f49e7721b6c6b1acc87b4",
+    "model": "qwen3.5:9b",
+    "model_bytes": 6594462816,
+    "pin_boundary": "named host files; not a complete OS or transitive compiler dependency attestation",
+    "profile": "new_offline_experimental_profile",
+    "tokenizer_architecture": "x86_64_via_existing_Rosetta",
+    "upstream_renderer_revision": "f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a"
+  },
+  "assets": {
+    "renderer": {
+      "path": "/Users/steven/Documents/Codex/2026-08-26/wo/r0-preflight-20260917/renderer/renderer",
+      "sha256": "sha256:e9e84b8f98a8cc84e99bbe24b4f27c51e6ce09ae9a111ecd961861ef9b53dd62"
+    },
+    "tokenizer": {
+      "path": "/Users/steven/Documents/Codex/2026-08-26/wo/r0-preflight-20260917/tokenizer/tokenizer",
+      "sha256": "sha256:fad5e406428365b420fb51018bf50e779057fe047902a801723d776c2b27cf2e"
+    },
+    "model": {
+      "path": "/Users/steven/.ollama/models/blobs/sha256-dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c",
+      "sha256": "sha256:dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c"
+    },
+    "dependencies": [
+      {
+        "path": "/Applications/Ollama.app/Contents/Resources/libggml-base.0.22.0.dylib",
+        "sha256": "sha256:446ee9d36847fcc68eab5f59ca9674b5b7661dcc755e1206a0a7d08c05f8e66e"
+      },
+      {
+        "path": "/Applications/Ollama.app/Contents/Resources/libggml.0.22.0.dylib",
+        "sha256": "sha256:a9240c3e165657e2271a039913207639881256a601289bbecca76430c2487ae3"
+      },
+      {
+        "path": "/Applications/Ollama.app/Contents/Resources/libllama.0.3.0.dylib",
+        "sha256": "sha256:2f38e41d6ace17c63f020f86faac75c2fe1e9c4660db494c9f0ac240d8ba4ee7"
+      },
+      {
+        "path": "/Users/steven/.ollama/models/manifests/registry.ollama.ai/library/qwen3.5/9b",
+        "sha256": "sha256:6488c96fa5faab64bb65cbd30d4289e20e6130ef535a93ef9a49f42eda893ea7"
+      },
+      {
+        "path": "/Users/steven/.ollama/models/blobs/sha256-be595b49fe22012bd1f5605ec14c7ffa58331783a88a4fd8c22e5fc8ec42cf9f",
+        "sha256": "sha256:be595b49fe22012bd1f5605ec14c7ffa58331783a88a4fd8c22e5fc8ec42cf9f"
+      },
+      {
+        "path": "/Users/steven/.ollama/models/blobs/sha256-9371364b27a52acac9d87f88bd93c9db1174d8d6ec57f6888925cdc1788871ff",
+        "sha256": "sha256:9371364b27a52acac9d87f88bd93c9db1174d8d6ec57f6888925cdc1788871ff"
+      },
+      {
+        "path": "/Users/steven/NetOpYuAgent-dev/NetOpYuAgent/evaluation/preflight/renderer_main.go",
+        "sha256": "sha256:e69ed8b760566ca6b2256deb8e02a45347c2891406472d455b8108d77f940387"
+      },
+      {
+        "path": "/Users/steven/NetOpYuAgent-dev/NetOpYuAgent/evaluation/preflight/renderer_sources.json",
+        "sha256": "sha256:b96b10ff950a18088b5088d97794690c6fd66aec106ccc5d560ed93cd096c545"
+      },
+      {
+        "path": "/Users/steven/NetOpYuAgent-dev/NetOpYuAgent/evaluation/preflight/tokenizer.cpp",
+        "sha256": "sha256:2ba4a72e81c0954ab8d479195ed7bba5cc2824ccde3740c2996cd6a97b5fcb68"
+      }
+    ]
+  },
+  "requests": [
+    {
+      "case": "plain",
+      "passed": true,
+      "repeats": 2,
+      "inputTokens": 20,
+      "reservedOutputTokens": 128,
+      "preparedDigest": "sha256:4479c6e10c63d13eba3a4284cff19bac4ce8a5d71b3a49c14548968e6ff5b70b",
+      "toolEncodingLosses": [],
+      "millisecondsIncludingFullIntegrityAndBinding": [
+        11377.092665992677,
+        11404.183583101258
+      ]
+    },
+    {
+      "case": "unicode_special_literal",
+      "passed": true,
+      "repeats": 2,
+      "inputTokens": 32,
+      "reservedOutputTokens": 128,
+      "preparedDigest": "sha256:5da0562fea23285f34bd1aecdd54f36aea47db6b07447d66c848529d199fd87f",
+      "toolEncodingLosses": [],
+      "millisecondsIncludingFullIntegrityAndBinding": [
+        11049.03466696851,
+        10928.665583953261
+      ]
+    },
+    {
+      "case": "tools",
+      "passed": true,
+      "repeats": 2,
+      "inputTokens": 275,
+      "reservedOutputTokens": 128,
+      "preparedDigest": "sha256:9f2fd91ddc6954beee0f2d9ab55cda13806ffc9a9ec4abad189794f99107a154",
+      "toolEncodingLosses": [
+        {
+          "kind": "omitted_by_upstream_api_type",
+          "original_value": false,
+          "path": "tools[0].function.parameters.additionalProperties"
+        }
+      ],
+      "millisecondsIncludingFullIntegrityAndBinding": [
+        10701.28250005655,
+        10585.488500073552
+      ]
+    },
+    {
+      "case": "tool_history",
+      "passed": true,
+      "repeats": 2,
+      "inputTokens": 338,
+      "reservedOutputTokens": 128,
+      "preparedDigest": "sha256:fa18f17951f48939e52abeb5583eb835939305d36ba7ea9c06a0f6ae8e66f72b",
+      "toolEncodingLosses": [
+        {
+          "kind": "omitted_by_upstream_api_type",
+          "original_value": false,
+          "path": "tools[0].function.parameters.additionalProperties"
+        }
+      ],
+      "millisecondsIncludingFullIntegrityAndBinding": [
+        10502.186917001382,
+        11100.380375050008
+      ]
+    },
+    {
+      "case": "actual_compiler_wire",
+      "passed": true,
+      "repeats": 2,
+      "inputTokens": 1711,
+      "reservedOutputTokens": 4096,
+      "preparedDigest": "sha256:227f60020aecf1fb8e6c2c2492e7d246531bbcd89e209eb8ece9151d16ef806c",
+      "toolEncodingLosses": [],
+      "millisecondsIncludingFullIntegrityAndBinding": [
+        10939.71454212442,
+        10743.717041099444
+      ]
+    },
+    {
+      "case": "actual_runtime_wire",
+      "passed": true,
+      "repeats": 2,
+      "inputTokens": 175,
+      "reservedOutputTokens": 2048,
+      "preparedDigest": "sha256:ecf4e1162844c1899cb6807685656dc48f1565f71eaecc081b53a3515f5e2dc1",
+      "toolEncodingLosses": [],
+      "millisecondsIncludingFullIntegrityAndBinding": [
+        10704.136207932606,
+        10396.59008407034
+      ]
+    }
+  ],
+  "renderer": {
+    "reportPath": "/Users/steven/Documents/Codex/2026-08-26/wo/r0-preflight-20260917/renderer/verification/report.json",
+    "reportSha256": "sha256:1922b772596f43def486a47a0476e684e8dbc567c68750a73ba7612d60c87695",
+    "topLevelTests": 5,
+    "subtests": 25,
+    "allPassed": true,
+    "upstreamFileCount": 36,
+    "go": {
+      "version": "go1.26.8",
+      "archiveSha256": "a012b25b571bd0138a03dcd25375ceba866fe5ca822f426d2c66a4de56fd3f4b",
+      "archiveBytes": 64626620,
+      "initialDownloadTimedOut": true,
+      "resumeAttempts": 1,
+      "officialChecksumMatched": true
+    },
+    "retainedUnusedArchive": {
+      "timedOut": true,
+      "partialUsed": false
+    },
+    "actualCapturedDSHWireSmoke": {
+      "passed": true,
+      "source": "artifacts/bounded-pilot-20260916-r0-dsh-v3/native/transport/3e2f98dc18e848ab91603edb9969afcd/request.json:wire",
+      "toolEncoding": "upstream_api_types",
+      "losses": [
+        "tools[0].function.parameters.additionalProperties",
+        "tools[0].function.strict"
+      ]
+    }
+  },
+  "tokenizer": {
+    "reportPath": "/Users/steven/Documents/Codex/2026-08-26/wo/r0-preflight-20260917/tokenizer/verification-v3/report.json",
+    "reportSha256": "sha256:f8fe67c4b3e946fe21df01bcadcb6a71ffc563e6d81ac189898913b1f9ac86e9",
+    "fixtureCount": 10,
+    "fixtures": [
+      {
+        "name": "empty",
+        "expectedAccept": true,
+        "returncode": 0,
+        "count": 0
+      },
+      {
+        "name": "english",
+        "expectedAccept": true,
+        "returncode": 0,
+        "count": 2
+      },
+      {
+        "name": "english_repeat",
+        "expectedAccept": true,
+        "returncode": 0,
+        "count": 2
+      },
+      {
+        "name": "unicode",
+        "expectedAccept": true,
+        "returncode": 0,
+        "count": 9
+      },
+      {
+        "name": "special",
+        "expectedAccept": true,
+        "returncode": 0,
+        "count": 9
+      },
+      {
+        "name": "nul",
+        "expectedAccept": true,
+        "returncode": 0,
+        "count": 3
+      },
+      {
+        "name": "nul_prefix",
+        "expectedAccept": true,
+        "returncode": 0,
+        "count": 1
+      },
+      {
+        "name": "invalid_utf8",
+        "expectedAccept": false,
+        "returncode": 2,
+        "count": null
+      },
+      {
+        "name": "prompt_limit",
+        "expectedAccept": false,
+        "returncode": 2,
+        "count": null
+      },
+      {
+        "name": "token_limit",
+        "expectedAccept": false,
+        "returncode": 2,
+        "count": null
+      }
+    ],
+    "allExpectedDecisionsMatched": true,
+    "dependencies": [
+      {
+        "loaded_path": "/Applications/Ollama.app/Contents/Resources/libggml-base.0.22.0.dylib",
+        "real_path": "/Applications/Ollama.app/Contents/Resources/libggml-base.0.22.0.dylib",
+        "sha256": "446ee9d36847fcc68eab5f59ca9674b5b7661dcc755e1206a0a7d08c05f8e66e"
+      },
+      {
+        "loaded_path": "/Applications/Ollama.app/Contents/Resources/libggml.0.22.0.dylib",
+        "real_path": "/Applications/Ollama.app/Contents/Resources/libggml.0.22.0.dylib",
+        "sha256": "a9240c3e165657e2271a039913207639881256a601289bbecca76430c2487ae3"
+      },
+      {
+        "loaded_path": "/Applications/Ollama.app/Contents/Resources/libllama.0.3.0.dylib",
+        "real_path": "/Applications/Ollama.app/Contents/Resources/libllama.0.3.0.dylib",
+        "sha256": "2f38e41d6ace17c63f020f86faac75c2fe1e9c4660db494c9f0ac240d8ba4ee7"
+      }
+    ],
+    "modelHashNote": "Component verifier originally used model blob identity only; enclosing Assets.verify now hashes the full GGUF before/after each prepare and at binding."
+  },
+  "qa": {
+    "preflightUnit": {
+      "passed": 65,
+      "xml": "artifacts/preflight-20260917-qa/unit-final-65.xml"
+    },
+    "wireCompatibility": {
+      "passed": 114,
+      "xml": "artifacts/preflight-20260917-qa/wire-compat.xml"
+    },
+    "fullRegression": {
+      "suite": "all",
+      "passed": 3837,
+      "subtestsPassed": 81,
+      "failures": 0,
+      "errors": 0,
+      "secondsPytest": 261.11,
+      "junitCasesIncludingSubtests": 3918,
+      "xml": "artifacts/preflight-20260917-qa/all.xml",
+      "xmlSha256": "sha256:ca753fca431fc2a0c21c3f8796ab3979f57bbd488d3aa0a070b583f97061f5b5"
+    },
+    "changedPythonRuff": {
+      "passed": true,
+      "fileCount": 15,
+      "note": "Changed files only; previously disclosed legacy lint findings are untouched."
+    },
+    "diffCheck": "passed",
+    "documentationAndAuthority": {
+      "passed": 8,
+      "xml": "artifacts/preflight-20260917-qa/docs-final.xml",
+      "helperMarkdownBilingualAndLinks": 2
+    },
+    "shellSyntax": {
+      "passed": true,
+      "file": "evaluation/preflight/renderer_build.sh"
+    }
+  },
+  "retainedFailures": [
+    {
+      "component": "tokenizer-v1",
+      "reason": "time -l wrapper denied sysctl in sandbox; helper output was valid; retained separately from functionality"
+    },
+    {
+      "component": "tokenizer-v2",
+      "path": "/Users/steven/Documents/Codex/2026-08-26/wo/r0-preflight-20260917/tokenizer/verification-v2/failure.json",
+      "reason": "262145 consecutive special markers exceeded 45-second timeout; partial stdout/stderr were not saved by original verifier; subsequent verifier retains partial timeout output. Remains unresolved pathological CPU input, not erased by v3 ordinary-token overflow fixture."
+    },
+    {
+      "component": "preflight-unit-initial",
+      "reason": "55 passed, 4 failed: resealed fixed metadata not rejected. Validation fixed; final65 pass. Initial tool output retained, no initial XML."
+    },
+    {
+      "component": "renderer-build",
+      "reason": "Full upstream archive download timed out; unused partial retained. Portable Go initial download timed out then exactly one resumed download matched official checksum; required source subset Git blobs matched pinned tree."
+    },
+    {
+      "component": "documentation-command",
+      "reason": "Initial command used nonexistent tests/test_authority_boundaries.py; exit4, zero tests. Correct tests/test_research_authority_boundary.py + documentation passed8. Not a product-test failure.",
+      "initialXml": "artifacts/preflight-20260917-qa/docs.xml"
+    }
+  ],
+  "boundaries": [
+    "No service changes, model download, source Skill script execution, context creation, decode, sampling or warmup. Vocab/metadata loading is offline, not inference.",
+    "Upstream tool type encoding can omit strict/additionalProperties; recorded losses are not semantic enforcement.",
+    "Seal detects drift, not malicious host replacement or cryptographic provenance.",
+    "Hash/serialization deadline checks are cooperative. Output size is checked after capture from trusted fixed helpers.",
+    "Timing includes full model integrity reads; not LLM latency or deployment performance.",
+    "Prepared request has no execute/generate API; no current generation payload consumer or admission."
+  ],
+  "remaining": [
+    "Bind the same prepared request at a controlled dispatch boundary with persistent budget reservation; no-model substitute acceptance before any live enabling.",
+    "Establish the selected backend execution profile instead of claiming equivalence to installed dirty Ollama.",
+    "Complete bounded controller, full execution dependency freeze and independently aligned six-Skill/twelve-task sample within original R0 limit."
+  ],
+  "scriptedDSHRegression": {
+    "path": "artifacts/preflight-20260917-dsh/report.json",
+    "digest": "sha256:45851f8d19cb5b982adac7976df58ab402c9fff178b2cfd47957810a36b96f79",
+    "allPassed": true,
+    "paths": [
+      {
+        "case": "native",
+        "passed": true,
+        "scriptedRequests": 2,
+        "providerCalls": 1,
+        "route": "native"
+      },
+      {
+        "case": "compiled",
+        "passed": true,
+        "scriptedRequests": 3,
+        "providerCalls": 1,
+        "route": "runtime_read_prefix"
+      },
+      {
+        "case": "fallback",
+        "passed": true,
+        "scriptedRequests": 3,
+        "providerCalls": 1,
+        "route": "fallback"
+      }
+    ],
+    "actualModelCalls": 0,
+    "note": "Fresh installed DSH plumbing only; still fixture token counts, not live preflight integration."
+  },
+  "finalIntegrityCheck": {
+    "sourceFreezeMatches": true,
+    "fullAssetContentMatches": true,
+    "ggufMatchesRendererManifestModelLayer": true,
+    "artifactSealsValid": true,
+    "ollamaApiPs": {
+      "models": []
+    },
+    "serviceChanged": false,
+    "gitCommitOrPush": false
+  },
+  "digest": "sha256:97976ce23e43d71d409cd81e5f3b30b203dcecc5db02b9df2e564633da0c31b0"
+}

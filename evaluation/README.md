@@ -2,7 +2,7 @@
 
 ## 中文
 
-当前研究协议唯一入口是[考核重置与有限收敛设计](../docs/EVALUATION-RESET-20260916.md)。**R0 测量部分完成；未进入 R1；没有真实模型 run 命令。** 旧研究代码仍可用于追溯和回归，但不再是当前试跑计划。清理与测试分类见[清理记录](../docs/CLEANUP-20260916.md)。
+当前研究协议唯一入口是[考核重置与有限收敛设计](../docs/EVALUATION-RESET-20260916.md)。**R0 最终状态和逐项证据以 [R0 验收报告](../docs/R0-COMPLETION.md)为准；未进入 R1，没有真实模型 run 命令。** 旧研究代码仍可用于追溯和回归，但不再是当前试跑计划。清理与测试分类见[清理记录](../docs/CLEANUP-20260916.md)。
 
 ### 当前 R0 测量链
 
@@ -15,6 +15,14 @@
 | [bounded_provider](bounded_provider.py) | 每 arm 独立 SQLite 模拟 Provider 与真实读回执；不获得产品写权限 |
 | [bounded_dsh_probe](bounded_dsh_probe.py) / [bounded_dsh_tools](bounded_dsh_tools.mjs) | 实际 DSH 的原生、编译后 Runtime 读取和拒绝后 fallback 接线；无真实 LLM |
 | [dsh_support](dsh_support.py) / [local_read_fixture](local_read_fixture.py) | 独立 DSH 配置／路径助手和只读 fixture，不依赖旧 ledger/reviewer 实验链 |
+| [bounded_preflight](bounded_preflight.py) / [离线 helpers](preflight/renderer.md) | 用户已授权的共享 renderer、vocab-only tokenizer 与不可变 prepared request；仅离线预备，不开放 generation 或 live dispatch |
+| [bounded_runner](bounded_runner.py) / [官方解析器 helper](runner_codec/README.md) | 精确 token 数组请求序列化与固定上游 Qwen35 解析；不启动真实 runner |
+| [bounded_prepared_transport](bounded_prepared_transport.py) | 准备→预留→实际 HTTP 请求→原始解析绑定；仅可连接本模块创建的零推理替身，不能传入外部 URL |
+| [bounded_controller](bounded_controller.py) | 固定 12 对机械 DSH 回合；B 在工具回合内编译最多两个只读前段，余下读取显式 fallback；不是整 Skill 编译 |
+| [bounded_freeze](bounded_freeze.py) / [bounded_acceptance](bounded_acceptance.py) | 冻结声明执行依赖及独立审阅材料；实际发送前后校验，固定工程总账，不可换目录刷过 |
+| [bounded_reacceptance](bounded_reacceptance.py) | 用户显式批准的一次工程重验；同一工程账本关联原失败与固定子记录，原结果不重置、不增加研究预算；不是自动重试入口 |
+| [bounded_cases](bounded_cases.py) / [bounded_network_policy](bounded_network_policy.py) | 依赖本地原始来源档案的只读草稿构造器；草稿不自动获得已审阅身份 |
+| [bounded_material](bounded_material.py) / [独立材料包](../data/bounded-pilot/r0-development-20260917/README.md) | 完整来源与双份标注、逐案裁决、精确摘要绑定和一次显式最终审阅；离开本机原始档案也可校验 |
 
 零真实模型检查（输出目录必须全新，不能覆盖已有证据）：
 
@@ -24,7 +32,7 @@
 .venv/bin/python -m evaluation.bounded_dsh_probe --help
 ```
 
-实际 DSH 接线结果见[接线摘要](../docs/benchmarks/bounded-pilot-r0-integration-summary.json)。脚本化返回和 token 数是 fixture；它不证明 9B 语义准确率、真实性能或 36 项 Runtime 门槛。可信同后端 tokenizer／调用前预授权、完整控制器／依赖冻结、6 Skill／12 Task 与独立标签仍待完成。
+历史三路径结果见[接线摘要](../docs/benchmarks/bounded-pilot-r0-integration-summary.json)，当时输入/输出 token 都是 fixture。新 prepared 路径的输入由真实离线 tokenizer 计数，输出仍是明确的替身 fixture；generation 禁止，不替换现用服务。完整控制器验收、6 Skill／12 Task 材料封存与剩余限制见 [R0 验收报告](../docs/R0-COMPLETION.md)。这些不是 9B 语义准确率、真实性能或 36 项 Runtime 门槛。旧[Token 预检](../docs/R0-TOKEN-PREFLIGHT.md)保留原始阶段范围。
 
 ### 产品实现与研究代码分开
 
@@ -51,11 +59,11 @@
 
 ## English
 
-The [bounded evaluation reset](../docs/EVALUATION-RESET-20260916.md) is the current research protocol. **R0 measurement remains partial; R1 has not started; no real-model run command exists.** Historical experiments are retained for traceability and regression, not as the active run plan. See the [cleanup record](../docs/CLEANUP-20260916.md).
+The [bounded evaluation reset](../docs/EVALUATION-RESET-20260916.md) is the current research protocol. **See [R0 acceptance](../docs/R0-COMPLETION.md) for its final status and checklist; R1 has not started and no real-model run command exists.** Historical experiments are retained for traceability and regression, not as the active run plan. See the [cleanup record](../docs/CLEANUP-20260916.md).
 
-The active measurement chain is `bounded_pilot/scoring/budget/execution`, the scripted-only `bounded_transport`, isolated SQLite `bounded_provider`, and the installed-DSH `bounded_dsh_probe`. Shared DSH helpers, protocol codecs and read fixtures now live independently in `dsh_support`, `chat_codec` and `local_read_fixture`. They do not require old semantic-closure, source-ledger, DSH-shadow or reviewer experiment chains. Historical callers retain compatible exports.
+The active measurement chain is `bounded_pilot/scoring/budget/execution`, the scripted-only `bounded_transport`, isolated SQLite `bounded_provider`, and the installed-DSH `bounded_dsh_probe`. The user-authorized `bounded_preflight` adds an offline shared renderer, vocab-only tokenizer and immutable prepared request, without enabling generation or live dispatch. Shared DSH helpers, protocol codecs and read fixtures now live independently in `dsh_support`, `chat_codec` and `local_read_fixture`. They do not require old semantic-closure, source-ledger, DSH-shadow or reviewer experiment chains. Historical callers retain compatible exports.
 
-Use the zero-real-model commands above with a fresh output directory. Scripted responses and token counts are fixtures, not 9B accuracy/performance or the 36-probe gate. Trusted same-backend tokenizer/preauthorization, full controller/dependency freeze and the six-Skill/twelve-task independently labeled sample remain unfinished. [Original integration evidence](../docs/benchmarks/bounded-pilot-r0-integration-summary.json) retains its original fingerprint.
+The new `bounded_runner/prepared_transport` binds actual token-array HTTP payloads and official parsing to reservations, using an exclusively local no-inference receiver. `bounded_controller` runs twelve mechanical pairs, with up to two in-session read-prefix compilations per B arm and explicit fallback, not whole-Skill translation. `bounded_freeze/acceptance` pins declared dependencies and source/reference materials before and after the once-only engineering batch. The explicitly authorized `bounded_reacceptance` links one fixed child to the preserved failed engineering study in the same ledger; it is not an automatic retry or a research-budget reset. Input tokens are real offline counts; output usage is synthetic. These are not 9B semantic/performance evidence or the 36-probe gate. [R0 acceptance](../docs/R0-COMPLETION.md) states the full material and control boundaries. [Original integration evidence](../docs/benchmarks/bounded-pilot-r0-integration-summary.json) retains its original fingerprint. Standalone accepted material must not rely on ignored original-acquisition archives.
 
 Product authoring lives in `skill_authoring`, execution in `network_runtime/l0`, and host integration in `dsh_adapter`. Compatibility exports under evaluation do not create another compiler. A governed mixed workflow is not a fully deterministic Skill; model proposals never grant authority.
 

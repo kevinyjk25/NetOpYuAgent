@@ -4,7 +4,7 @@
 
 ### 0. 决策和当前状态
 
-**2026-09-16：用户已授权按新方案实施，当前为 `r0_measurement_partial`。** 测量骨架之外，已新增角色绑定 HTTP 计量、每 arm 独立 SQLite 模拟 Provider，以及实际 DSH＋脚本化模型接线入口；不连接真实模型。可信调用前 token 计数、完整试验控制器、执行依赖快照和预封存样本／标签仍未完成，因此没有真实模型实跑入口，也未进入 R1。它替代此前无限修复安排，不把旧阶段改成通过，不覆盖失败、Oracle、基线或正式门禁。下文 R1–R3 仍是待实现及验收的设计，最新实现清单见第 5 节。
+**2026-09-18：R0 工程阶段完成，R1 尚未开始。** 原首次验收因 DSH 源文本模板解析失败，1 臂失败／23 臂未运行；该记录不变。用户明确批准[一次关联零推理修订](../data/bounded-pilot/r0-reacceptance-20260918.json)后，相同材料重验 24/24 机械通过，54 次本地 Provider 读取、0 次真实推理，计量、关停、依赖与父记录不变性通过。见 [R0 完成复核](R0-COMPLETION.md)。这不是语义通过或独立人类 Gold；原 R0 工时合规仍无完整历史工时账可证明。本次例外不重置原窗口，不改变下述研究指标、预算、两候选上限或旧失败。第 5 节保留历史实施快照。
 
 目标从不可操作的“让各种自然语言 Skill 都准确执行”收口为三个可分别否证的问题：
 
@@ -175,10 +175,12 @@ R2 工程门槛通过只能称 `prototype_pass`。主点估计为等权 Task、T
 - Effect 调度前必须预留至少 60 秒（或冻结 Provider 合同要求的更大上限）用于 Verify／Reconcile／恢复，仍含在 420 秒内；余额不足不发起 Effect。到截止时，未能完成恢复的事务保留 journal 和 `outcome_unknown`，计任务未完成、停止批次，不能盲杀权威状态、继续下一任务或切换原生写。需要预算外恢复时另行披露处置与成本，不给本轮补成功；本协议不授权真实设备上的限时强杀。
 - 离线转译每 Task 最多两次模型请求，每次最多 180 秒；请求预算每次 24,000 输入＋3,000 输出 token。长材料在入组前检查适配性，不能运行后截断制造支持。
 - 两次开发批最多 **48 arm sessions**，一次确认 **72**，合计上限 **120 arms／1,200 模型请求／14 小时 arm wall time**；另加最多 **48 次离线请求／2.4 小时**。这是最坏执行预算，实际通常应更少，不含开发和标注时间。
-- token 必须跨调用累计；发请求前预留输出额度，超限即以未完成结束。预算账本已有跨调用累计／预留，但真实传输的可信预先计数尚未接通；无法可靠计量的传输不能进入正式测量。
+- token 必须跨调用累计；发请求前预留输出额度，超限即以未完成结束。零推理 prepared 传输已实现精确输入计数与实际发送绑定；真实生成尚未开放或认证，无法可靠计量的传输仍不能进入正式测量。
 - 基础设施错误、未知结果、不变修订、失败 effect 不重放。首次／最终分开记录；不准用“接续”“新目录”“第二工具名”重置版本、调用或确认预算。
 
-### 5. 执行清单与实现改动范围
+### 5. 历史实施快照与原定改动范围
+
+本节记录 R0 各次增量当时的能力和待办；最新逐项封存、验收和剩余边界统一见 [R0 验收报告](R0-COMPLETION.md)。以下“当前／剩余”不重新启动旧包或改动预算。
 
 **当前仅完成 R0 的测量基础设施，不是整个 R0 或新协议验收通过。** 新入口独立于旧 paired-run，仅有 `check/prepare/inspect/score`，没有 `run`；不能绕过当前 >1×1 的正式准入保护。
 
@@ -193,6 +195,7 @@ R2 工程门槛通过只能称 `prototype_pass`。主点估计为等权 Task、T
 | [bounded_provider](../evaluation/bounded_provider.py) | 每 arm 独立 SQLite 初态和收据；固定 pool 防重建同 arm；全尝试记账、独立读回 Verify、审批模拟 | 不授予产品 Effect 权限；逻辑／数据库隔离不是对抗性 OS 沙箱；完整任务控制器尚未接入 |
 | [model_endpoint](../skill_authoring/model_endpoint.py) | 显式私有配置绑定 model／arm／compile／runtime；线程上下文冻结路由，配置错误不回退；未配置保留原入口 | endpoint 摘要不证明模型权重或 token 计数；不是新执行器 |
 | [bounded_dsh_probe](../evaluation/bounded_dsh_probe.py) | 安装的 DSH＋脚本化 HTTP 模型＋实际 SQLite＋既有只读 Runtime；原生／准入／拒绝 fallback 三种接线检查 | 单个合成预加载 Skill，不评估检索、转译语义、9B、自动写入或正式十二任务 |
+| [bounded_preflight](../evaluation/bounded_preflight.py) / [离线探针](../evaluation/bounded_preflight_probe.py) | 固定官方 renderer、本地 vocab-only tokenizer、全内容资产 pin、不可变 prepared request；6 类请求各两次一致，零推理 | 新实验 profile，不证明现用脏构建／generation 等价；没有发送方法；6 请求形状不是 6 Skill |
 
 前次测量基础探针全部符合预期。现有网关产生 `verified_success / precondition_changed / rollback_verified`；后者不算正向任务完成。原始制品为 `artifacts/bounded-pilot-20260916-r0/report.json`，其 `reportDigest` 为 `sha256:45413dfd709f53c5520588d9c1f5adb1523d82b6d9ec9f0321374e9ab85d7dff`。**评分输入、语义审阅和模型用量均为明确构造的 fixture，不是 9B 轨迹。** 自动 Effect 桥接仍为 `not_tested`；`pilotQualified=false`、`liveAdapterReady=false`、`researchEvidenceEligible=false`。
 
@@ -217,7 +220,7 @@ NETOPYU_BACKEND=mock NETOPYU_IDENTITY_MODE=local-simulation NETOPYU_PROVIDER_ADM
 
 实际 DSH `0.1.1-rc.2` 三条接线已通过：原生 `agent→agent`（2 请求）、编译后只读 Runtime `agent→compiler→agent`（3 请求）、编译确定拒绝后原生 fallback `agent→compiler→fallback`（3 请求）。共 **8 次脚本化请求／3 次真实 SQLite 读取／0 次真实模型调用**；三个初态一致、隔离 ID 不同，返回结果全部确实送达 DSH，执行代码全程未变。前两次因原生 DSH 请求格式被拒而失败的记录保留，未记作模型或工具调用。v3 报告摘要为 `sha256:57bb2e98675648d8757b196b34f290d82fc37e495a4519e25cbefa3c8604e68a`。另有实际 HTTP 集成测试覆盖编译器与 Runtime reason 调用点共用一个 arm；三条 DSH 探针本身没有调用 Runtime LLM 节点，不能混算。
 
-**可信 tokenizer 的具体缺口：** 本地 DSH token-meter 当前按字符数估算；旧 author budget 也是字节代理且 `tokenizerAttested=false`。本地 Qwen3.5:9b 的 GGUF 虽有词表／模板，Ollama 实际采用专用 `Qwen35Renderer`，当前没有已核验、与同一后端完全一致的无推理预计数入口。仅重新拼 Jinja 模板、用字符／字节代替 token、或把响应 usage 当调用前计数都不满足协议。下一步需同后端的 renderer＋tokenizer preflight，并绑定请求、模型、模板、工具、特殊 token 和选项摘要；未知就阻止真实批次。模型仍为 9B，不因计量阻塞改模型或放宽上限。
+**可信 tokenizer 的具体缺口（9 月 17 日更新）：** 本地 DSH 字符估算与旧 author budget 字节代理仍不足以预授权。本轮[离线预检](R0-TOKEN-PREFLIGHT.md)直接使用固定官方 `Qwen35Renderer` 和本地 vocab-only 库，绑定完整请求／prompt／token IDs／有效 options／实际资产，固定 6×2 检查通过。它是新实验 profile，尚未绑定真实发送点，不证明现用脏构建或 generation 等价。上游工具 Schema 编码损失显式披露。不能直接用离线计数放行旧服务；未知就阻止真实批次，不改模型、不放宽上限。
 
 脚本化探针复现（需要允许本地 loopback socket；不调用真实 LLM，不加载来源脚本，不修改正在运行的 UI）：
 
@@ -228,6 +231,8 @@ NETOPYU_BACKEND=mock NETOPYU_IDENTITY_MODE=local-simulation NETOPYU_PROVIDER_ADM
 新目录仅用于明确标注的无模型工程接线检查；不能用它重置正式 study 的模型／候选预算。原始失败目录不覆盖、不删除。默认 UI／权限／模型配置不变。
 
 **进入 R1 前剩余 R0 工作（不另开修复轮）：**
+
+最新[生命周期修复](R0-MEASUREMENT-LIFECYCLE.md)补齐调用点／交付点守卫、锁后取时、迟到隔离和排空判据，仍为脚本化工程证据。Python 回调和同步账本 I/O 不保证强制实时取消。[离线 Token 预检](R0-TOKEN-PREFLIGHT.md)已获授权实现并完成有限检查，但 count→generation／reservation 发送绑定未实现，真实模型仍禁用，不改变下列工作和原预算。
 
 1. 全部真实 DSH／编译／Runtime／fallback 请求走同一个可信计量入口；验证准确的调用前 token 上界及硬 deadline。不能用事后 usage 或字符数冒充预留。
 2. 将已验证的每 arm SQLite／收据组件接入完整试验控制器，并验证同一初态、暂停和全路径终态；脚本化接线不是完整配对评测。Effect 仍遵循既有独立网关，不因模拟器可写而改变产品权限。
@@ -266,7 +271,7 @@ NETOPYU_BACKEND=mock NETOPYU_IDENTITY_MODE=local-simulation NETOPYU_PROVIDER_ADM
 | 对象 | 本次决定 |
 |---|---|
 | 旧“语义闭环修复直到完成” | `paused_unmet`，不再自动执行；其失败与原出口保留，不宣告完成 |
-| 新 R0–R3 协议 | 已获授权实施；`r0_measurement_partial`，**显式、有硬预算、无研究准入权**的 preparation/scoring 入口已实现，live runner 尚未接通 |
+| 新 R0–R3 协议 | 已获授权；当前 R0 最终状态见[验收报告](R0-COMPLETION.md)。入口有硬预算、无研究准入权，真实生成未开放；下述 R1–R3 上限不变 |
 | ≥3 cohort／50 Skill／15 仓库／8 领域／600 case 正式转译门禁 | 原值和代码门禁不改。小批 pilot 不能签发 `runtimeLargeEvaluationAllowed`，也不能把其已看样本用于未来正式 unseen |
 | 不允许 >1×1 smoke 的旧 CLI | 继续生效；新 preparation/scoring 入口独立、无执行权。不靠环境变量或假 admission 旁路 |
 | “整 Skill 广泛转译”与“选择性双驱动有效” | 是两个不同 claim；新小批只能筛选后者。是否修改正式研究的全面转译门槛，待原型收益有证据后单独决策 |
@@ -279,7 +284,7 @@ NETOPYU_BACKEND=mock NETOPYU_IDENTITY_MODE=local-simulation NETOPYU_PROVIDER_ADM
 
 ### 0. Decision and status
 
-The user subsequently authorized this design's implementation on September 16. Status remains **r0_measurement_partial**. Beyond preparation, scoring and budgets, role-bound HTTP metering, per-arm SQLite simulators and an installed-DSH/scripted-model integration probe now exist. Trusted live token preflight, the complete pilot controller/dependency freeze and independently aligned cases/labels remain open. No real-model run command or R1 execution is enabled. R1–R3 below remain prospective. The reset replaces open-ended repairs, not historical results or formal gates.
+September 18: **R0 engineering is complete; R1 has not started.** The first source-template failure remains one invalid arm plus 23 unrun. Following an explicitly authorized [one-time zero-inference amendment](../data/bounded-pilot/r0-reacceptance-20260918.json), the same material passes 24/24 mechanical arms and 54 local reads, with zero real inference and verified accounting, drainage, dependency and parent-record integrity. See [R0 closure](R0-COMPLETION.md). This is not semantic success or independent human Gold. Exact historical R0 labor compliance remains unprovable without a full time ledger; the exception does not reset that window or change research thresholds, budgets, the two-candidate ceiling or negative results. Section 5 preserves historical snapshots.
 
 Three falsifiable claims must be evaluated separately: faithful selective translation; enforcement of admitted contracts; and complete-task benefit of the augmented **same real DSH/9B/L1 agent**, including authoring costs and native fallback. A bounded assessment can guarantee a decision process, not a positive model result.
 
@@ -373,7 +378,9 @@ Before dispatching an Effect, reserve at least 60 seconds, or the larger frozen 
 
 At most 48 development arms plus 72 confirmation arms = 120 arms/1,200 model requests/14 arm-hours, plus at most 48 offline requests/2.4 hours. These are worst-case execution ceilings, excluding engineering/labeling time. The ledger implements aggregate reservations/caps, but trusted live token preflight is still missing. Unknown calls, failed effects and unchanged revisions never replay.
 
-### 5. Implementation/runbook boundary
+### 5. Historical implementation snapshots and runbook boundary
+
+This section preserves earlier incremental status. Its old current/remaining wording is not a new work authorization; the latest checklist and final status are in [R0 acceptance](R0-COMPLETION.md). No budget is reset.
 
 Only the R0 measurement foundation is implemented; R0 itself is not complete. `evaluation.bounded_pilot` offers check/prepare/inspect/score, never run. Its protocol embeds support/cases/digests; preparation writes schedule, implementation snapshot, agent-only projections and private Provider fixtures. Evaluator references remain separate. Actual pilot cases/labels are not frozen. The existing paired CLI and formal gate are unchanged.
 
@@ -389,9 +396,11 @@ Installed DSH 0.1.1-rc.2 passed all three wiring paths: native agent→agent (tw
 
 The opt-in `model_endpoint` adapter freezes private host routes in a context-local scope. Invalid configured routes cannot fall back to 11434; late requests remain bound to their closed broker, not another arm. Default product behavior is unchanged. The installed-DSH probe uses the same source, schema and result projection for native, Runtime-read-prefix and compiler-rejected fallback paths. The original Runtime executes inside DSH's tool turn; nothing executes afterward to complete the task. The next actual DSH request must contain the matching tool-call identity and successful database-derived result, not merely an internal receipt. The synthetic source is preloaded: retrieval, translation semantics, real 9B and automatic Effects are not assessed.
 
-The trusted preflight blocker is specific: local DSH uses character estimates and the old author budget uses a byte proxy. GGUF vocabulary/template availability does not establish parity with Ollama's actual Qwen35Renderer. No matching no-inference renderer/tokenizer endpoint has been verified. A same-backend preflight must bind the exact request, model, template, tools, special tokens and options before dispatch. Character/byte heuristics and post-response usage cannot substitute; unknown means no live batch, not another model or a weaker limit.
+September 17 preflight update: DSH character estimates and the old byte proxy still cannot authorize live budgets. The [offline preparation](R0-TOKEN-PREFLIGHT.md) now directly uses the fixed official Qwen35Renderer and matching bundled vocab-only library, binding complete requests/prompts/token IDs/effective options/actual assets. Six request shapes twice pass; upstream tool-schema losses are explicit. This is a new experimental profile, not installed dirty-backend or generation parity. Dispatch/reservation binding is still absent. Do not use its counts to authorize the old service; unknown means no live batch, not another model or a weaker limit.
 
 Reproduce the zero-model commands in the Chinese section, always preserving earlier attempts. Fresh engineering-fixture directories cannot reset a real study's candidate/model budgets. Probe databases are not the fixed official registry at `artifacts/bounded-pilot-registry/studies.sqlite`. Remaining R0 work within its two-working-day limit: trusted live token/deadline metering; connect the tested simulator/receipts to the complete controller; freeze independently aligned six-Skill/twelve-task labels and complete execution dependencies; then no-LLM acceptance of that full controller. The three-path synthetic integration is not twelve-task acceptance. Report a measurement blocker if these cannot be met; do not start R1 prematurely.
+
+The latest [lifecycle repair](R0-MEASUREMENT-LIFECYCLE.md) adds dispatch/delivery guards, post-lock timestamps, late-result isolation and explicit drain gates, still with scripted engineering evidence only. Python callbacks and synchronous ledger I/O are not forcibly cancelled. The authorized [offline token preflight](R0-TOKEN-PREFLIGHT.md) is implemented and passes finite checks, while count-to-generation/reservation binding remains absent. No live-model enablement or budget change occurs.
 
 Reuse skill_authoring's source/schema/compiler isolation, hybrid_session's ACL/evidence/lifecycle, and existing Runtime graph/transaction authority. Add only bounded author lowering, host-controlled evidence/resource state, a cold-start paired evaluator, exact action/postcondition scoring and an immutable study budget ledger. Runtime changes require a reproducible general mechanism defect, not a Skill-specific exception.
 
@@ -401,7 +410,7 @@ Diagnose the first evidenced break: construct/Oracle mismatch; omitted/misinterp
 
 ### 6. Historical compatibility and completion
 
-The old semantic-repair stage remains **paused_unmet**, with unchanged criteria and negative results. This new protocol is **r0_measurement_partial**, authorized for implementation but not yet ready for live measurement. Its new preparation/scoring entry grants neither execution nor research admission. The existing >1×1 smoke restriction remains effective; no environment-variable or forged-admission workaround.
+The old semantic-repair stage remains **paused_unmet**, with unchanged criteria and negative results. This protocol's latest R0 status is recorded in [R0 acceptance](R0-COMPLETION.md); real generation remains disabled. Its measurement entry grants no production or research admission. The existing >1×1 smoke restriction remains effective; no environment-variable or forged-admission workaround.
 
 The formal three-cohort/50-Skill/15-repository/eight-domain/600-case gate and code remain unchanged. Pilot data cannot become formal unseen evidence or issue runtimeLargeEvaluationAllowed. Broad complete-Skill translation and useful selective dual-drive execution are distinct claims; revising the former research gate is a later decision, not an implicit consequence of this reset.
 

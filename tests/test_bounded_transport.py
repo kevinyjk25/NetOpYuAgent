@@ -82,7 +82,7 @@ def test_expired_delivery_cannot_be_success_or_allow_next_call(tmp_path):
         clock[0] += 421
         return {"content": "too late"}
     broker, ledger = setup(tmp_path, response=delayed, clock=lambda: clock[0])
-    with pytest.raises(BudgetError):
+    with pytest.raises(TimeoutError):
         broker.dispatch(broker.tokens["agent"], "native", request())
     assert ledger.snapshot("fixture")["study"]["status"] == "halted"
     assert len(broker.backend.calls) == 1
@@ -195,19 +195,21 @@ def test_close_during_responder_halts_immediately_and_never_returns_result(tmp_p
         future = pool.submit(broker.dispatch, broker.tokens["agent"], "native", request())
         try:
             assert entered.wait(2)
-            broker.close()
+            closed = broker.close()
+            assert not closed["drained"] and closed["workers"] == 1
             snapshot = BudgetLedger(ledger.path, clock=ledger.clock).snapshot("fixture")
             assert snapshot["study"]["status"] == "halted"
-            assert snapshot["calls"][0]["status"] == "reserved"
+            assert snapshot["calls"][0]["status"] == "unknown"
             assert snapshot["usage"]["model_requests"] == 1
         finally:
             release.set()
-        with pytest.raises(TimeoutError if fails else PermissionError):
+        with pytest.raises(PermissionError):
             future.result(timeout=3)
+    assert broker.close(timeout=1)["drained"]
     snapshot = ledger.snapshot("fixture")
     call = snapshot["calls"][0]
-    assert call["status"] == ("unknown" if fails else "settled")
-    assert call["charged_output"] == (100 if fails else 16)
+    assert call["status"] == "unknown"
+    assert call["charged_output"] == 100  # Late success cannot rewrite unknown usage.
     assert snapshot["study"]["status"] == "halted"
     with pytest.raises(PermissionError):
         broker.dispatch(broker.tokens["agent"], "native", request())

@@ -508,7 +508,7 @@ def run(output):
             write_new(directory / "process-error.json", process_error)
             ledger.pause_study("scripted-dsh-plumbing", "probe_process_failure")
         finally:
-            broker.close()
+            broker_close = broker.close(timeout=2)
             close_state = host.close()
             # Only collection here. Never execute Runtime/provider after DSH.
             write_new(directory / "provider-receipts.json", provider.receipts())
@@ -529,6 +529,7 @@ def run(output):
         code_unchanged = implementation == implementation_fingerprint()
         passed = (result is not None and result.returncode == 0 and not process_error
                   and code_unchanged and delivery["matched"] and close_state["drained"]
+                  and broker_close.get("drained") is True
                   and stages == expected and len(receipts) == 1
                   and receipts[0]["outcome"] == "ok" and not host.errors and not broker.errors
                   and host.route == {"native": "native", "compiled": "runtime_read_prefix", "fallback": "fallback"}[case]
@@ -538,7 +539,7 @@ def run(output):
             "providerCalls": len(receipts), "providerBinding": provider.binding,
             "graphStatus": host.graph["status"] if host.graph else None, "processExit": result.returncode if result else None,
             "processError": process_error, "delivery": delivery, "implementationUnchanged": code_unchanged,
-            "hostClose": close_state, "hostAttemptEvents": len(host.attempts()),
+            "hostClose": close_state, "brokerClose": broker_close, "hostAttemptEvents": len(host.attempts()),
             "hostToolAttempts": sum(event["event"] == "tool_requested" for event in host.attempts()),
             "commonInputDigest": sha256_json(common), "hostErrors": host.errors, "brokerErrors": broker.errors}
         write_new(directory / "observation.json", seal(row))

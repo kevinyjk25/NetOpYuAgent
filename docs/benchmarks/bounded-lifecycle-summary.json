@@ -1,0 +1,109 @@
+{
+  "schema": "ensuredskill.io/bounded-lifecycle-summary/v1",
+  "date": "2026-09-16",
+  "baseCommit": "b2cca74",
+  "status": "lifecycle_fix_verified_token_preflight_decision_pending",
+  "evidenceRole": "engineering_lifecycle_not_semantic_evaluation",
+  "currentResearchStatus": "r0_measurement_partial",
+  "actualModelCalls": 0,
+  "pilotQualified": false,
+  "researchEvidenceEligible": false,
+  "automaticEffectBridge": "not_tested",
+  "qa": {
+    "initialTransport": {
+      "passed": 52,
+      "failed": 3,
+      "localJUnit": "artifacts/bounded-lifecycle-20260916-qa/transport-first.xml",
+      "explanation": "Old assertions expected BudgetError on expiry and pending/late-success settlement after close. Updated to explicit timeout and conservative unknown settlement; late results cannot rewrite charged costs. Failures retained."
+    },
+    "intermediateTransport": {
+      "passed": 64,
+      "failed": 0,
+      "localJUnit": "artifacts/bounded-lifecycle-20260916-qa/transport-v2.xml"
+    },
+    "transport": {
+      "passed": 71,
+      "failed": 0,
+      "seconds": 4.69,
+      "localJUnit": "artifacts/bounded-lifecycle-20260916-qa/transport-v3.xml"
+    },
+    "targetedFinal": {
+      "passed": 213,
+      "failed": 0,
+      "seconds": 8.30,
+      "localJUnit": "artifacts/bounded-lifecycle-20260916-qa/targeted-final.xml"
+    },
+    "endpointRecheck": {
+      "passed": 59,
+      "failed": 0,
+      "additionalRaceRepetitions": "two positive cases repeated five times, all ten passed"
+    },
+    "initialFullSuite": {
+      "passed": 3768,
+      "failed": 2,
+      "subtestsPassed": 81,
+      "seconds": 260.04,
+      "localJUnit": "artifacts/bounded-lifecycle-20260916-qa/all.xml",
+      "explanation": "Positive HTTP tests closed on client body receipt before server-side delivery bookkeeping completed, revoking the in-flight response. Positive tests now wait boundedly for server idle and retain strict no-error/active-ledger/drain assertions. Production close guards and negative tests unchanged. This run predates the final two deadline/watchdog tests."
+    },
+    "fullSuite": {
+      "status": "passed",
+      "passed": 3772,
+      "failed": 0,
+      "subtestsPassed": 81,
+      "seconds": 260.57,
+      "testSuite": "all",
+      "localJUnit": "artifacts/bounded-lifecycle-20260916-qa/all-final.xml"
+    },
+    "documentationAndAuthority": {
+      "passed": 51,
+      "failed": 0,
+      "localJUnit": "artifacts/bounded-lifecycle-20260916-qa/docs.xml"
+    },
+    "changedPythonRuff": {"passed": true, "files": 10},
+    "diffCheckPassed": true,
+    "independentReview": "Post-guard deadline, DB-independent watchdog setup, eventual close cleanup, late-result accounting and explicit drain gates reviewed. Synchronous ledger authorization/settlement can still wait for SQLite and is not hard real-time cancellation.",
+    "broaderLint": "31 pre-existing findings in 16 unchanged files retained; see cleanup-20260916-summary.json"
+  },
+  "scriptedDSHRecheck": {
+    "localReport": "artifacts/bounded-lifecycle-20260916-dsh-final/report.json",
+    "digest": "sha256:e13a5ff1ab4232f204b8a22dcde2b51cfdd66b3bbf83bdfa822ee96a93cf4f1f",
+    "implementationDigest": "sha256:157a3e1bd9beb547c027f40924b17578e3d8856af8ab616972375b5b1f020698",
+    "freezeDigest": "sha256:ac5b1256466f0dc0b9cea901dbb9190f7ffcbed86d4bd57a4ef7dba7b789f2da",
+    "allPassed": true,
+    "passedCases": 3,
+    "scriptedRequests": 8,
+    "providerReads": 3,
+    "actualModelCalls": 0,
+    "versions": {"dsh": "0.1.1-rc.2", "node": "v24.19.0"},
+    "brokerDrainRequired": true,
+    "allBrokersDrained": true,
+    "implementationUnchangedDuringProbe": true,
+    "completeDependencySnapshot": false,
+    "sourceFingerprintsChecked": 265,
+    "sourceMismatches": 0,
+    "reportAndFreezeDigestsValid": true,
+    "sameInitialState": true,
+    "distinctIsolationIds": 3,
+    "precedingProbe": {
+      "localReport": "artifacts/bounded-lifecycle-20260916-dsh/report.json",
+      "digest": "sha256:74916a9dc6dfb5e1215d4fa3e58962f95f40a1f918c5d38e55b3c485b6e0fea6",
+      "allPassed": true,
+      "scope": "Before final post-guard deadline and DB-independent watchdog change; retained separately, not rebound to final code."
+    }
+  },
+  "remaining": [
+    "same-backend trusted zero-inference token preflight; isolated instance awaits user decision",
+    "complete controller and execution dependency freeze",
+    "six Skills / twelve Tasks with independently aligned references",
+    "automatic Effect bridge remains not_tested; existing product write boundary unchanged"
+  ],
+  "limitations": [
+    "cooperative Python callbacks and local I/O are not forcibly cancelled",
+    "socket shutdown cannot retract already transmitted bytes",
+    "undrained workers are reported, not treated as clean completion",
+    "fixture token counts are not Qwen preauthorization or performance evidence"
+  ],
+  "historicalEvidenceChanged": false,
+  "gitCommitOrPushPerformed": false
+}

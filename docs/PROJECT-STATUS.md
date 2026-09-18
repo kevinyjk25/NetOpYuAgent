@@ -2,7 +2,45 @@
 
 ## 中文
 
-### 2026-09-16 清理：当前路径与历史研究分离
+### 2026-09-18 最新：R0 工程验收完成，停在本地提交边界
+
+用户明确批准一次关联零推理重验后，同一封存材料完成 **12 对／24 臂，24/24 机械通过、0 未运行**。54 次实际本地 Provider 读取（原生 27／Runtime 22／fallback 5）的参数、结果和 DSH 回送均核对；100 次替身传输请求全部 settled，无未知用量。24 个 Provider 隔离初态一致，宿主、broker、receiver 全部关闭排空，执行依赖前后一致。见 [R0 完成复核](R0-COMPLETION.md)和[逐臂机器摘要](benchmarks/r0-reacceptance-20260918-summary.json)。
+
+**真实实验模型调用仍为 0。** 390,953 输入 token 是离线真实计数，100 输出 token 是 fixture，1,233.09 秒累计臂时间含资产哈希，不能用于声称 9B 提速。独立只读复核确认原父账本和报告未变，唯一重验 claim 已消费；跨两批保留 48 个分配、25 个启动、24 个完成、1 个原失败及 23 个原未运行，仍只有 12 个不同任务。
+
+最终完整 `all` 回归 **4,030 项＋81 子测试通过（281.31 秒）**，变更范围 Ruff、Node／shell 语法、文档／权限边界及 diff 检查通过。补充[第三方许可与 tokenizer 来源 pin](R0-THIRD-PARTY-NOTICES.md)，未改材料、标签、旧失败或研究门槛。原历史工时缺完整记录，不补称证明两工作日合规；仅消费获批例外，不重置预算。
+
+R0 工程出口已完成；本轮只做要求的本地提交，不推送、不自动进入 R1。后续仍为 **R1 有限实现与开发筛选 → R2 一次不相交确认 → R3 决策归档**。R1 的真实生成计量适配、三接管点、36 机制探针、自动 Effect 桥接和盲化评审仍待验收；本次不是转译语义通过或正式泛化成功。以下均为保留的历史快照。
+
+### 历史：2026-09-17 R0 材料封存，整批机械验收阻塞
+
+6 Skill／6 仓库／12 Task（8 正向＋4 边界）的来源、工具与初态、两份隔离 AI 标注和逐案裁决已封存；[独立材料包](../data/bounded-pilot/r0-development-20260917/README.md)可随 Git 校验，不依赖本机历史 artifacts。严格候选范围仍为证据、资源绑定和有限谓词，完整 YAML/KQL/因果语义不伪装为确定性证明。
+
+精确 token→预留→HTTP token 数组→原生解析、完整声明依赖冻结及固定配对控制器已实现。但首次 24 臂验收在 Mesh 第一臂启动时被 DSH 的 persona 模板解析阻断：原文 `{{destination_service_name}}` 被误识别为宿主变量。**1 臂尝试／0 臂完成／23 臂未运行，0 实验模型请求／0 工具调用。** 账本已 halted；同源输入、原始失败和完整分母保留。实际已创建的 receiver/host 均已关闭排空；原报告的 attempted/completed 与 cleanup 命名问题单独披露，不改写原始数据。
+
+详见 [R0 验收报告](R0-COMPLETION.md)。修复必须保留 Skill 原文字节而不是删除模板字符；定向验证不替代整批验收。新的关联零推理工程重验待显式授权，不重置原账本、标签、R1/R2 门槛和预算。R0 尚未完成、未进入 R1，也未执行“完成后提交”。下一小节开始均为历史增量快照。
+
+原文不透明载入修复已通过实际 DSH renderer／插件的 10 类逐字节保真验证；报告计数和主因保留修复通过 48 项验收门禁单测。最终完整 `all` 回归 **4,002 项＋81 子测试通过（266.39 秒）**。见[本轮机器摘要](benchmarks/r0-closure-20260917-summary.json)；这些结果不替代失败批次的完整重验，也不是语义泛化成功率。
+
+### 历史：2026-09-17 零推理离线 Token 预检通过，R0 仍部分完成
+
+用户明确仅有本地 Ollama／当前 Codex 后授权继续；本轮未替换服务、未下载模型、未调用真实模型。固定官方 Go renderer＋匹配本地 libllama 的 vocab-only tokenizer 已构建；全 GGUF、helper、实际 dylibs 和模型 metadata 逐摘要绑定，输出不可变 prepared request。详见[离线预检](R0-TOKEN-PREFLIGHT.md)与[机器摘要](benchmarks/token-preflight-20260917-summary.json)。
+
+固定 6 类请求×2 次准备全部通过，含真实 compiler／Runtime 请求构造；输入计数分别为 20／32／275／338／1,711／175，两次完整制品摘要一致，源码未漂移。**这是 6 类请求形状，不是 6 Skill 泛化测试。** Python 65 项准备／绑定测试、114 项原 wire 兼容测试、Go 5 项＋25 子案例、tokenizer 10 个预期决策通过。连续特殊标记的超时与初次单元测试失败完整披露，未改写为从未失败。
+
+最终完整 `all` 回归 **3,837 项＋81 子测试通过**（261.11 秒）；本轮 15 个变更 Python 文件 Ruff、文档／权限 8 项、shell 语法和 diff 检查通过。新 DSH 脚本化回归仍为 3/3 路径、8 请求、3 读取、0 模型；独立报告不覆盖旧证据。误写测试路径的一次零测试命令失败也在摘要披露。
+
+发现上游 API 会丢弃部分工具 Schema 字段，现明确保存 loss 路径、原值和实际编码；真实计数不证明语义约束完整。`generationEnabled=false`、`liveAdapterReady=false`，新实验 profile 不冒充现用脏构建。下一项仍是同一 prepared request→发送点→持久预算绑定的无模型验收，其后完整控制器／执行依赖冻结／6 Skill 12 Task 独立标签。遵守 R0 原时间和零模型上限，不以新单测替代研究进展、不启 R1，不提交／推送或重启 UI。以下为历史快照。
+
+### 历史：2026-09-16 计量生命周期修复，R0 仍部分完成
+
+用户确认清理提交 `b2cca74` 已推送后继续。本轮只关闭可复现的计量缺口：事务锁后取时、精确预留调用守卫、关闭后禁止成功交付、未知异常停止、迟到结果不重结算、HTTP 绝对期限及明确排空状态。见[修复报告](R0-MEASUREMENT-LIFECYCLE.md)和[机器摘要](benchmarks/bounded-lifecycle-summary.json)。
+
+213 项定向通过；最新安装版 DSH 的原生／Runtime 只读／拒绝 fallback 三条脚本化接线通过，8 次脚本请求、3 次 SQLite 读取、0 次真实模型调用。最终完整 `all` 回归 **3,772 项＋81 子测试通过**（260.57 秒），文档／权限 51 项和 10 个变更文件 Ruff 通过；初次失败保存在机器摘要。未知／迟到／未排空不算成功，但同步数据库 I/O 和 Python 回调不具强制硬实时取消能力。
+
+下一具体阻塞是[同后端零推理 Token 预检](R0-TOKEN-PREFLIGHT.md)。现用 Ollama 没有已验收的公共入口，debug-render 可能先 warmup；独立计量实例方案待用户决策，未改服务。完整控制器、依赖冻结及 6 Skill／12 Task 独立标签也未完成。遵守原 R0 时间／零模型上限，不进入 R1、不追加语义试跑，不提交／推送、不重启 UI。下面各段均为保留的历史增量，不把旧结论改为当前通过。
+
+### 历史：2026-09-16 清理，当前路径与历史研究分离
 
 [清理说明](CLEANUP-20260916.md)：旧探索性测试按显式文件清单分到 historical，默认 current 保留 Runtime 安全、现用编译器、宿主和正式门禁，CI／retirement 仍跑 all。R0 通用助手从旧实验链解耦、兼容导出保留；退役单快照 `task_delivery_ablation` 及专用测试。源码和 artifacts 已先归档逐内容核验，历史负结果、Oracle、数据库及无关用户文件不动。验证结果见[清理摘要](benchmarks/cleanup-20260916-summary.json)。
 
@@ -225,6 +263,38 @@
 生产身份/多人审批、Provider 供应链、HA/DR、WORM、Hermes/A2A、真实厂商认证与大规模 Runtime 性能评测仍冻结。原型准则见[权威文档](ENSUREDSKILL-PROTOTYPE.md)。共享虚拟环境、数据库、评测证据和无关用户文件不作垃圾删除。
 
 ## English
+
+### Latest: September 18 — R0 engineering complete, local commit boundary
+
+Following explicit one-time linked authorization, the same frozen twelve tasks complete **all 24 mechanical arms, none unrun**. Fifty-four local Provider reads (27 native, 22 Runtime, five fallback) have matching arguments/results and actual DSH delivery; all one hundred stand-in requests settle without unknown usage. Twenty-four isolated Providers have matching initial state, all hosts/brokers/receivers drain, and execution dependencies remain unchanged. See [R0 closure](R0-COMPLETION.md) and [per-arm evidence](benchmarks/r0-reacceptance-20260918-summary.json).
+
+**Zero real experimental inference calls.** Input 390,953 is actual offline token counting; output 100 is fixture usage. Total arm time is 1,233.09 seconds including asset hashing, not a 9B speed result. Independent read-only verification preserves the original parent ledger/reports and confirms the one-use claim is consumed. Across both attempts retain 48 assignments, 25 starts, 24 completions, one original failure and 23 original unrun assignments, still twelve distinct tasks.
+
+Full regression passes **4,030 tests and 81 subtests in 281.31 seconds**, alongside scoped lint, syntax, documentation/authority and diff checks. [Attribution and tokenizer pins](R0-THIRD-PARTY-NOTICES.md) supplement, not change, the frozen data. No retrospective labor-compliance claim or budget reset is made.
+
+R0 engineering is complete. Only the requested local commit follows; no push or automatic R1 start. Remaining stages are R1 bounded implementation/development screening, R2 one disjoint confirmation and R3 decision/archive. Live metering/generation adaptation, three takeover points, thirty-six probes, automatic Effect integration and blind-review projection still require R1 acceptance. This is not semantic or formal-generalization success. Entries below are retained historical snapshots.
+
+### Historical: September 17 — frozen material, blocked R0 acceptance
+
+The standalone six-Skill/six-repository/twelve-task development package (eight positive/four boundary) now contains complete sources, tool/state fixtures, two isolated AI annotations and adjudication. See the [material guide](../data/bounded-pilot/r0-development-20260917/README.md). This is not human Gold or complete semantic verification.
+
+Exact token/reservation/HTTP/parser binding and declared dependencies were implemented, but the first fixed 24-arm run stopped at DSH startup: Mesh source `{{destination_service_name}}` was interpreted as a persona variable. **One attempted, zero completed, 23 unrun; zero experimental model requests/tool calls.** The engineering ledger is halted, dependencies were unchanged, and created resources drained. The original report remains immutable; attempted/completed and uncreated/uncleaned naming problems are disclosed in [R0 acceptance](R0-COMPLETION.md).
+
+A literal-preserving loader repair does not qualify the failed run. Another linked zero-inference acceptance requires explicit authorization; no budget reset, R1 start or completion commit has occurred.
+
+The installed renderer/plugin preserves all ten literal-source fixtures byte-for-byte. Reporting fixes pass forty-eight gate unit tests; final full `all` regression passes **4,002 tests plus 81 subtests (266.39 seconds)**. See the [current machine summary](benchmarks/r0-closure-20260917-summary.json). These checks do not replace full-batch acceptance or measure semantic generalization. Following entries are historical snapshots.
+
+Historical September 17: the authorized [offline preflight](R0-TOKEN-PREFLIGHT.md) passes all six request shapes twice, using the fixed official Go renderer and matching bundled vocab-only tokenizer. Full GGUF/helper/dylib/metadata identities and immutable preparations are bound; the current service remains unchanged and real-model calls remain zero. Counts are 20/32/275/338/1,711/175, including actual compiler/Runtime request builders, with identical repeats and unchanged sources. This is not six Skills or semantic generalization. The [machine summary](benchmarks/token-preflight-20260917-summary.json) records 65 preparation/binding tests, 114 wire checks, five Go tests plus 25 subtests, ten tokenizer decisions and retained initial failures, including the pathological special-marker timeout.
+
+Final full `all` regression passes **3,837 tests plus 81 subtests** in 261.11 seconds. All 15 changed Python files pass Ruff; eight documentation/authority checks, shell syntax and diff checks pass. Fresh scripted DSH regression passes three paths/eight requests/three reads/zero model calls without replacing earlier evidence. An initial wrong-test-path command ran zero tests and is separately disclosed.
+
+Upstream tool-schema omissions are explicitly recorded, not treated as semantic fidelity. Generation/live adapter remain disabled; this new experimental profile does not claim installed dirty-backend equivalence. Next is no-model verification of same-prepared-request dispatch and persistent reservation binding, followed by the full controller, execution dependencies and independent six-Skill/twelve-task references within original R0 limits. No R1, model batch, commit/push or UI restart. Following entries are historical.
+
+Historical September 16: after the user confirmed pushing cleanup commit `b2cca74`, a bounded [measurement lifecycle repair](R0-MEASUREMENT-LIFECYCLE.md) fixes post-lock timing, exact reserved dispatch checks, unknown failures, close/late-result isolation, absolute HTTP deadlines and explicit drain status. R0 remains partial; this is not semantic tuning. See the [machine summary](benchmarks/bounded-lifecycle-summary.json) for complete QA, including retained failures.
+
+There are 213 targeted passes and three successful fresh installed-DSH scripted paths: eight requests, three SQLite reads, zero real-model calls. Synchronous DB I/O and Python callbacks remain cooperative, not forcibly cancelled. [Same-backend zero-inference preflight](R0-TOKEN-PREFLIGHT.md) is the concrete next blocker; a separate measurement instance awaits user decision and has not changed the running service. The full controller, dependency freeze and six-Skill/twelve-task independent references remain open. Original R0 time/zero-model limits apply; no R1, model batches, commit/push or UI restart. The following paragraphs are historical increments, not reclassified current passes.
+
+Final full `all` regression passes **3,772 tests plus 81 subtests** in 260.57 seconds, with 51 documentation/authority checks and Ruff on all ten changed Python files. Initial failures remain disclosed in the summary; this verifies the lifecycle package, not R0 completion or semantic improvement.
 
 September 16 cleanup separates active code/tests from historical research. An explicit historical manifest preserves core Runtime/compiler/host/formal gates in current; CI/retirement still run all. R0 helpers no longer load old experiment chains, with legacy exports retained. The no-consumer snapshot `task_delivery_ablation` CLI and dedicated tests are retired and recoverable. Pre-edit source/artifact archives were content-verified; failures, labels, databases and unrelated user files remain untouched. See [cleanup details](CLEANUP-20260916.md) and [QA summary](benchmarks/cleanup-20260916-summary.json).
 

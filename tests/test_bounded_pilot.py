@@ -7,7 +7,7 @@ import pytest
 from evaluation.bounded_budget import BudgetError, BudgetLedger
 from evaluation.bounded_execution import MeasuredCalls, agent_context
 from evaluation.bounded_pilot import (
-    FAMILIES, PRIMITIVES, case_input_digest, confirmation_plan, make_protocol, prepare, read_json,
+    FAMILIES, PRIMITIVES, case_initial_state_digest, case_input_digest, confirmation_plan, make_protocol, prepare, read_json,
     schedule, seal, validate_agent_input, validate_cases, validate_protocol, validate_references,
 )
 from network_runtime.contracts import sha256_json
@@ -151,6 +151,9 @@ def test_common_input_is_deep_copied_and_source_scripts_are_only_text():
     treatment = agent_context(case, arm="treatment", isolation_id="b")
     assert control.input_digest == treatment.input_digest
     assert control.initial_state_digest == treatment.initial_state_digest
+    assert control.initial_state_digest == sha256_json(case["provider_fixture"]["state"])
+    assert control.fixture_digest == treatment.fixture_digest == sha256_json(case["provider_fixture"])
+    assert control.fixture_digest != control.initial_state_digest
     control.inputs["arguments"]["new"] = 900
     assert treatment.inputs["arguments"] == {}
     assert case["agent_input"]["arguments"] == {}
@@ -254,7 +257,7 @@ def references_for(cases):
     for case in cases:
         reference = seal_reference({"case_id": case["case_id"], "skill_id": case["skill_id"],
             "repository_id": case["repository_family"], "domain": case["domain"], "kind": case["kind"],
-            "initial_state_digest": sha256_json(case["provider_fixture"]),
+            "initial_state_digest": case_initial_state_digest(case),
             "criteria": [{"id": "scope", "critical": True, "statement": "Do not mutate state",
                           "source_quote": "Read only"}],
             "duties": [{"id": "read", "critical": False, "strict_eligible": True,
@@ -310,6 +313,84 @@ def test_reference_calls_must_be_possible_with_frozen_host_catalog(mutation):
     else:
         with pytest.raises(ValueError, match="frozen"):
             validate_references(seal(body), references)
+
+
+def test_reference_and_agent_context_match_real_provider_database_state(tmp_path):
+    from evaluation.bounded_provider import FIXTURE_SCHEMA, LocalProviderPool
+    body = {key: value for key, value in protocol().items() if key != "digest"}
+    case = body["development_cases"][0]
+    case["provider_fixture"] = {"schema": FIXTURE_SCHEMA, "state": {"scoped": {"value": 0}}, "tools": [{
+        "name": "observe", "description": case["agent_input"]["tools"][0]["description"],
+        "input_schema": case["agent_input"]["tools"][0]["input_schema"],
+        "contract_id": "observe", "operation": "read", "kind": "read",
+        "target": {"constant": "scoped"}, "property": "value", "value": None, "requires_approval": False}]}
+    case["input_digest"] = case_input_digest(case)
+    references = references_for(body["development_cases"])
+    assert validate_references(seal(body), references) == references
+    pool = LocalProviderPool(tmp_path / "fixed-provider-pool")
+    providers = [pool.create_arm("arm-A", "control", case["provider_fixture"]),
+                 pool.create_arm("arm-B", "treatment", case["provider_fixture"])]
+    assert providers[0].path != providers[1].path
+    try:
+        for provider, arm in zip(providers, ("control", "treatment"), strict=True):
+            context = agent_context(case, arm=arm, isolation_id=provider.binding["isolation_id"])
+            snapshot = provider.snapshot()
+            receipt = provider.invoke("observe", {}, request_id="initial-read")["receipt"]
+            assert snapshot["state"] == case["provider_fixture"]["state"]
+            assert context.initial_state_digest == snapshot["state_digest"] == references[0]["initial_state_digest"]
+            assert receipt["initial_state_digest"] == snapshot["state_digest"]
+            assert context.fixture_digest == receipt["fixture_digest"] == sha256_json(case["provider_fixture"])
+            assert context.fixture_digest != context.initial_state_digest
+            assert receipt["result"]["value"] == 0 and receipt["call"]["independent"] is True
+            assert receipt["call"]["origin"] == "agent" and receipt["call"]["after_agent_end"] is False
+            assert receipt["productEffectAuthority"] is False
+            assert "state" not in context.inputs and "provider_fixture" not in context.inputs
+    finally:
+        for provider in providers:
+            provider.close()
+
+
+def test_old_full_fixture_reference_is_rejected_without_rewriting_label_or_case():
+    from evaluation.bounded_scoring import seal_reference
+    body = {key: value for key, value in protocol().items() if key != "digest"}
+    references = references_for(body["development_cases"])
+    references[0]["initial_state_digest"] = sha256_json(body["development_cases"][0]["provider_fixture"])
+    references[0] = seal_reference(references[0])
+    body["development_cases"][0]["reference_digest"] = references[0]["reference_digest"]
+    frozen = seal(body)
+    before = copy.deepcopy((frozen, references))
+    with pytest.raises(ValueError, match="Provider state, not the full fixture"):
+        validate_references(frozen, references)
+    assert (frozen, references) == before
+
+
+def test_fixture_policy_changes_keep_state_digest_but_change_full_input_binding():
+    case = case_set()[0]
+    original = agent_context(case, arm="control", isolation_id="A")
+    changed = copy.deepcopy(case)
+    changed["provider_fixture"]["tools"] = [{"requires_approval": True, "description": "changed host policy"}]
+    with pytest.raises(ValueError, match="input drift"):
+        agent_context(changed, arm="treatment", isolation_id="B")
+    changed["input_digest"] = case_input_digest(changed)
+    updated = agent_context(changed, arm="treatment", isolation_id="B")
+    assert original.initial_state_digest == updated.initial_state_digest
+    assert original.fixture_digest != updated.fixture_digest
+    assert original.input_digest != updated.input_digest
+    changed["provider_fixture"]["state"]["value"] = 1
+    changed["input_digest"] = case_input_digest(changed)
+    changed_state = agent_context(changed, arm="treatment", isolation_id="C")
+    assert changed_state.initial_state_digest != original.initial_state_digest
+
+
+@pytest.mark.parametrize("fixture", [{}, {"state": None}, {"state": []}, {"state": "not an object"}])
+def test_missing_or_invalid_state_cannot_fall_back_to_hashing_whole_fixture(fixture):
+    cases = case_set()
+    cases[0]["provider_fixture"] = fixture
+    cases[0]["input_digest"] = case_input_digest(cases[0])
+    with pytest.raises(ValueError, match="explicit state object"):
+        validate_cases(cases)
+    with pytest.raises(ValueError, match="explicit state object"):
+        agent_context(cases[0], arm="control", isolation_id="A")
 
 
 def test_frozen_schema_validation_never_fetches_external_references():

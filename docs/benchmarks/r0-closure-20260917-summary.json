@@ -1,0 +1,189 @@
+{
+  "actualExperimentalModelCalls": 0,
+  "authority": {
+    "commitPerformed": false,
+    "generationParity": "not_tested",
+    "oldPausedUnmetAndNegativesPreserved": true,
+    "originalR0Budget": "2 working days, not reset; exact historical work-hour ledger unavailable",
+    "productionAuthorityChanged": false,
+    "realGenerationEnabled": false,
+    "researchEvidenceEligible": false,
+    "revalidationAuthorization": "requested_not_received",
+    "runtimeLargeEvaluationAllowed": false,
+    "semanticPerformance": "not_measured"
+  },
+  "date": "2026-09-17",
+  "digest": "sha256:b06d29cdfc631ea44e21fd4ccf5673e9659cf95356782765e394afcae3dce445",
+  "fixed_acceptance": {
+    "assigned_arms": 24,
+    "claimed_arms": 1,
+    "closed_drained_receivers": 1,
+    "controller": {
+      "internal_digest": "sha256:ef4d4e12f011543c07937e5a4e6dd5dd683c5472b6b349d3e64b0d4e68f5f572",
+      "path": "artifacts/r0-closure-20260917/paired-acceptance/controller/report.json",
+      "raw_sha256": "sha256:7c47c749a4cfb558472c1e9452cf91a3ef9b89c80490f16403da3da8e1f3bc14"
+    },
+    "created_receivers": 1,
+    "dependencies_unchanged_during_attempt": true,
+    "dependency_digest": "sha256:1b28fc14351111be0e501e8f0a576fc54dc5fabe7b8ee7da48602f329205a25e",
+    "ledger_reason": "controller_failure_or_unknown",
+    "ledger_reset": false,
+    "ledger_status": "halted",
+    "mechanics_passed_arms": 0,
+    "model_requests": 0,
+    "original_reports_unchanged": true,
+    "original_v1_report_corrections": [
+      "completed_arms=len(rows) was attempted count, not successful completion",
+      "one created receiver drained; uncreated receivers were incorrectly labelled incomplete cleanup"
+    ],
+    "outer": {
+      "internal_digest": "sha256:034ba526205c93ef0913e54fa8d8033bb77109bc8ccbb598bd239c205f43bc0d",
+      "path": "artifacts/r0-closure-20260917/paired-acceptance/report.json",
+      "raw_sha256": "sha256:c6ff9e3368e6eff3898c9a5d3e01f0d062bb7bf855043e1112efb37c426431dd"
+    },
+    "primary_cause": "DSH persona scanned literal Skill {{destination_service_name}} as unregistered host variable",
+    "protocol_completed_arms": 0,
+    "provider_tool_invocations": 0,
+    "repeated_batch": false,
+    "source": "paired-acceptance/controller/00-treatment/dsh-stderr.txt",
+    "unrun_arms": 23
+  },
+  "material": {
+    "annotation_role": "AI_assisted_developer_evaluation_not_human_Gold",
+    "boundary": 4,
+    "criteria": 47,
+    "directory": "data/bounded-pilot/r0-development-20260917",
+    "domain_labels": [
+      "incident_knowledge_management",
+      "knowledge_management",
+      "network_observability",
+      "network_security",
+      "security_query_authoring",
+      "web_network_architecture"
+    ],
+    "duties": 58,
+    "independentHumanGold": false,
+    "knownDevelopmentNotHoldout": true,
+    "netdata_exclusion": "pre-enrollment source closure/budget/wrapper mismatch; old negatives preserved",
+    "positive": 8,
+    "repository_families": 6,
+    "review_digest": "sha256:8d7d66ac5f07049f4e84bf65f7d5397a48f4a55eb2ddd805b11a85e6a69af079",
+    "skills": 6,
+    "sourceScriptsExecuted": false,
+    "status": "frozen_for_bounded_development",
+    "strict_eligible_duties": 31,
+    "tasks": 12
+  },
+  "mechanism_evidence": {
+    "automaticEffectBridge": "not_tested",
+    "budget_all_expected": true,
+    "budget_probes": 10,
+    "exact_send_smoke": {
+      "internal_digest": "sha256:a0e95c093509ef28d6d8bd9c901dea17baa8d907a95c882b195d80c6b845f2c5",
+      "path": "artifacts/r0-closure-20260917/exact-send-smoke/report.json",
+      "raw_sha256": "sha256:687335258354ab6ea335b121d4d6bd09d959f5ed2a3dca5c73e426bbc4891ef4"
+    },
+    "existing_gateway_matched": true,
+    "runtime36ProbeGate": "not_assessed",
+    "scorer_all_expected": true,
+    "scorer_effect_probe": {
+      "internal_digest": "sha256:15d015ba55648bd38f0d51bb23d09f087531dffe08b2a11506fa363a15c28b52",
+      "path": "artifacts/r0-closure-20260917/scorer-effect-probe/report.json",
+      "raw_sha256": "sha256:05a0a77aaa04a93c6fe88a9e494fbd55939b19b5e0f7e1eee17dd782b7d37dd7"
+    },
+    "scorer_positive_negative_probes": 24
+  },
+  "qa": [
+    {
+      "counting": "JUnit testcase entries, including subtests; not model tasks",
+      "errors": 0,
+      "failures": 0,
+      "lane": "current; filename historically misnamed all.xml, 250 historical items deselected",
+      "path": "artifacts/r0-closure-20260917/qa/all.xml",
+      "raw_sha256": "sha256:c58b87245af3b79c7e86e64ed84677ef6db005e4b53f3bca459606898f099927",
+      "seconds": 226.579,
+      "skipped": 0,
+      "tests": 3766
+    },
+    {
+      "counting": "JUnit testcase entries, including subtests; not model tasks",
+      "errors": 0,
+      "failures": 0,
+      "lane": "targeted prerequisites before literal-source repair",
+      "path": "artifacts/r0-closure-20260917/qa/final-prerequisites.xml",
+      "raw_sha256": "sha256:5f886106d3ae42aae02943ef9f6c0ae888da35741ed59fb9a32e7faa39294d92",
+      "seconds": 13.765,
+      "skipped": 0,
+      "tests": 133
+    },
+    {
+      "counting": "JUnit testcase entries, including subtests; not model tasks",
+      "errors": 0,
+      "failures": 0,
+      "lane": "standalone material and acceptance gate before reporting repair",
+      "path": "artifacts/r0-closure-20260917/qa/material-final.xml",
+      "raw_sha256": "sha256:a1604578ee46455cde410e40cd23862001ae9747ec9b2a7779c7c2af63610f1e",
+      "seconds": 3.066,
+      "skipped": 0,
+      "tests": 57
+    },
+    {
+      "counting": "JUnit testcase entries, including subtests; not model tasks",
+      "errors": 0,
+      "failures": 0,
+      "lane": "all, includes explicitly historical research",
+      "path": "artifacts/r0-closure-20260917/qa/all-suite.xml",
+      "raw_sha256": "sha256:16d947afde497dd5cd0ca0cca5cee496eab9e6eaa87634e478c75efc47a2680d",
+      "seconds": 266.351,
+      "skipped": 0,
+      "tests": 4083
+    },
+    {
+      "counting": "JUnit testcase entries, including subtests; not model tasks",
+      "errors": 0,
+      "failures": 0,
+      "lane": "final documentation and research authority checks",
+      "path": "artifacts/r0-closure-20260917/qa/final-docs-authority.xml",
+      "raw_sha256": "sha256:f9b0fdb97eccebb6db0c0616f4ac7425bebb84603221570e24278735163148c1",
+      "seconds": 0.637,
+      "skipped": 0,
+      "tests": 8
+    }
+  ],
+  "qa_commands": {
+    "all_pytest_stdout": "4002 passed, 81 subtests passed in 266.39s",
+    "final_docs_stdout": "8 passed in 0.64s",
+    "git_diff_check": "passed",
+    "node_plugin_syntax": "passed using installed absolute runtime path",
+    "retained_command_failures": [
+      "initial final-QA chain stopped after Ruff because node was absent from shell PATH; no later chained checks ran",
+      "a read-only path lookup named two nonexistent dependency files; actual dependencies.json was then located"
+    ],
+    "ruff_changed_bounded_python": "passed",
+    "shell_build_syntax": "passed"
+  },
+  "r0Complete": false,
+  "r1Started": false,
+  "remaining": [
+    "explicit disposition/authorization for one linked no-inference engineering reacceptance",
+    "successful complete-controller acceptance under an immutable dependency/material freeze",
+    "R0 completion review, then requested local commit; no push"
+  ],
+  "schema": "ensuredskill.io/r0-closure-summary/v1",
+  "status": "measurement_blocked",
+  "targeted_repair": {
+    "actual_http_requests": 0,
+    "actual_model_calls": 0,
+    "all_byte_identical": true,
+    "controller_runs": 0,
+    "future_acceptance_report_schema": "ensuredskill.io/r0-controller-acceptance/v2",
+    "literal_source": {
+      "internal_digest": null,
+      "path": "artifacts/r0-literal-persona-20260917/report.json",
+      "raw_sha256": "sha256:9b69ea9221793bf2a759c9b347b0e8c29c0a698a99611e1af0fd9e6fe1a3db75"
+    },
+    "native_renderer_byte_identical_inputs": 10,
+    "repair_does_not_pass_original_batch": true,
+    "scope": "installed DSH pure renderPrompt plus actual plugin; no full DSH turn/batch"
+  }
+}

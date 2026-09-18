@@ -1,0 +1,30 @@
+{
+  "actualModelCalls": 0,
+  "boundary": 4,
+  "candidateResultsInspected": false,
+  "knownDevelopmentSet": true,
+  "mechanicalDialogue": "Gold-free fixed public tool requests; wiring surrogate, not autonomous task solving",
+  "outputSchema": "optional/open typed structural hints; no constant answers, evidence completeness or execution guarantees",
+  "positive": 8,
+  "realHumanReview": false,
+  "researchEvidenceEligible": false,
+  "role": "AI_assisted_developer_evaluation_not_human_Gold",
+  "runtimeAuthorityGranted": false,
+  "skills": 6,
+  "sourceExclusion": {
+    "notARepairOrPass": true,
+    "originalAnnotations": [
+      "annotation-a.json:original",
+      "annotation-b.json:original"
+    ],
+    "originalFailuresPreserved": true,
+    "phase": "before enrollment/execution",
+    "reason": "mandatory source closure and wrapper/curl conflicts exceed this bounded read-only material and input budget",
+    "source": "Netdata query-snmp-traps"
+  },
+  "sourceFamilies": 6,
+  "sourceProvenancePaths": "historical metadata only; verification/execution uses only this package's embedded source text",
+  "sourceScriptsExecuted": false,
+  "status": "pending_root_adjudication",
+  "tasks": 12
+}

@@ -8,11 +8,13 @@ The trusted host owns role capabilities and phase changes, never request JSON.
 from __future__ import annotations
 
 import copy
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import math
 from pathlib import Path
 import secrets
+import socket
 import threading
 import time
 import uuid
@@ -24,6 +26,8 @@ from network_runtime.contracts import sha256_json
 
 MAX_BYTES = 4 * 1024 * 1024
 STAGES = {"agent", "compiler", "runtime", "revision", "fallback"}
+INGRESS_SECONDS = 10.0
+EGRESS_SECONDS = 10.0
 
 
 def strict_json(data):
@@ -167,17 +171,21 @@ class ModelBroker:
 
     A path capability pins the caller's role. The model's body may not select a
     role, arm, identity or accounting data. Unknown completion halts the ledger.
-    No resume/replay endpoint exists. Physical live deadline enforcement is not
-    claimed for arbitrary Python callbacks; the only backend is the fixture.
+    No resume/replay endpoint exists. Host waiting is deadline-bounded; a Python
+    callback cannot be forcibly killed. Undrained callbacks remain disclosed,
+    their late result cannot settle again or authorize delivery. Fixture only.
     """
     def __init__(self, ledger: BudgetLedger, arm_id, backend: ScriptedModel, output, *, clock=time.time):
-        if type(backend) is not ScriptedModel:
-            raise ValueError("live model forwarding is not implemented")
+        self._validate_backend(backend)
         self.ledger, self.arm_id, self.backend = ledger, arm_id, backend
         self.clock = clock
         self.output = Path(output)
         self.output.mkdir(parents=True, exist_ok=False)
-        self.arm = ledger.inspect_arm(arm_id)["arm"]["arm"]
+        arm = ledger.inspect_arm(arm_id)["arm"]
+        self.arm = arm["arm"]
+        # Arm deadlines are immutable: lifecycle watchdog setup must not wait
+        # for a SQLite write lock. Dispatch authority still reads the ledger.
+        self.deadline = arm["deadline"]
         self.tokens = {role: secrets.token_hex(24) for role in ("agent", "compiler", "runtime")}
         self.agent_stage = "agent"
         self.lock = threading.RLock()
@@ -186,6 +194,118 @@ class ModelBroker:
         self.server = None
         self.closed = False
         self.errors = []
+        self.workers = set()
+        self.connections = set()
+        self.shutdown_done = threading.Event()
+        self.shutdown_lock = threading.Lock()
+        self.shutdown_failed = False
+
+    def _validate_backend(self, backend):
+        if type(backend) is not ScriptedModel:
+            raise ValueError("live model forwarding is not implemented")
+
+    def _preflight(self, api, source, wire):
+        return self.backend.preflight(wire)
+
+    def _invoke_backend(self, stage, wire, reservation, directory):
+        return self.backend.generate(stage, wire, deadline=reservation["deadline"])
+
+    def _measurement(self):
+        return {"actualModelCalls": 0, "measurementKind": "scripted_transport_fixture"}
+
+    def _remaining(self):
+        """Lifecycle time only; unlike a dispatch guard this grants no action."""
+        return max(0.0, self.deadline - self.clock())
+
+    def _http_event(self, code, exc=None):
+        event = {"code": code, "type": type(exc).__name__ if exc else None, "at": time.time(),
+                 "actualModelCalls": 0, "contains_request_text": False}
+        self.errors.append(event)
+        try:
+            write_new(self.output / ("http-" + uuid.uuid4().hex + ".json"), seal(event))
+        except (OSError, ValueError):
+            self._halt("http_audit_persistence_failure")
+
+    @contextmanager
+    def _serial(self):
+        # A queued role must not wait indefinitely behind a blocked caller.
+        deadline = time.monotonic() + self._remaining()
+        while not self.dispatch_lock.acquire(timeout=0.02):
+            if self.closed:
+                raise PermissionError("broker closed while queued")
+            if time.monotonic() >= deadline or self._remaining() <= 0:
+                self._halt("transport_queue_deadline")
+                raise TimeoutError("queued request deadline reached")
+        try:
+            if self.closed:
+                raise PermissionError("closed broker")
+            if time.monotonic() >= deadline or self._remaining() <= 0:
+                raise TimeoutError("request deadline reached")
+            yield
+        finally:
+            self.dispatch_lock.release()
+
+    def _generate(self, stage, wire, reservation, directory):
+        """One owner settles; the worker only records its actual completion.
+
+        Returning on timeout is not proof of cancellation of an upstream model.
+        No real upstream is implemented. A hung fixture is counted as undrained.
+        """
+        ready, aborted = threading.Event(), threading.Event()
+        box = {}
+        remaining = self.ledger.guard_reserved_call(self.arm_id, reservation["request_id"])["remaining_seconds"]
+        end = time.monotonic() + remaining
+
+        def work():
+            try:
+                # Recheck inside the actual worker, after any queue/journal delay.
+                with self.lock:
+                    if self.closed or aborted.is_set():
+                        raise PermissionError("broker stopped before backend start")
+                    guard = self.ledger.guard_reserved_call(self.arm_id, reservation["request_id"])
+                    if self.closed or aborted.is_set():
+                        raise PermissionError("broker stopped during backend guard")
+                    if time.monotonic() >= end or self.clock() >= guard["deadline"]:
+                        raise TimeoutError("backend deadline reached during guard")
+                box["response"] = self._invoke_backend(stage, wire, reservation, directory)
+                write_new(directory / "backend-response.json", box["response"])
+            except BaseException as exc:
+                box["error"] = exc
+            finally:
+                try:
+                    write_new(directory / "backend-completion.json", seal({
+                        "completed_after_abort": aborted.is_set(),
+                        "error_type": type(box["error"]).__name__ if "error" in box else None,
+                        "delivery_authorized": False, "actualModelCalls": 0}))
+                except BaseException as exc:
+                    box["error"] = exc
+                ready.set()
+                with self.lock:
+                    self.workers.discard(threading.current_thread())
+
+        thread = threading.Thread(target=work, daemon=True)
+        with self.lock:
+            if self.closed:
+                raise PermissionError("broker closed before dispatch")
+            self.workers.add(thread)
+            thread.start()
+        try:
+            while not ready.wait(min(0.02, max(0, end - time.monotonic()))):
+                if self.closed:
+                    raise PermissionError("broker closed while backend running")
+                if time.monotonic() >= end or self._remaining() <= 0:
+                    raise TimeoutError("backend absolute deadline reached")
+                self.ledger.guard_reserved_call(self.arm_id, reservation["request_id"])
+            if self.closed:
+                raise PermissionError("broker closed before backend result delivery")
+            if time.monotonic() >= end or self._remaining() <= 0:
+                raise TimeoutError("backend completed after deadline")
+            if "error" in box:
+                raise box["error"]
+            return box["response"]
+        except BaseException:
+            aborted.set()
+            raise
 
     def set_agent_stage(self, stage):
         """Host-only transition after observed workflow state; no HTTP exposure."""
@@ -213,7 +333,7 @@ class ModelBroker:
             self._role(token)
             self.ledger.check_arm(self.arm_id)
             return {"models": [{"name": MODEL, "digest": self.backend.digest}],
-                    "measurementKind": "scripted_transport_fixture", "actualModelCalls": 0}
+                    **self._measurement()}
 
     def _halt(self, reason):
         arm = self.ledger.inspect_arm(self.arm_id)["arm"]
@@ -240,7 +360,8 @@ class ModelBroker:
             "option_keys": [str(key)[:80] for key in list(options)[:64]] if isinstance(options, dict) else [],
             "num_predict": scalar(options.get("num_predict")) if isinstance(options, dict) else None})
 
-    def _wire(self, api, payload):
+    @staticmethod
+    def _wire(api, payload):
         if not isinstance(payload, dict) or payload.get("model") != MODEL:
             raise ValueError("host-pinned model identity required")
         if any(k in payload for k in ("stage", "arm_id", "input_tokens", "usage", "endpoint")):
@@ -298,7 +419,7 @@ class ModelBroker:
         return wire, limit
 
     def dispatch(self, token, api, payload):
-        with self.dispatch_lock:
+        with self._serial():
             with self.lock:
                 stage = self._role(token)
                 source_request = copy.deepcopy(payload)
@@ -307,7 +428,12 @@ class ModelBroker:
                 except ValueError as exc:
                     self._record_rejection(api, payload, exc)
                     raise
-                preflight = self.backend.preflight(wire)
+            # Preparation may read a large pinned vocabulary. Do not hold the
+            # lifecycle lock while doing so: close revokes dispatch immediately.
+            preflight = self._preflight(api, source_request, wire)
+            with self.lock:
+                if self._role(token) != stage:
+                    raise PermissionError("role changed during preparation")
                 request_id = uuid.uuid4().hex
                 reservation = self.ledger.reserve_model_call(self.arm_id, request_id, stage,
                     preflight["input_tokens"], limit)
@@ -321,8 +447,8 @@ class ModelBroker:
                     "source_request_digest": sha256_json(source_request),
                     "normalization": "scripted_openai_native_text_v1" if api == "openai" else "native_identity_v1",
                     "wire": wire, "preflight": preflight, "deadline": reservation["deadline"],
-                    "actualModelCalls": 0, "measurementKind": "scripted_transport_fixture"}))
-                envelope = self.backend.generate(stage, wire, deadline=reservation["deadline"])
+                    **self._measurement()}))
+                envelope = self._generate(stage, wire, reservation, directory)
                 write_new(directory / "response.json", envelope)
                 if (envelope.get("model") != MODEL or envelope.get("done") is not True
                         or not isinstance(envelope.get("message"), dict)):
@@ -340,7 +466,8 @@ class ModelBroker:
                     return copy.deepcopy(envelope)
             except BaseException:
                 if not settled:
-                    self.ledger.settle_call(self.arm_id, request_id)
+                    row = self.ledger.settle_call(self.arm_id, request_id)
+                    write_new(directory / "settlement.json", seal(row))
                 else:
                     self._halt("transport_delivery_or_deadline_failure")
                 raise
@@ -355,6 +482,46 @@ class ModelBroker:
         class Handler(BaseHTTPRequestHandler):
             model_claimed = False
 
+            def handle(self):
+                # The watchdog covers the request line, headers AND slow-drip
+                # body reads. socket.settimeout alone only bounds idle gaps.
+                self.ingress_done = threading.Event()
+                self.ingress_expired = threading.Event()
+                self.ingress_end = time.monotonic() + min(INGRESS_SECONDS, broker._remaining())
+
+                def expire():
+                    if self.ingress_done.is_set():
+                        return
+                    self.ingress_expired.set()
+                    try:
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    broker._http_event("http_ingress_deadline", TimeoutError())
+
+                with broker.lock:
+                    if broker.closed:
+                        self.close_connection = True
+                        return
+                    broker.connections.add(self.connection)
+                self.ingress_timer = threading.Timer(max(0, self.ingress_end - time.monotonic()), expire)
+                self.ingress_timer.daemon = True
+                self.ingress_timer.start()
+                try:
+                    super().handle()
+                finally:
+                    self.ingress_done.set()
+                    self.ingress_timer.cancel()
+                    with broker.lock:
+                        broker.connections.discard(self.connection)
+
+            def finish_ingress(self):
+                if hasattr(self, "ingress_done"):
+                    self.ingress_done.set()
+                    self.ingress_timer.cancel()
+                    if self.ingress_expired.is_set() or time.monotonic() >= self.ingress_end:
+                        raise TimeoutError("absolute HTTP ingress deadline reached")
+
             def log_message(self, *_):
                 pass
 
@@ -365,6 +532,7 @@ class ModelBroker:
                         raise PermissionError("unknown route")
                     token, path = pieces[2], "/".join(pieces[3:])
                     if not post and path == "api/tags":
+                        self.finish_ingress()
                         output, streaming = broker.identity(token), False
                     elif post and path in {"api/chat", "v1/chat/completions"}:
                         # OpenAI has one extra path segment, handled below.
@@ -373,16 +541,23 @@ class ModelBroker:
                         raise PermissionError("unknown route")
                     self.reply(200, output, streaming)
                 except (ValueError, PermissionError, KeyError, TypeError, TimeoutError) as exc:
-                    broker.errors.append({"type": type(exc).__name__, "at": time.time()})
+                    broker._http_event("http_request_rejected", exc)
                     self.reply(409, {"error": {"message": type(exc).__name__}}, False)
 
             def model_post(self, token, path):
                 broker._role(token)
+                lengths = self.headers.get_all("Content-Length", []) if hasattr(self.headers, "get_all") else [self.headers.get("Content-Length")]
+                if len(lengths) != 1 or self.headers.get("Transfer-Encoding") is not None:
+                    raise ValueError("one explicit Content-Length and no transfer encoding required")
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_BYTES:
                     raise ValueError("bounded request body required")
                 self.connection.settimeout(min(10.0, broker.ledger.check_arm(broker.arm_id)["remaining_seconds"]))
-                payload = strict_json(self.rfile.read(length))
+                raw = self.rfile.read(length)
+                if len(raw) != length:
+                    raise ValueError("truncated HTTP request body")
+                self.finish_ingress()
+                payload = strict_json(raw)
                 api = "native" if path == "api/chat" else "openai"
                 native = broker.dispatch(token, api, payload)
                 self.model_claimed = True
@@ -400,9 +575,13 @@ class ModelBroker:
             def do_POST(self):  # noqa: N802
                 # A later role cannot obtain a result before this request's
                 # delivery outcome is known. dispatch re-enters this same lock.
-                with broker.dispatch_lock:
-                    self.model_claimed = False
-                    self.post_request()
+                try:
+                    with broker._serial():
+                        self.model_claimed = False
+                        self.post_request()
+                except (ValueError, PermissionError, TimeoutError) as exc:
+                    broker._http_event("http_queue_rejected", exc)
+                    self.close_connection = True
 
             def post_request(self):
                 pieces = self.path.split("/")
@@ -410,38 +589,67 @@ class ModelBroker:
                     try:
                         self.reply(200, *self.model_post(pieces[2], "v1/chat/completions"))
                     except (ValueError, PermissionError, KeyError, TypeError, TimeoutError) as exc:
-                        broker.errors.append({"type": type(exc).__name__, "at": time.time()})
+                        broker._http_event("http_request_rejected", exc)
                         self.reply(409, {"error": {"message": type(exc).__name__}}, False)
                 else:
                     self.handle_request(True)
 
             def reply(self, status, value, streaming):
+                done, expired = threading.Event(), threading.Event()
+                end = time.monotonic() + min(EGRESS_SECONDS, broker._remaining())
+
+                def expire():
+                    if done.is_set():
+                        return
+                    expired.set()
+                    try:
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                    except (OSError, AttributeError):
+                        pass
+                    broker._http_event("http_egress_deadline", TimeoutError())
+                    if self.model_claimed:
+                        broker._halt("transport_response_delivery_deadline")
+
+                def check():
+                    if expired.is_set() or time.monotonic() >= end or broker._remaining() <= 0:
+                        raise TimeoutError("absolute HTTP egress deadline reached")
+                    if broker.closed:
+                        raise PermissionError("broker closed before/during delivery")
+                    if self.model_claimed and status == 200:
+                        broker.ledger.check_arm(broker.arm_id)
+
+                timer = threading.Timer(max(0, end - time.monotonic()), expire)
+                timer.daemon = True
+                timer.start()
                 try:
-                    # Serialize delivery with close, not with an arbitrary fixture
-                    # callback. Socket timeouts bound this lock for HTTP clients.
-                    with broker.lock:
-                        if self.model_claimed and status == 200:
-                            if broker.closed:
-                                raise PermissionError("broker closed before delivery")
-                            remaining = broker.ledger.check_arm(broker.arm_id)["remaining_seconds"]
-                            self.connection.settimeout(min(10.0, remaining))
-                        body = json.dumps(value, ensure_ascii=False, allow_nan=False)
-                        raw = ("data: " + body + "\n\ndata: [DONE]\n\n" if streaming else body).encode()
-                        self.send_response(status)
-                        self.send_header("Content-Type", "text/event-stream" if streaming else "application/json")
-                        self.send_header("Content-Length", str(len(raw)))
-                        self.end_headers()
-                        self.wfile.write(raw)
-                        self.wfile.flush()
-                        if self.model_claimed and status == 200:
-                            broker.ledger.check_arm(broker.arm_id)
+                    # The absolute watchdog spans encoding, headers, body and
+                    # flush. It closes real sockets even under slow backpressure.
+                    # Python encoding itself is cooperative, not forcibly killed.
+                    check()
+                    self.connection.settimeout(max(0.001, end - time.monotonic()))
+                    body = json.dumps(value, ensure_ascii=False, allow_nan=False)
+                    raw = ("data: " + body + "\n\ndata: [DONE]\n\n" if streaming else body).encode()
+                    check()
+                    self.send_response(status)
+                    self.send_header("Content-Type", "text/event-stream" if streaming else "application/json")
+                    self.send_header("Content-Length", str(len(raw)))
+                    check()
+                    self.end_headers()
+                    check()
+                    self.wfile.write(raw)
+                    check()
+                    self.wfile.flush()
+                    check()
                 except (OSError, ValueError, TypeError) as exc:
                     # No second response: headers or a partial body may already
                     # have been sent. Settled claims stay charged; no next call.
                     self.close_connection = True
-                    broker.errors.append({"type": type(exc).__name__, "at": time.time()})
+                    broker._http_event("http_delivery_failed", exc)
                     if self.model_claimed:
                         broker._halt("transport_response_delivery_failure")
+                finally:
+                    done.set()
+                    timer.cancel()
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.server.daemon_threads = True
@@ -455,15 +663,55 @@ class ModelBroker:
             raise ValueError("broker is not running")
         return self.base_url + "/r/" + self.tokens[role]
 
-    def close(self):
-        with self.lock:
-            if self.closed:
-                return
-            self.closed = True
-            if self.inflight:
-                self._halt("transport_closed_with_inflight_request")
-            server = self.server
-        if server is not None:
-            server.shutdown()
-            server.server_close()
-            self.thread.join(timeout=5)
+    def close(self, timeout=0.5):
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout < 0:
+            raise ValueError("finite nonnegative close timeout required")
+        end = time.monotonic() + timeout
+        # Revocation precedes any lock wait. No callback is forcibly killed.
+        self.closed = True
+        # Always schedule eventual cleanup, even when the lifecycle lock is
+        # held beyond this caller's timeout. A second close is not required.
+        # This separate once-lock never encloses user code, DB or socket I/O.
+        with self.shutdown_lock:
+            first = not hasattr(self, "shutdown_thread")
+            if first:
+                def shutdown():
+                    try:
+                        with self.lock:
+                            connections = tuple(self.connections)
+                            pending = bool(self.inflight or self.workers)
+                        for connection in connections:
+                            try:
+                                connection.shutdown(socket.SHUT_RDWR)
+                            except OSError:
+                                pass
+                        if self.server is not None:
+                            self.server.shutdown()
+                            self.server.server_close()
+                            self.thread.join()
+                        if pending:
+                            self._halt("transport_closed_with_inflight_request")
+                    except BaseException as exc:
+                        self.shutdown_failed = True
+                        self._http_event("transport_shutdown_failed", exc)
+                    finally:
+                        self.shutdown_done.set()
+                self.shutdown_thread = threading.Thread(target=shutdown, daemon=True)
+                self.shutdown_thread.start()
+        while time.monotonic() < end:
+            if not self.lock.acquire(timeout=max(0, end - time.monotonic())):
+                break
+            try:
+                if self.shutdown_done.is_set() and not (self.inflight or self.workers or self.connections):
+                    break
+            finally:
+                self.lock.release()
+            time.sleep(min(0.01, max(0, end - time.monotonic())))
+        if not self.lock.acquire(blocking=False):
+            return {"closed": True, "drained": False, "inflight": None, "workers": None, "connections": None}
+        try:
+            return {"closed": True, "drained": self.shutdown_done.is_set() and not self.shutdown_failed
+                    and not (self.inflight or self.workers or self.connections), "cleanup_failed": self.shutdown_failed,
+                    "inflight": self.inflight, "workers": len(self.workers), "connections": len(self.connections)}
+        finally:
+            self.lock.release()

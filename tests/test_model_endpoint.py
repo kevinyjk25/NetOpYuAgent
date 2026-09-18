@@ -5,6 +5,7 @@ from contextlib import nullcontext
 import json
 import os
 import threading
+import time
 
 import httpx
 import pytest
@@ -260,10 +261,28 @@ def test_actual_compiler_and_runtime_http_share_one_scripted_broker_arm(tmp_path
         assert (runtime_reply.input_tokens, runtime_reply.output_tokens) == (64, 16)
         assert observed == [("compiler", compile_wire), ("runtime", runtime_wire)]
         assert [call["stage"] for call in backend.calls] == ["compiler", "runtime"]
-        assert broker.errors == []
+        # A complete client body can precede the handler's final delivery
+        # guard and connection bookkeeping. This positive-path test waits for
+        # that work explicitly: close is immediate revocation, not graceful
+        # draining, and negative close-during-delivery tests keep that contract.
+        deadline = time.monotonic() + 2
+        poll = threading.Event()
+        while True:
+            remaining = deadline - time.monotonic()
+            assert remaining > 0, "successful HTTP handlers did not become idle"
+            assert broker.lock.acquire(timeout=remaining), "broker lifecycle lock did not become available"
+            try:
+                idle = not (broker.connections or broker.workers or broker.inflight)
+            finally:
+                broker.lock.release()
+            if idle:
+                break
+            poll.wait(min(0.01, max(0, deadline - time.monotonic())))
     finally:
-        broker.close()
+        broker_close = broker.close(timeout=2)
 
+    assert broker_close["drained"] is True
+    assert broker.errors == []
     ledger.finish_arm(arm_id, "completed")
     # Reopen SQLite to check durable shared accounting, not in-memory callbacks.
     recorded = BudgetLedger(ledger.path).inspect_arm(arm_id)

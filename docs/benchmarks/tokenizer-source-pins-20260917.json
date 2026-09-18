@@ -1,0 +1,121 @@
+{
+  "schema": "netopyu.io/tokenizer-source-pin-export/v1",
+  "exported_date": "2026-09-18",
+  "source_report": {
+    "path": "/Users/steven/Documents/Codex/2026-08-26/wo/r0-preflight-20260917/tokenizer/verification-v3/report.json",
+    "bytes": 9023,
+    "sha256": "sha256:f8fe67c4b3e946fe21df01bcadcb6a71ffc563e6d81ac189898913b1f9ac86e9"
+  },
+  "scope": "Read-only export of existing verification-v3 fields. No download, rebuild, tokenizer execution or model inference was performed to create this record. Historical pins are not claims of future live backend parity.",
+  "recorded_fields": {
+    "evidenceRole": "local_vocab_only_mechanism_probe_not_agent_benchmark",
+    "actualModelCalls": 0,
+    "contextCreated": false,
+    "generationEnabled": false,
+    "liveAdapterReady": false,
+    "researchEvidenceEligible": false,
+    "dirtyBinarySourceEquivalenceEstablished": false,
+    "helper_path": "/Users/steven/Documents/Codex/2026-08-26/wo/r0-preflight-20260917/tokenizer/tokenizer",
+    "helper_sha256": "fad5e406428365b420fb51018bf50e779057fe047902a801723d776c2b27cf2e",
+    "helper_source_sha256": "2ba4a72e81c0954ab8d479195ed7bba5cc2824ccde3740c2996cd6a97b5fcb68",
+    "pinned_sources": [
+      {
+        "relative_path": "ggml/include/ggml-alloc.h",
+        "sha256": "94e4cd069b9313b2ceb35dacec901981e0bb478d8bb31035b7126be091998c23",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/ggml/include/ggml-alloc.h"
+      },
+      {
+        "relative_path": "ggml/include/ggml-backend.h",
+        "sha256": "46d84cb998105f871240864fd0f55446939a2fe86c5c281afa63a010fb1f65a2",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/ggml/include/ggml-backend.h"
+      },
+      {
+        "relative_path": "ggml/include/ggml-cpu.h",
+        "sha256": "316279e004cdeb8e6ef78599acb602bf79a8abdf897fed9fd1914808c1518c6e",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/ggml/include/ggml-cpu.h"
+      },
+      {
+        "relative_path": "ggml/include/ggml-opt.h",
+        "sha256": "3586de1bc8a934b5c72339e2b6937b0641e8f149b512231e666f67de0736eea2",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/ggml/include/ggml-opt.h"
+      },
+      {
+        "relative_path": "ggml/include/ggml.h",
+        "sha256": "c6e7e86d00ee042e384aa3c738f4d4a80aa29eef26430da178a8d0abfece6d42",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/ggml/include/ggml.h"
+      },
+      {
+        "relative_path": "ggml/include/gguf.h",
+        "sha256": "e56714aab702e5ce62ee587a409643c08f7e93e8fbb77f48ef7cc85075f96fa4",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/ggml/include/gguf.h"
+      },
+      {
+        "relative_path": "include/llama.h",
+        "sha256": "d987e8fa7f98c845613201e66e5e0ca76aca7a08c2645711d4b0c8febd2cb369",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/include/llama.h"
+      },
+      {
+        "relative_path": "src/llama-model-loader.cpp",
+        "sha256": "57b011a756890a5659e08139fb17017ae29975dea67b95cd7badf13f90b76eed",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/src/llama-model-loader.cpp"
+      },
+      {
+        "relative_path": "src/llama.cpp",
+        "sha256": "9315db4cc7aad1a926dc7e10cc3483d0b7453e55509ae175562a87a066af296e",
+        "source_url": "https://raw.githubusercontent.com/ggml-org/llama.cpp/d222767c7a6516559a3f49e7721b6c6b1acc87b4/src/llama.cpp"
+      }
+    ],
+    "compat_sources": [
+      {
+        "name": "001-llama-cpp-hooks.patch",
+        "sha256": "80445adfc0b6892932031790aea6494e736d52aab84517f57bef9f869884700a",
+        "source_url": "https://raw.githubusercontent.com/ollama/ollama/f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a/llama/compat/001-llama-cpp-hooks.patch"
+      },
+      {
+        "name": "llama-ollama-compat-util.cpp",
+        "sha256": "9dbf99715d8d9ca5d4417a0374ea7f31fb1541b9c233f507fd19efaae0bbbddc",
+        "source_url": "https://raw.githubusercontent.com/ollama/ollama/f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a/llama/compat/llama-ollama-compat-util.cpp"
+      },
+      {
+        "name": "llama-ollama-compat-util.h",
+        "sha256": "88936749149a3f9378858918e738af7f631ea096366ee3dae83cad5057a880d0",
+        "source_url": "https://raw.githubusercontent.com/ollama/ollama/f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a/llama/compat/llama-ollama-compat-util.h"
+      },
+      {
+        "name": "llama-ollama-compat.cpp",
+        "sha256": "9c4e18e451c22ccf8b4d95ca2f8baaf8525ba3a06ae3223ea02a6b014f86e642",
+        "source_url": "https://raw.githubusercontent.com/ollama/ollama/f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a/llama/compat/llama-ollama-compat.cpp"
+      },
+      {
+        "name": "llama-ollama-compat.h",
+        "sha256": "06d1ffc11f2cf9001ca79ecc5ad89c2d00543b3e4948663ad06d83a8599e9edb",
+        "source_url": "https://raw.githubusercontent.com/ollama/ollama/f96e7aa0513b9973a0ccc71be414c2ecb9d65b1a/llama/compat/llama-ollama-compat.h"
+      }
+    ],
+    "dependencies": [
+      {
+        "loaded_path": "/Applications/Ollama.app/Contents/Resources/libggml-base.0.22.0.dylib",
+        "real_path": "/Applications/Ollama.app/Contents/Resources/libggml-base.0.22.0.dylib",
+        "sha256": "446ee9d36847fcc68eab5f59ca9674b5b7661dcc755e1206a0a7d08c05f8e66e"
+      },
+      {
+        "loaded_path": "/Applications/Ollama.app/Contents/Resources/libggml.0.22.0.dylib",
+        "real_path": "/Applications/Ollama.app/Contents/Resources/libggml.0.22.0.dylib",
+        "sha256": "a9240c3e165657e2271a039913207639881256a601289bbecca76430c2487ae3"
+      },
+      {
+        "loaded_path": "/Applications/Ollama.app/Contents/Resources/libllama.0.3.0.dylib",
+        "real_path": "/Applications/Ollama.app/Contents/Resources/libllama.0.3.0.dylib",
+        "sha256": "2f38e41d6ace17c63f020f86faac75c2fe1e9c4660db494c9f0ac240d8ba4ee7"
+      }
+    ],
+    "model_path": "/Users/steven/.ollama/models/blobs/sha256-dec52a44569a2a25341c4e4d3fee25846eed4f6f0b936278e3a3c900bb99d37c",
+    "model_bytes": 6594462816,
+    "model_digest_note": "Blob filename is an identifier; this probe does not rehash the full model.",
+    "limitations": [
+      "No renderer or live generation binding is exercised.",
+      "Prompt-byte/token limits are not a CPU-time guarantee; the caller must enforce a process deadline.",
+      "Imports, pinned source control flow and observed skip log support vocab-only execution; they do not establish equivalence of the installed dirty Ollama build to upstream source."
+    ]
+  }
+}

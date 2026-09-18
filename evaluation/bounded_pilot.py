@@ -168,6 +168,7 @@ def validate_cases(cases, *, confirmation=False):
         agent_input = validate_agent_input(case["agent_input"])
         if not isinstance(case["provider_fixture"], dict):
             raise ValueError("host-only provider fixture required")
+        case_initial_state_digest(case)
         if case["input_digest"] != case_input_digest(case):
             raise ValueError("paired input digest drift")
         _digest(case["reference_digest"])
@@ -190,6 +191,19 @@ def validate_cases(cases, *, confirmation=False):
 
 def case_input_digest(case):
     return sha256_json({"agent_input": case["agent_input"], "provider_fixture": case["provider_fixture"]})
+
+
+def case_initial_state_digest(case):
+    """Bind only state, matching ArmProvider's database-read initial snapshot.
+
+    The complete fixture (tools, policy and state) remains bound separately by
+    case_input_digest and the Provider fixture_digest. This is not a receipt or
+    proof that a Provider has actually initialized that state.
+    """
+    fixture = case.get("provider_fixture")
+    if not isinstance(fixture, dict) or not isinstance(fixture.get("state"), dict):
+        raise ValueError("host Provider fixture requires an explicit state object")
+    return sha256_json(fixture["state"])
 
 
 def make_protocol(study_id, cases, *, model_digest, harness_digest, support):
@@ -356,8 +370,9 @@ def validate_references(protocol, references):
             raise ValueError("missing, repeated or unassigned reference")
         seen.add(case_id)
         case = cases[case_id]
+        if reference["initial_state_digest"] != case_initial_state_digest(case):
+            raise ValueError("reference initial_state_digest must bind Provider state, not the full fixture")
         if (reference["reference_digest"] != case["reference_digest"]
-                or reference["initial_state_digest"] != sha256_json(case["provider_fixture"])
                 or reference["repository_id"] != case["repository_family"]
                 or any(reference[k] != case[k] for k in ("skill_id", "domain", "kind"))):
             raise ValueError("reference differs from frozen case/source/Provider identity")

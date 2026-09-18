@@ -63,11 +63,16 @@ def bindings_for(packet, resources, calls):
     return reads, bindings
 
 
-def invoke_local(request, folder, costs):
-    """One physical local request; exceptions/unknown usage never auto-retry."""
-    wire = {"model": author.MODEL, "stream": False, "think": False, "format": checked_schema(request["outputSchema"]),
+def make_request(request):
+    """Pure wire construction shared by invocation and offline metering."""
+    return {"model": author.MODEL, "stream": False, "think": False, "format": checked_schema(request["outputSchema"]),
         "options": {k: v for k, v in author.MODEL_CONFIG.items() if k != "think"},
         "messages": reasoning_transport.messages(request)}
+
+
+def invoke_local(request, folder, costs):
+    """One physical local request; exceptions/unknown usage never auto-retry."""
+    wire = make_request(request)
     if not budget(wire)["accepted"]:
         raise ValueError("complete reasoning request exceeds context budget; no truncation")
     endpoint = resolve_model_endpoint("runtime", model=author.MODEL, default_endpoint=ENDPOINT)

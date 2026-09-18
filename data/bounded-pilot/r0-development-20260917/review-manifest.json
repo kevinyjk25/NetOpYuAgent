@@ -1,0 +1,26 @@
+{
+  "annotations": {
+    "a": "sha256:e547f88d210fe7ab908d74dd8bfb3c9493e45f93f0a92159d9926c28a5437374",
+    "b": "sha256:8db9ae99741ebd30cb3bac2a71cca12e71d655f33020f1f7b3df32f85569d4d8"
+  },
+  "digest": "sha256:8d7d66ac5f07049f4e84bf65f7d5397a48f4a55eb2ddd805b11a85e6a69af079",
+  "extra_files": {
+    "adjudication.json": "sha256:0923e4b0df5e6bbba80d0733d4ab4e599db5c78ee264e66423323edfa93d1ca3",
+    "annotation-amendment-v4.json": "sha256:4514b173ae26a9abf28e138d5a3d2d72c050d35c42bd6702f43aade3e14a97d7",
+    "metadata.json": "sha256:2c8a7ce78a6856c7816a0416c6fb1f4df82d127de77f8b1d98db11de5004220f",
+    "review-manifest.pending.json": "sha256:ea2f69a6035d3d2bc8ad4780cdf331d299b5578f8c89f99b0822047096aa43ec",
+    "root-review.json": "sha256:35000a7873d393d270f4af9dd4349102aa81e4b581479c1b903f7659af87e10b",
+    "sources.json": "sha256:2669cb5f5db6f80b143a81aa8b4b202494072bd172c95c37578c9c4a21224cee"
+  },
+  "files": {
+    "cases.json": "sha256:0fdeb9e6a8d657cde887aaa5bfb600987d92e967a75bd3b8c69e427ddbd70a95",
+    "dialogues.json": "sha256:92df9b3ab7f186f8acf2cae98e254030db8341404976f974c4fdd31936b06615",
+    "references.json": "sha256:1a0beaf7eb998da76b9bf6b3cfbc7bff879db685de7e6241f0dd2ade9a0a1569",
+    "support.json": "sha256:209072a19664b92a05e89ecef4cef02089acb671b8023f67e2f121f50e4b9442"
+  },
+  "role": "AI_assisted_developer_evaluation_not_human_Gold",
+  "root_review": "root-review.json",
+  "schema": "netopyu.io/bounded-material-review/v1",
+  "status": "frozen_for_bounded_development",
+  "unresolved_blockers": []
+}

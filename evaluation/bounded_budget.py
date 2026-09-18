@@ -164,8 +164,9 @@ class BudgetLedger:
                    (reason, study_id))
 
     @staticmethod
-    def _no_pending(db, study_id):
-        if db.execute("SELECT 1 FROM calls WHERE study_id=? AND status='reserved'", (study_id,)).fetchone():
+    def _no_pending(db, study_id, *, except_call_id=None):
+        if db.execute("SELECT 1 FROM calls WHERE study_id=? AND status='reserved' "
+                      "AND (? IS NULL OR call_id<>?)", (study_id, except_call_id, except_call_id)).fetchone():
             raise BudgetError("unsettled request outcome; inspect or settle, never replay")
 
     def _candidate(self, db, study_id, candidate_id):
@@ -182,8 +183,8 @@ class BudgetLedger:
     def register_study(self, study_id, protocol_digest):
         _identifier(study_id, "study_id")
         _identifier(protocol_digest, "protocol_digest")
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             old = db.execute("SELECT * FROM studies WHERE study_id=?", (study_id,)).fetchone()
             if old:
                 if old["protocol_digest"] != protocol_digest:
@@ -197,8 +198,8 @@ class BudgetLedger:
         _identifier(candidate_digest, "candidate_digest")
         if phase not in {"development", "confirmation"}:
             raise BudgetError("invalid candidate phase")
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             self._study(db, study_id, now)
             old = db.execute("SELECT candidate_id FROM candidates WHERE study_id=? AND phase=? AND candidate_digest=?",
                              (study_id, phase, candidate_digest)).fetchone()
@@ -248,8 +249,8 @@ class BudgetLedger:
         _identifier(context_digest, "context_digest")
         if arm not in {"A", "B"} or type(repetition) is not int:
             raise BudgetError("arm must be A/B and repetition a one-based integer")
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             self._study(db, study_id, now)
             candidate = self._candidate(db, study_id, candidate_id)
             max_rep = 1 if candidate["phase"] == "development" else 3
@@ -277,7 +278,7 @@ class BudgetLedger:
                         now, now + CAPS["arm_seconds"]))
             return arm_id
 
-    def _active_arm(self, db, arm_id, now):
+    def _active_arm(self, db, arm_id, now, *, pending_call_id=None):
         arm = self._row(db, "arms", "arm_id", arm_id)
         self._study(db, arm["study_id"], now)
         self._candidate(db, arm["study_id"], arm["candidate_id"])
@@ -285,7 +286,7 @@ class BudgetLedger:
             raise BudgetError("arm terminal or blocked; no further action")
         if now >= arm["deadline"]:
             raise BudgetError("arm wall-clock budget exhausted")
-        self._no_pending(db, arm["study_id"])
+        self._no_pending(db, arm["study_id"], except_call_id=pending_call_id)
         return arm
 
     @staticmethod
@@ -300,8 +301,8 @@ class BudgetLedger:
         if stage not in MODEL_STAGES:
             raise BudgetError("unknown model stage")
         self._tokens(input_tokens, max_output_tokens, CAPS["arm_input_tokens"], CAPS["arm_output_tokens"])
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             arm = self._active_arm(db, arm_id, now)
             call_id = _id(arm_id, request_id)
             if db.execute("SELECT 1 FROM calls WHERE call_id=?", (call_id,)).fetchone():
@@ -322,6 +323,33 @@ class BudgetLedger:
                                  arm["case_id"], request_id, "arm", stage, input_tokens,
                                  max_output_tokens, now, arm["deadline"])
 
+    def guard_reserved_call(self, arm_id, request_id):
+        """Recheck one reserved call immediately before physical dispatch.
+
+        Its own pending reservation is allowed, never another pending request.
+        This does not consume the claim, settle usage, renew time, or grant an
+        execution capability. Callers must still enforce the returned deadline
+        and their own lifecycle; settlement after a halt is accounting only.
+        """
+        _identifier(arm_id, "arm_id")
+        _identifier(request_id, "request_id")
+        with self._transaction() as db:
+            now = self._now()
+            call_id = _id(arm_id, request_id)
+            call = self._row(db, "calls", "call_id", call_id)
+            if call["status"] != "reserved":
+                raise BudgetError("request is not reserved; no dispatch or replay")
+            arm = self._active_arm(db, arm_id, now, pending_call_id=call_id)
+            if (call["kind"] != "arm" or call["arm_id"] != arm_id or call["request_id"] != request_id
+                    or call["study_id"] != arm["study_id"] or call["candidate_id"] != arm["candidate_id"]):
+                raise BudgetError("reserved request binding mismatch")
+            deadline = min(call["deadline"], arm["deadline"])
+            if now >= deadline:
+                raise BudgetError("request wall-clock deadline exhausted")
+            return {"arm_id": arm_id, "request_id": request_id, "call_id": call_id,
+                    "deadline": deadline, "remaining_seconds": deadline - now,
+                    "authority_granted": False}
+
     def _reserve(self, db, call_id, study_id, candidate_id, arm_id, case_id, request_id,
                  kind, stage, input_tokens, output_tokens, now, deadline):
         db.execute("INSERT INTO calls VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'reserved', ?, ?, NULL, NULL, ?, ?, ?, ?, NULL, NULL, NULL)",
@@ -333,8 +361,8 @@ class BudgetLedger:
         _identifier(case_id, "case_id")
         _identifier(request_id, "request_id")
         self._tokens(input_tokens, max_output_tokens, CAPS["offline_input_tokens"], CAPS["offline_output_tokens"])
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             self._study(db, study_id, now)
             candidate = self._candidate(db, study_id, candidate_id)
             if candidate["phase"] != "development":
@@ -364,8 +392,8 @@ class BudgetLedger:
                             actual_input_tokens, actual_output_tokens)
 
     def _settle(self, call_id, actual_input_tokens, actual_output_tokens):
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             call = self._row(db, "calls", "call_id", call_id)
             if call["status"] != "reserved":
                 raise BudgetError("request already settled; no replay or usage replacement")
@@ -381,7 +409,7 @@ class BudgetLedger:
                 status, diagnostic = "budget_exceeded", "actual usage exceeded its reservation"
             if now < study["last_clock"] or now < call["started_at"]:
                 status, diagnostic = "invalid_usage", "clock rollback during settlement"
-            elif now > call["deadline"]:
+            elif now >= call["deadline"]:
                 status, diagnostic = "budget_exceeded", "request exceeded wall-clock deadline"
             charged = [values[i] if status == "settled" else max(reserved, values[i] if valid[i] else reserved)
                        for i, reserved in enumerate((call["reserved_input"], call["reserved_output"]))]
@@ -400,8 +428,8 @@ class BudgetLedger:
     def guard_effect(self, arm_id, reserve_seconds=60):
         if isinstance(reserve_seconds, bool) or not isinstance(reserve_seconds, (int, float)) or not math.isfinite(reserve_seconds) or reserve_seconds < 60:
             raise BudgetError("Effect requires at least 60 seconds for verify/reconcile/recovery")
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             arm = self._active_arm(db, arm_id, now)
             remaining = arm["deadline"] - now
             if remaining < reserve_seconds:
@@ -415,8 +443,8 @@ class BudgetLedger:
         Recovery after a stopped or expired arm belongs to the authoritative
         runtime's separately disclosed recovery path, never new pilot work.
         """
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             arm = self._active_arm(db, arm_id, now)
             return {"arm_id": arm_id, "deadline": arm["deadline"],
                     "remaining_seconds": arm["deadline"] - now, "authority_granted": False}
@@ -427,8 +455,8 @@ class BudgetLedger:
         if elapsed_ms is not None and (isinstance(elapsed_ms, bool) or not isinstance(elapsed_ms, (int, float))
                                        or not math.isfinite(elapsed_ms) or elapsed_ms < 0):
             raise BudgetError("invalid reported arm duration")
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             arm = self._row(db, "arms", "arm_id", arm_id)
             if arm["finished_at"] is not None:
                 raise BudgetError("arm already terminal; no replacement")
@@ -441,7 +469,7 @@ class BudgetLedger:
                 status, reason = "outcome_unknown", reason or "unsettled request at arm termination"
             elif now < study["last_clock"]:
                 status, reason = "measurement_invalid", "clock rollback at arm termination"
-            elif charged_ms > CAPS["arm_seconds"] * 1000:
+            elif now >= arm["deadline"] or charged_ms >= CAPS["arm_seconds"] * 1000:
                 status, reason = "timeout", "arm wall-clock budget exceeded"
             if pending or status in {"outcome_unknown", "measurement_invalid", "timeout", "cancelled"}:
                 self._halt(db, arm["study_id"], reason or status)
@@ -452,8 +480,8 @@ class BudgetLedger:
 
     def pause_study(self, study_id, reason):
         _identifier(reason, "pause reason")
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             self._row(db, "studies", "study_id", study_id)
             self._halt(db, study_id, reason)
             db.execute("UPDATE studies SET last_clock=MAX(last_clock, ?) WHERE study_id=?", (now, study_id))
@@ -461,8 +489,8 @@ class BudgetLedger:
 
     def inspect_arm(self, arm_id):
         """All persisted arm usage, including requests from an earlier process."""
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             arm = self._row(db, "arms", "arm_id", arm_id)
             study = self._row(db, "studies", "study_id", arm["study_id"])
             calls = [dict(row) for row in db.execute(
@@ -475,8 +503,8 @@ class BudgetLedger:
 
     def snapshot(self, study_id):
         """A coherent read snapshot; it never releases reservations or resumes work."""
-        now = self._now()
         with self._transaction() as db:
+            now = self._now()
             study = self._row(db, "studies", "study_id", study_id)
             candidates = [dict(r) for r in db.execute("SELECT * FROM candidates WHERE study_id=? ORDER BY created_at, phase, ordinal", (study_id,))]
             arms = [dict(r) for r in db.execute("SELECT * FROM arms WHERE study_id=? ORDER BY started_at, arm_id", (study_id,))]
